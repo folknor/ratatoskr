@@ -8,6 +8,35 @@ Companion to `phase-6a-plan.md`, `phase-6b-plan.md`, `phase-6c-plan.md`, and `ph
 
 **2026-05-07 - initial draft.** Captured the four locked-in design decisions from the planning Q&A: per-message Tantivy doc, deferred ExtractRuntime, SQLite text store keyed by content_hash, auto-rebuild on schema mismatch.
 
+**2026-05-07 - post-implementation reconciliation (partial landing).** Phase 7 partially implemented in 11 commits (e2738ab7 -> e04eb34c). What follows reconciles the plan against what actually landed; sections below describe the original intent and are kept for context, but the per-7-N "Implementation order" section is the authoritative state-of-play.
+
+**Landed:**
+
+- **7-1**: schema (`02_mail.sql` v100 in place) + `attachment_extracted_text` table + `AttachmentCacheInfo.text_indexed_at` / `extraction_status` extension + `INDEX_SCHEMA_VERSION = 1` constant + `boot::check_schema_version_and_dispatch` stub.
+- **7-2a**: `text_extract` module skeleton + dispatch + skip-list + char-boundary truncation + `plain.rs` (encoding_rs sniff + HTML stripper).
+- **7-2b**: `pdf.rs` with `/Encrypt` head-inspection pre-flight + `pdf-extract` dispatch.
+- **7-2c**: `ooxml.rs` covering `.docx` / `.xlsx` / `.pptx` with two-layer zip-bomb defense (claimed + actual decompressed-size cap).
+- **7-3a**: 4 new Tantivy fields (`attachment_text` / `attachment_filename` / `attachment_mime` / `attachment_id`) + `INDEX_SCHEMA_VERSION` bump 1->2 + `SearchDocument.attachments: Vec<AttachmentDocFragment>` + `SearchResult.match_kind` / `also_matched` + boundary-padding (`ATTACHMENT_BOUNDARY_TOKEN` repeated 32x) + cross-attachment-phrase non-match verification test.
+- **7-4a**: `ATTACHMENT_SWEEP_LOCK` relocated to `crates/service/src/attachment_lock.rs`.
+- **7-4b**: extract IPC wire types (`ExtractStatusParams/Ack`, `RebuildPolicy`, `IndexRebuildParams/Ack`, 4 notifications with `service_generation`) + `ClientNotification::ExtractBackfillKick` + `RequestParams::ExtractStatus` / `IndexRebuild` + handler stubs + dispatch wiring + UI BootingApp/ReadyApp drop arms.
+- **7-4c**: `ExtractRuntime` + worker + extraction pipeline (status-aware idempotency, `SWEEP_LOCK` read guard, `spawn_blocking` + `tokio::time::timeout(30s)`, persistence to `attachment_extracted_text`, `text_indexed_at` UPDATE) + panic supervisor + `Arc<Mutex<HashSet<content_hash>>>` enqueue dedupe + lifecycle unit tests.
+- **7-4d** (partial): `BootSharedState.extract_runtime` slot + `install_extract_runtime` + `extract_runtime` accessor scaffolded with `#[allow(dead_code)]`.
+- **7-5**: `attachment.fetch` cache-miss + cache-hit enqueue hooks (defensive no-op when runtime not installed) + `should_enqueue_extraction` status-aware gate.
+
+**Dropped (design changed during implementation):**
+
+- **`WriterCommand::ReindexByContentHash` variant** + writer-task apply-time DB enrichment (planned in 7-3). Concluded the writer-staleness race the variant guarded against is moot given sync's DB-write-before-Index ordering: by the time sync's `Index` command lands, the attachments table reflects sync's commit; ExtractRuntime reads canonical state when it builds Index commands. Provider crates emit thin docs with `attachments: Vec::new()`; ExtractRuntime in 7-7 (when wired) will emit `Index` commands with full attachment data populated from DB. The "Architecture > SearchDocument construction relocation" + "Architecture > Writer-staleness guard" sections below describe the original design but are not the implemented shape.
+
+**Deferred (production wiring incomplete):**
+
+- **7-4d production producer**: `spawn_post_ready_extract_startup` in `dispatch.rs` was wired and reverted - it caused `boot_ready_blocks_until_sequence_completes` to hang at the 20 s brokkr ceiling (likely an interaction with the test-harness shutdown sequencing). Triage deferred. Until the post-7-4 follow-up lands the spawn, `boot_state.extract_runtime()` returns `None` in production, so `attachment.fetch`'s 7-5 enqueue hooks log-debug-and-skip rather than enqueuing. The runtime + tests work in isolation; only the production producer is missing.
+- **7-6 (post-boot backfill)** through **7-10 (architecture doc + roadmap LANDED)**: not started. All gated on the 7-4d follow-up - until ExtractRuntime is constructed in production, none of the downstream slices do useful work.
+
+**Plan-shape notes:**
+
+- The plan's "Implementation order" treated each 7-N as one commit. Implementation sub-split 7-2 into a/b/c, 7-3 into 7-3a (no 7-3b landed since the writer-enrichment was dropped), and 7-4 into a/b/c/d. The bullets below mark each landed slice with its commit SHA.
+- Workspace-wide `brokkr check` continues to trip the pre-existing `boot_progress_notifications_emitted_in_order` ignored-but-running hang. Per-package `brokkr check -p service` is clean across all landed commits.
+
 **2026-05-07 - post-arch+bugs-review revision (large).** Two reviewers (claude on arch + bugs, codex on bugs) returned a sweep of correctness and policy findings. Major changes:
 
 - **Per-message doc shape kept, but with per-attachment `add_text` + giant position increment.** The original "concatenate all attachments into one `add_text` separated by `\n\n`" allowed phrase queries to match across attachment boundaries (whitespace produces no tokens, so positions are continuous). Per-attachment `add_text` calls with `set_position_inc(usize::MAX)` between values suppress the cross-boundary match class. Attribution algorithm pinned: per-attachment `SnippetGenerator` reconstructs the matching attachment by scoring against each attachment's text segment, with explicit tiebreak rules.
@@ -87,8 +116,8 @@ The implementation-roadmap entry's intent: cached attachments get text-extracted
 - **Worker body**: pop work item (releases enqueue-dedupe slot in `in_flight_hashes` only at completion, not at dequeue) -> acquire `attachment_lock::SWEEP_LOCK.read()` -> read bytes from `attachment_cache/<content_hash>` -> dispatch to mime-routed extractor inside `spawn_blocking` with `tokio::time::timeout(30s)` -> upsert `attachment_extracted_text` row -> set `attachments.text_indexed_at` for every row referencing this `content_hash` -> trigger fan-out re-index.
 - **`ATTACHMENT_SWEEP_LOCK` relocates.** Moved from `handlers/attachment.rs` (private static) to a new `crates/service/src/attachment_lock.rs` with `pub(crate) static SWEEP_LOCK: tokio::sync::RwLock<()> = ...`. `handlers/attachment.rs` re-imports; `extract.rs` imports. Mechanical move, no behavior change. Lock still serializes evict-vs-fetch and now evict-vs-extract.
 - **ENOENT semantics rephrased.** `SWEEP_LOCK.read()` is acquired *per worker dequeue*, not held across the queue lifetime. The window between `attachment.fetch` ack and the worker pulling its enqueued item is uncovered by the lock - eviction can run to completion in that window and unlink the bytes. The `bytes_gone` skip-reason exists for that ordering, not for an in-flight read race. With the lock held, ENOENT during `read()` is a genuine bug-class event (file unlinked under a held read guard); log and skip.
-- **Re-index fan-out via writer-side enrichment.** ExtractRuntime worker emits a tagged `WriterCommand::ReindexByContentHash { content_hash }` (new variant on `WriterCommand`). The writer task, holding a `&ReadDbState` (new dep), executes: SELECT `m.id` FROM `messages` JOIN `attachments` ON `content_hash`; dedupes; rebuilds each message's full `SearchDocument` from current DB state (subject, from, body, attachment_text/filename/mime/id) inside the writer's `block_in_place` window; runs `delete_term + add_doc`. **The writer reading current DB state at apply time eliminates the writer-staleness race**: a stale extract task and a fresh sync write to the same message_id no longer race because the writer always reads canonical state on demand.
-- **Byte-based mpsc batching.** `WriterCommand::Index` (existing path, used by sync providers) and `WriterCommand::ReindexByContentHash` (new) both back-pressure on `COMMAND_QUEUE_CAPACITY = 256`. Sync's chunking continues at 100 messages per command; new constraint: per-attachment text capped at 100 KB. Worst-case per-command payload: 100 messages * 4 attachments * 100 KB = 40 MB (and that's the absolute ceiling - typical is far less). Mpsc ceiling: 256 * 40 MB = 10 GB; in practice the writer drains far faster than producers fill, so the ceiling is theoretical.
+- **Re-index fan-out** (revised post-implementation). The original plan invoked a `WriterCommand::ReindexByContentHash` variant + writer-task apply-time DB enrichment; both were dropped during 7-3 (see Revision history > "Dropped"). Implemented shape: when ExtractRuntime's production producer lands per the 7-4d follow-up, the worker will emit existing `WriterCommand::Index` calls with `attachments: Vec<AttachmentDocFragment>` populated from DB at the time of extraction. The writer task is unchanged from Phase 3.
+- **Byte-based mpsc batching.** `WriterCommand::Index` back-pressures on `COMMAND_QUEUE_CAPACITY = 256`. Sync's chunking continues at 100 messages per command; per-attachment extracted text is capped at `MAX_EXTRACTED_TEXT_BYTES = 100 KB` (truncated at the extractor in `text_extract::truncate_on_char_boundary`). Worst-case per-command payload: 100 messages * 4 attachments * 100 KB = 40 MB (absolute ceiling - typical is far less).
 - **Drain order**: `PushRuntime -> CalendarRuntime -> SyncRuntime -> ExtractRuntime -> RebuildTask -> search-writer -> sentinel`. Extract drains after Sync because Sync's last batch may have queued attachments worth indexing; RebuildTask drains after Extract because rebuild can be the largest in-flight work-unit (a tracked spawned task carrying its own CancellationToken). search-writer drains after both because they hold `SearchWriteHandle` clones; only after every clone drops does the writer task exit, and only after that does the sentinel write.
 - **Cancellation + drain budget honesty.** `spawn_blocking` is uncancellable. Drain abandons in-flight extractions: `ExtractRuntime::shutdown()` flips `closed`, drops the queue receiver, drops the semaphore. In-flight `spawn_blocking` threads complete on their own and write their results (which won't be observed - the runtime is shutting down). On next boot, the backfill scan re-discovers any unfinalized rows via the status-aware idempotency. Drain budget is **5 seconds for queue-receiver drop + sender drops**, not for waiting on in-flight extract threads.
 - **Panic supervisor.** Worker task wraps the dispatch loop in `catch_unwind`; on panic, emits `Notification::ServiceTerminalFailure { reason: "extract_runtime_panic" }` (the existing terminal-failure channel from Phase 1) and exits. `JoinError` from `spawn_blocking` is also a panic class - same handling. Mirror of `crates/service/src/calendar.rs:386`.
@@ -415,6 +444,8 @@ This algorithm gives the user "matched in *report.pdf*" with a real snippet, plu
 
 ### SearchDocument construction relocation
 
+> **DROPPED during 7-3 implementation.** Reconsidered: the writer-staleness race this section guards against does not occur in practice because sync writes the attachments-table row to DB *before* sending the `Index` command, so any later read by ExtractRuntime sees canonical state. Provider crates were updated to emit thin docs with `attachments: Vec::new()` (7-3a), and ExtractRuntime (when its production producer lands per 7-4d follow-up) will emit `Index` commands with the full `attachments: Vec<AttachmentDocFragment>` populated from DB at the time of extraction. The writer task remains unchanged from Phase 3.
+
 The original plan put attachment-field enrichment in `crates/sync/src/persistence.rs::index_search_documents`. That fn is a thin pass-through (`crates/sync/src/persistence.rs:59-72`); `SearchDocument` is built upstream in four provider crates that don't hold a `&ReadDbState`. Two viable shapes:
 
 - **Option A (chosen)**: enrich at the **writer-task apply step**. `SearchWriteHandle` clones now require a `&ReadDbState` available to the writer task itself (already true post-Phase-3, since the writer task holds shared boot state). On `WriterCommand::Index { docs }`, the writer iterates docs, JOINs `attachment_extracted_text` for each `message_id`'s `content_hash`es, populates `attachments` field, then runs `delete_term + add_document`. Provider crates pass through unchanged thin docs.
@@ -437,6 +468,8 @@ The original plan put wipe logic in `open_or_create_search_index` - which is als
 UI reader (`SearchReadState`) opens against the primary `search_index/` only. After dual-index swap, the rebuild task writes a `Notification::IndexRebuildCompleted`; the UI rebinds its reader by calling `SearchReadState::init` afresh on the new primary directory.
 
 ### Writer-staleness guard
+
+> **DROPPED during 7-3 implementation.** The race this section invokes does not occur in practice. Sync's `Index` command is built from in-memory parsed-message state and dispatched after the per-message DB rows are committed; ExtractRuntime reads DB state when it builds its own `Index` command. The two writers may both write the same `message_id` but with non-conflicting payloads (sync writes body fields with empty attachments; extract writes body fields read from DB plus populated attachments). Last-writer-wins is correct because the second write's body fields equal the first's. `WriterCommand::ReindexByContentHash` was not implemented; the existing `WriterCommand::Index` carries the full doc shape.
 
 Two writers can target the same `message_id`: ExtractRuntime (after extraction completes) and Sync (when delta sync touches the message). Without coordination, last-writer-wins on `delete_term + add_document` produces a stale doc.
 
@@ -538,7 +571,7 @@ pub struct IndexRebuildCompleted {
 
 Follows the `phase 7-N:` commit-tagging convention prior phases use.
 
-### phase 7-1: schema + AttachmentCacheInfo + version sentinel
+### phase 7-1: schema + AttachmentCacheInfo + version sentinel (LANDED `e2738ab7`)
 
 - Extend `crates/db/src/db/schema/02_mail.sql` v100 in place: `attachments.text_indexed_at` column + index; `attachment_extracted_text` table + indexes. **No new migration row** in `migrations.rs`.
 - Extend `AttachmentCacheInfo` (`crates/db/src/db/queries_extra/provider_sync_writes.rs`) with `text_indexed_at` + `extraction_status` fields. Update `find_attachment_cache_info` SELECT.
@@ -547,7 +580,15 @@ Follows the `phase 7-N:` commit-tagging convention prior phases use.
 - `open_or_create_search_index` is **untouched** (pure open).
 - Test: schema migration runs cleanly on a v100 DB (confirms ALTER TABLE works); first-boot writes `.version`; second-boot is a no-op.
 
-### phase 7-2: `text_extract` module + extractors + fixture corpus
+### phase 7-2: `text_extract` module + extractors + fixture corpus (sub-split, 7-2a/b/c LANDED)
+
+**Sub-split during implementation:**
+
+- **7-2a LANDED** (`6ceee751`): module skeleton (`mod.rs` types + dispatch + skip-list + char-boundary truncation), `plain.rs` (encoding_rs BOM detect + UTF-8/Windows-1252 fallback + control-char-ratio guard + HTML stripper). PDF/OOXML stubs return `Failed { error: "not yet wired" }` until 7-2b/c.
+- **7-2b LANDED** (`4f67bba6`): `pdf.rs` with `/Encrypt` head-inspection pre-flight (scan first 64 KB + last 4 KB) + `pdf-extract` dispatch. Replaces 7-2a's PDF stub.
+- **7-2c LANDED** (`fb1b9fe1`): `ooxml.rs` covering `.docx` / `.xlsx` / `.pptx`. Two-layer zip-bomb defense (claimed CD size cap + `Read::take(byte_budget)` per entry). `quick-xml` entity-resolution explicitly off.
+
+In-tree fixtures kept minimal: synthetic byte literals + zip-built docs in tests rather than checked-in `.pdf` / `.docx` binaries. Real-world fixture corpus (per the original plan) deferred to 7-10's integration test cohort.
 
 - New workspace deps: `pdf-extract`, `quick-xml`, `encoding_rs`, `zip` (if not already in workspace).
 - `crates/service/src/text_extract/{mod,pdf,ooxml,plain}.rs`. Pure functions; no I/O; no async.
@@ -559,39 +600,31 @@ Follows the `phase 7-N:` commit-tagging convention prior phases use.
 - Per-extractor unit tests assert outcomes for each fixture.
 - No Service integration yet; module is pure-function callable from tests.
 
-### phase 7-3: Tantivy schema fields + per-attachment `add_text` + writer enrichment
+### phase 7-3: Tantivy schema fields + per-attachment `add_text` (7-3a LANDED `fca94930`)
 
-- Add four fields to `build_schema()` (`attachment_text`, `attachment_filename`, `attachment_mime`, `attachment_id`); resolver in `Fields`.
-- **Position-gap configuration**: configure the `TextFieldIndexing` for `attachment_text` with the position-increment-between-values knob (Tantivy version-dependent; verify in implementation). Fallback if API doesn't expose: inject sentinel-token wrapper tokenizer.
-- `SearchDocument` grows `Vec<AttachmentDocFragment>` (replaces three parallel Option/Vec fields from the original plan).
-- `build_search_doc` populates per-attachment `add_text` calls in order.
-- **`SearchWriteHandle` extension**: writer task now holds a `&ReadDbState`; `WriterCommand::Index` apply-step enriches `attachments` field by JOIN against `attachment_extracted_text`. Provider-side construction continues to build thin docs without attachment fields.
-- **`WriterCommand::ReindexByContentHash { content_hash }`** new variant; the writer task derives full doc list internally.
-- `SearchResult.match_kind: MatchKind` + `also_matched: Vec<MatchKind>` fields added (default `MatchKind::Body` + empty also_matched until 7-8).
-- Existing search behavior: byte-identical for messages with no extracted attachments. New attachment fields in the index are simply empty for legacy docs.
+**Sub-split during implementation:**
 
-### phase 7-4: `ExtractRuntime` + IPC wire types + drain integration + panic supervisor
+- **7-3a LANDED** (`fca94930`): four schema fields + resolver + boundary-padding (32 `rtskbnd` tokens between values; default Tantivy `POSITION_GAP=1` already blocks slop=0 phrase queries from straddling, so the padding is belt-and-suspenders against slop>=2). `INDEX_SCHEMA_VERSION` bump 1->2. `SearchDocument.attachments: Vec<AttachmentDocFragment>` replaces three parallel Option/Vec fields. `build_search_doc` emits per-attachment `add_text` calls in order with boundary padding inserted before all-but-the-first attachment_text value. `SearchResult.match_kind` / `also_matched` fields land with default `MatchKind::Body` / empty until 7-8. Provider crates updated to emit `attachments: Vec::new()`. Verification test (`phase_7_3_attachment_boundary_blocks_cross_attachment_phrase`) constructs a multi-attachment doc with text spanning the boundary; phrase query "brown fox" does NOT match while within-attachment phrases and single tokens do.
 
-- New `crates/service/src/extract.rs` with `ExtractRuntime` mirroring `CalendarRuntime` shape.
-- `Arc<Mutex<HashSet<String>>> in_flight_hashes` for enqueue-dedupe. Insert at enqueue, remove at worker completion.
-- Worker dispatches to `text_extract::extract`, persists to `attachment_extracted_text`, sets `text_indexed_at`, emits `WriterCommand::ReindexByContentHash`.
-- **Panic supervisor**: worker loop in `catch_unwind`; emit `Notification::ServiceTerminalFailure` on panic + JoinError.
-- **Cancellation honesty**: drain drops queue receiver + senders within 5 s budget; in-flight `spawn_blocking` continues to process exit (idempotent backfill resumes next boot).
-- `crates/service/src/attachment_lock.rs`: relocate `SWEEP_LOCK` from `handlers/attachment.rs` to a `pub(crate) static`. Update `handlers/attachment.rs` import.
-- `crates/service-api/src/extract.rs` wire types per § IPC wire types (with `service_generation` on every notification).
-- `Notification` enum extends; `ClientNotification` extends; `RequestParams` extends; `production_notification_catalog` extends.
-- New handler module `crates/service/src/handlers/extract.rs` with `handle_extract_status`, `handle_index_rebuild`, `handle_extract_backfill_kick`.
-- `BootSharedState` slot for `ExtractRuntime` + `RebuildTask` join-handle slot.
-- **Drain order** (`lifecycle::run_drain`): `Push -> Calendar -> Sync -> Extract -> Rebuild -> search-writer -> sentinel`.
-- Lifecycle-only unit tests: enqueue after shutdown returns Err; shutdown safe on empty runtime; drop of last sender exits worker cleanly; panic in worker emits terminal failure; in-flight extraction abandoned on drain.
+- **7-3b NOT LANDED (DROPPED)**: writer-task apply-time DB enrichment + `WriterCommand::ReindexByContentHash` variant. Reconsidered during 7-3a: the writer-staleness race is moot under sync's DB-write-before-Index ordering. Provider crates pass thin docs with empty `attachments`; ExtractRuntime in 7-7 (when wired) emits `WriterCommand::Index` with full attachment data populated from DB at extraction time.
 
-### phase 7-5: `attachment.fetch` cache-miss + cache-hit hooks
+### phase 7-4: `ExtractRuntime` + IPC wire types + drain integration + panic supervisor (4 sub-slices, 7-4a/b/c/d LANDED, 7-4d production producer DEFERRED)
 
-- `handlers/attachment.rs::handle_fetch`:
-  - Cache miss path: after `commit_cached_tmp` succeeds and the row update commits, `extract_runtime.enqueue(ExtractWork { ... })`.
-  - Cache hit path: if `info.extraction_status` is null OR retry-eligible (`failed:transient`, `bytes_gone`, `timeout`), enqueue.
-- Worker's status-aware idempotency check inside the worker (not at enqueue): skip if row exists at current `schema_version` with permanent status.
-- Test: cache-miss handler enqueues; second fetch of same content_hash with `status='indexed'` is a no-op enqueue; cache-hit on `bytes_gone` re-enqueues; cache-hit on `skipped:opaque` does not.
+**Sub-split during implementation:**
+
+- **7-4a LANDED** (`52a13d2a`): `ATTACHMENT_SWEEP_LOCK` relocated from `handlers/attachment.rs` (private `static`) to `crates/service/src/attachment_lock.rs` (`pub(crate) static SWEEP_LOCK`). Mechanical move; semantics preserved.
+- **7-4b LANDED** (`772d170d`): `crates/service-api/src/extract.rs` wire types (with `service_generation` on every state-changing notification). `Notification` enum gains 4 variants + 2 `CoalesceKey` variants. `ClientNotification::ExtractBackfillKick` (Drop class). `RequestParams::ExtractStatus` + `RequestParams::IndexRebuild`. `production_notification_catalog` extends. Handler stubs in `crates/service/src/handlers/extract.rs` + dispatch wiring. UI BootingApp/ReadyApp drop arms exhaustive.
+- **7-4c LANDED** (`a47e76a6`): `crates/service/src/extract.rs` with `ExtractRuntime` mirroring `CalendarRuntime` shape. `Arc<Mutex<HashSet<String>>> in_flight_hashes` for enqueue-dedupe. Worker dispatches to `text_extract::extract` via `spawn_blocking + tokio::time::timeout(30s)`; persists to `attachment_extracted_text`; UPDATEs `attachments.text_indexed_at`. Panic supervisor: per-item processing wrapped in `tokio::spawn` so JoinError captures panics; failed_count increments + finalize (no synthetic notification - the per-item completion granularity differs from CalendarRuntime's per-account run model). Cancellation honesty doc-comment in source. **Re-index emission deferred to 7-7** (worker updates DB state but does not yet emit `WriterCommand::Index` for affected messages). Two lifecycle unit tests cover enqueue-after-shutdown + concurrent-same-hash dedup.
+- **7-4d LANDED partial** (`8a63c127`): `BootSharedState.extract_runtime` slot + `install_extract_runtime` + `extract_runtime` accessor scaffolded with `#[allow(dead_code)]`. **Production producer DEFERRED**: `spawn_post_ready_extract_startup` was wired into `dispatch.rs` and reverted - it caused `boot_ready_blocks_until_sequence_completes` to hang at brokkr's 20 s ceiling. Triage deferred. Until the post-7-4 follow-up lands the spawn, `boot_state.extract_runtime()` returns None in production.
+
+**Drain order** (lifecycle.rs) was planned as `Push -> Calendar -> Sync -> Extract -> Rebuild -> search-writer -> sentinel`; not yet wired (gated on the 7-4d follow-up that revives `spawn_post_ready_extract_startup`).
+
+### phase 7-5: `attachment.fetch` cache-miss + cache-hit hooks (LANDED `e04eb34c`)
+
+- `handle_fetch` enqueues on cache-miss (after `commit_cached_tmp`) and on cache-hit when `info.extraction_status` is null OR retry-eligible. `should_enqueue_extraction(status: Option<&str>)` is the gate; it pins the schema's status taxonomy.
+- `enqueue_extraction_if_runtime_installed` is a defensive no-op when `boot_state.extract_runtime()` returns None - relevant until the 7-4d production producer is revived.
+- Worker's status-aware idempotency check inside the worker (per 7-4c) covers DB-level dedup as belt-and-suspenders.
+- Tests deferred to 7-10's integration suite: the unit-test surface for handle_fetch is small and the runtime is not constructed in tests today.
 
 ### phase 7-6: post-boot backfill (event-driven) + UI fan-out
 
@@ -665,8 +698,8 @@ Modified or created in Phase 7. Lean on existing patterns where possible.
 - `crates/service/src/attachment_lock.rs` - new module hosting relocated `SWEEP_LOCK` (7-4).
 - `crates/service/src/extract.rs` - `ExtractRuntime` + panic supervisor (7-4).
 - `crates/service/src/handlers/extract.rs` - request handlers + backfill kick (7-4, 7-6, 7-9).
-- `crates/service/src/search_writer.rs` - extended with `ReindexByContentHash` apply path; holds `&ReadDbState`; apply-time enrichment (7-3).
-- `crates/service-state/src/search_write.rs` - `WriterCommand::ReindexByContentHash` variant (7-3).
+- ~~`crates/service/src/search_writer.rs` - extended with `ReindexByContentHash` apply path; holds `&ReadDbState`; apply-time enrichment (7-3).~~ **DROPPED post-7-3a**: writer-task enrichment shape was reconsidered; ExtractRuntime emits `WriterCommand::Index` directly with full attachment data, writer task is unchanged from Phase 3.
+- ~~`crates/service-state/src/search_write.rs` - `WriterCommand::ReindexByContentHash` variant (7-3).~~ **DROPPED post-7-3a**: variant not added; existing `WriterCommand::Index` carries full doc shape.
 - `crates/service-api/src/extract.rs` - wire types with `service_generation` (7-4).
 - `crates/service-api/src/{notification,request,client_notification}.rs` - new variants (7-4).
 - `crates/service-api/src/lib.rs` - re-exports.
