@@ -895,8 +895,11 @@ impl SearchReadState {
             };
             // 50% threshold: secondary candidates must score at least
             // half the top score, with floor=1. `top_score / 2` rounds
-            // down, so a top of 1 admits everything >= 1.
-            let threshold = top_score.div_ceil(2).max(1);
+            // down (M3 fix: was `div_ceil(2)` which rounded *up*, so
+            // odd top scores tightened the threshold to 60-66% and
+            // dropped candidates the plan called for). `.max(1)`
+            // keeps a top of 1 admitting every nonzero secondary.
+            let threshold = (top_score / 2).max(1);
             let also: Vec<MatchKind> = candidates
                 .into_iter()
                 .skip(1)

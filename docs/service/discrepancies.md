@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M3. `also_matched` threshold uses `div_ceil(2)` not `/2`
-
-**Files:** `crates/search/src/lib.rs:892`.
-
-`let threshold = top_score.div_ceil(2).max(1);` rounds up. For top_score=3 → threshold=2 (66%); top_score=5 → threshold=3 (60%). Plan documents 50%. Only even top_scores honor it; odd top_scores tighten the threshold and drop more candidates.
-
-**Agreement: 1/8** (claude bugs).
-
-**Fix:** `top_score / 2` (integer division floors) or `(top_score as f64 * 0.5) as u64`.
-
 ### M4. `MatchKind::Body` shown as default for non-text matches
 
 **Files:** `crates/search/src/lib.rs:541-548, 755-759, 802-803, 807-810, 886`.
