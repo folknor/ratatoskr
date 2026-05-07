@@ -70,6 +70,13 @@ pub(crate) async fn run_wipe_rebuild(
     match outcome {
         Ok(()) => {
             log::info!("rebuild {rebuild_id}: completed");
+            // C4 fix: record this rebuild_id as the last successfully-
+            // completed rebuild. The schema-version dispatcher gates
+            // its `.version` write on observing this matches the
+            // rebuild_id it dispatched - so cancellation / drain /
+            // error all leave the OLD `.version` on disk and the next
+            // boot re-fires.
+            boot_state.mark_rebuild_completed(rebuild_id.clone());
             // Trigger backfill so attachment text re-extracts against
             // the freshly-cleared index. Defensive against the kick
             // failing - the next hourly UI tick will retry.

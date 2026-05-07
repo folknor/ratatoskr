@@ -4,20 +4,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Critical
 
-### C4. Schema-version `.version` written on drain-cancelled rebuild
-
-**Files:** `crates/service/src/dispatch.rs:1162-1184` (poll loop + unconditional .version write), `:392-400` (drain calls take_rebuild_task + cancel + abort), `crates/service/src/rebuild.rs:70-87` (run_wipe_rebuild_inner + take_rebuild_task on both Ok and Err paths).
-
-`spawn_post_ready_schema_rebuild` polls `boot_state.rebuild_in_flight_id().is_none()` every 500 ms and writes `.version` unconditionally on poll exit. The slot becomes `None` from three paths, two of which are not "rebuild succeeded": natural completion, error exit (still calls `take_rebuild_task`), and **drain-cancel** (`take_rebuild_task` + `cancel.cancel()` + `handle.abort()`).
-
-On drain-cancel: `WriterCommand::Clear` already executed earlier in `run_wipe_rebuild_inner`, so the on-disk index is empty; the chunk loop was cancelled mid-iteration. The dispatcher writes `.version` to the new schema number. Next boot reads matching `.version`, no mismatch, no re-rebuild. The user is left with a partial Tantivy index whose old-schema docs are gone (Clear succeeded) and whose new-schema re-index was cut short.
-
-The dispatcher's inline comment at `dispatch.rs:1175-1180` justifies this with "self-heal via subsequent extract.backfill_kicks." The justification is wrong: backfill enqueues only attachment extraction, which fans out only on the `Indexed` outcome. Body/subject/from/snippet fields for partially-rebuilt messages are never re-emitted. Messages without attachments are unrecoverable until the user manually re-runs the palette command.
-
-**Agreement: 7/8** (claude security, claude bugs, claude perf, claude arch, codex bugs, codex perf, codex arch).
-
-**Fix:** have `run_wipe_rebuild_inner` set an explicit `last_rebuild_succeeded` AtomicBool / oneshot on `Ok(())` exit only, and gate the `.version` write on it. Or have the rebuild itself write `.version` on success and remove the polling task entirely.
-
 ## High
 
 ### H1. Drain race with `spawn_post_ready_extract_startup`; per-item spawn tasks not tracked

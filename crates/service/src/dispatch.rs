@@ -1146,18 +1146,35 @@ fn spawn_post_ready_schema_rebuild(
             policy: service_api::RebuildPolicy::Wipe,
             force:  false,
         };
-        match crate::handlers::extract::handle_rebuild(&boot_state, params).await {
-            Ok(_value) => {}
+        let rebuild_id = match crate::handlers::extract::handle_rebuild(&boot_state, params).await
+        {
+            Ok(value) => match value
+                .get("rebuild_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+            {
+                Some(id) => id,
+                None => {
+                    log::warn!(
+                        "post-ready schema rebuild: handle_rebuild ack missing rebuild_id; \
+                         skipping .version bookkeeping",
+                    );
+                    return;
+                }
+            },
             Err(e) => {
                 log::warn!("post-ready schema rebuild: dispatch failed: {e:?}");
                 return;
             }
-        }
+        };
 
         // Poll the slot for completion. The rebuild task itself
         // calls `take_rebuild_task` on graceful exit; on shutdown
         // drain the slot is also taken. Either way, slot becoming
-        // None signals the rebuild ended.
+        // None signals the rebuild ended - but the slot can't
+        // distinguish success from cancellation, so we cross-check
+        // `last_completed_rebuild_id` (set by `run_wipe_rebuild_inner`
+        // only on Ok exit) before writing `.version`.
         let poll_interval = std::time::Duration::from_millis(500);
         loop {
             if boot_state.rebuild_in_flight_id().is_none() {
@@ -1166,24 +1183,29 @@ fn spawn_post_ready_schema_rebuild(
             tokio::time::sleep(poll_interval).await;
         }
 
-        // Pin .version write to AFTER successful rebuild. If the
-        // rebuild was cancelled mid-flight (drain), the slot also
-        // clears - but we shouldn't bump .version in that case
-        // because the rebuild is incomplete. Simple heuristic for
-        // v1: if we can confirm the rebuild ran to completion via
-        // the slot's natural exit (not a forced abort), write the
-        // version. Without a richer signal, write unconditionally
-        // and accept that a drain-mid-rebuild leaves .version at
-        // the new version with a partial index. The next boot would
-        // see no mismatch and skip rebuild; the partial state would
-        // self-heal via subsequent extract.backfill_kicks. Better
-        // signal lands as a follow-up.
+        // C4 fix: gate the `.version` write to "this specific rebuild
+        // ran to clean completion." Cancellation, drain abort, and
+        // run_wipe_rebuild_inner errors all leave
+        // last_completed_rebuild_id unchanged from a prior rebuild
+        // (or unset on first boot), so the rebuild_id check fails and
+        // the OLD `.version` stays on disk. Next boot reads the old
+        // value, sees a mismatch, and re-fires the rebuild - the
+        // sentinel-write ordering the plan promised.
+        let completed = boot_state.last_completed_rebuild_id();
+        if completed.as_deref() != Some(rebuild_id.as_str()) {
+            log::warn!(
+                "post-ready schema rebuild {rebuild_id}: did not complete cleanly \
+                 (last completed rebuild_id: {completed:?}); leaving .version unchanged \
+                 so next boot re-fires",
+            );
+            return;
+        }
         if let Err(e) = boot::write_current_search_index_version(&app_data_dir) {
             log::warn!("post-ready schema rebuild: .version write failed: {e}");
             return;
         }
         log::info!(
-            "post-ready schema rebuild: .version updated to {}",
+            "post-ready schema rebuild {rebuild_id}: .version updated to {}",
             search::INDEX_SCHEMA_VERSION,
         );
     })

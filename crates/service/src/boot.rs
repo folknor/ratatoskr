@@ -174,6 +174,14 @@ pub(crate) struct BootSharedState {
     /// (synchronous) and the post-ready task can interact without a
     /// lock.
     pending_schema_rebuild: std::sync::atomic::AtomicBool,
+    /// Phase 7 (C4 fix): rebuild_id of the most recently *successfully*
+    /// completed rebuild. Set by `run_wipe_rebuild_inner` only on the
+    /// `Ok(())` exit path - cancellation, drain abort, and error all
+    /// leave the previous value unchanged. Consumed by
+    /// `spawn_post_ready_schema_rebuild` to gate the `.version` write
+    /// to "rebuild completed cleanly," so a drain mid-rebuild leaves
+    /// the OLD `.version` on disk and the next boot re-fires.
+    last_completed_rebuild_id: Mutex<Option<String>>,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -203,7 +211,34 @@ impl BootSharedState {
             rebuild_task: Mutex::new(None),
             out_tx: Mutex::new(None),
             pending_schema_rebuild: std::sync::atomic::AtomicBool::new(false),
+            last_completed_rebuild_id: Mutex::new(None),
         })
+    }
+
+    /// Phase 7 (C4 fix): record that a rebuild ran to clean
+    /// completion. `run_wipe_rebuild_inner` calls this only on its
+    /// `Ok(())` exit path. The schema-version dispatcher gates its
+    /// `.version` write on observing this matches the rebuild_id it
+    /// dispatched, so cancellation / drain leaves the old `.version`
+    /// on disk and the next boot re-fires.
+    pub(crate) fn mark_rebuild_completed(&self, rebuild_id: String) {
+        match self.last_completed_rebuild_id.lock() {
+            Ok(mut slot) => {
+                *slot = Some(rebuild_id);
+            }
+            Err(e) => {
+                log::warn!("last_completed_rebuild_id mutex poisoned: {e}");
+            }
+        }
+    }
+
+    /// Phase 7 (C4 fix): read the last successfully-completed rebuild
+    /// id without consuming it. Used by the schema-version dispatcher.
+    pub(crate) fn last_completed_rebuild_id(&self) -> Option<String> {
+        self.last_completed_rebuild_id
+            .lock()
+            .ok()
+            .and_then(|s| s.clone())
     }
 
     /// Phase 7-9c: mark a schema-version rebuild as pending. Called
