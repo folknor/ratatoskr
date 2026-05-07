@@ -536,16 +536,69 @@ The phase splits into 6a + 6b + 6c at plan-doc level. 6a is the long tail of sma
 
 ---
 
-## Phase 8 - Crash recovery polish + cross-store invariant pass optimization
+## Phase 8 - Crash recovery polish + cross-store invariant pass optimization + close-out
 
-**Goal.** The Service surviving / failing / being respawned is fully handled (Phase 1.5 had the minimal version). UI shows visible state when the Service is restarting; queued work is preserved across a Service crash. The cross-store invariant pass (which already exists in minimal form from Phase 3 and Phase 6) gets optimized for large mailboxes.
+**The Phase 8 implementation plan and close-out checklist live in
+[`phase-8-plan.md`](phase-8-plan.md). The test cohort items
+(wedge, T1, `--test-fake-schema=N` e2e, manual matrix automation,
+Phase 7 extract cohort) live in
+[`../harness/roadmap.md`](../harness/roadmap.md). This entry is the
+high-level summary; the detail lives in those two docs.**
+
+When Phase 8 ships, this entire `docs/service/` directory deletes -
+including this file. Per `phase-8-plan.md` § 8-9.
+
+**Goal.** The Service surviving / failing / being respawned is fully handled (Phase 1.5 had the minimal version). UI shows visible state when the Service is restarting; queued work is preserved across a Service crash. The cross-store invariant pass (which already exists in minimal form from Phase 3 and Phase 6) gets optimized for large mailboxes. The Service-relocation arc closes: durable architectural content folds into `docs/architecture.md`; this directory retires.
 
 **Entry criteria.**
 - Phases 1-7 landed. Real crashes are happening (or being induced) so we know what hurts.
 - Phase 3 minimal cross-store pass + Phase 6 blob-store extension already in place; this phase optimizes them.
+- Harness roadmap M2 (the wedge) lands as test-coverage gating; the implementation work itself (8-1 through 8-5 in `phase-8-plan.md`) does not block on harness existence.
 
-**In scope.**
-- Respawn with exponential backoff (Phase 1.5 was no-backoff). Replaces the Phase 1.5 fixed 1-second cooldown + sliding-window crashloop guard. The "duplicate boot work on respawn" cost (each respawn re-runs the entire boot sequence including `reconcile_velo_rename`) is acceptable today under the 1-second cooldown but amplifies the lockfile race under a tight crashloop; backoff + crashloop detection together remove the amplification.
+**In scope** (summary; detail in `phase-8-plan.md`):
+- **8-1 Crash recovery polish.** Exponential backoff + crashloop detection refinement, UI Service-health indicator, in-flight request idempotency contract, retry-queue persistence verify, heartbeat policy refinement, Drop-watchdog + `wait_with_kill_watchdog` unification, soft-cancel signal for `boot.ready`, class-aware `boot_progress::emit` re-attempt, `from_boot_ready` async store init.
+- **8-2 Cross-store invariant pass optimization.** Marker-file gating per store, Tantivy orphan iteration, `attachment_extracted_text` orphan sweep (Phase 7 carry-forward folds in here).
+- **8-3 JMAP push hardening.** Push re-auth re-arm on token-refresh-success, push-state hardening (force fresh-start on crashed accounts).
+- **8-4 Phase 7 architectural carry-forwards.** PreserveExisting dual-index path (and re-introduce the `RebuildPolicy::PreserveExisting` wire variant), status-bar visual surface for `IndexRebuildProgress` + reader rebind on `IndexRebuildCompleted`, `local_drafts` re-emit during Wipe rebuild.
+- **8-5 Account-deletion `is_deleting` gate.** Phase 3 carry-forward.
+
+**Test cohort** (lives in `../harness/roadmap.md`):
+- Two `#[ignore]`'d `service_subprocess` tests as the wedge (harness M2).
+- Phase 2 T1 cohort (harness M4).
+- `--test-fake-schema=N` end-to-end test (harness M3 for the flag, M4 for the test).
+- Phase 7 integration test cohort (`extract_in_process` equivalents) (harness M5).
+- Manual matrix items 4 + 5 first; full matrix absorption tracked through harness M6.
+- PushRuntime integration cohort (harness M8, gated on Track 2 fake JMAP fixture).
+- Real-world fixture corpus for extract tests (harness M5, not Phase 8).
+
+**Close-out** (8-6 through 8-9 in `phase-8-plan.md`):
+- 8-6: promote durable IPC contract / process model / boot handshake / cross-store crash consistency / service-generation contract / stdio discipline / sensitive-value logging policy from `problem-statement.md` into `docs/architecture.md`.
+- 8-7: relocate `manual-test-matrix.md` to `docs/harness/manual-test-matrix.md`.
+- 8-8: per-file disposition map for everything in `docs/service/`.
+- 8-9: delete the `docs/service/` directory.
+
+**Out of scope.**
+- Hot-restart / live state migration of the Service. Crash + cold restart is the model.
+- Tray-resident UI / "close window keeps Service alive" - dropped from the roadmap entirely; no plans for a tray icon.
+
+**Exit criteria.**
+- All 8-1..8-5 sub-items LANDED (per the per-cluster exit criteria in `phase-8-plan.md`).
+- Killing the Service mid-sync results in a respawn within a few seconds with backoff preventing tight crashloops; UI status indicator surfaces degraded state.
+- A persistently failing Service surfaces a clear UI error rather than silent breakage.
+- Startup invariant pass runs in <5s on a typical mailbox; <30s on a 200 GB mailbox. Logged stats let us see how often crashes leave us reconciling.
+- Heartbeat false-positive rate (load-induced miss interpreted as crash) goes to zero.
+- Splash transition stays responsive on a slow-disk machine (async store init landed; `from_boot_ready` no longer blocks on body / inline / search opens).
+- Harness M2 LANDED - the two wedge tests pass consistently, including under 200-iteration soak.
+- `docs/service/` is empty and deleted from the repo. Durable content has migrated to `docs/architecture.md`; per-phase plans retired with git history; manual matrix relocated to the harness directory.
+
+**Risks / open questions.**
+- Distinguishing "Service crashed" from "Service is just slow under load" in the heartbeat. The N-consecutive-misses policy plus generous first-heartbeat-after-sync timeout should resolve this; tune as 8-1 lands.
+- Marker-file format and atomicity. Prefer a small per-store SQLite row over a flat file; SQLite gives atomicity for free.
+- PreserveExisting plumbing rework is the largest single 8-4 item; settles whether `SearchWriteHandle` carve-out / refactoring is required.
+
+---
+
+<!-- LEGACY-LISTING-REPLACED-BY-PHASE-8-PLAN
 - Crashloop detection: if respawn fails N times in M seconds, surface a permanent error state in the UI ("Service can't start - check logs"). Phase 1.5's `CRASHLOOP_THRESHOLD = 3` / `CRASHLOOP_WINDOW = 30s` flat policy gets replaced.
 - UI status indicator for Service health (small banner or status bar element). Indicator distinguishes "respawning" from "persistently failing" from "healthy."
 - In-flight requests are either (a) replayed if idempotent, (b) failed back to the caller with a clear error if not. Per-method idempotency contract recorded in `service-api`.
@@ -599,39 +652,7 @@ The phase splits into 6a + 6b + 6c at plan-doc level. 6a is the long tail of sma
 **Risks / open questions.**
 - Distinguishing "Service crashed" from "Service is just slow under load" in the heartbeat. The N-consecutive-misses policy plus generous first-heartbeat-after-sync timeout should resolve this; tune in the planning session.
 - Marker-file format and atomicity. Prefer a small per-store SQLite row over a flat file; SQLite gives atomicity for free.
-
----
-
-## Phase 9 (optional) - Tray-resident promotion
-
-**Goal.** Closing the UI window doesn't quit the app or kill the Service. Tray icon offers reopen / quit. Push notifications continue to run when the window is closed.
-
-**Entry criteria.**
-- Phases 1-8 landed and running well in real use.
-- Demand exists from users for "background sync without keeping a window open."
-
-**In scope.**
-- Cross-platform tray icon (probably `tray-icon` crate or iced's tray support if available by then).
-- "Close button minimizes to tray" preference (off by default; users opt in).
-- Tray menu: Open, Quit, possibly Compose.
-- The Service lifecycle stays exactly the same - it's still a child of the UI process. The UI process just doesn't exit when the window closes.
-
-**Out of scope.**
-- True system-daemon mode. Still rejected.
-- Auto-start at user-session login - separate optional follow-up.
-- Native OS notification toasts (e.g. for new mail). Separate work.
-
-**Touchpoints.**
-- New: `crates/app/src/tray.rs`.
-- `crates/app/src/app.rs` - lifecycle changes around window close.
-
-**Exit criteria.**
-- App can be configured to minimize-on-close.
-- Push notifications continue with window closed; reopening is fast (Service was already running).
-
-**Risks / open questions.**
-- Cross-platform tray APIs are uneven; `tray-icon` is the most established Rust crate but has its quirks.
-- Quit-vs-minimize disambiguation is a known UX trap.
+LEGACY-LISTING-REPLACED-BY-PHASE-8-PLAN -->
 
 ---
 
