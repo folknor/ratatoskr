@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M10. `attachment_extracted_text` plaintext survives cache eviction
-
-**Background:** plan acknowledges plaintext-at-rest in § "Encryption-at-rest gap"; this finding is the divergence from the existing cache posture, which the plan does not anticipate.
-
-`attachment_cache/<content_hash>` plaintext is bounded by cache eviction. `attachment_extracted_text.extracted_text` is plaintext SQLite TEXT and is **never** evicted (per the schema design intent: text persists when bytes are evicted, so search-for-evicted-attachment still works). A user who clears their attachment cache to "shred" a sensitive PDF still has its text in SQLite indefinitely; the only path to reclaim is a Wipe rebuild. Mental-model divergence from "cache cleared = data gone."
-
-**Agreement: 3/8** (claude security, claude bugs, codex bugs).
-
-**Fix:** release-notes flag is acceptable for v1, but add an `attachment.shred_extracted_text` IPC (or fold into a future `attachment.shred` that handles cache + text together) so users can act on the divergence without a full rebuild.
-
 ### M11. `enqueue_dedupe` + `queue_depth` ordering can fire `ExtractCompleted` before drain finishes
 
 **Files:** `crates/service/src/extract.rs:164-190` (enqueue), `:313-336` (finalize_item).
