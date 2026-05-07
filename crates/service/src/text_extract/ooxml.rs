@@ -50,10 +50,10 @@ pub(crate) fn extract_docx(bytes: &[u8]) -> ExtractionOutcome {
         Err(o) => return o,
     };
     match collect_text_from_entry(&mut archive, "word/document.xml", &[b"t"]) {
-        Ok(text) if text.trim().is_empty() => {
+        Ok(out) if out.text.trim().is_empty() => {
             ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent }
         }
-        Ok(text) => ExtractionOutcome::Indexed { text },
+        Ok(out) => ExtractionOutcome::Indexed { text: out.text },
         Err(EntryError::NotFound) => {
             ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent }
         }
@@ -78,9 +78,10 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
     // actually has shared strings (small workbooks may inline-string
     // everything).
     match collect_text_from_entry(&mut archive, "xl/sharedStrings.xml", &[b"t"]) {
-        Ok(text) => {
-            push_with_separator(&mut combined, &text);
-            budget = budget.saturating_sub(text.len() as u64);
+        Ok(out) => {
+            push_with_separator(&mut combined, &out.text);
+            // H3 fix: deduct decompressed bytes, not text length.
+            budget = budget.saturating_sub(out.decompressed_bytes);
         }
         Err(EntryError::NotFound) => {}
         Err(EntryError::Read(e)) => return ExtractionOutcome::Failed { error: e },
@@ -102,9 +103,9 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
             return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
         }
         match collect_text_from_entry_bounded(&mut archive, &name, &[b"t"], budget) {
-            Ok(text) => {
-                budget = budget.saturating_sub(text.len() as u64);
-                push_with_separator(&mut combined, &text);
+            Ok(out) => {
+                budget = budget.saturating_sub(out.decompressed_bytes);
+                push_with_separator(&mut combined, &out.text);
             }
             Err(EntryError::NotFound) => {}
             Err(EntryError::Read(e)) => return ExtractionOutcome::Failed { error: e },
@@ -144,9 +145,9 @@ pub(crate) fn extract_pptx(bytes: &[u8]) -> ExtractionOutcome {
             return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
         }
         match collect_text_from_entry_bounded(&mut archive, &name, &[b"t"], budget) {
-            Ok(text) => {
-                budget = budget.saturating_sub(text.len() as u64);
-                push_with_separator(&mut combined, &text);
+            Ok(out) => {
+                budget = budget.saturating_sub(out.decompressed_bytes);
+                push_with_separator(&mut combined, &out.text);
             }
             Err(EntryError::NotFound) => {}
             Err(EntryError::Read(e)) => return ExtractionOutcome::Failed { error: e },
@@ -207,8 +208,21 @@ fn collect_text_from_entry(
     archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
     entry: &str,
     target_local_names: &[&[u8]],
-) -> Result<String, EntryError> {
+) -> Result<EntryReadOutput, EntryError> {
     collect_text_from_entry_bounded(archive, entry, target_local_names, MAX_TOTAL_DECOMPRESSED)
+}
+
+/// Output of one zip entry read: extracted text plus the actual
+/// decompressed byte count. H3 fix: callers decrement their bomb
+/// budget by `decompressed_bytes` (i.e. `buf.len()`), not by
+/// `text.len()`. The pre-fix code subtracted text length, but
+/// `text.len()` is post-XML-walk - a 100 MB XML stream that produces
+/// 1 KB of `<t>` text would only deduct 1 KB from the budget,
+/// allowing N entries to each decompress up to MAX_TOTAL_DECOMPRESSED.
+#[derive(Debug)]
+struct EntryReadOutput {
+    text: String,
+    decompressed_bytes: u64,
 }
 
 fn collect_text_from_entry_bounded(
@@ -216,7 +230,7 @@ fn collect_text_from_entry_bounded(
     entry: &str,
     target_local_names: &[&[u8]],
     byte_budget: u64,
-) -> Result<String, EntryError> {
+) -> Result<EntryReadOutput, EntryError> {
     let file = match archive.by_name(entry) {
         Ok(f) => f,
         Err(zip::result::ZipError::FileNotFound) => return Err(EntryError::NotFound),
@@ -231,16 +245,24 @@ fn collect_text_from_entry_bounded(
     if let Err(e) = limited.read_to_end(&mut buf) {
         return Err(EntryError::Read(format!("read {entry}: {e}")));
     }
-    // If we hit the cap exactly, we may have been mid-stream of a
-    // zip-bomb. Surfacing as ZipBomb is the conservative call.
+    // H3 fix: any cap-hit is suspect. The prior `&& limit <
+    // MAX_TOTAL_DECOMPRESSED` guard let a single-entry bomb through:
+    // when called as the first entry with byte_budget ==
+    // MAX_TOTAL_DECOMPRESSED, the limit equalled the cap and the
+    // second condition was false, so a 100 MB inflation was treated
+    // as legitimate content. Conservative: a stream that fills the
+    // cap exactly is more likely zip-bomb than honest content.
     #[allow(clippy::cast_possible_truncation)]
-    let cap_hit = (buf.len() as u64) >= limit;
-    if cap_hit && limit < MAX_TOTAL_DECOMPRESSED {
+    let decompressed_bytes = buf.len() as u64;
+    if decompressed_bytes >= limit {
         return Err(EntryError::ZipBomb);
     }
 
     let text = collect_target_text(&buf, target_local_names);
-    Ok(text)
+    Ok(EntryReadOutput {
+        text,
+        decompressed_bytes,
+    })
 }
 
 /// Walk the XML in `bytes`, collect text events that are inside an

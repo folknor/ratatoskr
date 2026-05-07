@@ -6,18 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H3. OOXML decompressed-bytes accounting tracks output text, not actual decompressed input
-
-**Files:** `crates/service/src/text_extract/ooxml.rs:83, 100-106, 140-148, 226-240`.
-
-`budget = budget.saturating_sub(text.len() as u64)` decrements against extracted text (post-XML walk), but `Read::take(limit)` caps actual decompressed bytes per entry. A malicious xlsx/pptx with N entries whose central directory honestly claims small sizes (passing `open_with_size_check`) can decompress up to `MAX_TOTAL_DECOMPRESSED ≈ 100 MB` per entry whenever the XML is long but `<t>` text is sparse. Total decompression work is bounded only by entry count × 100 MB (CPU/IO DoS).
-
-Compounding: `cap_hit && limit < MAX_TOTAL_DECOMPRESSED` only fires the ZipBomb signal when the budget had already been reduced. The first entry's `limit == MAX_TOTAL_DECOMPRESSED` short-circuits the check, so a single-entry bomb declaring exactly 100 MB and inflating to 100 MB passes both pre-check and read-cap.
-
-**Agreement: 7/8** (claude security, claude bugs, claude perf, claude arch, codex bugs, codex perf, codex arch).
-
-**Fix:** subtract `buf.len()` from budget instead of `text.len()`; tighten the cap-hit check to `cap_hit && (buf.len() as u64) >= limit` regardless of whether `limit < MAX_TOTAL_DECOMPRESSED`.
-
 ### H4. OOXML CD-size sum can overflow u64 in release mode
 
 **Files:** `crates/service/src/text_extract/ooxml.rs:190-201`.
