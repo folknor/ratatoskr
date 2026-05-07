@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M7. Manual palette rebuild beats schema rebuild → `.version` skipped
-
-**Files:** `crates/service/src/dispatch.rs:1149-1154`, `crates/service/src/handlers/extract.rs:48-52`.
-
-If the user invokes `Rebuild Search Index` after `boot.ready` but before `spawn_post_ready_schema_rebuild` calls `handle_rebuild`, the slot is occupied. The post-ready task's `handle_rebuild` returns `Err("index.rebuild already in flight ...")`. The dispatcher logs and returns *without* writing `.version`. `pending_schema_rebuild` was already swapped to false. User's manual rebuild completes successfully; no code path writes `.version` for the rest of this boot. Next boot re-marks the rebuild and runs it redundantly.
-
-Self-healing on next boot but wasteful (one redundant full-mailbox rebuild). Folds into the C4 fix once `.version` is gated on success.
-
-**Agreement: 1/8** (claude bugs).
-
 ### M8. Phase 7 writes shared DB tables directly from `service`, bypassing the `db` crate ownership rule
 
 **Files:** `crates/service/src/extract.rs:352, 504, 535` (inline SQL upsert + status pre-flight + UPDATE).

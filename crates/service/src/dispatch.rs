@@ -1158,33 +1158,44 @@ fn spawn_post_ready_schema_rebuild(
             "post-ready schema rebuild: dispatching Wipe rebuild for INDEX_SCHEMA_VERSION change",
         );
 
-        // Dispatch the rebuild via the same in-process handler the
-        // palette command uses. This installs a RebuildTaskState on
-        // BootSharedState; we then watch for it to clear (= rebuild
-        // completed or got cancelled by drain).
-        let params = service_api::IndexRebuildParams {
-            policy: service_api::RebuildPolicy::Wipe,
-            force:  false,
-        };
-        let rebuild_id = match crate::handlers::extract::handle_rebuild(&boot_state, params).await
-        {
-            Ok(value) => match value
-                .get("rebuild_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-            {
-                Some(id) => id,
-                None => {
-                    log::warn!(
-                        "post-ready schema rebuild: handle_rebuild ack missing rebuild_id; \
-                         skipping .version bookkeeping",
-                    );
+        // M7 fix: if a rebuild is already in flight (the user fired
+        // the palette command between boot.ready and our reach here),
+        // adopt that rebuild_id rather than trying to dispatch a new
+        // one (which would Err with "already in flight" and leave us
+        // unable to bump .version - next boot would redundantly
+        // re-fire the schema rebuild). Either way we end up with a
+        // rebuild_id we can wait on; if last_completed_rebuild_id
+        // matches at the end, .version is correct to bump.
+        let rebuild_id = if let Some(in_flight) = boot_state.rebuild_in_flight_id() {
+            log::info!(
+                "post-ready schema rebuild: adopting in-flight rebuild {in_flight} \
+                 (palette racing post-ready) instead of dispatching a new one",
+            );
+            in_flight
+        } else {
+            let params = service_api::IndexRebuildParams {
+                policy: service_api::RebuildPolicy::Wipe,
+                force:  false,
+            };
+            match crate::handlers::extract::handle_rebuild(&boot_state, params).await {
+                Ok(value) => match value
+                    .get("rebuild_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                {
+                    Some(id) => id,
+                    None => {
+                        log::warn!(
+                            "post-ready schema rebuild: handle_rebuild ack missing rebuild_id; \
+                             skipping .version bookkeeping",
+                        );
+                        return;
+                    }
+                },
+                Err(e) => {
+                    log::warn!("post-ready schema rebuild: dispatch failed: {e:?}");
                     return;
                 }
-            },
-            Err(e) => {
-                log::warn!("post-ready schema rebuild: dispatch failed: {e:?}");
-                return;
             }
         };
 
