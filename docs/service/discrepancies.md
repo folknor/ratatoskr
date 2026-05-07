@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M9. `text/calendar` privacy exemption bypassable
-
-**Files:** `crates/service/src/text_extract/mod.rs:194-223`.
-
-`canonicalize_mime` routes via mime first then `.ics` extension. An ICS file with mime `text/plain` and filename `meeting.invite` (or no recognizable extension) falls through to `Mime::PlainText` and is extracted. The plan's `PrivacyExempt` skip-reason is not airtight - attendee/organizer data can land in Tantivy.
-
-**Agreement: 3/8** (claude arch, codex arch, codex bugs).
-
-**Fix:** widen `canonicalize_mime` to sniff `BEGIN:VCALENDAR` in the first 1 KB of plain content, or accept mis-typed ICS as out-of-scope and document.
-
 ### M10. `attachment_extracted_text` plaintext survives cache eviction
 
 **Background:** plan acknowledges plaintext-at-rest in § "Encryption-at-rest gap"; this finding is the divergence from the existing cache posture, which the plan does not anticipate.

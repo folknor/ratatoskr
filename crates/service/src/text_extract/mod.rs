@@ -244,6 +244,18 @@ pub(crate) fn canonicalize_mime(mime: &str, filename: &str) -> Mime {
     Mime::Unknown
 }
 
+/// M9 helper: detect VCALENDAR content even when the mime + filename
+/// don't betray it. Scans the first 1 KB for the canonical opening
+/// `BEGIN:VCALENDAR` line. ICS files always start with this token at
+/// the file head (RFC 5545 § 3.4); restricting the scan window keeps
+/// the cost bounded for non-ICS payloads.
+fn looks_like_vcalendar(bytes: &[u8]) -> bool {
+    const SCAN_WINDOW: usize = 1024;
+    const NEEDLE: &[u8] = b"BEGIN:VCALENDAR";
+    let head = &bytes[..SCAN_WINDOW.min(bytes.len())];
+    head.windows(NEEDLE.len()).any(|w| w == NEEDLE)
+}
+
 /// Extract text from `bytes` according to mime + filename. Pure
 /// function; no I/O. Output, if any, is truncated to
 /// `MAX_EXTRACTED_TEXT_BYTES` on a UTF-8 char boundary.
@@ -255,7 +267,17 @@ pub(crate) fn extract(bytes: &[u8], mime: &str, filename: &str) -> ExtractionOut
     if bytes.len() > MAX_INPUT_BYTES {
         return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
     }
-    let mime_canonical = canonicalize_mime(mime, filename);
+    let mut mime_canonical = canonicalize_mime(mime, filename);
+    // M9 fix: sniff BEGIN:VCALENDAR for files that landed on the
+    // PlainText path (mime was text/plain or absent + extension didn't
+    // map to .ics). Without this, an ICS file with mime text/plain
+    // and an unrecognized extension - common for forwarded calendar
+    // invites - is extracted as plain text and attendee/organizer
+    // data leaks into Tantivy. The sniff is cheap (first 1 KB) and
+    // narrow (only re-routes on the BEGIN:VCALENDAR opening line).
+    if mime_canonical == Mime::PlainText && looks_like_vcalendar(bytes) {
+        mime_canonical = Mime::Calendar;
+    }
     // H6 mitigation: tighter pre-extract cap for PDF specifically.
     // pdf-extract is uncancellable inside spawn_blocking; capping
     // input bytes lower than the global ceiling bounds the worst-case
