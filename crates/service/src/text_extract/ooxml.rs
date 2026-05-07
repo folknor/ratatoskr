@@ -176,7 +176,7 @@ fn open_with_size_check(
     bytes: &[u8],
 ) -> Result<zip::ZipArchive<Cursor<&[u8]>>, ExtractionOutcome> {
     let cursor = Cursor::new(bytes);
-    let archive = match zip::ZipArchive::new(cursor) {
+    let mut archive = match zip::ZipArchive::new(cursor) {
         Ok(a) => a,
         Err(e) => {
             return Err(ExtractionOutcome::Failed {
@@ -185,20 +185,36 @@ fn open_with_size_check(
         }
     };
 
-    // Sum claimed uncompressed sizes. zip 8.x exposes per-entry size
-    // via the central directory; iterating file_names + by_name pairs
-    // is what we have.
-    let claimed_total: u64 = (0..archive.len())
-        .filter_map(|i| {
-            // A read-only "peek" at the metadata. Re-open the archive
-            // for actual reads later; we only need size here.
-            let mut clone_archive = archive.clone();
-            clone_archive.by_index(i).ok().map(|f| f.size())
-        })
-        .sum();
-
-    if claimed_total > MAX_TOTAL_DECOMPRESSED {
-        return Err(ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb });
+    // Sum claimed uncompressed sizes via the central directory.
+    //
+    // H5 fix: pre-fix the loop did `let mut clone_archive =
+    // archive.clone(); clone_archive.by_index(i).ok().map(|f|
+    // f.size())` per entry - O(n^2) memory churn copying the per-entry
+    // metadata vec for each peek. Iterating `&mut archive` directly
+    // releases its borrow at the end of each loop body, no clone
+    // needed; the archive moves into the Ok return after the loop.
+    //
+    // H4 fix: pre-fix the loop summed via `.sum::<u64>()` - which uses
+    // checked + in debug (panic, caught by the per-item supervisor as
+    // a transient failure) and *wrapping* + in release. A crafted
+    // OOXML with N entries each declaring u64::MAX/2 + 1 wrapped to a
+    // small total in release builds and silently bypassed the bomb
+    // pre-check. Manual checked_add fold returns ZipBomb on overflow.
+    let mut claimed_total: u64 = 0;
+    for i in 0..archive.len() {
+        let entry_size = match archive.by_index(i) {
+            Ok(f) => f.size(),
+            Err(_) => continue,
+        };
+        match claimed_total.checked_add(entry_size) {
+            Some(t) => claimed_total = t,
+            None => {
+                return Err(ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb });
+            }
+        }
+        if claimed_total > MAX_TOTAL_DECOMPRESSED {
+            return Err(ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb });
+        }
     }
 
     Ok(archive)

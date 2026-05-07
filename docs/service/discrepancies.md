@@ -6,32 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H4. OOXML CD-size sum can overflow u64 in release mode
-
-**Files:** `crates/service/src/text_extract/ooxml.rs:190-201`.
-
-```rust
-let claimed_total: u64 = (0..archive.len())
-    .filter_map(|i| { ... f.size() })
-    .sum();
-```
-
-`<u64 as Sum>::sum` uses checked `+` in debug (panics) and wrapping `+` in release. A crafted OOXML with N entries each declaring `u64::MAX/2 + 1` wraps to a small total and passes the cap check. In debug, the worker panics into the per-item supervisor (counted as transient failure). In release, the bypass is silent. `Read::take` still bounds memory, but the first-line defense the plan promised at `phase-7-plan.md:107` is bypassable.
-
-**Agreement: 1/8** (claude arch).
-
-**Fix:** manual fold with `checked_add`, or short-circuit when any single declared size > `MAX_TOTAL_DECOMPRESSED`.
-
-### H5. OOXML pre-flight clones the archive per entry: O(n²) memory churn
-
-**Files:** `crates/service/src/text_extract/ooxml.rs:191-196`.
-
-`(0..archive.len()).filter_map(|i| { let mut clone_archive = archive.clone(); clone_archive.by_index(i).ok().map(|f| f.size()) })` clones the whole `ZipArchive` once per entry. Each clone copies central-directory metadata. For an adversarial OOXML with hundreds of thousands of entries, this is O(n²) bytes of cumulative allocations before extraction starts. DoS vector.
-
-**Agreement: 2/8** (claude perf, claude arch).
-
-**Fix:** iterate `&mut archive` directly: `for i in 0..archive.len() { archive.by_index(i)?.size() }`.
-
 ### H6. `spawn_blocking` thread leak under malicious payloads
 
 **Files:** `crates/service/src/extract.rs:217-231` (shutdown), `:253` (per-item spawn), `:458-482` (timeout wrapping).
