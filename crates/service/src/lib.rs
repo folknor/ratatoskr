@@ -15,6 +15,7 @@ mod snooze_runner;
 pub(crate) mod startup_invariants;
 pub(crate) mod sync;
 pub(crate) mod sync_dispatch;
+pub(crate) mod text_extract;
 
 /// Re-export test-helpers knobs for the in-process integration tests so
 /// they can drive the artificial boot delay without `pub mod boot` leaking
