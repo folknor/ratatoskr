@@ -304,6 +304,13 @@ async fn process_one(inner: Arc<ExtractRuntimeInner>, work: ExtractWork) {
         ExtractionOutcome::Failed { .. } => {
             inner.failed_count.fetch_add(1, Ordering::Relaxed);
         }
+        ExtractionOutcome::AlreadyResolved { .. } => {
+            // C3 fix: pre-flight already handled text_indexed_at
+            // UPDATE + fan_out_reindex (when applicable). The
+            // original extraction's outcome already incremented one
+            // of indexed/skipped/failed; counting it again here would
+            // inflate the IPC totals. Intentional no-op.
+        }
     }
     finalize_item(&inner, &work.content_hash).await;
 }
@@ -368,10 +375,50 @@ async fn run_extraction_pipeline(
         && is_permanent_status(&status)
     {
         log::debug!(
-            "ExtractRuntime skip {} (already at permanent status {status})",
+            "ExtractRuntime pre-flight {} already resolved at status {status}",
             work.content_hash,
         );
-        return ExtractionOutcome::Skipped { reason: SkipReason::OpaqueMime };
+        // Phase 7 (C3 fix): a permanent row already covers this hash.
+        // Two side effects to keep the system honest:
+        //
+        // 1. UPDATE attachments.text_indexed_at for any rows that
+        //    reference this content_hash with NULL. Without this the
+        //    backfill SELECT (`find_unindexed_cached_attachments`,
+        //    filtered on `text_indexed_at IS NULL`) keeps re-emitting
+        //    the same rows on every kick - permanent skips churn
+        //    forever and inflate `extract_status.skipped_total`.
+        //
+        // 2. When the permanent status is `indexed`, fan out a
+        //    re-index for any newly-referencing messages. Without this
+        //    a brand-new sync of a message that points at an
+        //    already-extracted content_hash never gets attachment_text
+        //    in its Tantivy doc - the worker short-circuits before
+        //    `fan_out_reindex` and sync's thin doc never enriches via
+        //    the extract path.
+        let hash_for_update = work.content_hash.clone();
+        if let Err(e) = inner
+            .db
+            .with_conn(move |conn| {
+                let now: i64 = chrono::Utc::now().timestamp();
+                conn.execute(
+                    "UPDATE attachments SET text_indexed_at = ?1 \
+                     WHERE content_hash = ?2 AND text_indexed_at IS NULL",
+                    rusqlite::params![now, hash_for_update],
+                )
+                .map_err(|e| format!("update text_indexed_at: {e}"))?;
+                Ok(())
+            })
+            .await
+        {
+            log::warn!(
+                "ExtractRuntime pre-flight {} text_indexed_at update failed: {e}",
+                work.content_hash,
+            );
+        }
+        if status == "indexed" {
+            fan_out_reindex(inner, &work.content_hash).await;
+        }
+        return ExtractionOutcome::AlreadyResolved { previous_status: status };
     }
 
     // Fetch metadata for this attachment (filename + mime), needed by
@@ -494,7 +541,21 @@ async fn run_extraction_pipeline(
 
     // Set attachments.text_indexed_at for every row referencing this
     // content_hash, so the backfill scan no longer picks them up.
-    if matches!(outcome, ExtractionOutcome::Indexed { .. }) {
+    //
+    // C3 fix: extended to fire for permanent skips too, not just
+    // Indexed. A row with status `skipped:opaque` (or any other
+    // permanent skip) is "decided" - re-extraction would produce the
+    // same outcome. Leaving text_indexed_at NULL would make backfill
+    // re-emit the row every kick, churning forever. Transient skips
+    // (Timeout, BytesGone) and Failed leave it NULL so a future kick
+    // retries.
+    let should_mark_indexed = match &outcome {
+        ExtractionOutcome::Indexed { .. } => true,
+        ExtractionOutcome::Skipped { reason } => !reason.is_retry_eligible(),
+        ExtractionOutcome::Failed { .. } => false,
+        ExtractionOutcome::AlreadyResolved { .. } => false, // pre-flight handled
+    };
+    if should_mark_indexed {
         let hash = work.content_hash.clone();
         let _ = inner
             .db
@@ -525,6 +586,12 @@ async fn persist_outcome_row(
         ExtractionOutcome::Indexed { text } => ("indexed".into(), Some(text.clone())),
         ExtractionOutcome::Skipped { reason } => (reason.status_string().to_string(), None),
         ExtractionOutcome::Failed { .. } => ("failed:transient".into(), None),
+        ExtractionOutcome::AlreadyResolved { .. } => {
+            // Pre-flight branch already verified the row exists; do
+            // not rewrite it. Re-writing would update extracted_at
+            // and confuse staleness sweeps that key on it.
+            return;
+        }
     };
     let hash = content_hash.to_string();
     let mime = mime_type.to_string();

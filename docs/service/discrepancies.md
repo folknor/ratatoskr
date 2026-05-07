@@ -4,20 +4,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Critical
 
-### C3. Permanent-skip pre-flight short-circuits without `fan_out_reindex` or `text_indexed_at` update
-
-**Files:** `crates/service/src/extract.rs:367-375` (pre-flight skip), `:497-512` (text_indexed_at UPDATE gated on Indexed only), `crates/service/src/handlers/attachment.rs:231-239` (`should_enqueue_extraction`), `crates/db/src/db/queries_extra/extract_reindex.rs:115-143`.
-
-Two cascading bugs from one root cause:
-
-1. **New message referencing already-indexed hash never gets `attachment_text`.** Sync writes a brand-new message with attachments row pointing at content_hash X (already indexed for a previous message). `attachment.fetch` cache-hit consults `info.extraction_status` → `'indexed'` → `should_enqueue_extraction` returns false. Hourly backfill does select the row (`text_indexed_at IS NULL`), but the worker's pre-flight at `extract.rs:367-375` finds the existing permanent row and returns `Skipped { OpaqueMime }` early, **without calling `fan_out_reindex`**. The new message's Tantivy doc has empty `attachment_text` permanently.
-
-2. **Backfill loops forever on every permanent-skipped row.** `find_unindexed_cached_attachments` filters `text_indexed_at IS NULL`. The worker only sets `text_indexed_at` on the `Indexed` outcome - every other terminal outcome (encrypted, opaque, oversize, encoding-invalid, empty, OCR-unavailable, unknown-mime, privacy-exempt, zip-bomb, transient-failed) leaves `text_indexed_at = NULL` while writing a permanent row to `attachment_extracted_text`. Every kick re-enqueues every permanently-skipped row. Each pass admits to `in_flight_hashes`, hits the pre-flight skip, increments `skipped_count`. On a 50 GB enterprise mailbox with ~50k image/audio attachments: ~50k DB SELECTs + ~50k mpsc enqueues + ~50k DB pre-flight queries every hour, indefinitely. `extract_status.skipped_total` inflates monotonically without bound.
-
-**Agreement: 4/8** (claude bugs, claude security, claude arch, codex perf).
-
-**Fix:** in the pre-flight permanent-status branch, (a) update `attachments.text_indexed_at` for any row at this content_hash with NULL, and (b) when the existing status is `'indexed'`, call `fan_out_reindex(&inner, &content_hash)` before returning so new messages get the attachment text.
-
 ### C4. Schema-version `.version` written on drain-cancelled rebuild
 
 **Files:** `crates/service/src/dispatch.rs:1162-1184` (poll loop + unconditional .version write), `:392-400` (drain calls take_rebuild_task + cancel + abort), `crates/service/src/rebuild.rs:70-87` (run_wipe_rebuild_inner + take_rebuild_task on both Ok and Err paths).
@@ -133,14 +119,6 @@ When the pre-flight fails to detect, `pdf-extract` is invoked on encrypted bytes
 **Fix:** thread `boot_state.service_generation()` (or whatever the actual accessor is) into both spawn sites.
 
 ## Medium
-
-### M1. Pre-flight permanent-status emits misleading `SkipReason::OpaqueMime` for every status
-
-**Files:** `crates/service/src/extract.rs:367-375`.
-
-The pre-flight branch returns `Skipped { reason: OpaqueMime }` regardless of stored status. Inflates `skipped_count` for re-enqueues of already-indexed hashes; conflates idempotent dedupe with true opaque-mime skips in `extract_status.skipped_total`. Cosmetic until the bug fixed in C3 lands; folds into the same diff (introduce `Skipped { AlreadyResolved }` variant or short-circuit before bumping the counter).
-
-**Agreement: 4/8** (claude security, claude bugs, claude perf, claude arch).
 
 ### M2. App-layer attribution passes empty `body_text`
 

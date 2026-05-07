@@ -61,12 +61,19 @@ pub(crate) const PER_EXTRACTION_TIMEOUT_SECS: u64 = 30;
 
 /// Outcome of an extraction attempt. Maps directly to the persisted
 /// `attachment_extracted_text.status` taxonomy.
+///
+/// `AlreadyResolved` is a runtime-layer-only variant: extractors never
+/// emit it, but the worker pre-flight returns it when a permanent row
+/// already exists for the content_hash, so `process_one` can skip the
+/// counter bump (the work was already accounted in the original
+/// extraction's outcome). See `extract.rs::run_extraction_pipeline`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // Consumed in 7-4.
 pub(crate) enum ExtractionOutcome {
     Indexed { text: String },
     Skipped { reason: SkipReason },
     Failed { error: String },
+    AlreadyResolved { previous_status: String },
 }
 
 /// Reason an extraction was skipped. The `Permanent` group never retries
