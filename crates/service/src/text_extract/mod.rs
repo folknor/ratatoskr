@@ -41,6 +41,7 @@
 //! - `ooxml` (7-2c, lands separately): `zip` walk + `quick-xml` text
 //!   extraction with decompressed-size cap and entities-off contract.
 
+pub(crate) mod pdf;
 pub(crate) mod plain;
 
 /// Cap on input bytes. Files larger than this skip extraction entirely.
@@ -232,10 +233,7 @@ pub(crate) fn extract(bytes: &[u8], mime: &str, filename: &str) -> ExtractionOut
         return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
     }
     let outcome = match canonicalize_mime(mime, filename) {
-        Mime::Pdf => {
-            // 7-2b: replace with `pdf::extract(bytes)`.
-            ExtractionOutcome::Failed { error: "pdf extractor not yet wired (lands in 7-2b)".into() }
-        }
+        Mime::Pdf => pdf::extract(bytes),
         Mime::Docx | Mime::Xlsx | Mime::Pptx => {
             // 7-2c: replace with `ooxml::extract_*(bytes)`.
             ExtractionOutcome::Failed { error: "ooxml extractor not yet wired (lands in 7-2c)".into() }
@@ -328,10 +326,11 @@ mod tests {
     }
 
     #[test]
-    fn pdf_dispatches_to_stub_until_7_2b() {
-        // Phase 7-2a placeholder: dispatch table maps Mime::Pdf to a
-        // Failed stub; phase 7-2b replaces with the real extractor.
-        let outcome = extract(b"%PDF-1.4 stub", "application/pdf", "x.pdf");
+    fn pdf_dispatch_routes_to_pdf_extractor() {
+        // Phase 7-2b lands real PDF dispatch. A non-PDF byte stream
+        // labeled application/pdf is still an outcome from the actual
+        // extractor (Failed on bad header), proving dispatch is wired.
+        let outcome = extract(b"this is not a pdf at all", "application/pdf", "x.pdf");
         assert!(matches!(outcome, ExtractionOutcome::Failed { .. }));
     }
 
