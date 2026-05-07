@@ -179,10 +179,22 @@ pub(crate) async fn handle_backfill_kick(
             message_id: row.message_id,
             attachment_id: row.attachment_id,
         };
-        if let Err(e) = runtime.enqueue(work).await {
-            // Runtime closed or queue full. Both are recoverable -
-            // the next kick will retry.
-            log::warn!("extract.backfill_kick: enqueue failed: {e}");
+        // Q2 close: try_enqueue instead of awaiting send. Backfill is
+        // a Drop-class trigger - the work is idempotent, the next
+        // hourly tick re-emits any rows the queue couldn't accept.
+        // Pre-fix the await on a bounded mpsc could park the handler
+        // for tens of minutes (1000 BACKFILL_KICK_LIMIT items at a
+        // 256-mpsc capacity with a 30s p95 per item under
+        // WORKER_CONCURRENCY=4). The handler is async and shouldn't
+        // hold execution that long; subsequent UI kicks (post-boot
+        // catch-up + hourly ticker) would queue up serially behind it.
+        // try_enqueue fills the queue up to capacity per kick and
+        // drops the rest; with rows now staying out of the backfill
+        // SELECT once their text_indexed_at is set (C3 fix),
+        // steady-state backlog shrinks fast.
+        if let Err(e) = runtime.try_enqueue(work) {
+            // Runtime closed. Recoverable - the next kick will retry.
+            log::warn!("extract.backfill_kick: try_enqueue failed: {e}");
             break;
         }
     }
