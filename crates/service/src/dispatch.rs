@@ -960,3 +960,12 @@ fn spawn_post_ready_calendar_startup(
         log::info!("post-ready calendar startup: CalendarRuntime installed");
     })
 }
+
+// Phase 7-4d: spawn_post_ready_extract_startup deferred. An earlier
+// version of this slice wired ExtractRuntime construction here, but
+// boot_ready_blocks_until_sequence_completes hung under the wiring
+// (likely an interaction with the test harness's shutdown sequencing).
+// Triage deferred; the post-7-4 follow-up will re-introduce the spawn
+// once the harness behavior is understood. The handler stubs in 7-4b
+// continue to return zeros / Internal-error until the runtime is
+// installed.

@@ -21,7 +21,10 @@ pub(crate) async fn handle_status(
     _boot_state: &Arc<BootSharedState>,
     _params: ExtractStatusParams,
 ) -> Result<Value, ServiceError> {
-    // 7-4c: read counters from ExtractRuntime once it lands.
+    // Phase 7-4d: ExtractRuntime is constructed in extract.rs but the
+    // dispatch-side wiring is deferred (test-harness interaction
+    // surfaced during initial wiring; triage deferred). For now this
+    // handler returns zeros so the IPC catalog stays exhaustive.
     let ack = ExtractStatusAck {
         queue_depth: 0,
         indexed_total: 0,

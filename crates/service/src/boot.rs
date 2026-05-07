@@ -130,6 +130,14 @@ pub(crate) struct BootSharedState {
     /// can both reach a shared `Arc<CalendarRuntime>`. Same install-once
     /// pattern as `push_runtime` and `sync_runtime`.
     calendar_runtime: Mutex<Option<Arc<crate::calendar::CalendarRuntime>>>,
+    /// Phase 7-4d: ExtractRuntime slot. The post-ready startup that
+    /// installs into this slot is deferred (initial wiring surfaced
+    /// a test-harness hang that needs triage); ExtractRuntime itself
+    /// exists in `extract.rs` and the slot + accessors are scaffolded
+    /// here so the next slice can wire production producers without
+    /// shape churn. Same install-once pattern as `calendar_runtime`.
+    #[allow(dead_code)] // 7-4 follow-up wires producers.
+    extract_runtime: Mutex<Option<crate::extract::ExtractRuntime>>,
     /// `JoinHandle` of the search-writer task. Phase 3 spawned it and
     /// discarded the handle; Phase 4 review-pass fix captures it so the
     /// consolidated drain can await termination after every
@@ -153,8 +161,41 @@ impl BootSharedState {
             sync_runtime: Mutex::new(None),
             push_runtime: Mutex::new(None),
             calendar_runtime: Mutex::new(None),
+            extract_runtime: Mutex::new(None),
             search_writer_handle: Mutex::new(None),
         })
+    }
+
+    /// Phase 7-4d: install the `ExtractRuntime` once the post-ready
+    /// startup task has constructed it. Same install-once pattern as
+    /// `install_calendar_runtime`.
+    #[allow(dead_code)] // 7-4 follow-up wires producers.
+    pub(crate) fn install_extract_runtime(
+        &self,
+        runtime: crate::extract::ExtractRuntime,
+    ) {
+        let mut guard = self
+            .extract_runtime
+            .lock()
+            .expect("extract_runtime mutex poisoned");
+        if guard.is_some() {
+            log::warn!(
+                "BootSharedState::install_extract_runtime called twice; second install ignored",
+            );
+            return;
+        }
+        *guard = Some(runtime);
+    }
+
+    /// Phase 7-4d: snapshot the active `ExtractRuntime` if boot has
+    /// installed one. `None` until the post-ready extract startup
+    /// task runs.
+    #[allow(dead_code)] // 7-4 follow-up wires producers.
+    pub(crate) fn extract_runtime(&self) -> Option<crate::extract::ExtractRuntime> {
+        self.extract_runtime
+            .lock()
+            .expect("extract_runtime mutex poisoned")
+            .clone()
     }
 
     /// Install the `SyncRuntime` once the boot task has constructed it
