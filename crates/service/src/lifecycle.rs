@@ -72,23 +72,34 @@ impl ServiceLifecycle {
     /// Write the `clean_shutdown` sentinel exactly once, gated on
     /// `cause`.
     ///
-    /// # Phase 4 drain ordering
+    /// # Drain ordering (Phase 4 + later additions)
     ///
-    /// As of Phase 4 task 4, the sentinel write is no longer the
-    /// entirety of the drain. The orchestrating helper in
-    /// `dispatch::run_shutdown_drain` calls subsystem shutdowns
-    /// *before* this method:
+    /// L7 fix: refreshed to reflect Phase 5 (Calendar between Push
+    /// and Sync) and Phase 7 (Extract before search-writer + Rebuild
+    /// after Extract).
+    ///
+    /// The sentinel write is no longer the entirety of the drain. The
+    /// orchestrating helper in `dispatch::run_shutdown_drain` calls
+    /// subsystem shutdowns *before* this method:
     ///
     /// 1. `PushRuntime::shutdown()` (Phase 4) - cancel push bridges
     ///    so a late `StateChange` can't call
     ///    `SyncRuntime::start_account` after step 2.
-    /// 2. `SyncRuntime::shutdown()` (Phase 3) - cancel + await runners.
-    /// 3. Drop `Arc<SyncRuntime>` so `SearchWriteHandle` releases.
-    /// 4. Await search-writer `JoinHandle` (via `out_tx` drop +
+    /// 2. `CalendarRuntime::shutdown()` (Phase 5) - cancel + await
+    ///    calendar runners.
+    /// 3. `SyncRuntime::shutdown()` (Phase 3) - cancel + await sync
+    ///    runners.
+    /// 4. Mark BootSharedState shutting_down (Phase 7 H1) +
+    ///    `take_extract_runtime` -> `ExtractRuntime::shutdown()`
+    ///    (Phase 7) - cancel + await worker + drain per-item JoinSet.
+    /// 5. `take_rebuild_task` -> cancel + abort + await (Phase 7).
+    /// 6. Drop `Arc<SyncRuntime>` and clear single-use `search_write`
+    ///    slot so `SearchWriteHandle` clones release.
+    /// 7. Await search-writer `JoinHandle` (via `out_tx` drop +
     ///    `writer_handle.await` in dispatch).
-    /// 5. **Then** this method: write the `clean_shutdown` sentinel.
+    /// 8. **Then** this method: write the `clean_shutdown` sentinel.
     ///
-    /// Calling this *before* steps 1-4 (the pre-Phase-4 layout) was
+    /// Calling this *before* steps 1-7 (the pre-Phase-4 layout) was
     /// racy: a sync runner mid-write could land bytes after the
     /// sentinel claimed clean state, leaving the next boot's invariant
     /// pass unable to detect the gap. The drain consolidation in

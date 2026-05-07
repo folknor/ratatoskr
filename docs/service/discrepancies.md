@@ -10,12 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L7. `lifecycle.rs` drain doc-comment is stale
-
-**Files:** `crates/service/src/lifecycle.rs:75-95`.
-
-Lists steps 1-5 as Push → Sync → drop → search-writer → sentinel. Phase 5 inserted Calendar between Push and Sync; Phase 7 inserted Extract before search-writer + Rebuild after Extract. Doc-rot only.
-
 ### L8. `spawn_post_ready_schema_rebuild` polls every 500 ms instead of subscribing
 
 **Files:** `crates/service/src/dispatch.rs:1161-1167`.
