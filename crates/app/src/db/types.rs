@@ -73,6 +73,15 @@ pub struct Thread {
     pub from_address: Option<String>,
     /// Whether this is a local-only draft (not yet synced to server).
     pub is_local_draft: bool,
+    /// Phase 7-8: which field carried the primary match for this
+    /// search hit. `None` for non-search list paths (folder/label
+    /// view) where attribution is meaningless. `Some(MatchKind::Body)`
+    /// is the default for search results where no field outscored
+    /// body (or where free_text was empty).
+    pub match_kind: Option<rtsk::search::MatchKind>,
+    /// Phase 7-8: secondary matches above the 50%-of-top-score
+    /// threshold, score-descending. Empty for non-search paths.
+    pub also_matched: Vec<rtsk::search::MatchKind>,
 }
 
 #[derive(Debug, Clone)]

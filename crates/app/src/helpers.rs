@@ -272,6 +272,8 @@ async fn load_public_folder_items_async(
                 from_name: item.sender_name,
                 from_address: item.sender_email,
                 is_local_draft: false,
+                match_kind: None,
+                also_matched: Vec::new(),
             })
             .collect())
     })
@@ -294,6 +296,8 @@ pub(crate) fn db_thread_to_app_thread(t: DbThread) -> Thread {
         from_name: t.from_name,
         from_address: t.from_address,
         is_local_draft: false,
+        match_kind: None,
+        also_matched: Vec::new(),
     }
 }
 
@@ -313,5 +317,7 @@ pub(crate) fn local_draft_to_app_thread(d: rtsk::db::queries_extra::LocalDraftSu
         from_name: None,
         from_address: d.from_email,
         is_local_draft: true,
+        match_kind: None,
+        also_matched: Vec::new(),
     }
 }

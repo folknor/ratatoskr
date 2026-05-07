@@ -46,6 +46,8 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
         from_name: t.from_name,
         from_address: t.from_address,
         is_local_draft: false,
+        match_kind: None,
+        also_matched: Vec::new(),
     }
 }
 

@@ -8,7 +8,10 @@ use std::collections::{HashMap, HashSet};
 
 use db::db::types::{AccountScope, DbThread};
 use crate::db::Connection;
-use search::{SearchParams, SearchResult as TantivyResult, SearchReadState};
+use search::{
+    AttachmentAttributionInput, AttributionInputs, MatchKind, SearchParams,
+    SearchReadState, SearchResult as TantivyResult,
+};
 use smart_folder::{ParsedQuery, parse_query, query_threads};
 
 // ── Result type ─────────────────────────────────────────────
@@ -28,6 +31,13 @@ pub struct UnifiedSearchResult {
     pub message_count: Option<i64>,
     /// BM25 score from Tantivy, or 0.0 for SQL-only results.
     pub rank: f32,
+    /// Phase 7-8: which field carried the primary match. Defaults to
+    /// `MatchKind::Body` for SQL paths and for Tantivy paths with
+    /// no free-text query (where attribution is meaningless).
+    pub match_kind: MatchKind,
+    /// Phase 7-8: secondary matches above the 50%-of-top-score
+    /// threshold, score-descending. Empty for SQL paths.
+    pub also_matched: Vec<MatchKind>,
 }
 
 // ── Public entry point ──────────────────────────────────────
@@ -59,7 +69,7 @@ pub fn search(
     let result = match (has_free_text, has_operators) {
         (false, false) => Ok(vec![]),
         (false, true) => search_sql_only(&parsed, conn),
-        (true, false) => search_tantivy_only(&parsed, search_state),
+        (true, false) => search_tantivy_only(&parsed, search_state, conn),
         (true, true) => search_combined(&parsed, search_state, conn),
     };
 
@@ -111,6 +121,8 @@ pub fn search_sql_fallback(
                 is_starred: r.is_starred,
                 message_count: Some(r.message_count),
                 rank: 0.0,
+                match_kind: MatchKind::Body,
+                also_matched: Vec::new(),
             })
             .collect())
     }
@@ -134,9 +146,11 @@ fn search_sql_only(
 fn search_tantivy_only(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
+    conn: &Connection,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let params = build_tantivy_params(parsed);
-    let results = search_state.search_with_filters(&params)?;
+    let mut results = search_state.search_with_filters(&params)?;
+    enrich_with_attribution(&mut results, &parsed.free_text, search_state, conn);
     let mut grouped = group_by_thread_unified(results);
     grouped.sort_by(|a, b| {
         b.rank
@@ -176,10 +190,15 @@ fn search_combined(
     let tantivy_results = search_state.search_with_filters(&params)?;
 
     // Step 3: Intersect - keep only Tantivy hits in the SQL candidate set.
-    let filtered: Vec<TantivyResult> = tantivy_results
+    let mut filtered: Vec<TantivyResult> = tantivy_results
         .into_iter()
         .filter(|r| candidate_ids.contains(&r.thread_id))
         .collect();
+
+    // Phase 7-8: per-message match-kind attribution. Runs before
+    // grouping so the highest-scoring message's attribution survives
+    // thread-grouping intact.
+    enrich_with_attribution(&mut filtered, &parsed.free_text, search_state, conn);
 
     // Step 4: Group by thread, take max score.
     let grouped = group_by_thread_unified(filtered);
@@ -200,6 +219,73 @@ fn search_combined(
 }
 
 // ── Helpers ─────────────────────────────────────────────────
+
+/// Phase 7-8: collect per-message attribution inputs from canonical DB
+/// state and rewrite each result's `match_kind` / `also_matched` to
+/// reflect which field actually matched.
+///
+/// Body text is NOT fetched here: Tantivy doesn't store body_text and
+/// fetching from `body_store` would expand the search-pipeline surface
+/// to take a `BodyStoreReadState`. As a v1 trade-off, body matches
+/// fall through to the default `MatchKind::Body` (which is the same as
+/// the no-attribution path), and only subject/from/per-attachment
+/// matches actively populate `match_kind`. The most user-visible
+/// outcome - "matched in *report.pdf*" annotations - works correctly.
+///
+/// On any DB error we log a warning and leave the results' default
+/// `MatchKind::Body` in place; this is a UI-affordance feature and
+/// must never break a search.
+fn enrich_with_attribution(
+    results: &mut [TantivyResult],
+    free_text: &str,
+    search_state: &SearchReadState,
+    conn: &Connection,
+) {
+    if free_text.trim().is_empty() || results.is_empty() {
+        return;
+    }
+    let pairs: Vec<(String, String)> = results
+        .iter()
+        .map(|r| (r.account_id.clone(), r.message_id.clone()))
+        .collect();
+    let fragments = match db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs) {
+        Ok(map) => map,
+        Err(e) => {
+            log::warn!("enrich_with_attribution: attachment fetch failed: {e}");
+            return;
+        }
+    };
+    let mut inputs: HashMap<String, AttributionInputs> = HashMap::with_capacity(results.len());
+    for r in results.iter() {
+        let key = (r.account_id.clone(), r.message_id.clone());
+        let attachments: Vec<AttachmentAttributionInput> = fragments
+            .get(&key)
+            .map(|rows| {
+                rows.iter()
+                    .map(|row| AttachmentAttributionInput {
+                        attachment_id:  row.attachment_id.clone(),
+                        filename:       row.filename.clone(),
+                        mime:           row.mime_type.clone(),
+                        extracted_text: row.extracted_text.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        inputs.insert(
+            r.message_id.clone(),
+            AttributionInputs {
+                subject:     r.subject.clone().unwrap_or_default(),
+                from_name:   r.from_name.clone().unwrap_or_default(),
+                // body_text not fetched in v1; see fn doc-comment.
+                body_text:   String::new(),
+                attachments,
+            },
+        );
+    }
+    if let Err(e) = search_state.enrich_match_kinds(free_text, results, &inputs) {
+        log::warn!("enrich_with_attribution: enrich_match_kinds failed: {e}");
+    }
+}
 
 /// Determine the account scope from parsed query operators.
 ///
@@ -250,6 +336,9 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
         is_starred: t.is_starred,
         message_count: Some(t.message_count),
         rank: 0.0,
+        // SQL paths don't compute per-field attribution.
+        match_kind: MatchKind::Body,
+        also_matched: Vec::new(),
     }
 }
 
@@ -265,6 +354,8 @@ fn group_by_thread_unified(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResu
 }
 
 /// Convert a single Tantivy result into a `UnifiedSearchResult`.
+/// Propagates the `match_kind` + `also_matched` fields populated by
+/// `enrich_with_attribution` (phase 7-8).
 fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
     UnifiedSearchResult {
         thread_id: r.thread_id.clone(),
@@ -278,6 +369,8 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
         is_starred: false,
         message_count: None,
         rank: r.rank,
+        match_kind: r.match_kind.clone(),
+        also_matched: r.also_matched.clone(),
     }
 }
 
@@ -524,6 +617,8 @@ mod tests {
             is_starred: false,
             message_count: None,
             rank: 3.5,
+            match_kind: MatchKind::Body,
+            also_matched: Vec::new(),
         };
 
         let enriched = enrich_from_sql(result, &map);

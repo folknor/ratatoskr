@@ -929,6 +929,8 @@ fn unified_result_to_thread(r: rtsk::search_pipeline::UnifiedSearchResult) -> Th
         from_name: r.from_name,
         from_address: r.from_address,
         is_local_draft: false,
+        match_kind: Some(r.match_kind),
+        also_matched: r.also_matched,
     }
 }
 

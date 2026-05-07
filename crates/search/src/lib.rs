@@ -7,6 +7,7 @@ use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQu
 use tantivy::schema::{
     DateOptions, Field, NumericOptions, STORED, STRING, Schema, TextFieldIndexing, TextOptions,
 };
+use tantivy::snippet::SnippetGenerator;
 use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, ReloadPolicy, Term};
 
 // ── Schema version sentinel ─────────────────────────────────────────────
@@ -211,6 +212,30 @@ pub enum MatchKind {
         mime:          String,
         snippet:       String,
     },
+}
+
+/// Phase 7-8: per-message inputs for `SearchReadState::enrich_match_kinds`.
+/// The caller (typically `core::search_pipeline`) materialises these from
+/// canonical DB state + the body store before invoking enrichment, so the
+/// search crate stays free of DB dependencies.
+#[derive(Debug, Clone, Default)]
+pub struct AttributionInputs {
+    pub subject:     String,
+    pub from_name:   String,
+    pub body_text:   String,
+    pub attachments: Vec<AttachmentAttributionInput>,
+}
+
+/// Phase 7-8: per-attachment input for attribution scoring. `extracted_text`
+/// is empty if the attachment has no `'indexed'` row in
+/// `attachment_extracted_text` (skipped/failed extractions still appear in
+/// the doc but contribute no full-text segment).
+#[derive(Debug, Clone)]
+pub struct AttachmentAttributionInput {
+    pub attachment_id:  String,
+    pub filename:       String,
+    pub mime:           String,
+    pub extracted_text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -727,8 +752,9 @@ impl SearchReadState {
                 snippet: Self::get_text(&doc, self.fields.snippet),
                 date: Self::get_date_secs(&doc, self.fields.date),
                 rank: score,
-                // Phase 7-3: default until 7-8's per-field snippet
-                // generator + per-attachment attribution lands.
+                // Default; replaced by `enrich_match_kinds` (7-8) when
+                // the caller has DB access and supplies attribution
+                // inputs. Operator-only or empty queries leave it.
                 match_kind: MatchKind::Body,
                 also_matched: Vec::new(),
             });
@@ -736,6 +762,212 @@ impl SearchReadState {
 
         Ok(results)
     }
+
+    /// Phase 7-8: rewrite each result's `match_kind` and `also_matched`
+    /// to reflect which field actually carried the query match.
+    ///
+    /// `free_text` is the text portion of the user's query (everything
+    /// outside structured operators). When empty or whitespace, this is
+    /// a no-op; results retain their default `MatchKind::Body`.
+    ///
+    /// `inputs` is keyed by `message_id` and supplies the texts needed
+    /// for per-field snippet generation: `body_text` is fetched from
+    /// the body store (Tantivy doesn't store it), and the attachment
+    /// list is the canonical DB state at search time.
+    ///
+    /// Algorithm:
+    /// 1. Build a `SnippetGenerator` per text field (subject, from,
+    ///    body, attachment) with a single-field `QueryParser`.
+    /// 2. For each result, score every candidate (the three message
+    ///    fields plus each attachment). Score = number of highlighted
+    ///    ranges in the best fragment. Zero-score candidates are
+    ///    dropped.
+    /// 3. Tiebreak across attachments: total query-term occurrences in
+    ///    the segment, then alphabetical filename for determinism.
+    /// 4. Highest-scoring candidate becomes `match_kind`; remaining
+    ///    candidates whose score is at least 50 % of the top score
+    ///    become `also_matched`, score-descending.
+    ///
+    /// Errors during per-field query parsing log a warning and skip
+    /// that field for the result; the function never propagates a
+    /// parse failure. A doc-level error (missing inputs, etc.) leaves
+    /// the result's default `MatchKind::Body` in place.
+    pub fn enrich_match_kinds(
+        &self,
+        free_text: &str,
+        results: &mut [SearchResult],
+        inputs: &HashMap<String, AttributionInputs>,
+    ) -> Result<(), String> {
+        let trimmed = free_text.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        let searcher = self.reader.searcher();
+
+        let body_gen = build_field_snippet_gen(&searcher, trimmed, self.fields.body_text);
+        let subject_gen = build_field_snippet_gen(&searcher, trimmed, self.fields.subject);
+        let from_gen = build_field_snippet_gen(&searcher, trimmed, self.fields.from_name);
+        let att_gen = build_field_snippet_gen(&searcher, trimmed, self.fields.attachment_text);
+
+        // Lower-cased, deduped query tokens for the per-attachment
+        // term-frequency tiebreak.
+        let mut query_tokens: Vec<String> = trimmed
+            .split_whitespace()
+            .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+        query_tokens.sort();
+        query_tokens.dedup();
+
+        for result in results.iter_mut() {
+            let Some(input) = inputs.get(&result.message_id) else {
+                continue;
+            };
+
+            let body_score = score_field(&body_gen, &input.body_text);
+            let subject_score = score_field(&subject_gen, &input.subject);
+            let from_score = score_field(&from_gen, &input.from_name);
+
+            // Per-attachment (highlights, term_freq, snippet).
+            let mut att_scored: Vec<(usize, usize, String, &AttachmentAttributionInput)> =
+                Vec::with_capacity(input.attachments.len());
+            for att in &input.attachments {
+                if att.extracted_text.is_empty() {
+                    continue;
+                }
+                let Some(att_snippet_gen) = att_gen.as_ref() else {
+                    continue;
+                };
+                let snippet = att_snippet_gen.snippet(&att.extracted_text);
+                let highlights = snippet.highlighted().len();
+                if highlights == 0 {
+                    continue;
+                }
+                let lower = att.extracted_text.to_lowercase();
+                let term_freq: usize = query_tokens
+                    .iter()
+                    .map(|t| count_word_occurrences(&lower, t))
+                    .sum();
+                att_scored.push((highlights, term_freq, snippet.fragment().to_string(), att));
+            }
+            // Sort: highlights desc, term_freq desc, filename asc.
+            att_scored.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| b.1.cmp(&a.1))
+                    .then_with(|| a.3.filename.cmp(&b.3.filename))
+            });
+
+            let mut candidates: Vec<(MatchKind, usize)> = Vec::new();
+            if body_score > 0 {
+                candidates.push((MatchKind::Body, body_score));
+            }
+            if subject_score > 0 {
+                candidates.push((MatchKind::Subject, subject_score));
+            }
+            if from_score > 0 {
+                candidates.push((MatchKind::From, from_score));
+            }
+            for (highlights, _, fragment, att) in att_scored {
+                candidates.push((
+                    MatchKind::Attachment {
+                        attachment_id: att.attachment_id.clone(),
+                        filename:      att.filename.clone(),
+                        mime:          att.mime.clone(),
+                        snippet:       fragment,
+                    },
+                    highlights,
+                ));
+            }
+            // Stable sort by score desc; equal scores preserve insertion
+            // order (body > subject > from > attachments), matching the
+            // plan's deterministic ordering.
+            candidates.sort_by_key(|c| std::cmp::Reverse(c.1));
+
+            let Some((primary, top_score)) = candidates.first().cloned() else {
+                continue;
+            };
+            // 50% threshold: secondary candidates must score at least
+            // half the top score, with floor=1. `top_score / 2` rounds
+            // down, so a top of 1 admits everything >= 1.
+            let threshold = top_score.div_ceil(2).max(1);
+            let also: Vec<MatchKind> = candidates
+                .into_iter()
+                .skip(1)
+                .filter(|(_, s)| *s >= threshold)
+                .map(|(k, _)| k)
+                .collect();
+            result.match_kind = primary;
+            result.also_matched = also;
+        }
+        Ok(())
+    }
+}
+
+/// Build a per-field SnippetGenerator. Returns `None` on parse failure
+/// (the caller logs and skips that field for affected results).
+fn build_field_snippet_gen(
+    searcher: &tantivy::Searcher,
+    free_text: &str,
+    field: Field,
+) -> Option<SnippetGenerator> {
+    let qp = QueryParser::for_index(searcher.index(), vec![field]);
+    let query = match qp.parse_query(free_text) {
+        Ok(q) => q,
+        Err(e) => {
+            log::debug!("enrich_match_kinds: parse failure on field: {e}");
+            return None;
+        }
+    };
+    match SnippetGenerator::create(searcher, &*query, field) {
+        Ok(snippet_gen) => Some(snippet_gen),
+        Err(e) => {
+            log::debug!("enrich_match_kinds: snippet gen create failed: {e}");
+            None
+        }
+    }
+}
+
+/// Run `snippet_gen.snippet(text)` and return `highlighted.len()` as
+/// the score. Empty text or absent generator yields 0.
+fn score_field(snippet_gen: &Option<SnippetGenerator>, text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    let Some(snippet_gen) = snippet_gen else { return 0 };
+    snippet_gen.snippet(text).highlighted().len()
+}
+
+/// Count whole-word occurrences of `needle` (already lowercase) in
+/// `haystack` (already lowercase). Word boundaries are
+/// non-alphanumeric characters or the start/end of the string. Used
+/// only as a per-attachment tiebreak; precision is not critical.
+fn count_word_occurrences(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() || haystack.is_empty() {
+        return 0;
+    }
+    let bytes = haystack.as_bytes();
+    let nlen = needle.len();
+    let mut count = 0usize;
+    let mut idx = 0usize;
+    while let Some(found) = haystack[idx..].find(needle) {
+        let abs = idx + found;
+        let before_ok = abs == 0
+            || !bytes
+                .get(abs - 1)
+                .copied()
+                .is_some_and(|b| b.is_ascii_alphanumeric());
+        let after = abs + nlen;
+        let after_ok = after >= bytes.len()
+            || !bytes
+                .get(after)
+                .copied()
+                .is_some_and(|b| b.is_ascii_alphanumeric());
+        if before_ok && after_ok {
+            count += 1;
+        }
+        idx = abs + nlen.max(1);
+    }
+    count
 }
 
 /// Group message-level search results by `thread_id`, keeping the
@@ -832,6 +1064,222 @@ mod tests {
     // `crates/service/src/search_writer.rs`.
 
     // ── Phase 7-3 verification ───────────────────────────────────────
+
+    // ── Phase 7-8 attribution tests ──────────────────────────────────
+
+    /// Build a one-message index whose body / subject / from / two
+    /// attachments carry distinct, controllable text. Returns a
+    /// `SearchReadState` ready for `enrich_match_kinds`.
+    fn build_attribution_test_index(
+        body: &str,
+        subject: &str,
+        from_name: &str,
+        att1_text: &str,
+        att2_text: &str,
+    ) -> SearchReadState {
+        use tantivy::Index;
+        let schema = build_schema();
+        let fields = Fields::from_schema(&schema);
+        let index = Index::create_in_ram(schema.clone());
+        let mut writer: tantivy::IndexWriter = index
+            .writer(15_000_000)
+            .expect("writer");
+        let doc = SearchDocument {
+            message_id: "msg1".into(),
+            account_id: "acct1".into(),
+            thread_id: "t1".into(),
+            subject: Some(subject.into()),
+            from_name: Some(from_name.into()),
+            from_address: Some("alice@example.com".into()),
+            to_addresses: Some("bob@example.com".into()),
+            body_text: Some(body.into()),
+            snippet: Some(body.chars().take(80).collect::<String>()),
+            date: 1,
+            is_read: false,
+            is_starred: false,
+            has_attachment: true,
+            attachments: vec![
+                AttachmentDocFragment {
+                    attachment_id: "att1".into(),
+                    filename: "first.pdf".into(),
+                    mime: "application/pdf".into(),
+                    extracted_text: att1_text.into(),
+                },
+                AttachmentDocFragment {
+                    attachment_id: "att2".into(),
+                    filename: "second.pdf".into(),
+                    mime: "application/pdf".into(),
+                    extracted_text: att2_text.into(),
+                },
+            ],
+        };
+        let tantivy_doc = build_search_doc(&fields, &doc);
+        writer.add_document(tantivy_doc).expect("add");
+        writer.commit().expect("commit");
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()
+            .expect("reader");
+        SearchReadState { reader, fields }
+    }
+
+    fn make_result_for_attribution() -> SearchResult {
+        SearchResult {
+            message_id: "msg1".into(),
+            account_id: "acct1".into(),
+            thread_id: "t1".into(),
+            subject: Some("dummy".into()),
+            from_name: None,
+            from_address: None,
+            snippet: None,
+            date: 1,
+            rank: 1.0,
+            match_kind: MatchKind::Body,
+            also_matched: Vec::new(),
+        }
+    }
+
+    fn make_inputs(
+        body: &str,
+        subject: &str,
+        from_name: &str,
+        att1_text: &str,
+        att2_text: &str,
+    ) -> HashMap<String, AttributionInputs> {
+        let mut inputs = HashMap::new();
+        inputs.insert(
+            "msg1".to_string(),
+            AttributionInputs {
+                subject: subject.into(),
+                from_name: from_name.into(),
+                body_text: body.into(),
+                attachments: vec![
+                    AttachmentAttributionInput {
+                        attachment_id:  "att1".into(),
+                        filename:       "first.pdf".into(),
+                        mime:           "application/pdf".into(),
+                        extracted_text: att1_text.into(),
+                    },
+                    AttachmentAttributionInput {
+                        attachment_id:  "att2".into(),
+                        filename:       "second.pdf".into(),
+                        mime:           "application/pdf".into(),
+                        extracted_text: att2_text.into(),
+                    },
+                ],
+            },
+        );
+        inputs
+    }
+
+    #[test]
+    fn phase_7_8_empty_query_is_noop() {
+        let read = build_attribution_test_index("hello world", "subj", "alice", "", "");
+        let mut results = vec![make_result_for_attribution()];
+        let inputs = make_inputs("hello world", "subj", "alice", "", "");
+        read.enrich_match_kinds("   ", &mut results, &inputs).expect("ok");
+        assert!(matches!(results[0].match_kind, MatchKind::Body));
+        assert!(results[0].also_matched.is_empty());
+    }
+
+    #[test]
+    fn phase_7_8_attachment_only_match_picks_filename_and_snippet() {
+        let read = build_attribution_test_index(
+            "ordinary email body unrelated",
+            "general inquiry",
+            "alice",
+            "the quarterly contract specifies penalties for delay",
+            "shipping manifest only - no contract here",
+        );
+        let mut results = vec![make_result_for_attribution()];
+        let inputs = make_inputs(
+            "ordinary email body unrelated",
+            "general inquiry",
+            "alice",
+            "the quarterly contract specifies penalties for delay",
+            "shipping manifest only - no contract here",
+        );
+        read.enrich_match_kinds("contract", &mut results, &inputs).expect("ok");
+        match &results[0].match_kind {
+            MatchKind::Attachment { filename, snippet, .. } => {
+                // Both attachments contain "contract"; picker is by score
+                // first, term-frequency next, then alphabetical filename.
+                assert!(
+                    filename == "first.pdf" || filename == "second.pdf",
+                    "expected one of the two attachments, got {filename}"
+                );
+                assert!(
+                    snippet.to_lowercase().contains("contract"),
+                    "snippet should include matched term: {snippet}"
+                );
+            }
+            other => panic!("expected Attachment match_kind, got {other:?}"),
+        }
+        // The other attachment should appear in also_matched (both contain
+        // "contract" once).
+        assert!(
+            !results[0].also_matched.is_empty(),
+            "second attachment should appear in also_matched"
+        );
+    }
+
+    #[test]
+    fn phase_7_8_body_match_is_primary() {
+        let read = build_attribution_test_index(
+            "the contract was signed contract contract again",
+            "subject without it",
+            "alice",
+            "no relevant words here",
+            "another irrelevant attachment",
+        );
+        let mut results = vec![make_result_for_attribution()];
+        let inputs = make_inputs(
+            "the contract was signed contract contract again",
+            "subject without it",
+            "alice",
+            "no relevant words here",
+            "another irrelevant attachment",
+        );
+        read.enrich_match_kinds("contract", &mut results, &inputs).expect("ok");
+        assert!(matches!(results[0].match_kind, MatchKind::Body));
+        assert!(
+            results[0].also_matched.is_empty(),
+            "no other field has the term: {:?}",
+            results[0].also_matched
+        );
+    }
+
+    #[test]
+    fn phase_7_8_attachment_tiebreak_alphabetical_when_term_freq_equal() {
+        let read = build_attribution_test_index(
+            "no body text here",
+            "no subject term",
+            "alice",
+            "contract once",
+            "contract once",
+        );
+        let mut results = vec![make_result_for_attribution()];
+        let inputs = make_inputs(
+            "no body text here",
+            "no subject term",
+            "alice",
+            "contract once",
+            "contract once",
+        );
+        read.enrich_match_kinds("contract", &mut results, &inputs).expect("ok");
+        // Tiebreak: alphabetical by filename. "first.pdf" < "second.pdf".
+        match &results[0].match_kind {
+            MatchKind::Attachment { filename, .. } => assert_eq!(filename, "first.pdf"),
+            other => panic!("expected Attachment match_kind, got {other:?}"),
+        }
+        // The other attachment is included via also_matched.
+        assert_eq!(results[0].also_matched.len(), 1);
+        match &results[0].also_matched[0] {
+            MatchKind::Attachment { filename, .. } => assert_eq!(filename, "second.pdf"),
+            other => panic!("expected Attachment in also_matched, got {other:?}"),
+        }
+    }
 
     /// Verifies the position-gap design: an `add_text` per attachment
     /// (with boundary padding for slop>=2 defense) prevents a phrase
