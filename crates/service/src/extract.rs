@@ -237,55 +237,83 @@ async fn run_worker(
 ) {
     let semaphore = Arc::new(Semaphore::new(WORKER_CONCURRENCY));
     let cancellation = inner.cancellation.clone();
+    // H1 fix: track per-item tasks in a JoinSet so the worker can
+    // abort + await them on shutdown. Pre-fix the per-item spawns were
+    // detached - shutdown only awaited the worker, but per-item futures
+    // continued running with their own Arc<Inner> clones, blocking the
+    // dispatch-side writer-task drain (which waits for every
+    // SearchWriteHandle clone to drop before observing EOF). Aborting
+    // the JoinSet drops the per-item futures at their next await
+    // point, releasing Arc<Inner>; the underlying spawn_blocking
+    // threads are still uncancellable and continue to completion in
+    // the tokio blocking pool, but they don't hold Arc<Inner>, so the
+    // writer-task drain is unblocked.
+    //
+    // Single-level spawn (collapsed from the prior outer-plus-inner
+    // pattern): JoinSet's join_next returns Result<(), JoinError>, so
+    // panic supervision is preserved at the worker level - a per-item
+    // panic is logged and the worker keeps draining. The trade-off vs
+    // the prior pattern: on panic we lose the content_hash bound to
+    // the failed work, so finalize_item is not called - the hash sticks
+    // in in_flight_hashes for the lifetime of this runtime instance.
+    // Acceptable: in_flight_hashes is per-runtime, so the next boot
+    // sees a fresh empty set; backfill re-enqueues the hash, and the
+    // pre-flight either short-circuits (if a permanent row is now
+    // present) or re-runs.
+    let mut tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
 
     loop {
-        let work = tokio::select! {
+        tokio::select! {
             biased;
             () = cancellation.cancelled() => {
-                log::debug!("ExtractRuntime worker cancelled, exiting");
-                return;
+                log::debug!("ExtractRuntime worker cancelled, draining {} per-item tasks", tasks.len());
+                break;
+            }
+            // Reap completed per-item tasks so the JoinSet doesn't
+            // grow without bound while the worker keeps accepting
+            // work. The if-guard prevents an empty JoinSet from
+            // returning None and starving the recv arm.
+            Some(result) = tasks.join_next(), if !tasks.is_empty() => {
+                if let Err(e) = result {
+                    if e.is_panic() {
+                        log::error!(
+                            "ExtractRuntime per-item task panicked: {e:?} \
+                             (content_hash unrecoverable; hash remains in in_flight_hashes \
+                             for the lifetime of this runtime, will be re-enqueued by next \
+                             boot's backfill)",
+                        );
+                        inner.failed_count.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        log::warn!("ExtractRuntime per-item task aborted: {e:?}");
+                    }
+                }
             }
             maybe_work = rx.recv() => match maybe_work {
-                Some(w) => w,
-                None => return,
-            },
-        };
-        let permit = match Arc::clone(&semaphore).acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-        let inner_for_task = Arc::clone(&inner);
-        tokio::spawn(async move {
-            let _permit = permit;
-            // Wrap individual-item processing in a spawned task so a
-            // panic during extraction does not kill the whole worker.
-            // JoinError::is_panic captures it for the supervisor log.
-            let work_for_log = work.clone();
-            let inner_for_inner = Arc::clone(&inner_for_task);
-            let task = tokio::spawn(async move {
-                process_one(inner_for_inner, work).await;
-            });
-            match task.await {
-                Ok(()) => {}
-                Err(e) if e.is_panic() => {
-                    log::error!(
-                        "ExtractRuntime worker panicked on hash {}: {e:?}",
-                        work_for_log.content_hash,
-                    );
-                    inner_for_task.failed_count.fetch_add(1, Ordering::Relaxed);
-                    finalize_item(&inner_for_task, &work_for_log.content_hash).await;
+                Some(work) => {
+                    let permit = match Arc::clone(&semaphore).acquire_owned().await {
+                        Ok(p) => p,
+                        Err(_) => break,
+                    };
+                    let inner_for_task = Arc::clone(&inner);
+                    tasks.spawn(async move {
+                        let _permit = permit;
+                        process_one(inner_for_task, work).await;
+                    });
                 }
-                Err(e) => {
-                    log::warn!(
-                        "ExtractRuntime worker aborted on hash {}: {e:?}",
-                        work_for_log.content_hash,
-                    );
-                    inner_for_task.failed_count.fetch_add(1, Ordering::Relaxed);
-                    finalize_item(&inner_for_task, &work_for_log.content_hash).await;
+                None => {
+                    log::debug!("ExtractRuntime worker rx closed, draining {} per-item tasks", tasks.len());
+                    break;
                 }
             }
-        });
+        }
     }
+
+    // Drain: abort any in-flight per-item tasks and await them so
+    // their Arc<Inner> clones drop. shutdown() then observes the
+    // worker JoinHandle's exit, by which point the only remaining
+    // Arc<Inner> is the one stored in ExtractRuntime itself.
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
 }
 
 async fn process_one(inner: Arc<ExtractRuntimeInner>, work: ExtractWork) {

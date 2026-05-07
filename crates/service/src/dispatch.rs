@@ -379,6 +379,16 @@ where
     //    writer) and the eventual `out_tx` drop deadlock against the
     //    extract worker holding the last clones. The earlier 7-4d
     //    revert hung exactly because this step was missing.
+    //
+    // H1 fix: mark shutting_down BEFORE taking the runtime slot. The
+    // post-ready spawn (`spawn_post_ready_extract_startup`) checks
+    // this flag inside `install_extract_runtime`'s mutex; if set
+    // during install, the runtime is dropped instead of installed,
+    // which releases its SearchWriteHandle clone. Without the gate,
+    // a spawn that finished construction after our take but before
+    // our writer_handle.await would install an orphan runtime, and
+    // the writer-task EOF would block forever on its clone.
+    boot_state.mark_shutting_down();
     if let Some(extract_runtime) = boot_state.take_extract_runtime() {
         extract_runtime.shutdown().await;
         drop(extract_runtime);
@@ -1076,10 +1086,17 @@ fn spawn_post_ready_extract_startup(
             );
             return;
         };
-        let Some(search_write) = boot_state.search_write() else {
-            // Drain raced ahead and cleared the slot, OR boot never
-            // installed it (shouldn't happen post-ready). Either way,
-            // skip - shutdown is in progress.
+        let Some(search_write) = boot_state.take_search_write() else {
+            // H1 fix: take_search_write (consume), not search_write
+            // (clone). The slot is single-use as the plan promised:
+            // either the post-ready spawn consumes it on success, or
+            // run_shutdown_drain's defensive take_search_write drains
+            // it before awaiting the writer task. Cloning left a
+            // SearchWriteHandle in the slot that drain would correctly
+            // take, but ALSO held a separate clone in this spawn's
+            // local that drain couldn't see - if drain raced ahead of
+            // install_extract_runtime, the writer-task await blocked
+            // forever on the orphan clone here.
             log::debug!(
                 "post-ready extract startup: search_write slot empty (shutdown raced)",
             );

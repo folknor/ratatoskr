@@ -182,6 +182,15 @@ pub(crate) struct BootSharedState {
     /// to "rebuild completed cleanly," so a drain mid-rebuild leaves
     /// the OLD `.version` on disk and the next boot re-fires.
     last_completed_rebuild_id: Mutex<Option<String>>,
+    /// Phase 7 (H1 fix): set by `run_shutdown_drain` before it takes
+    /// the extract runtime slot. `install_extract_runtime` checks this
+    /// inside its mutex - if set, the runtime is dropped instead of
+    /// installed. Closes the post-ready-spawn vs drain race: without
+    /// the gate, the spawn could finish constructing an ExtractRuntime
+    /// (with a SearchWriteHandle clone in its Inner) and install it
+    /// after drain had already taken extract_runtime, leaving the
+    /// writer-task await blocked on the orphan clone.
+    shutting_down: std::sync::atomic::AtomicBool,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -212,7 +221,22 @@ impl BootSharedState {
             out_tx: Mutex::new(None),
             pending_schema_rebuild: std::sync::atomic::AtomicBool::new(false),
             last_completed_rebuild_id: Mutex::new(None),
+            shutting_down: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Phase 7 (H1 fix): mark the boot state as shutting down. Future
+    /// `install_extract_runtime` calls drop their argument instead of
+    /// installing. Called by `run_shutdown_drain` before it takes the
+    /// extract runtime slot.
+    pub(crate) fn mark_shutting_down(&self) {
+        self.shutting_down
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn is_shutting_down(&self) -> bool {
+        self.shutting_down
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Phase 7 (C4 fix): record that a rebuild ran to clean
@@ -341,6 +365,15 @@ impl BootSharedState {
     /// Phase 7-4d: install the `ExtractRuntime` once the post-ready
     /// startup task has constructed it. Same install-once pattern as
     /// `install_calendar_runtime`.
+    ///
+    /// Phase 7 (H1 fix): if drain has already marked shutting_down,
+    /// drop the runtime instead of installing. The post-ready spawn
+    /// holds a `SearchWriteHandle` clone in the runtime's Inner; if
+    /// we installed during shutdown, drain's `take_extract_runtime`
+    /// would have already returned None (it ran before this call) and
+    /// the writer-task await would block forever on the orphan clone.
+    /// Dropping the runtime here releases the Inner Arc which drops
+    /// the clone, unblocking the writer-task EOF.
     #[allow(dead_code)] // 7-4 follow-up wires producers.
     pub(crate) fn install_extract_runtime(
         &self,
@@ -350,6 +383,15 @@ impl BootSharedState {
             .extract_runtime
             .lock()
             .expect("extract_runtime mutex poisoned");
+        if self.is_shutting_down() {
+            log::debug!(
+                "BootSharedState::install_extract_runtime called during shutdown; \
+                 dropping runtime so its SearchWriteHandle clone releases",
+            );
+            drop(guard);
+            drop(runtime);
+            return;
+        }
         if guard.is_some() {
             log::warn!(
                 "BootSharedState::install_extract_runtime called twice; second install ignored",

@@ -6,20 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H1. Drain race with `spawn_post_ready_extract_startup`; per-item spawn tasks not tracked
-
-**Files:** `crates/service/src/dispatch.rs:1079` (search_write clone, not take), `:382-419` (drain order), `:490` (extract_startup_handle.abort - too late), `crates/service/src/extract.rs:217-289` (worker + per-item tokio::spawn).
-
-Two separate problems with the same drain.
-
-**Drain race against post-ready spawn:** the plan's 7-4d revival retro claims the fix was making the `search_write` slot single-use - `take_search_write` consumed from inside the spawn on success. The implementation calls `boot_state.search_write()` (clone), not `take_search_write`. The slot stays populated; the spawn holds a separate `SearchWriteHandle` clone in a local until `ExtractRuntime::new` consumes it. Race window: drain runs between the spawn cloning `search_write` and `install_extract_runtime`. Drain's `take_extract_runtime` returns None, drain runs `take_search_write` clearing the slot, drain awaits `search_writer_handle.await`. Concurrently the spawn finishes constructing `ExtractRuntime` and installs it. Drain is past `take_extract_runtime`; never re-takes. Search-writer can't observe EOF because the runtime's `Arc<Inner>` holds a clone. `extract_startup_handle.abort()` lives at `:490`, after the writer await - never reached. Hang.
-
-**Per-item tasks not awaited at shutdown:** `run_worker` spawns each work item as `tokio::spawn` (`extract.rs:258`) and does not retain handles. `ExtractRuntime::shutdown()` cancels the worker's `tokio::select!` and awaits only `worker_handle`. Per-item tasks each hold an `Arc<ExtractRuntimeInner>` containing both `search_write` and `notification_tx`. After cancellation: worker exits without joining per-item tasks; per-item tasks continue running, holding live `SearchWriteHandle` clones; `take_search_write` clears the boot-state slot but per-item tasks each still hold a clone via the inner; `search_writer_handle.await` blocks on those clones until each per-item task rides out its full 30 s `spawn_blocking` timeout. Drain blocks for up to ~30 s × min(in-flight items, semaphore cap=4).
-
-**Agreement: 4/8** (claude arch, claude perf, codex bugs, codex perf).
-
-**Fix:** (a) `take_search_write` from inside `spawn_post_ready_extract_startup` so the slot becomes a one-time consume on success. (b) Track per-item handles in a `JoinSet` on `Inner`; `shutdown()` aborts and awaits them after cancelling the worker. Or move per-item spawn into the worker's loop with internal concurrency via JoinSet so the worker handle's await is the single drain point.
-
 ### H2. `fan_out_reindex` doesn't chunk; viral content_hash blows the writer mpsc
 
 **Files:** `crates/service/src/extract.rs:559-651`.
@@ -280,14 +266,6 @@ Lists steps 1-5 as Push → Sync → drop → search-writer → sentinel. Phase 
 **Files:** `crates/service/src/dispatch.rs:1161-1167`.
 
 Polls `rebuild_in_flight_id().is_none()` every 500 ms. The rebuild task already produces a clean `IndexRebuildCompleted` notification; subscribing to that signal would be event-driven. Today the cost is one timer per schema rebuild, so cosmetic. Folds into the C4 fix.
-
-### L9. Single-use `search_write` slot pattern is reusable for one more producer
-
-**Files:** `crates/service/src/boot.rs:272-303`.
-
-The slot's first-taker-wins / defensively-cleared-by-drain semantics are invariants by convention, not by type. Reusable for exactly one more post-ready producer; if a second is added, both can race the drain in the way described in H1. Plan acknowledges; not a defect today.
-
-**Fix when needed:** rename to `peek_search_write` / `take_search_write` to make the clone-friendly contract explicit, or convert to a `JoinSet`-of-clone-takers pattern.
 
 ### L10. Encoding fast paths and minor polish
 
