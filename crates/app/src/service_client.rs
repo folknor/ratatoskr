@@ -1023,6 +1023,36 @@ impl ServiceClient {
         self.subscribe_or_consume_calendar(ack.run_id).await
     }
 
+    /// Phase 7-9: dispatch a search-index rebuild. Returns the
+    /// `rebuild_id` immediately; the actual rebuild progresses
+    /// asynchronously, with `IndexRebuildProgress` (Coalesce) and
+    /// `IndexRebuildCompleted` (MustDeliver) notifications routed
+    /// back through the notification subscription.
+    pub async fn rebuild_index(
+        &self,
+        policy: service_api::RebuildPolicy,
+        force: bool,
+    ) -> Result<String, ClientError> {
+        let ack: service_api::IndexRebuildAck = self
+            .request(RequestParams::IndexRebuild {
+                params: service_api::IndexRebuildParams { policy, force },
+            })
+            .await?;
+        Ok(ack.rebuild_id)
+    }
+
+    /// Phase 7-9: snapshot the extract-runtime counters. Used by the
+    /// status bar to surface "extracting N attachments" while a
+    /// backfill is in flight.
+    pub async fn extract_status(
+        &self,
+    ) -> Result<service_api::ExtractStatusAck, ClientError> {
+        self.request(RequestParams::ExtractStatus {
+            params: service_api::ExtractStatusParams {},
+        })
+        .await
+    }
+
     /// Phase 6a: toggle calendar visibility via the
     /// `calendar.set_visibility` IPC. Replaces the deleted
     /// `Db::set_calendar_visibility` UI-side write surface.

@@ -314,15 +314,35 @@ impl ReadyApp {
                         );
                         Task::none()
                     }
-                    service_api::Notification::ExtractProgress(_)
-                    | service_api::Notification::ExtractCompleted(_)
-                    | service_api::Notification::IndexRebuildProgress(_)
-                    | service_api::Notification::IndexRebuildCompleted(_) => {
-                        // Phase 7-4: status-bar consumer + rebuild
-                        // progress consumer not yet wired (lands in
-                        // 7-9 + 7-10's UI integration). Drop with a
-                        // debug log so the dispatch is exhaustive.
-                        log::debug!("Extract notification: {}", notification.method_name());
+                    service_api::Notification::ExtractProgress(p) => {
+                        log::debug!(
+                            "extract progress: remaining={}, indexed_in_session={}",
+                            p.remaining, p.indexed_in_session,
+                        );
+                        Task::none()
+                    }
+                    service_api::Notification::ExtractCompleted(c) => {
+                        log::info!(
+                            "extract completed: indexed={}, skipped={}, failed={}",
+                            c.indexed, c.skipped, c.failed,
+                        );
+                        Task::none()
+                    }
+                    service_api::Notification::IndexRebuildProgress(p) => {
+                        log::info!(
+                            "index rebuild {}: {}/{}",
+                            p.rebuild_id, p.processed, p.total,
+                        );
+                        // Status-bar visual surface deferred to a
+                        // follow-up; logs let us verify the wire
+                        // path works end-to-end. Future work stores
+                        // a `Option<RebuildProgressState>` on
+                        // `ReadyApp` and the status-bar component
+                        // reads it.
+                        Task::none()
+                    }
+                    service_api::Notification::IndexRebuildCompleted(c) => {
+                        log::info!("index rebuild {} completed", c.rebuild_id);
                         Task::none()
                     }
                 }
@@ -789,6 +809,14 @@ impl ReadyApp {
                 self.handle_snooze_resurface_complete(result)
             }
             Message::ExtractBackfillTick => self.kick_extract_backfill(),
+            Message::RebuildSearchIndex => self.dispatch_rebuild_search_index(),
+            Message::RebuildSearchIndexDispatched(result) => {
+                match result {
+                    Ok(id) => log::info!("rebuild dispatched: {id}"),
+                    Err(e) => log::warn!("rebuild dispatch failed: {e}"),
+                }
+                Task::none()
+            }
             Message::ReaderReloadTick => {
                 // Phase 3 task 17: debounced reader reload. Skip when
                 // there is no pending stamp (idle) or when the stamp

@@ -385,6 +385,17 @@ pub enum Message {
     /// catch up after a Service crash mid-extraction.
     ExtractBackfillTick,
 
+    /// Phase 7-9d: dispatched from the palette
+    /// `app.rebuildSearchIndex` command. Sends a Wipe rebuild
+    /// request to the Service. Progress flows back via
+    /// `IndexRebuildProgress` notifications routed through the
+    /// service-notification subscription.
+    RebuildSearchIndex,
+    /// Phase 7-9d: rebuild started; carry the rebuild_id so the
+    /// status bar / progress UI can correlate against incoming
+    /// `IndexRebuildProgress` notifications.
+    RebuildSearchIndexDispatched(Result<String, String>),
+
     // Phase 5 task 10: GalRefreshTick / GalCacheRefreshed deleted. GAL
     // refresh now rides on `Message::SyncTick -> kick_gal_refresh`
     // (fire-and-forget IPC notification); the Service handler iterates

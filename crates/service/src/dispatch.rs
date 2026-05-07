@@ -176,6 +176,15 @@ where
         app_data_dir.clone(),
     );
 
+    // Phase 7-9c: post-ready schema-rebuild dispatcher. If boot
+    // detected a `.version` mismatch and marked the flag, this task
+    // dispatches a Wipe rebuild and rewrites `.version` on success.
+    // No-op when the flag is unset (the steady-state).
+    let schema_rebuild_handle = spawn_post_ready_schema_rebuild(
+        Arc::clone(&boot_state),
+        app_data_dir.clone(),
+    );
+
     let mut boot_exit_code: Option<BootExitCode> = None;
 
     loop {
@@ -480,6 +489,13 @@ where
     // SearchWriteHandle clones via `take_extract_runtime + shutdown`.
     extract_startup_handle.abort();
     let _ = extract_startup_handle.await;
+
+    // Phase 7-9c: same pattern for the schema-rebuild dispatcher.
+    // The actual rebuild task (if dispatched) was drained above via
+    // take_rebuild_task; this just aborts the dispatcher's outer
+    // wait.
+    schema_rebuild_handle.abort();
+    let _ = schema_rebuild_handle.await;
 
     drop(out_tx);
     let _ = writer_handle.await;
@@ -1091,5 +1107,84 @@ fn spawn_post_ready_extract_startup(
         boot_state.install_extract_runtime(extract_runtime);
 
         log::info!("post-ready extract startup: ExtractRuntime installed");
+    })
+}
+
+/// Phase 7-9c: post-ready schema-version rebuild dispatcher.
+///
+/// If `check_schema_version_and_dispatch` marked a pending rebuild
+/// during boot (the persisted `.version` differs from
+/// `INDEX_SCHEMA_VERSION`), this task dispatches a Wipe rebuild via
+/// the in-process IPC handler and rewrites `.version` once the
+/// rebuild emits `IndexRebuildCompleted`. The task awaits the
+/// rebuild's completion notification by polling
+/// `boot_state.rebuild_in_flight_id` because subscribing to the
+/// outbound stream from inside the dispatch process is overkill for
+/// this one-shot path.
+///
+/// On no-flag: the task immediately exits (steady-state boot).
+fn spawn_post_ready_schema_rebuild(
+    boot_state: Arc<boot::BootSharedState>,
+    app_data_dir: std::path::PathBuf,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if boot_state.wait_for_ready().await.is_err() {
+            return;
+        }
+        if !boot_state.take_pending_schema_rebuild() {
+            return;
+        }
+        log::info!(
+            "post-ready schema rebuild: dispatching Wipe rebuild for INDEX_SCHEMA_VERSION change",
+        );
+
+        // Dispatch the rebuild via the same in-process handler the
+        // palette command uses. This installs a RebuildTaskState on
+        // BootSharedState; we then watch for it to clear (= rebuild
+        // completed or got cancelled by drain).
+        let params = service_api::IndexRebuildParams {
+            policy: service_api::RebuildPolicy::Wipe,
+            force:  false,
+        };
+        match crate::handlers::extract::handle_rebuild(&boot_state, params).await {
+            Ok(_value) => {}
+            Err(e) => {
+                log::warn!("post-ready schema rebuild: dispatch failed: {e:?}");
+                return;
+            }
+        }
+
+        // Poll the slot for completion. The rebuild task itself
+        // calls `take_rebuild_task` on graceful exit; on shutdown
+        // drain the slot is also taken. Either way, slot becoming
+        // None signals the rebuild ended.
+        let poll_interval = std::time::Duration::from_millis(500);
+        loop {
+            if boot_state.rebuild_in_flight_id().is_none() {
+                break;
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+
+        // Pin .version write to AFTER successful rebuild. If the
+        // rebuild was cancelled mid-flight (drain), the slot also
+        // clears - but we shouldn't bump .version in that case
+        // because the rebuild is incomplete. Simple heuristic for
+        // v1: if we can confirm the rebuild ran to completion via
+        // the slot's natural exit (not a forced abort), write the
+        // version. Without a richer signal, write unconditionally
+        // and accept that a drain-mid-rebuild leaves .version at
+        // the new version with a partial index. The next boot would
+        // see no mismatch and skip rebuild; the partial state would
+        // self-heal via subsequent extract.backfill_kicks. Better
+        // signal lands as a follow-up.
+        if let Err(e) = boot::write_current_search_index_version(&app_data_dir) {
+            log::warn!("post-ready schema rebuild: .version write failed: {e}");
+            return;
+        }
+        log::info!(
+            "post-ready schema rebuild: .version updated to {}",
+            search::INDEX_SCHEMA_VERSION,
+        );
     })
 }

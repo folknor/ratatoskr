@@ -653,20 +653,29 @@ In-tree fixtures kept minimal: synthetic byte literals + zip-built docs in tests
 - UI search-result rendering surfaces `match_kind` + `also_matched`; attachment annotations are second-line italicized snippets with filename.
 - Tests: phrase-match in a fixture PDF returns `MatchKind::Attachment { filename: "<fixture>.pdf", ... }`; phrase that matches both body and attachment returns body as primary + attachment in `also_matched` (or vice versa, score-dependent); cross-attachment phrase fake-match (positions span boundary) does NOT match (position-gap working).
 
-### phase 7-9: `index.rebuild` IPC + dual-index PreserveExisting + palette command
+### phase 7-9: `index.rebuild` IPC + palette command + schema-version dispatch (Wipe-only; PreserveExisting deferred)
 
-- `handle_index_rebuild`:
-  - Mint `rebuild_id`. Reject if a rebuild is in flight and `force == false` (with `RebuildAlreadyInFlight` ServiceError).
-  - Spawn a tracked `tokio::task` (NOT block in handler) registered with the Service's CancellationToken pattern; store `JoinHandle` in `BootSharedState`. Ack the IPC immediately with `rebuild_id`.
-  - Inside the task:
-    - For `RebuildPolicy::Wipe`: send `WriterCommand::Clear`; `UPDATE attachments SET text_indexed_at = NULL`; `DELETE FROM attachment_extracted_text`; iterate `messages` + `local_drafts` in chunks; emit `WriterCommand::ReindexByContentHash` per content_hash.
-    - For `RebuildPolicy::PreserveExisting`: open `search_index_next/` adjacent; open a parallel `SearchWriteHandle` against `next`; route writes during catch-up to `next` only (legacy is read-only); iterate same corpus; on completion, atomic-swap directories + emit `IndexRebuildCompleted` -> UI re-init reader against new primary.
-  - Emit `IndexRebuildProgress` per chunk (Coalesce, key = rebuild_id).
-  - Trigger `extract.backfill_kick` at end so attachments re-extract after wipe (PreserveExisting path doesn't need this; attachment rows survived).
-- **`check_schema_version_and_dispatch`** (stubbed in 7-1): now actively dispatches `RebuildPolicy::PreserveExisting` on schema mismatch.
-- UI palette command: "Rebuild search index" -> confirmation modal -> `client.rebuild_index(RebuildPolicy::Wipe, force: false)`.
-- Status bar surfaces rebuild progress.
-- Tests: `Wipe` from a populated index empties + repopulates (messages first, attachments via subsequent backfill); `PreserveExisting` on schema mismatch keeps legacy reader live during rebuild; concurrent rebuild with `force=false` rejected; rebuild cancellation via drain leaves index in a re-indexable state (idempotent); first-boot (no `.version`) does not invoke either path.
+**Sub-slices:**
+
+- **7-9a LANDED**: handler skeleton + Wipe path + tracked-task lifecycle.
+  - `handlers/extract.rs::handle_rebuild` mints a UUIDv4 rebuild_id, rejects concurrent rebuilds via `boot_state.rebuild_in_flight_id()` (or pre-empts when `force=true` by cancel + abort of the previous handle), resolves runtime deps (db_conn, search_write, body_read, notification_sender), spawns the task, installs `RebuildTaskState` (rebuild_id + JoinHandle + CancellationToken) on `BootSharedState`, and acks the IPC with the rebuild_id.
+  - `service::rebuild::run_wipe_rebuild` sends `WriterCommand::Clear`, runs `reset_extracted_text_for_rebuild` (UPDATE `attachments.text_indexed_at = NULL` + DELETE `attachment_extracted_text`), iterates every message via `select_all_message_ids_for_rebuild` in 200-row chunks, builds `SearchDocument`s via `select_messages_for_index_batch` + `select_attachment_fragments_batch` + `body_read.get_batch` in parallel, sends `WriterCommand::Index` per chunk, emits `IndexRebuildProgress` per chunk (Coalesce by rebuild_id), emits `IndexRebuildCompleted` (MustDeliver), then triggers `extract.backfill_kick` so attachment text re-extracts.
+  - Cancellation respected between chunks; on cancel the task exits without `IndexRebuildCompleted` and the next boot can re-trigger.
+  - Drain step in `run_shutdown_drain` between sync drain and search-writer await: `take_rebuild_task` -> cancel -> abort -> await; defensively clears `search_write` + `out_tx` slots.
+  - `local_drafts` re-emit deferred to a follow-up.
+- **7-9c LANDED**: schema-version mismatch dispatcher.
+  - `check_schema_version_and_dispatch` (stub in 7-1) now sets a `pending_schema_rebuild` flag on `BootSharedState` when the persisted `.version` differs from `INDEX_SCHEMA_VERSION`. The post-ready dispatcher (`spawn_post_ready_schema_rebuild`) clears the flag, calls `handle_rebuild` with `RebuildPolicy::Wipe`, polls `rebuild_in_flight_id` until clear, then writes the current `.version`. Sentinel-write ordering is preserved: on a mid-rebuild crash, the OLD `.version` stays on disk and the next boot re-fires.
+  - v1 only handles additive schema changes (new fields). Tantivy can open the existing index against a superset schema; the rebuild backfills the new fields. Non-additive bumps would require deleting the index dir during boot pre-writer-spawn; documented as a future need.
+- **7-9d LANDED**: palette command + IPC client methods.
+  - `cmdk::CommandId::AppRebuildSearchIndex` ("Rebuild Search Index", category App). Dispatch routes to `Message::RebuildSearchIndex` -> `handlers::provider::dispatch_rebuild_search_index` -> `client.rebuild_index(Wipe, force=false)`.
+  - `ServiceClient::rebuild_index` and `extract_status` IPC methods.
+  - `IndexRebuildProgress` / `IndexRebuildCompleted` notification arms in `update.rs` log progress; visual status-bar surface deferred to a follow-up (would store `Option<RebuildProgressState>` on `ReadyApp` and render in `status_bar.rs`).
+
+**DEFERRED**: true PreserveExisting (search-stays-live during rebuild). The plan called for opening `search_index_next/` adjacent with a parallel writer + atomic directory swap + UI reader rebind. The honest scope is a substantial rework of how `SearchWriteHandle` is plumbed through `SyncRuntime` (currently moved at construction, not consulted via `boot_state`). v1 ships the simpler "search briefly unavailable while Wipe rebuild runs" UX; status bar progress softens the gap. Re-introduce when the index size + rebuild duration become user-pain.
+
+**DROPPED** from the original plan: the `RebuildAlreadyInFlight` `ServiceError` variant. The handler returns `ServiceError::Internal` with a clear message instead - cheaper to add and the error surface is internal to the IPC error pipeline anyway.
+
+Tests: handler-level unit tests + integration tests deferred to 7-10's `extract_in_process.rs` cohort. The DB-side `select_all_message_ids_for_rebuild` and `reset_extracted_text_for_rebuild` lack dedicated tests; the existing extract_reindex test schema covers the relevant tables and the queries are short.
 
 ### phase 7-10: integration tests, manual matrix, architecture doc
 

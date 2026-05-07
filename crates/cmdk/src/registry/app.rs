@@ -75,4 +75,17 @@ pub(super) fn register_app(out: &mut Vec<CommandDescriptor>) {
         "Undo",
         "Reverse the last undoable action (archive, delete, star, move, etc.).",
     ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::AppRebuildSearchIndex,
+            "Rebuild Search Index",
+            "App",
+            None,
+            always,
+            &["rebuild", "reindex", "search", "index"],
+        ),
+        "Rebuild Search Index",
+        "Wipe and rebuild the local search index. Search is unavailable while \
+         the rebuild runs; progress is shown in the status bar.",
+    ));
 }

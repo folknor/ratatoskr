@@ -110,6 +110,27 @@ impl ReadyApp {
         )
     }
 
+    /// Phase 7-9d: palette-driven rebuild dispatch. Sends a Wipe
+    /// rebuild to the Service and surfaces the resulting rebuild_id
+    /// (or error) via `Message::RebuildSearchIndexDispatched`.
+    /// Search becomes briefly unavailable until the rebuild emits
+    /// `IndexRebuildCompleted`; status bar shows progress in the
+    /// meantime via the existing notification subscription.
+    pub(crate) fn dispatch_rebuild_search_index(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                client
+                    .rebuild_index(service_api::RebuildPolicy::Wipe, false)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            Message::RebuildSearchIndexDispatched,
+        )
+    }
+
     /// Phase 7-6: kick the Service-side attachment-text backfill.
     ///
     /// Service-side `handle_backfill_kick` SELECTs up to 1000 rows

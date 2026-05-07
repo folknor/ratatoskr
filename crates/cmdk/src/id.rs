@@ -89,6 +89,9 @@ pub enum CommandId {
 
     // Smart Folders
     SmartFolderSave,
+
+    // Phase 7-9d: search-index rebuild from palette.
+    AppRebuildSearchIndex,
 }
 
 const TABLE: &[(CommandId, &str)] = &[
@@ -161,6 +164,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::AppOpenPalette, "app.openPalette"),
     (CommandId::Undo, "app.undo"),
     (CommandId::SmartFolderSave, "smartFolder.save"),
+    (CommandId::AppRebuildSearchIndex, "app.rebuildSearchIndex"),
 ];
 
 impl CommandId {
@@ -256,6 +260,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::AppOpenPalette,
     CommandId::Undo,
     CommandId::SmartFolderSave,
+    CommandId::AppRebuildSearchIndex,
 ];
 
 #[cfg(test)]

@@ -480,6 +480,9 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
 
         // Undo
         CommandId::Undo => Some(Message::Undo),
+
+        // Phase 7-9d: rebuild the search index from the palette.
+        CommandId::AppRebuildSearchIndex => Some(Message::RebuildSearchIndex),
     }
 }
 

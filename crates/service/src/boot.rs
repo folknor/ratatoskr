@@ -165,6 +165,15 @@ pub(crate) struct BootSharedState {
     /// dispatch installs it via `install_out_tx`. Cleared on shutdown
     /// to release the dispatch's stored clone.
     out_tx: Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>,
+    /// Phase 7-9c: pending schema-version rebuild flag.
+    /// `check_schema_version_and_dispatch` sets this during boot when
+    /// the persisted `.version` differs from
+    /// `search::INDEX_SCHEMA_VERSION`. `spawn_post_ready_schema_rebuild`
+    /// reads + clears the flag once after `boot.ready` and dispatches
+    /// a Wipe rebuild. Stored as `AtomicBool` so the boot path
+    /// (synchronous) and the post-ready task can interact without a
+    /// lock.
+    pending_schema_rebuild: std::sync::atomic::AtomicBool,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -193,7 +202,26 @@ impl BootSharedState {
             search_write: Mutex::new(None),
             rebuild_task: Mutex::new(None),
             out_tx: Mutex::new(None),
+            pending_schema_rebuild: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Phase 7-9c: mark a schema-version rebuild as pending. Called
+    /// from `check_schema_version_and_dispatch` when the persisted
+    /// `.version` differs from `search::INDEX_SCHEMA_VERSION`. The
+    /// post-ready spawn observes this and dispatches the rebuild.
+    pub(crate) fn mark_pending_schema_rebuild(&self) {
+        self.pending_schema_rebuild
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Phase 7-9c: read-and-clear the pending-schema-rebuild flag.
+    /// Returns `true` if the flag was set; subsequent calls return
+    /// `false` (the post-ready spawn fires the rebuild exactly once
+    /// per boot).
+    pub(crate) fn take_pending_schema_rebuild(&self) -> bool {
+        self.pending_schema_rebuild
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
     }
 
     /// Phase 7-9: install the dispatch-loop's `out_tx` so non-spawn
@@ -1010,7 +1038,7 @@ async fn run_boot_sequence_inner(
     // serving against the legacy index until catch-up completes, then
     // atomic-swaps. Called BEFORE the writer spawn so the (future)
     // dispatch can route writes to the right directory.
-    if let Err(e) = check_schema_version_and_dispatch(&app_data_dir) {
+    if let Err(e) = check_schema_version_and_dispatch(&app_data_dir, &state) {
         log::error!("search schema-version check failed: {e}");
         return Err(BootFailure::MigrationFailure);
     }
@@ -1281,22 +1309,32 @@ fn open_db_and_migrate(
     })
 }
 
-/// Phase 7-1 stub. Compares the persisted `<search_index>/.version` to
-/// `search::INDEX_SCHEMA_VERSION`; on absent or mismatch, persists the
-/// current version. Phase 7-9 replaces the stub with the dual-index
-/// PreserveExisting dispatch (open `<search_index_next>/`, route writes
-/// there, atomic-swap when caught up) plus an explicit-rebuild path for
-/// the palette command.
+/// Phase 7-1 stub, fleshed out in 7-9c. Compares the persisted
+/// `<search_index>/.version` to `search::INDEX_SCHEMA_VERSION`:
 ///
-/// **Sentinel-write ordering note**: this stub writes the `.version` file
-/// without a corresponding `Index::create_in_dir` succeeding first, which
-/// is acceptable in 7-1 because there is no destructive op to crash
-/// against. Phase 7-9 will pin the write to *after* successful index
-/// creation so a mid-rebuild crash leaves the new index incomplete with
-/// no `.version` (next boot detects "fresh `next/`" and rebuilds from
-/// scratch) rather than a `.version` pointing at a half-built index.
+/// - Absent (first-ever boot): write the current version, no rebuild.
+///   The writer task creates the index from scratch.
+/// - Match: no-op.
+/// - Mismatch: leave the `.version` file untouched (sentinel-write
+///   ordering: only update after a successful rebuild) and mark a
+///   pending rebuild on `BootSharedState`. The post-ready spawn
+///   dispatches a Wipe rebuild against the now-additive new schema
+///   and rewrites `.version` on success.
+///
+/// v1 only handles additive schema changes (new fields). The existing
+/// index can be opened with the new schema; pre-existing docs simply
+/// don't have the new fields, and the rebuild backfills them. A
+/// non-additive change would require deleting the index directory
+/// during boot (before the writer task opens it); that path is not
+/// implemented here. Document if a future bump is non-additive.
+///
+/// True dual-index PreserveExisting (search-stays-live during
+/// rebuild) is deferred - the v1 user experience is "search briefly
+/// unavailable while the index is rebuilt", with progress surfaced
+/// in the status bar via `IndexRebuildProgress`.
 pub(crate) fn check_schema_version_and_dispatch(
     app_data_dir: &std::path::Path,
+    state: &Arc<BootSharedState>,
 ) -> Result<(), String> {
     let index_dir = app_data_dir.join("search_index");
     std::fs::create_dir_all(&index_dir)
@@ -1321,18 +1359,30 @@ pub(crate) fn check_schema_version_and_dispatch(
             log::debug!("search index .version matches current ({v})");
         }
         Some(v) => {
-            // Phase 7-1 stub. Phase 7-9 will dispatch into the dual-index
-            // PreserveExisting rebuild here. For now, just overwrite the
-            // version - the rebuild work is deferred.
             log::warn!(
                 "search index .version mismatch: stored={v}, current={}. \
-                 Overwriting (dispatch stubbed until phase 7-9).",
+                 Marking pending rebuild; .version will be rewritten after \
+                 successful Wipe rebuild post-boot.ready.",
                 search::INDEX_SCHEMA_VERSION
             );
-            write_search_index_version(&version_path)?;
+            state.mark_pending_schema_rebuild();
         }
     }
     Ok(())
+}
+
+/// Phase 7-9c: Public-to-the-crate write helper. Used by the
+/// post-rebuild path to update `.version` only after the rebuild
+/// task has emitted `IndexRebuildCompleted`. Pinning the write to
+/// after success preserves the sentinel-write ordering invariant: a
+/// mid-rebuild crash leaves the OLD `.version` on disk, and the next
+/// boot's `check_schema_version_and_dispatch` re-marks the rebuild.
+pub(crate) fn write_current_search_index_version(
+    app_data_dir: &std::path::Path,
+) -> Result<(), String> {
+    let index_dir = app_data_dir.join("search_index");
+    let version_path = index_dir.join(".version");
+    write_search_index_version(&version_path)
 }
 
 fn write_search_index_version(path: &std::path::Path) -> Result<(), String> {
@@ -1458,32 +1508,37 @@ mod tests {
 
     /// Phase 7-1: schema-version sentinel writes the current version on a
     /// fresh app-data directory (absent `.version` file) and is a no-op on
-    /// a subsequent boot at the same version. A mismatch case overwrites
-    /// (until phase 7-9 lands the dual-index dispatch).
+    /// a subsequent boot at the same version. A mismatch case marks the
+    /// pending-rebuild flag rather than rewriting `.version` immediately.
     #[test]
     fn check_schema_version_writes_on_absent_and_no_ops_on_match() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let app_data = tmp.path();
         let version_path = app_data.join("search_index").join(".version");
+        let state = BootSharedState::new(app_data.to_path_buf());
 
         // First call: file is absent, function writes the current version.
-        check_schema_version_and_dispatch(app_data).expect("first call");
+        check_schema_version_and_dispatch(app_data, &state).expect("first call");
         let stored = std::fs::read_to_string(&version_path).expect("read .version");
         assert_eq!(
             stored.trim(),
             search::INDEX_SCHEMA_VERSION.to_string(),
             "first call must persist current version"
         );
+        assert!(
+            !state.take_pending_schema_rebuild(),
+            "absent path must not mark a rebuild"
+        );
 
-        // Second call: file matches; function is a no-op (file mtime is a
-        // weak signal, so we just assert the contents are still the same).
-        check_schema_version_and_dispatch(app_data).expect("second call");
+        // Second call: file matches; function is a no-op.
+        check_schema_version_and_dispatch(app_data, &state).expect("second call");
         let stored2 = std::fs::read_to_string(&version_path).expect("read .version");
         assert_eq!(stored2, stored, "second call must not change the file");
+        assert!(!state.take_pending_schema_rebuild());
     }
 
     #[test]
-    fn check_schema_version_overwrites_on_mismatch() {
+    fn check_schema_version_marks_pending_rebuild_on_mismatch() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let app_data = tmp.path();
         let index_dir = app_data.join("search_index");
@@ -1492,13 +1547,19 @@ mod tests {
 
         // Seed a deliberately wrong version.
         std::fs::write(&version_path, "999").expect("seed .version");
+        let state = BootSharedState::new(app_data.to_path_buf());
 
-        check_schema_version_and_dispatch(app_data).expect("dispatch");
+        check_schema_version_and_dispatch(app_data, &state).expect("dispatch");
+
+        // Sentinel-write ordering: .version stays at the OLD value
+        // until a successful rebuild rewrites it.
         let stored = std::fs::read_to_string(&version_path).expect("read .version");
-        assert_eq!(
-            stored.trim(),
-            search::INDEX_SCHEMA_VERSION.to_string(),
-            "mismatch must be overwritten with current version"
+        assert_eq!(stored.trim(), "999", ".version must not be overwritten yet");
+        assert!(
+            state.take_pending_schema_rebuild(),
+            "mismatch must mark a pending rebuild"
         );
+        // take_ is single-use.
+        assert!(!state.take_pending_schema_rebuild());
     }
 }
