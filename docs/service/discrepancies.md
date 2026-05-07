@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M12. `PreserveExisting` is still a public wire API but errors at runtime
-
-**Files:** `crates/service-api/src/extract.rs:58` (RebuildPolicy enum), `crates/service/src/handlers/extract.rs:115-119` (returns `ServiceError::Internal`), `crates/service/src/dispatch.rs:1145` (schema dispatcher hardcodes Wipe).
-
-`RebuildPolicy::PreserveExisting` is in the public IPC enum; calling it with that variant returns `ServiceError::Internal("PreserveExisting rebuild lands in phase 7-9b")`. The schema-version dispatcher hardcodes `RebuildPolicy::Wipe`. The wire surface advertises a capability the runtime refuses. Either collapse the API to Wipe-only for v1 (delete the variant) or document the runtime gap so external callers don't burn IPCs against an error path.
-
-**Agreement: 1/8** (codex bugs).
-
-**Fix:** delete the `PreserveExisting` variant from `RebuildPolicy` until the implementation lands. Re-introduce when Phase 8's true PreserveExisting work is in flight.
-
 ## Low
 
 ### L1. Three independent encodings of the permanent-vs-retry-eligible status taxonomy

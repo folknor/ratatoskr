@@ -85,8 +85,11 @@ pub(crate) async fn handle_rebuild(
     let rebuild_id = uuid::Uuid::new_v4().to_string();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    // Wipe is the only path implemented in 7-9a. PreserveExisting
-    // lands in 7-9b.
+    // Wipe is the only policy in v1; PreserveExisting was dropped from
+    // the wire enum (M12) until Phase 8 implements the dual-index
+    // path. Match here is exhaustive on the single variant; an
+    // explicit match keeps the structure in place for the future
+    // PreserveExisting branch to slot back in.
     match params.policy {
         service_api::RebuildPolicy::Wipe => {
             let db_state = service_state::WriteDbState::from_arc(db_conn);
@@ -114,11 +117,6 @@ pub(crate) async fn handle_rebuild(
                 cancel,
                 handle,
             });
-        }
-        service_api::RebuildPolicy::PreserveExisting => {
-            return Err(ServiceError::Internal(
-                "PreserveExisting rebuild lands in phase 7-9b".into(),
-            ));
         }
     }
 

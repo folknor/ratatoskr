@@ -55,16 +55,16 @@ pub struct ExtractStatusAck {
 // index.rebuild
 // ---------------------------------------------------------------------------
 
-/// Rebuild flavor. The auto-on-schema-mismatch path uses
-/// `PreserveExisting` (open `<search_index_next>/` adjacent, route
-/// writes there, atomic-swap when caught up). The explicit-rebuild
-/// palette command uses `Wipe` (clear + repopulate from scratch);
-/// the user has asked for it and accepted the temporary search-
-/// unavailable window.
+/// Rebuild flavor. v1 ships `Wipe` only (clear + repopulate from
+/// scratch); search is briefly unavailable while the rebuild runs.
+/// The originally-planned `PreserveExisting` (open
+/// `<search_index_next>/` adjacent, route writes there, atomic-swap
+/// when caught up) is a Phase 8 carry-forward - the variant is omitted
+/// from the wire enum until that work lands so external callers can't
+/// burn IPCs against an error path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RebuildPolicy {
-    PreserveExisting,
     Wipe,
 }
 
@@ -152,11 +152,10 @@ mod tests {
 
     #[test]
     fn rebuild_policy_round_trips() {
-        for p in [RebuildPolicy::PreserveExisting, RebuildPolicy::Wipe] {
-            let json = serde_json::to_value(p).expect("serialize");
-            let recovered: RebuildPolicy = serde_json::from_value(json).expect("deserialize");
-            assert_eq!(p, recovered);
-        }
+        let p = RebuildPolicy::Wipe;
+        let json = serde_json::to_value(p).expect("serialize");
+        let recovered: RebuildPolicy = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(p, recovered);
     }
 
     #[test]
@@ -175,7 +174,7 @@ mod tests {
     #[test]
     fn index_rebuild_params_round_trips() {
         let cases = [
-            IndexRebuildParams { policy: RebuildPolicy::PreserveExisting, force: false },
+            IndexRebuildParams { policy: RebuildPolicy::Wipe, force: false },
             IndexRebuildParams { policy: RebuildPolicy::Wipe, force: true },
         ];
         for params in cases {
