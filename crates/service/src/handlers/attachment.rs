@@ -4,7 +4,7 @@
 //! Bytes never cross the IPC (phase-1.5-plan.md backpressure
 //! policy). The Service-side window between metadata check and
 //! IPC ack is closed by serializing fetches against eviction via
-//! `ATTACHMENT_SWEEP_LOCK`. The UI-side window between IPC ack
+//! `SWEEP_LOCK`. The UI-side window between IPC ack
 //! receipt and `open()` remains open until lease semantics land
 //! (Phase 1a's `PackStore::get_with_lease`); UI consumers should
 //! treat ENOENT on open as a transient miss and re-call
@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{AttachmentFetchAck, AttachmentFetchParams, ServiceError};
-use tokio::sync::RwLock;
 
+use crate::attachment_lock::SWEEP_LOCK;
 use crate::boot::BootSharedState;
 
 const CACHE_DIR: &str = "attachment_cache";
@@ -53,15 +53,8 @@ const DEFAULT_CACHE_CAP_MB: i64 = 5 * 1024;
 /// case 50 GB drop, which is acceptable on the rare cap-flip path.
 const PER_KICK_RECLAIM_CAP_BYTES: i64 = 200 * 1024 * 1024;
 
-/// Single global sweep lock. `RwLock` so concurrent fetches on the
-/// hit and miss paths (read guards) run in parallel while the
-/// eviction sweep (write guard) blocks them and is blocked by
-/// in-flight fetches. A slow sweep on one tick is not re-entered
-/// when the next tick lands within `NOTIFY_CAP=4` queued kicks; the
-/// second kick acquires the write lock once the first finishes
-/// (back-to-back sweeps just see the cache already under cap and
-/// return immediately).
-static ATTACHMENT_SWEEP_LOCK: RwLock<()> = RwLock::const_new(());
+// Phase 7-4: SWEEP_LOCK relocated to crates/service/src/attachment_lock.rs
+// so the ExtractRuntime worker can share it. Imported above.
 
 pub(crate) async fn handle_fetch(
     boot_state: &Arc<BootSharedState>,
@@ -112,7 +105,7 @@ pub(crate) async fn handle_fetch(
         // file underneath us before we ack. The UI-side window
         // between ack and open remains open until lease semantics
         // land - documented at the module level.
-        let _hit_guard = ATTACHMENT_SWEEP_LOCK.read().await;
+        let _hit_guard = SWEEP_LOCK.read().await;
         let file_path = app_data.join(CACHE_DIR).join(content_hash);
         if let Ok(meta) = std::fs::metadata(&file_path) {
             let bump_id = info.id.clone();
@@ -159,7 +152,7 @@ pub(crate) async fn handle_fetch(
     // span so a sweep racing the commit observes either the
     // committed row (and skips as referenced) or only the `.tmp`
     // file (and skips the suffix).
-    let _miss_guard = ATTACHMENT_SWEEP_LOCK.read().await;
+    let _miss_guard = SWEEP_LOCK.read().await;
 
     let tmp_path =
         store::attachment_cache::write_cached_tmp(&app_data, &content_hash, &bytes)
@@ -201,7 +194,7 @@ pub(crate) async fn handle_fetch(
 
 /// `attachment.eviction_kick` notification handler.
 ///
-/// Single global sweep gated by `ATTACHMENT_SWEEP_LOCK`. Two phases:
+/// Single global sweep gated by `SWEEP_LOCK`. Two phases:
 ///
 /// 1. **Orphan-first.** Walk `attachment_cache/`; drop any file
 ///    whose `content_hash` does not appear in
@@ -218,7 +211,7 @@ pub(crate) async fn handle_fetch(
 pub(crate) async fn handle_eviction_kick(
     boot_state: &Arc<BootSharedState>,
 ) -> Result<(), String> {
-    let _guard = ATTACHMENT_SWEEP_LOCK.write().await;
+    let _guard = SWEEP_LOCK.write().await;
 
     let write_db = boot_state
         .write_db_state()

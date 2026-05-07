@@ -1,5 +1,6 @@
 mod accounts;
 pub mod actions;
+mod attachment_lock;
 mod boot;
 mod boot_progress;
 pub(crate) mod cal_actions;
