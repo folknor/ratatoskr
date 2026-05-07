@@ -260,12 +260,13 @@ impl ReadyApp {
                 let generation = self.search_generation.next();
                 let db = Arc::clone(&self.db);
                 let ss = self.search_state.clone();
+                let body_store = self.body_store.clone();
                 let scope = execution_scope_to_account_scope(&scope);
                 let resolved = resolved.clone();
 
                 Task::perform(
                     async move {
-                        let result = execute_search(db, ss, query, scope).await;
+                        let result = execute_search(db, ss, body_store, query, scope).await;
                         SearchExecutionResult {
                             resolved,
                             freshness: SearchFreshness::Query(generation),
@@ -893,12 +894,20 @@ impl ReadyApp {
 pub(crate) async fn execute_search(
     db: Arc<db::Db>,
     search_state: Option<Arc<rtsk::search::SearchReadState>>,
+    body_store: Option<rtsk::body_store::BodyStoreReadState>,
     query: String,
     scope: rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         if let Some(ref ss) = search_state {
-            let results = rtsk::search_pipeline::search(&query, ss, conn)?;
+            // M2 fix: pass body_store so per-message attribution can
+            // score body matches. Without it, body+attachment co-matches
+            // skewed toward attachment attribution and the documented
+            // "matched in body + also_matched: [Attachment]" outcome
+            // never appeared. Optional because body_store init can fail
+            // at boot; the attribution falls back to subject/from/
+            // attachments-only when None.
+            let results = rtsk::search_pipeline::search(&query, ss, conn, body_store.as_ref())?;
             Ok(results
                 .into_iter()
                 .map(unified_result_to_thread)

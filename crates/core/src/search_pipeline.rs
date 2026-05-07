@@ -52,6 +52,7 @@ pub fn search(
     query: &str,
     search_state: &SearchReadState,
     conn: &Connection,
+    body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let parsed = parse_query(query);
 
@@ -69,8 +70,8 @@ pub fn search(
     let result = match (has_free_text, has_operators) {
         (false, false) => Ok(vec![]),
         (false, true) => search_sql_only(&parsed, conn),
-        (true, false) => search_tantivy_only(&parsed, search_state, conn),
-        (true, true) => search_combined(&parsed, search_state, conn),
+        (true, false) => search_tantivy_only(&parsed, search_state, conn, body_read),
+        (true, true) => search_combined(&parsed, search_state, conn, body_read),
     };
 
     match &result {
@@ -147,10 +148,11 @@ fn search_tantivy_only(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
     conn: &Connection,
+    body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let params = build_tantivy_params(parsed);
     let mut results = search_state.search_with_filters(&params)?;
-    enrich_with_attribution(&mut results, &parsed.free_text, search_state, conn);
+    enrich_with_attribution(&mut results, &parsed.free_text, search_state, conn, body_read);
     let mut grouped = group_by_thread_unified(results);
     grouped.sort_by(|a, b| {
         b.rank
@@ -167,6 +169,7 @@ fn search_combined(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
     conn: &Connection,
+    body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     // Step 1: SQL generates candidate thread IDs.
     let scope = build_scope(parsed);
@@ -198,7 +201,7 @@ fn search_combined(
     // Phase 7-8: per-message match-kind attribution. Runs before
     // grouping so the highest-scoring message's attribution survives
     // thread-grouping intact.
-    enrich_with_attribution(&mut filtered, &parsed.free_text, search_state, conn);
+    enrich_with_attribution(&mut filtered, &parsed.free_text, search_state, conn, body_read);
 
     // Step 4: Group by thread, take max score.
     let grouped = group_by_thread_unified(filtered);
@@ -224,13 +227,12 @@ fn search_combined(
 /// state and rewrite each result's `match_kind` / `also_matched` to
 /// reflect which field actually matched.
 ///
-/// Body text is NOT fetched here: Tantivy doesn't store body_text and
-/// fetching from `body_store` would expand the search-pipeline surface
-/// to take a `BodyStoreReadState`. As a v1 trade-off, body matches
-/// fall through to the default `MatchKind::Body` (which is the same as
-/// the no-attribution path), and only subject/from/per-attachment
-/// matches actively populate `match_kind`. The most user-visible
-/// outcome - "matched in *report.pdf*" annotations - works correctly.
+/// M2 fix: body_text is now fetched from `body_store` via the optional
+/// `body_read` parameter. When `None` (caller didn't have a
+/// BodyStoreReadState handy), body falls through to empty as before
+/// and the attribution can only score subject / from / attachments;
+/// when `Some`, a sync batched read populates body_text per message
+/// and the attribution can correctly attribute body matches.
 ///
 /// On any DB error we log a warning and leave the results' default
 /// `MatchKind::Body` in place; this is a UI-affordance feature and
@@ -240,6 +242,7 @@ fn enrich_with_attribution(
     free_text: &str,
     search_state: &SearchReadState,
     conn: &Connection,
+    body_read: Option<&store::body_store::BodyStoreReadState>,
 ) {
     if free_text.trim().is_empty() || results.is_empty() {
         return;
@@ -255,6 +258,24 @@ fn enrich_with_attribution(
             return;
         }
     };
+    // Body fetch is opt-in via `body_read`; failures fall back to empty
+    // body strings (degraded but not broken).
+    let mut body_by_mid: HashMap<String, String> = HashMap::new();
+    if let Some(body_read) = body_read {
+        let message_ids: Vec<String> = results.iter().map(|r| r.message_id.clone()).collect();
+        match body_read.get_batch_sync(&message_ids) {
+            Ok(bodies) => {
+                for b in bodies {
+                    if let Some(text) = b.body_text {
+                        body_by_mid.insert(b.message_id, text);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("enrich_with_attribution: body fetch failed: {e}");
+            }
+        }
+    }
     let mut inputs: HashMap<String, AttributionInputs> = HashMap::with_capacity(results.len());
     for r in results.iter() {
         let key = (r.account_id.clone(), r.message_id.clone());
@@ -276,8 +297,7 @@ fn enrich_with_attribution(
             AttributionInputs {
                 subject:     r.subject.clone().unwrap_or_default(),
                 from_name:   r.from_name.clone().unwrap_or_default(),
-                // body_text not fetched in v1; see fn doc-comment.
-                body_text:   String::new(),
+                body_text:   body_by_mid.remove(&r.message_id).unwrap_or_default(),
                 attachments,
             },
         );

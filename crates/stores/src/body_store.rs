@@ -253,6 +253,67 @@ impl BodyStoreReadState {
         .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
+    /// Synchronous variant of `get_batch` for callers already on a
+    /// blocking thread (e.g. inside `db::Db::with_conn`'s spawn_blocking
+    /// closure where calling another async API would require a nested
+    /// runtime). Same contract: returns a `MessageBody` per message_id
+    /// that has a row in `bodies`; missing rows are silently dropped.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn get_batch_sync(&self, message_ids: &[String]) -> Result<Vec<MessageBody>, String> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("body store lock poisoned: {e}"))?;
+        type RawBodyRow = (String, Option<Vec<u8>>, Option<Vec<u8>>);
+        let mut rows_out: Vec<RawBodyRow> = Vec::with_capacity(message_ids.len());
+        for chunk in message_ids.chunks(100) {
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT message_id, body_html, body_text FROM bodies WHERE message_id IN ({placeholders})"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| format!("prepare batch get: {e}"))?;
+            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
+                .iter()
+                .map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>)
+                .collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+            let rows = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    let mid: String = row.get("message_id")?;
+                    let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                    let text_blob: Option<Vec<u8>> = row.get("body_text")?;
+                    Ok((mid, html_blob, text_blob))
+                })
+                .map_err(|e| format!("query batch get: {e}"))?;
+            for row in rows {
+                rows_out.push(row.map_err(|e| format!("map row: {e}"))?);
+            }
+        }
+        drop(conn);
+        let mut results = Vec::with_capacity(rows_out.len());
+        for (mid, html_blob, text_blob) in rows_out {
+            let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
+            let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
+            results.push(MessageBody {
+                message_id: mid,
+                body_html,
+                body_text,
+            });
+        }
+        Ok(results)
+    }
+
     /// Retrieve multiple message bodies in a single query.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn get_batch(&self, message_ids: Vec<String>) -> Result<Vec<MessageBody>, String> {

@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M2. App-layer attribution passes empty `body_text`
-
-**Files:** `crates/core/src/search_pipeline.rs:223, 274`, `crates/search/src/lib.rs:795`.
-
-The pipeline intentionally passes empty `body_text` into attribution inputs. Search scoring supports body scoring, but the app never supplies it, so body-only / body-plus-attachment co-match cases skew toward attachment attribution: a result that matched body text gets labeled as attachment when the attachment also contains the query, and `also_matched` cannot include `Body`. Diverges from the documented Phase 7 "matched in body + also_matched: [Attachment]" intent.
-
-**Agreement: 3/8** (codex bugs, codex perf, codex arch).
-
-**Fix:** thread the actual body text through `core::search_pipeline` into attribution. The body store already holds it; the lookup is one batched read.
-
 ### M3. `also_matched` threshold uses `div_ceil(2)` not `/2`
 
 **Files:** `crates/search/src/lib.rs:892`.
