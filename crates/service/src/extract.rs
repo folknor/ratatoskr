@@ -403,8 +403,27 @@ async fn finalize_item(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
         hashes.remove(content_hash);
         hashes.is_empty()
     };
-    let prev = inner.queue_depth.fetch_sub(1, Ordering::Relaxed);
-    let new_depth = prev.saturating_sub(1);
+    // L10 fix: guard against an accidental double-finalize wrapping
+    // the atomic to u64::MAX. fetch_update is the standard
+    // compare-exchange-loop pattern; on prev==0 we skip the decrement
+    // and log so a regression that introduced double-finalize would
+    // show up. Today no double-finalize is provable from the code, so
+    // this is defense in depth.
+    let prev = inner
+        .queue_depth
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+            if v > 0 { Some(v - 1) } else { None }
+        });
+    let new_depth = match prev {
+        Ok(p) => p.saturating_sub(1),
+        Err(_) => {
+            log::debug!(
+                "ExtractRuntime finalize_item: queue_depth was already 0 \
+                 (double-finalize?); leaving at 0"
+            );
+            0
+        }
+    };
 
     // Emit per-item progress (Coalesce: latest-wins).
     let progress = Notification::ExtractProgress(ExtractProgress {
@@ -792,7 +811,24 @@ async fn fan_out_reindex_chunk(
                 extracted_text: r.extracted_text,
             })
             .collect();
-        let body_text = body_by_mid.remove(&m.message_id).unwrap_or(None);
+        // L10 fix: distinguish "row absent in body store" (skip the
+        // doc - sync race, body hasn't committed yet, or store is in
+        // an inconsistent state) from "row present with body_text =
+        // None" (legitimate empty body). Pre-fix, both cases collapsed
+        // to None and the writer applied an empty-body doc, briefly
+        // dropping body_text from Tantivy until the next sync re-emit.
+        let body_text = match body_by_mid.remove(&m.message_id) {
+            Some(text) => text,
+            None => {
+                log::debug!(
+                    "fan_out_reindex_chunk: body store row missing for {} \
+                     (sync race or absent commit); skipping doc, next \
+                     sync emit will re-add",
+                    m.message_id,
+                );
+                continue;
+            }
+        };
         docs.push(SearchDocument {
             message_id: m.message_id,
             account_id: m.account_id,
@@ -976,6 +1012,19 @@ mod tests {
         let notification_tx = NotificationSender::new(tx);
         let (search_write, mut search_rx) = dummy_search_write();
         let (body_read, _body_dir) = body_read_in_tempdir();
+        // L10 fix: fan_out_reindex_chunk now skips docs whose body
+        // store row is absent (treats absence as a sync race rather
+        // than legit empty body). Populate the body store so the test
+        // mirrors the production invariant - sync writes body BEFORE
+        // emitting Index.
+        body_read
+            .put(
+                "msg1".to_string(),
+                None,
+                Some("message body text".to_string()),
+            )
+            .await
+            .expect("put body");
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),

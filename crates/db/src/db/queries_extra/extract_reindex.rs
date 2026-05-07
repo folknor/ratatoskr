@@ -324,6 +324,16 @@ pub fn select_attachment_fragments_batch(
         let placeholders: Vec<String> = (0..chunk.len())
             .map(|i| format!("(?{}, ?{})", i * 2 + 1, i * 2 + 2))
             .collect();
+        // L10 note: the LEFT JOIN intentionally does not filter on
+        // t.schema_version. Today's Wipe-only rebuild path truncates
+        // attachment_extracted_text on schema bump, so every row is
+        // at the current schema. When Phase 8 lands the true
+        // PreserveExisting dual-index path (which keeps the legacy
+        // table around during a rebuild), this JOIN must add
+        // `AND t.schema_version = ?` keyed on search::INDEX_SCHEMA_VERSION
+        // - until then the filter would be redundant. The function
+        // signature would need a schema_version parameter; deferred
+        // alongside the PreserveExisting work.
         let sql = format!(
             "SELECT a.id, a.message_id, a.account_id, a.filename, a.mime_type, \
                     t.extracted_text, t.status \

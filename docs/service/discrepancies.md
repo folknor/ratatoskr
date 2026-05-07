@@ -10,17 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L10. Encoding fast paths and minor polish
-
-Folded together because they're individually trivial:
-
-- `encoding_rs` UTF-8 fast path scans bytes twice (`plain.rs:46-48`) - `std::str::from_utf8(bytes).is_ok()` then `UTF_8.decode(bytes)`.
-- HTML extractor doesn't BOM-detect UTF-16 attachments (`plain.rs:69-150`).
-- `fan_out_reindex` body-text fallback to `None` rewrites the doc with empty body (`extract.rs:626`); on a missing body store row, prefer skip-the-doc over rewrite-with-empty-body.
-- `finalize_item` `fetch_sub` potential underflow (`extract.rs:313-314`); guard with `if prev > 0`.
-- `ExtractProgress` sends fail silently when `out_tx` already taken at drain (`extract.rs:317-336`); UI may not see the terminal signal.
-- `attachment_extracted_text` JOIN missing `schema_version` filter (`extract_reindex.rs:248`); moot today (Wipe truncates), blocks PreserveExisting.
-
 ## Open design questions
 
 These aren't bugs, just unsettled choices flagged for follow-up.

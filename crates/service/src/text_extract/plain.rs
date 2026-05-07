@@ -43,13 +43,21 @@ pub(crate) fn extract_plain(bytes: &[u8]) -> ExtractionOutcome {
                 return ExtractionOutcome::Skipped { reason: SkipReason::EncodingInvalid };
             }
             text
-        } else if std::str::from_utf8(bytes).is_ok() {
-            // 2. No BOM, valid UTF-8.
-            UTF_8.decode(bytes).0
         } else {
-            // 3. Strict UTF-8 failed. Fall back to Windows-1252 (always
-            //    succeeds for 8-bit byte streams).
-            WINDOWS_1252.decode(bytes).0
+            // 2. No BOM. Try UTF-8 in one pass; on decode errors fall
+            //    back to Windows-1252 (always succeeds for 8-bit byte
+            //    streams). L10 fix: pre-fix did
+            //    `std::str::from_utf8(bytes).is_ok() then UTF_8.decode(bytes)`,
+            //    which scanned the bytes twice on the happy path.
+            //    `decode_without_bom_handling` returns
+            //    (text, had_errors) - if had_errors is false it's
+            //    valid UTF-8 in a single pass.
+            let (utf8_text, had_errors) = UTF_8.decode_without_bom_handling(bytes);
+            if had_errors {
+                WINDOWS_1252.decode(bytes).0
+            } else {
+                utf8_text
+            }
         };
 
     // Sanity-check the control-char ratio uniformly. Genuine binary
@@ -74,7 +82,15 @@ pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
-    let mut reader = Reader::from_reader(bytes);
+    // L10 fix: BOM-detect for UTF-16 / UTF-16BE HTML attachments. The
+    // pre-fix path passed bytes directly to Reader::from_reader, which
+    // assumes UTF-8; a UTF-16 input was silently extracted as garbage.
+    // Pre-decoding via the existing encoding_rs setup converts to a
+    // String we can re-emit as UTF-8 bytes for the reader. UTF-8 input
+    // (no BOM) skips the conversion to keep the happy path zero-copy.
+    let decoded_utf8: Option<Vec<u8>> = decode_to_utf8_if_needed(bytes);
+    let html_bytes: &[u8] = decoded_utf8.as_deref().unwrap_or(bytes);
+    let mut reader = Reader::from_reader(html_bytes);
     // Phase 7-2a: explicit entity-resolution policy. quick-xml's default
     // already does NOT expand external entities (it has no DTD support),
     // but we set the explicit knobs anyway so a future change in the
@@ -149,6 +165,25 @@ pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
         return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
     }
     ExtractionOutcome::Indexed { text: out }
+}
+
+/// L10 helper: detect a UTF-16 / UTF-16BE BOM and decode to a UTF-8
+/// byte vec. Returns None for UTF-8 input (no BOM or UTF-8 BOM) so
+/// the caller can use the original bytes without copying. Mirrors the
+/// BOM-detection in extract_plain_text but emits UTF-8 bytes rather
+/// than a String.
+fn decode_to_utf8_if_needed(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        let encoding = if bytes.starts_with(&[0xFE, 0xFF]) {
+            encoding_rs::UTF_16BE
+        } else {
+            encoding_rs::UTF_16LE
+        };
+        let (text, _, _) = encoding.decode(bytes);
+        Some(text.into_owned().into_bytes())
+    } else {
+        None
+    }
 }
 
 fn finish_decoded(text: &str) -> ExtractionOutcome {
