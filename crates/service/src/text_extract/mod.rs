@@ -41,6 +41,7 @@
 //! - `ooxml` (7-2c, lands separately): `zip` walk + `quick-xml` text
 //!   extraction with decompressed-size cap and entities-off contract.
 
+pub(crate) mod ooxml;
 pub(crate) mod pdf;
 pub(crate) mod plain;
 
@@ -233,11 +234,10 @@ pub(crate) fn extract(bytes: &[u8], mime: &str, filename: &str) -> ExtractionOut
         return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
     }
     let outcome = match canonicalize_mime(mime, filename) {
-        Mime::Pdf => pdf::extract(bytes),
-        Mime::Docx | Mime::Xlsx | Mime::Pptx => {
-            // 7-2c: replace with `ooxml::extract_*(bytes)`.
-            ExtractionOutcome::Failed { error: "ooxml extractor not yet wired (lands in 7-2c)".into() }
-        }
+        Mime::Pdf       => pdf::extract(bytes),
+        Mime::Docx      => ooxml::extract_docx(bytes),
+        Mime::Xlsx      => ooxml::extract_xlsx(bytes),
+        Mime::Pptx      => ooxml::extract_pptx(bytes),
         Mime::PlainText => plain::extract_plain(bytes),
         Mime::Html      => plain::extract_html(bytes),
         Mime::Calendar  => ExtractionOutcome::Skipped { reason: SkipReason::PrivacyExempt },
