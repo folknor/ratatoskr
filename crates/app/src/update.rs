@@ -186,7 +186,15 @@ impl ReadyApp {
             // any new action against the same accounts.
             Message::ServiceBootReady(_response) => {
                 log::debug!("ReadyApp observed post-handshake respawn event");
-                self.kickoff_post_respawn_reconcile()
+                // Phase 7-6: catch-up kick for cached-but-unindexed
+                // attachments left over from a prior Service crash
+                // mid-extraction. Idempotent on repeat (the SELECT
+                // returns 0 rows after the first kick drains the
+                // backlog).
+                Task::batch(vec![
+                    self.kickoff_post_respawn_reconcile(),
+                    self.kick_extract_backfill(),
+                ])
             }
             // ServiceBootFailed reaching ReadyApp means a respawn attempt
             // failed (e.g., the new Service exited with a deterministic
@@ -780,6 +788,7 @@ impl ReadyApp {
             Message::SnoozeResurfaceComplete(result) => {
                 self.handle_snooze_resurface_complete(result)
             }
+            Message::ExtractBackfillTick => self.kick_extract_backfill(),
             Message::ReaderReloadTick => {
                 // Phase 3 task 17: debounced reader reload. Skip when
                 // there is no pending stamp (idle) or when the stamp

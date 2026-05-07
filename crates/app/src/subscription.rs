@@ -109,6 +109,20 @@ impl ReadyApp {
             );
         }
 
+        // Phase 7-6: hourly attachment-text backfill kick. The Service
+        // handler enqueues every cached-but-unindexed attachment (up
+        // to a 1000-row LIMIT per kick) into the ExtractRuntime. The
+        // initial catch-up post-boot is fired separately on
+        // `ServiceBootReady`; this hourly cadence chips away at any
+        // residual after a prior Service crash mid-extraction. Drop
+        // class - missed kicks self-heal on the next hour.
+        if !self.sidebar.accounts.is_empty() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(3600))
+                    .map(|_| Message::ExtractBackfillTick),
+            );
+        }
+
         // Phase 5 task 10: the dedicated 1-hour `Message::GalRefreshTick`
         // subscription is gone. GAL refresh now rides on the 5-min
         // `SyncTick` via `Message::SyncTick -> kick_gal_refresh`, gated

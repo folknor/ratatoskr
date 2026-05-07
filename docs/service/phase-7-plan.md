@@ -628,12 +628,14 @@ In-tree fixtures kept minimal: synthetic byte literals + zip-built docs in tests
 - Worker's status-aware idempotency check inside the worker (per 7-4c) covers DB-level dedup as belt-and-suspenders.
 - Tests deferred to 7-10's integration suite: the unit-test surface for handle_fetch is small and the runtime is not constructed in tests today.
 
-### phase 7-6: post-boot backfill (event-driven) + UI fan-out
+### phase 7-6: post-boot backfill (event-driven) + UI fan-out (LANDED)
 
-- `handle_extract_backfill_kick`: `SELECT id, content_hash, account_id, message_id FROM attachments WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL LIMIT 1000`; enqueue each.
-- `crates/app/src/subscription.rs`: emit `extract.backfill_kick` (a) once on `boot.ready`, (b) on a new hourly subscription. **Drop the `Message::SyncTick` always-on fan-out** the original plan proposed.
-- Idempotency: a second kick after the first finishes returns 0 rows. Drop class.
-- Test: backfill emits enqueues for unindexed cached attachments; second kick is a no-op; evicted-but-not-extracted rows (cached_at NULL) are skipped.
+- `find_unindexed_cached_attachments` in `db::queries_extra::extract_reindex` - SELECT against the partial `idx_attachments_text_indexed_at` index, returns `(attachment_id, message_id, account_id, content_hash)` tuples up to a caller-supplied limit. Two unit tests (filter correctness + limit respect).
+- `handle_backfill_kick` in `service::handlers::extract` resolves the installed `ExtractRuntime` via `boot_state.extract_runtime()`, runs the query against `boot_state.db_conn()`, and enqueues each row whose `content_hash` is `Some`. NULL hash rows are skipped (the worker can't extract without one). Defensive no-op when the runtime is not yet installed (boot still in progress) or has been taken (drain in progress).
+- `crates/app/src/handlers/provider.rs::kick_extract_backfill` mirrors `kick_calendar_sync`'s shape - sends `ClientNotification::ExtractBackfillKick` and discards the result.
+- `crates/app/src/subscription.rs` adds a 1-hour `iced::time::every` ticker that emits `Message::ExtractBackfillTick`, which `update.rs` forwards to `kick_extract_backfill`. The same kick is fired once from the `Message::ServiceBootReady` arm to catch up after a Service crash mid-extraction.
+- Idempotency comes from three layers: the SELECT returns 0 rows after the backlog drains, the runtime's `in_flight_hashes` dedupe rejects duplicates while extraction is in progress, and the worker's status-aware skip handles already-extracted rows. Drop class - missed kicks self-heal on the next hour.
+- Handler integration tests deferred to 7-10's `extract_in_process.rs` cohort (same setup as the other planned end-to-end tests).
 
 ### phase 7-7: re-index propagation (handler-side wiring complete)
 

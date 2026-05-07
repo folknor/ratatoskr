@@ -1,8 +1,9 @@
-//! Phase 7-7: queries that ExtractRuntime uses to fan a successful
-//! extraction out into one `WriterCommand::Index` per message that
-//! references the just-indexed `content_hash`.
+//! Phase 7-7 + 7-6: queries that ExtractRuntime uses to fan a
+//! successful extraction out into one `WriterCommand::Index` per
+//! message that references the just-indexed `content_hash`, plus the
+//! 7-6 post-boot backfill query that drives the kick handler.
 //!
-//! All three functions take `&Connection` (sync); callers wrap them in
+//! All functions take `&Connection` (sync); callers wrap them in
 //! `ReadDbState::with_conn(...)` for async dispatch.
 
 use rusqlite::{Connection, params};
@@ -41,6 +42,59 @@ pub struct AttachmentFragmentRow {
     pub filename:       String,
     pub mime_type:      String,
     pub extracted_text: String,
+}
+
+/// Phase 7-6: backfill row. Identifies one cached-but-unindexed
+/// attachment for the post-boot kick to enqueue. `content_hash` is
+/// `Option` because the `attachments` schema allows NULL there;
+/// callers skip rows with no hash (the worker can't extract without
+/// one).
+#[derive(Debug, Clone)]
+pub struct UnindexedCachedAttachmentRow {
+    pub attachment_id: String,
+    pub message_id:    String,
+    pub account_id:    String,
+    pub content_hash:  Option<String>,
+}
+
+/// Phase 7-6: post-boot backfill query. Returns up to `limit`
+/// attachment rows that are cached on disk (`cached_at IS NOT NULL`)
+/// but have no extracted-text pointer yet (`text_indexed_at IS NULL`).
+/// Uses the partial `idx_attachments_text_indexed_at` index.
+///
+/// Caller (`handle_backfill_kick`) iterates the result and enqueues
+/// each into the installed `ExtractRuntime`. Idempotency is two-fold:
+/// the `in_flight_hashes` dedupe inside the runtime, and the
+/// status-aware skip inside the worker. A second kick after the first
+/// finishes returns 0 rows.
+pub fn find_unindexed_cached_attachments(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<UnindexedCachedAttachmentRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, message_id, account_id, content_hash \
+             FROM attachments \
+             WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL \
+             LIMIT ?1",
+        )
+        .map_err(|e| format!("prepare find_unindexed_cached_attachments: {e}"))?;
+    let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
+    let rows = stmt
+        .query_map(params![limit_i64], |row| {
+            Ok(UnindexedCachedAttachmentRow {
+                attachment_id: row.get::<_, String>(0)?,
+                message_id:    row.get::<_, String>(1)?,
+                account_id:    row.get::<_, String>(2)?,
+                content_hash:  row.get::<_, Option<String>>(3)?,
+            })
+        })
+        .map_err(|e| format!("query find_unindexed_cached_attachments: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row find_unindexed_cached_attachments: {e}"))?);
+    }
+    Ok(out)
 }
 
 /// Distinct `(account_id, message_id)` pairs whose `attachments` rows
@@ -212,8 +266,11 @@ mod tests {
                 PRIMARY KEY (account_id, id));\
              CREATE TABLE attachments (\
                 id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
-                filename TEXT, mime_type TEXT, content_hash TEXT);\
+                filename TEXT, mime_type TEXT, content_hash TEXT,\
+                cached_at INTEGER, text_indexed_at INTEGER);\
              CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
+             CREATE INDEX idx_attachments_text_indexed_at ON attachments(text_indexed_at)\
+                WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL;\
              CREATE TABLE attachment_extracted_text (\
                 content_hash TEXT PRIMARY KEY, mime_type TEXT,\
                 extracted_text TEXT, status TEXT NOT NULL,\
@@ -301,5 +358,50 @@ mod tests {
         assert_eq!(by_id["att1"].extracted_text, "pdf body");
         assert_eq!(by_id["att2"].extracted_text, "");
         assert_eq!(by_id["att2"].filename, "b.txt");
+    }
+
+    #[test]
+    fn unindexed_cached_attachments_filters_correctly() {
+        let conn = open_test_db();
+        conn.execute(
+            "INSERT INTO attachments \
+             (id, message_id, account_id, content_hash, cached_at, text_indexed_at) \
+             VALUES \
+             ('cached_unindexed', 'msg1', 'acc1', 'hashA', 100, NULL),\
+             ('cached_indexed',   'msg2', 'acc1', 'hashB', 100, 200),\
+             ('evicted_unindexed','msg3', 'acc1', 'hashC', NULL, NULL),\
+             ('cached_no_hash',   'msg4', 'acc1', NULL,    100, NULL)",
+            [],
+        )
+        .expect("seed");
+
+        let mut rows = find_unindexed_cached_attachments(&conn, 1000).expect("query");
+        rows.sort_by(|a, b| a.attachment_id.cmp(&b.attachment_id));
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        // cached + unindexed (with hash) - the canonical backfill row.
+        assert_eq!(rows[0].attachment_id, "cached_no_hash");
+        assert!(rows[0].content_hash.is_none());
+        assert_eq!(rows[1].attachment_id, "cached_unindexed");
+        assert_eq!(rows[1].content_hash.as_deref(), Some("hashA"));
+    }
+
+    #[test]
+    fn unindexed_cached_attachments_respects_limit() {
+        let conn = open_test_db();
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO attachments \
+                 (id, message_id, account_id, content_hash, cached_at, text_indexed_at) \
+                 VALUES (?1, ?2, 'acc1', ?3, 100, NULL)",
+                rusqlite::params![
+                    format!("att{i}"),
+                    format!("msg{i}"),
+                    format!("hash{i}"),
+                ],
+            )
+            .expect("seed");
+        }
+        let rows = find_unindexed_cached_attachments(&conn, 3).expect("query");
+        assert_eq!(rows.len(), 3);
     }
 }

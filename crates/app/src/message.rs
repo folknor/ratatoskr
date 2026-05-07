@@ -377,6 +377,14 @@ pub enum Message {
     SnoozeTick,
     SnoozeResurfaceComplete(Result<usize, String>),
 
+    /// Phase 7-6: hourly fan-out for `extract.backfill_kick`. The
+    /// Service-side handler scans `attachments WHERE cached_at IS NOT
+    /// NULL AND text_indexed_at IS NULL LIMIT 1000` and enqueues each
+    /// into the `ExtractRuntime`. Drop class - missed ticks self-heal
+    /// on the next hour. Also fired once on `ServiceBootReady` to
+    /// catch up after a Service crash mid-extraction.
+    ExtractBackfillTick,
+
     // Phase 5 task 10: GalRefreshTick / GalCacheRefreshed deleted. GAL
     // refresh now rides on `Message::SyncTick -> kick_gal_refresh`
     // (fire-and-forget IPC notification); the Service handler iterates

@@ -110,6 +110,32 @@ impl ReadyApp {
         )
     }
 
+    /// Phase 7-6: kick the Service-side attachment-text backfill.
+    ///
+    /// Service-side `handle_backfill_kick` SELECTs up to 1000 rows
+    /// from `attachments WHERE cached_at IS NOT NULL AND
+    /// text_indexed_at IS NULL` and enqueues each into the
+    /// `ExtractRuntime`. Drop class - missed kicks self-heal on the
+    /// next hourly tick. Fired once on `ServiceBootReady` (catches
+    /// up after a crash mid-extraction) and then hourly via
+    /// `Message::ExtractBackfillTick`.
+    pub(crate) fn kick_extract_backfill(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::ExtractBackfillKick)
+                    .await
+                {
+                    log::debug!("extract.backfill_kick send failed: {error}");
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
     /// Phase 5 task 10: kick the Service-side calendar sync.
     ///
     /// Replaces the deleted UI-side `sync_calendars`. The Service
