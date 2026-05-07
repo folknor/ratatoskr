@@ -10,14 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L5. `attachment.fetch` can backpressure user-facing fetch on extraction queue
-
-**Files:** `crates/service/src/handlers/attachment.rs:123`, `crates/service/src/extract.rs:53` (`COMMAND_QUEUE_CAPACITY=256`).
-
-Cache-miss path awaits `enqueue_extraction` while still holding the sweep read lock. Runtime queue is bounded at 256; on a thundering-herd backfill, the user's UI fetch can block on indexing-queue capacity. Drop class would be appropriate here (the fetch path doesn't need to wait for enqueue to succeed).
-
-**Fix:** make the enqueue from the fetch handler non-blocking - `try_send` instead of `send().await`, log on full, accept the missed enqueue (the next backfill kick will catch it).
-
 ### L6. `extract.backfill_kick` from `Message::ServiceBootReady` can race runtime install
 
 **Files:** `crates/app/src/update.rs:187`, `crates/service/src/dispatch.rs:1062` (post-ready spawn), `crates/service/src/handlers/extract.rs:144` (handler).

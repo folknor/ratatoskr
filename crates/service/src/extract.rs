@@ -190,6 +190,48 @@ impl ExtractRuntime {
         }
     }
 
+    /// L5 fix: non-blocking enqueue variant for callers that must not
+    /// stall when the worker mpsc is full. Used by `attachment.fetch`
+    /// (cache-miss / cache-hit paths) where blocking the user's UI
+    /// fetch on indexing-queue capacity is the wrong trade-off. On
+    /// queue-full or shut-down receiver, returns Ok(()) silently and
+    /// rolls back the dedupe state - the next backfill kick will
+    /// re-emit the row, so a missed enqueue self-heals on the hourly
+    /// cadence.
+    pub fn try_enqueue(&self, work: ExtractWork) -> Result<(), String> {
+        if self.inner.closed.load(Ordering::Relaxed) {
+            return Err("ExtractRuntime is shutting down".into());
+        }
+
+        let hash = work.content_hash.clone();
+        let inserted = match self.inner.in_flight_hashes.try_lock() {
+            Ok(mut set) => set.insert(hash.clone()),
+            Err(_) => {
+                // Concurrent dedupe-set lock contention; treat as
+                // "another caller is mid-enqueue" and skip.
+                return Ok(());
+            }
+        };
+        if !inserted {
+            return Ok(());
+        }
+        self.inner.queue_depth.fetch_add(1, Ordering::Relaxed);
+        match self.inner.tx.try_send(work) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                self.inner.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                if let Ok(mut hashes) = self.inner.in_flight_hashes.try_lock() {
+                    hashes.remove(&hash);
+                }
+                log::debug!(
+                    "ExtractRuntime try_enqueue: queue full or receiver dropped for {hash} \
+                     (rolled back; next backfill kick will re-emit)",
+                );
+                Ok(())
+            }
+        }
+    }
+
     /// In-memory counter snapshot for `extract.status` IPC.
     pub fn status_snapshot(&self) -> (u64, u64, u64, u64) {
         (

@@ -123,12 +123,13 @@ pub(crate) async fn handle_fetch(
             if should_enqueue_extraction(info.extraction_status.as_deref()) {
                 enqueue_extraction_if_runtime_installed(
                     boot_state,
-                    content_hash.clone(),
-                    params.account_id.clone(),
-                    params.message_id.clone(),
-                    params.attachment_id.clone(),
-                )
-                .await;
+                    crate::extract::ExtractWork {
+                        content_hash: content_hash.clone(),
+                        account_id:   params.account_id.clone(),
+                        message_id:   params.message_id.clone(),
+                        attachment_id: params.attachment_id.clone(),
+                    },
+                );
             }
             return serde_json::to_value(AttachmentFetchAck {
                 content_hash: content_hash.clone(),
@@ -205,12 +206,13 @@ pub(crate) async fn handle_fetch(
     // them via the same SWEEP_LOCK to defend against eviction.
     enqueue_extraction_if_runtime_installed(
         boot_state,
-        content_hash.clone(),
-        params.account_id.clone(),
-        params.message_id.clone(),
-        params.attachment_id.clone(),
-    )
-    .await;
+        crate::extract::ExtractWork {
+            content_hash:  content_hash.clone(),
+            account_id:    params.account_id.clone(),
+            message_id:    params.message_id.clone(),
+            attachment_id: params.attachment_id.clone(),
+        },
+    );
 
     serde_json::to_value(AttachmentFetchAck {
         content_hash,
@@ -239,33 +241,31 @@ fn should_enqueue_extraction(status: Option<&str>) -> bool {
 }
 
 /// Phase 7-5: defensive enqueue. The ExtractRuntime is installed
-/// by `spawn_post_ready_extract_startup` (deferred from 7-4d); until
-/// the production wiring lands this is a logged no-op so
-/// `attachment.fetch` still acks normally.
-async fn enqueue_extraction_if_runtime_installed(
+/// by `spawn_post_ready_extract_startup`; if it's not yet installed
+/// (boot still in flight) this is a logged no-op so `attachment.fetch`
+/// still acks normally.
+///
+/// L5 fix: uses `try_enqueue` (non-blocking) instead of the awaiting
+/// `enqueue`. attachment.fetch is on the user-facing UI critical path;
+/// blocking on the worker's bounded mpsc capacity (256) when a
+/// thundering-herd backfill is in flight could park the user's fetch
+/// for tens of minutes. A missed enqueue self-heals on the next
+/// hourly backfill kick.
+fn enqueue_extraction_if_runtime_installed(
     boot_state: &Arc<crate::boot::BootSharedState>,
-    content_hash: String,
-    account_id: String,
-    message_id: String,
-    attachment_id: String,
+    work: crate::extract::ExtractWork,
 ) {
     let Some(runtime) = boot_state.extract_runtime() else {
         log::debug!(
             "attachment.fetch: ExtractRuntime not installed; skipping enqueue \
-             for hash {content_hash} (7-4d follow-up wires production producer)"
+             for hash {} (boot in flight or shutting down)",
+            work.content_hash,
         );
         return;
     };
-    if let Err(e) = runtime
-        .enqueue(crate::extract::ExtractWork {
-            content_hash: content_hash.clone(),
-            account_id,
-            message_id,
-            attachment_id,
-        })
-        .await
-    {
-        log::debug!("attachment.fetch enqueue {content_hash}: {e}");
+    let hash_for_log = work.content_hash.clone();
+    if let Err(e) = runtime.try_enqueue(work) {
+        log::debug!("attachment.fetch try_enqueue {hash_for_log}: {e}");
     }
 }
 
