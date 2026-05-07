@@ -24,11 +24,28 @@ use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, ReloadPolicy, Ter
 /// it is shared by the Service writer and the UI reader, so the
 /// destructive rebuild path lives Service-side only.
 ///
-/// Phase 7-1 lands this constant at value 1 (matches the current schema -
-/// no attachment fields yet). Phase 7-3 bumps to 2 when the
-/// `attachment_text` / `attachment_filename` / `attachment_mime` /
-/// `attachment_id` fields land on the per-message doc.
-pub const INDEX_SCHEMA_VERSION: u32 = 1;
+/// Phase 7-1 landed this constant at value 1; phase 7-3 bumps to 2
+/// because the per-message doc now carries `attachment_text` /
+/// `attachment_filename` / `attachment_mime` / `attachment_id`
+/// multi-value fields (one per cached + extracted attachment).
+pub const INDEX_SCHEMA_VERSION: u32 = 2;
+
+/// Belt-and-suspenders boundary padding inserted between attachment
+/// values within the multi-value `attachment_text` field. Tantivy's
+/// internal `POSITION_GAP=1` puts a 2-position gap between consecutive
+/// `add_text` calls' tokens (last-of-prev to first-of-next), which
+/// already blocks slop-0 phrase queries from straddling attachment
+/// boundaries. Adding 32 boundary tokens between values defends
+/// against slop>=2 phrase queries too. The token "rtskbnd" is chosen
+/// to be unlikely-to-occur in real attachment text; a query for the
+/// literal "rtskbnd" would match every multi-attachment message,
+/// which is acceptable v1 noise (no human types this).
+///
+/// Cost: 32 * 8 bytes = 256 bytes per attachment-after-the-first per
+/// message. With up to ~10 attachments per message and 100 KB text per
+/// attachment, the boundary overhead is well under 1% of stored bytes.
+pub(crate) const ATTACHMENT_BOUNDARY_TOKEN: &str = "rtskbnd";
+pub(crate) const ATTACHMENT_BOUNDARY_REPEATS: usize = 32;
 
 // ── Schema ──────────────────────────────────────────────────────────────
 
@@ -95,12 +112,23 @@ pub fn build_schema() -> Schema {
             .set_stored(),
     );
 
+    // Phase 7: per-attachment text + metadata. Multi-value fields
+    // populated once per cached + extracted attachment per message.
+    // Indexed-not-stored on attachment_text because per-attachment
+    // snippet retrieval at search time goes through the SQLite
+    // `attachment_extracted_text` table (see phase 7-8); Tantivy only
+    // needs to know the text for matching, not for retrieval.
+    builder.add_text_field("attachment_text", text_indexed());
+    builder.add_text_field("attachment_filename", text_indexed_stored());
+    builder.add_text_field("attachment_mime", STRING | STORED);
+    builder.add_text_field("attachment_id", STRING | STORED);
+
     builder.build()
 }
 
 // ── Types ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchDocument {
     pub message_id: String,
@@ -116,6 +144,31 @@ pub struct SearchDocument {
     pub is_read: bool,
     pub is_starred: bool,
     pub has_attachment: bool,
+    /// Phase 7: per-attachment text + metadata fragments. Each
+    /// fragment becomes one `add_text` call on each of the four
+    /// `attachment_*` Tantivy fields (text, filename, mime, id) at
+    /// build_search_doc time. Provider crates default this to empty;
+    /// the writer task's apply-time enrichment (phase 7-3 §
+    /// SearchDocument construction relocation) populates it by
+    /// JOINing `attachment_extracted_text` against the message's
+    /// attachments when the writer applies the command. Sync providers
+    /// pass through thin docs; the writer fills in attachment data.
+    #[serde(default)]
+    pub attachments: Vec<AttachmentDocFragment>,
+}
+
+/// Per-attachment doc fragment. One per cached + extracted attachment
+/// per message. The four fields populate the four `attachment_*`
+/// Tantivy fields in lockstep so multi-value index ordinals align
+/// across fields - reader code can iterate them in insertion order
+/// to recover (filename, mime, id) tuples.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentDocFragment {
+    pub attachment_id:  String,
+    pub filename:       String,
+    pub mime:           String,
+    pub extracted_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +183,34 @@ pub struct SearchResult {
     pub snippet: Option<String>,
     pub date: i64,
     pub rank: f32,
+    /// Phase 7: highest-scoring single field that matched the query.
+    /// Defaults to `MatchKind::Body` until phase 7-8's per-field
+    /// snippet generator + per-attachment attribution lands.
+    #[serde(default)]
+    pub match_kind: MatchKind,
+    /// Phase 7: secondary matches above the score threshold. Empty
+    /// until phase 7-8.
+    #[serde(default)]
+    pub also_matched: Vec<MatchKind>,
+}
+
+/// Phase 7: which field a search hit matched in. Phase 7-3 lands the
+/// type with `Body` as the default; phase 7-8 populates per-result
+/// match_kind via per-field snippet generation and per-attachment
+/// attribution against `attachment_extracted_text`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MatchKind {
+    #[default]
+    Body,
+    Subject,
+    From,
+    Attachment {
+        attachment_id: String,
+        filename:      String,
+        mime:          String,
+        snippet:       String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +253,10 @@ pub struct Fields {
     pub is_read: Field,
     pub is_starred: Field,
     pub has_attachment: Field,
+    pub attachment_text: Field,
+    pub attachment_filename: Field,
+    pub attachment_mime: Field,
+    pub attachment_id: Field,
 }
 
 impl Fields {
@@ -196,6 +281,18 @@ impl Fields {
             has_attachment: schema
                 .get_field("has_attachment")
                 .expect("has_attachment field"),
+            attachment_text: schema
+                .get_field("attachment_text")
+                .expect("attachment_text field"),
+            attachment_filename: schema
+                .get_field("attachment_filename")
+                .expect("attachment_filename field"),
+            attachment_mime: schema
+                .get_field("attachment_mime")
+                .expect("attachment_mime field"),
+            attachment_id: schema
+                .get_field("attachment_id")
+                .expect("attachment_id field"),
         }
     }
 }
@@ -277,7 +374,50 @@ pub fn build_search_doc(fields: &Fields, msg: &SearchDocument) -> tantivy::Tanti
     doc.add_u64(fields.is_starred, u64::from(msg.is_starred));
     doc.add_u64(fields.has_attachment, u64::from(msg.has_attachment));
 
+    // Phase 7: per-attachment text + metadata. One add_text per
+    // attachment for each of the four attachment_* fields, ordered
+    // identically across the four so multi-value ordinals align.
+    // Boundary padding inserted into attachment_text-after-the-first
+    // pushes positions further apart so cross-boundary phrase queries
+    // (slop > 1) cannot match across attachments.
+    if !msg.attachments.is_empty() {
+        let boundary = build_boundary_string();
+        for (i, att) in msg.attachments.iter().enumerate() {
+            let text_value = if i == 0 {
+                att.extracted_text.clone()
+            } else {
+                let mut s = String::with_capacity(boundary.len() + 1 + att.extracted_text.len());
+                s.push_str(&boundary);
+                s.push(' ');
+                s.push_str(&att.extracted_text);
+                s
+            };
+            doc.add_text(fields.attachment_text, &text_value);
+            doc.add_text(fields.attachment_filename, &att.filename);
+            doc.add_text(fields.attachment_mime, &att.mime);
+            doc.add_text(fields.attachment_id, &att.attachment_id);
+        }
+    }
+
     doc
+}
+
+/// Build the boundary-token string injected between attachment text
+/// values. Computed once per call site rather than via a OnceLock to
+/// keep the search crate dependency-free of `std::sync::OnceLock`
+/// (which is fine, but the cost of building a 256-byte string is
+/// negligible).
+fn build_boundary_string() -> String {
+    let mut s = String::with_capacity(
+        ATTACHMENT_BOUNDARY_REPEATS * (ATTACHMENT_BOUNDARY_TOKEN.len() + 1),
+    );
+    for i in 0..ATTACHMENT_BOUNDARY_REPEATS {
+        if i > 0 {
+            s.push(' ');
+        }
+        s.push_str(ATTACHMENT_BOUNDARY_TOKEN);
+    }
+    s
 }
 
 // ── SearchReadState ─────────────────────────────────────────────────────────
@@ -587,6 +727,10 @@ impl SearchReadState {
                 snippet: Self::get_text(&doc, self.fields.snippet),
                 date: Self::get_date_secs(&doc, self.fields.date),
                 rank: score,
+                // Phase 7-3: default until 7-8's per-field snippet
+                // generator + per-attachment attribution lands.
+                match_kind: MatchKind::Body,
+                also_matched: Vec::new(),
             });
         }
 
@@ -634,6 +778,8 @@ mod tests {
             snippet: None,
             date: 0,
             rank,
+            match_kind: MatchKind::Body,
+            also_matched: Vec::new(),
         }
     }
 
@@ -684,4 +830,85 @@ mod tests {
     // task 4 strips writer ownership from `SearchReadState` so the
     // search-with-data tests now live alongside the writer task in
     // `crates/service/src/search_writer.rs`.
+
+    // ── Phase 7-3 verification ───────────────────────────────────────
+
+    /// Verifies the position-gap design: an `add_text` per attachment
+    /// (with boundary padding for slop>=2 defense) prevents a phrase
+    /// query whose two halves straddle two attachments from matching.
+    ///
+    /// This is the highest-impact 7-3 verification step. If Tantivy
+    /// future-version changes the per-value position-increment OR the
+    /// query parser starts defaulting to non-zero slop, this test
+    /// fails and the boundary padding constant needs revisiting.
+    #[test]
+    fn phase_7_3_attachment_boundary_blocks_cross_attachment_phrase() {
+        use tantivy::Index;
+        use tantivy::query::QueryParser;
+        use tantivy::collector::Count;
+
+        let schema = build_schema();
+        let fields = Fields::from_schema(&schema);
+        let index = Index::create_in_ram(schema.clone());
+        let mut writer: tantivy::IndexWriter = index
+            .writer(15_000_000)
+            .expect("writer");
+
+        let doc = SearchDocument {
+            message_id: "msg1".into(),
+            account_id: "acct1".into(),
+            thread_id: "t1".into(),
+            attachments: vec![
+                AttachmentDocFragment {
+                    attachment_id: "att1".into(),
+                    filename: "first.pdf".into(),
+                    mime: "application/pdf".into(),
+                    extracted_text: "the quick brown".into(),
+                },
+                AttachmentDocFragment {
+                    attachment_id: "att2".into(),
+                    filename: "second.pdf".into(),
+                    mime: "application/pdf".into(),
+                    extracted_text: "fox jumps over".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let tantivy_doc = build_search_doc(&fields, &doc);
+        writer.add_document(tantivy_doc).expect("add_document");
+        writer.commit().expect("commit");
+
+        let reader = index.reader().expect("reader");
+        let searcher = reader.searcher();
+        let qp = QueryParser::for_index(&index, vec![fields.attachment_text]);
+
+        // Phrase that straddles the boundary: "brown" is the last
+        // token of attachment 1, "fox" is the first token of
+        // attachment 2. Default slop = 0; with the boundary padding
+        // in place, the position distance is ATTACHMENT_BOUNDARY_REPEATS
+        // tokens + tantivy's own POSITION_GAP, well beyond slop=0.
+        let cross_query = qp.parse_query("\"brown fox\"").expect("parse cross");
+        let cross_count = searcher
+            .search(&cross_query, &Count)
+            .expect("search cross");
+        assert_eq!(
+            cross_count, 0,
+            "cross-attachment phrase query must NOT match (boundary padding broken?)",
+        );
+
+        // Within-attachment phrase still matches.
+        let within_query = qp.parse_query("\"the quick\"").expect("parse within");
+        let within_count = searcher
+            .search(&within_query, &Count)
+            .expect("search within");
+        assert_eq!(
+            within_count, 1,
+            "within-attachment phrase query must still match",
+        );
+
+        // Single-token from each attachment matches independently.
+        let token_query = qp.parse_query("brown").expect("parse token");
+        let token_count = searcher.search(&token_query, &Count).expect("search token");
+        assert_eq!(token_count, 1, "single-token query must still hit");
+    }
 }

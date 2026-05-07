@@ -481,6 +481,10 @@ async fn index_messages(search: &SearchWriteHandle, account_id: &str, messages: 
             is_read: m.base.is_read,
             is_starred: m.base.is_starred,
             has_attachment: m.base.has_attachments,
+            // Phase 7: provider crates emit thin docs without
+            // attachment fragments; writer task enriches at apply
+            // time (lands 7-3c).
+            attachments: Vec::new(),
         })
         .collect();
 

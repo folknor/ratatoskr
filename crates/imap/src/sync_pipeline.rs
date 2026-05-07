@@ -364,6 +364,11 @@ pub async fn index_messages(search: &SearchWriteHandle, messages: &[ConvertedMes
             is_read: m.meta.is_read,
             is_starred: m.meta.is_starred,
             has_attachment: m.meta.has_attachments,
+            // Phase 7: provider crates emit thin docs with no
+            // attachment fragments; the writer task's apply-time
+            // enrichment populates `attachments` from
+            // attachment_extracted_text in 7-3c.
+            attachments: Vec::new(),
         })
         .collect();
 
