@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M6. Index-after-Delete race during message removal
-
-**Files:** `crates/service/src/extract.rs:559-651`, `crates/service/src/search_writer.rs`.
-
-Racy sequence: extract reads `select_messages_for_index_batch` → returns msg. Concurrently sync deletes msg + sends `WriterCommand::Delete { ids: [msg] }`. Sync's Delete arrives first (mpsc FIFO). Extract emits `WriterCommand::Index { docs: [msg] }`. Writer applies Index → `delete_term` (no-op) + `add_document` → re-creates the deleted doc. The plan's "DB-write-before-Index" invariant doesn't address this: the DB write happens, the Index command happens AFTER its own DB read with stale-but-valid content. Writer FIFO doesn't enforce DB-vs-Index ordering across runtimes.
-
-**Agreement: 1/8** (claude bugs).
-
-**Fix:** at apply time, re-read DB and skip-if-deleted (overlaps with C2's writer-task DB enrichment). Or per-message generation counter that the writer rejects when older than the last Delete.
-
 ### M7. Manual palette rebuild beats schema rebuild → `.version` skipped
 
 **Files:** `crates/service/src/dispatch.rs:1149-1154`, `crates/service/src/handlers/extract.rs:48-52`.

@@ -228,6 +228,15 @@ async fn apply_command(
             // `has_attachment == false` means the message has no
             // attachment rows; no DB read needed.
             enrich_thin_docs(&mut docs, db_read).await;
+            // Phase 7 (M6 fix): drop docs whose message_id is no
+            // longer in the canonical messages table at apply time.
+            // Closes the index-after-delete race: sync emits a Delete
+            // command, then extract's fan_out_reindex emits an Index
+            // command for the same message_id; without this filter
+            // the writer would re-create the just-deleted doc via
+            // delete_term + add_document. One batched SELECT per
+            // Index command, no per-doc lookup.
+            filter_deleted_messages(&mut docs, db_read).await;
             let result = tokio::task::block_in_place(|| {
                 for doc in &docs {
                     let tantivy_doc = build_search_doc(fields, doc);
@@ -330,6 +339,76 @@ async fn commit_and_notify(
         }
     }
     commit_result.map(|_| ())
+}
+
+/// Drop docs whose `message_id` no longer exists in the `messages`
+/// table at apply time. M6 fix: Sync's Delete and Extract's Index can
+/// race for the same message_id (Sync deletes the message + emits
+/// Delete; Extract's fan_out_reindex took its DB snapshot before the
+/// delete and emits Index). Writer FIFO doesn't enforce DB-vs-Index
+/// ordering across runtimes, so a stale Index after a fresh Delete
+/// would resurrect the doc via delete_term (no-op) + add_document.
+/// Single batched SELECT message_id FROM messages WHERE message_id IN
+/// (...) - any doc whose id isn't in the result set is dropped.
+///
+/// On DB-read failure we keep all docs (degraded but not broken):
+/// false-negative Delete handling is preferable to false-positive doc
+/// drops.
+async fn filter_deleted_messages(docs: &mut Vec<search::SearchDocument>, db_read: &ReadDbState) {
+    if docs.is_empty() {
+        return;
+    }
+    let ids: Vec<String> = docs.iter().map(|d| d.message_id.clone()).collect();
+    let result = db_read
+        .with_conn(move |conn| {
+            let mut surviving: std::collections::HashSet<String> =
+                std::collections::HashSet::with_capacity(ids.len());
+            for chunk in ids.chunks(500) {
+                let placeholders: String = chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!("SELECT id FROM messages WHERE id IN ({placeholders})");
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|e| format!("prepare filter_deleted: {e}"))?;
+                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
+                    .iter()
+                    .map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(AsRef::as_ref).collect();
+                let rows = stmt
+                    .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+                    .map_err(|e| format!("query filter_deleted: {e}"))?;
+                for row in rows {
+                    surviving.insert(row.map_err(|e| format!("row filter_deleted: {e}"))?);
+                }
+            }
+            Ok::<_, String>(surviving)
+        })
+        .await;
+    let surviving = match result {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!(
+                "search_writer filter_deleted_messages: SELECT failed: {e} \
+                 (proceeding with all docs; index-after-delete race window briefly open)"
+            );
+            return;
+        }
+    };
+    let before = docs.len();
+    docs.retain(|d| surviving.contains(&d.message_id));
+    let dropped = before - docs.len();
+    if dropped > 0 {
+        log::debug!(
+            "search_writer filter_deleted_messages: dropped {dropped} docs whose message_id \
+             no longer exists in `messages` (Index-after-Delete race)"
+        );
+    }
 }
 
 /// Populate `doc.attachments` from DB for any doc where
