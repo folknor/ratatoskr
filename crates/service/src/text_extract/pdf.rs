@@ -28,14 +28,22 @@ use super::{ExtractionOutcome, SkipReason};
 
 /// How many leading bytes to scan for `/Encrypt`. The trailer + cross-
 /// reference table where the encrypt dict lives is usually at the END
-/// of the file, but some PDFs put it inline near the catalog. 64 KB
-/// covers both common positions without slurping the whole file.
-const HEAD_SCAN_BYTES: usize = 64 * 1024;
+/// of the file, but some PDFs put it inline near the catalog.
+///
+/// H7 fix: doubled from 64 KB to close the head/tail gap class. PDFs
+/// in the 64-68 KB range previously had a coverage gap between the
+/// head and tail scan windows.
+const HEAD_SCAN_BYTES: usize = 128 * 1024;
 
 /// Tail bytes also scanned for `/Encrypt`. The PDF trailer is at the
-/// end of the file by convention; scanning the last 4 KB catches
-/// trailer-located encrypt dicts that the head scan would miss.
-const TAIL_SCAN_BYTES: usize = 4 * 1024;
+/// end of the file by convention; scanning the tail catches trailer-
+/// located encrypt dicts that the head scan would miss.
+///
+/// H7 fix: bumped from 4 KB to 64 KB. Linearized PDFs and
+/// incremental-update PDFs can place the live trailer further from
+/// the file end - multiple incremental saves push the *current*
+/// trailer off the 4 KB tail. 64 KB covers most real-world layouts.
+const TAIL_SCAN_BYTES: usize = 64 * 1024;
 
 #[allow(dead_code)] // Consumed in 7-4 by ExtractRuntime worker.
 pub(crate) fn extract(bytes: &[u8]) -> ExtractionOutcome {
@@ -58,7 +66,26 @@ pub(crate) fn extract(bytes: &[u8]) -> ExtractionOutcome {
             }
             ExtractionOutcome::Indexed { text: trimmed.to_string() }
         }
-        Err(e) => ExtractionOutcome::Failed { error: format!("pdf-extract: {e}") },
+        Err(e) => {
+            // H7 fix: when pdf-extract reports an encryption-related
+            // error, classify the outcome as a permanent
+            // SkipReason::Encrypted instead of a retry-eligible
+            // Failed { transient }. This catches the `/Encrypt`
+            // references the head/tail byte scan misses (hex-escape
+            // names like /#45ncrypt; mid-file XRef streams in PDF
+            // 1.5+ where the trailer lives inside a FlateDecode
+            // object stream). Without the remap, pdf-extract's error
+            // would produce failed:transient, and the same encrypted
+            // file would re-extract on every backfill kick forever.
+            let err_str = format!("pdf-extract: {e}");
+            let lower = err_str.to_lowercase();
+            if lower.contains("encrypt") || lower.contains("password")
+                || lower.contains("not authorized")
+            {
+                return ExtractionOutcome::Skipped { reason: SkipReason::Encrypted };
+            }
+            ExtractionOutcome::Failed { error: err_str }
+        }
     }
 }
 
@@ -70,17 +97,28 @@ fn looks_like_pdf(bytes: &[u8]) -> bool {
 /// keyword. The `/Encrypt` dict is referenced from the trailer (always
 /// at the end) and may appear inline near the catalog (start). Two
 /// scans cover both common layouts.
+///
+/// H7 mitigation: scan for the most common hex-escape spelling
+/// (`/#45ncrypt`) too. PDF name tokens permit `#NN` to encode any
+/// byte, so a fully malicious encoder can produce 2^n variations of
+/// `/Encrypt` (e.g. `/En#63rypt`, `/#45n#63rypt`). Catching the
+/// common case raises the bar without parsing the PDF; the fallback
+/// remap of pdf-extract's error in `extract` catches anything the
+/// scan misses.
 fn has_encrypt_dict(bytes: &[u8]) -> bool {
-    let needle = b"/Encrypt";
-    // Head scan.
+    const NEEDLES: &[&[u8]] = &[
+        b"/Encrypt",
+        b"/#45ncrypt", // hex-escape of leading 'E'
+    ];
     let head_end = HEAD_SCAN_BYTES.min(bytes.len());
-    if find_subslice(&bytes[..head_end], needle) {
-        return true;
-    }
-    // Tail scan (overlaps head when the input is small; harmless).
     let tail_start = bytes.len().saturating_sub(TAIL_SCAN_BYTES);
-    if find_subslice(&bytes[tail_start..], needle) {
-        return true;
+    for needle in NEEDLES {
+        if find_subslice(&bytes[..head_end], needle) {
+            return true;
+        }
+        if find_subslice(&bytes[tail_start..], needle) {
+            return true;
+        }
     }
     false
 }

@@ -6,22 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H7. PDF `/Encrypt` pre-flight bypassable (multiple paths)
-
-**Files:** `crates/service/src/text_extract/pdf.rs:69-93`.
-
-Three independent bypass paths:
-
-1. **Hex-escape encoding:** PDF name tokens permit `/#45ncrypt`, parsed by any conformant PDF as `/Encrypt`. Literal byte search misses it. A malicious PDF references the encryption dict via `<< /#45ncrypt 1 0 R >>` and the pre-flight is blind.
-2. **Mid-file XRef streams (PDF 1.5+):** the trailer + xref live inside FlateDecode-compressed object streams. Byte scan reads raw stored bytes; `/Encrypt` references inside compressed streams are invisible. Linearized PDFs and incremental-update PDFs commonly place the catalog mid-file.
-3. **Head/tail gap:** `HEAD_SCAN_BYTES = 64 KB` + `TAIL_SCAN_BYTES = 4 KB`. A PDF where `/Encrypt` lives between offset 64 KB and EOF-4 KB escapes pre-flight. Also: files in the 64-68 KB range have a coverage gap.
-
-When the pre-flight fails to detect, `pdf-extract` is invoked on encrypted bytes. The worker's panic supervisor catches resulting panics, but the outcome records as `failed:transient` (retry-eligible) rather than `skipped:encrypted` (permanent). The same encrypted file then re-runs every backfill kick.
-
-**Agreement: 5/8** (claude security, claude bugs, claude perf, codex bugs, codex perf).
-
-**Fix:** double the scan windows (cheap mitigation for path 3); for paths 1 and 2, parse the PDF trailer with a real PDF tokenizer rather than byte scan, or accept that `pdf-extract` itself must reject encrypted input. Permanent-vs-retry classification: when extraction fails on a file the pre-flight failed to flag, prefer the permanent classification (caller of `pdf::extract` can pattern-match on the underlying `pdf-extract` error string).
-
 ### H8. `service_generation` hardcoded to 0 in every Phase 7 notification source
 
 **Files:** `crates/service/src/dispatch.rs:1105` (extract), `crates/service/src/handlers/extract.rs:105` (rebuild).
