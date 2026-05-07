@@ -3,6 +3,7 @@ pub mod actions;
 mod attachment_lock;
 mod boot;
 mod boot_progress;
+mod extract;
 pub(crate) mod cal_actions;
 pub(crate) mod calendar;
 mod draft_wal;
