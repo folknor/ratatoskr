@@ -6,16 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H6. `spawn_blocking` thread leak under malicious payloads
-
-**Files:** `crates/service/src/extract.rs:217-231` (shutdown), `:253` (per-item spawn), `:458-482` (timeout wrapping).
-
-`run_extraction_pipeline` wraps `spawn_blocking` in `tokio::time::timeout(30s)`. On timeout, the JoinHandle drops but the blocking-pool thread keeps running with the up-to-50-MB `bytes` Vec moved into it. `pdf-extract` and `quick-xml` are not interrupt-safe: a crafted PDF with pathological CMap/font tables or a docx with deeply-nested groups can keep the blocking thread CPU-pegged for minutes. The worker's semaphore is released on timeout, so new work spawns more blocking threads - bounded only by tokio's default 512-thread blocking-pool ceiling. Memory: 4 simultaneous in-flight + N abandoned-but-running × up to 50 MB bytes each. The doc-comment at `extract.rs:209-216` honestly notes "thread continues to completion ... result is discarded" but doesn't quantify the ceiling.
-
-**Agreement: 4/8** (claude bugs, claude security, codex bugs, codex perf).
-
-**Fix surface:** hard input-size cap on PDF specifically (lower than 50 MB), or run the extractor in a child process with a SIGKILL deadline (the only correct answer for adversarial inputs). Tighter `WORKER_CONCURRENCY` lower-bound + per-class soft limit is a stop-gap.
-
 ### H7. PDF `/Encrypt` pre-flight bypassable (multiple paths)
 
 **Files:** `crates/service/src/text_extract/pdf.rs:69-93`.

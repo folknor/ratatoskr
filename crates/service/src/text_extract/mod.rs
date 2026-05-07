@@ -48,6 +48,21 @@ pub(crate) mod plain;
 /// Cap on input bytes. Files larger than this skip extraction entirely.
 pub(crate) const MAX_INPUT_BYTES: usize = 50 * 1024 * 1024;
 
+/// Tighter cap for PDF specifically. H6 mitigation: `pdf-extract` can
+/// CPU-peg a tokio blocking-pool thread on adversarial inputs
+/// (pathological CMap / font tables, deeply-nested object graphs) for
+/// minutes. The 30 s `tokio::time::timeout` wrapping the
+/// `spawn_blocking` only releases the outer future - the underlying
+/// thread continues to completion with the captured `Vec<u8>`. Per-
+/// thread byte resident is bounded by the input size, so capping PDF
+/// input below the global ceiling reduces the worst-case heap
+/// footprint of a thundering-herd of leaked timeout threads. 20 MB
+/// covers typical real-world PDF email attachments (single-message
+/// invoices, contracts, scans); larger PDFs are rare in mail flow and
+/// the sub-process extractor design (the principled answer) is parked
+/// for a future phase.
+pub(crate) const PDF_MAX_INPUT_BYTES: usize = 20 * 1024 * 1024;
+
 /// Cap on extracted text post-extraction. Truncate to this many bytes
 /// on a UTF-8 char boundary. Bounds DB row size + Tantivy heap pressure.
 pub(crate) const MAX_EXTRACTED_TEXT_BYTES: usize = 100 * 1024;
@@ -240,7 +255,15 @@ pub(crate) fn extract(bytes: &[u8], mime: &str, filename: &str) -> ExtractionOut
     if bytes.len() > MAX_INPUT_BYTES {
         return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
     }
-    let outcome = match canonicalize_mime(mime, filename) {
+    let mime_canonical = canonicalize_mime(mime, filename);
+    // H6 mitigation: tighter pre-extract cap for PDF specifically.
+    // pdf-extract is uncancellable inside spawn_blocking; capping
+    // input bytes lower than the global ceiling bounds the worst-case
+    // heap footprint of leaked timeout threads.
+    if mime_canonical == Mime::Pdf && bytes.len() > PDF_MAX_INPUT_BYTES {
+        return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
+    }
+    let outcome = match mime_canonical {
         Mime::Pdf       => pdf::extract(bytes),
         Mime::Docx      => ooxml::extract_docx(bytes),
         Mime::Xlsx      => ooxml::extract_xlsx(bytes),
