@@ -9,6 +9,27 @@ use tantivy::schema::{
 };
 use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, ReloadPolicy, Term};
 
+// ── Schema version sentinel ─────────────────────────────────────────────
+
+/// Persisted at `<app_data>/search_index/.version`. Bumped when the
+/// per-message Tantivy doc shape changes meaningfully:
+///   - new field added to `build_schema()` -> bump (forces re-index of all
+///     messages so the new field is populated).
+///   - extractor output format changes -> bump (forces re-extraction of
+///     all attachments so re-indexed docs reflect the new text).
+///
+/// The Service-side `boot::check_schema_version_and_dispatch` compares the
+/// persisted value against this constant and dispatches a rebuild when
+/// they differ. `open_or_create_search_index` is unaware of the version -
+/// it is shared by the Service writer and the UI reader, so the
+/// destructive rebuild path lives Service-side only.
+///
+/// Phase 7-1 lands this constant at value 1 (matches the current schema -
+/// no attachment fields yet). Phase 7-3 bumps to 2 when the
+/// `attachment_text` / `attachment_filename` / `attachment_mime` /
+/// `attachment_id` fields land on the per-message doc.
+pub const INDEX_SCHEMA_VERSION: u32 = 1;
+
 // ── Schema ──────────────────────────────────────────────────────────────
 
 fn text_indexed_stored() -> TextOptions {

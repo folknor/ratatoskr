@@ -152,11 +152,44 @@ CREATE TABLE IF NOT EXISTS attachments (
     cached_at INTEGER,
     cache_size INTEGER,
     content_hash TEXT,
+    -- Phase 7: pointer to attachment_extracted_text.extracted_at for the
+    -- row keyed by content_hash. NULL means "not yet extracted." Backfill
+    -- scan filters cached_at IS NOT NULL AND text_indexed_at IS NULL so
+    -- evicted-but-still-referenced rows do not churn the queue.
+    text_indexed_at INTEGER,
     FOREIGN KEY (account_id, message_id) REFERENCES messages(account_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(account_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_cid ON attachments(content_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_content_hash ON attachments(content_hash);
+-- Phase 7: backfill scan target. Partial index keeps it tiny.
+CREATE INDEX IF NOT EXISTS idx_attachments_text_indexed_at
+    ON attachments(text_indexed_at)
+    WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL;
+
+-- Phase 7: attachment text extraction store, keyed by content_hash so two
+-- attachments with identical bytes share one row and so the row survives
+-- attachment-cache eviction (eviction nulls local_path/cached_at/cache_size
+-- but keeps content_hash). status taxonomy (string-tagged so future-
+-- extensible without enum migration):
+--   permanent (no retry): 'indexed', 'skipped:opaque', 'skipped:encrypted',
+--     'skipped:oversize', 'skipped:encoding', 'skipped:empty',
+--     'skipped:ocr', 'skipped:unknown_mime', 'skipped:privacy',
+--     'skipped:zipbomb'.
+--   retry-eligible: 'failed:transient', 'skipped:bytes_gone',
+--     'skipped:timeout'.
+-- Worker pre-flight skips only on permanent statuses; retry-eligible rows
+-- re-extract on next enqueue.
+CREATE TABLE IF NOT EXISTS attachment_extracted_text (
+    content_hash    TEXT PRIMARY KEY,
+    mime_type       TEXT,
+    extracted_text  TEXT,
+    status          TEXT NOT NULL,
+    extracted_at    INTEGER NOT NULL,
+    schema_version  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachment_extracted_text_schema_version
+    ON attachment_extracted_text(schema_version);
 
 CREATE TABLE IF NOT EXISTS cloud_attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

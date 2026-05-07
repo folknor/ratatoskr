@@ -793,6 +793,21 @@ async fn run_boot_sequence_inner(
         })?;
 
     boot_progress::emit(&out_tx, BootPhase::OpeningSearchIndex, None);
+
+    // Phase 7-1: schema-version sentinel. Compare the persisted
+    // `<search_index>/.version` to the `search::INDEX_SCHEMA_VERSION`
+    // constant. Phase 7-1 lands as a stub that just persists the current
+    // version on absent or mismatch; phase 7-9 replaces this with the
+    // dual-index PreserveExisting dispatch that opens
+    // `<search_index_next>/` adjacent to the legacy index, keeps reads
+    // serving against the legacy index until catch-up completes, then
+    // atomic-swaps. Called BEFORE the writer spawn so the (future)
+    // dispatch can route writes to the right directory.
+    if let Err(e) = check_schema_version_and_dispatch(&app_data_dir) {
+        log::error!("search schema-version check failed: {e}");
+        return Err(BootFailure::MigrationFailure);
+    }
+
     let notification_tx = boot_progress::NotificationSender::new(out_tx.clone());
     let (search_write, search_writer_handle) =
         match crate::search_writer::spawn(&app_data_dir, notification_tx.clone(), 0) {
@@ -1055,6 +1070,66 @@ fn open_db_and_migrate(
     })
 }
 
+/// Phase 7-1 stub. Compares the persisted `<search_index>/.version` to
+/// `search::INDEX_SCHEMA_VERSION`; on absent or mismatch, persists the
+/// current version. Phase 7-9 replaces the stub with the dual-index
+/// PreserveExisting dispatch (open `<search_index_next>/`, route writes
+/// there, atomic-swap when caught up) plus an explicit-rebuild path for
+/// the palette command.
+///
+/// **Sentinel-write ordering note**: this stub writes the `.version` file
+/// without a corresponding `Index::create_in_dir` succeeding first, which
+/// is acceptable in 7-1 because there is no destructive op to crash
+/// against. Phase 7-9 will pin the write to *after* successful index
+/// creation so a mid-rebuild crash leaves the new index incomplete with
+/// no `.version` (next boot detects "fresh `next/`" and rebuilds from
+/// scratch) rather than a `.version` pointing at a half-built index.
+pub(crate) fn check_schema_version_and_dispatch(
+    app_data_dir: &std::path::Path,
+) -> Result<(), String> {
+    let index_dir = app_data_dir.join("search_index");
+    std::fs::create_dir_all(&index_dir)
+        .map_err(|e| format!("create_dir_all {}: {e}", index_dir.display()))?;
+    let version_path = index_dir.join(".version");
+
+    let stored: Option<u32> = match std::fs::read_to_string(&version_path) {
+        Ok(s) => s.trim().parse::<u32>().ok(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("read {}: {e}", version_path.display())),
+    };
+
+    match stored {
+        None => {
+            log::info!(
+                "search index .version absent; writing current version {}",
+                search::INDEX_SCHEMA_VERSION
+            );
+            write_search_index_version(&version_path)?;
+        }
+        Some(v) if v == search::INDEX_SCHEMA_VERSION => {
+            log::debug!("search index .version matches current ({v})");
+        }
+        Some(v) => {
+            // Phase 7-1 stub. Phase 7-9 will dispatch into the dual-index
+            // PreserveExisting rebuild here. For now, just overwrite the
+            // version - the rebuild work is deferred.
+            log::warn!(
+                "search index .version mismatch: stored={v}, current={}. \
+                 Overwriting (dispatch stubbed until phase 7-9).",
+                search::INDEX_SCHEMA_VERSION
+            );
+            write_search_index_version(&version_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_search_index_version(path: &std::path::Path) -> Result<(), String> {
+    std::fs::write(path, search::INDEX_SCHEMA_VERSION.to_string())
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,5 +1243,51 @@ mod tests {
             .expect("result mutex")
             .clone();
         assert!(matches!(got_result, Some(Ok(_))));
+    }
+
+    /// Phase 7-1: schema-version sentinel writes the current version on a
+    /// fresh app-data directory (absent `.version` file) and is a no-op on
+    /// a subsequent boot at the same version. A mismatch case overwrites
+    /// (until phase 7-9 lands the dual-index dispatch).
+    #[test]
+    fn check_schema_version_writes_on_absent_and_no_ops_on_match() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let app_data = tmp.path();
+        let version_path = app_data.join("search_index").join(".version");
+
+        // First call: file is absent, function writes the current version.
+        check_schema_version_and_dispatch(app_data).expect("first call");
+        let stored = std::fs::read_to_string(&version_path).expect("read .version");
+        assert_eq!(
+            stored.trim(),
+            search::INDEX_SCHEMA_VERSION.to_string(),
+            "first call must persist current version"
+        );
+
+        // Second call: file matches; function is a no-op (file mtime is a
+        // weak signal, so we just assert the contents are still the same).
+        check_schema_version_and_dispatch(app_data).expect("second call");
+        let stored2 = std::fs::read_to_string(&version_path).expect("read .version");
+        assert_eq!(stored2, stored, "second call must not change the file");
+    }
+
+    #[test]
+    fn check_schema_version_overwrites_on_mismatch() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let app_data = tmp.path();
+        let index_dir = app_data.join("search_index");
+        std::fs::create_dir_all(&index_dir).expect("create index_dir");
+        let version_path = index_dir.join(".version");
+
+        // Seed a deliberately wrong version.
+        std::fs::write(&version_path, "999").expect("seed .version");
+
+        check_schema_version_and_dispatch(app_data).expect("dispatch");
+        let stored = std::fs::read_to_string(&version_path).expect("read .version");
+        assert_eq!(
+            stored.trim(),
+            search::INDEX_SCHEMA_VERSION.to_string(),
+            "mismatch must be overwritten with current version"
+        );
     }
 }

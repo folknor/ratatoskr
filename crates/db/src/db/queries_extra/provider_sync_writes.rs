@@ -85,11 +85,19 @@ pub fn recompute_thread_read_starred(
 // attachments table
 // ---------------------------------------------------------------------------
 
-/// Cached-attachment lookup result for a single attachments row.
+/// Cached-attachment lookup result for a single attachments row. Phase 7
+/// added `text_indexed_at` (per-row pointer to the matching
+/// `attachment_extracted_text.extracted_at`) and `extraction_status` (from
+/// the joined `attachment_extracted_text` row, NULL if no row exists yet).
+/// `attachment.fetch`'s cache-hit path consults `extraction_status` to
+/// decide whether to enqueue extraction: NULL or retry-eligible -> enqueue;
+/// permanent (`'indexed'` / `'skipped:<permanent>'`) -> skip.
 pub struct AttachmentCacheInfo {
     pub id: String,
     pub content_hash: Option<String>,
     pub mime_type: Option<String>,
+    pub text_indexed_at: Option<i64>,
+    pub extraction_status: Option<String>,
 }
 
 /// Look up an attachment's cache info by message + provider-agnostic remote
@@ -102,10 +110,11 @@ pub fn find_attachment_cache_info(
 ) -> Result<Option<AttachmentCacheInfo>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, content_hash, mime_type \
-             FROM attachments \
-             WHERE account_id = ?1 AND message_id = ?2 \
-               AND (gmail_attachment_id = ?3 OR imap_part_id = ?3) \
+            "SELECT a.id, a.content_hash, a.mime_type, a.text_indexed_at, t.status AS extraction_status \
+             FROM attachments a \
+             LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash \
+             WHERE a.account_id = ?1 AND a.message_id = ?2 \
+               AND (a.gmail_attachment_id = ?3 OR a.imap_part_id = ?3) \
              LIMIT 1",
         )
         .map_err(|e| format!("find_attachment_cache_info prepare: {e}"))?;
@@ -118,6 +127,8 @@ pub fn find_attachment_cache_info(
                     id: row.get("id")?,
                     content_hash: row.get("content_hash")?,
                     mime_type: row.get("mime_type")?,
+                    text_indexed_at: row.get("text_indexed_at")?,
+                    extraction_status: row.get("extraction_status")?,
                 })
             },
         )
