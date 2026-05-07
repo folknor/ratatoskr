@@ -44,6 +44,7 @@ mod tasks;
 pub mod account_sync_writes;
 pub mod provider_sync_writes;
 pub mod calendar_contacts_writes;
+pub mod extract_reindex;
 
 pub use action_helpers::*;
 pub use accounts_crud::*;
@@ -86,6 +87,7 @@ pub use tasks::*;
 pub use account_sync_writes::*;
 pub use provider_sync_writes::*;
 pub use calendar_contacts_writes::*;
+pub use extract_reindex::*;
 
 pub(super) fn dynamic_update(
     conn: &Connection,

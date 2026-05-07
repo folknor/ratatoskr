@@ -3,26 +3,25 @@
 // callers land in the next slice.
 #![allow(dead_code)]
 
-//! Phase 7-4c: ExtractRuntime - Service-side text-extraction worker.
+//! Phase 7-4c / 7-7: ExtractRuntime - Service-side text-extraction
+//! worker.
 //!
 //! Runtime owns the work queue + bounded-concurrency semaphore +
 //! enqueue-dedupe HashSet + counters. The worker pops items, runs the
 //! mime-routed extractor inside `tokio::task::spawn_blocking` with a
 //! 30 s wallclock cap, persists the result to
-//! `attachment_extracted_text`, and sets `attachments.text_indexed_at`
-//! for every row referencing the same content_hash.
+//! `attachment_extracted_text`, sets `attachments.text_indexed_at` for
+//! every row referencing the same content_hash, and (7-7) fans out
+//! `WriterCommand::Index` for every message whose attachment list
+//! changed.
 //!
-//! ## What 7-4c does NOT do
+//! ## What this module does NOT do
 //!
-//! - **Re-index emission**: 7-4c does not yet emit
-//!   `WriterCommand::Index` for messages whose attachments newly
-//!   indexed. Phase 7-7 wires the search-writer fan-out. The DB
-//!   state (`attachment_extracted_text` row + `text_indexed_at`)
-//!   IS updated in 7-4c, so a future re-index reads canonical state.
 //! - **Boot wiring**: ExtractRuntime is constructed but only via tests
-//!   in 7-4c. The next slice (7-4d) wires construction into
-//!   dispatch.rs's post-ready startup path and drain integration into
-//!   lifecycle.rs.
+//!   today. The deferred 7-4d producer in `dispatch.rs` will pass
+//!   clones of the boot-installed `SearchWriteHandle` and a
+//!   `BodyStoreReadState` opened against `app_data_dir` into
+//!   `ExtractRuntime::new`.
 //! - **Cancellation budget**: `spawn_blocking` is uncancellable.
 //!   Drain abandons in-flight extractions; idempotent backfill resumes
 //!   from the dropped work next boot. Drain budget is for queue
@@ -33,8 +32,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use search::{AttachmentDocFragment, SearchDocument};
 use service_api::{ExtractCompleted, ExtractProgress, Notification};
-use service_state::WriteDbState;
+use service_state::{SearchWriteHandle, WriteDbState};
+use store::body_store::BodyStoreReadState;
 use tokio::sync::{Mutex, Semaphore, mpsc};
 
 use crate::attachment_lock::SWEEP_LOCK;
@@ -71,6 +72,17 @@ pub(crate) struct ExtractRuntimeInner {
     app_data_dir: PathBuf,
     notification_tx: NotificationSender,
     service_generation: u32,
+    /// Phase 7-7: producer-side enrichment. After a successful
+    /// extraction the worker reads canonical DB state for every
+    /// message referencing the just-indexed `content_hash`, builds a
+    /// fresh `SearchDocument` (body fields from `body_read`,
+    /// scalar/attachment fields from `db`), and emits a single
+    /// `WriterCommand::Index` via this handle. Sync's `Index` commands
+    /// continue to emit thin docs with `attachments: Vec::new()`; this
+    /// runtime is the only path that puts attachment text into the
+    /// search index.
+    search_write: SearchWriteHandle,
+    body_read: BodyStoreReadState,
     /// Work-queue depth + in-flight extractions count. Decrements when
     /// a work item is fully processed (success or failure). When this
     /// reaches zero AND the queue receiver is empty we emit
@@ -93,6 +105,8 @@ impl ExtractRuntime {
     pub fn new(
         db: WriteDbState,
         app_data_dir: PathBuf,
+        search_write: SearchWriteHandle,
+        body_read: BodyStoreReadState,
         notification_tx: NotificationSender,
         service_generation: u32,
     ) -> Self {
@@ -105,6 +119,8 @@ impl ExtractRuntime {
             app_data_dir,
             notification_tx,
             service_generation,
+            search_write,
+            body_read,
             queue_depth: AtomicU64::new(0),
             indexed_count: AtomicU64::new(0),
             skipped_count: AtomicU64::new(0),
@@ -222,6 +238,10 @@ async fn process_one(inner: Arc<ExtractRuntimeInner>, work: ExtractWork) {
     match outcome {
         ExtractionOutcome::Indexed { .. } => {
             inner.indexed_count.fetch_add(1, Ordering::Relaxed);
+            // Phase 7-7: re-index every message that references this
+            // hash. Failures here log but do not retry; DB state is
+            // idempotent and a future enqueue can re-emit.
+            fan_out_reindex(&inner, &work.content_hash).await;
         }
         ExtractionOutcome::Skipped { .. } => {
             inner.skipped_count.fetch_add(1, Ordering::Relaxed);
@@ -471,6 +491,111 @@ async fn persist_outcome_row(
     }
 }
 
+/// Phase 7-7: re-index every message that references the just-indexed
+/// `content_hash`. Reads canonical DB state (messages + attachments +
+/// extracted-text join) and the body store, builds a fresh
+/// `SearchDocument` per message, and emits a single
+/// `WriterCommand::Index` for the batch.
+///
+/// Failures here log a warning but do not retry: the
+/// `attachment_extracted_text` row + `text_indexed_at` UPDATE are
+/// already committed, so a future enqueue of the same hash (or a
+/// `extract.backfill_kick`) sees canonical state and re-emits.
+async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
+    let hash = content_hash.to_string();
+    let pairs_result = inner
+        .db
+        .to_read_state()
+        .with_conn(move |conn| {
+            db::db::queries_extra::find_message_ids_referencing_content_hash(conn, &hash)
+        })
+        .await;
+    let pairs = match pairs_result {
+        Ok(p) if p.is_empty() => {
+            log::debug!("fan_out_reindex {content_hash}: no messages reference this hash");
+            return;
+        }
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("fan_out_reindex {content_hash}: find_message_ids: {e}");
+            return;
+        }
+    };
+
+    let pairs_for_msgs = pairs.clone();
+    let pairs_for_atts = pairs.clone();
+    let messages_fut = inner.db.with_conn(move |conn| {
+        db::db::queries_extra::select_messages_for_index_batch(conn, &pairs_for_msgs)
+    });
+    let attachments_fut = inner.db.with_conn(move |conn| {
+        db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs_for_atts)
+    });
+    let message_ids: Vec<String> = pairs.iter().map(|(_, m)| m.clone()).collect();
+    let bodies_fut = inner.body_read.get_batch(message_ids);
+
+    let (messages, mut fragments, bodies) =
+        match tokio::join!(messages_fut, attachments_fut, bodies_fut) {
+            (Ok(m), Ok(a), Ok(b)) => (m, a, b),
+            (m, a, b) => {
+                log::warn!(
+                    "fan_out_reindex {content_hash}: query failure (messages: {:?}, attachments: {:?}, bodies: {:?})",
+                    m.as_ref().err(),
+                    a.as_ref().err(),
+                    b.as_ref().err(),
+                );
+                return;
+            }
+        };
+
+    // Index the bodies by message_id for cheap lookup.
+    let mut body_by_mid: std::collections::HashMap<String, Option<String>> =
+        std::collections::HashMap::with_capacity(bodies.len());
+    for b in bodies {
+        body_by_mid.insert(b.message_id, b.body_text);
+    }
+
+    let mut docs: Vec<SearchDocument> = Vec::with_capacity(messages.len());
+    for m in messages {
+        let key = (m.account_id.clone(), m.message_id.clone());
+        let attachment_rows = fragments.remove(&key).unwrap_or_default();
+        let has_attachment = !attachment_rows.is_empty();
+        let attachments: Vec<AttachmentDocFragment> = attachment_rows
+            .into_iter()
+            .map(|r| AttachmentDocFragment {
+                attachment_id:  r.attachment_id,
+                filename:       r.filename,
+                mime:           r.mime_type,
+                extracted_text: r.extracted_text,
+            })
+            .collect();
+        let body_text = body_by_mid.remove(&m.message_id).unwrap_or(None);
+        docs.push(SearchDocument {
+            message_id: m.message_id,
+            account_id: m.account_id,
+            thread_id: m.thread_id,
+            subject: m.subject,
+            from_name: m.from_name,
+            from_address: m.from_address,
+            to_addresses: m.to_addresses,
+            body_text,
+            snippet: m.snippet,
+            date: m.date,
+            is_read: m.is_read,
+            is_starred: m.is_starred,
+            has_attachment,
+            attachments,
+        });
+    }
+
+    if docs.is_empty() {
+        log::debug!("fan_out_reindex {content_hash}: pairs resolved but no messages found");
+        return;
+    }
+    if let Err(e) = inner.search_write.index_messages_batch(docs).await {
+        log::warn!("fan_out_reindex {content_hash}: index_messages_batch: {e}");
+    }
+}
+
 /// Status strings that signal "do not retry on next enqueue."
 fn is_permanent_status(status: &str) -> bool {
     matches!(
@@ -491,6 +616,25 @@ fn is_permanent_status(status: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use service_state::WriterCommand;
+    use tempfile::TempDir;
+
+    /// Build a `BodyStoreReadState` against a fresh tempdir; returns the
+    /// dir guard so the caller can keep it alive for the lifetime of
+    /// the test.
+    fn body_read_in_tempdir() -> (BodyStoreReadState, TempDir) {
+        let tmp = TempDir::new().expect("tempdir");
+        let body_read = BodyStoreReadState::init(tmp.path()).expect("body store init");
+        (body_read, tmp)
+    }
+
+    /// Build an unused search-write handle whose receiver is held by
+    /// the caller. Tests that don't exercise the writer drop the
+    /// receiver immediately; tests that do keep it.
+    fn dummy_search_write() -> (SearchWriteHandle, mpsc::Receiver<WriterCommand>) {
+        let (tx, rx) = mpsc::channel::<WriterCommand>(8);
+        (SearchWriteHandle::from_sender(tx), rx)
+    }
 
     #[tokio::test]
     async fn enqueue_after_shutdown_returns_err() {
@@ -501,9 +645,13 @@ mod tests {
         let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
+        let (search_write, _search_rx) = dummy_search_write();
+        let (body_read, _body_dir) = body_read_in_tempdir();
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),
+            search_write,
+            body_read,
             notification_tx,
             0,
         );
@@ -537,9 +685,13 @@ mod tests {
         let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
+        let (search_write, _search_rx) = dummy_search_write();
+        let (body_read, _body_dir) = body_read_in_tempdir();
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),
+            search_write,
+            body_read,
             notification_tx,
             0,
         );
@@ -555,6 +707,150 @@ mod tests {
         let result = runtime.enqueue(work).await;
         assert!(result.is_ok(), "dedupe path should be Ok no-op");
         assert_eq!(runtime.status_snapshot().0, 0, "queue_depth should not increment on dedupe");
+        runtime.shutdown();
+    }
+
+    /// Phase 7-7: build a runtime whose DB has one message + one
+    /// attachment + one indexed extracted-text row, invoke
+    /// `fan_out_reindex` directly, and assert the resulting
+    /// `WriterCommand::Index` carries the doc with the attachment's
+    /// extracted text inlined.
+    #[tokio::test]
+    async fn phase_7_7_indexed_outcome_emits_writer_command_index() {
+        let conn = rusqlite::Connection::open_in_memory().expect("conn");
+        conn.execute_batch(
+            "CREATE TABLE messages (\
+                id TEXT NOT NULL, account_id TEXT NOT NULL, thread_id TEXT NOT NULL,\
+                from_address TEXT, from_name TEXT, to_addresses TEXT,\
+                subject TEXT, snippet TEXT, date INTEGER NOT NULL,\
+                is_read INTEGER DEFAULT 0, is_starred INTEGER DEFAULT 0,\
+                PRIMARY KEY (account_id, id));\
+             CREATE TABLE attachments (\
+                id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
+                filename TEXT, mime_type TEXT, content_hash TEXT);\
+             CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
+             CREATE TABLE attachment_extracted_text (\
+                content_hash TEXT PRIMARY KEY, mime_type TEXT,\
+                extracted_text TEXT, status TEXT NOT NULL,\
+                extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
+        ).expect("schema");
+        conn.execute(
+            "INSERT INTO messages (id, account_id, thread_id, subject, from_name,\
+                from_address, to_addresses, snippet, date, is_read, is_starred) \
+             VALUES ('msg1', 'acc1', 'thr1', 'Quarterly report', 'Alice', \
+                     'a@example.com', 'b@example.com', 'snip', 1700000000, 0, 1)",
+            [],
+        ).expect("insert msg");
+        conn.execute(
+            "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, content_hash) \
+             VALUES ('att1', 'msg1', 'acc1', 'report.pdf', 'application/pdf', 'hashA')",
+            [],
+        ).expect("insert att");
+        conn.execute(
+            "INSERT INTO attachment_extracted_text \
+             (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
+             VALUES ('hashA', 'application/pdf', 'pdf full text body', 'indexed', 1, 2)",
+            [],
+        ).expect("insert ext");
+
+        let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
+        let notification_tx = NotificationSender::new(tx);
+        let (search_write, mut search_rx) = dummy_search_write();
+        let (body_read, _body_dir) = body_read_in_tempdir();
+        let runtime = ExtractRuntime::new(
+            db,
+            std::path::PathBuf::from("."),
+            search_write,
+            body_read,
+            notification_tx,
+            0,
+        );
+
+        // `fan_out_reindex` sends a command and awaits its oneshot ack
+        // before returning, so we must drive it concurrently with the
+        // receiver that supplies the ack.
+        let inner_for_task = Arc::clone(&runtime.inner);
+        let extract_task = tokio::spawn(async move {
+            fan_out_reindex(&inner_for_task, "hashA").await;
+        });
+
+        let cmd = search_rx.recv().await.expect("writer command");
+        match cmd {
+            WriterCommand::Index { docs, ack } => {
+                let _ = ack.send(Ok(()));
+                assert_eq!(docs.len(), 1, "one doc per referenced message");
+                let doc = &docs[0];
+                assert_eq!(doc.message_id, "msg1");
+                assert_eq!(doc.account_id, "acc1");
+                assert_eq!(doc.subject.as_deref(), Some("Quarterly report"));
+                assert!(doc.is_starred);
+                assert!(doc.has_attachment);
+                assert_eq!(doc.attachments.len(), 1);
+                let att = &doc.attachments[0];
+                assert_eq!(att.attachment_id, "att1");
+                assert_eq!(att.filename, "report.pdf");
+                assert_eq!(att.mime, "application/pdf");
+                assert_eq!(att.extracted_text, "pdf full text body");
+            }
+            WriterCommand::Delete { .. } => panic!("expected Index, got Delete"),
+            WriterCommand::Clear { .. } => panic!("expected Index, got Clear"),
+            WriterCommand::FlushNow { .. } => panic!("expected Index, got FlushNow"),
+        }
+        extract_task.await.expect("fan_out_reindex task panicked");
+        runtime.shutdown();
+    }
+
+    /// Phase 7-7: a content_hash that no message references is a
+    /// logged no-op; no `WriterCommand` is sent.
+    #[tokio::test]
+    async fn phase_7_7_empty_fan_out_is_no_op() {
+        let conn = rusqlite::Connection::open_in_memory().expect("conn");
+        conn.execute_batch(
+            "CREATE TABLE messages (\
+                id TEXT NOT NULL, account_id TEXT NOT NULL, thread_id TEXT NOT NULL,\
+                from_address TEXT, from_name TEXT, to_addresses TEXT,\
+                subject TEXT, snippet TEXT, date INTEGER NOT NULL,\
+                is_read INTEGER DEFAULT 0, is_starred INTEGER DEFAULT 0,\
+                PRIMARY KEY (account_id, id));\
+             CREATE TABLE attachments (\
+                id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
+                filename TEXT, mime_type TEXT, content_hash TEXT);\
+             CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
+             CREATE TABLE attachment_extracted_text (\
+                content_hash TEXT PRIMARY KEY, mime_type TEXT,\
+                extracted_text TEXT, status TEXT NOT NULL,\
+                extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
+        ).expect("schema");
+        let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
+        let notification_tx = NotificationSender::new(tx);
+        let (search_write, mut search_rx) = dummy_search_write();
+        let (body_read, _body_dir) = body_read_in_tempdir();
+        let runtime = ExtractRuntime::new(
+            db,
+            std::path::PathBuf::from("."),
+            search_write,
+            body_read,
+            notification_tx,
+            0,
+        );
+
+        fan_out_reindex(&runtime.inner, "no-such-hash").await;
+
+        // The worker task holds an Arc<inner> that keeps the
+        // SearchWriteHandle alive, so `recv()` never returns None.
+        // Use a short timeout instead and assert nothing arrived.
+        let timed = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            search_rx.recv(),
+        )
+        .await;
+        assert!(
+            timed.is_err(),
+            "no command should be sent for an empty fan-out (got {:?})",
+            timed.ok().flatten().map(|_| "WriterCommand"),
+        );
         runtime.shutdown();
     }
 }

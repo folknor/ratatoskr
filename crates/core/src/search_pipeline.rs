@@ -440,6 +440,8 @@ mod tests {
                 snippet: None,
                 date: 1000,
                 rank: 2.5,
+                match_kind: search::MatchKind::Body,
+                also_matched: Vec::new(),
             },
             TantivyResult {
                 message_id: "m2".to_owned(),
@@ -451,6 +453,8 @@ mod tests {
                 snippet: None,
                 date: 2000,
                 rank: 5.0,
+                match_kind: search::MatchKind::Body,
+                also_matched: Vec::new(),
             },
             TantivyResult {
                 message_id: "m3".to_owned(),
@@ -462,6 +466,8 @@ mod tests {
                 snippet: None,
                 date: 3000,
                 rank: 1.0,
+                match_kind: search::MatchKind::Body,
+                also_matched: Vec::new(),
             },
         ];
 
