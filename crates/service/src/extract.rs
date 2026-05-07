@@ -641,16 +641,28 @@ async fn persist_outcome_row(
     }
 }
 
+/// Maximum (account_id, message_id) pairs materialized into a single
+/// `WriterCommand::Index` payload during `fan_out_reindex`. Mirrors
+/// `rebuild::REBUILD_CHUNK_SIZE`. H2 fix: prior to chunking, a viral
+/// content_hash referenced by N messages produced one writer command
+/// carrying N * (subject + from + body_text + attachments) bytes - a
+/// 1000-message viral attachment with 100 KB extracted_text per message
+/// could push ~150 MB through a single mpsc command, blowing past the
+/// writer's 64 MB heap budget. Chunking keeps each command bounded
+/// (~30 MB worst case at 200 messages * 4 attachments * 100 KB) and
+/// lets the bounded mpsc backpressure naturally between chunks.
+const FANOUT_CHUNK_SIZE: usize = 200;
+
 /// Phase 7-7: re-index every message that references the just-indexed
 /// `content_hash`. Reads canonical DB state (messages + attachments +
 /// extracted-text join) and the body store, builds a fresh
-/// `SearchDocument` per message, and emits a single
-/// `WriterCommand::Index` for the batch.
+/// `SearchDocument` per message, and emits one `WriterCommand::Index`
+/// per chunk of `FANOUT_CHUNK_SIZE` pairs.
 ///
-/// Failures here log a warning but do not retry: the
-/// `attachment_extracted_text` row + `text_indexed_at` UPDATE are
-/// already committed, so a future enqueue of the same hash (or a
-/// `extract.backfill_kick`) sees canonical state and re-emits.
+/// Failures inside a chunk log a warning and proceed to the next
+/// chunk: the `attachment_extracted_text` row + `text_indexed_at`
+/// UPDATE are already committed, so a future enqueue of the same hash
+/// (or an `extract.backfill_kick`) sees canonical state and re-emits.
 async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
     let hash = content_hash.to_string();
     let pairs_result = inner
@@ -672,8 +684,21 @@ async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
         }
     };
 
-    let pairs_for_msgs = pairs.clone();
-    let pairs_for_atts = pairs.clone();
+    for chunk in pairs.chunks(FANOUT_CHUNK_SIZE) {
+        if let Err(e) = fan_out_reindex_chunk(inner, content_hash, chunk).await {
+            log::warn!("fan_out_reindex {content_hash}: chunk failed: {e}");
+            // Continue to next chunk - partial fan-out beats no fan-out.
+        }
+    }
+}
+
+async fn fan_out_reindex_chunk(
+    inner: &Arc<ExtractRuntimeInner>,
+    content_hash: &str,
+    pairs: &[(String, String)],
+) -> Result<(), String> {
+    let pairs_for_msgs = pairs.to_vec();
+    let pairs_for_atts = pairs.to_vec();
     let messages_fut = inner.db.with_conn(move |conn| {
         db::db::queries_extra::select_messages_for_index_batch(conn, &pairs_for_msgs)
     });
@@ -687,13 +712,12 @@ async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
         match tokio::join!(messages_fut, attachments_fut, bodies_fut) {
             (Ok(m), Ok(a), Ok(b)) => (m, a, b),
             (m, a, b) => {
-                log::warn!(
-                    "fan_out_reindex {content_hash}: query failure (messages: {:?}, attachments: {:?}, bodies: {:?})",
+                return Err(format!(
+                    "query failure (messages: {:?}, attachments: {:?}, bodies: {:?})",
                     m.as_ref().err(),
                     a.as_ref().err(),
                     b.as_ref().err(),
-                );
-                return;
+                ));
             }
         };
 
@@ -738,12 +762,14 @@ async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
     }
 
     if docs.is_empty() {
-        log::debug!("fan_out_reindex {content_hash}: pairs resolved but no messages found");
-        return;
+        log::debug!("fan_out_reindex {content_hash}: chunk resolved but no messages found");
+        return Ok(());
     }
-    if let Err(e) = inner.search_write.index_messages_batch(docs).await {
-        log::warn!("fan_out_reindex {content_hash}: index_messages_batch: {e}");
-    }
+    inner
+        .search_write
+        .index_messages_batch(docs)
+        .await
+        .map_err(|e| format!("index_messages_batch: {e}"))
 }
 
 /// Status strings that signal "do not retry on next enqueue."

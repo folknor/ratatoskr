@@ -6,16 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H2. `fan_out_reindex` doesn't chunk; viral content_hash blows the writer mpsc
-
-**Files:** `crates/service/src/extract.rs:559-651`.
-
-`fan_out_reindex` for a content_hash referenced by N messages: `find_message_ids_referencing_content_hash` returns N pairs; the follow-up SELECTs and `body_read.get_batch` materialize all rows in memory; one `WriterCommand::Index { docs: Vec<SearchDocument> }` is sent. For N=1000 (the plan's "viral content" scenario at `phase-7-plan.md:773`) × 50 KB body × 100 KB extracted_text per attachment, the single command carries ~150 MB through the mpsc - well past the writer's 64 MB heap budget. `COMMAND_QUEUE_CAPACITY=256` backpressure does not help because each one-attachment fan-out is one command, not chunked. `rebuild::rebuild_chunk` already chunks at `REBUILD_CHUNK_SIZE = 200` (`rebuild.rs:45`); `fan_out_reindex` should mirror that.
-
-**Agreement: 6/8** (claude security, claude perf, claude arch, codex bugs, codex perf, codex arch).
-
-**Fix:** chunk `pairs` at 200 and emit one `WriterCommand::Index` per chunk.
-
 ### H3. OOXML decompressed-bytes accounting tracks output text, not actual decompressed input
 
 **Files:** `crates/service/src/text_extract/ooxml.rs:83, 100-106, 140-148, 226-240`.
