@@ -90,6 +90,12 @@ where
     // an Arc so tests that spawn multiple Service instances don't collide on
     // a process-wide singleton.
     let boot_state = boot::BootSharedState::new(app_data_dir.clone());
+    // Phase 7-9: hand a clone of out_tx to BootSharedState so non-
+    // spawn handlers (the index.rebuild handler) can mint a
+    // NotificationSender for their tracked task. Cleared on drain
+    // before drop(out_tx) below so the writer-handle await observes
+    // EOF.
+    boot_state.install_out_tx(out_tx.clone());
 
     // Boot sequence runs concurrently with the dispatch loop so health.ping
     // continues to round-trip while migrations / key load run. On fatal boot
@@ -368,12 +374,30 @@ where
         extract_runtime.shutdown().await;
         drop(extract_runtime);
     }
+    // Phase 7-9: cancel any in-flight rebuild before clearing the
+    // search_write slot. The rebuild task holds a SearchWriteHandle
+    // clone and (when emitting) a NotificationSender clone; both
+    // need to drop before search_writer + writer await can observe
+    // EOF. The token check happens between chunks; abort handles
+    // the case where the task is mid-await.
+    if let Some(rebuild) = boot_state.take_rebuild_task() {
+        log::info!(
+            "shutdown: cancelling in-flight rebuild {}",
+            rebuild.rebuild_id
+        );
+        rebuild.cancel.cancel();
+        rebuild.handle.abort();
+        let _ = rebuild.handle.await;
+    }
     // Defensively clear the `search_write` slot. If shutdown raced
     // ahead of `spawn_post_ready_extract_startup`, the slot still
     // holds a `SearchWriteHandle` clone that would keep the
     // search-writer task alive across the JoinHandle await below.
     // Dropping the returned Option immediately releases the clone.
     let _ = boot_state.take_search_write();
+    // Same defensive clear for the out_tx slot installed for the
+    // rebuild handler's NotificationSender clone source.
+    let _ = boot_state.take_out_tx();
     // 5. Await the search-writer task's JoinHandle so the consolidated
     //    drain genuinely observes termination. The task exits when its
     //    mpsc rx returns None (every SearchWriteHandle clone has been
@@ -1036,8 +1060,8 @@ fn spawn_post_ready_extract_startup(
             );
             return;
         };
-        let Some(search_write) = boot_state.take_search_write() else {
-            // Drain raced ahead and consumed the slot, OR boot never
+        let Some(search_write) = boot_state.search_write() else {
+            // Drain raced ahead and cleared the slot, OR boot never
             // installed it (shouldn't happen post-ready). Either way,
             // skip - shutdown is in progress.
             log::debug!(

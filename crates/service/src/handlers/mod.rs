@@ -11,7 +11,7 @@ mod pending_ops_kick;
 mod account;
 mod attachment;
 mod contacts;
-mod extract;
+pub(crate) mod extract;
 mod internal;
 mod oauth;
 mod pinned_search;

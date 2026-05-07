@@ -57,6 +57,51 @@ pub struct UnindexedCachedAttachmentRow {
     pub content_hash:  Option<String>,
 }
 
+/// Phase 7-9: enumerate every message identity for the index-rebuild
+/// task. Returns `(account_id, id)` pairs ordered by `account_id, id`
+/// for deterministic chunking. Does not include local_drafts; those
+/// are re-emitted by a separate query.
+///
+/// Memory budget: ~24 bytes per row plus String overhead. A 300k-row
+/// mailbox is ~10 MB - acceptable for the rebuild path. If we ever
+/// need to scale past that, swap to a paginated query reading from a
+/// cursor.
+pub fn select_all_message_ids_for_rebuild(
+    conn: &Connection,
+) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT account_id, id FROM messages \
+             ORDER BY account_id, id",
+        )
+        .map_err(|e| format!("prepare select_all_message_ids_for_rebuild: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query select_all_message_ids_for_rebuild: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row select_all_message_ids_for_rebuild: {e}"))?);
+    }
+    Ok(out)
+}
+
+/// Phase 7-9: reset every `attachments.text_indexed_at` to NULL and
+/// truncate `attachment_extracted_text`. Run at the start of a Wipe
+/// rebuild so the subsequent backfill kick re-extracts everything
+/// against the new schema.
+pub fn reset_extracted_text_for_rebuild(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "UPDATE attachments SET text_indexed_at = NULL WHERE text_indexed_at IS NOT NULL",
+        [],
+    )
+    .map_err(|e| format!("UPDATE attachments.text_indexed_at: {e}"))?;
+    conn.execute("DELETE FROM attachment_extracted_text", [])
+        .map_err(|e| format!("DELETE attachment_extracted_text: {e}"))?;
+    Ok(())
+}
+
 /// Phase 7-6: post-boot backfill query. Returns up to `limit`
 /// attachment rows that are cached on disk (`cached_at IS NOT NULL`)
 /// but have no extracted-text pointer yet (`text_indexed_at IS NULL`).

@@ -40,16 +40,89 @@ pub(crate) async fn handle_status(
 
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) async fn handle_rebuild(
-    _boot_state: &Arc<BootSharedState>,
-    _params: IndexRebuildParams,
+    boot_state: &Arc<BootSharedState>,
+    params: IndexRebuildParams,
 ) -> Result<Value, ServiceError> {
-    // 7-9: spawn a tracked rebuild task and return its rebuild_id.
-    // 7-4b stub returns a deterministic placeholder so the wire path
-    // round-trips and tests can assert the response shape.
-    Err(ServiceError::Internal(
-        "index.rebuild not yet implemented (lands in phase 7-9)".into(),
-    ))
+    // Reject (or pre-empt) a rebuild that's already in flight.
+    if let Some(in_flight_id) = boot_state.rebuild_in_flight_id() {
+        if !params.force {
+            return Err(ServiceError::Internal(format!(
+                "index.rebuild already in flight (rebuild_id={in_flight_id}); pass force=true to pre-empt"
+            )));
+        }
+        // force=true: cancel + await the previous rebuild before
+        // installing the new one. The rebuild task respects
+        // CancellationToken between chunks.
+        if let Some(prev) = boot_state.take_rebuild_task() {
+            log::info!("index.rebuild: pre-empting previous rebuild {}", prev.rebuild_id);
+            prev.cancel.cancel();
+            // Don't .await on prev.handle here - the handler is
+            // user-facing and shouldn't block on the previous
+            // rebuild's chunk. abort drops the future at the next
+            // await point.
+            prev.handle.abort();
+        }
+    }
+
+    // Resolve the runtime dependencies. Errors here are programming
+    // bugs (boot completes before any handler is dispatched).
+    let db_conn = boot_state.db_conn().ok_or_else(|| {
+        ServiceError::Internal("index.rebuild: db_conn missing post-boot.ready".into())
+    })?;
+    let search_write = boot_state.search_write().ok_or_else(|| {
+        ServiceError::Internal("index.rebuild: search_write missing post-boot.ready".into())
+    })?;
+    let body_read =
+        store::body_store::BodyStoreReadState::init(boot_state.app_data_dir()).map_err(|e| {
+            ServiceError::Internal(format!("index.rebuild: body_store init failed: {e}"))
+        })?;
+    let notification_tx = boot_state.notification_sender().ok_or_else(|| {
+        ServiceError::Internal(
+            "index.rebuild: out_tx slot empty (boot incomplete or shutting down)".into(),
+        )
+    })?;
+
+    let rebuild_id = uuid::Uuid::new_v4().to_string();
+    let cancel = tokio_util::sync::CancellationToken::new();
+
+    // Wipe is the only path implemented in 7-9a. PreserveExisting
+    // lands in 7-9b.
+    match params.policy {
+        service_api::RebuildPolicy::Wipe => {
+            let db_state = service_state::WriteDbState::from_arc(db_conn);
+            let boot_state_for_task = Arc::clone(boot_state);
+            let cancel_for_task = cancel.clone();
+            let id_for_task = rebuild_id.clone();
+            let handle = tokio::spawn(async move {
+                crate::rebuild::run_wipe_rebuild(
+                    boot_state_for_task,
+                    id_for_task,
+                    cancel_for_task,
+                    db_state,
+                    search_write,
+                    body_read,
+                    notification_tx,
+                    0,
+                )
+                .await;
+            });
+            boot_state.install_rebuild_task(crate::boot::RebuildTaskState {
+                rebuild_id: rebuild_id.clone(),
+                cancel,
+                handle,
+            });
+        }
+        service_api::RebuildPolicy::PreserveExisting => {
+            return Err(ServiceError::Internal(
+                "PreserveExisting rebuild lands in phase 7-9b".into(),
+            ));
+        }
+    }
+
+    let ack = make_rebuild_ack(rebuild_id);
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
+
 
 /// Phase 7-6: post-boot backfill. Selects up to
 /// `BACKFILL_KICK_LIMIT` attachment rows that are cached but

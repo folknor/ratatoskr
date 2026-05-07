@@ -153,6 +153,27 @@ pub(crate) struct BootSharedState {
     /// `Arc<mpsc::Sender>` underneath); this slot installs a single
     /// canonical copy and hands out clones via `search_write()`.
     search_write: Mutex<Option<service_state::SearchWriteHandle>>,
+    /// Phase 7-9: in-flight `index.rebuild` task. Holds the
+    /// rebuild_id, the `JoinHandle` for the spawned rebuild, and a
+    /// `CancellationToken` the dispatch-side drain can cancel.
+    /// `None` between rebuilds. The handler rejects a second rebuild
+    /// while this is `Some` and `force == false`.
+    rebuild_task: Mutex<Option<RebuildTaskState>>,
+    /// Phase 7-9: clone of the dispatch-loop `out_tx`, used by
+    /// handlers that need to spawn long-running tasks emitting
+    /// notifications (the rebuild task in particular). `None` until
+    /// dispatch installs it via `install_out_tx`. Cleared on shutdown
+    /// to release the dispatch's stored clone.
+    out_tx: Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>,
+}
+
+/// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
+/// The handler stores this on `BootSharedState` and the consolidated
+/// drain consumes it via `take_rebuild_task` to cancel + await.
+pub(crate) struct RebuildTaskState {
+    pub rebuild_id: String,
+    pub cancel:     tokio_util::sync::CancellationToken,
+    pub handle:     tokio::task::JoinHandle<()>,
 }
 
 impl BootSharedState {
@@ -170,13 +191,56 @@ impl BootSharedState {
             extract_runtime: Mutex::new(None),
             search_writer_handle: Mutex::new(None),
             search_write: Mutex::new(None),
+            rebuild_task: Mutex::new(None),
+            out_tx: Mutex::new(None),
         })
     }
 
+    /// Phase 7-9: install the dispatch-loop's `out_tx` so non-spawn
+    /// handlers (the `index.rebuild` request handler) can mint a
+    /// `NotificationSender` for their tracked tasks. Cleared on
+    /// shutdown via `take_out_tx` so the dispatch's writer-handle
+    /// await is not pinned by the slot's stored clone.
+    pub(crate) fn install_out_tx(&self, tx: tokio::sync::mpsc::Sender<Vec<u8>>) {
+        let mut slot = self.out_tx.lock().expect("out_tx mutex poisoned");
+        if slot.is_some() {
+            log::warn!("install_out_tx called twice; second install ignored");
+            return;
+        }
+        *slot = Some(tx);
+    }
+
+    /// Phase 7-9: clone the installed `out_tx` and wrap it in a
+    /// `NotificationSender`. Returns `None` if dispatch hasn't
+    /// installed the sender yet (boot still in progress) or has
+    /// cleared it (drain in progress).
+    pub(crate) fn notification_sender(
+        &self,
+    ) -> Option<crate::boot_progress::NotificationSender> {
+        self.out_tx
+            .lock()
+            .expect("out_tx mutex poisoned")
+            .clone()
+            .map(crate::boot_progress::NotificationSender::new)
+    }
+
+    /// Phase 7-9: clear the `out_tx` slot. The dispatch-side drain
+    /// calls this before its `drop(out_tx)` so the writer-handle
+    /// await observes EOF.
+    pub(crate) fn take_out_tx(&self) -> Option<tokio::sync::mpsc::Sender<Vec<u8>>> {
+        self.out_tx
+            .lock()
+            .expect("out_tx mutex poisoned")
+            .take()
+    }
+
     /// Phase 7-4d: install the boot-constructed `SearchWriteHandle`.
-    /// Boot calls this once after spawning the writer task; subsequent
-    /// callers (post-ready extract startup) read clones via
-    /// `search_write()`.
+    /// Boot calls this once after spawning the writer task. Subsequent
+    /// async consumers (post-ready extract startup, 7-9 rebuild task,
+    /// etc.) read clones via `search_write()`.
+    /// `run_shutdown_drain` defensively clears the slot via
+    /// `take_search_write` before awaiting the search-writer
+    /// JoinHandle so no leftover clone pins the writer task past EOF.
     pub(crate) fn install_search_write(&self, handle: service_state::SearchWriteHandle) {
         let mut slot = self
             .search_write
@@ -189,12 +253,21 @@ impl BootSharedState {
         *slot = Some(handle);
     }
 
-    /// Phase 7-4d: take the boot-installed `SearchWriteHandle` out of
-    /// the slot. The slot is single-use - the post-ready extract
-    /// startup consumes it on success, and `run_shutdown_drain`
-    /// consumes it defensively to ensure the slot is empty before
-    /// awaiting the search-writer JoinHandle (an un-taken clone in
-    /// the slot would keep the writer task alive forever).
+    /// Phase 7-4d: clone the installed `SearchWriteHandle` for an
+    /// async-spawned consumer. Returns `None` until boot has installed
+    /// the handle. Multiple callers may clone independently; the
+    /// writer task only exits once *every* clone has been dropped.
+    pub(crate) fn search_write(&self) -> Option<service_state::SearchWriteHandle> {
+        self.search_write
+            .lock()
+            .expect("search_write mutex poisoned")
+            .clone()
+    }
+
+    /// Phase 7-4d: clear the installed `SearchWriteHandle`. Drains
+    /// the slot's stored clone so the dispatch-side
+    /// `run_shutdown_drain` does not pin the writer task past EOF.
+    /// Idempotent on repeat.
     pub(crate) fn take_search_write(&self) -> Option<service_state::SearchWriteHandle> {
         self.search_write
             .lock()
@@ -244,6 +317,51 @@ impl BootSharedState {
             .lock()
             .expect("extract_runtime mutex poisoned")
             .take()
+    }
+
+    /// Phase 7-9: install the in-flight `index.rebuild` task. The
+    /// handler stores the spawned task here so a concurrent
+    /// `index.rebuild` request can detect "rebuild already running"
+    /// and the consolidated drain can cancel + await on shutdown.
+    /// A second install while a rebuild is in flight is rejected by
+    /// the handler (with `force == false`) or pre-empted (with
+    /// `force == true`).
+    pub(crate) fn install_rebuild_task(&self, state: RebuildTaskState) {
+        let mut slot = self.rebuild_task.lock().expect("rebuild_task mutex poisoned");
+        if let Some(prev) = slot.take() {
+            // The handler is supposed to drain the previous slot
+            // before installing; warn if not.
+            log::warn!(
+                "install_rebuild_task: previous rebuild {} not drained; cancelling",
+                prev.rebuild_id,
+            );
+            prev.cancel.cancel();
+            prev.handle.abort();
+        }
+        *slot = Some(state);
+    }
+
+    /// Phase 7-9: take the in-flight rebuild slot for cancellation +
+    /// await. The consolidated drain calls this between the search-
+    /// writer await and the sentinel write so a mid-rebuild Service
+    /// shutdown does not leave the index in an inconsistent state.
+    pub(crate) fn take_rebuild_task(&self) -> Option<RebuildTaskState> {
+        self.rebuild_task
+            .lock()
+            .expect("rebuild_task mutex poisoned")
+            .take()
+    }
+
+    /// Phase 7-9: peek the rebuild slot without taking it. The
+    /// `index.rebuild` handler uses this to reject concurrent
+    /// rebuild requests when `force == false`. Returns the
+    /// rebuild_id of the in-flight rebuild for the error message.
+    pub(crate) fn rebuild_in_flight_id(&self) -> Option<String> {
+        self.rebuild_task
+            .lock()
+            .expect("rebuild_task mutex poisoned")
+            .as_ref()
+            .map(|s| s.rebuild_id.clone())
     }
 
     /// Install the `SyncRuntime` once the boot task has constructed it
