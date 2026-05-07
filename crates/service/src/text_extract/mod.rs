@@ -195,6 +195,15 @@ pub(crate) enum Mime {
 /// / archive / executable. The list is generous: the cost of skipping
 /// a borderline mime that COULD have extracted is much lower than the
 /// cost of running the dispatch on something that will produce noise.
+///
+/// L4 fix: `application/octet-stream` no longer short-circuits as
+/// opaque. Forwarded-attachment chains often lose the original mime
+/// and present extractable types (.pdf, .docx, .txt) as octet-stream;
+/// pre-fix these were skipped before extension fallback could
+/// classify them. Octet-stream now defers to extension: if the
+/// extension is itself opaque (.zip, .png, etc.) the function returns
+/// true, otherwise it returns false and `canonicalize_mime` gets a
+/// chance to route by extension.
 #[allow(dead_code)] // Consumed in 7-4.
 pub(crate) fn is_opaque_by_mime_or_extension(mime: &str, filename: &str) -> bool {
     let mime_lower = mime.to_ascii_lowercase();
@@ -205,7 +214,6 @@ pub(crate) fn is_opaque_by_mime_or_extension(mime: &str, filename: &str) -> bool
             mime_lower.as_str(),
             "application/x-executable"
                 | "application/x-msdownload"
-                | "application/octet-stream"
                 | "application/zip"
                 | "application/x-tar"
                 | "application/gzip"
@@ -216,7 +224,10 @@ pub(crate) fn is_opaque_by_mime_or_extension(mime: &str, filename: &str) -> bool
         return true;
     }
 
-    // Fall back to extension if the mime is generic / missing.
+    // Fall back to extension if the mime is generic / missing /
+    // octet-stream. The extension list below is the authoritative
+    // opaque-set; missing-mime + extractable extension (.pdf, .docx,
+    // etc.) lets the canonicalize path take over.
     if let Some(ext) = filename.rsplit('.').next() {
         let ext_lower = ext.to_ascii_lowercase();
         if matches!(

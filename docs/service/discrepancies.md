@@ -10,14 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L4. `application/octet-stream` blocks extension fallback for extractable files
-
-**Files:** `crates/service/src/text_extract/mod.rs:153, 209, 229`.
-
-`extract()` calls `is_opaque_by_mime_or_extension` before `canonicalize_mime`. `application/octet-stream` is treated as opaque immediately. An octet-stream attachment named `.pdf` / `.docx` / etc. is skipped before extension fallback can classify it. Common case for forwarded-attachment chains where the original mime is lost.
-
-**Fix:** check the extension first when mime is `application/octet-stream`, and only treat as opaque when the extension also doesn't match a known extractor.
-
 ### L5. `attachment.fetch` can backpressure user-facing fetch on extraction queue
 
 **Files:** `crates/service/src/handlers/attachment.rs:123`, `crates/service/src/extract.rs:53` (`COMMAND_QUEUE_CAPACITY=256`).
