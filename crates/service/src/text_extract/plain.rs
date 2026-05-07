@@ -167,12 +167,21 @@ fn control_char_ratio(text: &str) -> f32 {
     if total == 0 {
         return 0.0;
     }
-    let control = text
+    // L3 fix: count U+FFFD (Unicode replacement) toward the bad-char
+    // ratio alongside control chars. encoding_rs::decode emits U+FFFD
+    // for every byte sequence it couldn't decode; a binary blob
+    // mistyped as text/plain produces decoded text that's mostly
+    // U+FFFD, which char::is_control() does NOT match. Pre-fix, such
+    // a payload passed the ratio guard and got indexed as garbage.
+    let bad = text
         .chars()
-        .filter(|c| c.is_control() && *c != '\n' && *c != '\r' && *c != '\t')
+        .filter(|c| {
+            (c.is_control() && *c != '\n' && *c != '\r' && *c != '\t')
+                || *c == '\u{FFFD}'
+        })
         .count();
     #[allow(clippy::cast_precision_loss)]
-    let ratio = (control as f32) / (total as f32);
+    let ratio = (bad as f32) / (total as f32);
     ratio
 }
 

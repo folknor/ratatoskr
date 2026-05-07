@@ -10,14 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L3. Plain-text U+FFFD-heavy decode bypasses control-char ratio guard
-
-**Files:** `crates/service/src/text_extract/plain.rs:39, 162-177`.
-
-`encoding_rs::decode` returns `(text, _, had_errors)`. The skip path triggers only when decoded text is empty; `had_errors=true` with replacement-char-heavy content passes through. The control-char ratio uses `char::is_control()`, which is false for U+FFFD. A binary blob mistyped as `text/plain` decodes to mostly U+FFFD and indexes as garbage.
-
-**Fix:** count `'\u{FFFD}'` toward the bad-char ratio, or skip when `had_errors && replacement_count > N% of total`.
-
 ### L4. `application/octet-stream` blocks extension fallback for extractable files
 
 **Files:** `crates/service/src/text_extract/mod.rs:153, 209, 229`.
