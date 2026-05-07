@@ -159,6 +159,17 @@ where
         out_tx.clone(),
     );
 
+    // Phase 7-4d: post-ready extract startup. Constructs ExtractRuntime
+    // (which holds NotificationSender + SearchWriteHandle clones) and
+    // installs it on BootSharedState. Drained in run_shutdown_drain
+    // *between* sync and the search-writer await, so its handle clones
+    // are released before the writer task is asked to observe EOF.
+    let extract_startup_handle = spawn_post_ready_extract_startup(
+        Arc::clone(&boot_state),
+        out_tx.clone(),
+        app_data_dir.clone(),
+    );
+
     let mut boot_exit_code: Option<BootExitCode> = None;
 
     loop {
@@ -345,15 +356,33 @@ where
         runtime.shutdown().await;
         drop(runtime);
     }
-    // 3. Await the search-writer task's JoinHandle so the consolidated
+    // 4. Phase 7-4d: cancel the extract worker + await its
+    //    `JoinHandle`. ExtractRuntime holds a `NotificationSender`
+    //    clone of `out_tx` AND a `SearchWriteHandle` clone, so this
+    //    drain step MUST come before the search-writer JoinHandle
+    //    await below. Without it, both `writer_handle.await` (search
+    //    writer) and the eventual `out_tx` drop deadlock against the
+    //    extract worker holding the last clones. The earlier 7-4d
+    //    revert hung exactly because this step was missing.
+    if let Some(extract_runtime) = boot_state.take_extract_runtime() {
+        extract_runtime.shutdown().await;
+        drop(extract_runtime);
+    }
+    // Defensively clear the `search_write` slot. If shutdown raced
+    // ahead of `spawn_post_ready_extract_startup`, the slot still
+    // holds a `SearchWriteHandle` clone that would keep the
+    // search-writer task alive across the JoinHandle await below.
+    // Dropping the returned Option immediately releases the clone.
+    let _ = boot_state.take_search_write();
+    // 5. Await the search-writer task's JoinHandle so the consolidated
     //    drain genuinely observes termination. The task exits when its
     //    mpsc rx returns None (every SearchWriteHandle clone has been
-    //    dropped); SyncRuntime::shutdown above released the last
-    //    clone. Phase 4 review-pass fix - pre-fix the handle was
-    //    discarded at construction and the "the writer task observes
-    //    EOF and exits" claim relied on the run_sync flush_now()
-    //    invariant being maintained, with no test that would catch a
-    //    future regression of that invariant.
+    //    dropped); SyncRuntime::shutdown + ExtractRuntime::shutdown
+    //    above released the last clones. Phase 4 review-pass fix -
+    //    pre-fix the handle was discarded at construction and the
+    //    "the writer task observes EOF and exits" claim relied on the
+    //    run_sync flush_now() invariant being maintained, with no
+    //    test that would catch a future regression of that invariant.
     if let Some(handle) = boot_state.take_search_writer_handle()
         && let Err(e) = handle.await
     {
@@ -419,6 +448,14 @@ where
     // consolidated drain above.
     calendar_startup_handle.abort();
     let _ = calendar_startup_handle.await;
+
+    // Phase 7-4d: same pattern - abort the extract startup task in
+    // case it hadn't yet finished installing the runtime when
+    // shutdown arrived. If the runtime *was* installed, the
+    // consolidated drain above released its NotificationSender +
+    // SearchWriteHandle clones via `take_extract_runtime + shutdown`.
+    extract_startup_handle.abort();
+    let _ = extract_startup_handle.await;
 
     drop(out_tx);
     let _ = writer_handle.await;
@@ -961,11 +998,74 @@ fn spawn_post_ready_calendar_startup(
     })
 }
 
-// Phase 7-4d: spawn_post_ready_extract_startup deferred. An earlier
-// version of this slice wired ExtractRuntime construction here, but
-// boot_ready_blocks_until_sequence_completes hung under the wiring
-// (likely an interaction with the test harness's shutdown sequencing).
-// Triage deferred; the post-7-4 follow-up will re-introduce the spawn
-// once the harness behavior is understood. The handler stubs in 7-4b
-// continue to return zeros / Internal-error until the runtime is
-// installed.
+/// Phase 7-4d: post-ready extract startup. Mirrors
+/// `spawn_post_ready_calendar_startup` - waits for boot.ready,
+/// snapshots the search-writer + body-store + db handles, constructs
+/// `ExtractRuntime`, installs it on `BootSharedState`. Extract is
+/// kick-driven (`extract.backfill_kick` and per-`attachment.fetch`
+/// enqueues), so the post-ready task does not iterate accounts.
+///
+/// **The earlier 7-4d revert.** A previous version of this spawn
+/// caused `boot_ready_blocks_until_sequence_completes` to hang at the
+/// 20 s test ceiling. Root cause: `ExtractRuntime` held a
+/// `NotificationSender` (clone of the outbound `out_tx`) and a
+/// `SearchWriteHandle` clone, but the consolidated drain in
+/// `run_shutdown_drain` had no step to drain it. The writer task's
+/// JoinHandle.await blocked forever waiting for the last `out_tx`
+/// clone to drop, which couldn't happen while the extract worker
+/// kept the runtime Arc alive. Fixed by:
+///
+/// 1. Adding async `ExtractRuntime::shutdown()` driven by a
+///    `CancellationToken` + stored worker `JoinHandle`.
+/// 2. Adding the drain step in `run_shutdown_drain` between the sync
+///    drain and the search-writer await.
+fn spawn_post_ready_extract_startup(
+    boot_state: Arc<boot::BootSharedState>,
+    out_tx: mpsc::Sender<Vec<u8>>,
+    app_data_dir: std::path::PathBuf,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if boot_state.wait_for_ready().await.is_err() {
+            log::debug!("post-ready extract startup: boot failed, skipping");
+            return;
+        }
+
+        let Some(db_conn) = boot_state.db_conn() else {
+            log::error!(
+                "post-ready extract startup: db_conn missing after boot.ready - programming error",
+            );
+            return;
+        };
+        let Some(search_write) = boot_state.take_search_write() else {
+            // Drain raced ahead and consumed the slot, OR boot never
+            // installed it (shouldn't happen post-ready). Either way,
+            // skip - shutdown is in progress.
+            log::debug!(
+                "post-ready extract startup: search_write slot empty (shutdown raced)",
+            );
+            return;
+        };
+        let body_read = match store::body_store::BodyStoreReadState::init(&app_data_dir) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("post-ready extract startup: body_store init failed: {e}");
+                return;
+            }
+        };
+
+        let db_state = service_state::WriteDbState::from_arc(db_conn);
+        let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
+
+        let extract_runtime = crate::extract::ExtractRuntime::new(
+            db_state,
+            app_data_dir,
+            search_write,
+            body_read,
+            notification_tx,
+            0,
+        );
+        boot_state.install_extract_runtime(extract_runtime);
+
+        log::info!("post-ready extract startup: ExtractRuntime installed");
+    })
+}

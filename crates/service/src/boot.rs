@@ -147,6 +147,12 @@ pub(crate) struct BootSharedState {
     /// "step 5: await search-writer JoinHandle" doc-comment was
     /// aspirational.
     search_writer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Phase 7-4d: clone of the boot-installed `SearchWriteHandle`,
+    /// kept so the post-ready extract startup can grab a clone after
+    /// `boot.ready` resolves. The handle itself is `Clone` (cheap,
+    /// `Arc<mpsc::Sender>` underneath); this slot installs a single
+    /// canonical copy and hands out clones via `search_write()`.
+    search_write: Mutex<Option<service_state::SearchWriteHandle>>,
 }
 
 impl BootSharedState {
@@ -163,7 +169,37 @@ impl BootSharedState {
             calendar_runtime: Mutex::new(None),
             extract_runtime: Mutex::new(None),
             search_writer_handle: Mutex::new(None),
+            search_write: Mutex::new(None),
         })
+    }
+
+    /// Phase 7-4d: install the boot-constructed `SearchWriteHandle`.
+    /// Boot calls this once after spawning the writer task; subsequent
+    /// callers (post-ready extract startup) read clones via
+    /// `search_write()`.
+    pub(crate) fn install_search_write(&self, handle: service_state::SearchWriteHandle) {
+        let mut slot = self
+            .search_write
+            .lock()
+            .expect("search_write mutex poisoned");
+        if slot.is_some() {
+            log::warn!("install_search_write called twice; second install ignored");
+            return;
+        }
+        *slot = Some(handle);
+    }
+
+    /// Phase 7-4d: take the boot-installed `SearchWriteHandle` out of
+    /// the slot. The slot is single-use - the post-ready extract
+    /// startup consumes it on success, and `run_shutdown_drain`
+    /// consumes it defensively to ensure the slot is empty before
+    /// awaiting the search-writer JoinHandle (an un-taken clone in
+    /// the slot would keep the writer task alive forever).
+    pub(crate) fn take_search_write(&self) -> Option<service_state::SearchWriteHandle> {
+        self.search_write
+            .lock()
+            .expect("search_write mutex poisoned")
+            .take()
     }
 
     /// Phase 7-4d: install the `ExtractRuntime` once the post-ready
@@ -196,6 +232,18 @@ impl BootSharedState {
             .lock()
             .expect("extract_runtime mutex poisoned")
             .clone()
+    }
+
+    /// Phase 7-4d: move the `ExtractRuntime` out of the slot. Used by
+    /// the consolidated drain helper: the runtime drains *between* the
+    /// sync drain and the search-writer await, so its
+    /// `SearchWriteHandle` + `NotificationSender` clones are released
+    /// before the writer task is asked to observe EOF.
+    pub(crate) fn take_extract_runtime(&self) -> Option<crate::extract::ExtractRuntime> {
+        self.extract_runtime
+            .lock()
+            .expect("extract_runtime mutex poisoned")
+            .take()
     }
 
     /// Install the `SyncRuntime` once the boot task has constructed it
@@ -859,6 +907,10 @@ async fn run_boot_sequence_inner(
             }
         };
     state.install_search_writer_handle(search_writer_handle);
+    // Phase 7-4d: stash a clone for the post-ready extract startup to
+    // grab after boot.ready. Sync still owns its own clone (moved
+    // into SyncRuntime below); ExtractRuntime gets a separate clone.
+    state.install_search_write(search_write.clone());
 
     let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
 

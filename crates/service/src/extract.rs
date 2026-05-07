@@ -37,6 +37,8 @@ use service_api::{ExtractCompleted, ExtractProgress, Notification};
 use service_state::{SearchWriteHandle, WriteDbState};
 use store::body_store::BodyStoreReadState;
 use tokio::sync::{Mutex, Semaphore, mpsc};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::attachment_lock::SWEEP_LOCK;
 use crate::boot_progress::NotificationSender;
@@ -83,6 +85,20 @@ pub(crate) struct ExtractRuntimeInner {
     /// search index.
     search_write: SearchWriteHandle,
     body_read: BodyStoreReadState,
+    /// Phase 7-4d: cancellation signal for the worker. `shutdown()`
+    /// cancels this token; the worker's `tokio::select!` falls through
+    /// to its `cancelled()` arm and exits, releasing the worker's
+    /// `Arc<Inner>` clone. With both Arcs gone the inner drops, which
+    /// drops the held `NotificationSender` + `SearchWriteHandle`
+    /// clones - that's what lets the dispatch-side writer-task drain
+    /// observe EOF.
+    cancellation: CancellationToken,
+    /// Phase 7-4d: worker `JoinHandle` so `shutdown()` can `.await`
+    /// the worker's exit. Taken on first shutdown call; subsequent
+    /// calls see `None` and return immediately. `std::sync::Mutex` -
+    /// the access points (set during `new`, take during `shutdown`)
+    /// are well-bounded and never held across an `.await`.
+    worker_handle: std::sync::Mutex<Option<JoinHandle<()>>>,
     /// Work-queue depth + in-flight extractions count. Decrements when
     /// a work item is fully processed (success or failure). When this
     /// reaches zero AND the queue receiver is empty we emit
@@ -111,6 +127,7 @@ impl ExtractRuntime {
         service_generation: u32,
     ) -> Self {
         let (tx, rx) = mpsc::channel::<ExtractWork>(COMMAND_QUEUE_CAPACITY);
+        let cancellation = CancellationToken::new();
         let inner = Arc::new(ExtractRuntimeInner {
             closed: AtomicBool::new(false),
             in_flight_hashes: Mutex::new(HashSet::new()),
@@ -121,13 +138,20 @@ impl ExtractRuntime {
             service_generation,
             search_write,
             body_read,
+            cancellation,
+            worker_handle: std::sync::Mutex::new(None),
             queue_depth: AtomicU64::new(0),
             indexed_count: AtomicU64::new(0),
             skipped_count: AtomicU64::new(0),
             failed_count: AtomicU64::new(0),
         });
         let runner_inner = Arc::clone(&inner);
-        tokio::spawn(async move { run_worker(runner_inner, rx).await });
+        let handle = tokio::spawn(async move { run_worker(runner_inner, rx).await });
+        inner
+            .worker_handle
+            .lock()
+            .expect("worker_handle mutex poisoned at construction")
+            .replace(handle);
         Self { inner }
     }
 
@@ -177,13 +201,33 @@ impl ExtractRuntime {
     }
 
     /// Begin shutdown. Flips `closed` so future `enqueue` calls fail
-    /// fast; the worker observes the closed mpsc sender on its next
-    /// `recv()` and exits naturally. In-flight extractions continue
-    /// to completion (they can't be cancelled - `spawn_blocking` is
-    /// uncancellable). The drain budget is for the receiver/sender
-    /// drop dance, not for awaiting in-flight work.
-    pub fn shutdown(&self) {
+    /// fast; cancels the worker's cancellation token so its
+    /// `tokio::select!` short-circuits to the `cancelled()` arm; awaits
+    /// the worker `JoinHandle` so the dispatch-side drain genuinely
+    /// observes worker termination.
+    ///
+    /// In-flight extractions inside `spawn_blocking` are uncancellable
+    /// and are abandoned: the per-item task is dropped together with
+    /// the worker, so the actual `spawn_blocking` thread continues to
+    /// completion against the tokio blocking pool but its result is
+    /// discarded. Idempotent backfill (7-6) re-extracts on next boot
+    /// from canonical DB state. The drain budget is for the
+    /// `JoinHandle::await`, not for awaiting in-flight extraction
+    /// threads.
+    pub async fn shutdown(&self) {
         self.inner.closed.store(true, Ordering::Relaxed);
+        self.inner.cancellation.cancel();
+        let handle = self
+            .inner
+            .worker_handle
+            .lock()
+            .expect("worker_handle mutex poisoned during shutdown")
+            .take();
+        if let Some(h) = handle
+            && let Err(e) = h.await
+        {
+            log::warn!("ExtractRuntime worker join error during shutdown: {e}");
+        }
     }
 }
 
@@ -192,8 +236,20 @@ async fn run_worker(
     mut rx: mpsc::Receiver<ExtractWork>,
 ) {
     let semaphore = Arc::new(Semaphore::new(WORKER_CONCURRENCY));
+    let cancellation = inner.cancellation.clone();
 
-    while let Some(work) = rx.recv().await {
+    loop {
+        let work = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => {
+                log::debug!("ExtractRuntime worker cancelled, exiting");
+                return;
+            }
+            maybe_work = rx.recv() => match maybe_work {
+                Some(w) => w,
+                None => return,
+            },
+        };
         let permit = match Arc::clone(&semaphore).acquire_owned().await {
             Ok(p) => p,
             Err(_) => return,
@@ -230,7 +286,6 @@ async fn run_worker(
             }
         });
     }
-    log::info!("ExtractRuntime worker exiting (rx closed)");
 }
 
 async fn process_one(inner: Arc<ExtractRuntimeInner>, work: ExtractWork) {
@@ -655,7 +710,7 @@ mod tests {
             notification_tx,
             0,
         );
-        runtime.shutdown();
+        runtime.shutdown().await;
         let result = runtime
             .enqueue(ExtractWork {
                 content_hash: "abc".into(),
@@ -707,7 +762,7 @@ mod tests {
         let result = runtime.enqueue(work).await;
         assert!(result.is_ok(), "dedupe path should be Ok no-op");
         assert_eq!(runtime.status_snapshot().0, 0, "queue_depth should not increment on dedupe");
-        runtime.shutdown();
+        runtime.shutdown().await;
     }
 
     /// Phase 7-7: build a runtime whose DB has one message + one
@@ -798,7 +853,7 @@ mod tests {
             WriterCommand::FlushNow { .. } => panic!("expected Index, got FlushNow"),
         }
         extract_task.await.expect("fan_out_reindex task panicked");
-        runtime.shutdown();
+        runtime.shutdown().await;
     }
 
     /// Phase 7-7: a content_hash that no message references is a
@@ -851,6 +906,6 @@ mod tests {
             "no command should be sent for an empty fan-out (got {:?})",
             timed.ok().flatten().map(|_| "WriterCommand"),
         );
-        runtime.shutdown();
+        runtime.shutdown().await;
     }
 }
