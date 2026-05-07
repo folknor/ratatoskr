@@ -7,12 +7,12 @@ with it.
 
 The plan has two halves of work:
 
-- **Implementation** (8-1 through 8-5) — the Service-architecture work
+- **Implementation** (8-1 through 8-5) - the Service-architecture work
   the original Phase 8 entry in `implementation-roadmap.md` named:
   crash recovery polish, cross-store invariant pass optimization,
   JMAP push hardening, surviving Phase 7 carry-forwards, and the
   account-deletion `is_deleting` gate.
-- **Close-out** (8-6 through 8-9) — fold the durable architectural
+- **Close-out** (8-6 through 8-9) - fold the durable architectural
   content from `problem-statement.md` into `docs/architecture.md`,
   relocate `manual-test-matrix.md` to the harness directory, retire
   the per-phase plans, retire the implementation roadmap, delete the
@@ -20,15 +20,15 @@ The plan has two halves of work:
 
 ## Companion documents
 
-- `docs/harness/roadmap.md` — Phase 8's test cohort items (the wedge,
+- `docs/harness/roadmap.md` - Phase 8's test cohort items (the wedge,
   T1, the Phase 7 extract cohort, manual-matrix automation, the
   `--test-fake-schema=N` e2e) live in the harness roadmap, not here.
   Phase 8's close-out depends on harness **M2** (the wedge) passing.
-  The implementation work itself does not gate on the harness — code
+  The implementation work itself does not gate on the harness - code
   changes can land independently of test coverage shape.
 - `docs/harness/architecture.md`, `docs/harness/problem-statement.md`
-  — context for the harness move.
-- `docs/architecture.md` — the durable architecture document. The
+  - context for the harness move.
+- `docs/architecture.md` - the durable architecture document. The
   close-out promotes content from `docs/service/problem-statement.md`
   into it.
 
@@ -41,7 +41,7 @@ Service. Phase 7 closed the last user-visible feature surface
 original Phase 8 scope is **polish on the architecture that's already
 landed**: making crashes recoverable, making the boot-time invariant
 pass fast enough for 200 GB mailboxes, hardening push, and resolving
-carry-forwards from earlier phases. There is no Phase 9 — the
+carry-forwards from earlier phases. There is no Phase 9 - the
 "tray-resident" entry that sat in the original roadmap is dropped (no
 plans for a tray icon).
 
@@ -108,7 +108,7 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
   `wait_for_ready` keeps drain awaiting until `spawn_blocking`
   migration completes. UI Drop's `wait_with_kill_watchdog` is 1s
   before SIGKILL; on a mid-`COMMIT` Service, SQLite WAL recovers and
-  the next boot redoes the migration — the same "duplicate boot work"
+  the next boot redoes the migration - the same "duplicate boot work"
   cost the backoff bullet flags. The fix has `boot.ready` respect a
   soft-cancel signal so the Drop watchdog doesn't escalate at all on
   big migrations.
@@ -119,7 +119,7 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
   uses `try_send` only, which is structurally incompatible with
   MustDeliver semantics. The contract noted in
   `crates/service/src/boot_progress.rs` ("`OUTBOUND_QUEUE_CAP=1024`
-  must remain >> Phase-1.5 boot frame count") is doc-only — no
+  must remain >> Phase-1.5 boot frame count") is doc-only - no
   per-phase regression test bounds total emit count. Phase 8 owns
   re-attempting the helper *after* harness M2 makes the underlying
   drain bug deterministic. Either ship the class-aware helper with
@@ -138,15 +138,15 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
   field set incrementally.
 
 **Touchpoints:**
-- `crates/app/src/service_client.rs` — backoff + crashloop detection
+- `crates/app/src/service_client.rs` - backoff + crashloop detection
   + status reporting + heartbeat policy refinement.
-- `crates/app/src/ui/status_bar.rs` — Service-health indicator.
-- `crates/app/src/app.rs` — async store init, new
+- `crates/app/src/ui/status_bar.rs` - Service-health indicator.
+- `crates/app/src/app.rs` - async store init, new
   `Message::ReadyStoreReady(...)` arms.
-- `crates/service/src/boot_progress.rs` — class-aware emit helper.
-- `crates/service/src/dispatch.rs` — soft-cancel signal for
+- `crates/service/src/boot_progress.rs` - class-aware emit helper.
+- `crates/service/src/dispatch.rs` - soft-cancel signal for
   `boot.ready`; Drop-watchdog unification.
-- `crates/service-api/src/` — idempotency contract per method.
+- `crates/service-api/src/` - idempotency contract per method.
 
 ---
 
@@ -176,7 +176,7 @@ the exit-path matrix). Phase 8 makes them fast.
   attachment turnover ~150 orphans/year ~15 MB/year accumulation.
 
 **Touchpoints:**
-- `crates/service/src/startup_invariants.rs` — extend with marker-
+- `crates/service/src/startup_invariants.rs` - extend with marker-
   file gating + bounded windows; the minimal pass scaffolding
   already exists from Phases 3 and 6.
 
@@ -199,7 +199,7 @@ the fix; Phase 8 makes them robust under crash.
   `crates/app/src/handlers/accounts.rs`) updates the existing account
   row in place and does NOT trigger `PushRuntime::start_account`. So
   a JMAP token-revocation kills push for that account until Service
-  restart, even after the user re-authorizes — the dead `PushRuntime`
+  restart, even after the user re-authorizes - the dead `PushRuntime`
   entry has no path to re-arm. Phase 8 wires push re-arm to a
   token-refresh-success event (or to a UI-side
   `account.reauthorized { account_id }` IPC). Manual workaround
@@ -216,10 +216,10 @@ the fix; Phase 8 makes them robust under crash.
   workaround.
 
 **Touchpoints:**
-- `crates/service/src/push.rs::PushRuntime::start_account` — push
+- `crates/service/src/push.rs::PushRuntime::start_account` - push
   state hardening.
 - `crates/service/src/push.rs::PushRuntime` + an event emission
-  point in the OAuth refresh path — re-auth re-arm.
+  point in the OAuth refresh path - re-auth re-arm.
 
 ---
 
@@ -230,7 +230,7 @@ Two fold into other Phase 8 clusters (orphan sweep → 8-2;
 real-world fixture corpus → harness M5). Four remain here.
 
 - **PreserveExisting dual-index path.** v1 of Phase 7 ships
-  Wipe-only — search is briefly unavailable while a rebuild runs.
+  Wipe-only - search is briefly unavailable while a rebuild runs.
   Phase 8 reintroduces the originally-planned dual-index path: open
   `<search_index_next>/` adjacent with a parallel writer; route
   writes there; atomic-swap the directory; UI reader rebinds.
@@ -238,7 +238,7 @@ real-world fixture corpus → harness M5). Four remain here.
   construction into `SyncRuntime`, not consulted via `boot_state`,
   so the dual-writer scaffolding has to thread through the runtime.
   This is also the moment the
-  `RebuildPolicy::PreserveExisting` wire variant comes back —
+  `RebuildPolicy::PreserveExisting` wire variant comes back -
   Phase 7 close-out (M12) deleted the variant since the
   implementation didn't ship; Phase 8 restores it.
 - **Status-bar visual surface for `IndexRebuildProgress` +
@@ -259,24 +259,24 @@ real-world fixture corpus → harness M5). Four remain here.
   the visual-surface work. (Lands in
   `crates/service/src/rebuild.rs::run_wipe_rebuild_inner`.)
 
-(Real-world fixture corpus — checked-in `.pdf` / `.docx` / `.xlsx` /
-`.pptx` corpus + the malicious zip-bomb `.docx` — moves to harness
+(Real-world fixture corpus - checked-in `.pdf` / `.docx` / `.xlsx` /
+`.pptx` corpus + the malicious zip-bomb `.docx` - moves to harness
 **M5**, not Phase 8. The fixtures are test infrastructure; they
 belong with the integration cohort, not with Service architecture.)
 
 **Touchpoints:**
 - `crates/search/src/lib.rs` + `crates/service/src/search_writer.rs`
-  + `crates/service/src/rebuild.rs` — PreserveExisting plumbing.
-- `crates/service-api/src/extract.rs` — restore
+  + `crates/service/src/rebuild.rs` - PreserveExisting plumbing.
+- `crates/service-api/src/extract.rs` - restore
   `RebuildPolicy::PreserveExisting` variant.
-- `crates/service/src/dispatch.rs::spawn_post_ready_schema_rebuild` —
+- `crates/service/src/dispatch.rs::spawn_post_ready_schema_rebuild` -
   switch from hardcoded `Wipe` to PreserveExisting where the
   plumbing supports it.
-- `crates/app/src/update.rs` — `Option<RebuildProgressState>` on
+- `crates/app/src/update.rs` - `Option<RebuildProgressState>` on
   `ReadyApp`, `IndexRebuildProgress` / `IndexRebuildCompleted`
   consumption, reader rebind on completion.
-- `crates/app/src/ui/status_bar.rs` — rebuild-progress rendering.
-- `crates/service/src/rebuild.rs::run_wipe_rebuild_inner` —
+- `crates/app/src/ui/status_bar.rs` - rebuild-progress rendering.
+- `crates/service/src/rebuild.rs::run_wipe_rebuild_inner` -
   `local_drafts` re-emit.
 
 ---
@@ -297,10 +297,10 @@ The fix adds the column + both gates so the deletion flow is
 monotonic.
 
 **Touchpoints:**
-- `crates/db/src/db/schema/01_core.sql` — `accounts.is_deleting`
+- `crates/db/src/db/schema/01_core.sql` - `accounts.is_deleting`
   column.
-- `crates/app/src/...` — `SyncTick` account-list filter.
-- `crates/service/src/sync.rs::SyncRuntime::start_account` —
+- `crates/app/src/...` - `SyncTick` account-list filter.
+- `crates/service/src/sync.rs::SyncRuntime::start_account` -
   defense-in-depth gate.
 
 ---
@@ -309,13 +309,13 @@ monotonic.
 
 The close-out work runs as the final commits of Phase 8. Order:
 
-1. Run 8-6 (promote durable content into `docs/architecture.md`) —
+1. Run 8-6 (promote durable content into `docs/architecture.md`) -
    independent of implementation order; can land first.
-2. Run 8-7 (relocate `manual-test-matrix.md`) — depends on harness M1
+2. Run 8-7 (relocate `manual-test-matrix.md`) - depends on harness M1
    landed (so `docs/harness/` exists with companion docs).
-3. Run 8-8 (per-file disposition) — verify each
+3. Run 8-8 (per-file disposition) - verify each
    `docs/service/*` file has a target.
-4. Run 8-9 (delete the directory) — final commit; this plan deletes
+4. Run 8-9 (delete the directory) - final commit; this plan deletes
    with it.
 
 ### 8-6 Promote durable content into `docs/architecture.md`
@@ -347,7 +347,7 @@ content:
 - **Cross-store crash consistency.** The `clean_shutdown` sentinel
   contract, the exit-path matrix (graceful UI quit, UI-quit-but-
   unresponsive on Linux/Windows, panic in handler debug vs release,
-  external SIGTERM/SIGKILL/TerminateProcess, hard power-off — and
+  external SIGTERM/SIGKILL/TerminateProcess, hard power-off - and
   whether each writes the sentinel + triggers the recovery scan),
   the rationale for full-table scans being correctness-preserving,
   the marker-file gating that 8-2 implements.
@@ -375,14 +375,14 @@ crash-consistency content gets its own sibling section, probably
   (Phase 2 / 3 / 4 / 5 / 6a / 6b / 6c / 6d / 7 status sections).
   These document how the work proceeded; the durable lessons are
   already in `docs/architecture.md` and the per-component docs.
-- The "Why decide this now" framing — context only, the decision is
+- The "Why decide this now" framing - context only, the decision is
   made and the architecture is shipped.
-- The "What goes in v1" list — by Phase 8 ship, "v1" means current
+- The "What goes in v1" list - by Phase 8 ship, "v1" means current
   ratatoskr.
-- The migration policy (atomic-commit, single-binary-cost) — the
+- The migration policy (atomic-commit, single-binary-cost) - the
   migration is done; the policy was load-bearing during the work
   but isn't an ongoing concern.
-- The write-surface inventory table — the table tracked which UI
+- The write-surface inventory table - the table tracked which UI
   write surface relocated when; by Phase 8 ship, every entry is
   LANDED. The architectural shape (Service-side write surfaces) is
   already in `docs/architecture.md`.
@@ -488,7 +488,7 @@ up. Some natural pairings:
    benefit from harness M2 being available for verification (the
    class-aware emit re-attempt particularly), so harness M2 ideally
    lands in parallel.
-3. **8-3 in parallel** with 8-1 and 8-2 — different code area,
+3. **8-3 in parallel** with 8-1 and 8-2 - different code area,
    different reviewers.
 4. **8-4 after 8-1 / 8-2 / 8-3.** PreserveExisting is the largest
    single sub-item and benefits from the rest of Phase 8 being

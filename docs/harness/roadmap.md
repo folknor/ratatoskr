@@ -1,10 +1,10 @@
-# Service test harness — roadmap
+# Service test harness - roadmap
 
 The motivation is in `problem-statement.md`. The architectural shape
 is in `architecture.md`. This document tracks the milestone-by-
 milestone implementation plan.
 
-The harness work is a long arc — at least a year of incremental work
+The harness work is a long arc - at least a year of incremental work
 to fully absorb the manual test matrix and add Track 2 (provider mock
 servers + sync benchmarks). It is **not** a single phase of any
 service-relocation roadmap. The Service's Phase 8 depends only on M2
@@ -14,17 +14,17 @@ coverage.
 
 ## Status legend
 
-- **LANDED** — committed, tests pass, exit criteria met.
-- **PARTIAL** — some work in tree; remaining scope listed.
-- **READY** — predecessors landed; work can start.
-- **BLOCKED** — predecessors not landed.
-- **DEFERRED** — explicitly held back; reason in the milestone body.
+- **LANDED** - committed, tests pass, exit criteria met.
+- **PARTIAL** - some work in tree; remaining scope listed.
+- **READY** - predecessors landed; work can start.
+- **BLOCKED** - predecessors not landed.
+- **DEFERRED** - explicitly held back; reason in the milestone body.
 
 ## Milestones
 
-### M1 — Foundation
+### M1 - Foundation
 
-**Status:** PARTIAL — brokkr-side scaffolding LANDED; ratatoskr-side
+**Status:** PARTIAL - brokkr-side scaffolding LANDED; ratatoskr-side
 work READY (gated by Service Phase 8 starting; can land independently
 of Phase 8's recovery work).
 
@@ -66,7 +66,7 @@ the brokkr repo):
   existing `test-helpers` feature so production builds never carry
   the Lua VM.
 - Per-script wall-clock backstop for runaway scripts. (Not via
-  dellingr's cost budget — that's structurally unable to bound
+  dellingr's cost budget - that's structurally unable to bound
   wall-clock; see `architecture.md`.)
 - `crates/app/tests/service-harness/` directory.
 - `brokkr.toml` additions:
@@ -103,7 +103,7 @@ crate.
 
 ---
 
-### M2 — Wedge
+### M2 - Wedge
 
 **Status:** BLOCKED on M1.
 
@@ -112,12 +112,12 @@ The Service's Phase 8 close-out depends on this milestone passing.
 Re-express the two `#[ignore]`'d `service_subprocess.rs` tests as
 `.lua` scripts:
 
-- `crates/app/tests/service-harness/ping_and_shutdown.lua` —
+- `crates/app/tests/service-harness/ping_and_shutdown.lua` -
   `harness.spawn`, `client:request("HealthPing")`, assert ack,
   `client:shutdown()`, assert clean exit. Replaces
   `service_subprocess_ping_and_shutdown` (which has been hanging
   intermittently since Phase 2).
-- `crates/app/tests/service-harness/terminal_on_missing_key.lua` —
+- `crates/app/tests/service-harness/terminal_on_missing_key.lua` -
   `harness.spawn_with_events` against a keyless data dir, expect
   `Terminal { BootFailure { KeyLoadFailure } }`. Replaces
   `spawn_with_events_emits_terminal_on_missing_key`.
@@ -133,14 +133,14 @@ Re-express the two `#[ignore]`'d `service_subprocess.rs` tests as
   `proc-wchan.txt` showing the writer task blocked on the mpsc;
   `frames.jsonl` showing the shutdown response was never sent;
   `events.jsonl` showing what got past `BootReady`. Reproducing the
-  diagnosis from artefacts alone — no re-run needed.
+  diagnosis from artefacts alone - no re-run needed.
 - The `#[ignore]` markers in `service_subprocess.rs` for the two
   tests are removed (the tests themselves can stay or be deleted;
   the new Lua scripts are authoritative).
 
 ---
 
-### M3 — Test-helper `RequestParams`
+### M3 - Test-helper `RequestParams`
 
 **Status:** BLOCKED on M1.
 
@@ -150,16 +150,16 @@ needs. Each new variant is automatically usable from Lua (the binding's
 
 Required for M4 / M5:
 
-- `TestSeedAccount { ... }` — FK-constrained writes need real
+- `TestSeedAccount { ... }` - FK-constrained writes need real
   `accounts(id)` rows. Creates an account with credentials, label
   set, and any required adjacent rows.
-- `TestCounterRead { counter }` — counter probe for "before / after"
+- `TestCounterRead { counter }` - counter probe for "before / after"
   delta assertions in `action_skips_search_index_write`,
   `handler_does_not_drive_batch_execute`. Service-side counters that
   accumulate per-class write counts; the test-helper RPC reads the
   current value.
 - Fault-injection: `TestCrashAfterNWrites { n, kind }` (or
-  equivalent) — the action service / sync runner panics or exits
+  equivalent) - the action service / sync runner panics or exits
   after the Nth write of the given class. Needed for `pre_ack_crash_*`
   / `post_ack_crash_*` cohort.
 - `--test-fake-schema=N` CLI flag (analog of the existing
@@ -175,7 +175,7 @@ Required for M4 / M5:
 
 ---
 
-### M4 — T1 cohort
+### M4 - T1 cohort
 
 **Status:** BLOCKED on M2 + M3.
 
@@ -209,7 +209,7 @@ Each script lands as a separate file in
 
 ---
 
-### M5 — Phase 7 integration cohort
+### M5 - Phase 7 integration cohort
 
 **Status:** BLOCKED on M2 + M3.
 
@@ -236,9 +236,9 @@ repo at `crates/app/tests/service-harness/fixtures/extract/`.
 
 ---
 
-### M6 — Manual-matrix automation
+### M6 - Manual-matrix automation
 
-**Status:** PARTIAL — items 4 and 5 unblock at M2; the rest unblocks
+**Status:** PARTIAL - items 4 and 5 unblock at M2; the rest unblocks
 incrementally as harness capability grows.
 
 The manual test matrix relocates from `docs/service/manual-test-matrix.md`
@@ -272,13 +272,13 @@ Sequencing:
   Currently manual because there's no fake OAuth provider; M8 (mock
   servers) provides one.
 - **M6.10 (BLOCKED on Track 2 calendar fake server):** calendar
-  create/update/delete. Same as M6.9 — needs a fake CalDAV /
+  create/update/delete. Same as M6.9 - needs a fake CalDAV /
   Google Calendar / Graph fixture.
-- **M6.11–M6.14 (READY when M5 lands):** Phase 7 attachment
+- **M6.11-M6.14 (READY when M5 lands):** Phase 7 attachment
   extraction round-trip, backfill kick on boot.ready, palette
   rebuild, schema-version mismatch rebuild. All have Lua-script
   shapes already sketched in `docs/service/manual-test-matrix.md`
-  entries 11–14.
+  entries 11-14.
 
 **Exit criteria:**
 
@@ -292,15 +292,15 @@ Sequencing:
 
 ---
 
-### M7 — Brokkr-side polish
+### M7 - Brokkr-side polish
 
-**Status:** PARTIAL — `service-list` and soak landed; `service-suite`
+**Status:** PARTIAL - `service-list` and soak landed; `service-suite`
 + `service-list --json` deferred per `notes/ratatoskr-service-harness.md`.
 
-- `brokkr service-suite [--filter X]` — walks
+- `brokkr service-suite [--filter X]` - walks
   `crates/app/tests/service-harness/`, runs every script (or every
   script matching `--filter`), aggregates pass/fail stats.
-- `brokkr service-list --json` — machine-readable script discovery
+- `brokkr service-list --json` - machine-readable script discovery
   for failure-triage tooling and editor integrations.
 
 **Exit criteria:**
@@ -310,9 +310,9 @@ Sequencing:
 
 ---
 
-### M8 — Provider mock servers (Track 2)
+### M8 - Provider mock servers (Track 2)
 
-**Status:** DEFERRED — gated on M2+M4 stable, and on the team having
+**Status:** DEFERRED - gated on M2+M4 stable, and on the team having
 appetite for the protocol-modeling work (which is not small).
 
 Mock IMAP and JMAP servers, fixture sets (small smoke / medium /
@@ -344,9 +344,9 @@ plus new sync-triggering / state-querying `RequestParams` variants
 
 ---
 
-### M9 — Sync benchmarks
+### M9 - Sync benchmarks
 
-**Status:** DEFERRED — gated on M8.
+**Status:** DEFERRED - gated on M8.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The
@@ -422,7 +422,7 @@ depends only on M2.
   `steps.jsonl` schemas need to be stable enough for scripts and
   failure-triage tooling to consume across versions. Owned by
   ratatoskr (writer); brokkr-side tooling will read them.
-- **Concurrency between scripts.** Default no — subprocess tests
+- **Concurrency between scripts.** Default no - subprocess tests
   touch real files and ports. Add `--jobs N` later if a class of
   scripts opts in. (Brokkr-side decision.)
 - **Data-dir preservation policy on success vs failure.** Default

@@ -103,20 +103,20 @@ hangs reproduce once in twenty runs.
 Under the harness, a failed test produces a self-contained artefact
 directory:
 
-- `frames.jsonl` — every JSON-RPC frame, both directions, timestamped.
-- `events.jsonl` — every spawn event observed (`ChildSpawned`,
+- `frames.jsonl` - every JSON-RPC frame, both directions, timestamped.
+- `events.jsonl` - every spawn event observed (`ChildSpawned`,
   `BootReady`, `Terminal`).
-- `steps.jsonl` — the test's step trace: which step was active, what
+- `steps.jsonl` - the test's step trace: which step was active, what
   condition was awaited, which transition fired.
-- `proc-{wchan,status,syscall,stack}.txt` — `/proc/<pid>/` snapshot at
+- `proc-{wchan,status,syscall,stack}.txt` - `/proc/<pid>/` snapshot at
   failure-declaration time. Distinguishes "blocked on futex" from
   "blocked on closed pipe" without re-running.
-- `service.stderr` — Service's stderr verbatim, per-run, not
+- `service.stderr` - Service's stderr verbatim, per-run, not
   race-mingled.
-- `data-dir/` — copy of the test's app-data dir at failure time.
+- `data-dir/` - copy of the test's app-data dir at failure time.
   SQLite WAL state, lockfile, key file, `clean_shutdown` sentinel.
-- `exit.txt` — exit code, signal, wait time, exit reason.
-- `run.toml` — script path, env vars, brokkr version, git commit.
+- `exit.txt` - exit code, signal, wait time, exit reason.
+- `run.toml` - script path, env vars, brokkr version, git commit.
 
 That dump is the difference between "the test hung, re-run with
 verbose logging" and "the writer task exited at frame 47 while the
@@ -140,7 +140,7 @@ brokkr's release cadence.
 **The Lua VM lives in ratatoskr's `app` crate, not in brokkr.** The
 runtime needs `ServiceClient`'s typed classification (boot exit codes,
 `ClientError` variants, `SchemaVersionChanged { was, now }`,
-generation-tag tracking on notifications) — hundreds of lines of
+generation-tag tracking on notifications) - hundreds of lines of
 stateful protocol logic. Embedding it in brokkr would force tokio in
 and either a heavy `app`-crate dep or a parallel JSON-RPC client
 implementation. Hosting the VM in ratatoskr keeps the protocol logic
@@ -160,7 +160,7 @@ harness uses for every wait.
 signal.** Every wait the script can express has the shape `predicate |
 child_terminated | named_backstop`. The first transition to fire wins;
 the trace records which one fired. Wall-clock is never the primary
-signal — child-exit observation via `ServiceClient::observe_child_exit`
+signal - child-exit observation via `ServiceClient::observe_child_exit`
 is. A backstop firing in a passing test means the predicate fired in
 time and the backstop was unused; a backstop firing in a failing test
 names the test-design bug.
@@ -189,10 +189,10 @@ names the test-design bug.
 
 ## Companion documents
 
-- `docs/harness/architecture.md` — the technical shape of the
+- `docs/harness/architecture.md` - the technical shape of the
   runtime, what brokkr provides vs what ratatoskr provides, the
   cohort coverage table, the failure model.
-- `docs/harness/roadmap.md` — milestone-by-milestone implementation
+- `docs/harness/roadmap.md` - milestone-by-milestone implementation
   plan.
 - Brokkr-side companion: `notes/ratatoskr-service-harness.md` in the
   brokkr repo. Architecture is mirrored across the two; roadmap is
