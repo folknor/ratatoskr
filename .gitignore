@@ -42,6 +42,9 @@ nul
 # Claude Code — ignore local settings but track shared skills
 .claude
 
+# brokkr local cache
+.brokkr
+
 # Signing keys
 *.key
 *.pem

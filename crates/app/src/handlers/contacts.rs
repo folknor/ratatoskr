@@ -226,7 +226,15 @@ async fn execute_contact_import(
     let mut skipped_no_email = 0usize;
     let mut skipped_duplicate = 0usize;
     let mut updated = 0usize;
+    let mut failed = 0usize;
 
+    // Per-row failures log + continue: a single transient IPC error
+    // (admission queue full, slow-disk hiccup) shouldn't abort an
+    // import of thousands of rows. The earlier behavior bubbled the
+    // first Err and left the batch half-applied with no compensating
+    // delete. A future batch-IPC redesign would let the handler
+    // commit-or-rollback as a unit; until then, log + continue
+    // matches the documented intent.
     for contact in &contacts {
         let Some(email) = contact.normalized_email() else {
             skipped_no_email += 1;
@@ -244,11 +252,16 @@ async fn execute_contact_import(
         if let Some(existing_id) = exists {
             if update_existing {
                 let entry = build_contact_entry(existing_id, &email, contact, &account_id);
-                client
+                match client
                     .save_contact_local_only(contact_entry_to_save_params(entry))
                     .await
-                    .map_err(|e| format!("save_contact_local_only: {e}"))?;
-                updated += 1;
+                {
+                    Ok(()) => updated += 1,
+                    Err(e) => {
+                        log::warn!("contact import: save_contact_local_only({email}): {e}");
+                        failed += 1;
+                    }
+                }
             } else {
                 skipped_duplicate += 1;
             }
@@ -259,12 +272,20 @@ async fn execute_contact_import(
                 contact,
                 &account_id,
             );
-            client
+            match client
                 .save_contact_local_only(contact_entry_to_save_params(entry))
                 .await
-                .map_err(|e| format!("save_contact_local_only: {e}"))?;
-            imported += 1;
+            {
+                Ok(()) => imported += 1,
+                Err(e) => {
+                    log::warn!("contact import: save_contact_local_only({email}): {e}");
+                    failed += 1;
+                }
+            }
         }
+    }
+    if failed > 0 {
+        log::warn!("contact import: {failed} row(s) failed; the rest were applied");
     }
 
     // Create groups from import and link members

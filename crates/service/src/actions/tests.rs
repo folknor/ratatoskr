@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
-use db::db::{ReadDbState, params};
+use db::db::params;
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -17,7 +17,9 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     // Main DB with full migrations
     let conn = db::db::Connection::open_in_memory().expect("open in-memory db");
     db::db::migrations::run_all(&conn).expect("migrations");
-    let db = ReadDbState::from_arc(Arc::new(Mutex::new(conn)));
+    let conn_arc = Arc::new(Mutex::new(conn));
+    let write_db = service_state::WriteDbState::from_arc(conn_arc);
+    let db = write_db.to_read_state();
 
     // Stores: tempdir-backed
     let body_store = store::body_store::BodyStoreReadState::init(tmp.path()).expect("body store");
@@ -27,6 +29,7 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
 
     let ctx = ActionContext {
         db,
+        write_db,
         body_store,
         inline_images,
         search,

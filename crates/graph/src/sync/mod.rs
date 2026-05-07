@@ -51,14 +51,16 @@ struct SyncCtx<'a> {
 // Initial sync
 // ---------------------------------------------------------------------------
 
-/// Initial Graph sync: folders → per-folder message fetch → delta token bootstrap.
+/// Initial Graph sync: folders -> per-folder message fetch -> delta token bootstrap.
 ///
 /// Phase 6d-B flattened the parameter list: callers pass the writer-half
 /// handles individually instead of a `SyncProviderCtx`. The `provider-sync`
-/// crate (which carries the `service-state` dep) destructures its
-/// `SyncProviderCtx` at the IPC boundary, so graph itself no longer
-/// needs to import `SyncProviderCtx` and can drop its `service-state`
-/// Cargo dep.
+/// crate destructures its `SyncProviderCtx` at the IPC boundary so the
+/// `provider-sync -> graph -> provider-sync` Cargo cycle is closed. The
+/// `service-state` dep stays in `crates/graph/Cargo.toml` until the per-
+/// store handle types relocate to a UI-safe crate (deferred to Phase 8 -
+/// see `docs/service/implementation-roadmap.md` § "Phase 6d carry-forward
+/// to Phase 8" for the full structural-lockdown plan).
 #[allow(clippy::too_many_arguments)]
 pub async fn graph_initial_sync(
     client: &GraphClient,

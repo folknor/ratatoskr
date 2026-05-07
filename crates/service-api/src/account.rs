@@ -8,11 +8,17 @@
 //! own modules so the wire shape for the cancel/delete state machine
 //! does not bleed into the simple update path.
 //!
-//! `caldav_password` is passed through verbatim today (the column
-//! stores it without encryption); when the encryption-key handle
-//! bundle (`internal.encrypt_for_storage`) lands, the wire shape
-//! stays unchanged but the Service handler can route the value
-//! through the cipher before writing.
+//! Credential encryption: `account.create` and `account.update_tokens`
+//! encrypt at the Service handler boundary. UI ships
+//! `AccountCredentials::Plaintext`; the handler routes through
+//! `common::crypto::encrypt_value` using the key held in
+//! `BootSharedState`. The `Encrypted` variant is kept for callers
+//! that already hold ciphertext (today: tests; future: any path
+//! where the UI receives a pre-encrypted credential blob).
+//!
+//! `caldav_password` on `account.update` is still passed through
+//! verbatim (the column does not currently store ciphertext for the
+//! caldav path); this is documented drift, tracked separately.
 
 use serde::{Deserialize, Serialize};
 
@@ -73,14 +79,14 @@ pub struct AccountReorderAck;
 /// Day-one wire shape so 6b's two-step OAuth flow can extend rather
 /// than redefine. Variants:
 ///
-/// - `Plaintext`: caller passes raw secrets. The Service handler is
-///   the right place to encrypt before write - though today's
-///   behavior is "store verbatim" because the encryption-key handle
-///   relocation has not yet landed; once `internal.encrypt_for_storage`
-///   ships, this variant routes through it transparently.
+/// - `Plaintext`: caller passes raw secrets. Service handler routes
+///   through `common::crypto::encrypt_value` using the key held in
+///   `BootSharedState` before the DB write. UI's normal account-add
+///   flow ships this variant.
 /// - `Encrypted`: caller passes already-encrypted blobs in
 ///   `enc:base64iv:base64ct` form. Used by paths where the UI
-///   already holds the encrypted material (re-auth, recovery flows).
+///   already holds the encrypted material (today: tests; future
+///   recovery flows). Service handler passes through verbatim.
 ///
 /// Phase 6b will add a third `Oauth { auth_code, redirect_uri,
 /// code_verifier }` variant for the fresh-OAuth-grant flow rather
@@ -89,9 +95,8 @@ pub struct AccountReorderAck;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AccountCredentials {
-    /// Caller passes raw secrets. Service handler is responsible for
-    /// encryption (today: pass-through; future: route through
-    /// `internal.encrypt_for_storage`).
+    /// Caller passes raw secrets. Service handler encrypts at the
+    /// boundary before writing.
     Plaintext {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access_token: Option<String>,
@@ -103,8 +108,9 @@ pub enum AccountCredentials {
         smtp_password: Option<String>,
     },
     /// Caller passes already-encrypted blobs. Service handler writes
-    /// them verbatim. Used by re-auth / recovery flows that already
-    /// hold cipher text.
+    /// them verbatim. Used by callers that already hold ciphertext
+    /// (today: tests; future: any path where the UI receives a
+    /// pre-encrypted credential blob).
     Encrypted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         access_token: Option<String>,
@@ -115,38 +121,6 @@ pub enum AccountCredentials {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         smtp_password: Option<String>,
     },
-}
-
-impl AccountCredentials {
-    /// Pull the four secret fields out regardless of encryption
-    /// state. Today's Service handler treats both variants the same -
-    /// pass through to `create_account_sync` - because the underlying
-    /// DB column stores the value as-is. When
-    /// `internal.encrypt_for_storage` lands the handler can branch on
-    /// the variant before calling into this method.
-    pub fn into_fields(
-        self,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) {
-        match self {
-            Self::Plaintext {
-                access_token,
-                refresh_token,
-                imap_password,
-                smtp_password,
-            }
-            | Self::Encrypted {
-                access_token,
-                refresh_token,
-                imap_password,
-                smtp_password,
-            } => (access_token, refresh_token, imap_password, smtp_password),
-        }
-    }
 }
 
 /// `account.create` request body. Mirrors today's `CreateAccountParams`

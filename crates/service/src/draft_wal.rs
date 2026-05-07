@@ -32,10 +32,7 @@ use db::db::Connection;
 use rtsk::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
 use serde::{Deserialize, Serialize};
 
-/// Filename of the active WAL inside the user data directory.
-/// Mirrors the UI-side constant (the two crates do not share a
-/// module today; the constant is short and stable).
-pub(crate) const WAL_FILENAME: &str = "drafts.wal";
+pub(crate) use service_api::WAL_FILENAME;
 
 /// One entry on the WAL. Matches the UI-side serializer in
 /// `crates/app/src/draft_wal.rs`. The two crates do not share a
@@ -150,6 +147,42 @@ mod tests {
         )
         .expect("create local_drafts");
         conn
+    }
+
+    /// Pin the wire shape against the canonical golden in
+    /// `service-api`. The UI-side `app::draft_wal` test asserts the
+    /// same constant; if either side's `WalEntry` /
+    /// `SaveLocalDraftParams` shape drifts, that side's test breaks.
+    /// To intentionally evolve the wire shape, update both
+    /// `DRAFT_WAL_GOLDEN_FIXTURE_JSON` in `service-api` and the
+    /// matching params in both crates.
+    #[test]
+    fn wire_shape_pins_to_service_api_golden() {
+        let entry = WalEntry {
+            epoch_ms: service_api::DRAFT_WAL_GOLDEN_FIXTURE_EPOCH_MS,
+            params: golden_fixture_params(),
+        };
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert_eq!(serialized, service_api::DRAFT_WAL_GOLDEN_FIXTURE_JSON);
+    }
+
+    fn golden_fixture_params() -> SaveLocalDraftParams {
+        SaveLocalDraftParams {
+            id: "draft-fixture".to_string(),
+            account_id: "acct-fixture".to_string(),
+            to_addresses: Some("to@example.com".to_string()),
+            cc_addresses: Some("cc@example.com".to_string()),
+            bcc_addresses: Some("bcc@example.com".to_string()),
+            subject: Some("fixture subject".to_string()),
+            body_html: Some("<p>fixture body</p>".to_string()),
+            reply_to_message_id: Some("msg-reply".to_string()),
+            thread_id: Some("thread-fixture".to_string()),
+            from_email: Some("me@example.com".to_string()),
+            signature_id: Some("sig-1".to_string()),
+            remote_draft_id: Some("remote-1".to_string()),
+            attachments: Some("[]".to_string()),
+            signature_separator_index: Some(42),
+        }
     }
 
     fn fresh_params(id: &str, subject: &str) -> SaveLocalDraftParams {

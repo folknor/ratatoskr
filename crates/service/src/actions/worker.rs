@@ -36,11 +36,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use db::db::ReadDbState;
 use db::db::action_journal::{
     JobTerminalStatus, LeasedOp, LeasedQuietJob, OpStatusCounts, OpTerminalStatus, PerOpJobKind,
     ReplayableOp, count_ops_by_status, finalize_job, lease_next_ready_op,
-    lease_next_ready_quiet_job, mark_op_terminal, unemitted_terminal_ops,
+    lease_next_ready_quiet_job, mark_op_terminal, terminal_ops_for_plan, unemitted_terminal_ops,
     unfinalized_per_op_plan_jobs,
 };
 use service_api::{
@@ -87,15 +86,18 @@ async fn run(
         log::info!("action worker: boot failed, exiting");
         return;
     }
-    let Some(db_conn) = boot_state.db_conn() else {
-        log::warn!("action worker: db_conn missing post-boot");
-        return;
+    let write_db = match boot_state.write_db_state() {
+        Ok(db) => db,
+        Err(error) => {
+            log::warn!("action worker: write_db_state missing post-boot: {error}");
+            return;
+        }
     };
     let Some(encryption_key) = boot_state.encryption_key() else {
         log::warn!("action worker: encryption_key missing post-boot");
         return;
     };
-    let action_ctx = match build_action_context(db_conn, encryption_key, &app_data_dir) {
+    let action_ctx = match build_action_context(write_db, encryption_key, &app_data_dir) {
         Ok(ctx) => ctx,
         Err(error) => {
             log::error!("action worker: failed to build ActionContext: {error}");
@@ -431,7 +433,7 @@ async fn build_send_request(
 /// write-back + `MutationLog` emission) and are not journaled through
 /// the action worker.
 pub(crate) fn build_action_context(
-    db_conn: Arc<Mutex<db::db::Connection>>,
+    write_db: service_state::WriteDbState,
     encryption_key: [u8; 32],
     app_data_dir: &std::path::Path,
 ) -> Result<ActionContext, String> {
@@ -441,8 +443,10 @@ pub(crate) fn build_action_context(
         .map_err(|e| format!("InlineImageStoreReadState::init: {e}"))?;
     let search = search::SearchReadState::init(app_data_dir)
         .map_err(|e| format!("SearchReadState::init: {e}"))?;
+    let db = write_db.to_read_state();
     Ok(ActionContext {
-        db: ReadDbState::from_arc(db_conn),
+        db,
+        write_db,
         body_store,
         inline_images,
         search,
@@ -527,12 +531,11 @@ async fn drain_one_pass(
         // Check parent-job completion regardless of whether the op
         // succeeded - one failed op doesn't stop the job; only "all
         // ops reached terminal" triggers finalization. Unknown kinds
-        // skip finalization (the row is already in 'failed' status
-        // and the parent stays as-is for the user-visible support
-        // record).
-        if let Some(kind) = leased.kind {
-            let _ = maybe_finalize(ctx, out_tx, &leased.plan_id, kind).await;
-        }
+        // still finalize so the parent row doesn't strand at
+        // queued/leased/executing forever; maybe_finalize emits both
+        // mail and calendar completion frames in that case so either
+        // awaiter pool unblocks.
+        let _ = maybe_finalize(ctx, out_tx, &leased.plan_id, leased.kind).await;
     }
 }
 
@@ -559,18 +562,14 @@ async fn run_one(
         Some(PerOpJobKind::MailPlan) => run_one_mail(ctx, out_tx, op).await,
         Some(PerOpJobKind::CalendarPlan) => run_one_calendar(ctx, out_tx, op).await,
         None => {
-            // Phase 6c-7: corrupt journal row. Mark the op as failed
-            // with a structured reason blob so the lease index drops it
-            // and the parent can be finalized as `Failed`. The user-
-            // visible record persists in `action_jobs` history for
-            // support flows; the worker emits a generic
-            // `OperationOutcome::RemoteFailure` so the UI's
-            // `pending_action_plans` awaiter (mail) or
-            // `pending_calendar_action_plans` awaiter (calendar)
-            // doesn't hang. We bias to `OperationResult` here because
-            // the parent kind is unknown - both wire shapes' awaiters
-            // see the per-plan `*_completed` frame eventually via
-            // maybe_finalize-best-effort.
+            // Corrupt journal row: parent's `kind` column did not parse
+            // into any known `PerOpJobKind` variant. Mark the op as
+            // failed so the lease index drops it; the surrounding loop
+            // then calls `maybe_finalize` with `kind = None`, which
+            // emits both `ActionCompleted` and `CalendarActionCompleted`
+            // so either awaiter pool unblocks (the unmatched one
+            // TTL-expires UI-side). Persists as `RemoteFailure` with a
+            // `JournalCorrupt` provider_message for support flows.
             log::error!(
                 "action worker: corrupt journal row for plan {:?}/{}: kind={:?}",
                 op.plan_id,
@@ -620,12 +619,11 @@ async fn run_one_calendar(
 ) -> Result<(), String> {
     let wire_op: WireCalendarOperation = serde_json::from_slice(&op.operation_blob)
         .map_err(|e| format!("deserialize WireCalendarOperation: {e}"))?;
-    // Build a CalendarActionContext from the worker's ActionContext.
-    // ActionContext.db is `ReadDbState`; the calendar pipeline needs
-    // `WriteDbState`. The worker holds a `WriteDbState` clone in
-    // `boot_state`; for now we build one from the connection arc.
+    // ActionContext now carries `write_db` directly so calendar
+    // dispatch reuses the writer half compile-checked through the
+    // type system, no `WriteDbState::from_arc` end-run.
     let cal_ctx = action_types::CalendarActionContext {
-        db: service_state::WriteDbState::from_arc(ctx.db.conn()),
+        db: ctx.write_db.clone(),
         encryption_key: ctx.encryption_key,
     };
     let cal_op = service_api::CalendarActionWireOperation {
@@ -710,7 +708,7 @@ async fn maybe_finalize(
     ctx: &ActionContext,
     out_tx: &mpsc::Sender<Vec<u8>>,
     plan_id_bytes: &[u8; 16],
-    kind: PerOpJobKind,
+    kind: Option<PerOpJobKind>,
 ) -> Result<(), String> {
     let conn = ctx.db.conn();
     let plan_id = *plan_id_bytes;
@@ -749,34 +747,81 @@ async fn maybe_finalize(
     .map_err(|e| format!("spawn_blocking finalize_job: {e}"))??;
 
     let plan_id_uuid = PlanId(uuid::Uuid::from_bytes(*plan_id_bytes));
-    match kind {
-        PerOpJobKind::MailPlan => {
-            let completion = ActionCompleted {
+    let mail_completion = || ActionCompleted {
+        plan_id: plan_id_uuid,
+        summary: summary.clone(),
+        service_generation: 0,
+    };
+
+    // For calendar plans, walk the journal's per-op outcomes so the
+    // completion frame carries a concrete `Vec<CalendarOperationOutcome>`.
+    // The UI's `completion_to_result` inspects this list to surface
+    // partial-failure state to the user (e.g. "create event when
+    // offline" -> `LocalOnly { reason }` -> "not synced" indicator)
+    // rather than collapsing every terminal plan to `Ok(())`.
+    let needs_cal_completion =
+        matches!(kind, Some(PerOpJobKind::CalendarPlan) | None);
+    let cal_results = if needs_cal_completion {
+        let conn = ctx.db.conn();
+        let plan_id_for_blocking = *plan_id_bytes;
+        let rows: Vec<(u32, Vec<u8>)> = tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+            terminal_ops_for_plan(&conn, &plan_id_for_blocking)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking terminal_ops_for_plan: {e}"))??;
+        let mut outcomes = Vec::with_capacity(rows.len());
+        for (operation_id, blob) in rows {
+            let result: service_api::CalendarOperationResult =
+                serde_json::from_slice(&blob).map_err(|e| {
+                    format!("deserialize CalendarOperationResult for op {operation_id}: {e}")
+                })?;
+            outcomes.push(CalendarOperationOutcome {
                 plan_id: plan_id_uuid,
-                summary,
+                operation_id: OperationId(operation_id),
+                result,
                 service_generation: 0,
-            };
-            send_must_deliver_notification(out_tx, &Notification::ActionCompleted(completion))
-                .await;
+            });
         }
-        PerOpJobKind::CalendarPlan => {
-            // Phase 6c: the calendar pipeline does not journal a
-            // per-op result-list rollup the way mail does (PlanSummary
-            // counts terminal statuses without distinguishing
-            // CalendarOperationResult variants). The UI's awaiter
-            // (Phase 6c-9) keys on plan_id and triggers a reload via
-            // CalendarChanged regardless of the exact per-op result;
-            // emit an empty results vector to mirror the contract.
-            // Phase 6d can populate per-op results if the UI grows a
-            // need.
-            let completion = CalendarActionCompleted {
-                plan_id: plan_id_uuid,
-                results: Vec::new(),
-                service_generation: 0,
-            };
+        outcomes
+    } else {
+        Vec::new()
+    };
+    let cal_completion = CalendarActionCompleted {
+        plan_id: plan_id_uuid,
+        results: cal_results,
+        service_generation: 0,
+    };
+
+    match kind {
+        Some(PerOpJobKind::MailPlan) => {
             send_must_deliver_notification(
                 out_tx,
-                &Notification::CalendarActionCompleted(completion),
+                &Notification::ActionCompleted(mail_completion()),
+            )
+            .await;
+        }
+        Some(PerOpJobKind::CalendarPlan) => {
+            send_must_deliver_notification(
+                out_tx,
+                &Notification::CalendarActionCompleted(cal_completion),
+            )
+            .await;
+        }
+        None => {
+            // Corrupt parent kind: emit both completion frames so
+            // either awaiter pool unblocks. The unmatched one
+            // TTL-expires UI-side. Calendar results are populated
+            // even here in case the corrupt kind was originally a
+            // calendar plan.
+            send_must_deliver_notification(
+                out_tx,
+                &Notification::ActionCompleted(mail_completion()),
+            )
+            .await;
+            send_must_deliver_notification(
+                out_tx,
+                &Notification::CalendarActionCompleted(cal_completion),
             )
             .await;
         }

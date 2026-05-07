@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 /// Generic marker-file helper. Parameterised over the payload type
 /// so each consumer can shape its own state. The directory name is
@@ -52,10 +53,24 @@ where
         self.dir(app_data_dir).join(format!("{key}.json"))
     }
 
-    /// Write the marker atomically. Crash mid-write leaves either the
-    /// prior payload or no file at all - never a partial write.
-    /// `rename` is atomic on POSIX; Windows uses `ReplaceFileExW`-
-    /// equivalent semantics via `fs::rename`.
+    /// Write the marker atomically and durably. Crash mid-write
+    /// leaves either the prior payload or no file at all - never a
+    /// partial write. `rename` is atomic on POSIX; Windows uses
+    /// `ReplaceFileExW`-equivalent semantics via `fs::rename`.
+    ///
+    /// Durability sequence:
+    ///   1. Write tmp file, fsync the tmp file's data + metadata.
+    ///   2. Rename tmp -> final.
+    ///   3. fsync the parent directory so the rename's dirent is
+    ///      durable before the call returns (Unix). Power loss
+    ///      between rename and the next dirty-page flush would
+    ///      otherwise leave the dirent on disk while the data
+    ///      blocks point at stale or zeroed sectors on filesystems
+    ///      with looser ordering (ext4 `data=writeback`, xfs).
+    ///
+    /// On Windows the directory fsync step is a no-op (NTFS
+    /// journals directory metadata; opening a directory for sync
+    /// is not supported through the same API).
     pub(crate) async fn write(
         &self,
         app_data_dir: &Path,
@@ -70,12 +85,43 @@ where
         let tmp_path = dir.join(format!("{key}.json.tmp"));
         let bytes = serde_json::to_vec_pretty(payload)
             .map_err(|e| format!("serialize {} marker: {e}", self.dir_name))?;
-        fs::write(&tmp_path, &bytes)
+
+        // Step 1: write + fsync the tmp file.
+        let mut tmp_file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)
+            .await
+            .map_err(|e| format!("open {} tmp: {e}", self.dir_name))?;
+        tmp_file
+            .write_all(&bytes)
             .await
             .map_err(|e| format!("write {} tmp: {e}", self.dir_name))?;
+        tmp_file
+            .sync_all()
+            .await
+            .map_err(|e| format!("fsync {} tmp: {e}", self.dir_name))?;
+        drop(tmp_file);
+
+        // Step 2: rename tmp -> final.
         fs::rename(&tmp_path, &final_path)
             .await
             .map_err(|e| format!("rename {} tmp: {e}", self.dir_name))?;
+
+        // Step 3: fsync the parent dir so the dirent is durable
+        // (Unix only; NTFS does not need or support this).
+        #[cfg(unix)]
+        {
+            let dir_handle = fs::File::open(&dir)
+                .await
+                .map_err(|e| format!("open {} dir for fsync: {e}", self.dir_name))?;
+            dir_handle
+                .sync_all()
+                .await
+                .map_err(|e| format!("fsync {} dir: {e}", self.dir_name))?;
+        }
+
         Ok(())
     }
 
@@ -117,12 +163,16 @@ where
     /// Each entry is `(key, payload)`; the key is the file stem with
     /// the `.json` extension stripped.
     ///
+    /// Per-marker read or parse errors log + skip the offending file
+    /// so a single corrupt marker does not stop the drain for every
+    /// other account. The previous behavior short-circuited the
+    /// whole call on the first parse failure, which made one bad
+    /// JSON file freeze account-deletion drain workspace-wide.
+    ///
     /// Sync markers do their own walk inside
     /// `service::startup_invariants::discover_dirty_accounts` because
     /// that path needs to surface `Unparseable` markers as a
-    /// distinct dirty status (the `list` API short-circuits the
-    /// whole call on any parse failure). Account-deletion markers
-    /// will use this method directly when Phase 6b task 8 lands.
+    /// distinct dirty status.
     #[allow(dead_code)]
     pub(crate) async fn list(
         &self,
@@ -152,12 +202,26 @@ where
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
             }
-            let bytes = fs::read(&path).await.map_err(|e| {
-                format!("read {} marker {stem}: {e}", self.dir_name)
-            })?;
-            let payload: T = serde_json::from_slice(&bytes).map_err(|e| {
-                format!("parse {} marker {stem}: {e}", self.dir_name)
-            })?;
+            let bytes = match fs::read(&path).await {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!(
+                        "{}: skip marker {stem}, read failed: {e}",
+                        self.dir_name
+                    );
+                    continue;
+                }
+            };
+            let payload: T = match serde_json::from_slice(&bytes) {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!(
+                        "{}: skip marker {stem}, parse failed: {e}",
+                        self.dir_name
+                    );
+                    continue;
+                }
+            };
             out.push((stem, payload));
         }
         Ok(out)

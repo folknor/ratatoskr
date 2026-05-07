@@ -38,8 +38,7 @@ pub struct WalEntry {
     pub params: SaveLocalDraftParams,
 }
 
-/// Filename of the active WAL inside the user data directory.
-pub const WAL_FILENAME: &str = "drafts.wal";
+pub use service_api::WAL_FILENAME;
 
 /// Returns the absolute path of the active WAL.
 pub fn wal_path(data_dir: &Path) -> PathBuf {
@@ -61,6 +60,14 @@ fn epoch_millis_now() -> u64 {
 /// permission flip on `<data_dir>`); the caller should log and
 /// surface a warning. Today's UI logs at error level and keeps the
 /// draft `dirty` so the next tick or close attempt retries.
+///
+/// On the very first append after install, fsync the parent
+/// directory after `sync_all` so the WAL's dirent is durable; a
+/// subsequent power-loss would otherwise leave the freshly-created
+/// file with no directory entry on filesystems with looser ordering
+/// (ext4 `data=writeback`, xfs). After the first write the dirent
+/// already exists, so we only pay the dir fsync cost once per data
+/// dir lifetime.
 pub fn append(data_dir: &Path, params: &SaveLocalDraftParams) -> Result<(), String> {
     let entry = WalEntry {
         epoch_ms: epoch_millis_now(),
@@ -69,6 +76,7 @@ pub fn append(data_dir: &Path, params: &SaveLocalDraftParams) -> Result<(), Stri
     let mut line = serde_json::to_string(&entry).map_err(|e| format!("serialize wal entry: {e}"))?;
     line.push('\n');
     let path = wal_path(data_dir);
+    let first_creation = !path.exists();
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -80,6 +88,18 @@ pub fn append(data_dir: &Path, params: &SaveLocalDraftParams) -> Result<(), Stri
         .map_err(|e| format!("flush {}: {e}", path.display()))?;
     file.sync_all()
         .map_err(|e| format!("sync {}: {e}", path.display()))?;
+    drop(file);
+    #[cfg(unix)]
+    if first_creation {
+        let dir_handle = std::fs::File::open(data_dir).map_err(|e| {
+            format!("open {} for fsync: {e}", data_dir.display())
+        })?;
+        dir_handle
+            .sync_all()
+            .map_err(|e| format!("fsync {}: {e}", data_dir.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = first_creation;
     Ok(())
 }
 
@@ -127,6 +147,42 @@ mod tests {
         let entry: WalEntry = serde_json::from_str(body.trim()).expect("parse line");
         assert_eq!(entry.params.id, "draft-rt");
         assert_eq!(entry.params.subject.as_deref(), Some("hello"));
+    }
+
+    /// Pin the wire shape against the canonical golden in
+    /// `service-api`. The Service-side `draft_wal` test asserts the
+    /// same constant; if either side's `WalEntry` /
+    /// `SaveLocalDraftParams` shape drifts, that side's test breaks.
+    /// To intentionally evolve the wire shape, update both
+    /// `DRAFT_WAL_GOLDEN_FIXTURE_JSON` in `service-api` and the
+    /// matching params in both crates.
+    #[test]
+    fn wire_shape_pins_to_service_api_golden() {
+        let entry = WalEntry {
+            epoch_ms: service_api::DRAFT_WAL_GOLDEN_FIXTURE_EPOCH_MS,
+            params: golden_fixture_params(),
+        };
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert_eq!(serialized, service_api::DRAFT_WAL_GOLDEN_FIXTURE_JSON);
+    }
+
+    fn golden_fixture_params() -> SaveLocalDraftParams {
+        SaveLocalDraftParams {
+            id: "draft-fixture".to_string(),
+            account_id: "acct-fixture".to_string(),
+            to_addresses: Some("to@example.com".to_string()),
+            cc_addresses: Some("cc@example.com".to_string()),
+            bcc_addresses: Some("bcc@example.com".to_string()),
+            subject: Some("fixture subject".to_string()),
+            body_html: Some("<p>fixture body</p>".to_string()),
+            reply_to_message_id: Some("msg-reply".to_string()),
+            thread_id: Some("thread-fixture".to_string()),
+            from_email: Some("me@example.com".to_string()),
+            signature_id: Some("sig-1".to_string()),
+            remote_draft_id: Some("remote-1".to_string()),
+            attachments: Some("[]".to_string()),
+            signature_separator_index: Some(42),
+        }
     }
 
     #[test]

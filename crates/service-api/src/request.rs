@@ -563,6 +563,14 @@ impl RequestParams {
     /// loop with slow requests would otherwise be able to push the boot
     /// handshake out past the admission cap.
     ///
+    /// `oauth.exchange_code` bypasses because it makes an external HTTPS
+    /// call (token exchange + userinfo) inside the handler future. It runs
+    /// at human-paced cadence (account create / re-auth flow) so contention
+    /// is not a real-world concern, but the 30 s timeout would otherwise
+    /// pin a semaphore permit while waiting on a slow / wedged provider.
+    /// The bypass keeps the rest of the dispatch loop responsive during
+    /// the round-trip.
+    ///
     /// Renamed from `bypasses_semaphore` in Phase 1.5 to reflect the dual
     /// role - the dispatch loop's `ADMISSION_CAP` gate also keys off this
     /// flag.

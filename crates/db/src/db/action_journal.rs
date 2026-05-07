@@ -443,9 +443,14 @@ pub fn lease_next_ready_op(
     worker_owner: &[u8; 16],
     lease_duration_ms: i64,
 ) -> Result<Option<LeasedOp>, String> {
-    /// `(job_id_bytes, operation_id, ordinal, thread_id, operation_blob)`
-    /// destructured into a typed `LeasedOp` immediately after the query.
-    type LeaseRow = (Vec<u8>, u32, u32, String, Vec<u8>);
+    /// `(job_id_bytes, operation_id, ordinal, thread_id, operation_blob,`
+    /// ` account_id, quiet, raw_kind)` destructured into a typed
+    /// `LeasedOp` immediately after the query. Parent fields are
+    /// pulled via correlated subqueries in the RETURNING clause so
+    /// the lease + parent read commit atomically; nothing today
+    /// rewrites `kind` but the structural guarantee removes a
+    /// theoretical race for free.
+    type LeaseRow = (Vec<u8>, u32, u32, String, Vec<u8>, String, i64, String);
     let row: Option<LeaseRow> = conn
         .query_row(
             "UPDATE action_job_ops SET \
@@ -461,7 +466,11 @@ pub fn lease_next_ready_op(
                  ORDER BY jobs.created_at, ops.ordinal \
                  LIMIT 1 \
              ) \
-             RETURNING job_id, operation_id, ordinal, thread_id, operation",
+             RETURNING \
+                 job_id, operation_id, ordinal, thread_id, operation, \
+                 (SELECT account_id FROM action_jobs WHERE job_id = action_job_ops.job_id), \
+                 (SELECT quiet FROM action_jobs WHERE job_id = action_job_ops.job_id), \
+                 (SELECT kind FROM action_jobs WHERE job_id = action_job_ops.job_id)",
             params![worker_owner.as_slice(), lease_duration_ms],
             |row| {
                 Ok((
@@ -470,32 +479,31 @@ pub fn lease_next_ready_op(
                     row.get::<_, u32>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, Vec<u8>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| format!("lease_next_ready_op: {e}"))?;
-    let Some((job_id_bytes, operation_id, ordinal, thread_id, operation_blob)) = row else {
+    let Some((
+        job_id_bytes,
+        operation_id,
+        ordinal,
+        thread_id,
+        operation_blob,
+        account_id,
+        quiet_int,
+        raw_kind,
+    )) = row
+    else {
         return Ok(None);
     };
     let plan_id: [u8; 16] = job_id_bytes
         .as_slice()
         .try_into()
         .map_err(|_| "lease_next_ready_op: job_id is not 16 bytes".to_string())?;
-    // Pull account_id + quiet + kind from the parent row. Cheap PK lookup.
-    let (account_id, quiet, raw_kind) = conn
-        .query_row(
-            "SELECT account_id, quiet, kind FROM action_jobs WHERE job_id = ?1",
-            params![plan_id.as_slice()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)? != 0,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .map_err(|e| format!("lease_next_ready_op parent lookup: {e}"))?;
     let kind = PerOpJobKind::from_sql(&raw_kind).ok();
     Ok(Some(LeasedOp {
         plan_id,
@@ -504,7 +512,7 @@ pub fn lease_next_ready_op(
         thread_id,
         operation_blob,
         account_id,
-        quiet,
+        quiet: quiet_int != 0,
         kind,
         raw_kind,
     }))
@@ -633,13 +641,23 @@ pub fn count_ops_by_status(
 /// alongside the `job_id` so the worker can emit the right per-kind
 /// completion notification (`ActionCompleted` vs
 /// `CalendarActionCompleted`).
+///
+/// Filter is `kind NOT IN ('send', 'mark_chat_read')` rather than an
+/// allow-list of known per-op kinds: a future binary writing a kind
+/// value the current binary doesn't recognize would otherwise leave
+/// the parent stranded forever after a worker death between final
+/// `mark_op_terminal` and `finalize_job`. Unknown kinds surface as
+/// `None` in the returned tuple; the worker emits both completion
+/// frames defensively in that case.
+pub type UnfinalizedPerOpPlanJob = ([u8; 16], Option<PerOpJobKind>);
+
 pub fn unfinalized_per_op_plan_jobs(
     conn: &Connection,
-) -> Result<Vec<([u8; 16], PerOpJobKind)>, String> {
+) -> Result<Vec<UnfinalizedPerOpPlanJob>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT j.job_id, j.kind FROM action_jobs j \
-             WHERE j.kind IN ('mail_plan', 'calendar_plan') \
+             WHERE j.kind NOT IN ('send', 'mark_chat_read') \
                AND j.status NOT IN ('completed', 'partial', 'failed') \
                AND NOT EXISTS ( \
                  SELECT 1 FROM action_job_ops o \
@@ -666,7 +684,7 @@ pub fn unfinalized_per_op_plan_jobs(
                     bytes.len()
                 )
             })?;
-        let kind = PerOpJobKind::from_sql(&raw_kind)?;
+        let kind = PerOpJobKind::from_sql(&raw_kind).ok();
         out.push((arr, kind));
     }
     Ok(out)
@@ -790,6 +808,35 @@ pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, St
             kind,
             raw_kind,
         });
+    }
+    Ok(out)
+}
+
+/// Fetch all terminal `(operation_id, outcome_blob)` pairs for a single
+/// plan, in ordinal order. Used by `maybe_finalize` to reconstruct the
+/// per-op `CalendarOperationOutcome` rollup that ships in
+/// `CalendarActionCompleted::results`. Returns an empty Vec if the plan
+/// has no terminal ops yet (caller should not call this until the
+/// finalization pre-check confirms `non_terminal() == 0`).
+pub fn terminal_ops_for_plan(
+    conn: &Connection,
+    plan_id: &[u8; 16],
+) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT operation_id, outcome FROM action_job_ops \
+             WHERE job_id = ?1 AND outcome IS NOT NULL \
+             ORDER BY ordinal",
+        )
+        .map_err(|e| format!("terminal_ops_for_plan prepare: {e}"))?;
+    let rows = stmt
+        .query_map([plan_id.as_slice()], |row| {
+            Ok((row.get::<_, u32>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })
+        .map_err(|e| format!("terminal_ops_for_plan query: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("terminal_ops_for_plan row: {e}"))?);
     }
     Ok(out)
 }
@@ -1127,7 +1174,7 @@ mod tests {
         let orphans = unfinalized_per_op_plan_jobs(&conn).expect("query");
         assert_eq!(orphans.len(), 1, "calendar_plan stranded job picked up");
         assert_eq!(orphans[0].0, stranded_cal);
-        assert_eq!(orphans[0].1, PerOpJobKind::CalendarPlan);
+        assert_eq!(orphans[0].1, Some(PerOpJobKind::CalendarPlan));
     }
 
     #[test]

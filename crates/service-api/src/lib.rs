@@ -3,6 +3,7 @@ mod boot;
 mod cal_action;
 mod calendar;
 mod client_notification;
+mod draft_wal;
 mod error;
 mod framing;
 mod notification;
@@ -30,6 +31,9 @@ pub use action::{
     SendWireRequest, SyncProgress, WireFolderId, WireJobStatus, WireMailOperation, WireTagId,
 };
 pub use client_notification::{ClientNotification, JsonRpcClientNotification};
+pub use draft_wal::{
+    DRAFT_WAL_GOLDEN_FIXTURE_EPOCH_MS, DRAFT_WAL_GOLDEN_FIXTURE_JSON, WAL_FILENAME,
+};
 pub use boot::{
     BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
 };

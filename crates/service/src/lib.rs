@@ -2,19 +2,19 @@ mod accounts;
 pub mod actions;
 mod boot;
 mod boot_progress;
-pub mod cal_actions;
-pub mod calendar;
+pub(crate) mod cal_actions;
+pub(crate) mod calendar;
 mod draft_wal;
 mod markers;
-pub mod progress;
-pub mod push;
-pub mod search_writer;
-pub mod send;
+pub(crate) mod progress;
+pub(crate) mod push;
+pub(crate) mod search_writer;
+pub(crate) mod send;
 mod send_vault;
 mod snooze_runner;
-pub mod startup_invariants;
-pub mod sync;
-pub mod sync_dispatch;
+pub(crate) mod startup_invariants;
+pub(crate) mod sync;
+pub(crate) mod sync_dispatch;
 
 /// Re-export test-helpers knobs for the in-process integration tests so
 /// they can drive the artificial boot delay without `pub mod boot` leaking

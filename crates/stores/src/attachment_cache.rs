@@ -66,6 +66,40 @@ pub fn write_cached(
     Ok(format!("{CACHE_DIR}/{content_hash}"))
 }
 
+/// Stage attachment bytes at `<hash>.tmp` so the file is invisible to the
+/// orphan sweep (which skips `.tmp` suffixes) until the DB row referencing
+/// `<hash>` is committed. Returns the absolute tmp path; pair with
+/// `commit_cached_tmp` after the row update lands. If the final file already
+/// exists (shared blob), no work is performed and `Ok(None)` is returned.
+pub fn write_cached_tmp(
+    app_data_dir: &Path,
+    content_hash: &str,
+    data: &[u8],
+) -> Result<Option<PathBuf>, String> {
+    let dir = cache_dir(app_data_dir)?;
+    let final_path = dir.join(content_hash);
+    if final_path.exists() {
+        return Ok(None);
+    }
+    let tmp_path = dir.join(format!("{content_hash}.tmp"));
+    std::fs::write(&tmp_path, data).map_err(|e| format!("write cache tmp: {e}"))?;
+    Ok(Some(tmp_path))
+}
+
+/// Rename a staged `<hash>.tmp` to its final `<hash>` location and return
+/// the relative path for the wire ack. Caller must have committed the DB
+/// row before calling this so a sweep racing the rename observes the row.
+pub fn commit_cached_tmp(
+    app_data_dir: &Path,
+    tmp_path: &Path,
+    content_hash: &str,
+) -> Result<String, String> {
+    let final_path = cache_dir(app_data_dir)?.join(content_hash);
+    std::fs::rename(tmp_path, &final_path)
+        .map_err(|e| format!("commit cache tmp: {e}"))?;
+    Ok(format!("{CACHE_DIR}/{content_hash}"))
+}
+
 /// Delete a cached attachment file by its DB-relative path.
 pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Result<(), String> {
     if !relative_path.starts_with(&format!("{CACHE_DIR}/")) {

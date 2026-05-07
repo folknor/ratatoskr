@@ -2,29 +2,34 @@
 //!
 //! Wire ack carries `{ content_hash, size_bytes, relative_path }`.
 //! Bytes never cross the IPC (phase-1.5-plan.md backpressure
-//! policy). On the flat cache, the open fd is the pin against
-//! concurrent eviction - Linux `unlink` does not invalidate
-//! already-open fds, so a UI process holding the cache file open
-//! survives a concurrent sweep. When pack-aware reads land
-//! (Phase 1a), this handler grows lease semantics + a
-//! `PackStore::get_with_lease` API; that revision pass swaps the
-//! wire shape and adds a `lease_id` field. Until then, no leases.
+//! policy). The Service-side window between metadata check and
+//! IPC ack is closed by serializing fetches against eviction via
+//! `ATTACHMENT_SWEEP_LOCK`. The UI-side window between IPC ack
+//! receipt and `open()` remains open until lease semantics land
+//! (Phase 1a's `PackStore::get_with_lease`); UI consumers should
+//! treat ENOENT on open as a transient miss and re-call
+//! `attachment.fetch`.
 //!
 //! Cache hit: lookup the row's `content_hash`, verify the file
-//! exists at `attachment_cache/<content_hash>`, return immediately.
+//! exists at `attachment_cache/<content_hash>`, bump `cached_at`
+//! so the LRU sweep sees this attachment as recently used, return.
 //!
 //! Cache miss: build a provider via the shared
 //! `service::actions::provider::create_provider` (same path the
 //! action service uses), call `ProviderOps::fetch_attachment` to get
-//! the base64 bytes, decode + hash + `write_cached` + update the
-//! attachments row's cache columns, then return.
+//! the base64 bytes, decode + hash, stage at `<hash>.tmp` (invisible
+//! to the orphan sweep because it skips `.tmp` suffixes), update the
+//! attachments row, then rename `.tmp` -> final. The order ensures
+//! that a sweep racing the commit either (a) sees the committed row
+//! and skips the file as referenced, or (b) sees only `.tmp` and
+//! skips the suffix.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{AttachmentFetchAck, AttachmentFetchParams, ServiceError};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::boot::BootSharedState;
 
@@ -48,15 +53,15 @@ const DEFAULT_CACHE_CAP_MB: i64 = 5 * 1024;
 /// case 50 GB drop, which is acceptable on the rare cap-flip path.
 const PER_KICK_RECLAIM_CAP_BYTES: i64 = 200 * 1024 * 1024;
 
-/// Single global sweep lock. A slow sweep on one tick is not re-
-/// entered when the next tick lands within `NOTIFY_CAP=4` queued
-/// kicks; the second kick acquires the lock once the first
-/// finishes (or, more commonly, is dropped at the
-/// `try_lock`-equivalent if we wanted; today we use a regular
-/// `Mutex` and let queued kicks await sequentially - the work is
-/// idempotent so back-to-back sweeps just see the cache already
-/// under cap and return immediately).
-static ATTACHMENT_SWEEP_LOCK: Mutex<()> = Mutex::const_new(());
+/// Single global sweep lock. `RwLock` so concurrent fetches on the
+/// hit and miss paths (read guards) run in parallel while the
+/// eviction sweep (write guard) blocks them and is blocked by
+/// in-flight fetches. A slow sweep on one tick is not re-entered
+/// when the next tick lands within `NOTIFY_CAP=4` queued kicks; the
+/// second kick acquires the write lock once the first finishes
+/// (back-to-back sweeps just see the cache already under cap and
+/// return immediately).
+static ATTACHMENT_SWEEP_LOCK: RwLock<()> = RwLock::const_new(());
 
 pub(crate) async fn handle_fetch(
     boot_state: &Arc<BootSharedState>,
@@ -93,8 +98,29 @@ pub(crate) async fn handle_fetch(
     if let Some(ref info) = info
         && let Some(ref content_hash) = info.content_hash
     {
+        // Defensive: hex-only hashes (xxh3 emits 16-char hex via
+        // hash_bytes). A corrupted/migrated row containing path
+        // separators would escape the cache dir; rejecting here
+        // avoids that even though it should not happen in practice.
+        if !content_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(ServiceError::Internal(format!(
+                "rejecting non-hex content_hash: {content_hash}"
+            )));
+        }
+        // Hold the eviction lock for the metadata check + cached_at
+        // bump + ack serialization so eviction cannot unlink the
+        // file underneath us before we ack. The UI-side window
+        // between ack and open remains open until lease semantics
+        // land - documented at the module level.
+        let _hit_guard = ATTACHMENT_SWEEP_LOCK.read().await;
         let file_path = app_data.join(CACHE_DIR).join(content_hash);
         if let Ok(meta) = std::fs::metadata(&file_path) {
+            let bump_id = info.id.clone();
+            let _ = write_db
+                .with_conn(move |conn| {
+                    db::db::queries_extra::bump_attachment_cached_at(conn, &bump_id)
+                })
+                .await;
             return serde_json::to_value(AttachmentFetchAck {
                 content_hash: content_hash.clone(),
                 size_bytes: meta.len(),
@@ -104,8 +130,8 @@ pub(crate) async fn handle_fetch(
         }
     }
 
-    // 2. Cache miss: dispatch provider.fetch_attachment, write the
-    // bytes to the flat cache, update the row, return.
+    // 2. Cache miss: dispatch provider.fetch_attachment, stage the
+    // bytes at <hash>.tmp, update the row, then rename to final.
     let provider =
         crate::actions::provider::create_provider(&read_db, &params.account_id, key)
             .await
@@ -124,11 +150,20 @@ pub(crate) async fn handle_fetch(
     let bytes = store::attachment_cache::decode_base64(&attachment.data)
         .map_err(ServiceError::Internal)?;
     let content_hash = store::attachment_cache::hash_bytes(&bytes);
-    let relative_path = store::attachment_cache::write_cached(&app_data, &content_hash, &bytes)
-        .map_err(ServiceError::Internal)?;
     #[allow(clippy::cast_possible_wrap)]
     let cache_size = bytes.len() as i64;
     let size_bytes = bytes.len() as u64;
+    let relative_path = format!("{CACHE_DIR}/{content_hash}");
+
+    // Hold the eviction lock for the (stage -> commit-row -> rename)
+    // span so a sweep racing the commit observes either the
+    // committed row (and skips as referenced) or only the `.tmp`
+    // file (and skips the suffix).
+    let _miss_guard = ATTACHMENT_SWEEP_LOCK.read().await;
+
+    let tmp_path =
+        store::attachment_cache::write_cached_tmp(&app_data, &content_hash, &bytes)
+            .map_err(ServiceError::Internal)?;
 
     if let Some(info) = info {
         let id = info.id;
@@ -145,6 +180,14 @@ pub(crate) async fn handle_fetch(
                 )
             })
             .await
+            .map_err(ServiceError::Internal)?;
+    }
+
+    // Rename only after the row update is committed. If the file
+    // already existed (shared blob), `tmp_path` is None and there
+    // is nothing to rename.
+    if let Some(tmp) = tmp_path {
+        store::attachment_cache::commit_cached_tmp(&app_data, &tmp, &content_hash)
             .map_err(ServiceError::Internal)?;
     }
 
@@ -175,7 +218,7 @@ pub(crate) async fn handle_fetch(
 pub(crate) async fn handle_eviction_kick(
     boot_state: &Arc<BootSharedState>,
 ) -> Result<(), String> {
-    let _guard = ATTACHMENT_SWEEP_LOCK.lock().await;
+    let _guard = ATTACHMENT_SWEEP_LOCK.write().await;
 
     let write_db = boot_state
         .write_db_state()
@@ -247,6 +290,14 @@ fn sweep_orphans(
         let Some(stem) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
+        // Skip in-flight cache-miss writes staged at `<hash>.tmp` by
+        // `write_cached_tmp`. The handler renames `.tmp` -> final only
+        // after committing the row, but defense-in-depth: even if a
+        // sweep races outside the eviction lock, the suffix marker
+        // keeps the orphan walk from collecting half-written files.
+        if path.extension().and_then(|s| s.to_str()) == Some("tmp") {
+            continue;
+        }
         if referenced.contains(stem) {
             continue;
         }

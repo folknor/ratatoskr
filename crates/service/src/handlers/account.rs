@@ -6,24 +6,59 @@
 //! - `account.create` (Plaintext | Encrypted credential envelope)
 //! - `account.delete` (cancel-and-await runner orchestration)
 //!
-//! ...both will land alongside their own ack types and timeouts so
-//! the handler doc here stays scoped to the simple-write path.
-//!
-//! Today's caldav_password column stores the value verbatim (no
-//! encryption); when `internal.encrypt_for_storage` lands the wire
-//! shape stays unchanged but this handler can route the value through
-//! the cipher before writing.
+//! Credentials encryption: `account.create` and `account.update_tokens`
+//! encrypt at the handler boundary using `BootSharedState`'s key. The
+//! UI ships `Plaintext` and the handler routes it through
+//! `common::crypto::encrypt_value` before calling the DB-layer write.
+//! The `AccountCredentials::Encrypted` variant exists for the (rare)
+//! case where the caller already holds ciphertext; both shapes hit the
+//! same DB column with the same `enc:base64iv:base64ct` form.
 
 use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{
-    AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams, AccountReorderAck,
-    AccountReorderParams, AccountUpdateAck, AccountUpdateParams, AccountUpdateTokensAck,
-    AccountUpdateTokensParams, ServiceError,
+    AccountCreateAck, AccountCreateParams, AccountCredentials, AccountDeleteAck,
+    AccountDeleteParams, AccountReorderAck, AccountReorderParams, AccountUpdateAck,
+    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, ServiceError,
 };
 
 use crate::boot::BootSharedState;
+
+/// Encrypt up to four optional credential fields with the Service's
+/// loaded key. Bundled into one `spawn_blocking` so the AES-GCM CPU
+/// work doesn't sit on the dispatch executor and so we don't pay the
+/// spawn overhead per field.
+pub(crate) async fn encrypt_optional_credentials(
+    key: [u8; 32],
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    imap_password: Option<String>,
+    smtp_password: Option<String>,
+) -> Result<
+    (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ),
+    ServiceError,
+> {
+    tokio::task::spawn_blocking(move || {
+        let enc = |v: Option<String>| -> Result<Option<String>, String> {
+            v.map(|s| common::crypto::encrypt_value(&key, &s)).transpose()
+        };
+        Ok::<_, String>((
+            enc(access_token)?,
+            enc(refresh_token)?,
+            enc(imap_password)?,
+            enc(smtp_password)?,
+        ))
+    })
+    .await
+    .map_err(|e| ServiceError::Internal(format!("spawn_blocking encrypt: {e}")))?
+    .map_err(ServiceError::Internal)
+}
 
 pub(crate) async fn handle_update(
     boot_state: &Arc<BootSharedState>,
@@ -74,14 +109,30 @@ pub(crate) async fn handle_update_tokens(
     params: Box<AccountUpdateTokensParams>,
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
+    let key = boot_state.encryption_key().ok_or_else(|| {
+        ServiceError::Internal(
+            "encryption key not loaded; UI must wait for boot.ready before calling \
+             account.update_tokens"
+                .into(),
+        )
+    })?;
     let params = *params;
     let id = params.account_id.clone();
+    let (access_token, refresh_token, imap_password, smtp_password) =
+        encrypt_optional_credentials(
+            key,
+            params.access_token.map(service_api::RedactedString::into_inner),
+            params.refresh_token.map(service_api::RedactedString::into_inner),
+            params.imap_password.map(service_api::RedactedString::into_inner),
+            params.smtp_password.map(service_api::RedactedString::into_inner),
+        )
+        .await?;
     let reauth = db::db::queries_extra::ReauthAccountParams {
-        access_token: params.access_token.map(service_api::RedactedString::into_inner),
-        refresh_token: params.refresh_token.map(service_api::RedactedString::into_inner),
+        access_token,
+        refresh_token,
         token_expires_at: params.token_expires_at,
-        imap_password: params.imap_password.map(service_api::RedactedString::into_inner),
-        smtp_password: params.smtp_password.map(service_api::RedactedString::into_inner),
+        imap_password,
+        smtp_password,
     };
     write_db
         .with_conn(move |conn| db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth))
@@ -96,17 +147,44 @@ pub(crate) async fn handle_create(
     params: Box<AccountCreateParams>,
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
-    // Today's behavior: both Plaintext and Encrypted variants pass
-    // through to create_account_sync verbatim, because the
-    // underlying DB column does not require ciphertext. When
-    // `internal.encrypt_for_storage` is wired into this path the
-    // branch on the variant tag and the Plaintext-through-the-
-    // cipher step both go here. The Phase 6b OAuth two-step
-    // (`oauth.exchange_code`) shares the helper this calls so the
-    // "what makes a fully-formed account" question is answered in
-    // one place.
+    let key = boot_state.encryption_key().ok_or_else(|| {
+        ServiceError::Internal(
+            "encryption key not loaded; UI must wait for boot.ready before calling \
+             account.create"
+                .into(),
+        )
+    })?;
     let p = *params;
-    let (access_token, refresh_token, imap_password, smtp_password) = p.credentials.into_fields();
+    // Plaintext routes through `encrypt_value` here; Encrypted is the
+    // pre-encrypted-blob variant for re-auth / recovery paths and
+    // passes through verbatim. Both shapes hit the same DB column in
+    // the same `enc:base64iv:base64ct` form. The Phase 6b OAuth
+    // two-step (`oauth.exchange_code`) lands tokens via this same
+    // path on the initial-create branch (UI ships the returned
+    // tokens back as `Plaintext`).
+    let (access_token, refresh_token, imap_password, smtp_password) = match p.credentials {
+        AccountCredentials::Plaintext {
+            access_token,
+            refresh_token,
+            imap_password,
+            smtp_password,
+        } => {
+            encrypt_optional_credentials(
+                key,
+                access_token,
+                refresh_token,
+                imap_password,
+                smtp_password,
+            )
+            .await?
+        }
+        AccountCredentials::Encrypted {
+            access_token,
+            refresh_token,
+            imap_password,
+            smtp_password,
+        } => (access_token, refresh_token, imap_password, smtp_password),
+    };
     let create = db::db::queries_extra::CreateAccountParams {
         email: p.email,
         provider: p.provider,

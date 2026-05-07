@@ -137,17 +137,13 @@ pub(crate) async fn handle_contact_delete(
 fn action_context(
     boot_state: &Arc<BootSharedState>,
 ) -> Result<action_types::ActionContext, ServiceError> {
-    let db_conn = boot_state.db_conn().ok_or_else(|| {
-        ServiceError::Internal(
-            "request received before db_conn available; UI must wait for boot.ready".into(),
-        )
-    })?;
+    let write_db = boot_state.write_db_state()?;
     let encryption_key = boot_state.encryption_key().ok_or_else(|| {
         ServiceError::Internal(
             "request received before encryption_key available; UI must wait for boot.ready".into(),
         )
     })?;
-    build_action_context(db_conn, encryption_key, boot_state.app_data_dir())
+    build_action_context(write_db, encryption_key, boot_state.app_data_dir())
         .map_err(ServiceError::Internal)
 }
 

@@ -12,9 +12,19 @@ use store::inline_image_store::InlineImageStoreReadState;
 /// All fields are cheaply cloneable (`Arc<Mutex<…>>` internally).
 /// The service constructs `ProviderCtx` from these fields per-call -
 /// callers never see `ProviderCtx`.
+///
+/// `db` is the read-half view used by mail action paths; `write_db`
+/// is the write-half view used by the calendar dispatch path
+/// (`run_one_calendar` builds `CalendarActionContext { db: write_db,
+/// ... }` from this field). Both wrap the same connection arc; the
+/// distinction is type-level - holding `write_db` keeps the
+/// "writes go through the writer half" invariant compile-checked
+/// without the `WriteDbState::from_arc` end-run the worker used to
+/// perform per calendar op.
 #[derive(Clone)]
 pub struct ActionContext {
     pub db: ReadDbState,
+    pub write_db: service_state::WriteDbState,
     pub body_store: BodyStoreReadState,
     pub inline_images: InlineImageStoreReadState,
     pub search: SearchReadState,

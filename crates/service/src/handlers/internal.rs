@@ -69,6 +69,14 @@ pub(crate) async fn handle_read_bootstrap_snapshots(
     .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
+/// Scaffolding: not consumed by any production caller today. Phase 6a
+/// originally planned for the UI to call `encrypt_for_storage` before
+/// `account.create` / `account.update_tokens`, but those handlers
+/// encrypt at the Service-side boundary directly (see
+/// `crates/service/src/handlers/account.rs::encrypt_optional_credentials`),
+/// so this surface is reserved for future flows that genuinely need a
+/// UI-driven encrypt round-trip. Keep the dispatch wiring + tests so a
+/// future consumer doesn't have to re-litigate the contract.
 pub(crate) async fn handle_encrypt_for_storage(
     boot_state: &Arc<BootSharedState>,
     params: EncryptForStorageParams,
@@ -87,6 +95,8 @@ pub(crate) async fn handle_encrypt_for_storage(
         .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
+/// Scaffolding: see `handle_encrypt_for_storage`. Not currently
+/// consumed by any production caller; kept for future flows.
 pub(crate) async fn handle_decrypt_for_storage(
     boot_state: &Arc<BootSharedState>,
     params: DecryptForStorageParams,

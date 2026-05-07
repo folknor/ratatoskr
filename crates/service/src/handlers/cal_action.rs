@@ -96,9 +96,21 @@ fn serialize_ops(plan: CalendarActionPlan) -> Result<Vec<PlanOpInsert>, ServiceE
     let mut out = Vec::with_capacity(plan.operations.len());
     for (ordinal, op) in plan.operations.into_iter().enumerate() {
         let event_id_for_op = match &op.operation {
-            WireCalendarOperation::CreateEvent { .. } => String::new(),
-            WireCalendarOperation::UpdateEvent { event_id, .. }
-            | WireCalendarOperation::DeleteEvent { event_id } => event_id.clone(),
+            WireCalendarOperation::CreateEvent { input, .. } => {
+                // Round-trip the input through the wire_input_to_domain
+                // converter to enforce the mirror contract; we drop
+                // the result. Mirrors mail's `wire_to_mail` step in
+                // `actions/serialize_ops`. A stale wire variant
+                // missing a required field would otherwise journal a
+                // blob the worker can't reconstruct.
+                let _ = crate::cal_actions::wire_input_to_domain(input);
+                String::new()
+            }
+            WireCalendarOperation::UpdateEvent { event_id, input } => {
+                let _ = crate::cal_actions::wire_input_to_domain(input);
+                event_id.clone()
+            }
+            WireCalendarOperation::DeleteEvent { event_id } => event_id.clone(),
         };
         let blob = serde_json::to_vec(&op.operation).map_err(|e| {
             ServiceError::Internal(format!(

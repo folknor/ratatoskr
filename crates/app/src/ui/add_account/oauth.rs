@@ -255,7 +255,12 @@ pub(super) fn resolve_client_id(provider_id: &str) -> String {
 /// code. Mirrors `OAuthProviderAuthorizationRequest` so today's
 /// userinfo dispatch (Microsoft hard-coded URL vs `user_info_url`)
 /// keys on `provider_id` exactly as it did pre-Phase-6b.
-#[derive(Debug, Clone)]
+///
+/// `client_secret` is sensitive; the manual `Debug` impl prints
+/// `<redacted>` so log lines that capture this struct don't leak
+/// it. Wire transport already wraps the value in `RedactedString`;
+/// this keeps UI-side debug printing consistent with that policy.
+#[derive(Clone)]
 pub(super) struct OauthCaptureConfig {
     pub provider_id: String,
     pub auth_url: String,
@@ -265,6 +270,24 @@ pub(super) struct OauthCaptureConfig {
     pub use_pkce: bool,
     pub client_id: String,
     pub client_secret: Option<String>,
+}
+
+impl std::fmt::Debug for OauthCaptureConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OauthCaptureConfig")
+            .field("provider_id", &self.provider_id)
+            .field("auth_url", &self.auth_url)
+            .field("token_url", &self.token_url)
+            .field("scopes", &self.scopes)
+            .field("user_info_url", &self.user_info_url)
+            .field("use_pkce", &self.use_pkce)
+            .field("client_id", &self.client_id)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 /// Phase 6b: capture the OAuth auth code locally, then ship it

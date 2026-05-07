@@ -86,7 +86,7 @@ async fn run_one(
 /// Convert the wire shape to the in-process domain shape. The two
 /// have identical fields - the wire mirror exists so service-api
 /// stays free of cal's transitive provider-trait graph.
-fn wire_input_to_domain(input: &WireCalendarEventInput) -> CalendarEventInput {
+pub(crate) fn wire_input_to_domain(input: &WireCalendarEventInput) -> CalendarEventInput {
     CalendarEventInput {
         title: input.title.clone(),
         description: input.description.clone(),

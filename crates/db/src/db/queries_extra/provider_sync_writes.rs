@@ -149,6 +149,24 @@ pub fn update_attachment_cache_fields(
     Ok(())
 }
 
+/// Bump `cached_at` to the current epoch for a single attachment row that
+/// already has a populated cache. Used by the cache-hit path of
+/// `attachment.fetch` so an actively-opened attachment surfaces as recent
+/// to the LRU eviction sweep instead of staying frozen at its first-fetch
+/// timestamp.
+pub fn bump_attachment_cached_at(
+    conn: &Connection,
+    attachment_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE attachments SET cached_at = unixepoch() \
+         WHERE id = ?1 AND cached_at IS NOT NULL",
+        params![attachment_id],
+    )
+    .map_err(|e| format!("bump_attachment_cached_at: {e}"))?;
+    Ok(())
+}
+
 /// Clear the cache fields (`local_path`, `cached_at`, `cache_size`) for a
 /// batch of attachment IDs in one statement (used during cache eviction).
 pub fn clear_attachment_cache_fields_batch(

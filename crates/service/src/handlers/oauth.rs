@@ -89,10 +89,28 @@ pub(crate) async fn handle_exchange_code(
         // Re-auth: persist the new tokens onto the existing row,
         // omit token fields from the ack. Replaces the UI-side
         // with_write_conn callers in add_account/{state,oauth}.rs.
+        // Tokens encrypt at the handler boundary (same key + path
+        // as `account.update_tokens`).
         let write_db = boot_state.write_db_state()?;
+        let key = boot_state.encryption_key().ok_or_else(|| {
+            ServiceError::Internal(
+                "encryption key not loaded; UI must wait for boot.ready before calling \
+                 oauth.exchange_code"
+                    .into(),
+            )
+        })?;
+        let (access_token, refresh_token, _, _) =
+            crate::handlers::account::encrypt_optional_credentials(
+                key,
+                Some(bundle.tokens.access_token),
+                bundle.tokens.refresh_token,
+                None,
+                None,
+            )
+            .await?;
         let reauth = db::db::queries_extra::ReauthAccountParams {
-            access_token: Some(bundle.tokens.access_token),
-            refresh_token: bundle.tokens.refresh_token,
+            access_token,
+            refresh_token,
             token_expires_at: Some(token_expires_at),
             imap_password: None,
             smtp_password: None,

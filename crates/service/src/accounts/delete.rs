@@ -159,18 +159,39 @@ async fn drive_steps(
     mut marker: AccountDeletionMarker,
 ) -> Result<CleanupReport, String> {
     let mut report = CleanupReport::default();
-    let completed: HashSet<AccountDeletionStep> =
+    let mut completed: HashSet<AccountDeletionStep> =
         marker.completed_steps.iter().copied().collect();
+
+    // Recovery: if a previous run completed every canonical step but
+    // crashed before unlinking the marker (CASCADE succeeded, the
+    // unlink failed and returned Err), all subsequent boots would
+    // skip every step and return Ok without re-attempting the unlink.
+    // Idempotent-unlink here so the marker eventually drops.
+    let all_steps: HashSet<AccountDeletionStep> =
+        AccountDeletionStep::ordered().into_iter().collect();
+    if completed == all_steps {
+        MARKERS.unlink(app_data, &marker.account_id).await?;
+        return Ok(report);
+    }
+
+    let mut step_failures: Vec<String> = Vec::new();
 
     for step in AccountDeletionStep::ordered() {
         if completed.contains(&step) {
             continue;
         }
-        match step {
+        let step_succeeded = match step {
             AccountDeletionStep::Bodies => {
                 match body_write.delete(marker.message_ids.clone()).await {
-                    Ok(n) => report.bodies_deleted = n,
-                    Err(e) => log::error!("account.delete: body store cleanup: {e}"),
+                    Ok(n) => {
+                        report.bodies_deleted = n;
+                        true
+                    }
+                    Err(e) => {
+                        log::error!("account.delete: body store cleanup: {e}");
+                        step_failures.push(format!("bodies: {e}"));
+                        false
+                    }
                 }
             }
             AccountDeletionStep::InlineImages => {
@@ -182,14 +203,30 @@ async fn drive_steps(
                     .filter(|h| !shared.contains(h.as_str()))
                     .cloned()
                     .collect();
-                if !to_delete.is_empty() {
+                if to_delete.is_empty() {
+                    true
+                } else {
                     match inline_write.delete_hashes(to_delete).await {
-                        Ok(n) => report.inline_images_deleted = n,
-                        Err(e) => log::error!("account.delete: inline image cleanup: {e}"),
+                        Ok(n) => {
+                            report.inline_images_deleted = n;
+                            true
+                        }
+                        Err(e) => {
+                            log::error!("account.delete: inline image cleanup: {e}");
+                            step_failures.push(format!("inline: {e}"));
+                            false
+                        }
                     }
                 }
             }
             AccountDeletionStep::AttachmentCache => {
+                // Per-file errors are routine (file already removed, FS
+                // permission flake) and tracked individually in
+                // `report.cache_file_errors`. The step itself succeeds
+                // after attempting every file in the marker; a future
+                // resume will skip this step. Distinct from the body /
+                // inline / search steps where a single Err means the
+                // batch operation failed wholesale.
                 let shared: HashSet<&str> =
                     marker.shared_cache_hashes.iter().map(String::as_str).collect();
                 for (path, hash) in &marker.cached_files {
@@ -201,28 +238,62 @@ async fn drive_steps(
                         Err(e) => report.cache_file_errors.push(format!("{path}: {e}")),
                     }
                 }
+                true
             }
             AccountDeletionStep::SearchIndex => {
                 match search_write
                     .delete_messages_batch(marker.message_ids.clone())
                     .await
                 {
-                    Ok(()) => report.search_cleaned = true,
-                    Err(e) => log::error!("account.delete: search index cleanup: {e}"),
+                    Ok(()) => {
+                        report.search_cleaned = true;
+                        true
+                    }
+                    Err(e) => {
+                        log::error!("account.delete: search index cleanup: {e}");
+                        step_failures.push(format!("search: {e}"));
+                        false
+                    }
                 }
             }
             AccountDeletionStep::AccountRowCascade => {
-                let aid = marker.account_id.clone();
-                write_db
-                    .with_conn(move |conn| {
-                        db::db::queries_extra::delete_account_row_sync(conn, &aid)
-                    })
-                    .await?;
+                // Gate CASCADE behind successful external-store
+                // cleanup. External stores cannot be reverse-mapped
+                // from `account_id` once the row is gone, so running
+                // CASCADE while body / inline / search cleanup is
+                // still pending would strand orphans permanently.
+                // Skip and let the marker carry forward; next boot
+                // re-attempts the failed steps and CASCADE only runs
+                // once they all clear.
+                if !step_failures.is_empty() {
+                    log::warn!(
+                        "account.delete({}): skipping CASCADE - {} prior step(s) failed",
+                        marker.account_id,
+                        step_failures.len(),
+                    );
+                    false
+                } else {
+                    let aid = marker.account_id.clone();
+                    write_db
+                        .with_conn(move |conn| {
+                            db::db::queries_extra::delete_account_row_sync(conn, &aid)
+                        })
+                        .await?;
+                    true
+                }
             }
+        };
+        if !step_succeeded {
+            // Honor the failure: do NOT append to completed_steps;
+            // continue to the next step so independent cleanups still
+            // make progress, but the marker stays for retry on next
+            // boot. The CASCADE step is gated until all prior cleanups
+            // succeed - that ordering is enforced by the for-loop's
+            // sequential traversal.
+            continue;
         }
-        // Persist progress before continuing so a crash here is
-        // recoverable to the next step.
         marker.completed_steps.push(step);
+        completed.insert(step);
         if matches!(step, AccountDeletionStep::AccountRowCascade) {
             // Final step succeeded; drop the marker.
             MARKERS.unlink(app_data, &marker.account_id).await?;
@@ -231,6 +302,14 @@ async fn drive_steps(
                 .write(app_data, &marker.account_id, &marker)
                 .await?;
         }
+    }
+
+    if !step_failures.is_empty() {
+        return Err(format!(
+            "account.delete: {} step(s) failed: {}",
+            step_failures.len(),
+            step_failures.join("; "),
+        ));
     }
 
     Ok(report)

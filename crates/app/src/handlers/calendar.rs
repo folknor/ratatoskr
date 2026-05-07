@@ -660,6 +660,15 @@ impl ReadyApp {
             }],
         };
         let plan_id = plan.plan_id;
+
+        // Close the editor before dispatch so the Save click produces
+        // immediate visual feedback regardless of provider latency.
+        // Mirrors the DeleteEvent handler's pattern. If the dispatch
+        // fails, `EventSaved(Err)` shows the error in the status bar
+        // rather than the editor surface.
+        self.calendar.workflow = CalendarWorkflow::Idle;
+        self.calendar.sync_surfaces();
+
         Task::perform(
             async move {
                 client.execute_calendar_plan(plan).await.map_err(|e| e.to_string())?;
@@ -781,14 +790,31 @@ fn data_to_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32) -> i64 {
 }
 
 /// Map a `CalendarActionCompleted` to the `Result<(), String>` shape
-/// the UI handler expects. Today's calendar plans are 1:1 (one user
-/// intent = one operation) and the worker emits an empty `results`
-/// vector (Phase 6c-7); we treat every completion as success.
-/// Per-op `CalendarOperationResult::Failed` is reflected via the
-/// CalendarChanged-driven reload showing the un-changed state.
-/// Phase 6d will populate per-op results if richer feedback is needed.
-fn completion_to_result(_completed: &service_api::CalendarActionCompleted) -> Result<(), String> {
-    Ok(())
+/// the UI handler expects. The worker populates `results` with one
+/// `CalendarOperationOutcome` per op (Phase 6c review fix); we walk
+/// them and surface the worst observed result as the plan-level error
+/// so the UI's editor can render a meaningful message instead of
+/// silently treating provider failures as success.
+///
+/// Severity order (worst wins): `Failed` > `LocalOnly` > `Success`.
+/// `LocalOnly` is currently mapped to `Ok` because the local row was
+/// applied (the user sees the event with the "not synced" indicator
+/// driven by `CalendarChanged`-reload); a future revision can promote
+/// it to `Err` once the editor has UI for it.
+fn completion_to_result(completed: &service_api::CalendarActionCompleted) -> Result<(), String> {
+    use service_api::CalendarOperationResult;
+    let mut first_failure: Option<String> = None;
+    for outcome in &completed.results {
+        if let CalendarOperationResult::Failed { error } = &outcome.result
+            && first_failure.is_none()
+        {
+            first_failure = Some(error.clone());
+        }
+    }
+    match first_failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Convert a CalendarEvent from the DB to CalendarEventData for the UI.
