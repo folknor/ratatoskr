@@ -344,7 +344,23 @@ async fn process_one(inner: Arc<ExtractRuntimeInner>, work: ExtractWork) {
 }
 
 async fn finalize_item(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
-    inner.in_flight_hashes.lock().await.remove(content_hash);
+    // M11 fix: read the in-flight set's len under the same lock that
+    // does the remove, and gate completion on (new_depth == 0 &&
+    // in_flight_empty). Pre-fix the gate was new_depth == 0 only,
+    // which races against a concurrent enqueue parked at tx.send.await
+    // (mpsc full): the new item's hashes.insert had already happened,
+    // but its fetch_add hadn't, so depth read 0 momentarily and
+    // fired ExtractCompleted while the new item sat in tx.send. The
+    // hashes set is the canonical "items currently being processed
+    // anywhere" signal because enqueue inserts BEFORE fetch_add and
+    // BEFORE send, and finalize_item removes at terminal outcome -
+    // a non-empty set means there's still work, regardless of which
+    // bookkeeping queue holds it.
+    let in_flight_empty = {
+        let mut hashes = inner.in_flight_hashes.lock().await;
+        hashes.remove(content_hash);
+        hashes.is_empty()
+    };
     let prev = inner.queue_depth.fetch_sub(1, Ordering::Relaxed);
     let new_depth = prev.saturating_sub(1);
 
@@ -358,8 +374,9 @@ async fn finalize_item(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
         log::debug!("ExtractRuntime progress send failed: {e}");
     }
 
-    // Emit ExtractCompleted when the queue drains.
-    if new_depth == 0 {
+    // Emit ExtractCompleted when the queue drains AND nothing else
+    // is mid-flight. Both checks required - see M11 fix above.
+    if new_depth == 0 && in_flight_empty {
         let completed = Notification::ExtractCompleted(ExtractCompleted {
             service_generation: inner.service_generation,
             indexed: inner.indexed_count.load(Ordering::Relaxed),

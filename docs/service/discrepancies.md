@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M11. `enqueue_dedupe` + `queue_depth` ordering can fire `ExtractCompleted` before drain finishes
-
-**Files:** `crates/service/src/extract.rs:164-190` (enqueue), `:313-336` (finalize_item).
-
-`enqueue` does (1) insert into `in_flight_hashes`, (2) `queue_depth.fetch_add(1)`, (3) `tx.send(work).await`, (4) on send error, undo. On a thundering-herd backfill, step (3) blocks at the bounded mpsc. While blocked, `queue_depth` already shows the new count. If the worker concurrently finalizes another item via `fetch_sub(1)` and computes `new_depth = prev - 1`, the result is racy with step (2)'s concurrent `fetch_add(1)`. The `if new_depth == 0` branch can fire prematurely with items still parked in `tx.send`. `ExtractCompleted` is then sent before the queue is actually drained - the UI's terminal "all-drained" signal lies.
-
-**Agreement: 1/8** (claude bugs).
-
-**Fix:** bump `queue_depth` *after* `tx.send` succeeds (move step 2 below step 3), or use a single AtomicU64 reflecting `mpsc.len() + in_flight_hashes.len()`.
-
 ### M12. `PreserveExisting` is still a public wire API but errors at runtime
 
 **Files:** `crates/service-api/src/extract.rs:58` (RebuildPolicy enum), `crates/service/src/handlers/extract.rs:115-119` (returns `ServiceError::Internal`), `crates/service/src/dispatch.rs:1145` (schema dispatcher hardcodes Wipe).
