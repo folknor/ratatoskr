@@ -2,6 +2,9 @@ use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
 use crate::boot::{BootPhaseKind, BootProgress};
 use crate::cal_action::{CalendarActionCompleted, CalendarOperationOutcome};
 use crate::calendar::{CalendarChanged, CalendarRunCompleted};
+use crate::extract::{
+    ExtractCompleted, ExtractProgress, IndexRebuildCompleted, IndexRebuildProgress,
+};
 use crate::push::PushEvent;
 use crate::sync::{IndexCommitted, SyncCompleted};
 use serde::{Deserialize, Serialize};
@@ -66,6 +69,13 @@ pub enum CoalesceKey {
     /// two for different accounts both pass through. The dispatch-layer
     /// expression of "this account's calendar tables changed - reload."
     CalendarChanged(String),
+    /// Phase 7-4: ExtractRuntime per-tick progress. No sub-key - latest-
+    /// wins globally so the status-bar indicator collapses chatty
+    /// per-extraction emissions to one update.
+    ExtractProgress,
+    /// Phase 7-4: per-rebuild progress, keyed by `rebuild_id` so two
+    /// concurrent rebuilds (rare) don't collapse onto each other.
+    IndexRebuildProgress(String),
     /// Synthetic key used only by in-process queue tests in consumer crates.
     /// The queue's per-class enqueue logic is generic over `Classifiable`,
     /// and tests construct mock items with arbitrary string-keyed coalesce
@@ -167,6 +177,22 @@ pub enum Notification {
     /// `ActionCompleted`.
     #[serde(rename = "cal_action.completed")]
     CalendarActionCompleted(CalendarActionCompleted),
+    /// Phase 7-4: per-tick ExtractRuntime progress. `Coalesce`:
+    /// latest-wins for the status-bar indicator.
+    #[serde(rename = "extract.progress")]
+    ExtractProgress(ExtractProgress),
+    /// Phase 7-4: ExtractRuntime queue-drained-to-zero summary.
+    /// `MustDeliver`: the UI's status-bar dismiss logic awaits this.
+    #[serde(rename = "extract.completed")]
+    ExtractCompleted(ExtractCompleted),
+    /// Phase 7-4: per-rebuild progress, `Coalesce` keyed by
+    /// `rebuild_id` so concurrent rebuilds don't collapse together.
+    #[serde(rename = "index.rebuild_progress")]
+    IndexRebuildProgress(IndexRebuildProgress),
+    /// Phase 7-4: per-rebuild completion (success or cancel).
+    /// `MustDeliver`: the UI's status-bar dismiss logic awaits this.
+    #[serde(rename = "index.rebuild_completed")]
+    IndexRebuildCompleted(IndexRebuildCompleted),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -207,6 +233,14 @@ impl Notification {
             // result accumulation. MustDeliver.
             Self::CalendarOperationOutcome(_) => NotificationClass::MustDeliver,
             Self::CalendarActionCompleted(_) => NotificationClass::MustDeliver,
+            Self::ExtractProgress(_) => NotificationClass::Coalesce {
+                key: CoalesceKey::ExtractProgress,
+            },
+            Self::ExtractCompleted(_) => NotificationClass::MustDeliver,
+            Self::IndexRebuildProgress(p) => NotificationClass::Coalesce {
+                key: CoalesceKey::IndexRebuildProgress(p.rebuild_id.clone()),
+            },
+            Self::IndexRebuildCompleted(_) => NotificationClass::MustDeliver,
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -227,6 +261,10 @@ impl Notification {
             Self::CalendarChanged(_) => "calendar.changed",
             Self::CalendarOperationOutcome(_) => "cal_action.operation_outcome",
             Self::CalendarActionCompleted(_) => "cal_action.completed",
+            Self::ExtractProgress(_) => "extract.progress",
+            Self::ExtractCompleted(_) => "extract.completed",
+            Self::IndexRebuildProgress(_) => "index.rebuild_progress",
+            Self::IndexRebuildCompleted(_) => "index.rebuild_completed",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -272,6 +310,10 @@ impl Notification {
             Self::CalendarChanged(changed) => Some(changed.generation()),
             Self::CalendarOperationOutcome(outcome) => Some(outcome.generation()),
             Self::CalendarActionCompleted(completed) => Some(completed.generation()),
+            Self::ExtractProgress(progress) => Some(progress.generation()),
+            Self::ExtractCompleted(completed) => Some(completed.generation()),
+            Self::IndexRebuildProgress(progress) => Some(progress.generation()),
+            Self::IndexRebuildCompleted(completed) => Some(completed.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -299,6 +341,10 @@ impl Notification {
             Self::CalendarChanged(changed) => changed.set_generation(generation),
             Self::CalendarOperationOutcome(outcome) => outcome.set_generation(generation),
             Self::CalendarActionCompleted(completed) => completed.set_generation(generation),
+            Self::ExtractProgress(progress) => progress.set_generation(generation),
+            Self::ExtractCompleted(completed) => completed.set_generation(generation),
+            Self::IndexRebuildProgress(progress) => progress.set_generation(generation),
+            Self::IndexRebuildCompleted(completed) => completed.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }

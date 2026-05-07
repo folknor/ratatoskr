@@ -18,6 +18,7 @@ use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
 use crate::attachment::AttachmentFetchParams;
+use crate::extract::{ExtractStatusParams, IndexRebuildParams};
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
     PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -373,6 +374,15 @@ pub enum RequestParams {
     /// fetch_attachment which can be slow on large attachments
     /// over slow links.
     AttachmentFetch { params: AttachmentFetchParams },
+    /// Phase 7-4: read the ExtractRuntime's running status counters
+    /// (queue depth + indexed/skipped/failed totals) for the
+    /// status-bar polling.
+    ExtractStatus { params: ExtractStatusParams },
+    /// Phase 7-4: trigger a search-index rebuild. The handler spawns
+    /// a tracked task and acks immediately with the `rebuild_id`; the
+    /// UI subscribes via `index.rebuild_progress` /
+    /// `index.rebuild_completed` notifications.
+    IndexRebuild { params: IndexRebuildParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -434,6 +444,8 @@ impl RequestParams {
             Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
             Self::OauthExchangeCode { .. } => "oauth.exchange_code",
             Self::AttachmentFetch { .. } => "attachment.fetch",
+            Self::ExtractStatus { .. } => "extract.status",
+            Self::IndexRebuild { .. } => "index.rebuild",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -544,6 +556,12 @@ impl RequestParams {
             Self::AttachmentFetch { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(60))
             }
+            // Phase 7-4: in-memory counter read; cheap.
+            Self::ExtractStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            // Phase 7-4: handler spawns a tracked task and returns
+            // immediately with the rebuild_id; the rebuild itself runs
+            // asynchronously.
+            Self::IndexRebuild { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -635,6 +653,8 @@ impl RequestParams {
             Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::OauthExchangeCode { params } => serde_json::json!({ "params": params }),
             Self::AttachmentFetch { params } => serde_json::json!({ "params": params }),
+            Self::ExtractStatus { params } => serde_json::json!({ "params": params }),
+            Self::IndexRebuild { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -993,6 +1013,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("attachment.fetch params: {e}"))?;
                 Ok(Self::AttachmentFetch { params: p.params })
+            }
+            "extract.status" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ExtractStatusParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("extract.status params: {e}"))?;
+                Ok(Self::ExtractStatus { params: p.params })
+            }
+            "index.rebuild" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: IndexRebuildParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("index.rebuild params: {e}"))?;
+                Ok(Self::IndexRebuild { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {

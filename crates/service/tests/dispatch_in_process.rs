@@ -558,7 +558,11 @@ async fn boot_progress_notifications_emitted_in_order() -> TestResult {
                 | Notification::CalendarRunCompleted(_)
                 | Notification::CalendarChanged(_)
                 | Notification::CalendarOperationOutcome(_)
-                | Notification::CalendarActionCompleted(_),
+                | Notification::CalendarActionCompleted(_)
+                | Notification::ExtractProgress(_)
+                | Notification::ExtractCompleted(_)
+                | Notification::IndexRebuildProgress(_)
+                | Notification::IndexRebuildCompleted(_),
             )) => {
                 // Action / sync / push / calendar notifications cannot fire
                 // during the boot sequence (no action.execute_plan or

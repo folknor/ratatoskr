@@ -11,6 +11,7 @@ mod pending_ops_kick;
 mod account;
 mod attachment;
 mod contacts;
+mod extract;
 mod internal;
 mod oauth;
 mod pinned_search;
@@ -139,6 +140,12 @@ pub(crate) async fn dispatch(
         RequestParams::AttachmentFetch { params } => {
             attachment::handle_fetch(&boot_state, params).await
         }
+        RequestParams::ExtractStatus { params } => {
+            extract::handle_status(&boot_state, params).await
+        }
+        RequestParams::IndexRebuild { params } => {
+            extract::handle_rebuild(&boot_state, params).await
+        }
         RequestParams::AccountDelete { params } => {
             account::handle_delete(&boot_state, params).await
         }
@@ -179,6 +186,9 @@ pub(crate) async fn dispatch_notification(
         ClientNotification::PinnedSearchKick => pinned_search::handle_kick(&boot_state).await,
         ClientNotification::AttachmentEvictionKick => {
             attachment::handle_eviction_kick(&boot_state).await
+        }
+        ClientNotification::ExtractBackfillKick => {
+            extract::handle_backfill_kick(&boot_state).await
         }
     }
 }

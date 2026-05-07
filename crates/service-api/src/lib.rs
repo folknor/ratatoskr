@@ -5,6 +5,7 @@ mod calendar;
 mod client_notification;
 mod draft_wal;
 mod error;
+mod extract;
 mod framing;
 mod notification;
 mod push;
@@ -76,6 +77,11 @@ pub use signature::{
 pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use error::{JsonRpcErrorObject, ServiceError};
+pub use extract::{
+    ExtractCompleted, ExtractProgress, ExtractStatusAck, ExtractStatusParams,
+    IndexRebuildAck, IndexRebuildCompleted, IndexRebuildParams, IndexRebuildProgress,
+    RebuildPolicy,
+};
 pub use framing::{
     BoundedLineReader, FrameError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse,
     ParsedClientMessage, ParsedServiceMessage, RequestParseError, ServiceResponse,

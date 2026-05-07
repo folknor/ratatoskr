@@ -306,6 +306,17 @@ impl ReadyApp {
                         );
                         Task::none()
                     }
+                    service_api::Notification::ExtractProgress(_)
+                    | service_api::Notification::ExtractCompleted(_)
+                    | service_api::Notification::IndexRebuildProgress(_)
+                    | service_api::Notification::IndexRebuildCompleted(_) => {
+                        // Phase 7-4: status-bar consumer + rebuild
+                        // progress consumer not yet wired (lands in
+                        // 7-9 + 7-10's UI integration). Drop with a
+                        // debug log so the dispatch is exhaustive.
+                        log::debug!("Extract notification: {}", notification.method_name());
+                        Task::none()
+                    }
                 }
             }
             Message::ActionDispatched { plan_id, outcome } => {

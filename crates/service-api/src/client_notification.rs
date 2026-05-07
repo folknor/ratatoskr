@@ -63,6 +63,18 @@ pub enum ClientNotification {
     /// `SyncTick`.
     #[serde(rename = "attachment.eviction_kick")]
     AttachmentEvictionKick,
+    /// Phase 7-6: "The UI's tick fired (or boot.ready just resolved);
+    /// please consider scanning cached + unindexed attachments and
+    /// enqueuing them into the ExtractRuntime." The Service handler
+    /// runs `SELECT id, content_hash, account_id, message_id FROM
+    /// attachments WHERE cached_at IS NOT NULL AND text_indexed_at IS
+    /// NULL LIMIT 1000` and enqueues each. NOT fanned out from the
+    /// 5-min `Message::SyncTick` always-on path - the UI emits this
+    /// once on `boot.ready` plus from a separate hourly subscription
+    /// (event-driven cadence per the post-review revision). `Drop`
+    /// class - missed kicks self-heal on the next hourly trigger.
+    #[serde(rename = "extract.backfill_kick")]
+    ExtractBackfillKick,
 }
 
 impl ClientNotification {
@@ -73,6 +85,7 @@ impl ClientNotification {
             Self::GalKick => "gal.kick",
             Self::PinnedSearchKick => "pinned_search.kick",
             Self::AttachmentEvictionKick => "attachment.eviction_kick",
+            Self::ExtractBackfillKick => "extract.backfill_kick",
         }
     }
 
@@ -82,7 +95,8 @@ impl ClientNotification {
             | Self::CalendarKick
             | Self::GalKick
             | Self::PinnedSearchKick
-            | Self::AttachmentEvictionKick => Value::Null,
+            | Self::AttachmentEvictionKick
+            | Self::ExtractBackfillKick => Value::Null,
         }
     }
 
@@ -98,7 +112,8 @@ impl ClientNotification {
             | Self::CalendarKick
             | Self::GalKick
             | Self::PinnedSearchKick
-            | Self::AttachmentEvictionKick => NotificationClass::Drop,
+            | Self::AttachmentEvictionKick
+            | Self::ExtractBackfillKick => NotificationClass::Drop,
         }
     }
 
@@ -123,6 +138,10 @@ impl ClientNotification {
             "attachment.eviction_kick" => match params {
                 None | Some(Value::Null) => Ok(Self::AttachmentEvictionKick),
                 Some(_) => Err("attachment.eviction_kick must have no params".to_string()),
+            },
+            "extract.backfill_kick" => match params {
+                None | Some(Value::Null) => Ok(Self::ExtractBackfillKick),
+                Some(_) => Err("extract.backfill_kick must have no params".to_string()),
             },
             _ => Err(format!("unknown client notification method: {method}")),
         }

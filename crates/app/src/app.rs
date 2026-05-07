@@ -686,9 +686,13 @@ impl BootingApp {
                     | service_api::Notification::CalendarRunCompleted(_)
                     | service_api::Notification::CalendarChanged(_)
                     | service_api::Notification::CalendarOperationOutcome(_)
-                    | service_api::Notification::CalendarActionCompleted(_) => {
+                    | service_api::Notification::CalendarActionCompleted(_)
+                    | service_api::Notification::ExtractProgress(_)
+                    | service_api::Notification::ExtractCompleted(_)
+                    | service_api::Notification::IndexRebuildProgress(_)
+                    | service_api::Notification::IndexRebuildCompleted(_) => {
                         log::debug!(
-                            "BootingApp dropped action / sync / push / calendar notification (no plans in flight pre-ready, push/calendar start post-ready)"
+                            "BootingApp dropped action / sync / push / calendar / extract notification (no plans in flight pre-ready, push/calendar/extract start post-ready)"
                         );
                     }
                 }
