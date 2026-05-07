@@ -10,14 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L6. `extract.backfill_kick` from `Message::ServiceBootReady` can race runtime install
-
-**Files:** `crates/app/src/update.rs:187`, `crates/service/src/dispatch.rs:1062` (post-ready spawn), `crates/service/src/handlers/extract.rs:144` (handler).
-
-UI fires the kick on `boot.ready`. Service installs `ExtractRuntime` asynchronously *after* `boot.ready` via the post-ready spawn. The handler's defensive no-op when the runtime isn't installed swallows the kick silently. Backfill waits until the next hourly tick.
-
-**Fix:** install `ExtractRuntime` before signalling `boot.ready` (would change boot semantics; needs care), or have the post-ready spawn fire the first backfill kick itself when it installs the runtime.
-
 ### L7. `lifecycle.rs` drain doc-comment is stale
 
 **Files:** `crates/service/src/lifecycle.rs:75-95`.

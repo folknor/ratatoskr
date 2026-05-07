@@ -1127,6 +1127,21 @@ fn spawn_post_ready_extract_startup(
         boot_state.install_extract_runtime(extract_runtime);
 
         log::info!("post-ready extract startup: ExtractRuntime installed");
+
+        // L6 fix: fire the initial backfill kick from inside the
+        // post-ready spawn so a UI-side `extract.backfill_kick` that
+        // landed before runtime install (race against ServiceBootReady)
+        // doesn't get silently no-op'd. Without this, the first
+        // catch-up after a Service crash mid-extraction has to wait
+        // up to an hour for the next iced::time::every tick. The kick
+        // is idempotent against itself - the runtime's in-flight set
+        // dedupes against any concurrent UI-side kick.
+        if let Err(e) = crate::handlers::extract::handle_backfill_kick(&boot_state).await {
+            log::warn!(
+                "post-ready extract startup: initial backfill kick failed: {e} \
+                 (next hourly tick will retry)",
+            );
+        }
     })
 }
 
