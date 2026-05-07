@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M5. First-enqueue-wins on filename/mime poisons hash-shared attachments
-
-**Files:** `crates/service/src/extract.rs:382-409`, `crates/service/src/text_extract/mod.rs:194-220`.
-
-`process_one`'s metadata fetch looks up filename + mime by the *specific* `(account_id, message_id, attachment_id)` tuple from the work item. If that exact attachment row was deleted between enqueue and dequeue (account.delete, message expire, sync purge), `meta` is `None`, falling through to `("", "")`. `canonicalize_mime("","")` finds no mapping → `Mime::Unknown` → `Skipped { UnknownMime }` → permanent row. The same content_hash may be referenced by N other live attachments with valid filenames and mime types; none of them ever get extracted because the worker pre-flight short-circuits on the permanent row.
-
-**Agreement: 1/8** (claude bugs).
-
-**Fix:** query metadata as `SELECT filename, mime_type FROM attachments WHERE content_hash = ?1 AND filename != '' LIMIT 1` instead of pinning to the specific tuple. Hash-collision-aware naming is fine; first-enqueuer naming is not.
-
 ### M6. Index-after-Delete race during message removal
 
 **Files:** `crates/service/src/extract.rs:559-651`, `crates/service/src/search_writer.rs`.

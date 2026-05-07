@@ -451,9 +451,19 @@ async fn run_extraction_pipeline(
 
     // Fetch metadata for this attachment (filename + mime), needed by
     // the dispatcher to canonicalize the mime.
-    let meta_account = work.account_id.clone();
-    let meta_message = work.message_id.clone();
-    let meta_attachment = work.attachment_id.clone();
+    //
+    // M5 fix: query by content_hash, not by the (account, message,
+    // attachment_id) tuple. The specific work item's row may have been
+    // deleted between enqueue and dequeue (account.delete, message
+    // expire, sync purge); the same content_hash may still be
+    // referenced by N other live attachments with valid filename + mime.
+    // Pre-fix, a deleted-then-dequeued row produced None metadata,
+    // which fell through to ("","") -> canonicalize_mime returns
+    // Mime::Unknown -> permanent SkipReason::UnknownMime, poisoning
+    // the content_hash for every other live attachment that shares it.
+    // Picking ANY surviving row with non-empty filename keeps mime
+    // dispatch deterministic and unblocks honest siblings.
+    let hash_for_meta = work.content_hash.clone();
     let meta = inner
         .db
         .to_read_state()
@@ -461,12 +471,13 @@ async fn run_extraction_pipeline(
             let mut stmt = conn
                 .prepare(
                     "SELECT filename, mime_type FROM attachments \
-                     WHERE account_id = ?1 AND message_id = ?2 AND id = ?3 LIMIT 1",
+                     WHERE content_hash = ?1 AND filename IS NOT NULL AND filename != '' \
+                     ORDER BY rowid LIMIT 1",
                 )
                 .map_err(|e| format!("prepare attachment meta: {e}"))?;
             let mut rows = stmt
                 .query_map(
-                    rusqlite::params![meta_account, meta_message, meta_attachment],
+                    rusqlite::params![hash_for_meta],
                     |row| Ok((
                         row.get::<_, Option<String>>(0)?,
                         row.get::<_, Option<String>>(1)?,
