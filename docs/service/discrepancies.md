@@ -6,16 +6,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## High
 
-### H8. `service_generation` hardcoded to 0 in every Phase 7 notification source
-
-**Files:** `crates/service/src/dispatch.rs:1105` (extract), `crates/service/src/handlers/extract.rs:105` (rebuild).
-
-`ExtractRuntime::new(..., notification_tx, 0)` and `run_wipe_rebuild(..., notification_tx, 0)` pass literal `0`. Every `ExtractProgress` / `ExtractCompleted` / `IndexRebuildProgress` / `IndexRebuildCompleted` notification carries `service_generation: 0`. The plan's `notification.rs:245` contract for stale-notification rejection is decoratively present but operationally inert for these four variants - the UI's per-incarnation drop logic never fires.
-
-**Agreement: 1/8** (claude security).
-
-**Fix:** thread `boot_state.service_generation()` (or whatever the actual accessor is) into both spawn sites.
-
 ## Medium
 
 ### M2. App-layer attribution passes empty `body_text`

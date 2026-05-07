@@ -1113,6 +1113,9 @@ fn spawn_post_ready_extract_startup(
         let db_state = service_state::WriteDbState::from_arc(db_conn);
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
 
+        // service_generation is overwritten by the UI's reader task at
+        // enqueue time per the WithGeneration trait contract; emit 0
+        // here. Same pattern as PushRuntime / CalendarRuntime above.
         let extract_runtime = crate::extract::ExtractRuntime::new(
             db_state,
             app_data_dir,

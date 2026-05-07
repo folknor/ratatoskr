@@ -102,6 +102,9 @@ pub(crate) async fn handle_rebuild(
                     search_write,
                     body_read,
                     notification_tx,
+                    // service_generation is overwritten by the UI's
+                    // reader task at enqueue time per the
+                    // WithGeneration trait contract; emit 0 here.
                     0,
                 )
                 .await;
