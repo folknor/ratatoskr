@@ -114,6 +114,22 @@ pub(crate) async fn handle_fetch(
                     db::db::queries_extra::bump_attachment_cached_at(conn, &bump_id)
                 })
                 .await;
+            // Phase 7-5: cache-hit enqueue for extraction. Skip if
+            // the row already has a permanent extraction status
+            // (indexed or skipped:<permanent>); enqueue if null or
+            // retry-eligible. The ExtractRuntime's worker pre-flight
+            // does its own status-aware idempotency check too -
+            // belt-and-suspenders.
+            if should_enqueue_extraction(info.extraction_status.as_deref()) {
+                enqueue_extraction_if_runtime_installed(
+                    boot_state,
+                    content_hash.clone(),
+                    params.account_id.clone(),
+                    params.message_id.clone(),
+                    params.attachment_id.clone(),
+                )
+                .await;
+            }
             return serde_json::to_value(AttachmentFetchAck {
                 content_hash: content_hash.clone(),
                 size_bytes: meta.len(),
@@ -184,12 +200,73 @@ pub(crate) async fn handle_fetch(
             .map_err(ServiceError::Internal)?;
     }
 
+    // Phase 7-5: cache-miss enqueue for extraction. The bytes are
+    // freshly committed to the cache; ExtractRuntime worker reads
+    // them via the same SWEEP_LOCK to defend against eviction.
+    enqueue_extraction_if_runtime_installed(
+        boot_state,
+        content_hash.clone(),
+        params.account_id.clone(),
+        params.message_id.clone(),
+        params.attachment_id.clone(),
+    )
+    .await;
+
     serde_json::to_value(AttachmentFetchAck {
         content_hash,
         size_bytes,
         relative_path,
     })
     .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// Phase 7-5: status-aware re-enqueue gate for the cache-hit path.
+/// Returns true when extraction should be enqueued: null status (no
+/// `attachment_extracted_text` row exists) or retry-eligible status
+/// (`failed:transient`, `skipped:bytes_gone`, `skipped:timeout`).
+/// Returns false for permanent statuses (`indexed`, `skipped:opaque`,
+/// `skipped:encrypted`, `skipped:oversize`, `skipped:encoding`,
+/// `skipped:empty`, `skipped:ocr`, `skipped:unknown_mime`,
+/// `skipped:privacy`, `skipped:zipbomb`).
+fn should_enqueue_extraction(status: Option<&str>) -> bool {
+    match status {
+        None => true,
+        Some(s) => matches!(
+            s,
+            "failed:transient" | "skipped:bytes_gone" | "skipped:timeout"
+        ),
+    }
+}
+
+/// Phase 7-5: defensive enqueue. The ExtractRuntime is installed
+/// by `spawn_post_ready_extract_startup` (deferred from 7-4d); until
+/// the production wiring lands this is a logged no-op so
+/// `attachment.fetch` still acks normally.
+async fn enqueue_extraction_if_runtime_installed(
+    boot_state: &Arc<crate::boot::BootSharedState>,
+    content_hash: String,
+    account_id: String,
+    message_id: String,
+    attachment_id: String,
+) {
+    let Some(runtime) = boot_state.extract_runtime() else {
+        log::debug!(
+            "attachment.fetch: ExtractRuntime not installed; skipping enqueue \
+             for hash {content_hash} (7-4d follow-up wires production producer)"
+        );
+        return;
+    };
+    if let Err(e) = runtime
+        .enqueue(crate::extract::ExtractWork {
+            content_hash: content_hash.clone(),
+            account_id,
+            message_id,
+            attachment_id,
+        })
+        .await
+    {
+        log::debug!("attachment.fetch enqueue {content_hash}: {e}");
+    }
 }
 
 /// `attachment.eviction_kick` notification handler.
