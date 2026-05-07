@@ -74,12 +74,18 @@ the brokkr repo):
   [[check]]
   name = "harness"
   features = ["test-helpers"]
-  build_packages = ["app", "parent_death_helper"]
+  build_packages = ["app"]
 
   [ratatoskr.harness]
   sweep = "harness"
   binary = "app"
   ```
+
+  `parent_death_helper` is a bin target inside the `app` package
+  (`crates/app/src/bin/parent_death_helper.rs`), not a separate cargo
+  package - `cargo build -p app` builds it as a side effect and the
+  proven `crates/app/tests/service_subprocess.rs` setup already runs
+  off `build_packages = ["app"]`.
 
 **Exit criteria:**
 

@@ -103,10 +103,10 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
   risk without losing the distinction.
 - **Soft-cancel signal for `boot.ready` to avoid mid-COMMIT SIGKILL.**
   Phase 1.5 carry-forward, flagged by the bugs review.
-  `crates/service/src/dispatch.rs:185-208` orders `drain_in_flight`
-  before `boot_handle.abort()`; a `boot.ready` parked on
-  `wait_for_ready` keeps drain awaiting until `spawn_blocking`
-  migration completes. UI Drop's `wait_with_kill_watchdog` is 1s
+  `crates/service/src/dispatch.rs::run_dispatch_loop` orders
+  `drain_in_flight` before `boot_handle.abort()`; a `boot.ready`
+  parked on `wait_for_ready` keeps drain awaiting until
+  `spawn_blocking` migration completes. UI Drop's `wait_with_kill_watchdog` is 1s
   before SIGKILL; on a mid-`COMMIT` Service, SQLite WAL recovers and
   the next boot redoes the migration - the same "duplicate boot work"
   cost the backoff bullet flags. The fix has `boot.ready` respect a
@@ -152,9 +152,10 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
 
 ### 8-2 Cross-store invariant pass optimization
 
-The minimal pass landed in Phase 3 (Tantivy / body / inline orphan
-scans) and Phase 6 (blob orphan scan); both are full-table walks
-gated only on the missing `clean_shutdown` sentinel. On a 200 GB
+The minimal pass landed in Phase 3 (body / inline orphan scans;
+Tantivy iteration was deferred) and Phase 6 (blob orphan scan);
+both are full-table walks gated only on the missing `clean_shutdown`
+sentinel. On a 200 GB
 mailbox the cost is multi-minute boot delay every time the previous
 shutdown was unclean (which on Windows is most non-graceful exits per
 the exit-path matrix). Phase 8 makes them fast.
@@ -395,8 +396,12 @@ Move `docs/service/manual-test-matrix.md` to
 - `docs/service/problem-statement.md` (will be retired in 8-9 anyway,
   but during the close-out window the link should go to the new
   path).
+- `docs/harness/roadmap.md` and `docs/harness/problem-statement.md`,
+  which already prefigure the relocation in five places and link
+  `docs/service/manual-test-matrix.md` directly.
 - Any `// MANUAL TEST REQUIRED` comments in
-  `crates/service/src/parent_death/{linux,windows}.rs` or similar
+  `crates/process-lifetime/src/{linux,windows}.rs` (the parent-death
+  code was extracted to its own crate post-Phase-1) or similar
   source-side pointers.
 
 The matrix itself doesn't change in content; it just relocates. The
@@ -433,8 +438,26 @@ Final commit. After 8-6, 8-7, and 8-8 land:
 
 - `git rm -r docs/service/`
 - Verify `docs/service/` is absent from the repo.
-- Verify no surviving link in any other doc points at
-  `docs/service/<anything>`.
+- Verify no surviving link points at `docs/service/<anything>`. The
+  audit must cover **source code** as well as docs - the relocation
+  arc seeded ~35 module-doc / Cargo.toml / SQL-comment pointers of
+  the form `// Phase N of \`docs/service/phase-N-plan.md\`` across
+  `crates/service-api/`, `crates/service/`, `crates/service-state/`,
+  `crates/action-types/`, `crates/db/`, `crates/jmap/`,
+  `crates/graph/`, `crates/imap/`, `crates/calendar/`,
+  `crates/process-lifetime/`, and a handful of `crates/app/` sites.
+  Each becomes a dangling pointer the moment the directory
+  disappears. (One is dangling already: `crates/calendar/src/jmap.rs`
+  references the long-deleted `docs/service/discrepancies.md`.)
+  Doc-side references outside the close-out flow that need rewrites:
+  `docs/architecture.md` (the `WriteDbState` bullet referencing
+  `docs/service/problem-statement.md`) and
+  `docs/attachments/{problem-statement,implementation-roadmap}.md`
+  (cross-document dependencies on the Service problem statement and
+  roadmap). Replacement strategy: for source-side pointers, either
+  inline the rationale into the comment or drop it; for the
+  architecture / attachments docs, redirect to the new Service
+  sections in `docs/architecture.md` from 8-6.
 
 ---
 

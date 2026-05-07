@@ -306,8 +306,10 @@ binding picks.
 - `spawn_with_events_for_test(binary, data_dir, extra_args) -> mpsc::Receiver<SpawnEvent>`
 - `request::<R>(params: RequestParams) -> Result<R, ClientError>` -
   including the typed `RequestParams` variants (`HealthPing`,
-  `Shutdown`, `TestPrintln`, `TestSlow`, `ExecutePlan`, `JobStatus`,
-  `MarkChatRead`, etc.).
+  `Shutdown`, `TestPrintln`, `TestSlow`, `ActionExecutePlan`,
+  `ActionJobStatus`, `ActionMarkChatRead`, etc.; the `Action` prefix
+  is canonical in the Rust enum and the binding strips or maps it as
+  it chooses for Lua spellings).
 - `notifications() -> Arc<NotificationQueue>` - returns a queue
   userdata with `recv(timeout)` and drain helpers.
 - `current_generation() -> u32`
