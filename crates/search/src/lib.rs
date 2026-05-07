@@ -951,27 +951,33 @@ fn score_field(snippet_gen: &Option<SnippetGenerator>, text: &str) -> usize {
 /// `haystack` (already lowercase). Word boundaries are
 /// non-alphanumeric characters or the start/end of the string. Used
 /// only as a per-attachment tiebreak; precision is not critical.
+///
+/// L2 fix: pre-fix the boundary check ran on bytes via
+/// `is_ascii_alphanumeric`. Multi-byte UTF-8 (`é = 0xC3 0xA9`) starts
+/// with a non-ASCII byte, which then registered as a word boundary.
+/// Latin-Extended haystacks ("café") would inflate term_freq for any
+/// needle preceded by an accented character. Char-based boundary
+/// checks via `char::is_alphanumeric` handle the full Unicode plane.
 fn count_word_occurrences(haystack: &str, needle: &str) -> usize {
     if needle.is_empty() || haystack.is_empty() {
         return 0;
     }
-    let bytes = haystack.as_bytes();
     let nlen = needle.len();
     let mut count = 0usize;
     let mut idx = 0usize;
     while let Some(found) = haystack[idx..].find(needle) {
         let abs = idx + found;
         let before_ok = abs == 0
-            || !bytes
-                .get(abs - 1)
-                .copied()
-                .is_some_and(|b| b.is_ascii_alphanumeric());
+            || !haystack[..abs]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric);
         let after = abs + nlen;
-        let after_ok = after >= bytes.len()
-            || !bytes
-                .get(after)
-                .copied()
-                .is_some_and(|b| b.is_ascii_alphanumeric());
+        let after_ok = after >= haystack.len()
+            || !haystack[after..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric);
         if before_ok && after_ok {
             count += 1;
         }

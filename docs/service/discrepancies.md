@@ -10,14 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L2. `count_word_occurrences` treats non-ASCII bytes as word boundaries
-
-**Files:** `crates/search/src/lib.rs:944-971`.
-
-Tiebreak helper iterates bytes and tests `is_ascii_alphanumeric()`. Multi-byte UTF-8 sequences (`é = 0xC3 0xA9`) start with non-ASCII. False-positive word boundaries inflate per-attachment tiebreak `term_freq` for Latin-Extended haystacks. Tiebreak-only effect; ties fall through to filename-alphabetical anyway.
-
-**Fix:** iterate `chars()` with `char::is_alphanumeric`.
-
 ### L3. Plain-text U+FFFD-heavy decode bypasses control-char ratio guard
 
 **Files:** `crates/service/src/text_extract/plain.rs:39, 162-177`.
