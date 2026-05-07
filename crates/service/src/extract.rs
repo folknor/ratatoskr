@@ -781,20 +781,12 @@ async fn fan_out_reindex_chunk(
 }
 
 /// Status strings that signal "do not retry on next enqueue."
+/// L1 fix: delegates to `text_extract::is_retry_eligible_status_str` so
+/// the partition lives in one place. Indexed is permanent (success +
+/// fan-out emitted); transient failures and retry-eligible skips are
+/// not.
 fn is_permanent_status(status: &str) -> bool {
-    matches!(
-        status,
-        "indexed"
-            | "skipped:opaque"
-            | "skipped:encrypted"
-            | "skipped:oversize"
-            | "skipped:encoding"
-            | "skipped:empty"
-            | "skipped:ocr"
-            | "skipped:unknown_mime"
-            | "skipped:privacy"
-            | "skipped:zipbomb"
-    )
+    !crate::text_extract::is_retry_eligible_status_str(status)
 }
 
 #[cfg(test)]

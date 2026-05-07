@@ -10,14 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L1. Three independent encodings of the permanent-vs-retry-eligible status taxonomy
-
-**Files:** `crates/service/src/extract.rs:655-669` (`is_permanent_status`), `crates/service/src/handlers/attachment.rs:231-239` (`should_enqueue_extraction`), `crates/service/src/text_extract/mod.rs:106-130` (`SkipReason::status_string` + `is_retry_eligible`).
-
-Three sources of truth for the same partition. A future addition (e.g. `SkipReason::Throttled`) compiles cleanly and silently falls into the wrong bucket in two of three places. No type-level link.
-
-**Fix:** introduce a single `is_retry_eligible_status_str(&str) -> bool` and a single permanent-status-from-SkipReason path. Co-locate with the SkipReason enum.
-
 ### L2. `count_word_occurrences` treats non-ASCII bytes as word boundaries
 
 **Files:** `crates/search/src/lib.rs:944-971`.

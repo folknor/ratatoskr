@@ -229,12 +229,12 @@ pub(crate) async fn handle_fetch(
 /// `skipped:empty`, `skipped:ocr`, `skipped:unknown_mime`,
 /// `skipped:privacy`, `skipped:zipbomb`).
 fn should_enqueue_extraction(status: Option<&str>) -> bool {
+    // L1 fix: delegate to text_extract's centralised partition so all
+    // three call sites (here, extract.rs::is_permanent_status, and
+    // SkipReason::is_retry_eligible) share one definition.
     match status {
         None => true,
-        Some(s) => matches!(
-            s,
-            "failed:transient" | "skipped:bytes_gone" | "skipped:timeout"
-        ),
+        Some(s) => crate::text_extract::is_retry_eligible_status_str(s),
     }
 }
 

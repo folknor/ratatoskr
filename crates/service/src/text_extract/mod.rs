@@ -152,6 +152,30 @@ impl SkipReason {
     }
 }
 
+/// L1 fix: single source of truth for the permanent-vs-retry-eligible
+/// status taxonomy as it lives on the wire (in `attachment_extracted_
+/// text.status`). Pre-fix three sites encoded the same partition
+/// independently:
+///
+/// - `extract.rs::is_permanent_status` (string match against status
+///   strings - the inverse of this function)
+/// - `handlers/attachment.rs::should_enqueue_extraction` (string match
+///   against retry-eligible status strings)
+/// - `text_extract::SkipReason::is_retry_eligible` (enum match)
+///
+/// A future addition (e.g. a new `SkipReason::Throttled`) would compile
+/// cleanly and silently fall into the wrong bucket in two of three
+/// places. Centralising on `is_retry_eligible_status_str` lets the two
+/// string-keyed callers share one definition; the enum-keyed
+/// `SkipReason::is_retry_eligible` reuses the same logic via the
+/// status_string round-trip.
+pub(crate) fn is_retry_eligible_status_str(status: &str) -> bool {
+    matches!(
+        status,
+        "failed:transient" | "skipped:bytes_gone" | "skipped:timeout",
+    )
+}
+
 /// Canonical mime tags. Provider-reported variants
 /// (`application/pdf` / `application/x-pdf` / missing-mime + `.pdf`)
 /// collapse here.
