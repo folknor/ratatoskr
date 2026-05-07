@@ -87,6 +87,89 @@ pub fn select_all_message_ids_for_rebuild(
     Ok(out)
 }
 
+/// Phase 7 (M8 fix): SELECT existing row's status from
+/// `attachment_extracted_text` for a given content_hash, scoped to the
+/// current schema_version. The worker's pre-flight skip in extract.rs
+/// uses this to detect already-resolved hashes and short-circuit
+/// without re-running the extractor.
+///
+/// Returns `Some(status)` when a row exists at the current schema
+/// version, `None` otherwise. The schema_version filter ensures a
+/// pre-PreserveExisting Tantivy schema bump invalidates stale rows
+/// without explicit cleanup.
+pub fn select_extracted_text_status(
+    conn: &Connection,
+    content_hash: &str,
+    schema_version: i64,
+) -> Result<Option<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT status FROM attachment_extracted_text \
+             WHERE content_hash = ?1 AND schema_version = ?2",
+        )
+        .map_err(|e| format!("prepare select_extracted_text_status: {e}"))?;
+    let mut rows = stmt
+        .query_map(rusqlite::params![content_hash, schema_version], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| format!("query select_extracted_text_status: {e}"))?;
+    match rows.next() {
+        None => Ok(None),
+        Some(Ok(status)) => Ok(Some(status)),
+        Some(Err(e)) => Err(format!("row select_extracted_text_status: {e}")),
+    }
+}
+
+/// Phase 7 (M8 fix): set `attachments.text_indexed_at` for every row
+/// referencing the given content_hash whose value is currently NULL.
+/// Idempotent: running twice with the same `at` is a no-op for rows
+/// already set. Used by the worker's pre-flight skip (so backfill stops
+/// re-emitting permanent skips) and by the post-extraction success
+/// path (so backfill stops re-emitting newly-resolved rows).
+pub fn mark_attachment_text_indexed(
+    conn: &Connection,
+    content_hash: &str,
+    at: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE attachments SET text_indexed_at = ?1 \
+         WHERE content_hash = ?2 AND text_indexed_at IS NULL",
+        rusqlite::params![at, content_hash],
+    )
+    .map_err(|e| format!("update text_indexed_at: {e}"))?;
+    Ok(())
+}
+
+/// Phase 7 (M8 fix): upsert one row of `attachment_extracted_text`
+/// per content_hash. The schema's PRIMARY KEY is content_hash, so
+/// INSERT OR REPLACE is the correct shape - re-running with the same
+/// hash overwrites in place.
+pub fn upsert_extracted_text_row(
+    conn: &Connection,
+    content_hash: &str,
+    mime_type: &str,
+    extracted_text: Option<&str>,
+    status: &str,
+    extracted_at: i64,
+    schema_version: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO attachment_extracted_text \
+         (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![
+            content_hash,
+            mime_type,
+            extracted_text,
+            status,
+            extracted_at,
+            schema_version
+        ],
+    )
+    .map_err(|e| format!("upsert attachment_extracted_text: {e}"))?;
+    Ok(())
+}
+
 /// Phase 7-9: reset every `attachments.text_indexed_at` to NULL and
 /// truncate `attachment_extracted_text`. Run at the start of a Wipe
 /// rebuild so the subsequent backfill kick re-extracts everything

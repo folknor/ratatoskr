@@ -8,16 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M8. Phase 7 writes shared DB tables directly from `service`, bypassing the `db` crate ownership rule
-
-**Files:** `crates/service/src/extract.rs:352, 504, 535` (inline SQL upsert + status pre-flight + UPDATE).
-
-Architecture rule (`docs/architecture.md` § "Shared-table SQL belongs to db"): shared tables are owned by `db`, not by `service`/`core`/provider crates. `attachment_extracted_text` upsert, status pre-flight, and `attachments.text_indexed_at` UPDATE are inline SQL in `extract.rs`. Should be `db::queries_extra` functions called by the service.
-
-**Agreement: 1/8** (codex arch).
-
-**Fix:** relocate to `crates/db/src/db/queries_extra/extract_reindex.rs` (which already hosts `find_unindexed_cached_attachments`, etc.).
-
 ### M9. `text/calendar` privacy exemption bypassable
 
 **Files:** `crates/service/src/text_extract/mod.rs:194-223`.

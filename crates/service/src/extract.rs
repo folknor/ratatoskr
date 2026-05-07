@@ -382,20 +382,11 @@ async fn run_extraction_pipeline(
         .db
         .to_read_state()
         .with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT status FROM attachment_extracted_text \
-                     WHERE content_hash = ?1 AND schema_version = ?2",
-                )
-                .map_err(|e| format!("prepare idempotency check: {e}"))?;
-            let mut rows = stmt
-                .query_map(
-                    rusqlite::params![hash_for_check, search::INDEX_SCHEMA_VERSION],
-                    |row| row.get::<_, String>(0),
-                )
-                .map_err(|e| format!("query idempotency check: {e}"))?;
-            let first = rows.next().transpose().map_err(|e| e.to_string())?;
-            Ok::<Option<String>, String>(first)
+            db::db::queries_extra::select_extracted_text_status(
+                conn,
+                &hash_for_check,
+                i64::from(search::INDEX_SCHEMA_VERSION),
+            )
         })
         .await
         .unwrap_or(None);
@@ -428,13 +419,7 @@ async fn run_extraction_pipeline(
             .db
             .with_conn(move |conn| {
                 let now: i64 = chrono::Utc::now().timestamp();
-                conn.execute(
-                    "UPDATE attachments SET text_indexed_at = ?1 \
-                     WHERE content_hash = ?2 AND text_indexed_at IS NULL",
-                    rusqlite::params![now, hash_for_update],
-                )
-                .map_err(|e| format!("update text_indexed_at: {e}"))?;
-                Ok(())
+                db::db::queries_extra::mark_attachment_text_indexed(conn, &hash_for_update, now)
             })
             .await
         {
@@ -600,13 +585,7 @@ async fn run_extraction_pipeline(
             .db
             .with_conn(move |conn| {
                 let now: i64 = chrono::Utc::now().timestamp();
-                conn.execute(
-                    "UPDATE attachments SET text_indexed_at = ?1 \
-                     WHERE content_hash = ?2 AND text_indexed_at IS NULL",
-                    rusqlite::params![now, hash],
-                )
-                .map_err(|e| format!("update text_indexed_at: {e}"))?;
-                Ok(())
+                db::db::queries_extra::mark_attachment_text_indexed(conn, &hash, now)
             })
             .await;
     }
@@ -637,14 +616,15 @@ async fn persist_outcome_row(
     let result = inner
         .db
         .with_conn(move |conn| {
-            conn.execute(
-                "INSERT OR REPLACE INTO attachment_extracted_text \
-                 (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![hash, mime, text, status, now, search::INDEX_SCHEMA_VERSION],
+            db::db::queries_extra::upsert_extracted_text_row(
+                conn,
+                &hash,
+                &mime,
+                text.as_deref(),
+                &status,
+                now,
+                i64::from(search::INDEX_SCHEMA_VERSION),
             )
-            .map_err(|e| format!("upsert attachment_extracted_text: {e}"))?;
-            Ok(())
         })
         .await;
     if let Err(e) = result {
