@@ -14,8 +14,8 @@ use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode, BootPhaseKind,
     Notification, OperationId, PlanId, RequestParams, TestCrashAfterNWritesParams,
-    TestDelayNextWriteParams, TestSeedAccountParams, TestSeedThreadParams, TestThreadReadParams,
-    WireFolderId, WireMailOperation, WireTagId,
+    TestDelayNextWriteParams, TestPendingOpsReadParams, TestSeedAccountParams,
+    TestSeedThreadParams, TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
 };
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -1137,6 +1137,24 @@ fn request_params_from_lua(
                     thread_id,
                 },
             })
+        }
+        "TestPendingOpsRead" | "test.pending_ops_read" => {
+            let params = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) != LuaType::Nil
+            {
+                if state.typ(params_idx) != LuaType::Table {
+                    return Err(lua_error_message("TestPendingOpsRead params must be table"));
+                }
+                TestPendingOpsReadParams {
+                    account_id: get_string_field(state, params_idx, "account_id")?,
+                    resource_id: get_string_field(state, params_idx, "resource_id")?,
+                    operation_type: get_string_field(state, params_idx, "operation_type")?,
+                    status: get_string_field(state, params_idx, "status")?,
+                }
+            } else {
+                TestPendingOpsReadParams::default()
+            };
+            Ok(RequestParams::TestPendingOpsRead { params })
         }
         "TestDelayNextWrite" | "test.delay_next_write" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {

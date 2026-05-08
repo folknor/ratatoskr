@@ -68,9 +68,10 @@ perspective.
 roadmap names ~15+ similarly-shaped real-subprocess tests planned across
 Phases 2-7 (`pre_ack_crash_rolls_back_subprocess`,
 `journal_replays_after_respawn`, `compose_send_50mb_attachment`,
-`bulk_archive_200_threads_under_budget`, the `--test-fake-schema=N` e2e,
-the whole T1 cohort) that haven't landed because today's framework
-can't carry them. The existing `spawn_harness_with_suffix` cohort in
+`bulk_archive_200_threads_under_budget`,
+`retry_queue_persists_across_respawn`, the `--test-fake-schema=N` e2e,
+the whole T1 cohort) that hadn't landed because the old framework
+couldn't carry them. The existing `spawn_harness_with_suffix` cohort in
 `dispatch_in_process.rs` is already in the same danger zone; a hung
 `boot.ready` test under `brokkr check` currently yields a process-level
 watchdog dump, not the protocol and boot-state trace needed to diagnose

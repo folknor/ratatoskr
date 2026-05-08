@@ -309,7 +309,7 @@ under `crates/app/tests/service-harness/m3/`.
 ### M4 - T1 cohort
 
 **Status:** PARTIAL; deterministic action/journal, stale-generation,
-bulk-action, and crashloop slices have landed.
+bulk-action, retry-queue, and crashloop slices have landed.
 
 Express the Phase 2 plan-specified integration cohort as `.lua`
 scripts. The "T1" cohort:
@@ -319,6 +319,8 @@ scripts. The "T1" cohort:
   `post_ack_crash_replays_subprocess`
 - `pre_ack_crash_rolls_back_subprocess`
 - `mark_chat_read_emits_only_action_completed`
+- `retry_queue_persists_across_respawn` - Phase 8-1 carry-forward
+  verify for `pending_ops` persistence across Service respawn.
 - `action_skips_search_index_write`
 - `compose_send_50mb_attachment` / `send_wire_attachment_validation`
   / `send_wire_oversize_payload_handler_path`
@@ -351,26 +353,36 @@ Current in-tree slice:
 - `test_fake_schema_propagates_via_terminal`
 - `stale_outcomes_dropped_after_respawn`
 - `bulk_archive_200_threads_under_budget`
+- `retry_queue_persists_across_respawn`
 - `unbroken_crashes_trip_persistently_failing`
 
 This slice also adds the M4-specific helper surface:
-`test.seed_thread`, `test.thread_read`, `test.delay_next_write`, Lua
-bindings for `action.execute_plan`, `action.job_status`, and
-`action.mark_chat_read`, `client:notification_should_dispatch`, plus
-notification fields for action plan IDs and service generations. The
-crashloop script combines the existing Service-side
+`test.seed_thread`, `test.thread_read`, `test.pending_ops_read`,
+`test.delay_next_write`, Lua bindings for `action.execute_plan`,
+`action.job_status`, and `action.mark_chat_read`,
+`client:notification_should_dispatch`, plus notification fields for
+action plan IDs and service generations. The crashloop script combines
+the existing Service-side
 `--test-boot-delay-ms` helper with `SIGKILL` to keep pre-`BootReady`
 respawn failures deterministic.
 
 Remaining M4 scope:
 
-- compose-send attachment and oversize validation scripts.
-- 50-iteration soak across the full T1 directory.
+- compose-send attachment and oversize validation scripts. These are
+  blocked on brokkr + `../sæhrimnir`: ratatoskr can submit
+  `action.send`, but the harness cannot yet launch the mock server
+  needed to exercise the actual network send.
+- 50-iteration soak across the full T1 directory. The new
+  `retry_queue_persists_across_respawn` script passes 50/50 by itself,
+  but `brokkr service-test crates/app/tests/service-harness/t1 -N 50`
+  currently fails because `service-test` only accepts a regular file.
+  This needs brokkr directory or suite support.
 
 **Exit criteria:**
 
 - Every test in the list passes individually.
-- A 50-iteration soak across the whole T1 directory is clean.
+- A 50-iteration soak across the whole T1 directory is clean once
+  brokkr supports directory or suite invocation.
 - The Phase 2 plan-doc reference to "T1 deferred to Phase 8" is
   resolved.
 

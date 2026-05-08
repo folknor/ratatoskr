@@ -88,7 +88,8 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
   Per-method idempotency contract recorded in `service-api`.
 - **Retry-queue persistence verify.** The `pending_ops` retry queue
   already persists across Service restarts; this entry is a verify
-  pass + a real-subprocess test (lands as a harness M4 script).
+  pass + a real-subprocess test. It landed as
+  `retry_queue_persists_across_respawn.lua` in the harness M4 cohort.
 - **Heartbeat policy refinement.** Distinguish "dispatch loop alive"
   from "no progress on a long-running task." Generous timeout on
   first heartbeat after a sync starts; require N consecutive misses
@@ -521,8 +522,9 @@ up. Some natural pairings:
    can slot anywhere.
 5. **8-5 anywhere.** Smallest cluster.
 6. **Close-out (8-6 through 8-9) last.** Gated on all
-   implementation landed and on harness M1+M2 landed (so
-   `docs/harness/manual-test-matrix.md` has a home).
+   implementation landed and on the harness M4 close-out blockers
+   being explicit (the compose-send mock server path and the full
+   T1 directory soak).
 
 Each sub-slice that lands gets a per-slice retrospective bullet here
 in this plan as it goes (mirroring the convention from
@@ -531,8 +533,8 @@ documents what shipped before the file deletes.
 
 ## Phase 8 status (as landed)
 
-- **8-1** LANDED in four commits (A-D); two carry-forwards (E, F)
-  deferred behind harness work, called out per-bullet below.
+- **8-1** LANDED in four commits (A-D); carry-forward F has now
+  landed in harness M4, while carry-forward E remains deferred.
   - **A** (respawn backoff + heartbeat policy). Replaced the Phase
     1.5 fixed 1 s cooldown + sliding-window crashloop guard with
     exponential backoff (1, 2, 4, 8, 16, 30 s cap) and a
@@ -577,10 +579,12 @@ documents what shipped before the file deletes.
     subprocess-cohort flakes; once M2 lands the wedge scripts as
     `.lua` (and the `#[ignore]`'d libtest tests are retired), the
     class-aware emit re-attempt has deterministic verification.
-  - **F** (retry-queue persistence verify) DEFERRED behind harness
-    M4. The `pending_ops` retry queue already persists across
-    restarts; the verify is a real-subprocess test that lands in
-    the M4 T1 cohort.
+  - **F** (retry-queue persistence verify) LANDED in harness M4.
+    `retry_queue_persists_across_respawn.lua` drives
+    `action.mark_chat_read`, observes the `pending_ops` row through
+    `test.pending_ops_read`, SIGKILLs the Service, waits for respawn,
+    and verifies the same pending row survives. Focused soak:
+    50/50 passed.
 
 - **8-2** LANDED. Cross-store invariant pass now bounds its scans
   via per-store cursors (`clean_shutdown_cursors` table in main
@@ -623,8 +627,9 @@ documents what shipped before the file deletes.
   correctness-preserving piece, the UI filter is a small UX
   optimization for follow-up.
 
-- **8-6 through 8-9** (close-out) BLOCKED on harness M1 + M2
-  landing on the ratatoskr side. The brokkr-side scaffolding for
-  M1 + M2 is ready per `notes/ratatoskr-service-harness.md`; the
-  ratatoskr-side `crates/app/src/harness/` module + the wedge
-  scripts unblock the close-out.
+- **8-6 through 8-9** (close-out) BLOCKED on remaining Phase 8
+  implementation and explicit M4 close-out gaps, not on harness M1
+  or M2. M1/M2 have landed on ratatoskr. Remaining blockers:
+  8-4 PreserveExisting dual-index work, compose-send network tests
+  blocked on brokkr + `../sæhrimnir`, and brokkr directory/suite
+  support for the full T1 50-iteration soak.

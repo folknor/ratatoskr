@@ -132,6 +132,44 @@ pub struct TestThreadReadAck {
 }
 
 #[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestPendingOpsReadParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestPendingOpRow {
+    pub id: String,
+    pub account_id: String,
+    pub operation_type: String,
+    pub resource_id: String,
+    pub params: String,
+    pub status: String,
+    pub retry_count: i64,
+    pub max_retries: i64,
+    pub next_retry_at: Option<i64>,
+    pub created_at: i64,
+    pub error_message: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestPendingOpsReadAck {
+    pub total: u64,
+    pub pending: u64,
+    pub failed: u64,
+    pub operations: Vec<TestPendingOpRow>,
+}
+
+#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDelayNextWriteParams {
     pub kind: String,
@@ -517,6 +555,9 @@ pub enum RequestParams {
     /// Reads back thread flags and labels for harness assertions.
     #[cfg(feature = "test-helpers")]
     TestThreadRead { params: TestThreadReadParams },
+    /// Reads pending retry-queue rows for harness assertions.
+    #[cfg(feature = "test-helpers")]
+    TestPendingOpsRead { params: TestPendingOpsReadParams },
     /// Arms a one-shot delay at a named write/crash hook.
     #[cfg(feature = "test-helpers")]
     TestDelayNextWrite { params: TestDelayNextWriteParams },
@@ -601,6 +642,8 @@ impl RequestParams {
             Self::TestSeedThread { .. } => "test.seed_thread",
             #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { .. } => "test.thread_read",
+            #[cfg(feature = "test-helpers")]
+            Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
         }
@@ -721,6 +764,7 @@ impl RequestParams {
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
             | Self::TestThreadRead { .. }
+            | Self::TestPendingOpsRead { .. }
             | Self::TestDelayNextWrite { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
@@ -801,7 +845,8 @@ impl RequestParams {
             | Self::TestSlow { .. }
             | Self::TestPrintln { .. }
             | Self::TestCounterRead { .. }
-            | Self::TestThreadRead { .. } => Idempotency::Idempotent,
+            | Self::TestThreadRead { .. }
+            | Self::TestPendingOpsRead { .. } => Idempotency::Idempotent,
 
             #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. }
@@ -915,6 +960,8 @@ impl RequestParams {
             Self::TestSeedThread { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { params } => {
                 serde_json::json!({ "params": params })
@@ -1372,6 +1419,16 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.thread_read params: {e}"))?;
                 Ok(Self::TestThreadRead { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.pending_ops_read" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestPendingOpsReadParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.pending_ops_read params: {e}"))?;
+                Ok(Self::TestPendingOpsRead { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.delay_next_write" => {
@@ -2977,6 +3034,27 @@ mod tests {
         .expect("parse");
         assert_eq!(parsed, original);
         assert_eq!(original.method_name(), "test.thread_read");
+        assert_eq!(original.idempotency(), Idempotency::Idempotent);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_pending_ops_read_round_trips_from_method_params() {
+        let original = RequestParams::TestPendingOpsRead {
+            params: TestPendingOpsReadParams {
+                account_id: Some("acc-1".into()),
+                resource_id: Some("thread-1".into()),
+                operation_type: Some("archive".into()),
+                status: Some("pending".into()),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.pending_ops_read");
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 

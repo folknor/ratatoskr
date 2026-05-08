@@ -11,8 +11,9 @@ use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedThreadAck, TestSeedThreadParams,
-    TestThreadReadAck, TestThreadReadParams,
+    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams, TestSeedAccountAck,
+    TestSeedAccountParams, TestSeedThreadAck, TestSeedThreadParams, TestThreadReadAck,
+    TestThreadReadParams,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -161,6 +162,18 @@ pub(super) async fn thread_read_handle(
     let write_db = boot_state.write_db_state()?;
     let ack = write_db
         .with_conn(move |conn| read_harness_thread(conn, &params))
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn pending_ops_read_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestPendingOpsReadParams,
+) -> Result<Value, ServiceError> {
+    let write_db = boot_state.write_db_state()?;
+    let ack = write_db
+        .with_conn(move |conn| read_harness_pending_ops(conn, &params))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -432,6 +445,87 @@ fn read_harness_thread(
         is_chat_thread,
         label_ids,
         unread_messages,
+    })
+}
+
+fn read_harness_pending_ops(
+    conn: &Connection,
+    filters: &TestPendingOpsReadParams,
+) -> Result<TestPendingOpsReadAck, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, account_id, operation_type, resource_id, params, status,
+                    retry_count, max_retries, next_retry_at, created_at,
+                    error_message
+             FROM pending_operations
+             ORDER BY created_at ASC, id ASC",
+        )
+        .map_err(|e| format!("prepare pending ops: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(TestPendingOpRow {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                operation_type: row.get(2)?,
+                resource_id: row.get(3)?,
+                params: row.get(4)?,
+                status: row.get(5)?,
+                retry_count: row.get(6)?,
+                max_retries: row.get(7)?,
+                next_retry_at: row.get(8)?,
+                created_at: row.get(9)?,
+                error_message: row.get(10)?,
+            })
+        })
+        .map_err(|e| format!("query pending ops: {e}"))?;
+
+    let mut operations = Vec::new();
+    for row in rows {
+        let op = row.map_err(|e| format!("collect pending op: {e}"))?;
+        if let Some(account_id) = &filters.account_id
+            && op.account_id != *account_id
+        {
+            continue;
+        }
+        if let Some(resource_id) = &filters.resource_id
+            && op.resource_id != *resource_id
+        {
+            continue;
+        }
+        if let Some(operation_type) = &filters.operation_type
+            && op.operation_type != *operation_type
+        {
+            continue;
+        }
+        if let Some(status) = &filters.status
+            && op.status != *status
+        {
+            continue;
+        }
+        operations.push(op);
+    }
+
+    let total = u64::try_from(operations.len()).map_err(|e| e.to_string())?;
+    let pending = u64::try_from(
+        operations
+            .iter()
+            .filter(|op| op.status == "pending")
+            .count(),
+    )
+    .map_err(|e| e.to_string())?;
+    let failed = u64::try_from(
+        operations
+            .iter()
+            .filter(|op| op.status == "failed")
+            .count(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(TestPendingOpsReadAck {
+        total,
+        pending,
+        failed,
+        operations,
     })
 }
 
