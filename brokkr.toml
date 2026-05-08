@@ -5,6 +5,16 @@ name = "harness"
 features = ["test-helpers"]
 build_packages = ["app"]
 
+[ratatoskr]
+mock_server_binary = "../sæhrimnir/target/release/saehrimnir"
+fixtures_dir = "../sæhrimnir/fixtures"
+test_endpoint_env_jmap = "RATATOSKR_TEST_JMAP_ENDPOINT"
+test_endpoint_env_imap = "RATATOSKR_TEST_IMAP_ENDPOINT"
+test_endpoint_env_smtp = "RATATOSKR_TEST_SMTP_ENDPOINT"
+test_endpoint_env_graph = "RATATOSKR_TEST_GRAPH_ENDPOINT"
+test_endpoint_env_gmail = "RATATOSKR_TEST_GMAIL_ENDPOINT"
+sync_script_dir = "crates/app/tests/sync-harness"
+
 [ratatoskr.harness]
 sweep = "harness"
 binary = "app"

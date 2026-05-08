@@ -521,8 +521,9 @@ up. Some natural pairings:
 5. **8-5 anywhere.** Smallest cluster.
 6. **Close-out (8-6 through 8-9) last.** Gated on all
    implementation landed and on the harness M4 close-out blockers
-   being explicit (the compose-send mock server path and the full
-   T1 directory soak).
+   being explicit. The full T1 directory soak is now green; the
+   remaining M4 blocker is the compose-send mock SMTP path in
+   `../sæhrimnir`.
 
 Each sub-slice that lands gets a per-slice retrospective bullet here
 in this plan as it goes (mirroring the convention from
@@ -628,6 +629,16 @@ documents what shipped before the file deletes.
 - **8-6 through 8-9** (close-out) BLOCKED on remaining Phase 8
   implementation and explicit M4 close-out gaps, not on harness M1
   or M2. M1/M2 have landed on ratatoskr. Remaining blockers:
-  8-4 PreserveExisting dual-index work, compose-send network tests
-  blocked on brokkr + `../sæhrimnir`, and brokkr directory/suite
-  support for the full T1 50-iteration soak.
+  8-4 PreserveExisting dual-index work and compose-send network tests
+  blocked on the mock SMTP path in `../sæhrimnir`. The full T1
+  directory soak passed 550/550 runs across 50 cycles on 2026-05-08.
+
+- **Harness M8 ratatoskr-side sync surface** PARTIAL. Under
+  `test-helpers`, provider clients now read
+  `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, the Service
+  sync dispatcher runs initial sync for accounts whose
+  `initial_sync_completed = 0`, `test.start_sync` / `test.query_db_state`
+  are script-visible, and
+  `crates/app/tests/sync-harness/jmap-initial.lua` is in tree for the
+  `jmap-small` fixture. Mock orchestration and wider fixture coverage
+  remain in brokkr + `../sæhrimnir`.

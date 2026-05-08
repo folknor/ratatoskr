@@ -11,9 +11,8 @@
 //!    `<app_data>/sync_markers/<account_id>.json` with `status:
 //!    "in_progress"` (atomic temp-file-then-rename) before doing any
 //!    network or DB work.
-//! 3. The runner calls
-//!    `core::sync_dispatch::sync_delta_for_account` (which dispatches
-//!    to the provider's `sync_delta` impl).
+//! 3. The runner calls `service::sync_dispatch::sync_for_account`,
+//!    which dispatches to the provider's initial or delta sync impl.
 //! 4. On exit (Ok / Err / cancelled), the runner updates the marker
 //!    status (`completed | cancelled | failed`) and emits a
 //!    `Notification::SyncCompleted` carrying the run id + result.
@@ -457,7 +456,7 @@ async fn run_sync_supervised(
     }
 }
 
-/// Inner runner. Calls `core::sync_dispatch::sync_delta_for_account`,
+/// Inner runner. Calls `core::sync_dispatch::sync_for_account`,
 /// then emits the terminal notification + updates the marker.
 async fn run_sync(
     inner: Arc<SyncRuntimeInner>,
@@ -468,7 +467,7 @@ async fn run_sync(
     let mut encryption_key_bytes = [0u8; 32];
     encryption_key_bytes.copy_from_slice(inner.encryption_key.expose().as_slice());
 
-    let result = crate::sync_dispatch::sync_delta_for_account(
+    let result = crate::sync_dispatch::sync_for_account(
         &inner.db,
         &account_id,
         encryption_key_bytes,

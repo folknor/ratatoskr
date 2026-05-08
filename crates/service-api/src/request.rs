@@ -171,6 +171,48 @@ pub struct TestPendingOpsReadAck {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestStartSyncParams {
+    pub account_id: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestQueryDbStateParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_limit: Option<u64>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbMessageRow {
+    pub id: String,
+    pub account_id: String,
+    pub thread_id: String,
+    pub subject: Option<String>,
+    pub from_address: Option<String>,
+    pub to_addresses: Option<String>,
+    pub date: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestQueryDbStateAck {
+    pub account_count: u64,
+    pub label_count: u64,
+    pub thread_count: u64,
+    pub thread_label_count: u64,
+    pub message_count: u64,
+    pub unread_message_count: u64,
+    pub attachment_count: u64,
+    pub messages: Vec<TestDbMessageRow>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDelayNextWriteParams {
     pub kind: String,
     pub millis: u64,
@@ -558,6 +600,12 @@ pub enum RequestParams {
     /// Reads pending retry-queue rows for harness assertions.
     #[cfg(feature = "test-helpers")]
     TestPendingOpsRead { params: TestPendingOpsReadParams },
+    /// Starts the real sync runtime from sync-harness scripts.
+    #[cfg(feature = "test-helpers")]
+    TestStartSync { params: TestStartSyncParams },
+    /// Reads a small DB snapshot for sync-harness assertions.
+    #[cfg(feature = "test-helpers")]
+    TestQueryDbState { params: TestQueryDbStateParams },
     /// Arms a one-shot delay at a named write/crash hook.
     #[cfg(feature = "test-helpers")]
     TestDelayNextWrite { params: TestDelayNextWriteParams },
@@ -644,6 +692,10 @@ impl RequestParams {
             Self::TestThreadRead { .. } => "test.thread_read",
             #[cfg(feature = "test-helpers")]
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
+            #[cfg(feature = "test-helpers")]
+            Self::TestStartSync { .. } => "test.start_sync",
+            #[cfg(feature = "test-helpers")]
+            Self::TestQueryDbState { .. } => "test.query_db_state",
             #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
         }
@@ -765,6 +817,8 @@ impl RequestParams {
             | Self::TestSeedThread { .. }
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
+            | Self::TestStartSync { .. }
+            | Self::TestQueryDbState { .. }
             | Self::TestDelayNextWrite { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
@@ -846,13 +900,17 @@ impl RequestParams {
             | Self::TestPrintln { .. }
             | Self::TestCounterRead { .. }
             | Self::TestThreadRead { .. }
-            | Self::TestPendingOpsRead { .. } => Idempotency::Idempotent,
+            | Self::TestPendingOpsRead { .. }
+            | Self::TestQueryDbState { .. } => Idempotency::Idempotent,
 
             #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. }
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
+
+            #[cfg(feature = "test-helpers")]
+            Self::TestStartSync { .. } => Idempotency::Conditional,
         }
     }
 
@@ -962,6 +1020,10 @@ impl RequestParams {
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestStartSync { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestQueryDbState { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { params } => {
                 serde_json::json!({ "params": params })
@@ -1429,6 +1491,26 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.pending_ops_read params: {e}"))?;
                 Ok(Self::TestPendingOpsRead { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.start_sync" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestStartSyncParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.start_sync params: {e}"))?;
+                Ok(Self::TestStartSync { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.query_db_state" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestQueryDbStateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.query_db_state params: {e}"))?;
+                Ok(Self::TestQueryDbState { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.delay_next_write" => {
@@ -3055,6 +3137,43 @@ mod tests {
         .expect("parse");
         assert_eq!(parsed, original);
         assert_eq!(original.method_name(), "test.pending_ops_read");
+        assert_eq!(original.idempotency(), Idempotency::Idempotent);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_start_sync_round_trips_from_method_params() {
+        let original = RequestParams::TestStartSync {
+            params: TestStartSyncParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.start_sync");
+        assert_eq!(original.idempotency(), Idempotency::Conditional);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_query_db_state_round_trips_from_method_params() {
+        let original = RequestParams::TestQueryDbState {
+            params: TestQueryDbStateParams {
+                account_id: Some("acc-1".into()),
+                message_limit: Some(10),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.query_db_state");
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 

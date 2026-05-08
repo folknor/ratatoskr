@@ -8,7 +8,13 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-test-helpers = ["service-api/test-helpers"]
+test-helpers = [
+    "service-api/test-helpers",
+    "gmail/test-helpers",
+    "graph/test-helpers",
+    "imap/test-helpers",
+    "jmap/test-helpers",
+]
 
 [dependencies]
 service-api = { path = "../service-api" }

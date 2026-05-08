@@ -27,6 +27,7 @@ pub struct GmailClient {
 
 struct ClientInner {
     http: reqwest::Client,
+    api_base: String,
     account_id: String,
     token: RwLock<TokenState>,
     refresh_lock: Mutex<()>,
@@ -42,6 +43,42 @@ pub type GmailState = common::state::ProviderState<GmailClient>;
 /// Create a new `GmailState` with the given encryption key.
 pub fn new_gmail_state(encryption_key: [u8; 32]) -> GmailState {
     GmailState::new(encryption_key, "Gmail")
+}
+
+#[cfg(feature = "test-helpers")]
+fn endpoint_has_non_root_path(endpoint: &str) -> bool {
+    let after_authority = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(endpoint);
+    after_authority
+        .find('/')
+        .map(|idx| !after_authority[idx..].trim_matches('/').is_empty())
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "test-helpers")]
+fn gmail_api_base_from_test_endpoint(endpoint: &str) -> Option<String> {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    if endpoint.is_empty() {
+        return None;
+    }
+    if endpoint_has_non_root_path(endpoint) {
+        Some(endpoint.to_string())
+    } else {
+        Some(format!("{endpoint}/gmail/v1/users/me"))
+    }
+}
+
+fn gmail_api_base() -> String {
+    #[cfg(feature = "test-helpers")]
+    if let Ok(value) = std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
+        && let Some(api_base) = gmail_api_base_from_test_endpoint(&value)
+    {
+        return api_base;
+    }
+
+    GMAIL_API_BASE.to_string()
 }
 
 impl GmailClient {
@@ -67,6 +104,7 @@ impl GmailClient {
         Ok(Self {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
+                api_base: gmail_api_base(),
                 account_id: account_id.to_string(),
                 token: RwLock::new(token_state),
                 refresh_lock: Mutex::new(()),
@@ -105,7 +143,7 @@ impl GmailClient {
 
     /// Make an authenticated GET request to the Gmail API.
     pub async fn get<T: DeserializeOwned>(&self, path: &str, db: &ReadDbState) -> Result<T, String> {
-        let url = format!("{GMAIL_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request::<T, ()>(&url, "GET", None, db).await
     }
 
@@ -125,7 +163,7 @@ impl GmailClient {
         body: &B,
         db: &ReadDbState,
     ) -> Result<T, String> {
-        let url = format!("{GMAIL_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request(&url, "POST", Some(body), db).await
     }
 
@@ -136,7 +174,7 @@ impl GmailClient {
         body: &B,
         db: &ReadDbState,
     ) -> Result<T, String> {
-        let url = format!("{GMAIL_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request(&url, "PUT", Some(body), db).await
     }
 
@@ -147,7 +185,7 @@ impl GmailClient {
         body: &B,
         db: &ReadDbState,
     ) -> Result<T, String> {
-        let url = format!("{GMAIL_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request(&url, "PATCH", Some(body), db).await
     }
 
@@ -204,7 +242,7 @@ impl GmailClient {
     /// Make an authenticated DELETE request to the Gmail API.
     /// Returns `()` - no response body expected.
     pub async fn delete(&self, path: &str, db: &ReadDbState) -> Result<(), String> {
-        let url = format!("{GMAIL_API_BASE}{path}");
+        let url = self.api_url(path);
         let access_token = self.ensure_valid_token(db).await?;
         let response = self
             .execute_with_retry(&url, "DELETE", None::<&()>, &access_token)
@@ -227,6 +265,10 @@ impl GmailClient {
 // ── Private implementation ──────────────────────────────────
 
 impl GmailClient {
+    fn api_url(&self, path: &str) -> String {
+        format!("{}{}", self.inner.api_base, path)
+    }
+
     /// Core request method with token refresh and 429 retry.
     async fn request<T: DeserializeOwned, B: Serialize>(
         &self,
@@ -461,4 +503,25 @@ async fn persist_refreshed_token(
         db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
     })
     .await
+}
+
+#[cfg(all(test, feature = "test-helpers"))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gmail_endpoint_origin_maps_to_api_base() {
+        let base = gmail_api_base_from_test_endpoint("http://127.0.0.1:8080")
+            .expect("endpoint maps");
+        assert_eq!(base, "http://127.0.0.1:8080/gmail/v1/users/me");
+    }
+
+    #[test]
+    fn test_gmail_endpoint_keeps_explicit_path() {
+        let base =
+            gmail_api_base_from_test_endpoint("http://127.0.0.1:8080/custom")
+                .expect("endpoint maps");
+        assert_eq!(base, "http://127.0.0.1:8080/custom");
+    }
 }

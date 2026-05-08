@@ -33,6 +33,49 @@ pub struct ImapAndSmtpConfig {
     pub smtp: SmtpConfig,
 }
 
+#[cfg(feature = "test-helpers")]
+fn test_endpoint_host_port(
+    env_name: &str,
+    default_port: u16,
+) -> Result<Option<(String, u16)>, String> {
+    let Ok(value) = std::env::var(env_name) else {
+        return Ok(None);
+    };
+    let endpoint = value.trim();
+    if endpoint.is_empty() {
+        return Ok(None);
+    }
+    parse_test_endpoint_host_port(endpoint, default_port, env_name).map(Some)
+}
+
+#[cfg(feature = "test-helpers")]
+fn parse_test_endpoint_host_port(
+    value: &str,
+    default_port: u16,
+    label: &str,
+) -> Result<(String, u16), String> {
+    let endpoint = value.trim();
+    let endpoint = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(endpoint);
+    let endpoint = endpoint.split('/').next().unwrap_or(endpoint);
+    let (host, port) = match endpoint.rsplit_once(':') {
+        Some((host, port)) => {
+            let parsed = port
+                .parse::<u16>()
+                .map_err(|e| format!("{label} has invalid port {port:?}: {e}"))?;
+            (host, parsed)
+        }
+        None => (endpoint, default_port),
+    };
+    let host = host.trim().trim_matches('[').trim_matches(']');
+    if host.is_empty() {
+        return Err(format!("{label} must include a host"));
+    }
+    Ok((host.to_string(), port))
+}
+
 fn map_security(security: Option<&str>) -> String {
     match security.map(str::to_lowercase).as_deref() {
         Some("ssl") | Some("tls") | None => "tls".to_string(),
@@ -195,6 +238,21 @@ fn imap_config_from_record(
     username: String,
     password: String,
 ) -> Result<ImapConfig, String> {
+    #[cfg(feature = "test-helpers")]
+    if let Some((host, port)) =
+        test_endpoint_host_port("RATATOSKR_TEST_IMAP_ENDPOINT", 143)?
+    {
+        return Ok(ImapConfig {
+            host,
+            port,
+            security: "none".to_string(),
+            username,
+            password,
+            auth_method: record.auth_method.clone(),
+            accept_invalid_certs: true,
+        });
+    }
+
     let host = record
         .imap_host
         .clone()
@@ -218,6 +276,21 @@ fn smtp_config_from_record(
     username: String,
     password: String,
 ) -> Result<SmtpConfig, String> {
+    #[cfg(feature = "test-helpers")]
+    if let Some((host, port)) =
+        test_endpoint_host_port("RATATOSKR_TEST_SMTP_ENDPOINT", 25)?
+    {
+        return Ok(SmtpConfig {
+            host,
+            port,
+            security: "none".to_string(),
+            username,
+            password,
+            auth_method: record.auth_method.clone(),
+            accept_invalid_certs: true,
+        });
+    }
+
     // The schema stores a single password/token for both IMAP and SMTP auth.
     // Until separate SMTP credentials exist, SMTP deliberately reuses `imap_password`.
     let host = record
@@ -273,6 +346,7 @@ pub async fn load_both_configs(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use common::crypto::decrypt_if_needed;
 
     #[test]
@@ -281,5 +355,21 @@ mod tests {
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
         let err = decrypt_if_needed(&key, encrypted_like).expect_err("expected decrypt failure");
         assert!(err.contains("decrypt credential"));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_endpoint_host_port_parses_mock_endpoint() {
+        let parsed = parse_test_endpoint_host_port("127.0.0.1:2525", 25, "TEST")
+            .expect("parse endpoint");
+        assert_eq!(parsed, ("127.0.0.1".to_string(), 2525));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_endpoint_host_port_defaults_port() {
+        let parsed = parse_test_endpoint_host_port("imap://localhost", 143, "TEST")
+            .expect("parse endpoint");
+        assert_eq!(parsed, ("localhost".to_string(), 143));
     }
 }

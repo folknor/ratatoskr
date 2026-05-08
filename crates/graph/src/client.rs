@@ -36,6 +36,8 @@ pub struct GraphClient {
 
 struct ClientInner {
     http: reqwest::Client,
+    api_base: String,
+    api_beta_base: String,
     account_id: String,
     /// When `Some`, API calls target `/users/{mailbox_id}` instead of `/me`.
     mailbox_id: Option<String>,
@@ -59,6 +61,55 @@ pub fn new_graph_state(encryption_key: [u8; 32]) -> GraphState {
     GraphState::new(encryption_key, "Graph")
 }
 
+#[cfg(feature = "test-helpers")]
+fn endpoint_has_non_root_path(endpoint: &str) -> bool {
+    let after_authority = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(endpoint);
+    after_authority
+        .find('/')
+        .map(|idx| !after_authority[idx..].trim_matches('/').is_empty())
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "test-helpers")]
+fn endpoint_parent(endpoint: &str, segment: &str) -> Option<String> {
+    endpoint
+        .strip_suffix(segment)
+        .map(|parent| parent.trim_end_matches('/').to_string())
+}
+
+#[cfg(feature = "test-helpers")]
+fn graph_api_bases_from_test_endpoint(endpoint: &str) -> Option<(String, String)> {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    if endpoint.is_empty() {
+        return None;
+    }
+    if let Some(parent) = endpoint_parent(endpoint, "/v1.0") {
+        return Some((endpoint.to_string(), format!("{parent}/beta")));
+    }
+    if let Some(parent) = endpoint_parent(endpoint, "/beta") {
+        return Some((format!("{parent}/v1.0"), endpoint.to_string()));
+    }
+    if endpoint_has_non_root_path(endpoint) {
+        Some((endpoint.to_string(), format!("{endpoint}/beta")))
+    } else {
+        Some((format!("{endpoint}/v1.0"), format!("{endpoint}/beta")))
+    }
+}
+
+fn graph_api_bases() -> (String, String) {
+    #[cfg(feature = "test-helpers")]
+    if let Ok(value) = std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT")
+        && let Some(bases) = graph_api_bases_from_test_endpoint(&value)
+    {
+        return bases;
+    }
+
+    (GRAPH_API_BASE.to_string(), GRAPH_API_BETA.to_string())
+}
+
 impl GraphClient {
     /// Create a Graph client by reading account credentials from the database.
     pub async fn from_account(
@@ -78,10 +129,13 @@ impl GraphClient {
             refresh_token,
             expires_at,
         };
+        let (api_base, api_beta_base) = graph_api_bases();
 
         Ok(Self {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
+                api_base,
+                api_beta_base,
                 account_id: account_id.to_string(),
                 mailbox_id: None,
                 token: RwLock::new(token_state),
@@ -124,6 +178,8 @@ impl GraphClient {
         Self {
             inner: Arc::new(ClientInner {
                 http: self.inner.http.clone(),
+                api_base: self.inner.api_base.clone(),
+                api_beta_base: self.inner.api_beta_base.clone(),
                 account_id: self.inner.account_id.clone(),
                 mailbox_id: Some(mailbox_id),
                 // Token refresh works via DB - shared client gets fresh tokens
@@ -200,13 +256,13 @@ impl GraphClient {
         path: &str,
         db: &ReadDbState,
     ) -> Result<T, String> {
-        let url = format!("{GRAPH_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request::<T, ()>(&url, "GET", None, db).await
     }
 
     /// Authenticated GET returning raw bytes (for attachment `/$value`).
     pub async fn get_bytes(&self, path: &str, db: &ReadDbState) -> Result<Vec<u8>, String> {
-        let url = format!("{GRAPH_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request_bytes(&url, db).await
     }
 
@@ -217,7 +273,7 @@ impl GraphClient {
         body: &B,
         db: &ReadDbState,
     ) -> Result<T, String> {
-        let url = format!("{GRAPH_API_BASE}{path}");
+        let url = self.api_url(path);
         self.request(&url, "POST", Some(body), db).await
     }
 
@@ -228,7 +284,7 @@ impl GraphClient {
         body: &B,
         db: &ReadDbState,
     ) -> Result<T, String> {
-        let url = format!("{GRAPH_API_BETA}{path}");
+        let url = self.api_beta_url(path);
         self.request(&url, "POST", Some(body), db).await
     }
 
@@ -239,7 +295,7 @@ impl GraphClient {
         body: Option<&B>,
         db: &ReadDbState,
     ) -> Result<(), String> {
-        let url = format!("{GRAPH_API_BASE}{path}");
+        let url = self.api_url(path);
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
             .inner
@@ -268,7 +324,7 @@ impl GraphClient {
         body: &B,
         db: &ReadDbState,
     ) -> Result<(), String> {
-        let url = format!("{GRAPH_API_BASE}{path}");
+        let url = self.api_url(path);
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
             .inner
@@ -292,7 +348,7 @@ impl GraphClient {
 
     /// Authenticated DELETE against the Graph API.
     pub async fn delete(&self, path: &str, db: &ReadDbState) -> Result<(), String> {
-        let url = format!("{GRAPH_API_BASE}{path}");
+        let url = self.api_url(path);
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
             .inner
@@ -380,6 +436,14 @@ impl GraphClient {
 // ── Private implementation ──────────────────────────────────
 
 impl GraphClient {
+    fn api_url(&self, path: &str) -> String {
+        format!("{}{}", self.inner.api_base, path)
+    }
+
+    fn api_beta_url(&self, path: &str) -> String {
+        format!("{}{}", self.inner.api_beta_base, path)
+    }
+
     /// Core request method with semaphore, token refresh, and 429 retry.
     async fn request<T: DeserializeOwned, B: Serialize>(
         &self,
@@ -651,6 +715,8 @@ impl GraphClient {
         Self {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
+                api_base: GRAPH_API_BASE.to_string(),
+                api_beta_base: GRAPH_API_BETA.to_string(),
                 account_id: "test-account".to_string(),
                 mailbox_id,
                 token: RwLock::new(TokenState {
@@ -685,6 +751,8 @@ mod tests {
         GraphClient {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
+                api_base: GRAPH_API_BASE.to_string(),
+                api_beta_base: GRAPH_API_BETA.to_string(),
                 account_id: "test-account".to_string(),
                 mailbox_id,
                 token: RwLock::new(token_state),
@@ -722,6 +790,26 @@ mod tests {
         assert!(shared.is_shared_mailbox());
         assert_eq!(shared.mailbox_id(), Some("team@contoso.com"));
         assert_eq!(shared.api_path_prefix(), "/users/team%40contoso.com");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_graph_endpoint_origin_maps_to_api_bases() {
+        let (api, beta) =
+            graph_api_bases_from_test_endpoint("http://127.0.0.1:8080")
+                .expect("endpoint maps");
+        assert_eq!(api, "http://127.0.0.1:8080/v1.0");
+        assert_eq!(beta, "http://127.0.0.1:8080/beta");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_graph_endpoint_v1_derives_beta_base() {
+        let (api, beta) =
+            graph_api_bases_from_test_endpoint("http://127.0.0.1:8080/v1.0")
+                .expect("endpoint maps");
+        assert_eq!(api, "http://127.0.0.1:8080/v1.0");
+        assert_eq!(beta, "http://127.0.0.1:8080/beta");
     }
 
     #[test]

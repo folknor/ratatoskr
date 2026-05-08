@@ -111,6 +111,16 @@ the brokkr repo):
   [ratatoskr.harness]
   sweep = "harness"
   binary = "app"
+
+  [ratatoskr]
+  mock_server_binary = "../sæhrimnir/target/release/saehrimnir"
+  fixtures_dir = "../sæhrimnir/fixtures"
+  test_endpoint_env_jmap = "RATATOSKR_TEST_JMAP_ENDPOINT"
+  test_endpoint_env_imap = "RATATOSKR_TEST_IMAP_ENDPOINT"
+  test_endpoint_env_smtp = "RATATOSKR_TEST_SMTP_ENDPOINT"
+  test_endpoint_env_graph = "RATATOSKR_TEST_GRAPH_ENDPOINT"
+  test_endpoint_env_gmail = "RATATOSKR_TEST_GMAIL_ENDPOINT"
+  sync_script_dir = "crates/app/tests/sync-harness"
   ```
 
   `parent_death_helper` is a bin target inside the `app` package
@@ -373,23 +383,21 @@ propagation on the same retry policy: unknown providers are permanent
 setup errors, while `harness-offline` is a deliberate offline network
 provider for `pending_ops` coverage.
 
+The full T1 directory soak is now green with brokkr directory support:
+`brokkr service-test crates/app/tests/service-harness/t1 -N 50`
+passed 550/550 runs across 50 cycles on 2026-05-08.
+
 Remaining M4 scope:
 
 - compose-send attachment and oversize validation scripts. These are
-  blocked on brokkr + `../sæhrimnir`: ratatoskr can submit
-  `action.send`, but the harness cannot yet launch the mock server
-  needed to exercise the actual network send.
-- 50-iteration soak across the full T1 directory. The new
-  `retry_queue_persists_across_respawn` script passes 50/50 by itself,
-  but `brokkr service-test crates/app/tests/service-harness/t1 -N 50`
-  currently fails because `service-test` only accepts a regular file.
-  This needs brokkr directory or suite support.
+  blocked on the mock-server network-send path in `../sæhrimnir`:
+  ratatoskr can submit `action.send`, but the mock SMTP side is not
+  ready to exercise and assert the actual network send.
 
 **Exit criteria:**
 
 - Every test in the list passes individually.
-- A 50-iteration soak across the whole T1 directory is clean once
-  brokkr supports directory or suite invocation.
+- A 50-iteration soak across the whole T1 directory is clean.
 - The Phase 2 plan-doc reference to "T1 deferred to Phase 8" is
   resolved.
 
@@ -481,14 +489,17 @@ Sequencing:
 
 ### M7 - Brokkr-side polish
 
-**Status:** PARTIAL - `service-list` and soak landed; `service-suite`
-and `service-list --json` deferred per
-`notes/ratatoskr-service-harness.md`.
+**Status:** PARTIAL - `service-list`, single-script soak,
+directory-cohort `service-test`, and `service-suite -N` landed;
+`service-list --json` is deferred.
 
 - `brokkr service-suite [--filter X]` - walks
   `crates/app/tests/service-harness/`, runs every script (or every
   script matching `--filter`), aggregates pass/fail stats. V1 suite
   execution is serial and does not expose `--jobs`.
+- `brokkr service-test <DIR> -N <COUNT>` - directory form is sugar
+  for the suite path scoped to that cohort. `-N` means cohort cycles,
+  so `-N 50` over the 11-script T1 directory runs 550 invocations.
 - `brokkr service-list --json` - machine-readable script discovery
   for failure-triage tooling and editor integrations.
 
@@ -501,8 +512,10 @@ and `service-list --json` deferred per
 
 ### M8 - Provider mock servers (Track 2)
 
-**Status:** DEFERRED - gated on M2+M4 stable, and on the team having
-appetite for the protocol-modeling work (which is not small).
+**Status:** PARTIAL - ratatoskr's test-only endpoint override,
+sync-trigger, DB-query, and first sync-harness script surfaces have
+landed. The remaining work is mock-server orchestration and protocol
+fixture depth in brokkr + `../sæhrimnir`.
 
 Mock IMAP and JMAP servers, fixture sets (small smoke / medium /
 large / huge thread / many folders / duplicate Message-ID / malformed
@@ -520,6 +533,21 @@ path (per the brokkr-side note's Plan 3 resolution): tests use the
 existing `app --test-harness` binary and `ServiceClient` userdata
 plus new sync-triggering / state-querying `RequestParams` variants
 (`TestStartSync`, `TestQueryDbState`).
+
+Ratatoskr-side M8 surface now in tree:
+
+- `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT` are read
+  under the `test-helpers` feature and redirect provider clients to
+  the mock endpoints supplied by brokkr.
+- `test.start_sync` starts the real Service sync runtime. The
+  Service sync dispatcher now runs provider initial sync when
+  `accounts.initial_sync_completed = 0`, then delta sync afterwards.
+- `test.query_db_state` returns account, label, thread, message,
+  unread-message, attachment, and small message-list snapshots for
+  sync-harness assertions.
+- `crates/app/tests/sync-harness/jmap-initial.lua` is the first
+  sync-harness script. It targets the `jmap-small` fixture and asserts
+  the two fixture messages land in the local DB.
 
 **Exit criteria:**
 

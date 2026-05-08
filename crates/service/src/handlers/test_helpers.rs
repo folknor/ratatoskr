@@ -11,8 +11,9 @@ use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams, TestSeedAccountAck,
-    TestSeedAccountParams, TestSeedThreadAck, TestSeedThreadParams, TestThreadReadAck,
+    TestDbMessageRow, TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
+    TestQueryDbStateAck, TestQueryDbStateParams, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
     TestThreadReadParams,
 };
 use std::sync::Arc;
@@ -54,20 +55,27 @@ pub(super) async fn seed_account_handle(
     let email = params
         .email
         .unwrap_or_else(|| format!("harness-{unique}@example.test"));
+    let provider = params.provider.unwrap_or_else(|| "imap".into());
+    let oauth_provider = match provider.as_str() {
+        "gmail_api" => Some("google".to_string()),
+        "graph" => Some("microsoft".to_string()),
+        _ => None,
+    };
+    let uses_oauth = oauth_provider.is_some();
     let create_params = db::db::queries_extra::CreateAccountParams {
         email: email.clone(),
-        provider: params.provider.unwrap_or_else(|| "imap".into()),
+        provider,
         display_name: params.display_name.or_else(|| Some("Harness".into())),
         account_name: params
             .account_name
             .unwrap_or_else(|| "Harness Account".into()),
         account_color: "#4285f4".into(),
-        auth_method: "password".into(),
-        access_token: None,
-        refresh_token: None,
-        token_expires_at: None,
-        oauth_provider: None,
-        oauth_client_id: None,
+        auth_method: if uses_oauth { "oauth2" } else { "password" }.into(),
+        access_token: uses_oauth.then(|| "test-access-token".into()),
+        refresh_token: uses_oauth.then(|| "test-refresh-token".into()),
+        token_expires_at: uses_oauth.then(|| chrono::Utc::now().timestamp() + 3_600),
+        oauth_provider,
+        oauth_client_id: uses_oauth.then(|| "test-client-id".into()),
         imap_host: Some("imap.example.test".into()),
         imap_port: Some(993),
         imap_security: Some("tls".into()),
@@ -78,7 +86,7 @@ pub(super) async fn seed_account_handle(
         smtp_security: Some("starttls".into()),
         smtp_username: Some(email.clone()),
         smtp_password: Some("test-password".into()),
-        jmap_url: None,
+        jmap_url: Some("https://jmap.example.test/jmap/session".into()),
         accept_invalid_certs: true,
     };
     let ack_email = email.clone();
@@ -174,6 +182,37 @@ pub(super) async fn pending_ops_read_handle(
     let write_db = boot_state.write_db_state()?;
     let ack = write_db
         .with_conn(move |conn| read_harness_pending_ops(conn, &params))
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn start_sync_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestStartSyncParams,
+) -> Result<Value, ServiceError> {
+    if params.account_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.start_sync".into(),
+            message: "account_id is required".into(),
+        });
+    }
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.start_sync received before SyncRuntime was installed".into(),
+        )
+    })?;
+    let ack = runtime.start_account(params.account_id).await;
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn query_db_state_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestQueryDbStateParams,
+) -> Result<Value, ServiceError> {
+    let write_db = boot_state.write_db_state()?;
+    let ack = write_db
+        .with_conn(move |conn| read_harness_db_state(conn, &params))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -527,6 +566,147 @@ fn read_harness_pending_ops(
         failed,
         operations,
     })
+}
+
+fn read_harness_db_state(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<TestQueryDbStateAck, String> {
+    let account_id = params.account_id.as_deref();
+    Ok(TestQueryDbStateAck {
+        account_count: count_accounts(conn, account_id)?,
+        label_count: count_account_rows(conn, "labels", account_id)?,
+        thread_count: count_account_rows(conn, "threads", account_id)?,
+        thread_label_count: count_account_rows(conn, "thread_labels", account_id)?,
+        message_count: count_account_rows(conn, "messages", account_id)?,
+        unread_message_count: count_unread_messages(conn, account_id)?,
+        attachment_count: count_account_rows(conn, "attachments", account_id)?,
+        messages: read_harness_messages(conn, params)?,
+    })
+}
+
+fn count_accounts(conn: &Connection, account_id: Option<&str>) -> Result<u64, String> {
+    let count = match account_id {
+        Some(account_id) => conn.query_row(
+            "SELECT COUNT(*) FROM accounts WHERE id = ?1",
+            params![account_id],
+            |row| row.get::<_, i64>(0),
+        ),
+        None => conn.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
+            row.get::<_, i64>(0)
+        }),
+    }
+    .map_err(|e| format!("count accounts: {e}"))?;
+    non_negative_count(count, "accounts")
+}
+
+fn count_account_rows(
+    conn: &Connection,
+    table: &str,
+    account_id: Option<&str>,
+) -> Result<u64, String> {
+    let count = match account_id {
+        Some(account_id) => {
+            let sql = format!("SELECT COUNT(*) FROM {table} WHERE account_id = ?1");
+            conn.query_row(&sql, params![account_id], |row| row.get::<_, i64>(0))
+        }
+        None => {
+            let sql = format!("SELECT COUNT(*) FROM {table}");
+            conn.query_row(&sql, [], |row| row.get::<_, i64>(0))
+        }
+    }
+    .map_err(|e| format!("count {table}: {e}"))?;
+    non_negative_count(count, table)
+}
+
+fn count_unread_messages(
+    conn: &Connection,
+    account_id: Option<&str>,
+) -> Result<u64, String> {
+    let count = match account_id {
+        Some(account_id) => conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE account_id = ?1 AND is_read = 0",
+            params![account_id],
+            |row| row.get::<_, i64>(0),
+        ),
+        None => conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE is_read = 0",
+            [],
+            |row| row.get::<_, i64>(0),
+        ),
+    }
+    .map_err(|e| format!("count unread messages: {e}"))?;
+    non_negative_count(count, "unread messages")
+}
+
+fn read_harness_messages(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbMessageRow>, String> {
+    let limit = i64::try_from(params.message_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("message_limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, thread_id, subject, from_address,
+                            to_addresses, date, is_read, is_starred
+                     FROM messages
+                     WHERE account_id = ?1
+                     ORDER BY date ASC, id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare messages query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_message_from_row)
+                .map_err(|e| format!("query messages: {e}"))?;
+            collect_rows(mapped, "messages")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, thread_id, subject, from_address,
+                            to_addresses, date, is_read, is_starred
+                     FROM messages
+                     ORDER BY account_id ASC, date ASC, id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare messages query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_message_from_row)
+                .map_err(|e| format!("query messages: {e}"))?;
+            collect_rows(mapped, "messages")
+        }
+    }
+}
+
+fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbMessageRow> {
+    Ok(TestDbMessageRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        thread_id: row.get(2)?,
+        subject: row.get(3)?,
+        from_address: row.get(4)?,
+        to_addresses: row.get(5)?,
+        date: row.get(6)?,
+        is_read: row.get::<_, i64>(7)? != 0,
+        is_starred: row.get::<_, i64>(8)? != 0,
+    })
+}
+
+fn collect_rows<T, F>(rows: rusqlite::MappedRows<'_, F>, label: &str) -> Result<Vec<T>, String>
+where
+    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+{
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("read {label}: {e}"))?);
+    }
+    Ok(out)
+}
+
+fn non_negative_count(value: i64, label: &str) -> Result<u64, String> {
+    u64::try_from(value).map_err(|e| format!("{label} count was negative: {e}"))
 }
 
 fn add_changed_rows(current: u64, changed: usize) -> Result<u64, String> {

@@ -14,8 +14,9 @@ use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode, BootPhaseKind,
     Notification, OperationId, PlanId, RequestParams, TestCrashAfterNWritesParams,
-    TestDelayNextWriteParams, TestPendingOpsReadParams, TestSeedAccountParams,
-    TestSeedThreadParams, TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
+    TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
+    TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams,
+    WireFolderId, WireMailOperation, WireTagId,
 };
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -989,6 +990,23 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 completed.service_generation as f64,
             )?;
         }
+        Notification::SyncCompleted(completed) => {
+            set_field_string(state, idx, "type", "SyncCompleted")?;
+            set_field_string(state, idx, "account_id", &completed.account_id)?;
+            set_field_string(state, idx, "run_id", &completed.run_id.to_string())?;
+            set_field_string(
+                state,
+                idx,
+                "result",
+                sync_result_name(&completed.result),
+            )?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                completed.service_generation as f64,
+            )?;
+        }
         other => {
             set_field_string(state, idx, "type", other.method_name())?;
         }
@@ -996,6 +1014,14 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
     push_json(state, &serde_json::to_value(notification).map_err(lua_json)?)?;
     set_pushed_field(state, idx, "raw")?;
     Ok(())
+}
+
+fn sync_result_name(result: &service_api::SyncResult) -> &'static str {
+    match result {
+        service_api::SyncResult::Completed => "completed",
+        service_api::SyncResult::Cancelled => "cancelled",
+        service_api::SyncResult::Failed(_) => "failed",
+    }
 }
 
 fn request_params_from_lua(
@@ -1155,6 +1181,33 @@ fn request_params_from_lua(
                 TestPendingOpsReadParams::default()
             };
             Ok(RequestParams::TestPendingOpsRead { params })
+        }
+        "TestStartSync" | "test.start_sync" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestStartSync requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestStartSync requires params.account_id"))?;
+            Ok(RequestParams::TestStartSync {
+                params: TestStartSyncParams { account_id },
+            })
+        }
+        "TestQueryDbState" | "test.query_db_state" => {
+            let params = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) != LuaType::Nil
+            {
+                if state.typ(params_idx) != LuaType::Table {
+                    return Err(lua_error_message("TestQueryDbState params must be table"));
+                }
+                TestQueryDbStateParams {
+                    account_id: get_string_field(state, params_idx, "account_id")?,
+                    message_limit: get_number_field(state, params_idx, "message_limit")?
+                        .map(|value| value as u64),
+                }
+            } else {
+                TestQueryDbStateParams::default()
+            };
+            Ok(RequestParams::TestQueryDbState { params })
         }
         "TestDelayNextWrite" | "test.delay_next_write" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {

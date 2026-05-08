@@ -34,8 +34,8 @@ top-level commands tagged `[ratatoskr]`, `[pbfhogg]`, etc. The CLI is
 flat: `brokkr service-test foo.lua`, not `brokkr ratatoskr
 service-test foo.lua`. Today it already handles ratatoskr's
 `brokkr check` and `brokkr test` invocations; the harness commands
-(`service-test`, `service-list`, eventual `service-suite`) are an
-extension of that surface.
+(`service-test`, `service-list`, `service-suite`, and mock/sync
+orchestration commands as they land) are an extension of that surface.
 
 Brokkr also owns lockfile coordination, build orchestration with
 feature sweeps, a sidecar profiler that samples `/proc` at 100 ms, a
@@ -87,11 +87,15 @@ subprocess Service path, the dellingr `0.2.0` VM, client/event/request
 userdata needed by the wedge scripts, redacted frame tracing,
 event/step tracing, Service stderr capture, runtime outcome writing,
 data-dir copy-on-failure, and best-effort Linux `/proc` snapshots.
+M8's ratatoskr-side sync surface has also started: provider clients
+read test-only mock endpoint env vars, sync-harness scripts can call
+`test.start_sync` and `test.query_db_state`, and
+`crates/app/tests/sync-harness/jmap-initial.lua` targets the
+`jmap-small` fixture. Mock orchestration remains outside ratatoskr.
 The broader target surface above is still incremental work:
-generic `wait_for`, `NotificationQueue` userdata, sentinel watch,
-parent-death helper bindings, generic `wait_exit`, resource summaries,
-and a complete request registry are deferred until the first migrated
-test needs each one.
+generic `wait_for`, sentinel watch, parent-death helper bindings,
+generic `wait_exit`, resource summaries, and a complete request
+registry are deferred until the first migrated test needs each one.
 
 The v1 spawn path is subprocess-only. Scripts spawn the Service through
 `ServiceClient` / `app --service`; the `spawn_harness_with_suffix`
@@ -137,7 +141,7 @@ needs the client API or compile-time profiling shows pressure.
 
 - **Project gating + CLI surface.** `Project::Ratatoskr` first-class
   variant; `[ratatoskr]`-tagged commands (`service-test`,
-  `service-list`, eventual `service-suite`) in `brokkr --help`.
+  `service-list`, `service-suite`, `mock-serve`) in `brokkr --help`.
 - **Sweep-aware build.** Reads `[ratatoskr.harness] sweep / binary`
   out of `brokkr.toml`, matches `sweep` to a `[[check]]` entry,
   builds every `build_packages` entry with the sweep's feature flags,
@@ -168,10 +172,12 @@ needs the client API or compile-time profiling shows pressure.
   cohorts can live under `t1/`, `extract/`, etc.; non-`.lua` files
   such as fixtures are ignored by extension. `preserve_data_dir` is
   brokkr-side frontmatter because brokkr owns artefact-dir deletion.
-- **Soak (`-N`) and eventual serial suite (`--filter`) runners** on
-  top of the single-script run path. Soak is already brokkr-side. The
-  v1 suite is serial and does not expose `--jobs`; parallelism can be
-  added later only for an opt-in class of isolated scripts.
+- **Soak (`-N`) and serial suite (`--filter`) runners** on top of the
+  single-script run path. `service-test <SCRIPT> -N 50` repeats that
+  script 50 times. `service-test <DIR> -N 50` routes through the suite
+  path and runs the cohort 50 cycles. The v1 suite is serial and does
+  not expose `--jobs`; parallelism can be added later only for an
+  opt-in class of isolated scripts.
 - **History-DB recording, optional sidecar /proc profiling.**
 
 ## What ratatoskr provides (in `app`'s harness module)
@@ -553,13 +559,14 @@ existing tests do.
 | `stale_notifications_dropped_after_generation_bump_end_to_end` | `notifications()`, `current_generation()`, drain across kill+respawn, generation-tag check. |
 | `deadlocked_service_drop_escalates_to_kill` | `spawn_for_test --test-hang-on-stdin-eof`, `drop`, `pid_is_alive` poll with time-floor + ceiling. |
 | `pre_ack_crash_*` / `post_ack_crash_*` (Phase 8 cohort) | `request("ExecutePlan")`, fault-inject via test-helper RPC, kill, respawn, follow-up `request`, `Notification` drain. |
-| `retry_queue_persists_across_respawn` | M4 landed `test.pending_ops_read`, a test-only `harness-offline` provider, and a real-subprocess `action.execute_plan` retry-queue script; 50/50 focused soak passes. |
-| `compose_send_50mb_attachment` | Blocked on brokkr + `../sæhrimnir`: the harness can call `action.send`, but cannot yet launch the mock server needed to exercise the actual network send. |
+| `retry_queue_persists_across_respawn` | M4 landed `test.pending_ops_read`, a test-only `harness-offline` provider, and a real-subprocess `action.execute_plan` retry-queue script; 50/50 focused soak passes. Full T1 directory soak also passed 550/550 across 50 cohort cycles. |
+| `compose_send_50mb_attachment` | Blocked on the mock SMTP path in `../sæhrimnir`: the harness can call `action.send`, but cannot yet exercise and assert the actual network send. |
 | `bulk_archive_200_threads_under_budget` | Lua loop dispatching 200 `request` calls in parallel, wall-clock budget assertion via `os.time`. |
 | `mark_chat_read_emits_only_action_completed` | `request("MarkChatRead")`, `notifications():drain_for`, cardinality-1 assertion. |
 | `action_skips_search_index_write` / `handler_does_not_drive_batch_execute` | `request("TestCounterRead", ...)` before/after, Lua subtraction. |
 | `journal_replays_after_respawn` / `stale_outcomes_dropped_after_respawn` | `request` + `kill` + respawn + `notifications` drain. |
 | `test_fake_schema_propagates_via_terminal` | `spawn_with_events_for_test` first run + `kill` + respawn with `--test-fake-schema=N`, expect `Terminal { SchemaVersionChanged { was, now } }`. |
+| `sync-harness/jmap-initial` | `test.seed_account` with provider `jmap`, `test.start_sync`, wait for `SyncCompleted`, `test.query_db_state` assertion over the `jmap-small` mock fixture. |
 | Manual matrix #4 (heartbeat detects killed Service) | `spawn_with_events_for_test`, `kill(service_pid, SIGKILL)`, `wait_for_sentinel { path = "logs/heartbeat-exiting", backstop = "30s" }` or follow-up event. |
 | Manual matrix #5 (SIGTERM triggers shutdown drain) | `spawn_for_test`, `kill(pid, SIGTERM)`, `wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }`, `wait_exit`. |
 
@@ -585,6 +592,32 @@ variants, counter probes) as the cohort grows; they should remain
 explicitly test-scoped, ideally behind the `test-helpers` feature
 surface. New `RequestParams` variants become script-visible by adding
 entries to the harness request/response registry.
+
+Provider mock endpoints are test-scoped env vars, consumed only when
+the relevant provider crate is compiled with `test-helpers`:
+
+```
+RATATOSKR_TEST_JMAP_ENDPOINT=http://127.0.0.1:<jmap-port>
+RATATOSKR_TEST_IMAP_ENDPOINT=127.0.0.1:<imap-port>
+RATATOSKR_TEST_SMTP_ENDPOINT=127.0.0.1:<smtp-port>
+RATATOSKR_TEST_GRAPH_ENDPOINT=http://127.0.0.1:<graph-port>
+RATATOSKR_TEST_GMAIL_ENDPOINT=http://127.0.0.1:<gmail-port>
+```
+
+JMAP origins map to `/jmap/session`; Graph origins map to `/v1.0`
+and `/beta`; Gmail origins map to `/gmail/v1/users/me`; IMAP and
+SMTP expect host:port. This lets brokkr pass per-run mock ports
+without changing persisted account config.
+
+The sync-harness request surface is:
+
+- `test.start_sync` / `TestStartSync` - starts the real Service sync
+  runtime for an account. The Service sync dispatcher runs provider
+  initial sync when `accounts.initial_sync_completed = 0`, then
+  provider delta sync afterwards.
+- `test.query_db_state` / `TestQueryDbState` - returns account,
+  label, thread, message, unread-message, attachment, and bounded
+  message-list snapshots for assertions.
 
 ## Deterministic app-data fixtures
 
@@ -744,9 +777,11 @@ brokkr's other project-gated tags.
 
 ```
 brokkr service-test <SCRIPT>
-brokkr service-test <SCRIPT> -N 200       # soak
-brokkr service-suite [--filter X]
+brokkr service-test <SCRIPT> -N 200       # single-script soak
+brokkr service-test <DIR> -N 50           # cohort cycles
+brokkr service-suite [--filter X] [-N 50]
 brokkr service-list
+brokkr mock-serve --fixture <NAME>
 ```
 
 Brokkr does not embed the Lua VM or `ServiceClient`; it never speaks
@@ -772,10 +807,11 @@ boot/dispatch protocol, or process/IO boundary is the thing under test.
   `service_subprocess.rs` wedge, the `spawn_harness_with_suffix`
   dispatch tests, and new tests that need deterministic protocol waits
   plus artefact dumps.
-- **Track 2 (provider mocks + sync benchmarks).** Reuses the
-  artefact / lockfile / history machinery and the harness binary.
-  Separate planning note in the brokkr repo. Lands as harness
-  roadmap M8+ once Track 1 is solid.
+- **Owning the mock servers.** Track 2 reuses the artefact / lockfile
+  / history machinery and the harness binary, but protocol mocks live
+  in `../sæhrimnir` and orchestration lives in brokkr. Ratatoskr owns
+  only the test-only endpoint overrides, sync-trigger requests, and
+  sync-harness scripts.
 - **CI-only features.** First user is a local developer
   root-causing a flake. CI integration follows once the local story
   works.

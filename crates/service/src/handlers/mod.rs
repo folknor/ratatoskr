@@ -191,6 +191,14 @@ pub(crate) async fn dispatch(
             test_helpers::pending_ops_read_handle(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
+        RequestParams::TestStartSync { params } => {
+            test_helpers::start_sync_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestQueryDbState { params } => {
+            test_helpers::query_db_state_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
         RequestParams::TestDelayNextWrite { params } => {
             test_helpers::delay_next_write_handle(params).await
         }
