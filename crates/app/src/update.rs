@@ -366,21 +366,43 @@ impl ReadyApp {
                         Task::none()
                     }
                     service_api::Notification::IndexRebuildProgress(p) => {
-                        log::info!(
+                        log::debug!(
                             "index rebuild {}: {}/{}",
                             p.rebuild_id, p.processed, p.total,
                         );
-                        // Status-bar visual surface deferred to a
-                        // follow-up; logs let us verify the wire
-                        // path works end-to-end. Future work stores
-                        // a `Option<RebuildProgressState>` on
-                        // `ReadyApp` and the status-bar component
-                        // reads it.
+                        // Phase 8-4: store the latest progress for the
+                        // status-bar component. The component renders a
+                        // small banner when this is `Some`; cleared on
+                        // IndexRebuildCompleted.
+                        self.index_rebuild_progress = Some(crate::app::RebuildProgressState {
+                            rebuild_id: p.rebuild_id,
+                            processed:  p.processed,
+                            total:      p.total,
+                        });
                         Task::none()
                     }
                     service_api::Notification::IndexRebuildCompleted(c) => {
                         log::info!("index rebuild {} completed", c.rebuild_id);
-                        Task::none()
+                        // Phase 8-4: clear the progress state and
+                        // re-init `SearchReadState` so the new index
+                        // is reachable in-session. Without the
+                        // re-init the UI keeps the stale reader
+                        // handle until the next launch.
+                        self.index_rebuild_progress = None;
+                        let data_dir = match crate::APP_DATA_DIR.get() {
+                            Some(d) => d.clone(),
+                            None => return Task::none(),
+                        };
+                        Task::perform(
+                            async move {
+                                tokio::task::spawn_blocking(move || {
+                                    rtsk::search::SearchReadState::init(&data_dir).map(Arc::new)
+                                })
+                                .await
+                                .map_err(|e| format!("search re-init join: {e}"))?
+                            },
+                            Message::SearchStateReady,
+                        )
                     }
                 }
             }

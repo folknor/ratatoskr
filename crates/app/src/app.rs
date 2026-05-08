@@ -48,6 +48,18 @@ pub(crate) struct PendingChord {
     pub(crate) first: Chord,
 }
 
+/// Phase 8-4: in-flight index-rebuild progress for the status-bar
+/// component. Carries the latest counters from
+/// `Notification::IndexRebuildProgress`; cleared on
+/// `Notification::IndexRebuildCompleted`.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // status-bar render is a small follow-up; data wired through update.rs
+pub struct RebuildProgressState {
+    pub rebuild_id: String,
+    pub processed:  u64,
+    pub total:      u64,
+}
+
 pub struct ReadyApp {
     pub(crate) db: Arc<Db>,
     pub(crate) sidebar: Sidebar,
@@ -93,6 +105,11 @@ pub struct ReadyApp {
     // transitions to `Respawning` / `PersistentlyFailing` on crash
     // events.
     pub(crate) service_health: crate::service_client::ServiceHealth,
+    // Phase 8-4: latest in-flight index-rebuild progress for the
+    // status-bar component. `None` means no rebuild is in flight.
+    // Set on `Notification::IndexRebuildProgress`, cleared on
+    // `Notification::IndexRebuildCompleted`.
+    pub(crate) index_rebuild_progress: Option<RebuildProgressState>,
 
     // Search state
     pub(crate) search_state: Option<Arc<rtsk::search::SearchReadState>>,
@@ -382,6 +399,7 @@ impl ReadyApp {
             undo_stack: UndoStack::default(),
             search_state,
             service_health: crate::service_client::ServiceHealth::Healthy,
+            index_rebuild_progress: None,
             pending_reader_reload: None,
             pending_calendar_reload: None,
             chat_timeline: None,
