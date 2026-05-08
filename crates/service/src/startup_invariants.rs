@@ -229,8 +229,9 @@ pub async fn run_invariant_pass(
     for account in dirty_accounts {
         let account_id = account.account_id.clone();
         log::info!(
-            "invariant pass: repairing account {account_id} (status={:?})",
-            account.status
+            "invariant pass: repairing account {account_id} (run_id={:?}, status={:?})",
+            account.run_id,
+            account.status,
         );
 
         // Clear JMAP cursor (load-bearing).
@@ -653,4 +654,3 @@ mod tests {
         assert!(dirty.is_empty(), "in-progress temp files must be ignored");
     }
 }
-

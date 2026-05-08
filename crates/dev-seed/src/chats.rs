@@ -421,7 +421,7 @@ pub fn seed_chats(
                 {
                     let entry = &palette.entries[rng.random_range(0..palette.entries.len())];
                     let attach_id = crate::next_uuid(rng);
-                    let cid = format!("<{}@chat.ratatoskr.test>", &entry.content_hash);
+                    let cid = format!("<{}@chat.ratatoskr.test>", entry.content_hash);
                     let size = i64::try_from(entry.bytes.len()).unwrap_or(i64::MAX);
                     let filename = format!("inline-{}.png", &entry.content_hash[..8]);
 

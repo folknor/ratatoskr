@@ -4,7 +4,7 @@
 //! This module provides:
 //! - [`SendRequest`] - all data needed to send an email
 //! - [`build_mime_message`] - assembles a proper MIME message and returns raw bytes
-//! - Draft lifecycle helpers - `mark_draft_sending`, `mark_draft_sent`, `mark_draft_failed`
+//! - Draft lifecycle helpers - `mark_draft_sent`, `mark_draft_failed`
 //!
 //! Provider-specific send logic lives in each provider crate. This module
 //! produces the raw RFC 2822 bytes that providers consume (Gmail uploads raw
@@ -72,27 +72,17 @@ pub struct SendRequest {
 pub enum SendError {
     /// The MIME message could not be assembled.
     Build(String),
-    /// A provider-level error (network, auth, etc.).
-    Provider(String),
-    /// The draft was not found or is in an invalid state.
-    InvalidDraft(String),
 }
 
 impl std::fmt::Display for SendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Build(msg) => write!(f, "MIME build error: {msg}"),
-            Self::Provider(msg) => write!(f, "Provider error: {msg}"),
-            Self::InvalidDraft(msg) => write!(f, "Invalid draft: {msg}"),
         }
     }
 }
 
 impl std::error::Error for SendError {}
-
-/// The result of a successful send: the provider-assigned message ID.
-#[derive(Debug, Clone)]
-pub struct SentMessageId(pub String);
 
 // ── MIME construction ────────────────────────────────────────
 
@@ -204,24 +194,6 @@ pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendErr
 }
 
 // ── Draft lifecycle ──────────────────────────────────────────
-
-/// Transition a local draft to `'sending'` status.
-///
-/// Called at the start of the send pipeline, before the provider call.
-/// Prevents duplicate sends if the user triggers send again while in flight.
-pub async fn mark_draft_sending(db: &ReadDbState, draft_id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let transitioned =
-            db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)?;
-        if !transitioned {
-            return Err(format!(
-                "Draft {draft_id} not found or already sending/sent"
-            ));
-        }
-        Ok(())
-    })
-    .await
-}
 
 /// Transition a local draft to `'sent'` status after successful provider send.
 pub async fn mark_draft_sent(

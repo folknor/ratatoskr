@@ -264,8 +264,8 @@ pub(crate) async fn handle_delete(
     // check in `SyncRuntime::start_account` would catch it but we'd
     // still pay the round-trip cost.
     let aid_for_flag = account_id.clone();
-    if let Ok(write_db) = boot_state.write_db_state() {
-        if let Err(e) = write_db
+    if let Ok(write_db) = boot_state.write_db_state()
+        && let Err(e) = write_db
             .with_conn(move |conn| {
                 conn.execute(
                     "UPDATE accounts SET is_deleting = 1 WHERE id = ?1",
@@ -275,11 +275,10 @@ pub(crate) async fn handle_delete(
                 .map_err(|e| format!("set is_deleting: {e}"))
             })
             .await
-        {
-            log::warn!(
-                "account.delete: failed to set is_deleting for {account_id}: {e}; proceeding"
-            );
-        }
+    {
+        log::warn!(
+            "account.delete: failed to set is_deleting for {account_id}: {e}; proceeding"
+        );
     }
 
     if let Some(sync) = boot_state.sync_runtime()
