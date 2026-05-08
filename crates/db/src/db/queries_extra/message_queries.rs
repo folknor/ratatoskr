@@ -69,6 +69,67 @@ pub fn get_message_attachments(
     .map_err(|e| e.to_string())
 }
 
+/// Phase 8-2: given a slice of candidate `message_id`s, return the
+/// subset that is **not** present in the `messages` table. Used by the
+/// startup invariant pass to find orphan body / search rows whose
+/// underlying message has been deleted.
+///
+/// Chunked to stay under SQLite's host-parameter cap (default 999).
+pub fn find_unreferenced_message_ids(
+    conn: &Connection,
+    candidates: &[String],
+) -> Result<Vec<String>, String> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut orphans = Vec::new();
+    for chunk in candidates.chunks(500) {
+        let placeholders = (1..=chunk.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT id FROM messages WHERE id IN ({placeholders})");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare unreferenced lookup: {e}"))?;
+        let params: Vec<&dyn rusqlite::ToSql> = chunk
+            .iter()
+            .map(|s| s as &dyn rusqlite::ToSql)
+            .collect();
+        let live: std::collections::HashSet<String> = stmt
+            .query_map(params.as_slice(), |r| r.get::<_, String>(0))
+            .map_err(|e| format!("query unreferenced lookup: {e}"))?
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("collect unreferenced lookup: {e}"))?;
+        for id in chunk {
+            if !live.contains(id) {
+                orphans.push(id.clone());
+            }
+        }
+    }
+    Ok(orphans)
+}
+
+/// Phase 8-2: enumerate `messages.id` for a given account. Used by the
+/// startup invariant pass to build the live-set passed to
+/// `SearchReadState::find_orphan_message_ids_for_account`.
+pub fn list_message_ids_for_account(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM messages WHERE account_id = ?1")
+        .map_err(|e| format!("prepare list ids: {e}"))?;
+    let rows = stmt
+        .query_map(params![account_id], |r| r.get::<_, String>(0))
+        .map_err(|e| format!("query list ids: {e}"))?;
+    let mut out = std::collections::HashSet::new();
+    for r in rows {
+        out.insert(r.map_err(|e| format!("collect id: {e}"))?);
+    }
+    Ok(out)
+}
+
 /// Load raw email source for a message (Source view / Save As).
 ///
 /// NOTE: Raw source is not stored in the messages table in the seed

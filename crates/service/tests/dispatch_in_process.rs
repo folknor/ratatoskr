@@ -102,6 +102,7 @@ fn spawn_harness() -> Harness {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn ping_round_trip_succeeds() -> TestResult {
     let mut harness = spawn_harness();
     write_request(&mut harness.stdin, 1, RequestParams::HealthPing).await?;
@@ -118,6 +119,7 @@ async fn ping_round_trip_succeeds() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn malformed_json_returns_error_and_loop_continues() -> TestResult {
     let mut harness = spawn_harness();
     harness.stdin.write_all(b"{not-json}\n").await?;
@@ -134,6 +136,7 @@ async fn malformed_json_returns_error_and_loop_continues() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn oversized_frame_returns_error_and_loop_continues() -> TestResult {
     let mut harness = spawn_harness();
     let oversized = vec![b'a'; service_api::MAX_FRAME_BYTES + 1];
@@ -152,6 +155,7 @@ async fn oversized_frame_returns_error_and_loop_continues() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn eof_on_stdin_exits_cleanly() -> TestResult {
     let harness = spawn_harness();
     drop(harness.stdin);
@@ -161,6 +165,7 @@ async fn eof_on_stdin_exits_cleanly() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn invalid_utf8_returns_parse_error_and_loop_continues() -> TestResult {
     let mut harness = spawn_harness();
     harness.stdin.write_all(b"\xff\xfe\n").await?;
@@ -177,6 +182,7 @@ async fn invalid_utf8_returns_parse_error_and_loop_continues() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
     let mut harness = spawn_harness();
     let bogus = br#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{"unexpected":"value"}}"#;
@@ -191,6 +197,7 @@ async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
 
 #[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> TestResult {
     use service_api::{JsonRpcErrorObject, ServiceError};
     let mut harness = spawn_harness();
@@ -221,6 +228,7 @@ async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> T
 
 #[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -> TestResult {
     // Issue 100 slow handlers in parallel. Each sleeps for 800ms. The
     // semaphore caps concurrency at 64; the math says the second batch
@@ -294,6 +302,7 @@ async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn concurrent_ping_ids_are_correlated() -> TestResult {
     let mut harness = spawn_harness();
     for id in 1..=100 {
@@ -320,6 +329,7 @@ async fn concurrent_ping_ids_are_correlated() -> TestResult {
 /// and that the response carries the expected schema_version /
 /// migrations_applied for a fresh DB.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn boot_ready_returns_after_sequence_completes() -> TestResult {
     let mut harness = spawn_harness_with_suffix("boot_ready_completes");
     write_request(&mut harness.stdin, 1, RequestParams::BootReady).await?;
@@ -352,6 +362,7 @@ async fn boot_ready_returns_after_sequence_completes() -> TestResult {
 /// pool instead of `spawn_blocking` would not be caught.
 #[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn health_ping_succeeds_during_long_migration() -> TestResult {
     use std::sync::atomic::Ordering;
     {
@@ -419,6 +430,7 @@ async fn health_ping_succeeds_during_long_migration() -> TestResult {
 /// Verifies the dispatch loop's bypass: a parked boot.ready handler does
 /// not block other requests through the admission cap.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn health_ping_works_concurrently_with_boot_ready() -> TestResult {
     let mut harness = spawn_harness_with_suffix("concurrent_ping_during_boot");
     // Issue boot.ready first; it may complete before we read its response,

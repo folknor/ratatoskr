@@ -25,3 +25,7 @@ hotpath = { workspace = true, optional = true }
 [features]
 hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc"]
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }

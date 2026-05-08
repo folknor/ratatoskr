@@ -249,6 +249,32 @@ pub fn find_message_ids_referencing_content_hash(
     Ok(out)
 }
 
+/// Phase 8-2: drop `attachment_extracted_text` rows added since the
+/// given cursor whose `content_hash` is no longer referenced by any
+/// `attachments` row. Returns the number of rows deleted.
+///
+/// Bounded by the `extracted_at > cursor` predicate so on a 200 GB
+/// mailbox we only inspect rows written since the last clean shutdown
+/// rather than the entire extracted-text store. Defense-in-depth: the
+/// content-hash join is by sub-select against `attachments`.
+pub fn delete_extracted_text_orphans_since(
+    conn: &Connection,
+    cursor: i64,
+) -> Result<u64, String> {
+    let n = conn
+        .execute(
+            "DELETE FROM attachment_extracted_text \
+             WHERE extracted_at > ?1 \
+               AND content_hash NOT IN ( \
+                   SELECT content_hash FROM attachments \
+                   WHERE content_hash IS NOT NULL \
+               )",
+            params![cursor],
+        )
+        .map_err(|e| format!("delete_extracted_text_orphans_since: {e}"))?;
+    Ok(n as u64)
+}
+
 /// Fetch the scalar `messages` rows for a batch of `(account_id,
 /// message_id)` pairs. Chunks transparently to stay under SQLite's
 /// host-parameter cap.
@@ -541,5 +567,48 @@ mod tests {
         }
         let rows = find_unindexed_cached_attachments(&conn, 3).expect("query");
         assert_eq!(rows.len(), 3);
+    }
+
+    /// Phase 8-2: rows with `extracted_at <= cursor` are NOT scanned;
+    /// rows with `extracted_at > cursor` whose content_hash is no
+    /// longer in `attachments` ARE deleted; rows with a live
+    /// content_hash are preserved.
+    #[test]
+    fn delete_extracted_text_orphans_since_respects_cursor_and_live_hashes() {
+        let conn = open_test_db();
+        // One live attachment referencing hash 'live'.
+        conn.execute(
+            "INSERT INTO attachments (id, message_id, account_id, content_hash) \
+             VALUES ('att-live', 'm1', 'a1', 'live')",
+            [],
+        )
+        .expect("seed attachment");
+        // Three extracted_text rows:
+        //  - 'live' at extracted_at=200 (referenced, must NOT delete)
+        //  - 'orphan-old' at extracted_at=100 (orphan but pre-cursor, must NOT delete)
+        //  - 'orphan-new' at extracted_at=300 (orphan and post-cursor, MUST delete)
+        for (h, t) in &[("live", 200), ("orphan-old", 100), ("orphan-new", 300)] {
+            conn.execute(
+                "INSERT INTO attachment_extracted_text \
+                 (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
+                 VALUES (?1, 'text/plain', '', 'indexed', ?2, 2)",
+                rusqlite::params![h, t],
+            )
+            .expect("seed extracted_text");
+        }
+        let cursor = 150;
+        let dropped = delete_extracted_text_orphans_since(&conn, cursor).expect("delete");
+        assert_eq!(dropped, 1, "exactly the post-cursor orphan dropped");
+
+        // Verify which rows remain.
+        let mut remaining: Vec<String> = conn
+            .prepare("SELECT content_hash FROM attachment_extracted_text ORDER BY content_hash")
+            .expect("prepare")
+            .query_map([], |r| r.get::<_, String>(0))
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect");
+        remaining.sort();
+        assert_eq!(remaining, vec!["live".to_string(), "orphan-old".to_string()]);
     }
 }

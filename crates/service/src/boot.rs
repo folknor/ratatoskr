@@ -1154,11 +1154,27 @@ async fn run_boot_sequence_inner(
                 app_data_dir.display()
             );
         } else {
+            // Phase 8-2: open a transient SearchReadState for the
+            // Tantivy orphan iteration. The search-writer task already
+            // ensured the index directory exists; opening a second
+            // reader is cheap and independent of the writer. If the
+            // open fails the rest of the pass still runs; the
+            // history_id-clear plus next initial-style sync covers
+            // index correctness even without orphan iteration.
+            let search_read = search::SearchReadState::init(&app_data_dir)
+                .map_err(|e| {
+                    log::warn!(
+                        "invariant pass: SearchReadState::init failed: {e}; \
+                         Tantivy orphan iteration skipped"
+                    );
+                })
+                .ok();
             let _stats = crate::startup_invariants::run_invariant_pass(
                 &db_write,
                 &body_write,
                 &inline_write,
                 &search_write,
+                search_read.as_ref(),
                 &app_data_dir,
                 &dirty,
             )

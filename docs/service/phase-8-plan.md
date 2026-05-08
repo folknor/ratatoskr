@@ -482,9 +482,11 @@ Implementation:
   crash) goes to zero.
 
 Test coverage (lives in harness roadmap, listed here as gating):
-- ✓ Harness M2 LANDED. Both wedge tests
-  (`ping_and_shutdown.lua`, `terminal_on_missing_key.lua`) pass
-  consistently, including under 200-iteration soak.
+- ✓ Harness M2 LANDED. All five wedge scripts
+  (`ping_and_shutdown.lua`, `two_phase_spawn.lua`,
+  `terminal_on_missing_key.lua`, `respawn_after_sigkill.lua`,
+  `pending_at_respawn.lua`) pass consistently, including under
+  200-iteration soak.
 
 Close-out:
 - ✓ `docs/architecture.md` contains the IPC contract, process model,

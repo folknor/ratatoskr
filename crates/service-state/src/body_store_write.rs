@@ -106,8 +106,12 @@ impl BodyStoreWriteState {
                 .lock()
                 .map_err(|e| format!("body store write lock poisoned: {e}"))?;
             conn.execute(
-                "INSERT OR REPLACE INTO bodies (message_id, body_html, body_text)
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO bodies (message_id, body_html, body_text, inserted_at)
+                 VALUES (?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(message_id) DO UPDATE SET
+                     body_html   = excluded.body_html,
+                     body_text   = excluded.body_text,
+                     inserted_at = unixepoch()",
                 params![message_id, html_blob, text_blob],
             )
             .map_err(|e| format!("body store put: {e}"))?;
@@ -149,8 +153,12 @@ impl BodyStoreWriteState {
             {
                 let mut stmt = tx
                     .prepare(
-                        "INSERT OR REPLACE INTO bodies (message_id, body_html, body_text)
-                         VALUES (?1, ?2, ?3)",
+                        "INSERT INTO bodies (message_id, body_html, body_text, inserted_at)
+                         VALUES (?1, ?2, ?3, unixepoch())
+                         ON CONFLICT(message_id) DO UPDATE SET
+                             body_html   = excluded.body_html,
+                             body_text   = excluded.body_text,
+                             inserted_at = unixepoch()",
                     )
                     .map_err(|e| format!("prepare batch put: {e}"))?;
                 for (message_id, html_blob, text_blob) in &compressed {

@@ -515,6 +515,52 @@ impl SearchReadState {
         Ok(count > 0)
     }
 
+    /// Phase 8-2: enumerate `message_id`s in the search index that
+    /// belong to `account_id` but are absent from `live_message_ids`.
+    /// Used by the startup invariant pass to drop Tantivy docs whose
+    /// underlying `messages` row was deleted in a non-graceful exit
+    /// window.
+    ///
+    /// Bounded by the dirty-account scope - the caller restricts
+    /// invocations to accounts whose `sync_markers/<id>.json` survived
+    /// (i.e., the previous sync did not finalize). On a typical account
+    /// this returns quickly because the live set covers nearly every
+    /// indexed message.
+    pub fn find_orphan_message_ids_for_account(
+        &self,
+        account_id: &str,
+        live_message_ids: &std::collections::HashSet<String>,
+    ) -> Result<Vec<String>, String> {
+        let searcher = self.reader.searcher();
+        let term = Term::from_field_text(self.fields.account_id, account_id);
+        let q = TermQuery::new(term, tantivy::schema::IndexRecordOption::Basic);
+        // First find how many docs match, then collect that many. Two
+        // queries against the same searcher are cheap (the segments are
+        // already mmaped) and let us size TopDocs precisely instead of
+        // guessing at a cap.
+        let count = searcher
+            .search(&q, &tantivy::collector::Count)
+            .map_err(|e| format!("orphan count: {e}"))?;
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let top = searcher
+            .search(&q, &TopDocs::with_limit(count).order_by_score())
+            .map_err(|e| format!("orphan iter: {e}"))?;
+        let mut orphans = Vec::new();
+        for (_score, addr) in top {
+            let doc: tantivy::TantivyDocument = searcher
+                .doc(addr)
+                .map_err(|e| format!("orphan doc fetch: {e}"))?;
+            if let Some(mid) = Self::get_text(&doc, self.fields.message_id)
+                && !live_message_ids.contains(&mid)
+            {
+                orphans.push(mid);
+            }
+        }
+        Ok(orphans)
+    }
+
     /// Search with structured filters.
     #[allow(clippy::too_many_lines)]
     pub fn search_with_filters(&self, params: &SearchParams) -> Result<Vec<SearchResult>, String> {

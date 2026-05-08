@@ -6,27 +6,33 @@
 //! `failed`, or unparseable). Each such marker becomes one
 //! `DirtyAccount` entry; the pass:
 //!
-//! 1. Calls `clear_account_history_id` for the account. This is the
+//! 1. Per dirty account: calls `clear_account_history_id`. This is the
 //!    load-bearing repair: the next JMAP delta sync becomes
 //!    initial-style and re-fetches the cached window from the
 //!    provider, repopulating body / inline / search regardless of
 //!    which leg was partial. (See § "Minimal cross-store invariant
 //!    pass" in `docs/service/phase-3-plan.md` for why per-row repair
 //!    was rejected.)
-//! 2. Drops body-store and inline-image-store orphans whose
-//!    `message_id` (or `content_hash`) has no surviving row in the
-//!    main DB. Cheap; redundant with the cursor-clear (next sync
-//!    would clean these up too) but avoids leaving stale data
-//!    visible during the gap. Tantivy orphan iteration is deferred
-//!    to Phase 8 - the cursor-clear is sufficient for correctness,
-//!    and the Tantivy iterator helper that the doc walk would
-//!    require is non-trivial.
-//! 3. Unlinks the marker file. Subsequent boots without further sync
-//!    activity see no marker and skip the pass entirely.
+//! 2. Per dirty account: iterates the Tantivy index for that
+//!    account_id, drops docs whose message_id is no longer in
+//!    `messages`. Bounded by per-account scope; defense-in-depth -
+//!    the cursor-clear plus next initial-style sync repopulates the
+//!    index regardless.
+//! 3. Per dirty account: unlinks the marker file. Subsequent boots
+//!    without further sync activity see no marker and skip the pass
+//!    entirely.
+//! 4. Globally (gated on dirty-account presence): Phase 8-2
+//!    cursor-bounded sweeps over body / inline / extracted_text
+//!    stores. Each store has a cursor in `clean_shutdown_cursors`
+//!    advanced on the previous graceful drain; the sweep scans only
+//!    rows added since that cursor. Bounds the per-store scan to a
+//!    known budget on a 200 GB mailbox.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use search::SearchReadState;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
@@ -59,7 +65,19 @@ pub struct InvariantPassStats {
     pub history_ids_cleared: u64,
     pub body_orphans_dropped: u64,
     pub inline_orphans_dropped: u64,
+    /// Phase 8-2: Tantivy docs whose `messages` row was deleted in a
+    /// non-graceful exit window. Per-account scope.
+    pub search_orphans_dropped: u64,
+    /// Phase 8-2: `attachment_extracted_text` rows whose `content_hash`
+    /// is no longer referenced by any `attachments` row.
+    pub extracted_text_orphans_dropped: u64,
     pub elapsed_ms: u128,
+    /// Phase 8-2: per-store elapsed times so the <5s typical / <30s
+    /// 200 GB exit criterion is observable in production logs.
+    pub body_scan_ms: u128,
+    pub inline_scan_ms: u128,
+    pub search_scan_ms: u128,
+    pub extracted_text_scan_ms: u128,
 }
 
 /// Phase 6b: result of `reconcile_attachment_cache`. Runs on every
@@ -148,19 +166,29 @@ pub async fn discover_dirty_accounts(app_data_dir: &Path) -> Vec<DirtyAccount> {
     dirty
 }
 
-/// Run the invariant pass against the supplied dirty accounts. Idempotent;
-/// safe to call with an empty `dirty_accounts` slice (returns immediately).
+/// Run the invariant pass against the supplied dirty accounts.
+/// Idempotent; safe to call with an empty `dirty_accounts` slice
+/// (returns immediately).
 ///
-/// Order per account: clear `history_id`, drop body orphans, drop inline
-/// orphans, unlink marker. Errors at any step are logged at warn and the
-/// pass continues - per-account work is independent and a failure on one
-/// account must not block the rest.
+/// Order:
+/// 1. Per dirty account: clear `history_id`, drop Tantivy orphans
+///    scoped to that account, unlink marker.
+/// 2. Globally (gated on dirty-account presence): cursor-bounded
+///    sweeps over body / inline / extracted_text stores. Each store
+///    has a cursor in `clean_shutdown_cursors`; the sweep scans only
+///    rows added since that cursor. Bounds the per-store scan to a
+///    known budget on a 200 GB mailbox.
+///
+/// Errors at any step are logged at warn and the pass continues -
+/// the work is independent and a failure in one slice must not
+/// block the rest.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_invariant_pass(
     db: &WriteDbState,
     body_write: &BodyStoreWriteState,
     inline_write: &InlineImageStoreWriteState,
-    _search_write: &SearchWriteHandle,
+    search_write: &SearchWriteHandle,
+    search_read: Option<&SearchReadState>,
     app_data_dir: &Path,
     dirty_accounts: &[DirtyAccount],
 ) -> InvariantPassStats {
@@ -177,6 +205,27 @@ pub async fn run_invariant_pass(
         dirty_accounts.len()
     );
 
+    // Read all cursors once. Failure to read falls back to 0 (scan
+    // everything) - the cursor is an optimization hint, not a
+    // correctness gate.
+    let body_cursor = db
+        .with_conn(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "body"))
+        .await
+        .unwrap_or(0);
+    let inline_cursor = db
+        .with_conn(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "inline"))
+        .await
+        .unwrap_or(0);
+    let extract_cursor = db
+        .with_conn(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "extract"))
+        .await
+        .unwrap_or(0);
+    log::debug!(
+        "invariant pass: cursors body={body_cursor} inline={inline_cursor} extract={extract_cursor}"
+    );
+
+    // ── Per-account work ─────────────────────────────────────
+    let search_started = Instant::now();
     for account in dirty_accounts {
         let account_id = account.account_id.clone();
         log::info!(
@@ -184,7 +233,7 @@ pub async fn run_invariant_pass(
             account.status
         );
 
-        // 1. Clear JMAP cursor (load-bearing).
+        // Clear JMAP cursor (load-bearing).
         let aid = account_id.clone();
         match db
             .with_conn(move |conn| ::sync::pipeline::clear_account_history_id(conn, &aid))
@@ -196,131 +245,108 @@ pub async fn run_invariant_pass(
             ),
         }
 
-        // 2. Body-store orphan drop. Cheap defense-in-depth.
-        match drop_body_orphans(db, body_write, &account_id).await {
-            Ok(n) => stats.body_orphans_dropped += n,
-            Err(e) => log::warn!(
-                "invariant pass: body orphan drop for {account_id} failed: {e}"
-            ),
+        // Tantivy orphan iteration scoped to this account. Skipped
+        // if the SearchReadState was unavailable at boot - the
+        // history_id-clear plus next initial-style sync still
+        // repopulates the index.
+        if let Some(search_read) = search_read {
+            match drop_search_orphans(db, search_read, search_write, &account_id).await {
+                Ok(n) => stats.search_orphans_dropped += n,
+                Err(e) => log::warn!(
+                    "invariant pass: search orphan drop for {account_id} failed: {e}"
+                ),
+            }
         }
 
-        // 3. Inline-image orphan drop.
-        match drop_inline_orphans(db, inline_write, &account_id).await {
-            Ok(n) => stats.inline_orphans_dropped += n,
-            Err(e) => log::warn!(
-                "invariant pass: inline orphan drop for {account_id} failed: {e}"
-            ),
-        }
-
-        // 4. Tantivy orphan drop is deferred to Phase 8: the cursor-
-        //    clear plus the next initial-style sync repopulates the
-        //    index from scratch for this account, and a doc-walk
-        //    iterator on `SearchReadState` is the missing helper. For
-        //    Phase 3 the cursor-clear is sufficient for correctness.
-
-        // 5. Unlink the marker now that repair is complete. A future
-        //    crash before the next sync still leaves a clean state -
-        //    history_id cleared means the next sync re-fetches.
+        // Unlink the marker now that per-account repair is complete.
         if let Err(e) = unlink_marker_file(app_data_dir, &account_id).await {
             log::warn!(
                 "invariant pass: failed to unlink marker for {account_id}: {e}"
             );
         }
     }
+    stats.search_scan_ms = search_started.elapsed().as_millis();
+
+    // ── Global cursor-bounded sweeps ─────────────────────────
+    let body_started = Instant::now();
+    match drop_body_orphans(db, body_write, body_cursor).await {
+        Ok(n) => stats.body_orphans_dropped = n,
+        Err(e) => log::warn!("invariant pass: body orphan sweep failed: {e}"),
+    }
+    stats.body_scan_ms = body_started.elapsed().as_millis();
+
+    let inline_started = Instant::now();
+    match drop_inline_orphans(db, inline_write, inline_cursor).await {
+        Ok(n) => stats.inline_orphans_dropped = n,
+        Err(e) => log::warn!("invariant pass: inline orphan sweep failed: {e}"),
+    }
+    stats.inline_scan_ms = inline_started.elapsed().as_millis();
+
+    let extract_started = Instant::now();
+    match db
+        .with_conn(move |c| {
+            ::db::db::queries_extra::delete_extracted_text_orphans_since(c, extract_cursor)
+        })
+        .await
+    {
+        Ok(n) => stats.extracted_text_orphans_dropped = n,
+        Err(e) => log::warn!("invariant pass: extracted_text orphan sweep failed: {e}"),
+    }
+    stats.extracted_text_scan_ms = extract_started.elapsed().as_millis();
 
     stats.elapsed_ms = started.elapsed().as_millis();
     log::info!(
-        "invariant pass: done in {}ms ({} cursor(s) cleared, {} body / {} inline orphan(s) dropped)",
+        "invariant pass: done in {}ms (history={}, body={}/{}ms, inline={}/{}ms, search={}/{}ms, extract={}/{}ms)",
         stats.elapsed_ms,
         stats.history_ids_cleared,
         stats.body_orphans_dropped,
+        stats.body_scan_ms,
         stats.inline_orphans_dropped,
+        stats.inline_scan_ms,
+        stats.search_orphans_dropped,
+        stats.search_scan_ms,
+        stats.extracted_text_orphans_dropped,
+        stats.extracted_text_scan_ms,
     );
     stats
 }
 
-/// Find body rows whose `message_id` has no surviving row in the main
-/// `messages` table for `account_id`, then delete them from the body
-/// store. Bounded SQL: pulls the account's message ids into memory
-/// (capped) and the body store's message ids similarly.
+/// Phase 8-2: drop body rows added since `cursor` whose `message_id`
+/// is not in the main DB's `messages` table. Cursor-bounded so on a
+/// 200 GB mailbox the scan only inspects rows written since the last
+/// graceful drain.
 async fn drop_body_orphans(
     db: &WriteDbState,
     body_write: &BodyStoreWriteState,
-    account_id: &str,
+    cursor: i64,
 ) -> Result<u64, String> {
-    use std::collections::HashSet;
-
-    // Live message ids for the account.
-    let aid = account_id.to_string();
-    let live: HashSet<String> = db
-        .with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT id FROM messages WHERE account_id = ?1")
-                .map_err(|e| format!("prepare live msgs: {e}"))?;
-            let rows = stmt
-                .query_map(rusqlite::params![aid], |r| r.get::<_, String>(0))
-                .map_err(|e| format!("query live msgs: {e}"))?;
-            let mut out = HashSet::new();
-            for row in rows {
-                out.insert(row.map_err(|e| format!("collect live msg: {e}"))?);
-            }
-            Ok(out)
-        })
-        .await?;
-
-    // We can't filter the body store by account_id (no such column), so the
-    // strategy is: walk the live set, find which body rows exist, and delete
-    // bodies for messages that were live but the body store row is for a
-    // message_id that's no longer in the main DB. Concretely: enumerate body
-    // store ids, intersect with this-account ids that are gone. The body
-    // store has no account scoping so we cannot tell which account a stray
-    // row belonged to without a join; instead we pick orphans whose
-    // message_id is not in *any* account's messages table.
-
-    let body_ids = list_body_message_ids(body_write).await?;
-    if body_ids.is_empty() {
+    let candidates = list_body_message_ids_since(body_write, cursor).await?;
+    if candidates.is_empty() {
         return Ok(0);
     }
-    // Refetch the global live set so the orphan check is against all
-    // accounts, not just the dirty one (a body row whose message_id
-    // belongs to a different account is NOT an orphan).
-    let global_live: HashSet<String> = db
-        .with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT id FROM messages")
-                .map_err(|e| format!("prepare all msg ids: {e}"))?;
-            let rows = stmt
-                .query_map([], |r| r.get::<_, String>(0))
-                .map_err(|e| format!("query all msg ids: {e}"))?;
-            let mut out = HashSet::new();
-            for row in rows {
-                out.insert(row.map_err(|e| format!("collect msg id: {e}"))?);
-            }
-            Ok(out)
+    let orphans: Vec<String> = db
+        .with_conn(move |conn| {
+            ::db::db::queries_extra::find_unreferenced_message_ids(conn, &candidates)
         })
         .await?;
-    let _ = live; // keep the per-account fetch as a sanity warm-up
-
-    let orphans: Vec<String> = body_ids
-        .into_iter()
-        .filter(|id| !global_live.contains(id))
-        .collect();
     if orphans.is_empty() {
         return Ok(0);
     }
-
     let count = body_write.delete(orphans).await?;
     Ok(count)
 }
 
-async fn list_body_message_ids(body_write: &BodyStoreWriteState) -> Result<Vec<String>, String> {
+async fn list_body_message_ids_since(
+    body_write: &BodyStoreWriteState,
+    cursor: i64,
+) -> Result<Vec<String>, String> {
     body_write
-        .with_conn(|conn| {
+        .with_conn(move |conn| {
             let mut stmt = conn
-                .prepare("SELECT message_id FROM bodies")
+                .prepare("SELECT message_id FROM bodies WHERE inserted_at > ?1")
                 .map_err(|e| format!("prepare body ids: {e}"))?;
             let rows = stmt
-                .query_map([], |r| r.get::<_, String>(0))
+                .query_map(rusqlite::params![cursor], |r| r.get::<_, String>(0))
                 .map_err(|e| format!("query body ids: {e}"))?;
             let mut out = Vec::new();
             for row in rows {
@@ -331,20 +357,17 @@ async fn list_body_message_ids(body_write: &BodyStoreWriteState) -> Result<Vec<S
         .await
 }
 
-/// Drop inline-image rows whose `content_hash` no longer has a referencing
-/// `attachments` row. Reuses `find_unreferenced_hashes` semantics but
-/// operates over the entire inline store; the dirty-account gate decides
-/// *whether* to run, not *what* to scan.
+/// Phase 8-2: drop inline-image rows added since `cursor` whose
+/// `content_hash` no longer has a referencing `attachments` row.
 async fn drop_inline_orphans(
     db: &WriteDbState,
     inline_write: &InlineImageStoreWriteState,
-    _account_id: &str,
+    cursor: i64,
 ) -> Result<u64, String> {
-    let hashes = list_inline_hashes(inline_write).await?;
+    let hashes = list_inline_hashes_since(inline_write, cursor).await?;
     if hashes.is_empty() {
         return Ok(0);
     }
-
     let orphans: Vec<String> = db
         .with_conn(move |conn| {
             ::store::inline_image_store::find_unreferenced_hashes(conn, &hashes)
@@ -353,21 +376,21 @@ async fn drop_inline_orphans(
     if orphans.is_empty() {
         return Ok(0);
     }
-
     let n = inline_write.delete_hashes(orphans).await?;
     Ok(n)
 }
 
-async fn list_inline_hashes(
+async fn list_inline_hashes_since(
     inline_write: &InlineImageStoreWriteState,
+    cursor: i64,
 ) -> Result<Vec<String>, String> {
     inline_write
-        .with_conn(|conn| {
+        .with_conn(move |conn| {
             let mut stmt = conn
-                .prepare("SELECT content_hash FROM inline_images")
+                .prepare("SELECT content_hash FROM inline_images WHERE created_at > ?1")
                 .map_err(|e| format!("prepare hash list: {e}"))?;
             let rows = stmt
-                .query_map([], |r| r.get::<_, String>(0))
+                .query_map(rusqlite::params![cursor], |r| r.get::<_, String>(0))
                 .map_err(|e| format!("query hash list: {e}"))?;
             let mut out = Vec::new();
             for row in rows {
@@ -376,6 +399,41 @@ async fn list_inline_hashes(
             Ok(out)
         })
         .await
+}
+
+/// Phase 8-2: enumerate Tantivy docs for `account_id` and drop those
+/// whose `message_id` is no longer in `messages`. Per-account scope
+/// bounds the scan natively; the cursor-clear plus the next
+/// initial-style sync repopulates the index regardless, so this is
+/// defense-in-depth.
+async fn drop_search_orphans(
+    db: &WriteDbState,
+    search_read: &SearchReadState,
+    search_write: &SearchWriteHandle,
+    account_id: &str,
+) -> Result<u64, String> {
+    let aid = account_id.to_string();
+    let live: HashSet<String> = db
+        .with_conn(move |conn| {
+            ::db::db::queries_extra::list_message_ids_for_account(conn, &aid)
+        })
+        .await?;
+    let aid2 = account_id.to_string();
+    let read_clone = search_read.clone();
+    let orphans = tokio::task::spawn_blocking(move || {
+        read_clone.find_orphan_message_ids_for_account(&aid2, &live)
+    })
+    .await
+    .map_err(|e| format!("orphan iter join: {e}"))??;
+    if orphans.is_empty() {
+        return Ok(0);
+    }
+    let n = orphans.len() as u64;
+    search_write
+        .delete_messages_batch(orphans)
+        .await
+        .map_err(|e| format!("orphan delete: {e}"))?;
+    Ok(n)
 }
 
 /// Phase 6b: walk `attachment_cache/`, drop files whose

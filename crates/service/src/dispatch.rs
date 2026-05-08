@@ -477,6 +477,43 @@ where
     action_worker_handle.abort();
     let _ = action_worker_handle.await;
 
+    // Phase 8-2: advance the per-store `clean_shutdown_cursors` rows
+    // so the next dirty boot's invariant pass can bound its scans to
+    // rows added since this drain. Skipped on non-graceful exits
+    // (cursor-as-of-now would mis-advertise unflushed work as
+    // "clean"). Failure is logged and ignored - the cursor is an
+    // optimization hint; on miss the next dirty boot just scans more
+    // rows than ideal.
+    //
+    // Uses a fresh `Connection::open` rather than the shared writer
+    // mutex. The shared `WriteDbState::with_conn` path hung when an
+    // aborted-but-still-running `spawn_blocking` from the action
+    // worker held the rust-level `Mutex<Connection>`. SQLite WAL
+    // handles multi-connection write contention via its busy timeout;
+    // there is no rust-level mutex on this path.
+    if matches!(cause, ShutdownCause::GracefulRequest) {
+        let app_data_dir = boot_state.app_data_dir().to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            let conn = rusqlite::Connection::open(app_data_dir.join("ratatoskr.db"))
+                .map_err(|e| format!("open ratatoskr.db for cursor write: {e}"))?;
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .map_err(|e| format!("busy_timeout: {e}"))?;
+            ::db::db::queries_extra::update_clean_shutdown_cursors(
+                &conn,
+                &["body", "inline", "extract"],
+            )
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => log::debug!("invariant pass: clean_shutdown_cursors advanced"),
+            Ok(Err(e)) => log::warn!(
+                "invariant pass: clean_shutdown_cursors update failed: {e}; \
+                 next dirty boot will scan more rows than ideal"
+            ),
+            Err(e) => log::warn!("invariant pass: cursor join failed: {e}"),
+        }
+    }
+
     // Phase 4 task 5: abort the post-ready push startup task in case
     // it was still iterating accounts when shutdown arrived. Started
     // bridges are already registered in the PushRuntime and were

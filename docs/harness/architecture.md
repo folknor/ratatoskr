@@ -6,6 +6,13 @@ technical shape of the harness: what brokkr provides, what ratatoskr
 provides, the dependency direction, the determinism rule, the cohort
 coverage, and the failure model.
 
+The target cohort is not limited to OS-subprocess tests. It includes
+any Service test that starts the Service behind an IO boundary and then
+waits on boot, dispatch, drain, crash, or framing behaviour. Today that
+means both `crates/app/tests/service_subprocess.rs` and the
+`spawn_harness_with_suffix` family in
+`crates/service/tests/dispatch_in_process.rs`.
+
 The architecture is mirrored on the brokkr side as
 `notes/ratatoskr-service-harness.md` in the brokkr repository. Both
 documents stay in sync; this one is authoritative for the ratatoskr
@@ -68,12 +75,19 @@ The runtime inside `app --test-harness`:
 +-- ServiceClient / SpawnEvent / ClientError / NotificationQueue
 |   exposed as Lua userdata, one method per Rust method
 +-- wait_for { predicate, child, backstop } combinator that races
-|   against ServiceClient::observe_child_exit
-+-- process primitives (kill, pid_is_alive, sentinel watch)
+|   against child-exit observation
++-- script-visible process primitives (kill, pid_is_alive, sentinel watch)
 +-- artefact writers (frames.jsonl, events.jsonl, steps.jsonl,
-    proc-*.txt, data-dir/, exit.txt, run.toml) into
+    proc-*.txt, data-dir/, runtime diagnostics) into
     BROKKR_HARNESS_ARTEFACT_DIR
 ```
+
+The v1 spawn path is subprocess-only. Scripts spawn the Service through
+`ServiceClient` / `app --service`; the `spawn_harness_with_suffix`
+cohort migrates by rewriting boot/dispatch lifecycle coverage onto
+that subprocess path. An in-process Lua mode around
+`run_service_with_io` is deferred until a future test names coverage
+that the subprocess path cannot preserve.
 
 ## Dependency direction
 
@@ -103,6 +117,11 @@ the VM in ratatoskr keeps the protocol logic where the protocol is,
 keeps brokkr small, and lets the Lua bindings sit one file over from
 `ServiceClient` itself.
 
+`ServiceClient` stays in `app` for v1. A slim
+`crates/service-client` carve-out is a compile-time-hygiene refactor,
+not a correctness requirement; revisit only if a second crate genuinely
+needs the client API or compile-time profiling shows pressure.
+
 ## What brokkr provides
 
 - **Project gating + CLI surface.** `Project::Ratatoskr` first-class
@@ -124,15 +143,24 @@ keeps brokkr small, and lets the Lua bindings sit one file over from
   `.brokkr/ratatoskr/<test>/run-N/` with collision-incrementing N,
   preserve-on-failure, delete-on-success-unless-`--keep-artefacts`,
   preserve-on-panic (Drop default).
-- **Process-tree primitives** (signal, pid_is_alive, sentinel watch
-  with named backstop, /proc snapshot tolerant of CAP_SYS_PTRACE).
-  Available to scripts via the harness module; also used directly by
-  brokkr for hang cleanup on the orchestrator side.
-- **Script discovery.** `crates/app/tests/service-harness/*.lua`,
+- **Orchestrator-side process-tree primitives** (signal, pid_is_alive,
+  sentinel watch with named backstop, /proc snapshot tolerant of
+  CAP_SYS_PTRACE). These are useful for brokkr's own hang cleanup and
+  for implementation sharing later, but they are **not** directly
+  callable from Lua scripts. V1 implements equivalent script-visible
+  bindings in ratatoskr's harness module and does not add a
+  brokkr/runtime control channel.
+- **Script discovery.** `crates/app/tests/service-harness/**/*.lua`,
   top-of-file `-- key: value` frontmatter (`description`,
-  `expected = pass | ignored`).
-- **Soak (`-N`) and suite (`--filter`) runners** on top of the
-  single-script run path.
+  `expected = pass | ignored`, `ceiling = 60s`,
+  `preserve_data_dir = on_success_too`). Discovery is recursive so
+  cohorts can live under `t1/`, `extract/`, etc.; non-`.lua` files
+  such as fixtures are ignored by extension. `preserve_data_dir` is
+  brokkr-side frontmatter because brokkr owns artefact-dir deletion.
+- **Soak (`-N`) and eventual serial suite (`--filter`) runners** on
+  top of the single-script run path. Soak is already brokkr-side. The
+  v1 suite is serial and does not expose `--jobs`; parallelism can be
+  added later only for an opt-in class of isolated scripts.
 - **History-DB recording, optional sidecar /proc profiling.**
 
 ## What ratatoskr provides (in `app`'s harness module)
@@ -144,33 +172,68 @@ keeps brokkr small, and lets the Lua bindings sit one file over from
   `client:request("HealthPing")`, `client:request("Shutdown")`,
   `client:notifications()`, `client:current_generation()`,
   `client:child_pid()`, `client:shutdown()`, `drop(client)`.
+  The `request` binding is registry-backed: Rust owns a
+  request/response registry that maps Lua method names and argument
+  tables onto `RequestParams` variants, decodes the typed Rust
+  response, and returns a plain Lua table. Bad method names, malformed
+  argument tables, and mismatched response shapes fail in Rust with a
+  structured harness error.
 - **`SpawnEvent` receiver userdata** - `events:next(timeout_secs)`
   returns one of `ChildSpawned { client }`, `BootReady { response }`,
   `Terminal { error }`. The classification logic stays inside
   `ServiceClient`; the binding does not synthesise events.
+  `SpawnEvent`, `ClientError`, `BootClassification`, and
+  `SchemaVersionChanged { was, now }` are exposed as typed userdata so
+  scripts can pattern-match without parsing strings.
 - **`NotificationQueue` userdata** - `queue:recv(timeout)` /
   `queue:drain_for(duration)` return `Notification` userdata that
   scripts inspect for `service_generation`, `method`, etc.
+  Notification payloads are the exception to typed request/response
+  decoding: they expose a `serde_json::Value`-backed Lua view for
+  `params`, so scripts can filter on `notif.method == "X"` and inspect
+  varied payload details without one typed shell per notification.
 - **Deterministic wait combinator** - exposed as
   `harness.wait_for { predicate, child = client, backstop = "30s" }`.
   Every wait races the predicate against
-  `client:observe_child_exit()` internally; failure verdicts name
-  which fired.
+  child-exit observation internally; failure verdicts name which fired.
+  M1 bumps `ServiceClient::observe_child_exit` to `pub(crate)`; the
+  wait combinator remains in the harness module so the protocol layer
+  does not learn about Lua predicates or the VM.
+- **Quiet observation combinator** - exposed as
+  `harness.expect_quiet { predicate, child = client, window = "2s" }`.
+  This is the absence assertion shape. The window expiring without the
+  predicate firing is success; child termination still short-circuits
+  with a named verdict.
 - **Process orchestration not covered by `ServiceClient`** -
   process-group spawn for non-`ServiceClient` children (the
   `parent_death_helper` binary, future stub helpers); SIGKILL/SIGTERM
   to a named PID; data-dir snapshotting; sentinel-file watch
-  (`harness.wait_for_sentinel(path, backstop)`); JSON-RPC frame log
-  for diagnostic purposes (taps the wire underneath `ServiceClient`,
-  not the primary test surface).
+  (`harness.wait_for_sentinel { path = "...", backstop = "5s" }` for
+  data-dir-relative paths and
+  `harness.wait_for_sentinel { absolute = "/...", backstop = "5s" }`
+  for explicit absolute paths); JSON-RPC frame log for diagnostic
+  purposes (taps the wire underneath `ServiceClient`, not the primary
+  test surface). There is no leading-slash auto-detection and no glob
+  support in v1.
+  These script-visible primitives are implemented in ratatoskr's
+  harness module. Brokkr has similar helpers for its own cleanup path,
+  but there is no brokkr/runtime control channel in v1.
 - **Artefact-dir writers** - the frame log, event log, step trace,
-  `/proc` snapshot, data-dir copy, and `exit.txt` / `run.toml` are
-  populated by the harness module into the directory pointed at by
-  `BROKKR_HARNESS_ARTEFACT_DIR`. Brokkr only owns the directory's
-  *lifecycle* (allocate, preserve, delete); the *contents* come from
-  the runtime.
+  Service-specific `/proc` snapshot, data-dir copy, `service.stderr`,
+  and `runtime-outcome.json` are populated by the harness module into
+  the directory pointed at by
+  `BROKKR_HARNESS_ARTEFACT_DIR`. Brokkr owns the directory lifecycle
+  and already writes brokkr-owned files (`run.toml`,
+  `binary-stdout.log`, `binary-stderr.log`, copied script, spawn error
+  breadcrumb). The runtime must not claim ownership of those same files
+  unless the contract is changed. `service.stderr` is a v1 artefact:
+  the harness uses a Service spawn path that pipes the child Service's
+  stderr to that file instead of inheriting it.
 - **Per-script wall-clock backstop** - runaway scripts are bounded
   by a per-script wall-clock ceiling enforced around the whole run.
+  Scripts may set frontmatter `-- ceiling: 60s`; omitted scripts use a
+  sane default ceiling. This is a runaway guard for infinite loops or
+  missing per-call backstops, not normal test control flow.
   Note: dellingr's per-opcode cost accounting is **not** used for
   this. dellingr's cost budget is structurally unable to bound
   wall-clock execution (`while true do end` is free, by design - the
@@ -201,9 +264,10 @@ do **not** need to integrate with.
   (`parent_death_helper`, future stub binaries). The runtime reads
   this when it needs to spawn helper subprocesses; brokkr guarantees
   the binaries listed in `[[check]] build_packages` are present.
-- Inherited stdin/stdout/stderr connected to brokkr's own; the
-  runtime can `println!` for human-readable progress and brokkr will
-  log it under `binary-stdout.log` in the artefact dir.
+- The harness binary's stdout/stderr are piped by brokkr; brokkr writes
+  them to `binary-stdout.log` and `binary-stderr.log` in the artefact
+  dir after the process exits. The runtime can `println!` for
+  human-readable progress, but that is not a structured protocol.
 
 **What brokkr expects in return:**
 
@@ -212,11 +276,15 @@ do **not** need to integrate with.
   unless the user passed `--keep-artefacts`. There is no other
   out-of-band signaling - no JSON stdout protocol, no shared memory,
   no inotify on the artefact dir.
-- The artefact dir's contents (frame log, event log, step trace,
-  /proc snapshot, data-dir copy, `exit.txt`, `run.toml`) are
-  written by the runtime; brokkr does not parse them, just preserves
-  them. Future failure-triage tooling may read them, but that
-  tooling is brokkr-side and lives outside this contract.
+- Brokkr-owned artefacts (`run.toml`, copied script,
+  `binary-stdout.log`, `binary-stderr.log`, `spawn-error.txt` on spawn
+  failure) are written by brokkr. Runtime-owned artefacts
+  (`frames.jsonl`, `events.jsonl`, `steps.jsonl`, `data-dir/`,
+  `service.stderr`, `runtime-outcome.json`, and Service `/proc`
+  snapshots) are written by the ratatoskr harness module. Brokkr does
+  not parse runtime-owned artefacts in v1, just preserves them. Future
+  failure-triage tooling may read them, but that tooling is brokkr-side
+  and lives outside this v1 contract.
 
 **What the harness module does NOT need to interact with:**
 
@@ -234,11 +302,12 @@ do **not** need to integrate with.
 - Brokkr's source code. The runtime never imports anything from
   brokkr; the contract is process-level, not source-level.
 
-If you find yourself wanting more from brokkr than the four env-var-
-plus-argv-plus-exit-code points above, **stop and surface it as an
-explicit design change** rather than reaching across the contract.
-Both this document and `notes/ratatoskr-service-harness.md` in the
-brokkr repo would need to change in lockstep.
+If you find yourself wanting more from brokkr than argv, env vars,
+stdout/stderr capture, brokkr-owned artefacts, and exit status, **stop
+and surface it as an explicit design change** rather than reaching
+across the contract. Both this document and
+`notes/ratatoskr-service-harness.md` in the brokkr repo would need to
+change in lockstep.
 
 ## Determinism rule
 
@@ -256,17 +325,26 @@ fired; failure messages name the transition that actually did.
 
 This is the Phase 1.6 `request_or_observe_child_exit` pattern lifted
 from "one helper inside ratatoskr" to "the default wait shape exposed
-through the Lua binding." `ServiceClient` already provides the
-underlying mechanism (`observe_child_exit` polls `Child::try_wait` on
-a 50 ms interval); the harness's wait combinator just wires that
-polling into every wait the script can express. Wall-clock is never
-the primary signal.
+through the Lua binding." `ServiceClient` provides the underlying
+mechanism (`observe_child_exit` polls `Child::try_wait` on a 50 ms
+interval); M1 bumps that method to `pub(crate)`, and the harness module
+owns the combinator loop. Keeping the loop in the harness avoids
+bridging Lua predicates through `ServiceClient` and keeps
+`ServiceClient` as a pure protocol layer. Wall-clock is never the
+primary signal.
 
 Backstops are still wall-clock - the harness can't escape physical
-time entirely - but they are explicit, named, generous, and only fire
-when a determinism bug elsewhere (a missing sentinel, an unmatched
-event) leaves the harness with nothing else to wait on. A backstop
-firing is a test-design bug, not a flake.
+time entirely - but they are explicit, named, generous, and never the
+primary signal. The API has two separate wait shapes:
+
+- `harness.wait_for { predicate, child, backstop }` is for positive
+  waits that should complete through a predicate or child-exit
+  transition. Safety-backstop firing is a test-design or
+  implementation-determinism bug, not a flake.
+- `harness.expect_quiet { predicate, child, window }` is for absence
+  assertions, such as "no respawn event after a terminal boot failure."
+  Window expiry is the expected success verdict; predicate firing is
+  the failure verdict.
 
 ## Test scripts
 
@@ -304,12 +382,14 @@ binding picks.
 
 - `spawn_for_test(binary, data_dir, extra_args) -> Arc<ServiceClient>`
 - `spawn_with_events_for_test(binary, data_dir, extra_args) -> mpsc::Receiver<SpawnEvent>`
-- `request::<R>(params: RequestParams) -> Result<R, ClientError>` -
-  including the typed `RequestParams` variants (`HealthPing`,
-  `Shutdown`, `TestPrintln`, `TestSlow`, `ActionExecutePlan`,
-  `ActionJobStatus`, `ActionMarkChatRead`, etc.; the `Action` prefix
-  is canonical in the Rust enum and the binding strips or maps it as
-  it chooses for Lua spellings).
+- `request(method, params) -> Result<table, ClientError>` - registry-
+  backed Lua-facing shape. The registry covers the typed
+  `RequestParams` variants (`HealthPing`, `Shutdown`, `TestPrintln`,
+  `TestSlow`, `ActionExecutePlan`, `ActionJobStatus`,
+  `ActionMarkChatRead`, etc.; the `Action` prefix is canonical in the
+  Rust enum and the binding strips or maps it as it chooses for Lua
+  spellings). Rust decodes the typed response and converts it to a Lua
+  table.
 - `notifications() -> Arc<NotificationQueue>` - returns a queue
   userdata with `recv(timeout)` and drain helpers.
 - `current_generation() -> u32`
@@ -363,9 +443,11 @@ existing tests do.
 - **Notification-queue introspection** -
   `queue:drain_for(duration) -> [Notification]`, with
   `Notification:service_generation()` exposing the tag.
-- **Absence over window** - "no event received in N seconds, after a
-  known transition." The wait combinator returns "expired" as a
-  first-class verdict so the absence assertion is structural.
+- **Absence over observation window** - "no event received in N seconds,
+  after a known transition." Scripts use
+  `harness.expect_quiet { predicate, child, window }`; the window
+  expiring is the expected success verdict, not a harness-timeout
+  failure.
 - **Cardinality** - "exactly N notifications matching predicate."
   Lua expresses with `drain_for` + `#table` + `assert`.
 - **Counter probe with delta** - `client:request("TestCounterRead",
@@ -385,22 +467,31 @@ existing tests do.
   predicate against `client:observe_child_exit()` so any Service
   death short-circuits the wait with a "child exited while awaiting
   X" verdict.
-- **Sentinel-file watch** - `harness.wait_for_sentinel(path,
-  backstop)`. Required for the `clean_shutdown` sentinel in the
-  manual-matrix items moving into automation; available for any
-  future test that benefits from a non-clock readiness signal.
+- **Sentinel-file watch** -
+  `harness.wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }`
+  for data-dir-relative paths, or
+  `harness.wait_for_sentinel { absolute = "/var/run/foo", backstop = "5s" }`
+  for explicit absolute paths. Required for the `clean_shutdown`
+  sentinel in the manual-matrix items moving into automation; available
+  for any future test that benefits from a non-clock readiness signal.
 - **Frame log** - captured under the hood via `ServiceClient`'s wire
   layer (the harness taps stdin/stdout). Diagnostic only; emitted to
   the artefact dir on failure. Tests do not pattern-match on raw
   frames - they pattern-match on `ServiceClient` return values and
   `Notification` userdata.
-- **Backstop policy** - explicit, named, generous. Backstop firing
-  is a test-design bug, not a flake.
+- **Backstop policy** - explicit, named, generous. Safety-backstop
+  firing in `wait_for` is a test-design bug, not a flake.
+  Observation-window expiry in `expect_quiet` is a success verdict for
+  absence assertions.
 
 ### Cohort coverage
 
 | Test | Surface used |
 | --- | --- |
+| `dispatch_in_process.rs` tests using `spawn_harness_with_suffix` | Migrates as a cohort because they share the same IO-boundary wait failure mode even though they use `tokio::io::duplex` instead of an OS subprocess. V1 rewrites the boot/dispatch lifecycle coverage onto the real-subprocess `ServiceClient` path; in-process Lua mode is deferred until a future test needs it. |
+| `boot_ready_returns_after_sequence_completes` | Current example of the cohort failing under `brokkr check`; needs frame/step trace around `boot.ready`, boot shared state, and shutdown drain rather than only an outer libtest timeout. |
+| `health_ping_succeeds_during_long_migration` / `health_ping_works_concurrently_with_boot_ready` | Need concurrent request driving while `boot.ready` is parked; Lua API may need explicit background request / parallel request primitive, not just sequential `client:request`. |
+| `boot_ready_blocks_until_sequence_completes` / `boot_progress_notifications_emitted_in_order` (currently ignored) | Existing in-process harness hangs; migrate with the same diagnostic artefact contract as the subprocess wedge. |
 | `service_subprocess_ping_and_shutdown` (existing, ignored) | direct subprocess + raw frames; rewrite to `ServiceClient`-based once stable. |
 | `dropping_client_terminates_child_within_one_second` | `spawn_for_test`, `child_pid`, `drop(client)`, `pid_is_alive` poll. |
 | `spawn_failure_against_missing_binary_returns_io_error` | `spawn_for_test` against bogus path, expect `ClientError::Io`. |
@@ -426,8 +517,8 @@ existing tests do.
 | `action_skips_search_index_write` / `handler_does_not_drive_batch_execute` | `request("TestCounterRead", ...)` before/after, Lua subtraction. |
 | `journal_replays_after_respawn` / `stale_outcomes_dropped_after_respawn` | `request` + `kill` + respawn + `notifications` drain. |
 | `test_fake_schema_propagates_via_terminal` | `spawn_with_events_for_test` first run + `kill` + respawn with `--test-fake-schema=N`, expect `Terminal { SchemaVersionChanged { was, now } }`. |
-| Manual matrix #4 (heartbeat detects killed Service) | `spawn_with_events_for_test`, `kill(service_pid, SIGKILL)`, `wait_for_sentinel("logs/heartbeat-exiting")` or follow-up event. |
-| Manual matrix #5 (SIGTERM triggers shutdown drain) | `spawn_for_test`, `kill(pid, SIGTERM)`, `wait_for_sentinel("clean_shutdown")`, `wait_exit`. |
+| Manual matrix #4 (heartbeat detects killed Service) | `spawn_with_events_for_test`, `kill(service_pid, SIGKILL)`, `wait_for_sentinel { path = "logs/heartbeat-exiting", backstop = "30s" }` or follow-up event. |
+| Manual matrix #5 (SIGTERM triggers shutdown drain) | `spawn_for_test`, `kill(pid, SIGTERM)`, `wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }`, `wait_exit`. |
 
 If a capability above doesn't have a Lua binding, the binding is
 incomplete; extend it. The harness binding never reimplements
@@ -449,8 +540,8 @@ examples include:
 More hooks will come (`--test-fake-schema=N`, fault-injection
 variants, counter probes) as the cohort grows; they should remain
 explicitly test-scoped, ideally behind the `test-helpers` feature
-surface, and should expose `RequestParams` variants the harness can
-pick up automatically (no harness recompile per new variant).
+surface. New `RequestParams` variants become script-visible by adding
+entries to the harness request/response registry.
 
 ## Deterministic app-data fixtures
 
@@ -474,8 +565,9 @@ deliberate API, not an accidental dependency on dev startup behavior.
 
 Brokkr can measure much more accurately when ratatoskr emits stable
 phase markers or counters. The sidecar already supports a marker FIFO
-(`BROKKR_MARKER_FIFO`); the harness module can either route through
-it or write its own log entries.
+(`BROKKR_MARKER_FIFO`). V1 ships without lifecycle markers. When M9
+sync benchmarks need marker timing, the harness routes through
+`BROKKR_MARKER_FIFO` rather than inventing a parallel marker protocol.
 
 Useful lifecycle spans:
 
@@ -496,39 +588,101 @@ SHUTDOWN_END
 
 Timings should not require brokkr to scrape human log lines.
 
+## Trace schema
+
+Trace files are JSONL with versioned records. The schemas live as
+serde structs in `crates/app/src/harness/trace_schema.rs`; each
+top-level record carries `schema = 1`. Readers tolerate unknown fields
+for forward compatibility. Writers bump the schema version only for
+incompatible field changes.
+
+`frames.jsonl` records:
+
+```
+{
+  "schema": 1,
+  "ts_ms": 123,
+  "direction": "in" | "out",
+  "raw_redacted": "...",
+  "raw_len": 456,
+  "raw_sha256": "...",
+  "parsed": { ... } | null
+}
+```
+
+Both `raw_redacted` and `parsed` follow the same redaction policy. V1's
+wedge cohort uses fake credentials, but the field names are redaction-
+ready from day one: the writer emits `raw_redacted`, never `raw`.
+Structural redaction is the default posture for strings above a chosen
+threshold (`<redacted len=N>`). A per-`RequestParams` field allowlist is
+the long-term refinement before any credentialed script lands.
+
+`events.jsonl` records:
+
+```
+{ "schema": 1, "ts_ms": 123, "seq": 7, "event": { ... } }
+```
+
+`event` is the typed `SpawnEvent` serialization.
+
+`steps.jsonl` records:
+
+```
+{
+  "schema": 1,
+  "ts_ms": 123,
+  "step": "script supplied label",
+  "kind": "wait_for" | "expect_quiet" | "wait_for_sentinel",
+  "predicate_desc": "...",
+  "transition": "predicate" | "child_exit" | "backstop" | "window_expired",
+  "duration_ms": 42
+}
+```
+
+Step labels and predicate descriptions come from scripts. V1 documents
+and commits these schemas without building a separate reader; failure-
+triage tooling can provide feedback once it exists.
+
 ## Failure model
 
-When a test fails, brokkr writes a self-contained artefact directory
-to `.brokkr/ratatoskr/<test-name>/<run-N>/` containing:
+When a test fails, brokkr preserves a self-contained artefact directory
+at `.brokkr/ratatoskr/<test-name>/<run-N>/`. Brokkr creates the
+directory and writes brokkr-owned run metadata; the ratatoskr runtime
+writes Service/runtime diagnostics into that directory. The target
+contents are:
 
 - **`frames.jsonl`** - every JSON-RPC frame, both directions,
   timestamped from spawn. Single most useful artefact for
   drain-ordering / framing bugs.
-- **`events.jsonl`** - every spawn event observed (`ChildSpawned`,
-  `BootReady`, `Terminal`), timestamped.
+- **`events.jsonl`** - every spawn/runtime event observed
+  (`ChildSpawned`, `BootReady`, `Terminal`), timestamped.
 - **`steps.jsonl`** - the test's step trace: which step was active,
   what condition was awaited, which transition fired.
 - **`service.stderr`** - Service's stderr verbatim. Captured
-  per-run, not race-mingled with test stdout.
-- **`proc-at-failure.txt`** - snapshot of `/proc/<pid>/status`,
-  `/proc/<pid>/wchan`, `/proc/<pid>/syscall`, `/proc/<pid>/stack` at
-  the moment failure was declared. Distinguishes "blocked on futex"
-  from "blocked on closed pipe" without re-running.
+  per-run, not race-mingled with test stdout. V1 requires a
+  harness-specific Service spawn path that pipes stderr to this file,
+  because today's `ServiceClient::launch_subprocess` inherits stderr.
+- **`proc-{status,wchan,syscall,stack}.txt`** - snapshot of
+  `/proc/<pid>/status`, `/proc/<pid>/wchan`, `/proc/<pid>/syscall`,
+  `/proc/<pid>/stack` at the moment failure was declared.
+  Distinguishes "blocked on futex" from "blocked on closed pipe"
+  without re-running.
 - **`data-dir/`** - copy of the test's app-data dir at failure time.
   SQLite WAL state, lockfile presence, key file, `clean_shutdown`
   sentinel.
-- **`exit.txt`** - exit code, signal, wait time, exit reason
-  (clean / harness-killed-on-backstop / signal / etc.).
-- **`run.toml`** - the test script, env vars, brokkr version, git
-  commit. Reproducibility metadata.
+- **`runtime-outcome.json`** - runtime-side exit reason
+  (clean / harness-killed-on-backstop / child-exited / signal / etc.).
+- **`run.toml`** - brokkr-owned reproducibility metadata: test script,
+  env vars, brokkr version, git commit, sweep label, exit code/signal.
 
 On success, the artefact directory is deleted unless
-`--keep-artifacts` is passed.
+`--keep-artefacts` is passed.
 
-The data dir copy and `/proc` snapshot are the two pieces of state
-that today's tokio-test pattern destroys at failure (`DataDirGuard::Drop`
-unconditional cleanup; no `/proc` capture at all). Recovering them is
-the largest single jump in debug ergonomics.
+The data dir copy, protocol/step trace, and `/proc` snapshot for real
+subprocesses are the pieces of state that today's tokio-test pattern
+destroys or never records (`DataDirGuard::Drop` / `TestDataDir::Drop`
+unconditional cleanup; no structured frame/step capture). Recovering
+them is the largest single jump in debug ergonomics.
 
 ## Brokkr CLI surface
 
@@ -547,22 +701,25 @@ Brokkr does not embed the Lua VM or `ServiceClient`; it never speaks
 JSON-RPC over the wire.
 
 Cargo / libtest remains the place for unit tests and for tests that
-do not need the real-subprocess shape. The new harness is specifically
-for tests where the subprocess lifecycle is the thing under test.
+do not need deterministic Service IO-boundary orchestration. The new
+harness is specifically for tests where the Service lifecycle,
+boot/dispatch protocol, or process/IO boundary is the thing under test.
 
 ## Out of scope
 
 - **Replacing `brokkr test`.** The cargo single-test runner stays.
-  Subprocess-lifecycle tests use the new harness; everything else
-  uses `brokkr test`.
+  Service IO-boundary tests use the new harness; everything else uses
+  `brokkr test`.
 - **Fixing the underlying Service bugs.** The harness exists to make
   those bugs deterministic and diagnosable, not to hide them. The
   Service-side Phase 8 work owns the drain-ordering / class-aware
   emit / crashloop fixes.
-- **Migrating the existing tokio-tests.** The new harness coexists.
-  Tests that work today as `#[tokio::test]` stay there. New tests in
-  the cohort start in the new harness; old tests migrate only if
-  their authors choose to.
+- **Migrating every existing tokio test.** The new harness coexists
+  with libtest. Unit-style `#[tokio::test]` functions stay there. The
+  migration target is the Service IO-boundary cohort: the flaky
+  `service_subprocess.rs` wedge, the `spawn_harness_with_suffix`
+  dispatch tests, and new tests that need deterministic protocol waits
+  plus artefact dumps.
 - **Track 2 (provider mocks + sync benchmarks).** Reuses the
   artefact / lockfile / history machinery and the harness binary.
   Separate planning note in the brokkr repo. Lands as harness
@@ -573,33 +730,6 @@ for tests where the subprocess lifecycle is the thing under test.
 
 ## Open questions
 
-- **`ServiceClient` slim sub-crate carve-out.** Should `ServiceClient`
-  and friends carve into `crates/service-client` before the harness
-  module lands, or stay in `app`? Either layout works for the Lua
-  bindings; the slim crate is a compile-time-hygiene call, not a
-  correctness call.
-- **Marker emission protocol.** Should the harness module's marker
-  emission go through the existing `BROKKR_MARKER_FIFO` sidecar
-  protocol, or write its own log entries the harness reads back? The
-  sidecar protocol exists and is stable; using it is the
-  conservative call.
 - **Fixture-setup home.** Should fixture setup live in
   `crates/dev-seed`, a new test-fixtures crate, or `service` test
   helpers?
-- **Concurrency between scripts.** Does the suite runner run scripts
-  in parallel? Default no - subprocess tests touch real files and
-  ports. Add `--jobs N` later if a class of scripts opts in.
-  (Brokkr-side decision.)
-- **Sentinel-watch addressing.** Path relative to data dir?
-  Absolute? File-glob support? Lean data-dir-relative with optional
-  globs.
-- **Backstop policy.** Per-call or per-script ceiling? Leaning
-  per-call (every wait takes its own backstop arg) plus a per-script
-  wall-clock ceiling enforced around the whole run.
-- **Trace format stability.** `frames.jsonl` / `events.jsonl` /
-  `steps.jsonl` schemas need to be stable enough for scripts and
-  failure-triage tooling to consume across versions.
-- **Data-dir preservation policy.** Default cleanup on script
-  success; preserve always with `--keep-artefacts`. Open whether
-  some classes of script (long-running, expensive seed) want a
-  per-script override.

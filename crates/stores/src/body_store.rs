@@ -47,12 +47,29 @@ pub fn open_body_store_connection(app_data_dir: &Path) -> Result<Connection, Str
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS bodies (
-            message_id TEXT PRIMARY KEY,
-            body_html  BLOB,
-            body_text  BLOB
+            message_id  TEXT PRIMARY KEY,
+            body_html   BLOB,
+            body_text   BLOB,
+            inserted_at INTEGER NOT NULL DEFAULT 0
          );",
     )
     .map_err(|e| format!("create bodies table: {e}"))?;
+
+    // Phase 8-2 in-place migration. SQLite forbids non-constant DEFAULT
+    // on ALTER TABLE ADD COLUMN, so existing-row backfill happens with a
+    // follow-up UPDATE. Idempotent: the column-presence check skips both
+    // statements once the column exists.
+    let has_inserted_at = conn
+        .prepare("SELECT 1 FROM pragma_table_info('bodies') WHERE name = 'inserted_at'")
+        .and_then(|mut s| s.exists([]))
+        .unwrap_or(false);
+    if !has_inserted_at {
+        conn.execute_batch(
+            "ALTER TABLE bodies ADD COLUMN inserted_at INTEGER NOT NULL DEFAULT 0;
+             UPDATE bodies SET inserted_at = unixepoch() WHERE inserted_at = 0;",
+        )
+        .map_err(|e| format!("body store inserted_at migration: {e}"))?;
+    }
 
     Ok(conn)
 }
@@ -156,8 +173,12 @@ impl BodyStoreReadState {
                 .lock()
                 .map_err(|e| format!("body store lock poisoned: {e}"))?;
             conn.execute(
-                "INSERT OR REPLACE INTO bodies (message_id, body_html, body_text)
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO bodies (message_id, body_html, body_text, inserted_at)
+                 VALUES (?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(message_id) DO UPDATE SET
+                     body_html   = excluded.body_html,
+                     body_text   = excluded.body_text,
+                     inserted_at = unixepoch()",
                 params![message_id, html_blob, text_blob],
             )
             .map_err(|e| format!("body store put: {e}"))?;
@@ -194,8 +215,12 @@ impl BodyStoreReadState {
             {
                 let mut stmt = tx
                     .prepare(
-                        "INSERT OR REPLACE INTO bodies (message_id, body_html, body_text)
-                         VALUES (?1, ?2, ?3)",
+                        "INSERT INTO bodies (message_id, body_html, body_text, inserted_at)
+                         VALUES (?1, ?2, ?3, unixepoch())
+                         ON CONFLICT(message_id) DO UPDATE SET
+                             body_html   = excluded.body_html,
+                             body_text   = excluded.body_text,
+                             inserted_at = unixepoch()",
                     )
                     .map_err(|e| format!("prepare batch put: {e}"))?;
 
@@ -472,4 +497,108 @@ pub struct BodyStoreStats {
     pub message_count: u64,
     pub compressed_html_bytes: u64,
     pub compressed_text_bytes: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Phase 8-2: an existing `bodies.db` with the pre-`inserted_at`
+    /// schema must gain the column and have all rows backfilled to
+    /// non-zero `inserted_at` on next open. Idempotent: a second open
+    /// must not double-update.
+    #[test]
+    fn open_migrates_existing_db_to_inserted_at_column() {
+        let dir = tempdir().expect("tempdir");
+
+        // Simulate the old schema: open a connection and create the
+        // pre-Phase-8-2 `bodies` table directly, then close.
+        {
+            let conn = Connection::open(dir.path().join("bodies.db")).expect("open");
+            conn.execute_batch(
+                "CREATE TABLE bodies (
+                    message_id TEXT PRIMARY KEY,
+                    body_html  BLOB,
+                    body_text  BLOB
+                 );",
+            )
+            .expect("create old schema");
+            conn.execute(
+                "INSERT INTO bodies (message_id, body_html, body_text) \
+                 VALUES ('m1', NULL, NULL), ('m2', NULL, NULL)",
+                [],
+            )
+            .expect("seed rows");
+        }
+
+        // Now run open_body_store_connection - the migration should add
+        // the column and backfill the seeded rows.
+        let conn = open_body_store_connection(dir.path()).expect("open migrated");
+        let column_exists: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('bodies') WHERE name = 'inserted_at'")
+            .and_then(|mut s| s.exists([]))
+            .expect("column check");
+        assert!(column_exists, "inserted_at column was added");
+
+        let zero_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM bodies WHERE inserted_at = 0",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count zero");
+        assert_eq!(
+            zero_count, 0,
+            "all backfilled rows have non-zero inserted_at"
+        );
+        drop(conn);
+
+        // Open again. The check should see the column, skip the ALTER,
+        // and leave existing values alone.
+        let conn = open_body_store_connection(dir.path()).expect("re-open");
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM bodies", [], |r| r.get(0))
+            .expect("count total");
+        assert_eq!(total, 2);
+    }
+
+    /// Phase 8-2: a fresh `open_body_store_connection` call against a
+    /// non-existent dir creates the table with `inserted_at` already
+    /// present (no migration needed).
+    #[test]
+    fn fresh_open_creates_table_with_inserted_at() {
+        let dir = tempdir().expect("tempdir");
+        let conn = open_body_store_connection(dir.path()).expect("open");
+        let column_exists: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('bodies') WHERE name = 'inserted_at'")
+            .and_then(|mut s| s.exists([]))
+            .expect("column check");
+        assert!(column_exists);
+    }
+
+    /// Phase 8-2: `BodyStoreReadState::put` sets `inserted_at` to a
+    /// non-zero unix epoch.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn put_writes_non_zero_inserted_at() {
+        let dir = tempdir().expect("tempdir");
+        let store = BodyStoreReadState::init(dir.path()).expect("init");
+        store
+            .put(
+                "m1".to_string(),
+                Some("<p>hi</p>".to_string()),
+                None,
+            )
+            .await
+            .expect("put");
+        let conn = Connection::open(dir.path().join("bodies.db")).expect("open");
+        let inserted_at: i64 = conn
+            .query_row(
+                "SELECT inserted_at FROM bodies WHERE message_id = 'm1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query");
+        assert!(inserted_at > 0, "put set inserted_at to current epoch");
+    }
 }

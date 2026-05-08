@@ -415,6 +415,11 @@ async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestR
 /// BootReady, in that order. Validates the two-phase contract: the App can
 /// receive the client (and subscribe to notifications) before the slow
 /// boot.ready round-trip completes.
+///
+/// FLAKY: same libtest-subprocess-lifecycle flake shape as the others
+/// in this file (passes solo, hangs in the suite). The proper fix is
+/// the harness Lua rewrite under M2 of `docs/harness/roadmap.md`.
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
 -> TestResult {
@@ -797,6 +802,15 @@ async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
 /// `ChildSpawned` + `BootReady` on the same `SpawnEvent` receiver. A
 /// follow-up `health.ping` against the respawned client must succeed,
 /// proving end-to-end that the new state is live.
+// FLAKY: passes solo but hangs intermittently when run in the suite
+// or under `-N` repeats. Same shape as the other Phase 8 service-
+// subprocess flakes (`service_subprocess_ping_and_shutdown`,
+// `spawn_with_events_emits_terminal_on_missing_key`). The root cause
+// is the libtest-based subprocess lifecycle; the proper fix is the
+// service test harness in `docs/harness/` (the `.lua` rewrite under
+// M2 of the roadmap). Re-enable - or delete in favor of the Lua
+// rewrite - once the harness wedge lands.
+#[ignore]
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn respawn_after_sigkill_succeeds() -> TestResult {
@@ -914,6 +928,10 @@ async fn respawn_after_sigkill_succeeds() -> TestResult {
 /// (single-shot, no respawn) and from `respawn_after_sigkill_succeeds`
 /// (respawn happy-path, no in-flight request). The plan asked for both
 /// halves in the same test - this is that test.
+// FLAKY: same shape as `respawn_after_sigkill_succeeds` above -
+// passes solo, hangs in the suite or under `-N` repeats. The proper
+// fix is the harness Lua rewrite under M2 of `docs/harness/roadmap.md`.
+#[ignore]
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn pending_request_fails_at_respawn_then_subsequent_succeeds() -> TestResult {

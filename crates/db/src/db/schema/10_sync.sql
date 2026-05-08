@@ -97,3 +97,19 @@ CREATE TABLE IF NOT EXISTS pending_operations (
 );
 CREATE INDEX IF NOT EXISTS idx_pending_ops_status ON pending_operations(status, next_retry_at);
 CREATE INDEX IF NOT EXISTS idx_pending_ops_resource ON pending_operations(account_id, resource_id);
+
+-- ── Cross-store invariant pass cursors (Phase 8-2) ──────────
+-- One row per content store. Updated to unixepoch() during the
+-- graceful shutdown drain, just before the clean_shutdown sentinel
+-- write. The startup invariant pass scans only rows whose store-side
+-- timestamp (bodies.inserted_at, inline_images.created_at,
+-- attachment_extracted_text.extracted_at) exceeds the cursor, bounding
+-- the scan on a 200 GB mailbox after a non-graceful exit.
+--
+-- Defense-in-depth, not load-bearing: the per-account history_id clear
+-- + next initial-style sync handles correctness regardless of what the
+-- cursor-bounded scan misses.
+CREATE TABLE IF NOT EXISTS clean_shutdown_cursors (
+    store_name TEXT PRIMARY KEY,
+    last_clean_shutdown_at INTEGER NOT NULL DEFAULT 0
+);
