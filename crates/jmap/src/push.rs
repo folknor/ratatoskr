@@ -159,6 +159,7 @@ pub async fn start_push(
     db: &ReadDbState,
     change_tx: mpsc::Sender<StateChange>,
     auth_resolver: AuthResolver,
+    fresh_start: bool,
 ) -> Result<JmapPushManager, String> {
     let inner = client.inner();
     let session = inner.session();
@@ -176,8 +177,21 @@ pub async fn start_push(
 
     let ws_url = ws_caps.url().to_string();
 
-    // Load last known push state from DB
-    let last_push_state = load_push_state(db, account_id).await?;
+    // Phase 8-3: when `fresh_start` is set, drop any persisted
+    // `push_state` cursor before sending the WebSocketPushEnable so the
+    // JMAP server delivers an `Initial` cursor rather than attempting
+    // to resume from a stale (post-crash, post-token-revocation, etc.)
+    // position. Two callers set this:
+    //   1. `dispatch::spawn_post_ready_push_startup` for accounts whose
+    //      `sync_markers/<id>.json` survived the previous shutdown.
+    //   2. `handle_exchange_code` after a re-auth, since the new
+    //      session may not honour the old session's push_state.
+    let last_push_state = if fresh_start {
+        clear_push_state(db, account_id).await;
+        None
+    } else {
+        load_push_state(db, account_id).await?
+    };
 
     let state = Arc::new(RwLock::new(PushState::Disconnected));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -610,6 +624,31 @@ async fn load_push_state(db: &ReadDbState, account_id: &str) -> Result<Option<St
         .or_else(|e| if e.is_empty() { Ok(None) } else { Err(e) })
     })
     .await
+}
+
+/// Phase 8-3: drop the persisted `push_state` cursor for an account
+/// so the next `WebSocketPushEnable` sends `push_state: None` and the
+/// server delivers an `Initial` state rather than attempting to
+/// resume. Used when boot detects a non-graceful exit for the account
+/// or when the user just completed a re-auth (the old session's
+/// cursor may not be valid against the new session). Best-effort: a
+/// failure here just means the next reconnect tries to resume; the
+/// server will reject if the state is stale and the client recovers
+/// via the existing reconcile path.
+async fn clear_push_state(db: &ReadDbState, account_id: &str) {
+    let aid = account_id.to_string();
+    if let Err(e) = db
+        .with_conn(move |conn| {
+            conn.execute(
+                "UPDATE jmap_push_state SET push_state = NULL WHERE account_id = ?1",
+                rusqlite::params![aid],
+            )
+            .map_err(|e| format!("clear_push_state: {e}"))
+        })
+        .await
+    {
+        log::warn!("[JMAP push] failed to clear push_state: {e}");
+    }
 }
 
 async fn save_push_enabled(db: &ReadDbState, account_id: &str, ws_url: &str) {

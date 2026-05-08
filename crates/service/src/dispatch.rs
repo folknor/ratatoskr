@@ -1019,16 +1019,36 @@ fn spawn_post_ready_push_startup(
             }
         };
 
+        // Phase 8-3: discover dirty accounts via the same Phase 3
+        // sync-marker signal the invariant pass uses. JMAP accounts in
+        // this set get a fresh-start push (push_state cleared) so the
+        // server delivers `Initial` rather than attempting to resume a
+        // cursor that may be ahead of the local DB. Bounded one-time
+        // file-listing on `<app_data>/sync_markers/`; on a clean prior
+        // shutdown the directory is empty and this is a no-op.
+        let app_data_dir = boot_state.app_data_dir().to_path_buf();
+        let dirty: std::collections::HashSet<String> =
+            crate::startup_invariants::discover_dirty_accounts(&app_data_dir)
+                .await
+                .into_iter()
+                .map(|d| d.account_id)
+                .collect();
+
         log::info!(
-            "post-ready push startup: starting bridges for {} JMAP account(s)",
-            account_ids.len()
+            "post-ready push startup: starting bridges for {} JMAP account(s) ({} dirty)",
+            account_ids.len(),
+            account_ids.iter().filter(|id| dirty.contains(*id)).count()
         );
         for account_id in account_ids {
             let push_runtime = Arc::clone(&push_runtime);
+            let fresh_start = dirty.contains(&account_id);
             // Spawn per-account so a slow TLS handshake for one account
             // doesn't sequence the others.
             tokio::spawn(async move {
-                if let Err(e) = push_runtime.start_account(account_id.clone()).await {
+                if let Err(e) = push_runtime
+                    .start_account(account_id.clone(), fresh_start)
+                    .await
+                {
                     log::warn!("[push] start_account({account_id}) failed: {e}");
                 }
             });

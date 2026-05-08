@@ -41,7 +41,15 @@ pub(crate) async fn handle_start_account(
     // doesn't need to know which provider an account uses.
     if let Some(push_runtime) = boot_state.push_runtime() {
         tokio::spawn(async move {
-            if let Err(e) = push_runtime.start_account(account_id.clone()).await {
+            // Phase 8-3: piggyback start always uses the resume path
+            // (`fresh_start: false`) - the existing push_state cursor
+            // is the right one to pick up. Fresh-start is reserved
+            // for boot-time dirty-account recovery and post-re-auth
+            // restarts.
+            if let Err(e) = push_runtime
+                .start_account(account_id.clone(), false)
+                .await
+            {
                 log::debug!("[push] piggyback start_account({account_id}) failed: {e}");
             }
         });

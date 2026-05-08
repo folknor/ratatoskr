@@ -148,7 +148,19 @@ impl PushRuntime {
     /// `handle_start_account` piggyback, `handle_cancel_account`
     /// piggyback) and a late call would otherwise re-open the Phase 3
     /// sentinel-before-sync race.
-    pub async fn start_account(&self, account_id: String) -> Result<(), String> {
+    /// Phase 8-3: `fresh_start` controls whether the persisted
+    /// `push_state` cursor is dropped before the
+    /// `WebSocketPushEnable` is sent. Two callers set it to `true`:
+    /// `dispatch::spawn_post_ready_push_startup` for accounts whose
+    /// `sync_markers/<id>.json` survived the previous shutdown
+    /// (Phase 8-3 hardening, mirroring the Phase 3 `history_id`
+    /// clear), and `handle_exchange_code` after a re-auth completes
+    /// (the new session may not honour the old session's cursor).
+    pub async fn start_account(
+        &self,
+        account_id: String,
+        fresh_start: bool,
+    ) -> Result<(), String> {
         if self.inner.closed.load(Ordering::Acquire) {
             return Err("PushRuntime is shutting down".into());
         }
@@ -216,7 +228,7 @@ impl PushRuntime {
 
         let (state_tx, state_rx) = jmap::push::create_push_channel();
         let manager =
-            jmap::push::start_push(&client, &account_id, &read_db, state_tx, auth_resolver)
+            jmap::push::start_push(&client, &account_id, &read_db, state_tx, auth_resolver, fresh_start)
                 .await?;
 
         let cancel = CancellationToken::new();

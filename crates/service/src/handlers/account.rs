@@ -118,6 +118,7 @@ pub(crate) async fn handle_update_tokens(
     })?;
     let params = *params;
     let id = params.account_id.clone();
+    let id_for_push = id.clone();
     let (access_token, refresh_token, imap_password, smtp_password) =
         encrypt_optional_credentials(
             key,
@@ -138,6 +139,24 @@ pub(crate) async fn handle_update_tokens(
         .with_conn(move |conn| db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth))
         .await
         .map_err(ServiceError::Internal)?;
+
+    // Phase 8-3: re-arm push for the re-authed account. Without this,
+    // a JMAP token-revocation kills the websocket bridge and password
+    // re-entry leaves push dead until the Service restarts.
+    // `start_account` silently skips non-JMAP accounts; `fresh_start:
+    // true` clears the persisted `push_state` because the new session
+    // may not honour the old session's cursor.
+    if let Some(push_runtime) = boot_state.push_runtime() {
+        tokio::spawn(async move {
+            if let Err(e) = push_runtime
+                .start_account(id_for_push.clone(), true)
+                .await
+            {
+                log::warn!("[push] re-auth start_account({id_for_push}) failed: {e}");
+            }
+        });
+    }
+
     serde_json::to_value(AccountUpdateTokensAck)
         .map_err(|e| ServiceError::Internal(e.to_string()))
 }
