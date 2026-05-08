@@ -7,11 +7,11 @@
 )]
 
 use crate::service_client::{
-    ClientError, ServiceClient, ServiceTraceSink, SpawnEvent,
+    ClientError, ServiceClient, ServiceNotificationReceiver, ServiceTraceSink, SpawnEvent,
 };
 use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
-use service_api::{BootClassification, BootExitCode, RequestParams};
+use service_api::{BootClassification, BootExitCode, BootPhaseKind, Notification, RequestParams};
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -91,6 +91,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "kill", lua_kill)?;
     set_field_fn(state, table_idx, "pid_is_alive", lua_pid_is_alive)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
+    set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
     set_field_fn(state, table_idx, "assert", lua_assert)?;
     set_field_fn(state, table_idx, "assert_eq", lua_assert_eq)?;
     set_field_fn(state, table_idx, "same_client", lua_same_client)?;
@@ -242,6 +243,7 @@ impl HarnessContext {
 enum HarnessResource {
     Client(Arc<ServiceClient>),
     Events(mpsc::Receiver<SpawnEvent>),
+    Notifications(ServiceNotificationReceiver),
     Request(tokio::task::JoinHandle<Result<serde_json::Value, ClientError>>),
 }
 
@@ -370,6 +372,17 @@ fn lua_sleep(state: &mut State) -> dellingr::Result<u8> {
     std::thread::sleep(Duration::from_millis(millis));
     state.set_top(0);
     Ok(0)
+}
+
+fn lua_now_ms(state: &mut State) -> dellingr::Result<u8> {
+    let elapsed = {
+        let ctx = context(state)?;
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.started.elapsed().as_millis()
+    };
+    state.set_top(0);
+    state.push_number(elapsed as f64);
+    Ok(1)
 }
 
 fn lua_assert(state: &mut State) -> dellingr::Result<u8> {
@@ -546,6 +559,22 @@ fn lua_client_current_generation(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_client_notifications(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    let ctx = context(state)?;
+    let notifications = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.client(id)?.notifications()
+    };
+    let queue_id = {
+        let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.insert(HarnessResource::Notifications(notifications))
+    };
+    state.set_top(0);
+    push_notifications_table(state, queue_id)?;
+    Ok(1)
+}
+
 fn lua_client_drop(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     context(state)?
@@ -554,6 +583,69 @@ fn lua_client_drop(state: &mut State) -> dellingr::Result<u8> {
         .remove(id);
     state.set_top(0);
     Ok(0)
+}
+
+fn lua_notifications_recv(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    let seconds = if state.get_top() >= 2 {
+        state.to_number(2)?
+    } else {
+        30.0
+    };
+    let ctx = context(state)?;
+    let (handle, queue) = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(HarnessResource::Notifications(queue)) = guard.resources.get(&id) else {
+            return Err(lua_error_message(format!("no notification queue resource {id}")));
+        };
+        (guard.handle.clone(), Arc::clone(queue))
+    };
+    let result = handle.block_on(async {
+        tokio::time::timeout(duration_from_seconds(seconds), queue.recv()).await
+    });
+    state.set_top(0);
+    match result {
+        Ok(Some(notification)) => push_notification(state, &notification)?,
+        Ok(None) | Err(_) => state.push_nil(),
+    }
+    Ok(1)
+}
+
+fn lua_notifications_drain_for(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    let seconds = state.to_number(2)?;
+    let ctx = context(state)?;
+    let (handle, queue) = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(HarnessResource::Notifications(queue)) = guard.resources.get(&id) else {
+            return Err(lua_error_message(format!("no notification queue resource {id}")));
+        };
+        (guard.handle.clone(), Arc::clone(queue))
+    };
+    let notifications = handle.block_on(async move {
+        let deadline = Instant::now() + duration_from_seconds(seconds);
+        let mut notifications = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, queue.recv()).await {
+                Ok(Some(notification)) => notifications.push(notification),
+                Ok(None) | Err(_) => break,
+            }
+        }
+        notifications
+    });
+    state.set_top(0);
+    state.new_table();
+    let idx = state.get_top() as isize;
+    for (offset, notification) in notifications.iter().enumerate() {
+        state.push_number((offset + 1) as f64);
+        push_notification(state, notification)?;
+        state.set_table_raw(idx)?;
+    }
+    Ok(1)
 }
 
 fn lua_events_next(state: &mut State) -> dellingr::Result<u8> {
@@ -767,6 +859,7 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_fn(state, idx, "shutdown", lua_client_shutdown)?;
     set_field_fn(state, idx, "child_pid", lua_client_child_pid)?;
     set_field_fn(state, idx, "current_generation", lua_client_current_generation)?;
+    set_field_fn(state, idx, "notifications", lua_client_notifications)?;
     set_field_fn(state, idx, "drop", lua_client_drop)?;
     Ok(())
 }
@@ -786,6 +879,41 @@ fn push_request_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_string(state, idx, "__harness_type", "request")?;
     set_field_number(state, idx, "__harness_id", id as f64)?;
     set_field_fn(state, idx, "await", lua_request_await)?;
+    Ok(())
+}
+
+fn push_notifications_table(state: &mut State, id: u64) -> dellingr::Result<()> {
+    state.new_table();
+    let idx = state.get_top() as isize;
+    set_field_string(state, idx, "__harness_type", "notifications")?;
+    set_field_number(state, idx, "__harness_id", id as f64)?;
+    set_field_fn(state, idx, "recv", lua_notifications_recv)?;
+    set_field_fn(state, idx, "drain_for", lua_notifications_drain_for)?;
+    Ok(())
+}
+
+fn push_notification(state: &mut State, notification: &Notification) -> dellingr::Result<()> {
+    state.new_table();
+    let idx = state.get_top() as isize;
+    set_field_string(state, idx, "method", notification.method_name())?;
+    match notification {
+        Notification::BootProgress(progress) => {
+            set_field_string(state, idx, "type", "BootProgress")?;
+            set_field_string(
+                state,
+                idx,
+                "phase_kind",
+                boot_phase_kind_name(progress.phase.coalesce_discriminant()),
+            )?;
+            set_field_string(state, idx, "phase", &format!("{:?}", progress.phase))?;
+            set_field_number(state, idx, "service_generation", progress.service_generation as f64)?;
+        }
+        other => {
+            set_field_string(state, idx, "type", other.method_name())?;
+        }
+    }
+    push_json(state, &serde_json::to_value(notification).map_err(lua_json)?)?;
+    set_pushed_field(state, idx, "raw")?;
     Ok(())
 }
 
@@ -990,6 +1118,21 @@ fn boot_code_name(code: BootExitCode) -> &'static str {
         BootExitCode::MigrationFailure => "MigrationFailure",
         BootExitCode::KeyLoadFailure => "KeyLoadFailure",
         BootExitCode::LockIoFailure => "LockIoFailure",
+    }
+}
+
+fn boot_phase_kind_name(kind: BootPhaseKind) -> &'static str {
+    match kind {
+        BootPhaseKind::LoadingKey => "LoadingKey",
+        BootPhaseKind::OpeningDatabase => "OpeningDatabase",
+        BootPhaseKind::Migrating => "Migrating",
+        BootPhaseKind::RecoveringPendingOps => "RecoveringPendingOps",
+        BootPhaseKind::SweepingQueuedDrafts => "SweepingQueuedDrafts",
+        BootPhaseKind::BackfillingThreadParticipants => "BackfillingThreadParticipants",
+        BootPhaseKind::DrainingDraftWal => "DrainingDraftWal",
+        BootPhaseKind::OpeningBodyAndInlineStores => "OpeningBodyAndInlineStores",
+        BootPhaseKind::OpeningSearchIndex => "OpeningSearchIndex",
+        BootPhaseKind::RunningInvariantPass => "RunningInvariantPass",
     }
 }
 

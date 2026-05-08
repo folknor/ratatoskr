@@ -215,7 +215,8 @@ coverage:
 
 ### M2.5 - `spawn_harness_with_suffix` cohort
 
-**Status:** READY; M1/M2 have proven the harness runner.
+**Status:** PARTIAL; the boot/dispatch lifecycle scripts have landed,
+with soak and forced-hang artefact validation still open.
 
 Migrate the `crates/service/tests/dispatch_in_process.rs` tests that
 use `spawn_harness_with_suffix`. These tests are not OS-subprocess
@@ -233,11 +234,20 @@ preserve.
 
 Initial migration list:
 
-- `boot_ready_returns_after_sequence_completes`
-- `health_ping_succeeds_during_long_migration`
-- `health_ping_works_concurrently_with_boot_ready`
-- `boot_ready_blocks_until_sequence_completes` (currently ignored)
-- `boot_progress_notifications_emitted_in_order` (currently ignored)
+- `crates/app/tests/service-harness/m2_5/boot_ready_returns_after_sequence_completes.lua`
+  - replaces `boot_ready_returns_after_sequence_completes`
+- `crates/app/tests/service-harness/m2_5/health_ping_succeeds_during_long_migration.lua`
+  - replaces `health_ping_succeeds_during_long_migration`
+- `crates/app/tests/service-harness/m2_5/health_ping_works_concurrently_with_boot_ready.lua`
+  - replaces `health_ping_works_concurrently_with_boot_ready`
+- `crates/app/tests/service-harness/m2_5/boot_ready_blocks_until_sequence_completes.lua`
+  - replaces `boot_ready_blocks_until_sequence_completes`
+- `crates/app/tests/service-harness/m2_5/boot_progress_notifications_emitted_in_order.lua`
+  - replaces `boot_progress_notifications_emitted_in_order`
+
+All five scripts pass individually under `brokkr service-test` as of
+2026-05-08. The old libtest bodies remain ignored pointers until the
+M2.5 soak and forced-hang artefact drill close out.
 
 The remaining `spawn_harness()` tests in the same file should be
 reviewed after the boot/dispatch subset lands; many may stay as

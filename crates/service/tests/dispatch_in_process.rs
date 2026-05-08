@@ -329,7 +329,7 @@ async fn concurrent_ping_ids_are_correlated() -> TestResult {
 /// and that the response carries the expected schema_version /
 /// migrations_applied for a fresh DB.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
+#[ignore = "covered by crates/app/tests/service-harness/m2_5/boot_ready_returns_after_sequence_completes.lua"]
 async fn boot_ready_returns_after_sequence_completes() -> TestResult {
     let mut harness = spawn_harness_with_suffix("boot_ready_completes");
     write_request(&mut harness.stdin, 1, RequestParams::BootReady).await?;
@@ -362,7 +362,7 @@ async fn boot_ready_returns_after_sequence_completes() -> TestResult {
 /// pool instead of `spawn_blocking` would not be caught.
 #[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
+#[ignore = "covered by crates/app/tests/service-harness/m2_5/health_ping_succeeds_during_long_migration.lua"]
 async fn health_ping_succeeds_during_long_migration() -> TestResult {
     use std::sync::atomic::Ordering;
     {
@@ -430,7 +430,7 @@ async fn health_ping_succeeds_during_long_migration() -> TestResult {
 /// Verifies the dispatch loop's bypass: a parked boot.ready handler does
 /// not block other requests through the admission cap.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
+#[ignore = "covered by crates/app/tests/service-harness/m2_5/health_ping_works_concurrently_with_boot_ready.lua"]
 async fn health_ping_works_concurrently_with_boot_ready() -> TestResult {
     let mut harness = spawn_harness_with_suffix("concurrent_ping_during_boot");
     // Issue boot.ready first; it may complete before we read its response,
@@ -484,7 +484,7 @@ async fn health_ping_works_concurrently_with_boot_ready() -> TestResult {
 /// service plan; pulling this test off the default sweep until then.
 #[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Phase 8 triage (hangs when run after another in-process harness test)"]
+#[ignore = "covered by crates/app/tests/service-harness/m2_5/boot_ready_blocks_until_sequence_completes.lua"]
 async fn boot_ready_blocks_until_sequence_completes() -> TestResult {
     use std::sync::atomic::Ordering;
     // Acquire-and-release the std::sync::Mutex synchronously around the
@@ -545,7 +545,7 @@ async fn boot_ready_blocks_until_sequence_completes() -> TestResult {
 /// pull this off the per-test schedule entirely.
 #[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Phase 8 triage (Phase 6c hang under workspace-wide brokkr check)"]
+#[ignore = "covered by crates/app/tests/service-harness/m2_5/boot_progress_notifications_emitted_in_order.lua"]
 async fn boot_progress_notifications_emitted_in_order() -> TestResult {
     use service_api::{BootPhase, Notification};
     let mut harness = spawn_harness_with_suffix("boot_progress_order");

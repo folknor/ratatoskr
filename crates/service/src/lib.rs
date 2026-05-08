@@ -77,6 +77,8 @@ pub fn run_service_blocking() -> ! {
         .unwrap_or_else(default_app_data_dir);
     let _ = logging::init(&app_data_dir);
     logging::install_panic_hook();
+    #[cfg(feature = "test-helpers")]
+    install_test_boot_delay_from_args();
     if arg_app_data_dir.is_none() {
         // Production launches always pass --app-data-dir from the UI; a
         // missing arg is most likely a debug-session invocation
@@ -196,6 +198,29 @@ pub(crate) fn test_fake_version() -> Option<u32> {
 #[cfg(feature = "test-helpers")]
 pub(crate) fn test_hang_on_stdin_eof() -> bool {
     std::env::args().any(|arg| arg == "--test-hang-on-stdin-eof")
+}
+
+/// Test-only artificial boot delay for subprocess harness scripts.
+/// Triggered by `--test-boot-delay-ms=N` on the Service command line.
+#[cfg(feature = "test-helpers")]
+fn install_test_boot_delay_from_args() {
+    use std::sync::atomic::Ordering;
+
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        let parsed = if let Some(value) = arg.strip_prefix("--test-boot-delay-ms=") {
+            value.parse().ok()
+        } else if arg == "--test-boot-delay-ms" {
+            args.next().and_then(|value| value.parse().ok())
+        } else {
+            None
+        };
+        if let Some(delay_ms) = parsed {
+            boot::TEST_BOOT_DELAY_MS.store(delay_ms, Ordering::SeqCst);
+            log::info!("test-helpers: configured boot delay {delay_ms}ms");
+            return;
+        }
+    }
 }
 
 fn default_app_data_dir() -> PathBuf {
