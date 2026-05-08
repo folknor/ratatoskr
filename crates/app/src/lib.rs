@@ -26,6 +26,8 @@ mod display;
 mod draft_wal;
 mod font;
 mod handlers;
+#[cfg(feature = "test-helpers")]
+pub mod harness;
 mod helpers;
 mod icon;
 mod main_view;

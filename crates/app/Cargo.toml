@@ -49,6 +49,7 @@ mime_guess = "2"
 sha2 = "0.11"
 dev-seed = { path = "../dev-seed", optional = true }
 hotpath = { workspace = true, optional = true }
+dellingr = { version = "0.2.0", optional = true }
 
 [target.'cfg(unix)']
 dev-dependencies = {}
@@ -64,7 +65,7 @@ tempfile = "3"
 [features]
 default = ["dev-seed"]
 dev-seed = ["dep:dev-seed"]
-test-helpers = ["service/test-helpers", "service-api/test-helpers"]
+test-helpers = ["dep:dellingr", "service/test-helpers", "service-api/test-helpers"]
 hotpath = [
     "dep:hotpath",
     "hotpath/hotpath",

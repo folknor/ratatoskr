@@ -27,13 +27,14 @@ use service_api::{
     ThreadUiStateSetAck, ThreadUiStateSetParams, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, hash_map::Entry};
+use std::io::Write as StdWrite;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, PoisonError, Weak,
     atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -114,6 +115,76 @@ const BOOT_PROGRESS_RECENT_WINDOW: Duration = Duration::from_secs(30);
 const POST_KILL_WAIT: Duration = Duration::from_secs(1);
 
 pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
+
+/// Test-harness wire trace sink. Production clients pass `None` and pay no
+/// file IO; harness clients pass one shared sink so initial spawn and respawns
+/// append to the same per-run artefacts.
+#[derive(Debug)]
+pub(crate) struct ServiceTraceSink {
+    started: Instant,
+    artefact_dir: PathBuf,
+    frames: Mutex<std::fs::File>,
+    seq: AtomicU64,
+}
+
+impl ServiceTraceSink {
+    #[cfg(feature = "test-helpers")]
+    pub(crate) fn new(artefact_dir: &Path) -> std::io::Result<Arc<Self>> {
+        std::fs::create_dir_all(artefact_dir)?;
+        let frames = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(artefact_dir.join("frames.jsonl"))?;
+        Ok(Arc::new(Self {
+            started: Instant::now(),
+            artefact_dir: artefact_dir.to_path_buf(),
+            frames: Mutex::new(frames),
+            seq: AtomicU64::new(1),
+        }))
+    }
+
+    fn service_stderr_path(&self) -> PathBuf {
+        self.artefact_dir.join("service.stderr")
+    }
+
+    fn record_frame(&self, direction: &str, raw: &[u8]) {
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        let raw_len = raw.len();
+        let raw_redacted = redact_frame(raw);
+        let raw_sha256 = sha256_hex(raw);
+        let record = serde_json::json!({
+            "schema": 1,
+            "ts_ms": self.started.elapsed().as_millis(),
+            "seq": seq,
+            "direction": direction,
+            "raw_redacted": raw_redacted,
+            "raw_len": raw_len,
+            "raw_sha256": raw_sha256,
+            "parsed": null,
+        });
+        let mut guard = self.frames.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ = writeln!(guard, "{record}");
+    }
+}
+
+fn redact_frame(raw: &[u8]) -> String {
+    const INLINE_LIMIT: usize = 4096;
+    if raw.len() > INLINE_LIMIT {
+        return format!("<redacted len={} sha256={}>", raw.len(), sha256_hex(raw));
+    }
+    String::from_utf8_lossy(raw).trim_end_matches('\n').to_string()
+}
+
+fn sha256_hex(raw: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(raw);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
 
 /// Per-`SyncRunId` waiter slot. Phase 3 task 14: a `start_sync` /
 /// `cancel_and_await` caller subscribes to a broadcast channel for the
@@ -267,6 +338,7 @@ struct RespawnConfig {
     binary_path: PathBuf,
     app_data_dir: PathBuf,
     extra_args: Vec<String>,
+    trace: Option<Arc<ServiceTraceSink>>,
     spawn_event_tx: mpsc::Sender<SpawnEvent>,
     /// Captured first `BootReadyResponse` for the schema-version sanity
     /// check on every subsequent respawn. A binary swap that changes the
@@ -697,6 +769,20 @@ impl ServiceClient {
         rx
     }
 
+    #[cfg(feature = "test-helpers")]
+    pub(crate) fn spawn_with_events_for_harness(
+        binary: PathBuf,
+        app_data_dir: PathBuf,
+        extra_args: Vec<String>,
+        trace: Option<Arc<ServiceTraceSink>>,
+    ) -> mpsc::Receiver<SpawnEvent> {
+        let (tx, rx) = mpsc::channel(8);
+        tokio::spawn(async move {
+            run_spawn_flow_with_trace(binary, app_data_dir, extra_args, tx, trace).await;
+        });
+        rx
+    }
+
     /// Test-only spawn that lets tests override the binary path and pass
     /// extra args to the Service. Used for spawn-failure (bad binary path)
     /// and version-mismatch (`--test-fake-version=N`) coverage. Compiled
@@ -714,11 +800,31 @@ impl ServiceClient {
         Self::spawn_inner(binary, app_data_dir, extra_args, None).await
     }
 
+    #[cfg(feature = "test-helpers")]
+    pub(crate) async fn spawn_for_harness(
+        binary: &Path,
+        app_data_dir: &Path,
+        extra_args: &[&str],
+        trace: Option<Arc<ServiceTraceSink>>,
+    ) -> Result<Arc<Self>, ClientError> {
+        Self::spawn_inner_with_trace(binary, app_data_dir, extra_args, None, trace).await
+    }
+
     async fn spawn_inner(
         binary: &Path,
         app_data_dir: &Path,
         extra_args: &[&str],
         respawn_config: Option<RespawnConfig>,
+    ) -> Result<Arc<Self>, ClientError> {
+        Self::spawn_inner_with_trace(binary, app_data_dir, extra_args, respawn_config, None).await
+    }
+
+    async fn spawn_inner_with_trace(
+        binary: &Path,
+        app_data_dir: &Path,
+        extra_args: &[&str],
+        respawn_config: Option<RespawnConfig>,
+        trace: Option<Arc<ServiceTraceSink>>,
     ) -> Result<Arc<Self>, ClientError> {
         let process_guard = process_lifetime::ProcessGuard::new()?;
         let pending: Arc<
@@ -769,6 +875,7 @@ impl ServiceClient {
             Arc::clone(&notifications),
             Arc::downgrade(&client),
             generation,
+            trace,
         )
         .await?;
 
@@ -800,6 +907,14 @@ impl ServiceClient {
         }
         log::info!("Service ready (pid={}, gen={generation})", ping.pid);
         Ok(client)
+    }
+
+    #[cfg(feature = "test-helpers")]
+    pub(crate) async fn request_value_for_harness(
+        &self,
+        params: RequestParams,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.request_value(params).await
     }
 
     /// Wait briefly for the dying child and project its exit code into a
@@ -2362,6 +2477,7 @@ impl ServiceClient {
             Arc::clone(&self.notifications),
             Arc::downgrade(self),
             new_gen,
+            respawn.trace.clone(),
         )
         .await?;
 
@@ -2749,6 +2865,7 @@ async fn launch_subprocess(
     notifications: Arc<NotificationQueue>,
     weak_client: Weak<ServiceClient>,
     generation: u32,
+    trace: Option<Arc<ServiceTraceSink>>,
 ) -> Result<SpawnedSubprocess, ClientError> {
     let mut command = Command::new(binary);
     command
@@ -2761,8 +2878,12 @@ async fn launch_subprocess(
     command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
         .kill_on_drop(false);
+    if trace.is_some() {
+        command.stderr(std::process::Stdio::piped());
+    } else {
+        command.stderr(std::process::Stdio::inherit());
+    }
     process_lifetime::configure_command(&mut command)?;
 
     let mut child = command.spawn()?;
@@ -2773,6 +2894,11 @@ async fn launch_subprocess(
     process_guard.assign(&child)?;
     let stdin = child.stdin.take().ok_or(ClientError::NotConnected)?;
     let stdout = child.stdout.take().ok_or(ClientError::NotConnected)?;
+    if let Some(trace_sink) = trace.as_ref()
+        && let Some(stderr) = child.stderr.take()
+    {
+        tokio::spawn(copy_service_stderr(stderr, Arc::clone(trace_sink)));
+    }
     let (stdin_tx, stdin_rx) = mpsc::channel(STDIN_QUEUE_CAP);
 
     let reader_handle = tokio::spawn(reader_task(
@@ -2781,8 +2907,9 @@ async fn launch_subprocess(
         notifications,
         Weak::clone(&weak_client),
         generation,
+        trace.clone(),
     ));
-    let writer_handle = tokio::spawn(writer_task(stdin, stdin_rx));
+    let writer_handle = tokio::spawn(writer_task(stdin, stdin_rx, trace));
     let heartbeat_handle = tokio::spawn(heartbeat_task(
         stdin_tx.clone(),
         pending,
@@ -2813,20 +2940,32 @@ async fn run_spawn_flow(
     extra_args: Vec<String>,
     tx: mpsc::Sender<SpawnEvent>,
 ) {
+    run_spawn_flow_with_trace(binary, app_data_dir, extra_args, tx, None).await;
+}
+
+async fn run_spawn_flow_with_trace(
+    binary: PathBuf,
+    app_data_dir: PathBuf,
+    extra_args: Vec<String>,
+    tx: mpsc::Sender<SpawnEvent>,
+    trace: Option<Arc<ServiceTraceSink>>,
+) {
     let respawn_config = RespawnConfig {
         binary_path: binary.clone(),
         app_data_dir: app_data_dir.clone(),
         extra_args: extra_args.clone(),
+        trace: trace.clone(),
         spawn_event_tx: tx.clone(),
         first_boot_ready: Mutex::new(None),
     };
 
     let extra_arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
-    let client = match ServiceClient::spawn_inner(
+    let client = match ServiceClient::spawn_inner_with_trace(
         &binary,
         &app_data_dir,
         &extra_arg_refs,
         Some(respawn_config),
+        trace,
     )
     .await
     {
@@ -2892,6 +3031,7 @@ async fn reader_task<R>(
     notifications: Arc<NotificationQueue>,
     weak_client: Weak<ServiceClient>,
     generation: u32,
+    trace: Option<Arc<ServiceTraceSink>>,
 ) where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -2906,7 +3046,11 @@ async fn reader_task<R>(
     let mut consecutive_parse_errors: u32 = 0;
     loop {
         match lines.next_line().await {
-            Ok(Some(line)) => match parse_service_message(&line) {
+            Ok(Some(line)) => {
+                if let Some(trace_sink) = trace.as_ref() {
+                    trace_sink.record_frame("in", line.as_bytes());
+                }
+                match parse_service_message(&line) {
                 Ok(parsed) => {
                     consecutive_parse_errors = 0;
                     match parsed {
@@ -3037,6 +3181,7 @@ async fn reader_task<R>(
                         return;
                     }
                 }
+            }
             },
             Ok(None) => {
                 fail_pending(&pending);
@@ -3187,11 +3332,45 @@ fn client_error_from_rpc(error: JsonRpcErrorObject) -> ClientError {
     }
 }
 
-async fn writer_task<W>(mut stdin: W, mut stdin_rx: mpsc::Receiver<Vec<u8>>)
+async fn copy_service_stderr<R>(mut stderr: R, trace: Arc<ServiceTraceSink>)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buffer = [0u8; 8192];
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(trace.service_stderr_path());
+    let Ok(mut file) = file else {
+        return;
+    };
+    loop {
+        match stderr.read(&mut buffer).await {
+            Ok(0) => return,
+            Ok(n) => {
+                let _ = file.write_all(&buffer[..n]);
+                let _ = file.flush();
+            }
+            Err(error) => {
+                let _ = writeln!(file, "\n[harness] stderr capture failed: {error}");
+                return;
+            }
+        }
+    }
+}
+
+async fn writer_task<W>(
+    mut stdin: W,
+    mut stdin_rx: mpsc::Receiver<Vec<u8>>,
+    trace: Option<Arc<ServiceTraceSink>>,
+)
 where
     W: AsyncWrite + Unpin,
 {
     while let Some(bytes) = stdin_rx.recv().await {
+        if let Some(trace_sink) = trace.as_ref() {
+            trace_sink.record_frame("out", &bytes);
+        }
         if let Err(error) = stdin.write_all(&bytes).await {
             log::warn!("service stdin write failed: {error}");
             break;

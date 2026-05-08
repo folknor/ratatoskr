@@ -24,9 +24,12 @@ Two existing families have that shape:
   over an async IO boundary and waits on Service boot/dispatch/drain
   transitions.
 
-Both families are currently `#[tokio::test]` functions with internal
-`tokio::time::timeout` or libtest/brokkr watchdogs around protocol
-waits.
+Before the harness landed, both families were `#[tokio::test]`
+functions with internal `tokio::time::timeout` or libtest/brokkr
+watchdogs around protocol waits. As of the M1/M2 wedge, five flaky
+`service_subprocess.rs` lifecycle tests have authoritative Lua
+replacements under `crates/app/tests/service-harness/`, while the
+broader `spawn_harness_with_suffix` cohort remains to migrate.
 
 That shape doesn't work. The diagnosis is structural, not a matter of
 fixing this or that flake.
@@ -36,12 +39,10 @@ own ceilings.** A `#[tokio::test]` that issues a `health.ping` with a
 1 s timeout is racing against the Service's own 5 s `health.ping`
 timeout, the spawn-side `request_or_observe_child_exit` 50 ms polling
 interval, the OS scheduler, and the disk's behaviour during a hot
-migration. Two of the existing tests
-(`service_subprocess_ping_and_shutdown`,
-`spawn_with_events_emits_terminal_on_missing_key`) sit
-`#[ignore]`'d today because they hang intermittently; running them 200
-times averages the noise rather than eliminates it. An inline comment in
-`service_subprocess.rs` already concedes this.
+migration. The old libtest wedge grew to five ignored subprocess
+flakes. They now exist as Lua scripts and 200-iteration soaks pass, but
+the lesson remains: running a flaky libtest shape 200 times averages
+the noise rather than eliminating it.
 
 **Failure destroys the diagnostic state.** `DataDirGuard::Drop` in the
 subprocess tests and `TestDataDir::Drop` in the in-process dispatch
@@ -130,18 +131,22 @@ bugs (the most common Service-correctness class), hangs reproduce once
 in twenty runs.
 
 Under the harness, a failed test produces a self-contained artefact
-directory:
+directory. The M1/M2 wedge already writes the core files below; some
+schema fields are intentionally minimal until later cohorts need richer
+readers.
 
 - `frames.jsonl` - every JSON-RPC frame, both directions, timestamped,
-  with `raw_redacted` / redacted parsed payloads rather than raw secret
-  dumps.
+  with `raw_redacted`, frame length, and SHA-256. M1/M2 leaves
+  `parsed` null; structural parsed redaction is future hardening before
+  credentialed scripts land.
 - `events.jsonl` - every spawn/runtime event observed (`ChildSpawned`,
   `BootReady`, `Terminal`).
 - `steps.jsonl` - the test's step trace: which step was active, what
-  condition was awaited, which transition fired.
+  operation ran, and which coarse transition fired.
 - `proc-{wchan,status,syscall,stack}.txt` - `/proc/<pid>/` snapshot at
-  failure-declaration time. Distinguishes "blocked on futex" from
-  "blocked on closed pipe" without re-running.
+  failure-declaration time on Linux, best-effort. Distinguishes
+  "blocked on futex" from "blocked on closed pipe" without re-running
+  when the kernel permits the reads.
 - `service.stderr` - Service's stderr verbatim, per-run, not
   race-mingled; v1 captures it through a harness-only Service spawn
   path that pipes stderr to this file.
@@ -153,9 +158,9 @@ directory:
   commit, sweep label, process exit code/signal.
 
 Scripts can set frontmatter for harness-level run behavior:
-`-- ceiling: 60s` for the whole-script runaway guard, and
-`-- preserve_data_dir: on_success_too` when the script author wants
-brokkr to preserve the whole artefact dir even on success.
+`-- ceiling: 60s` for the whole-script runaway guard. Brokkr-side
+artefact retention flags still control whether successful artefacts are
+kept.
 
 That dump is the difference between "the test hung, re-run with
 verbose logging" and "the writer task exited at frame 47 while the
@@ -198,8 +203,9 @@ where the protocol is and lets the Lua bindings sit one file over from
 `.lua` file in `crates/app/tests/service-harness/`. No brokkr rebuild;
 no harness-module rebuild either unless the new test exercises a Lua
 API surface that does not exist yet. The Lua VM is `dellingr` (pure
-Rust, no FFI, no system Lua dep). dellingr's per-opcode cost
-accounting is **not** used for runaway-script abort; runaway scripts
+Rust, no FFI, no system Lua dep; M1/M2 uses `0.2.0`). dellingr's
+per-opcode cost accounting is **not** used for runaway-script abort;
+runaway scripts
 are bounded by per-script wall-clock backstop, same mechanism the
 harness uses for every wait.
 
@@ -232,9 +238,9 @@ window expired" can be the expected success verdict.
   the thing under test.
 - **Not a blanket migration target for all existing tokio tests.**
   Existing unit-style tests stay where they are. The migration target is
-  the Service IO-boundary cohort: the two ignored
-  `service_subprocess.rs` tests, the `spawn_harness_with_suffix` tests
-  that currently hang under libtest, and new Phase 8/T1 tests that need
+  the Service IO-boundary cohort: the M2 `service_subprocess.rs` wedge
+  now represented by Lua scripts, the `spawn_harness_with_suffix`
+  tests that still need migration, and new Phase 8/T1 tests that need
   the same deterministic wait and artefact model.
 
 ## Companion documents

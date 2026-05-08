@@ -1,1 +1,10 @@
 project = "ratatoskr"
+
+[[check]]
+name = "harness"
+features = ["test-helpers"]
+build_packages = ["app"]
+
+[ratatoskr.harness]
+sweep = "harness"
+binary = "app"

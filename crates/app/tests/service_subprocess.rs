@@ -1,8 +1,8 @@
 use app::service_client::{ClientError, ServiceClient, SpawnEvent};
 use service_api::{
     BootClassification, BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest,
-    ParsedServiceMessage, RequestParams, ServiceError, ServiceResponse, ShutdownResponse,
-    parse_service_message, write_message,
+    ParsedServiceMessage, RequestParams, ServiceError, ServiceResponse, parse_service_message,
+    write_message,
 };
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -103,67 +103,10 @@ fn binary_path() -> Result<std::path::PathBuf, std::io::Error> {
         })
 }
 
-// FLAKY: this test hangs intermittently on the test host - the Service
-// child appears to never exit after acking Shutdown. Reproduced
-// multiple times under `brokkr check`. Not yet root-caused; tracked
-// for investigation in `docs/service/implementation-roadmap.md`
-// Phase 8. Re-enable once we've isolated the deadlock.
-#[ignore]
-#[tokio::test]
-async fn service_subprocess_ping_and_shutdown() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("ping_and_shutdown")?;
-    let app_data_dir = data_dir.path();
-
-    let mut child = Command::new(binary)
-        .arg("--service")
-        .arg("--app-data-dir")
-        .arg(app_data_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(false)
-        .spawn()?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| std::io::Error::other("missing child stdin"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| std::io::Error::other("missing child stdout"))?;
-    let mut stdout = BoundedLineReader::new(stdout, service_api::MAX_FRAME_BYTES);
-
-    write_message(
-        &JsonRpcRequest::new(1, &RequestParams::HealthPing),
-        &mut stdin,
-    )
-    .await?;
-    let (id, response) = read_response(&mut stdout).await?;
-    assert_eq!(id, Some(1));
-    let ServiceResponse::Success(value) = response else {
-        return Err(std::io::Error::other("expected ping success").into());
-    };
-    let ping: HealthPingResponse = serde_json::from_value(value)?;
-    assert_eq!(ping.version, service_api::PROTOCOL_VERSION);
-
-    write_message(
-        &JsonRpcRequest::new(2, &RequestParams::Shutdown),
-        &mut stdin,
-    )
-    .await?;
-    let (id, response) = read_response(&mut stdout).await?;
-    assert_eq!(id, Some(2));
-    let ServiceResponse::Success(value) = response else {
-        return Err(std::io::Error::other("expected shutdown success").into());
-    };
-    let shutdown: ShutdownResponse = serde_json::from_value(value)?;
-    assert!(shutdown.flushed_ok);
-
-    let status = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await??;
-    assert!(status.success());
-    Ok(())
+#[ignore = "covered by crates/app/tests/service-harness/ping_and_shutdown.lua"]
+#[test]
+fn service_subprocess_ping_and_shutdown() {
+    // Authoritative coverage moved to `brokkr service-test`.
 }
 
 async fn read_response<R>(
@@ -411,67 +354,10 @@ async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestR
     }
 }
 
-/// `spawn_with_events` against a healthy data dir emits ChildSpawned then
-/// BootReady, in that order. Validates the two-phase contract: the App can
-/// receive the client (and subscribe to notifications) before the slow
-/// boot.ready round-trip completes.
-///
-/// FLAKY: same libtest-subprocess-lifecycle flake shape as the others
-/// in this file (passes solo, hangs in the suite). The proper fix is
-/// the harness Lua rewrite under M2 of `docs/harness/roadmap.md`.
-#[ignore]
-#[tokio::test(flavor = "multi_thread")]
-async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
--> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("two_phase_happy")?;
-    let mut events = ServiceClient::spawn_with_events_for_test(
-        binary,
-        data_dir.path().to_path_buf(),
-        Vec::new(),
-    );
-
-    let first = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("ChildSpawned did not arrive in time"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed without ChildSpawned"))?;
-    let client = match first {
-        SpawnEvent::ChildSpawned(client) => client,
-        SpawnEvent::BootReady(_) => {
-            return Err(std::io::Error::other("BootReady arrived before ChildSpawned").into());
-        }
-        SpawnEvent::Terminal(error) => {
-            return Err(std::io::Error::other(format!("unexpected Terminal: {error:?}")).into());
-        }
-        SpawnEvent::HealthChanged(_) => {
-            return Err(std::io::Error::other(
-                "HealthChanged arrived before ChildSpawned",
-            )
-            .into());
-        }
-    };
-
-    let second = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("BootReady did not arrive in time"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed without BootReady"))?;
-    match second {
-        SpawnEvent::BootReady(response) => {
-            assert!(response.ready);
-            assert_eq!(response.schema_version, 100);
-            assert_eq!(response.migrations_applied, 1);
-        }
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected BootReady second, got {other:?}"
-            ))
-            .into());
-        }
-    }
-
-    // Tear down cleanly.
-    let _ = client.shutdown().await;
-    Ok(())
+#[ignore = "covered by crates/app/tests/service-harness/two_phase_spawn.lua"]
+#[test]
+fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot() {
+    // Authoritative coverage moved to `brokkr service-test`.
 }
 
 /// `spawn_with_events` against a data dir without `ratatoskr.key`: ping
@@ -493,27 +379,10 @@ async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
 /// scheduling pressure (`brokkr check` does not set --test-threads=1
 /// and reviewers explicitly rejected setting it). The helper waits for
 /// `Terminal` regardless of whether `ChildSpawned` fired first.
-// FLAKY: previously ignored, then re-enabled when the
-// `request_or_observe_child_exit` path was thought to have fixed it.
-// `service_subprocess_ping_and_shutdown` is hanging again on the same
-// host so the underlying flakiness is likely back. Tracked for
-// investigation in `docs/service/implementation-roadmap.md` Phase 8.
-// Re-enable when the deadlock is root-caused.
-#[ignore]
-#[tokio::test(flavor = "multi_thread")]
-async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::without_key("two_phase_missing_key")?;
-    let mut events = ServiceClient::spawn_with_events_for_test(
-        binary,
-        data_dir.path().to_path_buf(),
-        Vec::new(),
-    );
-
-    let error =
-        await_terminal_with_deadline(&mut events, std::time::Duration::from_secs(30)).await?;
-    assert_terminal_is_key_load_failure(&error);
-    Ok(())
+#[ignore = "covered by crates/app/tests/service-harness/terminal_on_missing_key.lua"]
+#[test]
+fn spawn_with_events_emits_terminal_on_missing_key() {
+    // Authoritative coverage moved to `brokkr service-test`.
 }
 
 /// Wait for a `Terminal` event (or unrecoverable failure) on a spawn-event
@@ -835,262 +704,18 @@ async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
     Ok(())
 }
 
-/// SIGKILL the running Service mid-session and verify that the
-/// respawn machinery (commit 14) brings up a replacement child and re-emits
-/// `ChildSpawned` + `BootReady` on the same `SpawnEvent` receiver. A
-/// follow-up `health.ping` against the respawned client must succeed,
-/// proving end-to-end that the new state is live.
-// FLAKY: passes solo but hangs intermittently when run in the suite
-// or under `-N` repeats. Same shape as the other Phase 8 service-
-// subprocess flakes (`service_subprocess_ping_and_shutdown`,
-// `spawn_with_events_emits_terminal_on_missing_key`). The root cause
-// is the libtest-based subprocess lifecycle; the proper fix is the
-// service test harness in `docs/harness/` (the `.lua` rewrite under
-// M2 of the roadmap). Re-enable - or delete in favor of the Lua
-// rewrite - once the harness wedge lands.
-#[ignore]
+#[ignore = "covered by crates/app/tests/service-harness/respawn_after_sigkill.lua"]
 #[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn respawn_after_sigkill_succeeds() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("respawn_after_sigkill")?;
-    let mut events = ServiceClient::spawn_with_events_for_test(
-        binary,
-        data_dir.path().to_path_buf(),
-        Vec::new(),
-    );
-
-    // Initial ChildSpawned + BootReady.
-    let first_event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("ChildSpawned did not arrive in time"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed without ChildSpawned"))?;
-    let initial_client = match first_event {
-        SpawnEvent::ChildSpawned(client) => client,
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected initial ChildSpawned, got {other:?}",
-            ))
-            .into());
-        }
-    };
-    let second_event = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("initial BootReady did not arrive in time"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed without BootReady"))?;
-    match second_event {
-        SpawnEvent::BootReady(_) => {}
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected initial BootReady, got {other:?}"
-            ))
-            .into());
-        }
-    }
-
-    let initial_pid = initial_client
-        .child_pid()
-        .ok_or_else(|| std::io::Error::other("initial child has no pid"))?;
-    let initial_pid_signed = i32::try_from(initial_pid).map_err(std::io::Error::other)?;
-    // SAFETY: SIGKILL on a known PID held alive by the ServiceClient's
-    // child handle. The client keeps the PID stable until wait().
-    let kill_result = unsafe { libc::kill(initial_pid_signed, libc::SIGKILL) };
-    if kill_result != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-
-    // Reader observes EOF, fires handle_crash, runs the 1s respawn cooldown,
-    // launches a replacement Service, version-check pings, re-emits
-    // ChildSpawned then BootReady. Budget covers the 1s sleep + spawn +
-    // boot.ready (sub-second on a non-migrating reopen).
-    let respawn_first =
-        tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-            .await
-            .map_err(|_| std::io::Error::other("respawn ChildSpawned did not arrive in time"))?
-            .ok_or_else(|| std::io::Error::other("event stream closed before respawn"))?;
-    let respawned_client = match respawn_first {
-        SpawnEvent::ChildSpawned(client) => client,
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected respawn ChildSpawned, got {other:?}",
-            ))
-            .into());
-        }
-    };
-    let respawn_second =
-        tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-            .await
-            .map_err(|_| std::io::Error::other("respawn BootReady did not arrive in time"))?
-            .ok_or_else(|| std::io::Error::other("event stream closed before respawn BootReady"))?;
-    match respawn_second {
-        SpawnEvent::BootReady(response) => {
-            assert!(response.ready);
-            assert_eq!(response.schema_version, 100);
-        }
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected respawn BootReady, got {other:?}",
-            ))
-            .into());
-        }
-    }
-
-    // ServiceClient is the same allocation across the respawn (the App holds
-    // one Arc and respawn replaces internal RunningState in place); proof:
-    // the post-respawn ChildSpawned hands back the same Arc.
-    assert!(
-        std::sync::Arc::ptr_eq(&initial_client, &respawned_client),
-        "respawn must replace state in place; the Arc must be identical",
-    );
-
-    // Sanity: a health.ping against the respawned subprocess must round-trip
-    // through the new RunningState. The new child has a different PID.
-    let respawned_pid = respawned_client
-        .child_pid()
-        .ok_or_else(|| std::io::Error::other("respawned child has no pid"))?;
-    assert_ne!(initial_pid, respawned_pid);
-    let ping: HealthPingResponse = respawned_client
-        .request(RequestParams::HealthPing)
-        .await?;
-    assert_eq!(ping.version, service_api::PROTOCOL_VERSION);
-    assert_eq!(ping.pid, respawned_pid);
-
-    let _ = respawned_client.shutdown().await;
-    Ok(())
+#[test]
+fn respawn_after_sigkill_succeeds() {
+    // Authoritative coverage moved to `brokkr service-test`.
 }
 
-/// Combined: a long-running request in flight at SIGKILL time fails with
-/// `ClientError::ServiceCrashed`, AND a follow-up request after the
-/// respawn lands successfully on the new Service incarnation. Distinct
-/// from `pending_request_fails_with_service_crashed_when_child_killed`
-/// (single-shot, no respawn) and from `respawn_after_sigkill_succeeds`
-/// (respawn happy-path, no in-flight request). The plan asked for both
-/// halves in the same test - this is that test.
-// FLAKY: same shape as `respawn_after_sigkill_succeeds` above -
-// passes solo, hangs in the suite or under `-N` repeats. The proper
-// fix is the harness Lua rewrite under M2 of `docs/harness/roadmap.md`.
-#[ignore]
+#[ignore = "covered by crates/app/tests/service-harness/pending_at_respawn.lua"]
 #[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn pending_request_fails_at_respawn_then_subsequent_succeeds() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("pending_fail_respawn_succeed")?;
-    let mut events = ServiceClient::spawn_with_events_for_test(
-        binary,
-        data_dir.path().to_path_buf(),
-        Vec::new(),
-    );
-
-    // Walk the receiver to ChildSpawned + BootReady so we have the live
-    // ServiceClient for the respawn-enabled path.
-    let initial_client = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        events.recv(),
-    )
-    .await
-    .map_err(|_| std::io::Error::other("ChildSpawned timeout"))?
-    .ok_or_else(|| std::io::Error::other("event stream closed empty"))?
-    {
-        SpawnEvent::ChildSpawned(client) => client,
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected ChildSpawned, got {other:?}",
-            ))
-            .into());
-        }
-    };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("initial BootReady timeout"))?;
-
-    let initial_pid = initial_client
-        .child_pid()
-        .ok_or_else(|| std::io::Error::other("initial child has no pid"))?;
-
-    // Issue a long-running request in the background. The handler sleeps
-    // for 60 s; we will kill the child before the response can arrive.
-    let request_client = std::sync::Arc::clone(&initial_client);
-    let pending = tokio::spawn(async move {
-        request_client
-            .request::<()>(RequestParams::TestSlow { millis: 60_000 })
-            .await
-    });
-
-    // Give the request time to land at the Service.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    // SIGKILL the initial Service.
-    let pid_signed = i32::try_from(initial_pid).map_err(std::io::Error::other)?;
-    // SAFETY: SIGKILL on a known PID held alive by the ServiceClient's
-    // child handle. The client keeps the PID stable until wait().
-    let kill_result = unsafe { libc::kill(pid_signed, libc::SIGKILL) };
-    if kill_result != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-
-    // Half 1: the in-flight request resolves to ServiceCrashed.
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
-        .await
-        .map_err(|_| std::io::Error::other("pending request did not resolve after SIGKILL"))?
-        .map_err(|e| std::io::Error::other(format!("request task join: {e}")))?;
-    match outcome {
-        Err(ClientError::ServiceCrashed) => {}
-        Err(other) => {
-            return Err(std::io::Error::other(format!(
-                "expected ServiceCrashed, got {other:?}"
-            ))
-            .into());
-        }
-        Ok(()) => {
-            return Err(std::io::Error::other(
-                "pending request unexpectedly succeeded after SIGKILL",
-            )
-            .into());
-        }
-    }
-
-    // Half 2: drain the respawn events (ChildSpawned + BootReady) and then
-    // assert a fresh request succeeds against the new incarnation.
-    let respawn_first = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("respawn ChildSpawned timeout"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed before respawn ChildSpawned"))?;
-    match respawn_first {
-        SpawnEvent::ChildSpawned(_) => {}
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected respawn ChildSpawned, got {other:?}",
-            ))
-            .into());
-        }
-    }
-    let respawn_second = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("respawn BootReady timeout"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed before respawn BootReady"))?;
-    match respawn_second {
-        SpawnEvent::BootReady(_) => {}
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected respawn BootReady, got {other:?}",
-            ))
-            .into());
-        }
-    }
-
-    // The same Arc is in-place across the respawn; a fresh ping must
-    // round-trip through the new RunningState.
-    let ping: HealthPingResponse = initial_client
-        .request(RequestParams::HealthPing)
-        .await?;
-    assert_eq!(ping.version, service_api::PROTOCOL_VERSION);
-    let respawned_pid = initial_client
-        .child_pid()
-        .ok_or_else(|| std::io::Error::other("respawned child has no pid"))?;
-    assert_ne!(initial_pid, respawned_pid);
-
-    let _ = initial_client.shutdown().await;
-    Ok(())
+#[test]
+fn pending_request_fails_at_respawn_then_subsequent_succeeds() {
+    // Authoritative coverage moved to `brokkr service-test`.
 }
 
 /// Boot-time KeyLoadFailure must NOT trigger respawn: handle_crash sees

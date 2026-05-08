@@ -251,6 +251,7 @@ dependencies = [
  "chrono",
  "cmdk",
  "dashmap",
+ "dellingr",
  "dev-seed",
  "dirs",
  "display-info",
@@ -1486,6 +1487,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "dellingr"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0417452c64eeb6492207e8354ad4ef25b5f5999326608f66787a34a69be2b0b"
+dependencies = [
+ "hotpath",
+ "indexmap",
+ "rand 0.10.1",
+ "slotmap",
 ]
 
 [[package]]

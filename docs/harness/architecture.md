@@ -68,7 +68,7 @@ brokkr service-test foo.lua
     +-- preserves artefact dir on failure / non-zero exit
 ```
 
-The runtime inside `app --test-harness`:
+The target runtime inside `app --test-harness`:
 
 ```
 +-- dellingr Lua VM
@@ -81,6 +81,17 @@ The runtime inside `app --test-harness`:
     proc-*.txt, data-dir/, runtime diagnostics) into
     BROKKR_HARNESS_ARTEFACT_DIR
 ```
+
+Current landed state (2026-05-08): the M1/M2 wedge implements the
+subprocess Service path, the dellingr `0.2.0` VM, client/event/request
+userdata needed by the wedge scripts, redacted frame tracing,
+event/step tracing, Service stderr capture, runtime outcome writing,
+data-dir copy-on-failure, and best-effort Linux `/proc` snapshots.
+The broader target surface above is still incremental work:
+generic `wait_for`, `NotificationQueue` userdata, sentinel watch,
+parent-death helper bindings, generic `wait_exit`, resource summaries,
+and a complete request registry are deferred until the first migrated
+test needs each one.
 
 The v1 spawn path is subprocess-only. Scripts spawn the Service through
 `ServiceClient` / `app --service`; the `spawn_harness_with_suffix`
@@ -165,6 +176,26 @@ needs the client API or compile-time profiling shows pressure.
 
 ## What ratatoskr provides (in `app`'s harness module)
 
+The M1/M2 implementation is deliberately narrower than the full
+target API described below. In tree today:
+
+- `app --test-harness <script.lua>` is compiled only with
+  `test-helpers`.
+- The Lua global `harness` exposes `data_dir`, `spawn`,
+  `spawn_with_events`, `kill`, `pid_is_alive`, `sleep`, `assert`,
+  `assert_eq`, `same_client`, `expect_quiet(events, seconds)`, and
+  `protocol_version`.
+- Client tables expose `request`, `request_async`, `shutdown`,
+  `child_pid`, `current_generation`, and `drop`.
+- Event streams expose `events:next(timeout_seconds)`.
+- Async request handles expose `request:await(timeout_seconds)`.
+- The request registry currently covers `HealthPing`, `Shutdown`,
+  `BootReady`, `TestSlow`, and `TestPrintln`.
+
+The bullets after this paragraph are the target capability set for the
+full harness arc; when they mention APIs not in the current list, those
+APIs are future work, not hidden existing behavior.
+
 - **Embedded Lua VM** (`dellingr`) running test scripts.
 - **`ServiceClient` userdata** - Lua scripts construct one via
   `harness.spawn(args)` or `harness.spawn_with_events(args)` and call
@@ -185,25 +216,29 @@ needs the client API or compile-time profiling shows pressure.
   `SpawnEvent`, `ClientError`, `BootClassification`, and
   `SchemaVersionChanged { was, now }` are exposed as typed userdata so
   scripts can pattern-match without parsing strings.
-- **`NotificationQueue` userdata** - `queue:recv(timeout)` /
+- **`NotificationQueue` userdata** - not landed in M1/M2.
+  Target shape: `queue:recv(timeout)` /
   `queue:drain_for(duration)` return `Notification` userdata that
   scripts inspect for `service_generation`, `method`, etc.
   Notification payloads are the exception to typed request/response
   decoding: they expose a `serde_json::Value`-backed Lua view for
   `params`, so scripts can filter on `notif.method == "X"` and inspect
   varied payload details without one typed shell per notification.
-- **Deterministic wait combinator** - exposed as
+- **Deterministic wait combinator** - not landed in M1/M2.
+  Target shape: exposed as
   `harness.wait_for { predicate, child = client, backstop = "30s" }`.
   Every wait races the predicate against
   child-exit observation internally; failure verdicts name which fired.
-  M1 bumps `ServiceClient::observe_child_exit` to `pub(crate)`; the
-  wait combinator remains in the harness module so the protocol layer
-  does not learn about Lua predicates or the VM.
-- **Quiet observation combinator** - exposed as
+  When this lands, the harness will need a child-exit observation
+  surface that preserves `ServiceClient` as a protocol layer and does
+  not teach it about Lua predicates or the VM.
+- **Quiet observation combinator** - M1/M2 exposes
+  `harness.expect_quiet(events, seconds)` for event-stream absence
+  assertions. Target shape:
   `harness.expect_quiet { predicate, child = client, window = "2s" }`.
-  This is the absence assertion shape. The window expiring without the
-  predicate firing is success; child termination still short-circuits
-  with a named verdict.
+  The window expiring without the predicate firing is success; child
+  termination should short-circuit with a named verdict once the
+  generic form lands.
 - **Process orchestration not covered by `ServiceClient`** -
   process-group spawn for non-`ServiceClient` children (the
   `parent_death_helper` binary, future stub helpers); SIGKILL/SIGTERM
@@ -215,9 +250,10 @@ needs the client API or compile-time profiling shows pressure.
   purposes (taps the wire underneath `ServiceClient`, not the primary
   test surface). There is no leading-slash auto-detection and no glob
   support in v1.
-  These script-visible primitives are implemented in ratatoskr's
-  harness module. Brokkr has similar helpers for its own cleanup path,
-  but there is no brokkr/runtime control channel in v1.
+  M1/M2 implements `kill` and `pid_is_alive`. The other primitives in
+  this bullet are target capabilities. Brokkr has similar helpers for
+  its own cleanup path, but there is no brokkr/runtime control channel
+  in v1.
 - **Artefact-dir writers** - the frame log, event log, step trace,
   Service-specific `/proc` snapshot, data-dir copy, `service.stderr`,
   and `runtime-outcome.json` are populated by the harness module into
@@ -324,27 +360,26 @@ in the test trace. Tests assert on the transition that should have
 fired; failure messages name the transition that actually did.
 
 This is the Phase 1.6 `request_or_observe_child_exit` pattern lifted
-from "one helper inside ratatoskr" to "the default wait shape exposed
-through the Lua binding." `ServiceClient` provides the underlying
-mechanism (`observe_child_exit` polls `Child::try_wait` on a 50 ms
-interval); M1 bumps that method to `pub(crate)`, and the harness module
-owns the combinator loop. Keeping the loop in the harness avoids
-bridging Lua predicates through `ServiceClient` and keeps
-`ServiceClient` as a pure protocol layer. Wall-clock is never the
-primary signal.
+from "one helper inside ratatoskr" toward "the default wait shape
+exposed through the Lua binding." M1/M2 does not yet expose the generic
+Lua `wait_for` combinator; the wedge uses typed `ServiceClient`
+requests, event-stream receives, async request handles, and generous
+per-call timeouts. The future generic combinator should keep the loop
+in the harness module so `ServiceClient` remains a pure protocol layer.
+Wall-clock must never become the primary signal.
 
 Backstops are still wall-clock - the harness can't escape physical
 time entirely - but they are explicit, named, generous, and never the
 primary signal. The API has two separate wait shapes:
 
-- `harness.wait_for { predicate, child, backstop }` is for positive
-  waits that should complete through a predicate or child-exit
+- `harness.wait_for { predicate, child, backstop }` is target API for
+  positive waits that should complete through a predicate or child-exit
   transition. Safety-backstop firing is a test-design or
   implementation-determinism bug, not a flake.
-- `harness.expect_quiet { predicate, child, window }` is for absence
-  assertions, such as "no respawn event after a terminal boot failure."
-  Window expiry is the expected success verdict; predicate firing is
-  the failure verdict.
+- M1/M2 exposes the narrower `harness.expect_quiet(events, seconds)`
+  used by the wedge scripts. The target
+  `harness.expect_quiet { predicate, child, window }` shape remains the
+  full absence assertion API.
 
 ## Test scripts
 
@@ -356,6 +391,8 @@ it spawns the ratatoskr-side runtime via
 `.lua` file in ratatoskr's tree; no brokkr rebuild, and no
 harness-module rebuild either unless the new test exercises a Lua API
 surface that does not exist yet.
+
+The landed dependency is `dellingr 0.2.0`.
 
 Why Lua via `dellingr`:
 
@@ -376,9 +413,11 @@ binding has to surface.
 
 ### `ServiceClient` methods exposed to Lua
 
-The existing test bodies call these. The Lua binding wraps each
-one-for-one. Names below are Rust; Lua spelling is whatever the
-binding picks.
+The existing and planned test bodies call these. M1/M2 wraps the
+subset needed by the wedge (`spawn`, `spawn_with_events`, `request`,
+`request_async`, `shutdown`, `current_generation`, `child_pid`,
+`drop`). Names below are Rust; Lua spelling is whatever the binding
+picks as each capability lands.
 
 - `spawn_for_test(binary, data_dir, extra_args) -> Arc<ServiceClient>`
 - `spawn_with_events_for_test(binary, data_dir, extra_args) -> mpsc::Receiver<SpawnEvent>`
@@ -390,8 +429,8 @@ binding picks.
   Rust enum and the binding strips or maps it as it chooses for Lua
   spellings). Rust decodes the typed response and converts it to a Lua
   table.
-- `notifications() -> Arc<NotificationQueue>` - returns a queue
-  userdata with `recv(timeout)` and drain helpers.
+- `notifications() -> Arc<NotificationQueue>` - target capability;
+  returns a queue userdata with `recv(timeout)` and drain helpers.
 - `current_generation() -> u32`
 - `child_pid() -> Option<u32>`
 - `shutdown() -> Result<(), ClientError>`
@@ -411,7 +450,8 @@ existing tests do.
 - **`drop(client)`** - exercises the explicit Drop teardown path.
 - **PID-existence polling** - `harness.pid_is_alive(pid)` mirroring
   ratatoskr's `pid_is_alive` test helper.
-- **Stub-parent helper invocation** - the `parent_death_helper`
+- **Stub-parent helper invocation** - target capability. The
+  `parent_death_helper`
   binary already exists in ratatoskr (registered as
   `CARGO_BIN_EXE_parent_death_helper`). The harness builds it
   alongside `app` and exposes
@@ -444,7 +484,8 @@ existing tests do.
   `queue:drain_for(duration) -> [Notification]`, with
   `Notification:service_generation()` exposing the tag.
 - **Absence over observation window** - "no event received in N seconds,
-  after a known transition." Scripts use
+  after a known transition." M1/M2 scripts use
+  `harness.expect_quiet(events, seconds)`. The target shape is
   `harness.expect_quiet { predicate, child, window }`; the window
   expiring is the expected success verdict, not a harness-timeout
   failure.
@@ -463,11 +504,12 @@ existing tests do.
 
 ### Determinism scaffolding
 
-- **Wait combinator** - `harness.wait_for { ... }`. Composes a
+- **Wait combinator** - target API `harness.wait_for { ... }`.
+  Composes a
   predicate against `client:observe_child_exit()` so any Service
   death short-circuits the wait with a "child exited while awaiting
   X" verdict.
-- **Sentinel-file watch** -
+- **Sentinel-file watch** - target API:
   `harness.wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }`
   for data-dir-relative paths, or
   `harness.wait_for_sentinel { absolute = "/var/run/foo", backstop = "5s" }`
@@ -492,20 +534,20 @@ existing tests do.
 | `boot_ready_returns_after_sequence_completes` | Current example of the cohort failing under `brokkr check`; needs frame/step trace around `boot.ready`, boot shared state, and shutdown drain rather than only an outer libtest timeout. |
 | `health_ping_succeeds_during_long_migration` / `health_ping_works_concurrently_with_boot_ready` | Need concurrent request driving while `boot.ready` is parked; Lua API may need explicit background request / parallel request primitive, not just sequential `client:request`. |
 | `boot_ready_blocks_until_sequence_completes` / `boot_progress_notifications_emitted_in_order` (currently ignored) | Existing in-process harness hangs; migrate with the same diagnostic artefact contract as the subprocess wedge. |
-| `service_subprocess_ping_and_shutdown` (existing, ignored) | direct subprocess + raw frames; rewrite to `ServiceClient`-based once stable. |
+| `service_subprocess_ping_and_shutdown` | M2 landed `crates/app/tests/service-harness/ping_and_shutdown.lua`; the old libtest body is now an ignored pointer stub. |
 | `dropping_client_terminates_child_within_one_second` | `spawn_for_test`, `child_pid`, `drop(client)`, `pid_is_alive` poll. |
 | `spawn_failure_against_missing_binary_returns_io_error` | `spawn_for_test` against bogus path, expect `ClientError::Io`. |
 | `linux_parent_sigkill_terminates_service_within_two_seconds` | `parent_death_helper` invocation, PID handoff via stdout, `kill(helper, SIGKILL)`, `pid_is_alive` poll on Service PID. |
 | `println_from_handler_does_not_corrupt_json_rpc_framing` | `spawn_for_test`, `request("TestPrintln")`, `request("HealthPing")`, two-step round-trip. |
 | `version_mismatch_surfaces_during_handshake` | `spawn_for_test` with `--test-fake-version=999`, expect `ClientError::VersionMismatch { ui, service }`. |
 | `pending_request_fails_with_service_crashed_when_child_killed` | `request("TestSlow", 60_000)` in background, `kill(pid, SIGKILL)`, expect `ClientError::ServiceCrashed`. |
-| `spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot` | `spawn_with_events_for_test`, ordered events, `BootReady` field assertions. |
-| `spawn_with_events_emits_terminal_on_missing_key` (existing, ignored) | `spawn_with_events_for_test` against keyless dir, expect `Terminal { BootFailure { KeyLoadFailure } }`. |
+| `spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot` | M2 landed `two_phase_spawn.lua`; the old libtest body is now an ignored pointer stub. |
+| `spawn_with_events_emits_terminal_on_missing_key` | M2 landed `terminal_on_missing_key.lua`; the old libtest body is now an ignored pointer stub. |
 | `missing_key_file_exits_with_key_load_failure_code` | direct subprocess, hold stdin, `wait_exit` with code 73. |
 | `second_instance_against_same_data_dir_exits_with_already_running` | two parallel children, drive A's IPC, B's `wait_exit` with code 71. |
 | `spawn_with_events_classifies_another_instance_running` | A direct, B via events, expect `Terminal { BootFailure { AnotherInstanceRunning } }`. |
-| `respawn_after_sigkill_succeeds` | `spawn_with_events_for_test`, `kill`, follow-up events, `same_client(a, b)`, ping after respawn. |
-| `pending_request_fails_at_respawn_then_subsequent_succeeds` | combined `pending_request_fails_*` + `respawn_after_sigkill_*`. |
+| `respawn_after_sigkill_succeeds` | M2 landed `respawn_after_sigkill.lua`; the old libtest body is now an ignored pointer stub. |
+| `pending_request_fails_at_respawn_then_subsequent_succeeds` | M2 landed `pending_at_respawn.lua`; the old libtest body is now an ignored pointer stub. |
 | `terminal_failure_at_initial_boot_does_not_respawn` | `spawn_with_events`, `Terminal`, post-Terminal absence-over-window. |
 | `crashloop_threshold_emits_terminal_after_third_crash` | loop of `kill` + observe `ChildSpawned + BootReady`, third kill expects `Terminal`. |
 | `stale_notifications_dropped_after_generation_bump_end_to_end` | `notifications()`, `current_generation()`, drain across kill+respawn, generation-tag check. |
@@ -545,9 +587,14 @@ entries to the harness request/response registry.
 
 ## Deterministic app-data fixtures
 
-Brokkr does not create app-data directories itself - the Lua scripts
-do, via `RequestParams::TestSeedAccount` (or equivalent). Ratatoskr
-provides a fixture setup path that creates:
+Brokkr does not create app-data directories itself - Lua scripts do.
+M1/M2 exposes `harness.data_dir(suffix, with_key)` for simple Service
+boot fixtures; it creates a per-run app-data directory and, by default,
+a deterministic non-zero `ratatoskr.key`. The missing-key wedge passes
+`false`.
+
+The later fixture setup path, likely via `RequestParams::TestSeedAccount`
+(or equivalent), should create:
 
 - `ratatoskr.key`;
 - migrated main SQLite schema;
@@ -590,11 +637,13 @@ Timings should not require brokkr to scrape human log lines.
 
 ## Trace schema
 
-Trace files are JSONL with versioned records. The schemas live as
-serde structs in `crates/app/src/harness/trace_schema.rs`; each
-top-level record carries `schema = 1`. Readers tolerate unknown fields
-for forward compatibility. Writers bump the schema version only for
-incompatible field changes.
+Trace files are JSONL with versioned records. M1/M2 emits these
+records directly from the harness runtime and `ServiceTraceSink`;
+there is not yet a separate `trace_schema.rs` module or reader crate.
+When failure-triage tooling starts reading these files, factor the
+schemas into serde structs and keep readers tolerant of unknown fields
+for forward compatibility. Each top-level record currently carries
+`schema = 1`.
 
 `frames.jsonl` records:
 
@@ -617,10 +666,14 @@ Structural redaction is the default posture for strings above a chosen
 threshold (`<redacted len=N>`). A per-`RequestParams` field allowlist is
 the long-term refinement before any credentialed script lands.
 
+Current M1/M2 limitation: `parsed` is always `null`. The raw redacted
+frame, length, and SHA-256 are present and are the supported diagnostic
+surface for the wedge.
+
 `events.jsonl` records:
 
 ```
-{ "schema": 1, "ts_ms": 123, "seq": 7, "event": { ... } }
+{ "schema": 1, "ts_ms": 123, "event": { ... } }
 ```
 
 `event` is the typed `SpawnEvent` serialization.
@@ -632,16 +685,14 @@ the long-term refinement before any credentialed script lands.
   "schema": 1,
   "ts_ms": 123,
   "step": "script supplied label",
-  "kind": "wait_for" | "expect_quiet" | "wait_for_sentinel",
-  "predicate_desc": "...",
-  "transition": "predicate" | "child_exit" | "backstop" | "window_expired",
-  "duration_ms": 42
+  "kind": "spawn" | "request" | "expect_quiet" | "...",
+  "transition": "started" | "ok" | "error" | "quiet" | "event" | "..."
 }
 ```
 
-Step labels and predicate descriptions come from scripts. V1 documents
-and commits these schemas without building a separate reader; failure-
-triage tooling can provide feedback once it exists.
+The target schema will add predicate descriptions, duration fields,
+and richer transition naming when generic wait combinators land.
+Failure-triage tooling can provide feedback once it exists.
 
 ## Failure model
 
@@ -662,7 +713,7 @@ contents are:
   per-run, not race-mingled with test stdout. V1 requires a
   harness-specific Service spawn path that pipes stderr to this file,
   because today's `ServiceClient::launch_subprocess` inherits stderr.
-- **`proc-{status,wchan,syscall,stack}.txt`** - snapshot of
+- **`proc-{status,wchan,syscall,stack}.txt`** - best-effort snapshot of
   `/proc/<pid>/status`, `/proc/<pid>/wchan`, `/proc/<pid>/syscall`,
   `/proc/<pid>/stack` at the moment failure was declared.
   Distinguishes "blocked on futex" from "blocked on closed pipe"
