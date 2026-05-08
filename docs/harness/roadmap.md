@@ -542,6 +542,10 @@ Ratatoskr-side M8 surface now in tree:
 - `test.start_sync` starts the real Service sync runtime. The
   Service sync dispatcher now runs provider initial sync when
   `accounts.initial_sync_completed = 0`, then delta sync afterwards.
+- `client:start_sync` is the Lua path for scripts that need the
+  terminal result; it routes through `ServiceClient::start_sync`
+  because raw `sync.completed` notifications are consumed by the
+  client's waiter map before `client:notifications()`.
 - `test.query_db_state` returns account, label, thread, message,
   unread-message, attachment, and small message-list snapshots for
   sync-harness assertions.

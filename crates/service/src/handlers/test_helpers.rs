@@ -86,7 +86,7 @@ pub(super) async fn seed_account_handle(
         smtp_security: Some("starttls".into()),
         smtp_username: Some(email.clone()),
         smtp_password: Some("test-password".into()),
-        jmap_url: Some("https://jmap.example.test/jmap/session".into()),
+        jmap_url: Some("https://jmap.example.test".into()),
         accept_invalid_certs: true,
     };
     let ack_email = email.clone();

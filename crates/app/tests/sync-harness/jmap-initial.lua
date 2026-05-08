@@ -4,19 +4,6 @@
 -- protocol: jmap
 -- ceiling: 120s
 
-local function wait_for_sync_completed(queue, run_id, timeout)
-    local deadline = harness.now_ms() + timeout * 1000
-    while harness.now_ms() < deadline do
-        local event = queue:recv(1)
-        if event ~= nil and event.type == "SyncCompleted" then
-            if event.run_id == run_id then
-                return event
-            end
-        end
-    end
-    return nil
-end
-
 local function subject_seen(messages, subject)
     for _, message in ipairs(messages) do
         if message.subject == subject then
@@ -34,8 +21,6 @@ local ready, ready_err = client:request("BootReady")
 harness.assert(ready_err == nil, "boot.ready failed")
 harness.assert(ready.ready, "boot.ready returned ready=false")
 
-local queue = client:notifications()
-
 local account, account_err = client:request("TestSeedAccount", {
     email = "sync-jmap-initial@example.test",
     display_name = "Sync JMAP",
@@ -44,15 +29,11 @@ local account, account_err = client:request("TestSeedAccount", {
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
-local started, start_err = client:request("TestStartSync", {
+local completed, sync_err = client:start_sync({
     account_id = account.account_id,
-})
-harness.assert(start_err == nil, "TestStartSync failed")
-harness.assert(started.run_id ~= nil, "sync run id missing")
-
-local completed = wait_for_sync_completed(queue, started.run_id, 30)
-harness.assert(completed ~= nil, "missing sync.completed")
-harness.assert_eq(completed.result, "completed", "sync result")
+}, 30)
+harness.assert(sync_err == nil, "start_sync failed")
+harness.assert_eq(completed.result, "completed", completed.error or "sync result")
 
 local state, state_err = client:request("TestQueryDbState", {
     account_id = account.account_id,

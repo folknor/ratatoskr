@@ -637,8 +637,9 @@ documents what shipped before the file deletes.
   `test-helpers`, provider clients now read
   `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, the Service
   sync dispatcher runs initial sync for accounts whose
-  `initial_sync_completed = 0`, `test.start_sync` / `test.query_db_state`
-  are script-visible, and
+  `initial_sync_completed = 0`, `test.start_sync` /
+  `test.query_db_state` are script-visible, `client:start_sync` awaits
+  terminal sync results through the ServiceClient waiter path, and
   `crates/app/tests/sync-harness/jmap-initial.lua` is in tree for the
   `jmap-small` fixture. Mock orchestration and wider fixture coverage
   remain in brokkr + `../sæhrimnir`.

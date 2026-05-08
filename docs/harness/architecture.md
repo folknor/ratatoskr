@@ -566,7 +566,7 @@ existing tests do.
 | `action_skips_search_index_write` / `handler_does_not_drive_batch_execute` | `request("TestCounterRead", ...)` before/after, Lua subtraction. |
 | `journal_replays_after_respawn` / `stale_outcomes_dropped_after_respawn` | `request` + `kill` + respawn + `notifications` drain. |
 | `test_fake_schema_propagates_via_terminal` | `spawn_with_events_for_test` first run + `kill` + respawn with `--test-fake-schema=N`, expect `Terminal { SchemaVersionChanged { was, now } }`. |
-| `sync-harness/jmap-initial` | `test.seed_account` with provider `jmap`, `test.start_sync`, wait for `SyncCompleted`, `test.query_db_state` assertion over the `jmap-small` mock fixture. |
+| `sync-harness/jmap-initial` | `test.seed_account` with provider `jmap`, `client:start_sync`, `test.query_db_state` assertion over the `jmap-small` mock fixture. |
 | Manual matrix #4 (heartbeat detects killed Service) | `spawn_with_events_for_test`, `kill(service_pid, SIGKILL)`, `wait_for_sentinel { path = "logs/heartbeat-exiting", backstop = "30s" }` or follow-up event. |
 | Manual matrix #5 (SIGTERM triggers shutdown drain) | `spawn_for_test`, `kill(pid, SIGTERM)`, `wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }`, `wait_exit`. |
 
@@ -604,10 +604,11 @@ RATATOSKR_TEST_GRAPH_ENDPOINT=http://127.0.0.1:<graph-port>
 RATATOSKR_TEST_GMAIL_ENDPOINT=http://127.0.0.1:<gmail-port>
 ```
 
-JMAP origins map to `/jmap/session`; Graph origins map to `/v1.0`
-and `/beta`; Gmail origins map to `/gmail/v1/users/me`; IMAP and
-SMTP expect host:port. This lets brokkr pass per-run mock ports
-without changing persisted account config.
+JMAP endpoints are passed as base URLs and the JMAP client discovers
+`/.well-known/jmap`; Graph origins map to `/v1.0` and `/beta`; Gmail
+origins map to `/gmail/v1/users/me`; IMAP and SMTP expect host:port.
+This lets brokkr pass per-run mock ports without changing persisted
+account config.
 
 The sync-harness request surface is:
 
@@ -618,6 +619,12 @@ The sync-harness request surface is:
 - `test.query_db_state` / `TestQueryDbState` - returns account,
   label, thread, message, unread-message, attachment, and bounded
   message-list snapshots for assertions.
+
+Lua sync scripts that need the terminal result should call
+`client:start_sync({ account_id = ... })`. That routes through
+`ServiceClient::start_sync`, which uses the same waiter map as the UI;
+raw `sync.completed` frames are consumed there and are not delivered
+to `client:notifications()` queues.
 
 ## Deterministic app-data fixtures
 

@@ -39,35 +39,19 @@ type MailboxCache = Option<(Vec<MailboxListEntry>, std::time::Instant)>;
 const MAILBOX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[cfg(feature = "test-helpers")]
-fn endpoint_has_non_root_path(endpoint: &str) -> bool {
-    let after_authority = endpoint
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(endpoint);
-    after_authority
-        .find('/')
-        .map(|idx| !after_authority[idx..].trim_matches('/').is_empty())
-        .unwrap_or(false)
-}
-
-#[cfg(feature = "test-helpers")]
-fn jmap_session_url_from_test_endpoint(endpoint: &str) -> Option<String> {
+fn jmap_base_url_from_test_endpoint(endpoint: &str) -> Option<String> {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.is_empty() {
         return None;
     }
-    if endpoint_has_non_root_path(endpoint) {
-        Some(endpoint.to_string())
-    } else {
-        Some(format!("{endpoint}/jmap/session"))
-    }
+    Some(endpoint.to_string())
 }
 
 #[cfg(feature = "test-helpers")]
-fn jmap_session_url_override() -> Option<String> {
+fn jmap_base_url_override() -> Option<String> {
     std::env::var("RATATOSKR_TEST_JMAP_ENDPOINT")
         .ok()
-        .and_then(|value| jmap_session_url_from_test_endpoint(&value))
+        .and_then(|value| jmap_base_url_from_test_endpoint(&value))
 }
 
 impl JmapClient {
@@ -415,7 +399,7 @@ fn read_jmap_credentials(
 
     let mut jmap_url = row.0;
     #[cfg(feature = "test-helpers")]
-    if let Some(override_url) = jmap_session_url_override() {
+    if let Some(override_url) = jmap_base_url_override() {
         jmap_url = Some(override_url);
     }
     let jmap_url = jmap_url.ok_or("No jmap_url configured for account")?;
@@ -493,18 +477,17 @@ mod tests {
 
     #[cfg(feature = "test-helpers")]
     #[test]
-    fn test_jmap_endpoint_origin_maps_to_session_url() {
-        let url = jmap_session_url_from_test_endpoint("http://127.0.0.1:8080")
+    fn test_jmap_endpoint_origin_maps_to_base_url() {
+        let url = jmap_base_url_from_test_endpoint("http://127.0.0.1:8080")
             .expect("endpoint maps");
-        assert_eq!(url, "http://127.0.0.1:8080/jmap/session");
+        assert_eq!(url, "http://127.0.0.1:8080");
     }
 
     #[cfg(feature = "test-helpers")]
     #[test]
     fn test_jmap_endpoint_keeps_explicit_path() {
-        let url =
-            jmap_session_url_from_test_endpoint("http://127.0.0.1:8080/custom")
-                .expect("endpoint maps");
+        let url = jmap_base_url_from_test_endpoint("http://127.0.0.1:8080/custom")
+            .expect("endpoint maps");
         assert_eq!(url, "http://127.0.0.1:8080/custom");
     }
 
