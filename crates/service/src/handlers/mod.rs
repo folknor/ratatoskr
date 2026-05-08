@@ -166,6 +166,18 @@ pub(crate) async fn dispatch(
         RequestParams::TestSlow { millis } => test_helpers::slow_handle(millis).await,
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPrintln { message } => test_helpers::println_handle(message).await,
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestSeedAccount { params } => {
+            test_helpers::seed_account_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestCounterRead { counter } => {
+            test_helpers::counter_read_handle(counter).await
+        }
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestCrashAfterNWrites { params } => {
+            test_helpers::crash_after_n_writes_handle(params).await
+        }
     }
 }
 

@@ -848,15 +848,21 @@ pub(crate) async fn run_boot_sequence(
     )
     .await;
     let (result, context) = match inner {
-        Ok(ctx) => (
-            Ok(BootReadyResponse {
-                ready: true,
-                schema_version: ctx.schema_version,
-                migrations_applied: ctx.migrations_applied,
-                recovery_warnings: ctx.recovery_warnings.clone(),
-            }),
-            Some(ctx),
-        ),
+        Ok(ctx) => {
+            #[cfg(feature = "test-helpers")]
+            let schema_version = crate::test_fake_schema().unwrap_or(ctx.schema_version);
+            #[cfg(not(feature = "test-helpers"))]
+            let schema_version = ctx.schema_version;
+            (
+                Ok(BootReadyResponse {
+                    ready: true,
+                    schema_version,
+                    migrations_applied: ctx.migrations_applied,
+                    recovery_warnings: ctx.recovery_warnings.clone(),
+                }),
+                Some(ctx),
+            )
+        }
         Err(failure) => (Err(failure), None),
     };
     let outcome = match &result {

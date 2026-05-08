@@ -18,6 +18,8 @@ mod snooze_runner;
 pub(crate) mod startup_invariants;
 pub(crate) mod sync;
 pub(crate) mod sync_dispatch;
+#[cfg(feature = "test-helpers")]
+pub(crate) mod test_counters;
 pub(crate) mod text_extract;
 
 /// Re-export test-helpers knobs for the in-process integration tests so
@@ -183,6 +185,23 @@ pub(crate) fn test_fake_version() -> Option<u32> {
             return value.parse().ok();
         }
         if arg == "--test-fake-version" {
+            return args.next().and_then(|v| v.parse().ok());
+        }
+    }
+    None
+}
+
+/// Test-only override for the schema version reported in `boot.ready`.
+/// Triggered by `--test-fake-schema=N` on the Service command line. Used
+/// by the respawn harness to verify the terminal binary-swap guard.
+#[cfg(feature = "test-helpers")]
+pub(crate) fn test_fake_schema() -> Option<u32> {
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--test-fake-schema=") {
+            return value.parse().ok();
+        }
+        if arg == "--test-fake-schema" {
             return args.next().and_then(|v| v.parse().ok());
         }
     }

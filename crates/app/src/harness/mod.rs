@@ -11,7 +11,10 @@ use crate::service_client::{
 };
 use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
-use service_api::{BootClassification, BootExitCode, BootPhaseKind, Notification, RequestParams};
+use service_api::{
+    BootClassification, BootExitCode, BootPhaseKind, Notification, RequestParams,
+    TestCrashAfterNWritesParams, TestSeedAccountParams,
+};
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -559,6 +562,21 @@ fn lua_client_current_generation(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_client_set_respawn_args(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    let extra_args = read_extra_args(state, 2)?;
+    let ctx = context(state)?;
+    let updated = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard
+            .client(id)?
+            .set_respawn_extra_args_for_harness(extra_args)
+    };
+    state.set_top(0);
+    state.push_boolean(updated);
+    Ok(1)
+}
+
 fn lua_client_notifications(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     let ctx = context(state)?;
@@ -859,6 +877,7 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_fn(state, idx, "shutdown", lua_client_shutdown)?;
     set_field_fn(state, idx, "child_pid", lua_client_child_pid)?;
     set_field_fn(state, idx, "current_generation", lua_client_current_generation)?;
+    set_field_fn(state, idx, "set_respawn_args", lua_client_set_respawn_args)?;
     set_field_fn(state, idx, "notifications", lua_client_notifications)?;
     set_field_fn(state, idx, "drop", lua_client_drop)?;
     Ok(())
@@ -953,8 +972,53 @@ fn request_params_from_lua(
             };
             Ok(RequestParams::TestPrintln { message })
         }
+        "TestSeedAccount" | "test.seed_account" => {
+            let params = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) != LuaType::Nil
+            {
+                if state.typ(params_idx) != LuaType::Table {
+                    return Err(lua_error_message("TestSeedAccount params must be table"));
+                }
+                TestSeedAccountParams {
+                    email: get_string_field(state, params_idx, "email")?,
+                    display_name: get_string_field(state, params_idx, "display_name")?,
+                    account_name: get_string_field(state, params_idx, "account_name")?,
+                    provider: get_string_field(state, params_idx, "provider")?,
+                }
+            } else {
+                TestSeedAccountParams::default()
+            };
+            Ok(RequestParams::TestSeedAccount { params })
+        }
+        "TestCounterRead" | "test.counter_read" => {
+            let counter = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) == LuaType::Table
+            {
+                get_string_field(state, params_idx, "counter")?
+                    .ok_or_else(|| lua_error_message("TestCounterRead requires params.counter"))?
+            } else if state.get_top() >= params_idx as usize {
+                state.to_string(params_idx)?
+            } else {
+                return Err(lua_error_message("TestCounterRead requires counter"));
+            };
+            Ok(RequestParams::TestCounterRead { counter })
+        }
+        "TestCrashAfterNWrites" | "test.crash_after_n_writes" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestCrashAfterNWrites requires params table",
+                ));
+            }
+            let kind = get_string_field(state, params_idx, "kind")?
+                .ok_or_else(|| lua_error_message("TestCrashAfterNWrites requires params.kind"))?;
+            let n = get_number_field(state, params_idx, "n")?
+                .ok_or_else(|| lua_error_message("TestCrashAfterNWrites requires params.n"))?;
+            Ok(RequestParams::TestCrashAfterNWrites {
+                params: TestCrashAfterNWritesParams { kind, n: n as u64 },
+            })
+        }
         other => Err(lua_error_message(format!(
-            "request method {other:?} is not registered in harness M1"
+            "request method {other:?} is not registered in harness"
         ))),
     }
 }

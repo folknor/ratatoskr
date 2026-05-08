@@ -90,6 +90,11 @@ pub use framing::{
 pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
 pub use push::PushEvent;
 pub use redacted::{RedactedBytes, RedactedString};
+#[cfg(feature = "test-helpers")]
+pub use request::{
+    TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams,
+    TestSeedAccountAck, TestSeedAccountParams,
+};
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};
 pub use sync::{

@@ -255,6 +255,8 @@ async fn apply_command(
                 if first_uncommitted.is_none() {
                     *first_uncommitted = Some(Instant::now());
                 }
+                #[cfg(feature = "test-helpers")]
+                record_search_write("search.index");
             }
             let _ = ack.send(result);
         }
@@ -271,6 +273,8 @@ async fn apply_command(
                 if first_uncommitted.is_none() {
                     *first_uncommitted = Some(Instant::now());
                 }
+                #[cfg(feature = "test-helpers")]
+                record_search_write("search.delete");
             }
             let _ = ack.send(result);
         }
@@ -285,6 +289,10 @@ async fn apply_command(
                 let commit_result =
                     commit_and_notify(writer, notification_tx, service_generation).await;
                 let final_result = result.and(commit_result);
+                if final_result.is_ok() {
+                    #[cfg(feature = "test-helpers")]
+                    record_search_write("search.clear");
+                }
                 *pending_docs = 0;
                 *first_uncommitted = None;
                 let _ = ack.send(final_result);
@@ -296,6 +304,10 @@ async fn apply_command(
         WriterCommand::FlushNow { ack } => {
             let commit_result =
                 commit_and_notify(writer, notification_tx, service_generation).await;
+            if commit_result.is_ok() {
+                #[cfg(feature = "test-helpers")]
+                crate::test_counters::record("search.flush");
+            }
             *pending_docs = 0;
             *first_uncommitted = None;
             let _ = ack.send(commit_result);
@@ -311,6 +323,12 @@ async fn apply_command(
         *pending_docs = 0;
         *first_uncommitted = None;
     }
+}
+
+#[cfg(feature = "test-helpers")]
+fn record_search_write(kind: &str) {
+    crate::test_counters::record(kind);
+    crate::test_counters::record("search.write");
 }
 
 async fn commit_and_notify(

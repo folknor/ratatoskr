@@ -45,6 +45,9 @@ pub(super) async fn handle(
     .map_err(|e| ServiceError::Internal(format!("spawn_blocking: {e}")))?
     .map_err(ServiceError::Internal)?;
 
+    #[cfg(feature = "test-helpers")]
+    crate::test_counters::record("action.journal_write");
+
     // Worker wakeup wires in with task 9c. For now, the journal rows
     // sit until the worker is added.
     state.notify_action_worker();

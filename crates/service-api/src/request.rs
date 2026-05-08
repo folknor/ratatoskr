@@ -38,6 +38,45 @@ pub enum RequestTimeoutKind {
     Infinite,
 }
 
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedAccountParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedAccountAck {
+    pub account_id: String,
+    pub email: String,
+    pub label_count: u64,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestCounterReadAck {
+    pub counter: String,
+    pub value: u64,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestCrashAfterNWritesParams {
+    pub kind: String,
+    pub n: u64,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestCrashAfterNWritesAck;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestParams {
     HealthPing,
@@ -398,6 +437,15 @@ pub enum RequestParams {
     /// before responding. Used to verify the stdio corruption defense.
     #[cfg(feature = "test-helpers")]
     TestPrintln { message: String },
+    /// Creates a FK-valid account fixture plus baseline labels.
+    #[cfg(feature = "test-helpers")]
+    TestSeedAccount { params: TestSeedAccountParams },
+    /// Reads a service-side test counter by name.
+    #[cfg(feature = "test-helpers")]
+    TestCounterRead { counter: String },
+    /// Arms a crash rule that exits after the Nth matching write.
+    #[cfg(feature = "test-helpers")]
+    TestCrashAfterNWrites { params: TestCrashAfterNWritesParams },
 }
 
 /// Phase 8-1: idempotency classification for `RequestParams::idempotency()`.
@@ -469,6 +517,12 @@ impl RequestParams {
             Self::TestSlow { .. } => "test.slow",
             #[cfg(feature = "test-helpers")]
             Self::TestPrintln { .. } => "test.println",
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedAccount { .. } => "test.seed_account",
+            #[cfg(feature = "test-helpers")]
+            Self::TestCounterRead { .. } => "test.counter_read",
+            #[cfg(feature = "test-helpers")]
+            Self::TestCrashAfterNWrites { .. } => "test.crash_after_n_writes",
         }
     }
 
@@ -582,6 +636,12 @@ impl RequestParams {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             #[cfg(feature = "test-helpers")]
+            Self::TestSeedAccount { .. }
+            | Self::TestCounterRead { .. }
+            | Self::TestCrashAfterNWrites { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
+            #[cfg(feature = "test-helpers")]
             Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
         }
     }
@@ -656,7 +716,13 @@ impl RequestParams {
             Self::TestPanic
             | Self::TestVersion { .. }
             | Self::TestSlow { .. }
-            | Self::TestPrintln { .. } => Idempotency::Idempotent,
+            | Self::TestPrintln { .. }
+            | Self::TestCounterRead { .. } => Idempotency::Idempotent,
+
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedAccount { .. } | Self::TestCrashAfterNWrites { .. } => {
+                Idempotency::Mutating
+            }
         }
     }
 
@@ -752,6 +818,14 @@ impl RequestParams {
             Self::TestSlow { millis } => serde_json::json!({ "millis": millis }),
             #[cfg(feature = "test-helpers")]
             Self::TestPrintln { message } => serde_json::json!({ "message": message }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedAccount { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestCounterRead { counter } => serde_json::json!({ "counter": counter }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestCrashAfterNWrites { params } => {
+                serde_json::json!({ "params": params })
+            }
         }
     }
 
@@ -1155,6 +1229,36 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.println params: {e}"))?;
                 Ok(Self::TestPrintln { message: p.message })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.seed_account" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestSeedAccountParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.seed_account params: {e}"))?;
+                Ok(Self::TestSeedAccount { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.counter_read" => {
+                #[derive(Deserialize)]
+                struct P {
+                    counter: String,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.counter_read params: {e}"))?;
+                Ok(Self::TestCounterRead { counter: p.counter })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.crash_after_n_writes" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestCrashAfterNWritesParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.crash_after_n_writes params: {e}"))?;
+                Ok(Self::TestCrashAfterNWrites { params: p.params })
             }
             _ => Err(format!("unknown method: {method}")),
         }
@@ -2639,5 +2743,70 @@ mod tests {
             },
         };
         assert!(!q.bypasses_admission());
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_seed_account_round_trips_from_method_params() {
+        let original = RequestParams::TestSeedAccount {
+            params: TestSeedAccountParams {
+                email: Some("harness@example.test".into()),
+                display_name: Some("Harness".into()),
+                account_name: Some("Harness Account".into()),
+                provider: Some("imap".into()),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(
+            original.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_counter_read_round_trips_from_method_params() {
+        let original = RequestParams::TestCounterRead {
+            counter: "search.write".into(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(
+            original.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+        assert_eq!(original.idempotency(), Idempotency::Idempotent);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_crash_after_n_writes_round_trips_from_method_params() {
+        let original = RequestParams::TestCrashAfterNWrites {
+            params: TestCrashAfterNWritesParams {
+                kind: "action.journal_write".into(),
+                n: 2,
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(
+            original.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 }

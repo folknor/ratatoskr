@@ -36,6 +36,9 @@ pub async fn batch_execute(
     ctx: &ActionContext,
     operations: Vec<(String, String, MailOperation)>,
 ) -> Vec<ActionOutcome> {
+    #[cfg(feature = "test-helpers")]
+    crate::test_counters::record("action.batch_execute");
+
     let started = Instant::now();
     let total = operations.len();
 

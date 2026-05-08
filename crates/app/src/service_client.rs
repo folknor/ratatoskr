@@ -329,7 +329,7 @@ struct RunningState {
     generation: u32,
 }
 
-/// Immutable respawn configuration. `None` on the test single-shot
+/// Respawn configuration. `None` on the test single-shot
 /// `spawn_for_test` path: those clients tear down on first crash and the
 /// orchestration belongs to the test, not to the client. For the real
 /// `spawn_with_events` path, this struct carries everything `handle_crash`
@@ -337,7 +337,7 @@ struct RunningState {
 struct RespawnConfig {
     binary_path: PathBuf,
     app_data_dir: PathBuf,
-    extra_args: Vec<String>,
+    extra_args: Mutex<Vec<String>>,
     trace: Option<Arc<ServiceTraceSink>>,
     spawn_event_tx: mpsc::Sender<SpawnEvent>,
     /// Captured first `BootReadyResponse` for the schema-version sanity
@@ -915,6 +915,21 @@ impl ServiceClient {
         params: RequestParams,
     ) -> Result<serde_json::Value, ClientError> {
         self.request_value(params).await
+    }
+
+    #[cfg(feature = "test-helpers")]
+    pub(crate) fn set_respawn_extra_args_for_harness(
+        &self,
+        extra_args: Vec<String>,
+    ) -> bool {
+        let Some(respawn) = self.respawn_config.as_ref() else {
+            return false;
+        };
+        *respawn
+            .extra_args
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = extra_args;
+        true
     }
 
     /// Wait briefly for the dying child and project its exit code into a
@@ -2451,8 +2466,12 @@ impl ServiceClient {
 
     async fn respawn(self: &Arc<Self>, respawn: &RespawnConfig) -> Result<(), ClientError> {
         let new_gen = self.current_generation.load(Ordering::SeqCst);
-        let extra_arg_refs: Vec<&str> =
-            respawn.extra_args.iter().map(String::as_str).collect();
+        let extra_args = respawn
+            .extra_args
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let extra_arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
 
         // Early bail before launch_subprocess fires. handle_crash already
         // checked is_shutting_down before sleeping, but Drop could have
@@ -2953,7 +2972,7 @@ async fn run_spawn_flow_with_trace(
     let respawn_config = RespawnConfig {
         binary_path: binary.clone(),
         app_data_dir: app_data_dir.clone(),
-        extra_args: extra_args.clone(),
+        extra_args: Mutex::new(extra_args.clone()),
         trace: trace.clone(),
         spawn_event_tx: tx.clone(),
         first_boot_ready: Mutex::new(None),

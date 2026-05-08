@@ -8,12 +8,13 @@
 
 ### Memory rules
 
-Do not use your Memory functionality. Do not read, write, or update memories. Do not suggest saving things to memory. Durable context belongs in CLAUDE.md or the relevant docs, not in per-session memory files - this project is developed across several hosts and users, and memory does not transfer between them; CLAUDE.md does.
+Do not use your Memory functionality. Do not read, write, or update memories. Do not suggest saving things to memory. Durable context belongs in CLAUDE.md or the relevant docs.
 
 ### Bash rules
 
 - Never use `sed`, `find`, `awk`, `head`, `tail`, or complex bash commands.
-- Never run `git` with `-C <path>`. Run `git` from the current working directory.
+- Never run `git` with `-C <path>`
+- One Bash() invocation === one command
 
 ## Multi-Agent Orchestration
 

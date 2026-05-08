@@ -267,7 +267,7 @@ that do not need lifecycle artefacts.
 
 ### M3 - Test-helper `RequestParams`
 
-**Status:** READY for variants beyond the M1/M2 registry.
+**Status:** LANDED for the initial M3 helper surface.
 
 Add the Service-side test-helper `RequestParams` variants the cohort
 needs. Each new variant should become usable from Lua through the
@@ -298,6 +298,11 @@ Required for M4 / M5:
 - Each variant is exercised by at least one Lua script.
 - `--test-fake-schema=N` flag present; existing
   `--test-fake-version` test pattern extended for schema.
+
+Implementation note: the initial M3 slice adds
+`test.seed_account`, `test.counter_read`,
+`test.crash_after_n_writes`, `--test-fake-schema=N`, and Lua coverage
+under `crates/app/tests/service-harness/m3/`.
 
 ---
 
