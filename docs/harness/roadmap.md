@@ -308,7 +308,7 @@ under `crates/app/tests/service-harness/m3/`.
 
 ### M4 - T1 cohort
 
-**Status:** BLOCKED on M3.
+**Status:** PARTIAL; the first deterministic action/journal slice has landed.
 
 Express the Phase 2 plan-specified integration cohort as `.lua`
 scripts. The "T1" cohort:
@@ -338,6 +338,29 @@ scripts. The "T1" cohort:
 Each script lands as a separate file in
 `crates/app/tests/service-harness/t1/`. Brokkr discovery recurses under
 `service-harness/**/*.lua`.
+
+Current in-tree slice:
+
+- `handler_does_not_drive_batch_execute`
+- `action_skips_search_index_write`
+- `journal_replays_after_respawn`
+- `post_ack_crash_replays_subprocess`
+- `pre_ack_crash_rolls_back_subprocess`
+- `mark_chat_read_emits_only_action_completed`
+- `test_fake_schema_propagates_via_terminal`
+
+This slice also adds the M4-specific helper surface:
+`test.seed_thread`, `test.thread_read`, `test.delay_next_write`, Lua
+bindings for `action.execute_plan`, `action.job_status`, and
+`action.mark_chat_read`, plus notification fields for action plan IDs.
+
+Remaining M4 scope:
+
+- compose-send attachment and oversize validation scripts.
+- `stale_outcomes_dropped_after_respawn`.
+- `bulk_archive_200_threads_under_budget`.
+- `unbroken_crashes_trip_persistently_failing`.
+- 50-iteration soak across the full T1 directory.
 
 **Exit criteria:**
 

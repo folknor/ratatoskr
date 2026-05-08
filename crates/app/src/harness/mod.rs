@@ -12,8 +12,10 @@ use crate::service_client::{
 use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
-    BootClassification, BootExitCode, BootPhaseKind, Notification, RequestParams,
-    TestCrashAfterNWritesParams, TestSeedAccountParams,
+    ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode, BootPhaseKind,
+    Notification, OperationId, PlanId, RequestParams, TestCrashAfterNWritesParams,
+    TestDelayNextWriteParams, TestSeedAccountParams, TestSeedThreadParams, TestThreadReadParams,
+    WireFolderId, WireMailOperation, WireTagId,
 };
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -927,6 +929,33 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
             set_field_string(state, idx, "phase", &format!("{:?}", progress.phase))?;
             set_field_number(state, idx, "service_generation", progress.service_generation as f64)?;
         }
+        Notification::OperationOutcome(outcome) => {
+            set_field_string(state, idx, "type", "OperationOutcome")?;
+            set_field_string(state, idx, "plan_id", &outcome.plan_id.to_string())?;
+            set_field_number(state, idx, "operation_id", outcome.operation_id.0 as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                outcome.service_generation as f64,
+            )?;
+        }
+        Notification::ActionCompleted(completed) => {
+            set_field_string(state, idx, "type", "ActionCompleted")?;
+            set_field_string(state, idx, "plan_id", &completed.plan_id.to_string())?;
+            set_field_number(
+                state,
+                idx,
+                "summary_total",
+                completed.summary.total as f64,
+            )?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                completed.service_generation as f64,
+            )?;
+        }
         other => {
             set_field_string(state, idx, "type", other.method_name())?;
         }
@@ -945,6 +974,27 @@ fn request_params_from_lua(
         "HealthPing" | "health.ping" => Ok(RequestParams::HealthPing),
         "Shutdown" | "shutdown" => Ok(RequestParams::Shutdown),
         "BootReady" | "boot.ready" => Ok(RequestParams::BootReady),
+        "ActionExecutePlan" | "action.execute_plan" => {
+            let plan = parse_action_plan(state, params_idx)?;
+            Ok(RequestParams::ActionExecutePlan { plan })
+        }
+        "ActionJobStatus" | "action.job_status" => {
+            let plan_id = parse_plan_id_request(state, params_idx, "ActionJobStatus")?;
+            Ok(RequestParams::ActionJobStatus { plan_id })
+        }
+        "ActionMarkChatRead" | "action.mark_chat_read" => {
+            let chat_email = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) == LuaType::Table
+            {
+                get_string_field(state, params_idx, "chat_email")?
+                    .ok_or_else(|| lua_error_message("ActionMarkChatRead requires chat_email"))?
+            } else if state.get_top() >= params_idx as usize {
+                state.to_string(params_idx)?
+            } else {
+                return Err(lua_error_message("ActionMarkChatRead requires chat_email"));
+            };
+            Ok(RequestParams::ActionMarkChatRead { chat_email })
+        }
         "TestSlow" | "test.slow" => {
             let millis = if state.get_top() >= params_idx as usize {
                 match state.typ(params_idx) {
@@ -1017,10 +1067,243 @@ fn request_params_from_lua(
                 params: TestCrashAfterNWritesParams { kind, n: n as u64 },
             })
         }
+        "TestSeedThread" | "test.seed_thread" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestSeedThread requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestSeedThread requires params.account_id"))?;
+            Ok(RequestParams::TestSeedThread {
+                params: TestSeedThreadParams {
+                    account_id,
+                    thread_id: get_string_field(state, params_idx, "thread_id")?,
+                    message_id: get_string_field(state, params_idx, "message_id")?,
+                    subject: get_string_field(state, params_idx, "subject")?,
+                    label_ids: get_string_array_field(state, params_idx, "label_ids")?,
+                    is_read: get_bool_field(state, params_idx, "is_read")?.unwrap_or(false),
+                    is_starred: get_bool_field(state, params_idx, "is_starred")?.unwrap_or(false),
+                    is_pinned: get_bool_field(state, params_idx, "is_pinned")?.unwrap_or(false),
+                    is_muted: get_bool_field(state, params_idx, "is_muted")?.unwrap_or(false),
+                    is_chat_thread: get_bool_field(state, params_idx, "is_chat_thread")?
+                        .unwrap_or(false),
+                    chat_email: get_string_field(state, params_idx, "chat_email")?,
+                },
+            })
+        }
+        "TestThreadRead" | "test.thread_read" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestThreadRead requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestThreadRead requires params.account_id"))?;
+            let thread_id = get_string_field(state, params_idx, "thread_id")?
+                .ok_or_else(|| lua_error_message("TestThreadRead requires params.thread_id"))?;
+            Ok(RequestParams::TestThreadRead {
+                params: TestThreadReadParams {
+                    account_id,
+                    thread_id,
+                },
+            })
+        }
+        "TestDelayNextWrite" | "test.delay_next_write" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestDelayNextWrite requires params table"));
+            }
+            let kind = get_string_field(state, params_idx, "kind")?
+                .ok_or_else(|| lua_error_message("TestDelayNextWrite requires params.kind"))?;
+            let millis = get_number_field(state, params_idx, "millis")?
+                .ok_or_else(|| lua_error_message("TestDelayNextWrite requires params.millis"))?;
+            Ok(RequestParams::TestDelayNextWrite {
+                params: TestDelayNextWriteParams {
+                    kind,
+                    millis: millis as u64,
+                },
+            })
+        }
         other => Err(lua_error_message(format!(
             "request method {other:?} is not registered in harness"
         ))),
     }
+}
+
+fn parse_action_plan(state: &mut State, params_idx: isize) -> dellingr::Result<ActionWirePlan> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message("ActionExecutePlan requires params table"));
+    }
+
+    let top = state.get_top();
+    state.push_string("plan");
+    state.get_table(params_idx)?;
+    let plan_idx = if state.typ(-1) == LuaType::Table {
+        state.get_top() as isize
+    } else {
+        state.set_top(top as isize);
+        params_idx
+    };
+
+    let plan_id = match get_string_field(state, plan_idx, "plan_id")? {
+        Some(value) => parse_plan_id(&value)?,
+        None => PlanId::new_v7(),
+    };
+    let operations = parse_action_operations(state, plan_idx)?;
+    state.set_top(top as isize);
+    Ok(ActionWirePlan {
+        plan_id,
+        operations,
+    })
+}
+
+fn parse_plan_id_request(
+    state: &mut State,
+    params_idx: isize,
+    method: &str,
+) -> dellingr::Result<PlanId> {
+    if state.get_top() < params_idx as usize {
+        return Err(lua_error_message(format!("{method} requires plan_id")));
+    }
+    if state.typ(params_idx) == LuaType::Table {
+        let plan_id = get_string_field(state, params_idx, "plan_id")?
+            .ok_or_else(|| lua_error_message(format!("{method} requires params.plan_id")))?;
+        return parse_plan_id(&plan_id);
+    }
+    let plan_id = state.to_string(params_idx)?;
+    parse_plan_id(&plan_id)
+}
+
+fn parse_plan_id(value: &str) -> dellingr::Result<PlanId> {
+    uuid::Uuid::parse_str(value)
+        .map(PlanId)
+        .map_err(|error| lua_error_message(format!("invalid plan_id {value:?}: {error}")))
+}
+
+fn parse_action_operations(
+    state: &mut State,
+    plan_idx: isize,
+) -> dellingr::Result<Vec<ActionWireOperation>> {
+    let top = state.get_top();
+    state.push_string("operations");
+    state.get_table(plan_idx)?;
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message("ActionExecutePlan requires operations table"));
+    }
+    let operations_idx = state.get_top() as isize;
+    let len = state.table_len(operations_idx);
+    let mut operations = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(operations_idx)?;
+        if state.typ(-1) != LuaType::Table {
+            state.set_top(top as isize);
+            return Err(lua_error_message("action operation must be table"));
+        }
+        let op_idx = state.get_top() as isize;
+        let operation = parse_action_operation(state, op_idx, i)?;
+        operations.push(operation);
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(operations)
+}
+
+fn parse_action_operation(
+    state: &mut State,
+    op_idx: isize,
+    ordinal: usize,
+) -> dellingr::Result<ActionWireOperation> {
+    let operation_id = get_number_field(state, op_idx, "operation_id")?
+        .map(|value| value as u32)
+        .unwrap_or_else(|| (ordinal - 1) as u32);
+    let account_id = get_string_field(state, op_idx, "account_id")?
+        .ok_or_else(|| lua_error_message("action operation requires account_id"))?;
+    let thread_id = get_string_field(state, op_idx, "thread_id")?
+        .ok_or_else(|| lua_error_message("action operation requires thread_id"))?;
+    let op_name = get_string_field(state, op_idx, "operation")?
+        .or_else(|| get_string_field(state, op_idx, "kind").ok().flatten())
+        .ok_or_else(|| lua_error_message("action operation requires operation"))?;
+    let operation = parse_wire_mail_operation(state, op_idx, &op_name)?;
+    Ok(ActionWireOperation {
+        operation_id: OperationId(operation_id),
+        account_id,
+        thread_id,
+        operation,
+    })
+}
+
+fn parse_wire_mail_operation(
+    state: &mut State,
+    op_idx: isize,
+    op_name: &str,
+) -> dellingr::Result<WireMailOperation> {
+    let normalized = op_name
+        .chars()
+        .filter(|ch| *ch != '_' && *ch != '-' && *ch != '.')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "archive" => Ok(WireMailOperation::Archive),
+        "trash" => Ok(WireMailOperation::Trash),
+        "permanentdelete" => Ok(WireMailOperation::PermanentDelete),
+        "setspam" => Ok(WireMailOperation::SetSpam {
+            to: required_bool_field(state, op_idx, "to", op_name)?,
+        }),
+        "setstarred" => Ok(WireMailOperation::SetStarred {
+            to: required_bool_field(state, op_idx, "to", op_name)?,
+        }),
+        "setread" => Ok(WireMailOperation::SetRead {
+            to: required_bool_field(state, op_idx, "to", op_name)?,
+        }),
+        "setpinned" => Ok(WireMailOperation::SetPinned {
+            to: required_bool_field(state, op_idx, "to", op_name)?,
+        }),
+        "setmuted" => Ok(WireMailOperation::SetMuted {
+            to: required_bool_field(state, op_idx, "to", op_name)?,
+        }),
+        "movetofolder" => {
+            let dest = get_string_field(state, op_idx, "dest")?
+                .ok_or_else(|| lua_error_message("MoveToFolder requires dest"))?;
+            let source = get_string_field(state, op_idx, "source")?.map(WireFolderId);
+            Ok(WireMailOperation::MoveToFolder {
+                dest: WireFolderId(dest),
+                source,
+            })
+        }
+        "addlabel" => {
+            let label_id = get_string_field(state, op_idx, "label_id")?
+                .ok_or_else(|| lua_error_message("AddLabel requires label_id"))?;
+            Ok(WireMailOperation::AddLabel {
+                label_id: WireTagId(label_id),
+            })
+        }
+        "removelabel" => {
+            let label_id = get_string_field(state, op_idx, "label_id")?
+                .ok_or_else(|| lua_error_message("RemoveLabel requires label_id"))?;
+            Ok(WireMailOperation::RemoveLabel {
+                label_id: WireTagId(label_id),
+            })
+        }
+        "snooze" => {
+            let until = get_number_field(state, op_idx, "until")?
+                .ok_or_else(|| lua_error_message("Snooze requires until"))?;
+            Ok(WireMailOperation::Snooze {
+                until: until as i64,
+            })
+        }
+        "unsnooze" => Ok(WireMailOperation::Unsnooze),
+        other => Err(lua_error_message(format!(
+            "unsupported action operation {other:?}"
+        ))),
+    }
+}
+
+fn required_bool_field(
+    state: &mut State,
+    idx: isize,
+    key: &str,
+    op_name: &str,
+) -> dellingr::Result<bool> {
+    get_bool_field(state, idx, key)?
+        .ok_or_else(|| lua_error_message(format!("{op_name} requires {key}")))
 }
 
 fn read_extra_args(state: &mut State, idx: isize) -> dellingr::Result<Vec<String>> {
@@ -1142,6 +1425,52 @@ fn get_number_field(
     };
     state.set_top(top as isize);
     Ok(result)
+}
+
+fn get_bool_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Option<bool>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    let result = if state.typ(-1) == LuaType::Nil {
+        None
+    } else {
+        Some(state.to_boolean(-1))
+    };
+    state.set_top(top as isize);
+    Ok(result)
+}
+
+fn get_string_array_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Vec<String>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    if state.typ(-1) == LuaType::Nil {
+        state.set_top(top as isize);
+        return Ok(Vec::new());
+    }
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message(format!("{key} must be a table")));
+    }
+    let values_idx = state.get_top() as isize;
+    let len = state.table_len(values_idx);
+    let mut values = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(values_idx)?;
+        values.push(state.to_string(-1)?);
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(values)
 }
 
 fn resource_id(state: &mut State, idx: isize) -> dellingr::Result<u64> {

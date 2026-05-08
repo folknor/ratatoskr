@@ -77,6 +77,71 @@ pub struct TestCrashAfterNWritesParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestCrashAfterNWritesAck;
 
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedThreadParams {
+    pub account_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub label_ids: Vec<String>,
+    #[serde(default)]
+    pub is_read: bool,
+    #[serde(default)]
+    pub is_starred: bool,
+    #[serde(default)]
+    pub is_pinned: bool,
+    #[serde(default)]
+    pub is_muted: bool,
+    #[serde(default)]
+    pub is_chat_thread: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_email: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedThreadAck {
+    pub account_id: String,
+    pub thread_id: String,
+    pub message_id: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestThreadReadParams {
+    pub account_id: String,
+    pub thread_id: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestThreadReadAck {
+    pub exists: bool,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_pinned: bool,
+    pub is_muted: bool,
+    pub is_chat_thread: bool,
+    pub label_ids: Vec<String>,
+    pub unread_messages: u64,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDelayNextWriteParams {
+    pub kind: String,
+    pub millis: u64,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDelayNextWriteAck;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestParams {
     HealthPing,
@@ -446,6 +511,15 @@ pub enum RequestParams {
     /// Arms a crash rule that exits after the Nth matching write.
     #[cfg(feature = "test-helpers")]
     TestCrashAfterNWrites { params: TestCrashAfterNWritesParams },
+    /// Creates a FK-valid thread fixture under a seeded account.
+    #[cfg(feature = "test-helpers")]
+    TestSeedThread { params: TestSeedThreadParams },
+    /// Reads back thread flags and labels for harness assertions.
+    #[cfg(feature = "test-helpers")]
+    TestThreadRead { params: TestThreadReadParams },
+    /// Arms a one-shot delay at a named write/crash hook.
+    #[cfg(feature = "test-helpers")]
+    TestDelayNextWrite { params: TestDelayNextWriteParams },
 }
 
 /// Phase 8-1: idempotency classification for `RequestParams::idempotency()`.
@@ -523,6 +597,12 @@ impl RequestParams {
             Self::TestCounterRead { .. } => "test.counter_read",
             #[cfg(feature = "test-helpers")]
             Self::TestCrashAfterNWrites { .. } => "test.crash_after_n_writes",
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedThread { .. } => "test.seed_thread",
+            #[cfg(feature = "test-helpers")]
+            Self::TestThreadRead { .. } => "test.thread_read",
+            #[cfg(feature = "test-helpers")]
+            Self::TestDelayNextWrite { .. } => "test.delay_next_write",
         }
     }
 
@@ -638,7 +718,10 @@ impl RequestParams {
             #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. }
             | Self::TestCounterRead { .. }
-            | Self::TestCrashAfterNWrites { .. } => {
+            | Self::TestCrashAfterNWrites { .. }
+            | Self::TestSeedThread { .. }
+            | Self::TestThreadRead { .. }
+            | Self::TestDelayNextWrite { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             #[cfg(feature = "test-helpers")]
@@ -717,12 +800,14 @@ impl RequestParams {
             | Self::TestVersion { .. }
             | Self::TestSlow { .. }
             | Self::TestPrintln { .. }
-            | Self::TestCounterRead { .. } => Idempotency::Idempotent,
+            | Self::TestCounterRead { .. }
+            | Self::TestThreadRead { .. } => Idempotency::Idempotent,
 
             #[cfg(feature = "test-helpers")]
-            Self::TestSeedAccount { .. } | Self::TestCrashAfterNWrites { .. } => {
-                Idempotency::Mutating
-            }
+            Self::TestSeedAccount { .. }
+            | Self::TestCrashAfterNWrites { .. }
+            | Self::TestSeedThread { .. }
+            | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
         }
     }
 
@@ -824,6 +909,14 @@ impl RequestParams {
             Self::TestCounterRead { counter } => serde_json::json!({ "counter": counter }),
             #[cfg(feature = "test-helpers")]
             Self::TestCrashAfterNWrites { params } => {
+                serde_json::json!({ "params": params })
+            }
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedThread { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestDelayNextWrite { params } => {
                 serde_json::json!({ "params": params })
             }
         }
@@ -1259,6 +1352,36 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.crash_after_n_writes params: {e}"))?;
                 Ok(Self::TestCrashAfterNWrites { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.seed_thread" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestSeedThreadParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.seed_thread params: {e}"))?;
+                Ok(Self::TestSeedThread { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.thread_read" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestThreadReadParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.thread_read params: {e}"))?;
+                Ok(Self::TestThreadRead { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.delay_next_write" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestDelayNextWriteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.delay_next_write params: {e}"))?;
+                Ok(Self::TestDelayNextWrite { params: p.params })
             }
             _ => Err(format!("unknown method: {method}")),
         }
@@ -2807,6 +2930,72 @@ mod tests {
             original.timeout(),
             RequestTimeoutKind::Finite(Duration::from_secs(5)),
         );
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_seed_thread_round_trips_from_method_params() {
+        let original = RequestParams::TestSeedThread {
+            params: TestSeedThreadParams {
+                account_id: "acc-1".into(),
+                thread_id: Some("thread-1".into()),
+                message_id: Some("message-1".into()),
+                subject: Some("M4".into()),
+                label_ids: vec!["INBOX".into()],
+                is_read: false,
+                is_starred: true,
+                is_pinned: false,
+                is_muted: true,
+                is_chat_thread: true,
+                chat_email: Some("chat@example.test".into()),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.seed_thread");
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_thread_read_round_trips_from_method_params() {
+        let original = RequestParams::TestThreadRead {
+            params: TestThreadReadParams {
+                account_id: "acc-1".into(),
+                thread_id: "thread-1".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.thread_read");
+        assert_eq!(original.idempotency(), Idempotency::Idempotent);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_delay_next_write_round_trips_from_method_params() {
+        let original = RequestParams::TestDelayNextWrite {
+            params: TestDelayNextWriteParams {
+                kind: "action.batch_execute".into(),
+                millis: 250,
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.delay_next_write");
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 }

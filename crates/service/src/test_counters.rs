@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 const ACTION_BATCH_EXECUTE: &str = "action.batch_execute";
+const ACTION_BEFORE_JOURNAL_WRITE: &str = "action.before_journal_write";
 const ACTION_JOURNAL_WRITE: &str = "action.journal_write";
 const SEARCH_WRITE: &str = "search.write";
 const SEARCH_INDEX: &str = "search.index";
@@ -16,6 +17,7 @@ const SEARCH_CLEAR: &str = "search.clear";
 const SEARCH_FLUSH: &str = "search.flush";
 
 static ACTION_BATCH_EXECUTE_COUNT: AtomicU64 = AtomicU64::new(0);
+static ACTION_BEFORE_JOURNAL_WRITE_COUNT: AtomicU64 = AtomicU64::new(0);
 static ACTION_JOURNAL_WRITE_COUNT: AtomicU64 = AtomicU64::new(0);
 static SEARCH_WRITE_COUNT: AtomicU64 = AtomicU64::new(0);
 static SEARCH_INDEX_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -29,7 +31,14 @@ struct CrashRule {
     trigger_at: u64,
 }
 
+#[derive(Debug, Clone)]
+struct DelayRule {
+    kind: String,
+    millis: u64,
+}
+
 static CRASH_RULES: OnceLock<Mutex<Vec<CrashRule>>> = OnceLock::new();
+static DELAY_RULES: OnceLock<Mutex<Vec<DelayRule>>> = OnceLock::new();
 
 pub(crate) fn read(kind: &str) -> Option<u64> {
     counter(kind).map(|counter| counter.load(Ordering::SeqCst))
@@ -61,6 +70,39 @@ pub(crate) fn configure_crash(kind: String, n: u64) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn configure_delay(kind: String, millis: u64) -> Result<(), String> {
+    if millis == 0 {
+        return Err("millis must be greater than zero".into());
+    }
+    read(&kind).ok_or_else(|| format!("unknown counter kind {kind:?}"))?;
+    let mut rules = delay_rules()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    rules.retain(|rule| rule.kind != kind);
+    rules.push(DelayRule { kind, millis });
+    Ok(())
+}
+
+pub(crate) async fn delay_if_configured(kind: &str) {
+    let rule = {
+        let mut rules = delay_rules()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        rules
+            .iter()
+            .position(|rule| rule.kind == kind)
+            .map(|idx| rules.remove(idx))
+    };
+    if let Some(rule) = rule {
+        log::info!(
+            "test-helpers: delaying {} for {} ms",
+            rule.kind,
+            rule.millis,
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(rule.millis)).await;
+    }
+}
+
 fn maybe_crash(kind: &str, value: u64) {
     let rule = {
         let mut rules = crash_rules()
@@ -85,9 +127,14 @@ fn crash_rules() -> &'static Mutex<Vec<CrashRule>> {
     CRASH_RULES.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+fn delay_rules() -> &'static Mutex<Vec<DelayRule>> {
+    DELAY_RULES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
 fn counter(kind: &str) -> Option<&'static AtomicU64> {
     match kind {
         ACTION_BATCH_EXECUTE => Some(&ACTION_BATCH_EXECUTE_COUNT),
+        ACTION_BEFORE_JOURNAL_WRITE => Some(&ACTION_BEFORE_JOURNAL_WRITE_COUNT),
         ACTION_JOURNAL_WRITE => Some(&ACTION_JOURNAL_WRITE_COUNT),
         SEARCH_WRITE => Some(&SEARCH_WRITE_COUNT),
         SEARCH_INDEX => Some(&SEARCH_INDEX_COUNT),

@@ -35,6 +35,12 @@ pub(super) async fn handle(
     let plan_id_bytes = *plan_id.0.as_bytes();
     let ops = serialize_ops(plan)?;
 
+    #[cfg(feature = "test-helpers")]
+    {
+        crate::test_counters::delay_if_configured("action.before_journal_write").await;
+        crate::test_counters::record("action.before_journal_write");
+    }
+
     tokio::task::spawn_blocking(move || {
         let conn = conn
             .lock()

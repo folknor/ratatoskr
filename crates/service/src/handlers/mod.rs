@@ -178,6 +178,18 @@ pub(crate) async fn dispatch(
         RequestParams::TestCrashAfterNWrites { params } => {
             test_helpers::crash_after_n_writes_handle(params).await
         }
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestSeedThread { params } => {
+            test_helpers::seed_thread_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestThreadRead { params } => {
+            test_helpers::thread_read_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
+        RequestParams::TestDelayNextWrite { params } => {
+            test_helpers::delay_next_write_handle(params).await
+        }
     }
 }
 
