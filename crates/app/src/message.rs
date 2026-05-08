@@ -174,6 +174,22 @@ pub enum Message {
     /// `ServiceBootFailed` (terminal) and from `ServiceNotification`
     /// (the in-band BootProgress / SyncProgress / etc. stream).
     ServiceHealthChanged(crate::service_client::ServiceHealth),
+    /// Phase 8-1: async-init completion for the body store. The
+    /// boot-time path now constructs `ReadyApp` with `body_store: None`
+    /// and dispatches a `Task::perform` that fires this message when
+    /// `BodyStoreReadState::init` completes. The result is
+    /// `Result<BodyStoreReadState, String>` - on Err the field stays
+    /// None and reading-pane requests for body text show "loading..."
+    /// until the next launch retries init.
+    BodyStoreReady(Result<rtsk::body_store::BodyStoreReadState, String>),
+    /// Phase 8-1: async-init completion for the inline image store.
+    /// Same pattern as `BodyStoreReady`.
+    InlineImageStoreReady(Result<store::inline_image_store::InlineImageStoreReadState, String>),
+    /// Phase 8-1: async-init completion for the search read state.
+    /// Same pattern as `BodyStoreReady`. The result is wrapped in
+    /// `Arc` because multiple UI surfaces (reading-pane, search-bar)
+    /// share read access to the same Tantivy reader handle.
+    SearchStateReady(Result<std::sync::Arc<rtsk::search::SearchReadState>, String>),
     ServiceNotification(service_api::Notification),
     ServiceShutdownComplete(Result<(), String>),
     ToggleSettings,

@@ -53,6 +53,13 @@ pub struct InlineImageStoreReadState {
     conn: Arc<Mutex<Connection>>,
 }
 
+impl std::fmt::Debug for InlineImageStoreReadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InlineImageStoreReadState")
+            .finish_non_exhaustive()
+    }
+}
+
 /// A stored inline image blob.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -297,22 +297,18 @@ impl ReadyApp {
         let sync_receiver = shared_receiver(rx);
         let sync_reporter = Arc::new(reporter);
 
-        let body_store = match db::threads::init_body_store() {
-            Ok(bs) => Some(bs),
-            Err(e) => {
-                log::error!("Failed to init body store: {e}");
-                None
-            }
-        };
-
-        let inline_image_store =
-            match store::inline_image_store::InlineImageStoreReadState::init(data_dir) {
-                Ok(store) => Some(store),
-                Err(e) => {
-                    log::error!("Failed to init inline image store: {e}");
-                    None
-                }
-            };
+        // Phase 8-1: body store, inline image store, and search read
+        // state init are dispatched as async tasks below so the splash
+        // -> Ready transition fires immediately rather than blocking
+        // on slow-disk file I/O. Each field stays `None` until its
+        // BodyStoreReady / InlineImageStoreReady / SearchStateReady
+        // message lands and `update.rs` populates the slot. UI surfaces
+        // that depend on a store render a "loading..." placeholder
+        // until then; the gap is well under 100 ms on warm hardware
+        // and the splash transition no longer freezes during it.
+        let body_store: Option<rtsk::body_store::BodyStoreReadState> = None;
+        let inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState> =
+            None;
 
         // Phase 6a-part-2: the bootstrap-snapshot decrypt path flows
         // through `internal.read_bootstrap_snapshots` (one IPC, both
@@ -328,10 +324,9 @@ impl ReadyApp {
         // The Service holds the validated key bytes for the lifetime
         // of the process; the UI never touches `ratatoskr.key`.
 
-        // Initialize search state once - the reading-pane and search
-        // surfaces read through this Arc.
-        let search_state: Option<Arc<rtsk::search::SearchReadState>> =
-            rtsk::search::SearchReadState::init(data_dir).map(Arc::new).ok();
+        // Phase 8-1: search read state init is also dispatched async
+        // (see body_store / inline_image_store comment above).
+        let search_state: Option<Arc<rtsk::search::SearchReadState>> = None;
 
         let session = pop_out::session::SessionState::load(data_dir);
 
@@ -480,6 +475,44 @@ impl ReadyApp {
 
         // Snooze resurface on boot: unsnooze threads that became due while the app was closed.
         boot_tasks.push(Task::done(Message::SnoozeTick));
+
+        // Phase 8-1: async-init the body / inline / search stores
+        // outside the boot-ready transition. Each runs inside
+        // `spawn_blocking` because the underlying `*::init` calls
+        // synchronous file I/O (CREATE TABLE IF NOT EXISTS, mmap
+        // setup). On warm hardware these complete in tens of
+        // milliseconds; on a cold disk they could take seconds. The
+        // splash transition no longer waits for them.
+        boot_tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(db::threads::init_body_store)
+                    .await
+                    .map_err(|e| format!("body store join: {e}"))?
+            },
+            Message::BodyStoreReady,
+        ));
+        let inline_data_dir = data_dir.clone();
+        boot_tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    store::inline_image_store::InlineImageStoreReadState::init(&inline_data_dir)
+                })
+                .await
+                .map_err(|e| format!("inline store join: {e}"))?
+            },
+            Message::InlineImageStoreReady,
+        ));
+        let search_data_dir = data_dir.clone();
+        boot_tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    rtsk::search::SearchReadState::init(&search_data_dir).map(Arc::new)
+                })
+                .await
+                .map_err(|e| format!("search state join: {e}"))?
+            },
+            Message::SearchStateReady,
+        ));
 
         boot_tasks.append(&mut session_tasks);
         (app, Task::batch(boot_tasks))

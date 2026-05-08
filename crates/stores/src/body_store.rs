@@ -12,6 +12,12 @@ pub struct BodyStoreReadState {
     conn: Arc<Mutex<Connection>>,
 }
 
+impl std::fmt::Debug for BodyStoreReadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodyStoreReadState").finish_non_exhaustive()
+    }
+}
+
 /// A single body record returned to callers.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

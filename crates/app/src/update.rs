@@ -216,6 +216,33 @@ impl ReadyApp {
                 self.service_health = health;
                 Task::none()
             }
+            // Phase 8-1: async store-init completion. UI surfaces that
+            // depend on a store render "loading..." until these arms
+            // populate the corresponding `Option<...>` field.
+            Message::BodyStoreReady(Ok(store)) => {
+                self.body_store = Some(store);
+                Task::none()
+            }
+            Message::BodyStoreReady(Err(e)) => {
+                log::error!("body store async init failed: {e}");
+                Task::none()
+            }
+            Message::InlineImageStoreReady(Ok(store)) => {
+                self.inline_image_store = Some(store);
+                Task::none()
+            }
+            Message::InlineImageStoreReady(Err(e)) => {
+                log::error!("inline image store async init failed: {e}");
+                Task::none()
+            }
+            Message::SearchStateReady(Ok(state)) => {
+                self.search_state = Some(state);
+                Task::none()
+            }
+            Message::SearchStateReady(Err(e)) => {
+                log::error!("search state async init failed: {e}");
+                Task::none()
+            }
             Message::ServiceNotification(notification) => {
                 // Drop notifications from a dying-but-still-flushing reader
                 // after a respawn (item 15 of phase-1.5-plan.md). The

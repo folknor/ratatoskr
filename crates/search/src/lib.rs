@@ -460,6 +460,12 @@ pub struct SearchReadState {
     fields: Fields,
 }
 
+impl std::fmt::Debug for SearchReadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SearchReadState").finish_non_exhaustive()
+    }
+}
+
 // IndexReader is Send + Sync; no interior mutability that would block auto-derives.
 
 impl SearchReadState {
