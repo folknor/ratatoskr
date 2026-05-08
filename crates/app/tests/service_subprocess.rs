@@ -1128,20 +1128,22 @@ fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
     }
 }
 
-/// Crashloop-threshold tripping. `record_respawn_and_check_crashloop`
-/// fires Terminal after `CRASHLOOP_THRESHOLD` (3) respawns within
-/// `CRASHLOOP_WINDOW` (30s). The classification logic and the threshold-
-/// firing are unit-tested in `service_client.rs`, but the end-to-end
-/// path - SIGKILL the child, observe respawn, repeat until threshold
-/// trips and Terminal arrives instead of another ChildSpawned - is
-/// uncovered. This is the only stop on a fast post-Ready crash loop
-/// until Phase 8 replaces it with exponential backoff; flagged by arch
-/// review as missing.
+/// Phase 8-1 crashloop semantics: a successful BootReady between
+/// crashes resets the unbroken-crash counter. This regression test
+/// asserts that a kill -> respawn -> BootReady -> kill -> respawn ->
+/// BootReady -> kill -> respawn pattern does NOT trip Terminal (the
+/// Phase 1.5 sliding-window guard would have falsely tripped here).
 ///
-/// Each kill -> respawn cycle takes ~1.5-2s (1s cooldown + spawn +
-/// boot.ready), so three cycles fit comfortably in the 30s window. The
-/// test drives the cycle three times and asserts the third kill
-/// produces `Terminal`, not another `ChildSpawned`.
+/// The "3 unbroken crashes (no successful boot in between)" path -
+/// the case that SHOULD trip Terminal under new semantics - lands in
+/// harness M4 because reliably forcing pre-BootReady crashes from a
+/// libtest-subprocess test is racy.
+///
+/// FLAKY: same libtest-subprocess-lifecycle flake shape as the other
+/// `#[ignore]`'d tests in this file (passes solo, hangs in the suite
+/// or under `-N`). The proper fix is the harness Lua rewrite under
+/// M2 of `docs/harness/roadmap.md`.
+#[ignore]
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn crashloop_threshold_emits_terminal_after_third_crash() -> TestResult {

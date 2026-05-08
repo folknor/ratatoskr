@@ -292,6 +292,13 @@ scripts. The "T1" cohort:
 - `bulk_archive_200_threads_under_budget` (depends on `os.time`
   budget assertion; Lua-level loop dispatching 200 concurrent
   requests)
+- `unbroken_crashes_trip_persistently_failing` - Phase 8-1 carry-
+  forward. Replaces `crashloop_threshold_emits_terminal_after_third_crash`
+  (now `#[ignore]`'d in `service_subprocess.rs`). Forces 3 unbroken
+  crashes by killing the Service before BootReady on each spawn,
+  asserts `ServiceHealth::PersistentlyFailing` surfaces and respawn
+  stops. Also asserts the inverse: 3 kill-respawn-BootReady cycles
+  do NOT trip (regression for the Phase 8-1 reset-on-success fix).
 
 Each script lands as a separate file in
 `crates/app/tests/service-harness/t1/`. Brokkr discovery recurses under

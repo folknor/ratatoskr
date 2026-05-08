@@ -26,11 +26,11 @@ use service_api::{
     SyncCompleted, SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck,
     ThreadUiStateSetAck, ThreadUiStateSetParams, encode_message, parse_service_message,
 };
-use std::collections::{HashMap, VecDeque, hash_map::Entry};
+use std::collections::{HashMap, hash_map::Entry};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, PoisonError, Weak,
-    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -44,14 +44,42 @@ const NOTIFICATION_QUEUE_CAP: usize = 1024;
 /// runtime crash that produces an `UnexpectedExit` (signal-killed, unknown
 /// numeric code) does NOT match `BootExitCode::from_i32`, so the
 /// terminal-no-respawn policy doesn't fire and the respawn loop keeps
-/// going. The 1 s sleep before respawn is the only other bound, which
-/// caps CPU at ~one Service per second forever - per-PID log naming would
-/// turn that into 86 400 log files per day. This crashloop guard turns the
-/// loop terminal after `CRASHLOOP_THRESHOLD` respawns within
-/// `CRASHLOOP_WINDOW`. Phase 8 replaces this with exponential backoff +
-/// real telemetry; for v1 a flat threshold is enough.
-const CRASHLOOP_WINDOW: Duration = Duration::from_secs(30);
-const CRASHLOOP_THRESHOLD: usize = 3;
+/// going. The exponential-backoff sleep before respawn caps the CPU
+/// burn under tight crash loops; the consecutive-crash counter trips
+/// the loop terminal after `CRASHLOOP_THRESHOLD` *unbroken* crashes
+/// (the counter resets on any successful boot, so a 3-crash, 3-recovery,
+/// 3-crash pattern does not falsely trip).
+///
+/// Phase 8-1 replaced the Phase 1.5 sliding-window guard + fixed 1 s
+/// cooldown with this shape:
+///
+/// - `BACKOFF_INITIAL_SECS` - first crash sleeps this long.
+/// - `BACKOFF_MAX_SECS` - cap for the exponential ramp; further crashes
+///   stay parked here.
+/// - `CRASHLOOP_THRESHOLD` - unbroken crashes to surface
+///   `ServiceHealth::PersistentlyFailing` (Commit B). Same numeric value
+///   as the Phase 1.5 guard so existing operator expectations carry.
+const BACKOFF_INITIAL_SECS: u32 = 1;
+const BACKOFF_MAX_SECS: u32 = 30;
+const CRASHLOOP_THRESHOLD: u32 = 3;
+/// Heartbeat timeout during an in-progress sync. The Service can park
+/// the dispatch loop on a `spawn_blocking` provider call for tens of
+/// seconds; a flat 5 s deadline reads that as "Service hung" and trips
+/// a respawn that throws away in-flight work. The 60 s window covers
+/// the slow-network provider path.
+const HEARTBEAT_TIMEOUT_DURING_SYNC: Duration = Duration::from_secs(60);
+/// Consecutive heartbeat timeout count at which we give up and
+/// trigger a respawn. Phase 1.5 tripped on the first miss; that
+/// produced false positives under transient load (a single 5 s ping
+/// timeout during a long migration was indistinguishable from a hung
+/// Service). N=3 maps to ~90 s of unresponsive pings before a
+/// respawn, which is firmly into "Service is genuinely gone"
+/// territory. Hard transport / decode errors still trip immediately.
+const HEARTBEAT_MAX_CONSECUTIVE_MISSES: u32 = 3;
+/// Window during which a recent `SyncProgress` notification elongates
+/// the next heartbeat timeout. 30 s comfortably covers the
+/// inter-progress gap on a slow paginated sync.
+const SYNC_RECENT_WINDOW: Duration = Duration::from_secs(30);
 
 pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
 
@@ -245,11 +273,26 @@ pub struct ServiceClient {
     is_shutting_down: AtomicBool,
     /// Per-client respawn knobs; `None` on the test single-shot spawn path.
     respawn_config: Option<RespawnConfig>,
-    /// Sliding-window timestamps of recent respawns. `handle_crash`
-    /// pushes onto this before launching a replacement; the crashloop
-    /// guard fires when `CRASHLOOP_THRESHOLD` entries land within
-    /// `CRASHLOOP_WINDOW`. See [`CrashloopTracker::record_and_check`].
-    respawn_attempts: Mutex<VecDeque<Instant>>,
+    /// Phase 8-1: count of *unbroken* crashes since the last successful
+    /// boot. `handle_crash` increments this on every crash; `respawn`
+    /// resets it to 0 after a `boot.ready` response confirms the new
+    /// instance is up. The crashloop guard trips when this reaches
+    /// `CRASHLOOP_THRESHOLD`. The reset-on-success shape closes the
+    /// Phase 1.5 sliding-window false positive: a 3-crash, 3-recovery,
+    /// 3-crash pattern no longer trips because the recoveries clear the
+    /// counter.
+    consecutive_crashes: AtomicU32,
+    /// Phase 8-1: current backoff delay for the next respawn, in
+    /// seconds. Starts at `BACKOFF_INITIAL_SECS`, doubles after each
+    /// crash (capped at `BACKOFF_MAX_SECS`), resets on successful boot.
+    /// Replaces the Phase 1.5 fixed 1 s cooldown.
+    current_backoff_secs: AtomicU32,
+    /// Phase 8-1: unix epoch in milliseconds of the latest
+    /// `Notification::SyncProgress` observed by `reader_task`. The
+    /// heartbeat task consults this to elongate its next ping timeout
+    /// when a sync is recent (see `SYNC_RECENT_WINDOW`). `0` means no
+    /// SyncProgress has been seen since this client was constructed.
+    last_sync_progress_at_ms: AtomicI64,
     /// Cross-platform parent-death tie-up. Held for the lifetime of the
     /// client so the OS-level safety net (Job Object on Windows) survives
     /// any failure in our explicit Drop teardown. Listed last so it drops
@@ -613,7 +656,9 @@ impl ServiceClient {
             current_generation: AtomicU32::new(1),
             is_shutting_down: AtomicBool::new(false),
             respawn_config,
-            respawn_attempts: Mutex::new(VecDeque::new()),
+            consecutive_crashes: AtomicU32::new(0),
+            current_backoff_secs: AtomicU32::new(BACKOFF_INITIAL_SECS),
+            last_sync_progress_at_ms: AtomicI64::new(0),
             _process_guard: process_guard,
         });
 
@@ -2057,18 +2102,22 @@ impl ServiceClient {
             return;
         }
 
-        // 1-second cooldown serves two purposes:
-        // (a) bounds CPU under transient crashes (the v1 crashloop guard;
-        //     Phase 8 replaces with exponential backoff + crashloop
-        //     detection); and
-        // (b) gives the dying child's fs2 file lock time to be released by
-        //     the kernel before the replacement spawn tries to acquire it.
-        //     Without this, the new Service can race the dying child and
-        //     exit AnotherInstanceRunning, which under our terminal-failure
-        //     policy is fatal - turning a recoverable crash into a hard
-        //     exit. Plan item 6 (Architecture / Service-side boot sequence)
-        //     calls this race out explicitly.
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Phase 8-1: exponential backoff replaces the Phase 1.5 fixed
+        // 1 s cooldown. Same two purposes:
+        // (a) bounds CPU under transient crashes - the doubling delay
+        //     keeps a tight crashloop from re-running the entire boot
+        //     sequence (lockfile open, db open, migration apply,
+        //     reconcile_velo_rename, recovery scan) once per second
+        //     forever.
+        // (b) gives the dying child's fs2 file lock time to be released
+        //     by the kernel before the replacement spawn tries to
+        //     acquire it. Without this, the new Service can race the
+        //     dying child and exit `AnotherInstanceRunning`, which
+        //     under our terminal-failure policy turns a recoverable
+        //     crash into a hard exit.
+        let backoff = advance_respawn_backoff(&self.current_backoff_secs);
+        log::info!("service respawn backoff: sleeping {backoff:?} before respawn");
+        tokio::time::sleep(backoff).await;
         if self.is_shutting_down.load(Ordering::SeqCst) {
             return;
         }
@@ -2121,20 +2170,20 @@ impl ServiceClient {
             return;
         }
 
-        // Crashloop guard. The 1 s sleep above bounds CPU at one Service
-        // per second; under signal-killed crashloops that is still enough
-        // to fill `<app_data>/logs/` with thousands of files per hour and
-        // exhaust the rest-of-day's disk budget on a busy host. The
-        // sliding-window tracker fires Terminal after CRASHLOOP_THRESHOLD
-        // respawns within CRASHLOOP_WINDOW. The classification carries the
-        // dying child's exit code so the user-visible message names what
-        // kind of exit was repeating.
-        let now = Instant::now();
-        if record_respawn_and_check_crashloop(&self.respawn_attempts, now) {
+        // Crashloop guard. The exponential backoff above bounds CPU
+        // under tight crashes; this guard turns the loop terminal once
+        // we've seen `CRASHLOOP_THRESHOLD` *unbroken* crashes (the
+        // counter resets on a successful boot in `respawn`). Under
+        // signal-killed crashloops the backoff alone would still let
+        // `<app_data>/logs/` accumulate thousands of files per hour;
+        // tripping terminal stops the loop. The classification carries
+        // the dying child's exit code so the user-visible message names
+        // what kind of exit was repeating.
+        if record_consecutive_crash_and_check(&self.consecutive_crashes) {
             let classification =
                 BootClassification::from_exit_code(exit_status.and_then(|s| s.code()));
             log::error!(
-                "crashloop detected ({CRASHLOOP_THRESHOLD} respawns within {CRASHLOOP_WINDOW:?}); \
+                "crashloop detected ({CRASHLOOP_THRESHOLD} unbroken crashes); \
                  terminating with {classification:?}",
             );
             let _ = respawn
@@ -2294,6 +2343,14 @@ impl ServiceClient {
                 return Err(ClientError::SchemaBaselineMissing);
             }
         }
+
+        // Phase 8-1: a clean BootReady is the signal "boot succeeded
+        // on this respawn." Reset the unbroken-crash counter and the
+        // backoff schedule so the *next* crash starts a fresh sequence
+        // rather than counting against the prior series.
+        self.consecutive_crashes.store(0, Ordering::Relaxed);
+        self.current_backoff_secs
+            .store(BACKOFF_INITIAL_SECS, Ordering::Relaxed);
 
         let _ = respawn
             .spawn_event_tx
@@ -2769,6 +2826,19 @@ async fn reader_task<R>(
                                 }
                                 continue;
                             }
+                            // Phase 8-1: tap SyncProgress to elongate the
+                            // next heartbeat timeout (heartbeat_task
+                            // consults `last_sync_progress_at_ms` against
+                            // `SYNC_RECENT_WINDOW`). The notification
+                            // still flows to the UI dispatcher below.
+                            if matches!(notification, Notification::SyncProgress(_))
+                                && let Some(client) = upgraded.as_ref()
+                            {
+                                let now_ms = chrono::Utc::now().timestamp_millis();
+                                client
+                                    .last_sync_progress_at_ms
+                                    .store(now_ms, Ordering::Relaxed);
+                            }
                             let tagged = tag_notification_with_generation(notification, generation);
                             notifications.enqueue(tagged).await;
                         }
@@ -2808,26 +2878,33 @@ async fn reader_task<R>(
     }
 }
 
-/// Sliding-window crashloop tracker. Pushes `now` onto the deque, evicts
-/// entries older than `CRASHLOOP_WINDOW`, and returns `true` when the deque
-/// reaches `CRASHLOOP_THRESHOLD` entries (i.e., this is the threshold-th
-/// respawn within the window). Extracted for testability; the `now`
-/// parameter lets unit tests drive the clock without depending on real
-/// time.
-fn record_respawn_and_check_crashloop(
-    queue: &Mutex<VecDeque<Instant>>,
-    now: Instant,
-) -> bool {
-    let mut guard = queue.lock().unwrap_or_else(PoisonError::into_inner);
-    // Evict expired entries. checked_sub guards against the (effectively
-    // never) startup case where Instant::now() is younger than the window.
-    if let Some(cutoff) = now.checked_sub(CRASHLOOP_WINDOW) {
-        while guard.front().is_some_and(|t| *t < cutoff) {
-            guard.pop_front();
-        }
-    }
-    guard.push_back(now);
-    guard.len() >= CRASHLOOP_THRESHOLD
+/// Phase 8-1 crashloop tracker. Increments the unbroken-crash counter,
+/// returns `true` when it reaches `CRASHLOOP_THRESHOLD`. The reset on
+/// successful boot lives in `respawn` (after `handshake_post_install`
+/// returns Ok); this function is one half of the pair.
+///
+/// Extracted from the Phase 1.5 sliding-window guard - the new shape
+/// drops the time-window dimension entirely. The Phase 1.5 false
+/// positive ("3 crashes, 3 successful recoveries, 3 more crashes
+/// within window") only existed because the window-eviction logic
+/// failed to clear on success. With reset-on-success we don't need
+/// the window: any pattern that includes successful recoveries clears
+/// the counter.
+fn record_consecutive_crash_and_check(counter: &AtomicU32) -> bool {
+    let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
+    n >= CRASHLOOP_THRESHOLD
+}
+
+/// Phase 8-1: compute the next respawn delay, doubling the current
+/// backoff up to `BACKOFF_MAX_SECS`. Caller is responsible for
+/// resetting the counter to `BACKOFF_INITIAL_SECS` on a successful
+/// boot. Returns the delay we are about to sleep (the value in
+/// `current_backoff_secs` BEFORE the doubling).
+fn advance_respawn_backoff(current: &AtomicU32) -> Duration {
+    let secs = current.load(Ordering::Relaxed).max(BACKOFF_INITIAL_SECS);
+    let next = (secs.saturating_mul(2)).min(BACKOFF_MAX_SECS);
+    current.store(next, Ordering::Relaxed);
+    Duration::from_secs(secs as u64)
 }
 
 /// Pre-queue gate for the reader task. Returns `true` if the reader's
@@ -2957,19 +3034,58 @@ async fn heartbeat_task(
     generation: u32,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let mut consecutive_misses: u32 = 0;
     loop {
         interval.tick().await;
         let started = Instant::now();
-        let result = request_value_raw(
+
+        // Phase 8-1: elongate the ping timeout when a sync is recent.
+        // The Service's dispatch loop can park on a `spawn_blocking`
+        // provider call for tens of seconds during a paginated sync; a
+        // flat 5 s deadline would read that as "Service hung" and trip
+        // a respawn that throws away the in-flight work. Consult the
+        // SyncProgress watermark stored by `reader_task`.
+        let timeout_override = match weak_client.upgrade() {
+            Some(client) => {
+                let last_sync_ms = client.last_sync_progress_at_ms.load(Ordering::Relaxed);
+                if last_sync_ms == 0 {
+                    None
+                } else {
+                    let now_ms = chrono::Utc::now().timestamp_millis();
+                    let diff = now_ms.saturating_sub(last_sync_ms);
+                    let elapsed_ms = u128::try_from(diff).unwrap_or(u128::MAX);
+                    if elapsed_ms <= SYNC_RECENT_WINDOW.as_millis() {
+                        Some(HEARTBEAT_TIMEOUT_DURING_SYNC)
+                    } else {
+                        None
+                    }
+                }
+            }
+            // Client dropped - the dispatch loop is exiting; nothing to
+            // ping. Letting the loop continue will fail on the next tick
+            // when stdin_tx is closed; that's fine.
+            None => None,
+        };
+
+        let result = request_value_raw_with_timeout(
             &stdin_tx,
             &pending,
             &next_id,
             RequestParams::HealthPing,
+            timeout_override,
         )
         .await;
         match result {
             Ok(value) => match serde_json::from_value::<HealthPingResponse>(value) {
-                Ok(_) => log::debug!("service heartbeat ok in {:?}", started.elapsed()),
+                Ok(_) => {
+                    if consecutive_misses > 0 {
+                        log::info!(
+                            "service heartbeat recovered after {consecutive_misses} miss(es)"
+                        );
+                    }
+                    consecutive_misses = 0;
+                    log::debug!("service heartbeat ok in {:?}", started.elapsed());
+                }
                 Err(error) => {
                     // Decode failure is a hard error per scope item 16's
                     // "anything else: hard, respawn" catch-all. A Service
@@ -2981,10 +3097,26 @@ async fn heartbeat_task(
                 }
             },
             Err(ClientError::Timeout) => {
-                // Per scope item 16: Timeout is transient and does NOT
-                // trigger respawn. A long migration produces a series of
-                // 5 s ping timeouts that the heartbeat must ride out.
-                log::warn!("service heartbeat missed (timeout); not a respawn trigger");
+                // Phase 8-1: a single timeout is no longer enough to
+                // trip a respawn. A long migration / paginated sync /
+                // GC pause can produce a one-off ping miss that
+                // resolves on the next tick. Require N consecutive
+                // misses (~90 s of unresponsive pings at the 30 s
+                // interval) before tripping. Hard errors below still
+                // trip immediately.
+                consecutive_misses = consecutive_misses.saturating_add(1);
+                if consecutive_misses >= HEARTBEAT_MAX_CONSECUTIVE_MISSES {
+                    log::warn!(
+                        "service heartbeat missed {consecutive_misses} consecutive pings; \
+                         triggering respawn"
+                    );
+                    trigger_crash_handler(&weak_client, generation);
+                    return;
+                }
+                log::warn!(
+                    "service heartbeat missed (timeout) ({consecutive_misses}/{HEARTBEAT_MAX_CONSECUTIVE_MISSES}); \
+                     not yet a respawn trigger"
+                );
             }
             Err(error) => {
                 // Hard error per scope item 16: the writer task died (the
@@ -2999,11 +3131,19 @@ async fn heartbeat_task(
     }
 }
 
-async fn request_value_raw(
+/// Phase 8-1: send a JSON-RPC request and wait for the response, with
+/// an optional per-call timeout override. The override path is used by
+/// `heartbeat_task` to elongate the next ping's deadline during an
+/// in-progress sync (where the dispatch loop can be parked on a slow
+/// `spawn_blocking` provider call). `None` falls back to
+/// `params.timeout()` so non-heartbeat call sites get the same per-method
+/// budget they would have inherited from the prior `request_value_raw`.
+async fn request_value_raw_with_timeout(
     stdin_tx: &mpsc::Sender<Vec<u8>>,
     pending: &Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
     next_id: &Arc<AtomicU64>,
     params: RequestParams,
+    timeout_override: Option<Duration>,
 ) -> Result<serde_json::Value, ClientError> {
     let id = next_id.fetch_add(1, Ordering::SeqCst);
     let bytes = encode_message(&JsonRpcRequest::new(id, &params))?;
@@ -3028,7 +3168,11 @@ async fn request_value_raw(
             Err(_) => Err(ClientError::ServiceCrashed),
         }
     };
-    let response = match params.timeout() {
+    let kind = match timeout_override {
+        Some(d) => RequestTimeoutKind::Finite(d),
+        None => params.timeout(),
+    };
+    let response = match kind {
         RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, body).await {
             Ok(response) => response,
             Err(_) => return Err(ClientError::Timeout),
@@ -3148,9 +3292,11 @@ mod tests {
             .expect("first ping should be enqueued");
 
         // No responder fills the pending entry. Advance past the
-        // HealthPing finite timeout (5 s) so request_value_raw returns
-        // ClientError::Timeout. The heartbeat must log and continue rather
-        // than exit.
+        // HealthPing finite timeout (5 s) so the underlying request
+        // call returns ClientError::Timeout. The heartbeat must log
+        // and continue rather than exit (Phase 8-1: a single timeout
+        // is no longer enough to trip a respawn; HEARTBEAT_MAX_CONSECUTIVE_MISSES
+        // gates that).
         tokio::time::advance(Duration::from_secs(6)).await;
         // Yield so the heartbeat task can observe the timeout.
         tokio::task::yield_now().await;
@@ -3486,43 +3632,52 @@ mod tests {
         assert_ne!(mismatch_msg, missing_msg);
     }
 
-    /// Crashloop tracker: the first two respawns are not crashloops; the
-    /// third within the window is. Drives the clock manually so the test
-    /// doesn't depend on wall time.
+    /// Phase 8-1 crashloop tracker: the first two unbroken crashes are
+    /// not a crashloop; the third trips. The reset-on-success behaviour
+    /// lives in `respawn` (clearing the counter after a successful
+    /// `BootReady`) so this unit test only covers the increment-and-check
+    /// half.
     #[test]
-    fn crashloop_tracker_fires_on_third_respawn_within_window() {
-        let queue: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
-        let t0 = Instant::now();
-        assert!(!record_respawn_and_check_crashloop(&queue, t0));
-        assert!(!record_respawn_and_check_crashloop(
-            &queue,
-            t0 + Duration::from_secs(5),
-        ));
-        assert!(record_respawn_and_check_crashloop(
-            &queue,
-            t0 + Duration::from_secs(10),
-        ));
+    fn crashloop_tracker_fires_on_third_unbroken_crash() {
+        let counter = AtomicU32::new(0);
+        assert!(!record_consecutive_crash_and_check(&counter));
+        assert!(!record_consecutive_crash_and_check(&counter));
+        assert!(record_consecutive_crash_and_check(&counter));
     }
 
-    /// Crashloop tracker evicts entries older than the window, so a slow
-    /// drip of respawns never trips the bound. The first respawn at t0
-    /// drops out before the third at t0+CRASHLOOP_WINDOW+1s, leaving the
-    /// queue with two recent entries - below threshold.
+    /// Phase 8-1: a successful boot resets the counter, so the
+    /// 3-crash-3-recovery-3-crash pattern that falsely tripped the
+    /// Phase 1.5 sliding-window guard does not trip the new counter.
+    /// Models what `respawn` does: store(0) clears the unbroken series.
     #[test]
-    fn crashloop_tracker_evicts_old_entries() {
-        let queue: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
-        let t0 = Instant::now();
-        assert!(!record_respawn_and_check_crashloop(&queue, t0));
-        assert!(!record_respawn_and_check_crashloop(
-            &queue,
-            t0 + Duration::from_secs(15),
-        ));
-        // CRASHLOOP_WINDOW is 30 s; advance to 31 s past t0 so the first
-        // entry has expired.
-        assert!(!record_respawn_and_check_crashloop(
-            &queue,
-            t0 + Duration::from_secs(31),
-        ));
+    fn crashloop_tracker_does_not_trip_after_recovery_clears_counter() {
+        let counter = AtomicU32::new(0);
+        // Three crashes - would trip on its own, but the third is the
+        // boundary; assert it returns false until cleared.
+        assert!(!record_consecutive_crash_and_check(&counter));
+        assert!(!record_consecutive_crash_and_check(&counter));
+        // Successful recovery clears the counter (mimics `respawn`).
+        counter.store(0, Ordering::Relaxed);
+        // Two more crashes - still not at threshold because the prior
+        // series was cleared.
+        assert!(!record_consecutive_crash_and_check(&counter));
+        assert!(!record_consecutive_crash_and_check(&counter));
+    }
+
+    /// Phase 8-1: backoff doubles up to the cap. The returned delay is
+    /// the value we *just* slept for; the new value stored in the
+    /// atomic is what the next call would consume.
+    #[test]
+    fn respawn_backoff_doubles_up_to_cap() {
+        let cur = AtomicU32::new(BACKOFF_INITIAL_SECS);
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(1));
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(2));
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(4));
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(8));
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(16));
+        // Cap is 30 s; further advances stay parked.
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(30));
+        assert_eq!(advance_respawn_backoff(&cur), Duration::from_secs(30));
     }
 
     /// Pre-queue gate accepts the reader's notification when generations
