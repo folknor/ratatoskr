@@ -564,6 +564,33 @@ fn lua_client_current_generation(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_client_notification_should_dispatch(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    if state.get_top() < 2 || state.typ(2) != LuaType::Table {
+        return Err(lua_error_message(
+            "notification_should_dispatch requires notification table",
+        ));
+    }
+    let method_name = get_string_field(state, 2, "method")?
+        .or_else(|| get_string_field(state, 2, "type").ok().flatten())
+        .unwrap_or_else(|| "notification".to_string());
+    let service_generation =
+        get_number_field(state, 2, "service_generation")?.map(|value| value as u32);
+    let ctx = context(state)?;
+    let current_generation = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.client(id)?.current_generation()
+    };
+    let dispatch = crate::service_client::notification_generation_should_dispatch(
+        service_generation,
+        current_generation,
+        &method_name,
+    );
+    state.set_top(0);
+    state.push_boolean(dispatch);
+    Ok(1)
+}
+
 fn lua_client_set_respawn_args(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     let extra_args = read_extra_args(state, 2)?;
@@ -879,6 +906,12 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_fn(state, idx, "shutdown", lua_client_shutdown)?;
     set_field_fn(state, idx, "child_pid", lua_client_child_pid)?;
     set_field_fn(state, idx, "current_generation", lua_client_current_generation)?;
+    set_field_fn(
+        state,
+        idx,
+        "notification_should_dispatch",
+        lua_client_notification_should_dispatch,
+    )?;
     set_field_fn(state, idx, "set_respawn_args", lua_client_set_respawn_args)?;
     set_field_fn(state, idx, "notifications", lua_client_notifications)?;
     set_field_fn(state, idx, "drop", lua_client_drop)?;

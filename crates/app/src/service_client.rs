@@ -2224,7 +2224,8 @@ impl ServiceClient {
     /// 8. Launch a replacement subprocess. On any launch failure, emit
     ///    `Terminal`. Otherwise install state, run version-check ping,
     ///    re-emit `ChildSpawned`, run `boot.ready`, schema-version sanity
-    ///    check, re-emit `BootReady`. Any failure during these steps emits
+    ///    check, re-emit `BootReady`. A child crash during these steps is
+    ///    handed back through `handle_crash`; other failures emit
     ///    `Terminal`.
     async fn handle_crash(self: Arc<Self>, dying_generation: u32) {
         // Pre-checks BEFORE taking the running state. If we're going to bail
@@ -2456,6 +2457,15 @@ impl ServiceClient {
         }
 
         if let Err(error) = self.respawn(respawn).await {
+            if matches!(error, ClientError::ServiceCrashed) {
+                let crashed_generation = self.current_generation.load(Ordering::SeqCst);
+                log::warn!(
+                    "respawn generation {crashed_generation} crashed before BootReady; \
+                     handing off to crash handler",
+                );
+                trigger_crash_handler(&Arc::downgrade(&self), crashed_generation);
+                return;
+            }
             log::error!("respawn failed: {error}");
             let _ = respawn
                 .spawn_event_tx
@@ -2527,6 +2537,7 @@ impl ServiceClient {
         // schema we just declared incompatible) until the App drops the Arc.
         match self.handshake_post_install(respawn, new_gen).await {
             Ok(()) => Ok(()),
+            Err(error @ ClientError::ServiceCrashed) => Err(error),
             Err(error) => {
                 self.tear_down_installed_state(&error).await;
                 Err(error)
@@ -2558,7 +2569,9 @@ impl ServiceClient {
             .send(SpawnEvent::ChildSpawned(Arc::clone(self)))
             .await;
 
-        let response: BootReadyResponse = self.request(RequestParams::BootReady).await?;
+        let response: BootReadyResponse = self
+            .request_or_observe_child_exit(RequestParams::BootReady)
+            .await?;
 
         // Schema-version sanity check vs the first BootReady captured by
         // run_spawn_flow. The contract: `handle_crash` defers respawn when
@@ -3304,12 +3317,24 @@ pub(crate) fn notification_should_dispatch(
     notification: &Notification,
     current_generation: u32,
 ) -> bool {
-    match notification.service_generation() {
+    notification_generation_should_dispatch(
+        notification.service_generation(),
+        current_generation,
+        notification.method_name(),
+    )
+}
+
+pub(crate) fn notification_generation_should_dispatch(
+    service_generation: Option<u32>,
+    current_generation: u32,
+    method_name: &str,
+) -> bool {
+    match service_generation {
         // `gen` is a reserved keyword in edition 2024.
         Some(tagged) if tagged != current_generation => {
             log::debug!(
-                "dropping stale notification {} (tagged={tagged}, current={current_generation})",
-                notification.method_name(),
+                "dropping stale notification {method_name} \
+                 (tagged={tagged}, current={current_generation})",
             );
             false
         }

@@ -308,7 +308,8 @@ under `crates/app/tests/service-harness/m3/`.
 
 ### M4 - T1 cohort
 
-**Status:** PARTIAL; the first deterministic action/journal slice has landed.
+**Status:** PARTIAL; deterministic action/journal, stale-generation,
+bulk-action, and crashloop slices have landed.
 
 Express the Phase 2 plan-specified integration cohort as `.lua`
 scripts. The "T1" cohort:
@@ -348,18 +349,22 @@ Current in-tree slice:
 - `pre_ack_crash_rolls_back_subprocess`
 - `mark_chat_read_emits_only_action_completed`
 - `test_fake_schema_propagates_via_terminal`
+- `stale_outcomes_dropped_after_respawn`
+- `bulk_archive_200_threads_under_budget`
+- `unbroken_crashes_trip_persistently_failing`
 
 This slice also adds the M4-specific helper surface:
 `test.seed_thread`, `test.thread_read`, `test.delay_next_write`, Lua
 bindings for `action.execute_plan`, `action.job_status`, and
-`action.mark_chat_read`, plus notification fields for action plan IDs.
+`action.mark_chat_read`, `client:notification_should_dispatch`, plus
+notification fields for action plan IDs and service generations. The
+crashloop script combines the existing Service-side
+`--test-boot-delay-ms` helper with `SIGKILL` to keep pre-`BootReady`
+respawn failures deterministic.
 
 Remaining M4 scope:
 
 - compose-send attachment and oversize validation scripts.
-- `stale_outcomes_dropped_after_respawn`.
-- `bulk_archive_200_threads_under_budget`.
-- `unbroken_crashes_trip_persistently_failing`.
 - 50-iteration soak across the full T1 directory.
 
 **Exit criteria:**
