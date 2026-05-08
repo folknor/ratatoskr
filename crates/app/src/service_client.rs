@@ -80,6 +80,38 @@ const HEARTBEAT_MAX_CONSECUTIVE_MISSES: u32 = 3;
 /// the next heartbeat timeout. 30 s comfortably covers the
 /// inter-progress gap on a slow paginated sync.
 const SYNC_RECENT_WINDOW: Duration = Duration::from_secs(30);
+/// Phase 8-1: budget for the JoinHandle abort phase of the user-quit
+/// `async_drop_wait` path. 200 ms covers the cooperative-cancel
+/// window for the reader / writer / heartbeat tasks; anything longer
+/// is overhead for the user closing the window.
+const DROP_ABORT_DEADLINE: Duration = Duration::from_millis(200);
+/// Phase 8-1: post-abort exit-wait budget when the Service is healthy
+/// (boot completed). 1 s catches a graceful shutdown's Drop emission
+/// in the typical case; respawn / kill path uses
+/// `wait_with_kill_watchdog` with a longer budget.
+const DROP_EXIT_DEADLINE_HEALTHY: Duration = Duration::from_secs(1);
+/// Phase 8-1: post-abort exit-wait budget when the Service has
+/// recently emitted a `BootProgress` notification. Migrations and
+/// other boot-time work can sit in a SQLite COMMIT for tens of
+/// seconds; SIGKILL during commit forces WAL recovery + migration
+/// redo on the next boot. 60 s gives the slow-path migrations /
+/// index rebuilds room to finish without the user-quit watchdog
+/// escalating.
+const DROP_EXIT_DEADLINE_BOOTING: Duration = Duration::from_secs(60);
+/// Window during which a recent `BootProgress` notification trips the
+/// extended booting-path budget on user-quit. 30 s comfortably covers
+/// the inter-phase gap on a slow migration; once boot completes and
+/// no further progress arrives, the watermark ages out and Drop falls
+/// back to the short healthy-path budget.
+const BOOT_PROGRESS_RECENT_WINDOW: Duration = Duration::from_secs(30);
+/// Phase 8-1: post-SIGKILL wait used by `wait_with_kill_watchdog` as a
+/// safety net. The OS should reap a kill -9'd process near-instantly;
+/// 1 s is generous enough that any longer wait indicates a kernel-level
+/// issue (the wait won't ever return) and we should give up rather
+/// than block the dispatch loop. Independent of `DROP_EXIT_DEADLINE_*`
+/// because this fires *after* a SIGKILL has already been sent, not
+/// before.
+const POST_KILL_WAIT: Duration = Duration::from_secs(1);
 
 pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
 
@@ -293,6 +325,17 @@ pub struct ServiceClient {
     /// when a sync is recent (see `SYNC_RECENT_WINDOW`). `0` means no
     /// SyncProgress has been seen since this client was constructed.
     last_sync_progress_at_ms: AtomicI64,
+    /// Phase 8-1: unix epoch in milliseconds of the latest
+    /// `Notification::BootProgress` observed by `reader_task`. The
+    /// Drop watchdog (`async_drop_wait`) consults this to elongate its
+    /// exit budget while the Service is actively in a boot phase - on
+    /// big migrations the previous 1 s budget would SIGKILL the Service
+    /// mid-COMMIT, leaving SQLite WAL recovery to redo the migration on
+    /// the next boot. `0` means no BootProgress has been seen since
+    /// this client was constructed (the test single-shot path never
+    /// drives boot.progress through the reader so this stays 0; only
+    /// real production boots populate it).
+    last_boot_progress_at_ms: AtomicI64,
     /// Cross-platform parent-death tie-up. Held for the lifetime of the
     /// client so the OS-level safety net (Job Object on Windows) survives
     /// any failure in our explicit Drop teardown. Listed last so it drops
@@ -592,6 +635,20 @@ impl ServiceClient {
         Self::spawn_inner(&exe, app_data_dir, &[], None).await
     }
 
+    /// Phase 8-1: did this client see a `BootProgress` notification
+    /// within `BOOT_PROGRESS_RECENT_WINDOW`? Used by the Drop watchdog
+    /// to extend its exit budget when a user-quit lands during a
+    /// long migration.
+    fn last_boot_progress_recent(&self) -> bool {
+        let last_ms = self.last_boot_progress_at_ms.load(Ordering::Relaxed);
+        if last_ms == 0 {
+            return false;
+        }
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let elapsed = now_ms.saturating_sub(last_ms);
+        u128::try_from(elapsed).unwrap_or(u128::MAX) <= BOOT_PROGRESS_RECENT_WINDOW.as_millis()
+    }
+
     /// Two-phase spawn that emits `SpawnEvent`s on the returned receiver.
     /// The receiver gets `ChildSpawned` after the version-check ping
     /// succeeds, `BootReady` after the boot.ready handshake completes, and
@@ -697,6 +754,7 @@ impl ServiceClient {
             consecutive_crashes: AtomicU32::new(0),
             current_backoff_secs: AtomicU32::new(BACKOFF_INITIAL_SECS),
             last_sync_progress_at_ms: AtomicI64::new(0),
+            last_boot_progress_at_ms: AtomicI64::new(0),
             _process_guard: process_guard,
         });
 
@@ -2516,6 +2574,24 @@ impl Drop for ServiceClient {
             // after the 1.2 s polling budget. Production uses a multi-thread
             // runtime (iced's daemon, plus the Service's own runtime), so
             // this only bites tests that pin a current_thread flavor.
+            // Phase 8-1: extend the exit budget when the Service is
+            // actively in a boot phase. The default 1 s budget would
+            // SIGKILL the Service mid-COMMIT during a long migration,
+            // leaving SQLite WAL recovery to redo the migration on the
+            // next boot. The watermark is set by `reader_task` on every
+            // BootProgress notification and ages out post-boot.
+            //
+            // Only applied on the production path (respawn_config is
+            // Some). Test single-shot clients use the short budget
+            // unconditionally - they assert tight kill-escalation
+            // bounds and don't have respawn semantics anyway.
+            let booting_recent = self.respawn_config.is_some()
+                && self.last_boot_progress_recent();
+            let exit_deadline = if booting_recent {
+                DROP_EXIT_DEADLINE_BOOTING
+            } else {
+                DROP_EXIT_DEADLINE_HEALTHY
+            };
             match runtime_for_block_on() {
                 Some(handle) => {
                     tokio::task::block_in_place(|| {
@@ -2524,12 +2600,13 @@ impl Drop for ServiceClient {
                             reader_handle,
                             writer_handle,
                             heartbeat_handle,
+                            exit_deadline,
                         ));
                     });
                 }
                 None => {
                     drop((reader_handle, writer_handle, heartbeat_handle));
-                    poll_for_exit_blocking(&mut child, Duration::from_millis(1200));
+                    poll_for_exit_blocking(&mut child, DROP_ABORT_DEADLINE + exit_deadline);
                 }
             }
 
@@ -2554,17 +2631,16 @@ async fn async_drop_wait(
     reader_handle: tokio::task::JoinHandle<()>,
     writer_handle: tokio::task::JoinHandle<()>,
     heartbeat_handle: tokio::task::JoinHandle<()>,
+    exit_deadline: Duration,
 ) {
-    let abort_deadline = Duration::from_millis(200);
     let abort_started = Instant::now();
     for handle in [reader_handle, writer_handle, heartbeat_handle] {
-        let remaining = abort_deadline.saturating_sub(abort_started.elapsed());
+        let remaining = DROP_ABORT_DEADLINE.saturating_sub(abort_started.elapsed());
         if remaining.is_zero() {
             continue;
         }
         let _ = tokio::time::timeout(remaining, handle).await;
     }
-    let exit_deadline = Duration::from_secs(1);
     let exit_started = Instant::now();
     while exit_started.elapsed() < exit_deadline {
         if try_wait_child_owned(child) {
@@ -2602,6 +2678,13 @@ fn poll_for_exit_blocking(child: &mut Child, deadline: Duration) {
 /// and try one more short wait. Returns `Some(status)` if the child exited;
 /// `None` if `wait` errored or both attempts timed out (rare - the OS
 /// should not block on a kill -9'd process).
+///
+/// Phase 8-1 unification: shares the `POST_KILL_WAIT` constant with
+/// `async_drop_wait`. The primary `watchdog` window is parameterised
+/// per call site (typically 1-5 s for shutdown drains, longer for
+/// respawn paths where the dying Service may be finishing legitimate
+/// in-flight work). The post-SIGKILL secondary wait is a kernel-level
+/// safety net and is not user-facing.
 async fn wait_with_kill_watchdog(
     child: &mut Child,
     watchdog: Duration,
@@ -2617,7 +2700,7 @@ async fn wait_with_kill_watchdog(
             if let Err(error) = child.start_kill() {
                 log::warn!("start_kill on dying child failed: {error}");
             }
-            tokio::time::timeout(Duration::from_secs(1), child.wait())
+            tokio::time::timeout(POST_KILL_WAIT, child.wait())
                 .await
                 .ok()
                 .and_then(Result::ok)
@@ -2909,17 +2992,29 @@ async fn reader_task<R>(
                                 continue;
                             }
                             // Phase 8-1: tap SyncProgress to elongate the
-                            // next heartbeat timeout (heartbeat_task
-                            // consults `last_sync_progress_at_ms` against
-                            // `SYNC_RECENT_WINDOW`). The notification
+                            // next heartbeat timeout, and tap BootProgress
+                            // to extend the user-quit Drop watchdog's
+                            // exit deadline during boot phases. Both
+                            // watermarks are unix epoch ms; the
+                            // consumers compare against their own
+                            // recent-window constant. The notification
                             // still flows to the UI dispatcher below.
-                            if matches!(notification, Notification::SyncProgress(_))
-                                && let Some(client) = upgraded.as_ref()
-                            {
-                                let now_ms = chrono::Utc::now().timestamp_millis();
-                                client
-                                    .last_sync_progress_at_ms
-                                    .store(now_ms, Ordering::Relaxed);
+                            if let Some(client) = upgraded.as_ref() {
+                                match &notification {
+                                    Notification::SyncProgress(_) => {
+                                        let now_ms = chrono::Utc::now().timestamp_millis();
+                                        client
+                                            .last_sync_progress_at_ms
+                                            .store(now_ms, Ordering::Relaxed);
+                                    }
+                                    Notification::BootProgress(_) => {
+                                        let now_ms = chrono::Utc::now().timestamp_millis();
+                                        client
+                                            .last_boot_progress_at_ms
+                                            .store(now_ms, Ordering::Relaxed);
+                                    }
+                                    _ => {}
+                                }
                             }
                             let tagged = tag_notification_with_generation(notification, generation);
                             notifications.enqueue(tagged).await;
