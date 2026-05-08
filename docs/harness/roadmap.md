@@ -366,6 +366,13 @@ the existing Service-side
 `--test-boot-delay-ms` helper with `SIGKILL` to keep pre-`BootReady`
 respawn failures deterministic.
 
+The `harness-offline` account provider is a test-helper provider that
+constructs successfully and returns transient network errors for
+provider operations. This keeps planned actions and quiet remote
+propagation on the same retry policy: unknown providers are permanent
+setup errors, while `harness-offline` is a deliberate offline network
+provider for `pending_ops` coverage.
+
 Remaining M4 scope:
 
 - compose-send attachment and oversize validation scripts. These are

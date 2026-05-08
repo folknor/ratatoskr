@@ -553,7 +553,7 @@ existing tests do.
 | `stale_notifications_dropped_after_generation_bump_end_to_end` | `notifications()`, `current_generation()`, drain across kill+respawn, generation-tag check. |
 | `deadlocked_service_drop_escalates_to_kill` | `spawn_for_test --test-hang-on-stdin-eof`, `drop`, `pid_is_alive` poll with time-floor + ceiling. |
 | `pre_ack_crash_*` / `post_ack_crash_*` (Phase 8 cohort) | `request("ExecutePlan")`, fault-inject via test-helper RPC, kill, respawn, follow-up `request`, `Notification` drain. |
-| `retry_queue_persists_across_respawn` | M4 landed `test.pending_ops_read` plus a real-subprocess retry-queue script; 50/50 focused soak passes. |
+| `retry_queue_persists_across_respawn` | M4 landed `test.pending_ops_read`, a test-only `harness-offline` provider, and a real-subprocess `action.execute_plan` retry-queue script; 50/50 focused soak passes. |
 | `compose_send_50mb_attachment` | Blocked on brokkr + `../sæhrimnir`: the harness can call `action.send`, but cannot yet launch the mock server needed to exercise the actual network send. |
 | `bulk_archive_200_threads_under_budget` | Lua loop dispatching 200 `request` calls in parallel, wall-clock budget assertion via `os.time`. |
 | `mark_chat_read_emits_only_action_completed` | `request("MarkChatRead")`, `notifications():drain_for`, cardinality-1 assertion. |

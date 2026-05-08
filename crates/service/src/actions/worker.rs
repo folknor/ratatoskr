@@ -52,7 +52,7 @@ use tokio::sync::mpsc;
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::provider::{classify_provider_error, create_provider};
 use super::wire_conversion::wire_to_mail;
 use common::types::ActionProviderCtx;
 use db::progress::NoopProgressReporter;
@@ -982,10 +982,15 @@ async fn mark_chat_read_remote(ctx: &ActionContext, affected: Vec<(String, Strin
         let provider = match create_provider(&ctx.db, &account_id, ctx.encryption_key).await {
             Ok(p) => p,
             Err(error) => {
+                let kind = classify_provider_error(&error);
+                let retryable = matches!(
+                    kind,
+                    RemoteFailureKind::Transient | RemoteFailureKind::Unknown
+                );
                 for thread_id in &thread_ids {
                     let outcome = ActionOutcome::LocalOnly {
-                        reason: ActionError::remote(error.clone()),
-                        retryable: true,
+                        reason: ActionError::remote_with_kind(kind, error.clone()),
+                        retryable,
                     };
                     enqueue_if_retryable(
                         ctx,

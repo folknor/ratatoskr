@@ -12,7 +12,7 @@ use super::log::MutationLog;
 use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::provider::{classify_provider_error, create_provider};
 use super::{
     archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, snooze, spam, star,
     trash,
@@ -442,27 +442,5 @@ fn op_name(op: &MailOperation) -> &'static str {
         MailOperation::SetMuted { .. } => "mute",
         MailOperation::Snooze { .. } => "snooze",
         MailOperation::Unsnooze => "unsnooze",
-    }
-}
-
-/// Classify a provider creation error for retry policy.
-fn classify_provider_error(error: &str) -> RemoteFailureKind {
-    let lower = error.to_lowercase();
-    // Permanent: provider/account doesn't exist or can't be constructed
-    if lower.contains("unknown provider")
-        || lower.contains("no rows returned")
-        || lower.contains("queryreturnednorows")
-        || lower.contains("not found")
-        || lower.contains("missing account")
-    {
-        RemoteFailureKind::Permanent
-    } else if lower.contains("timeout")
-        || lower.contains("connection refused")
-        || lower.contains("dns")
-        || lower.contains("network")
-    {
-        RemoteFailureKind::Transient
-    } else {
-        RemoteFailureKind::Unknown
     }
 }

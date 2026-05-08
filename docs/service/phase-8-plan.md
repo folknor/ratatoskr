@@ -23,7 +23,7 @@ The plan has two halves of work:
 - `docs/harness/roadmap.md` - Phase 8's test cohort items (the wedge,
   T1, the Phase 7 extract cohort, manual-matrix automation, the
   `--test-fake-schema=N` e2e) live in the harness roadmap, not here.
-  Phase 8's close-out depends on harness **M2** (the wedge) passing.
+  The harness **M2** wedge dependency is satisfied on ratatoskr.
   The implementation work itself does not gate on the harness - code
   changes can land independently of test coverage shape.
 - `docs/harness/architecture.md`, `docs/harness/problem-statement.md`
@@ -121,9 +121,9 @@ entangled with the two flaky `service_subprocess` tests pre-harness.
   MustDeliver semantics. The contract noted in
   `crates/service/src/boot_progress.rs` ("`OUTBOUND_QUEUE_CAP=1024`
   must remain >> Phase-1.5 boot frame count") is doc-only - no
-  per-phase regression test bounds total emit count. Phase 8 owns
-  re-attempting the helper *after* harness M2 makes the underlying
-  drain bug deterministic. Either ship the class-aware helper with
+  per-phase regression test bounds total emit count. Harness M2 now
+  makes the underlying drain bug deterministic for a re-attempt.
+  Either ship the class-aware helper with
   the underlying drain fix, or replace the contract with per-emitter
   regression tests bounding emit count per boot phase. Coalesce-class
   `try_send` remains correct for `boot.progress` / `sync.progress`
@@ -313,8 +313,8 @@ The close-out work runs as the final commits of Phase 8. Order:
 
 1. Run 8-6 (promote durable content into `docs/architecture.md`) -
    independent of implementation order; can land first.
-2. Run 8-7 (relocate `manual-test-matrix.md`) - depends on harness M1
-   landed (so `docs/harness/` exists with companion docs).
+2. Run 8-7 (relocate `manual-test-matrix.md`) - harness M1 has
+   landed, so `docs/harness/` exists with companion docs.
 3. Run 8-8 (per-file disposition) - verify each
    `docs/service/*` file has a target.
 4. Run 8-9 (delete the directory) - final commit; this plan deletes
@@ -510,10 +510,8 @@ up. Some natural pairings:
    purely Service-internal work, no UI plumbing, no harness
    gating. Most measurable user-visible improvement.
 2. **8-1 second.** The recovery + boot polish cluster is the most
-   substantial work and the most user-visible. Several sub-items
-   benefit from harness M2 being available for verification (the
-   class-aware emit re-attempt particularly), so harness M2 ideally
-   lands in parallel.
+   substantial work and the most user-visible. Harness M2 is now
+   available for verification of the class-aware emit re-attempt.
 3. **8-3 in parallel** with 8-1 and 8-2 - different code area,
    different reviewers.
 4. **8-4 after 8-1 / 8-2 / 8-3.** PreserveExisting is the largest
@@ -574,14 +572,14 @@ documents what shipped before the file deletes.
     populate the `Option<...>` fields on `ReadyApp` as each init
     completes. UI surfaces gracefully render their existing
     "loading..." placeholder while the fields are None.
-  - **E** (class-aware `boot_progress::emit`) DEFERRED behind
-    harness M2. The earlier attempt was reverted because of
-    subprocess-cohort flakes; once M2 lands the wedge scripts as
-    `.lua` (and the `#[ignore]`'d libtest tests are retired), the
-    class-aware emit re-attempt has deterministic verification.
+  - **E** (class-aware `boot_progress::emit`) DEFERRED, but no
+    longer blocked on harness M2. The earlier attempt was reverted
+    because of subprocess-cohort flakes; the M2 wedge scripts now
+    give the re-attempt deterministic verification.
   - **F** (retry-queue persistence verify) LANDED in harness M4.
     `retry_queue_persists_across_respawn.lua` drives
-    `action.mark_chat_read`, observes the `pending_ops` row through
+    `action.execute_plan` through the test-only `harness-offline`
+    provider, observes the `pending_ops` row through
     `test.pending_ops_read`, SIGKILLs the Service, waits for respawn,
     and verifies the same pending row survives. Focused soak:
     50/50 passed.

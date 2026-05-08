@@ -6426,6 +6426,7 @@ name = "service"
 version = "0.1.0"
 dependencies = [
  "action-types",
+ "async-trait",
  "base64",
  "bifrost-jmap",
  "cal",

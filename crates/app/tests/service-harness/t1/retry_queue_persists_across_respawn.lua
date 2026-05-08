@@ -72,13 +72,20 @@ local thread, thread_err = client:request("TestSeedThread", {
 })
 harness.assert(thread_err == nil, "seed thread failed")
 
-local ack, ack_err = client:request("ActionMarkChatRead", {
-    chat_email = "m4-retry-queue-chat@example.test",
+local ack, ack_err = client:request("ActionExecutePlan", {
+    operations = {
+        {
+            account_id = account.account_id,
+            thread_id = thread.thread_id,
+            operation = "SetRead",
+            to = true,
+        },
+    },
 })
-harness.assert(ack_err == nil, "mark_chat_read failed")
-harness.assert(ack.journaled, "mark_chat_read was not journaled")
+harness.assert(ack_err == nil, "action.execute_plan failed")
+harness.assert(ack.journaled, "plan was not journaled")
 
-local completed = wait_for_action_completed(queue, ack.job_id, 10)
+local completed = wait_for_action_completed(queue, ack.plan_id, 10)
 harness.assert(completed ~= nil, "missing action.completed")
 
 local before =

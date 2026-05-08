@@ -39,6 +39,7 @@ imap = { path = "../imap" }
 # `ProviderOps`) so a single trait object covers both action and
 # sync surfaces.
 provider-sync = { path = "../provider-sync" }
+async-trait = "0.1"
 # Action service deps brought in from core: futures for batch_execute's
 # join_all, uuid for action plan/op IDs and send.rs RFC822 message-id,
 # jmap-client for the JMAP-specific contact action handlers.
