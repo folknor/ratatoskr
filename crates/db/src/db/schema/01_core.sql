@@ -41,7 +41,17 @@ CREATE TABLE IF NOT EXISTS accounts (
     sort_order INTEGER NOT NULL DEFAULT 0,
     smtp_username TEXT,
     smtp_password TEXT,
-    supports_keywords INTEGER
+    supports_keywords INTEGER,
+    -- Phase 8-5 (account deletion is_deleting gate): set to 1 by
+    -- `account.delete` immediately after the cancel-and-await flow
+    -- starts so subsequent SyncTick / start_account requests skip the
+    -- account. The row deletion finalizes the flow; before that, the
+    -- `is_deleting=1` flag prevents a SyncTick firing between cancel-
+    -- ack and row-delete from re-kicking a sync against the
+    -- disappearing account. Defense-in-depth: the gate exists at
+    -- both the UI SyncTick filter and the Service-side
+    -- SyncRuntime::start_account guard.
+    is_deleting INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS settings (

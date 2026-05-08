@@ -255,6 +255,33 @@ pub(crate) async fn handle_delete(
 ) -> Result<Value, ServiceError> {
     let account_id = params.account_id;
 
+    // Phase 8-5: flip `accounts.is_deleting = 1` BEFORE the cancel-
+    // and-await flow so any concurrent SyncTick / start_account
+    // request observes the flag and skips. Without this gate, a
+    // SyncTick firing between the cancel-ack and the row-delete
+    // could re-kick a sync against the disappearing account; the
+    // cancel races the start, and the Service-side defense-in-depth
+    // check in `SyncRuntime::start_account` would catch it but we'd
+    // still pay the round-trip cost.
+    let aid_for_flag = account_id.clone();
+    if let Ok(write_db) = boot_state.write_db_state() {
+        if let Err(e) = write_db
+            .with_conn(move |conn| {
+                conn.execute(
+                    "UPDATE accounts SET is_deleting = 1 WHERE id = ?1",
+                    rusqlite::params![aid_for_flag],
+                )
+                .map(|_| ())
+                .map_err(|e| format!("set is_deleting: {e}"))
+            })
+            .await
+        {
+            log::warn!(
+                "account.delete: failed to set is_deleting for {account_id}: {e}; proceeding"
+            );
+        }
+    }
+
     if let Some(sync) = boot_state.sync_runtime()
         && let Err(e) = sync.cancel_account_and_await(&account_id).await
     {

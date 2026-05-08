@@ -174,7 +174,44 @@ impl SyncRuntime {
     /// Spawn a runner for `account_id` if one is not already in flight.
     /// Returns the `SyncStartAck` describing the run id + whether the
     /// caller is the original kicker or a duplicate.
+    ///
+    /// Phase 8-5 defense-in-depth: rejects starts against an account
+    /// whose `is_deleting = 1` flag has been set by `account.delete`.
+    /// The UI side filters SyncTick on the same flag, but a delayed
+    /// SyncTick from the iced subscription can still arrive between
+    /// the flag flip and the row delete; this gate ensures the
+    /// runner is never spawned against a disappearing account even if
+    /// the UI filter fails.
     pub async fn start_account(&self, account_id: String) -> SyncStartAck {
+        let aid = account_id.clone();
+        let is_deleting: bool = self
+            .inner
+            .db
+            .with_conn(move |conn| {
+                conn.query_row(
+                    "SELECT is_deleting FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|v| v != 0)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(true),
+                    _ => Err(format!("read is_deleting: {e}")),
+                })
+            })
+            .await
+            .unwrap_or(false);
+        if is_deleting {
+            log::info!(
+                "sync start_account({account_id}) rejected: account is being deleted"
+            );
+            return SyncStartAck {
+                account_id,
+                run_id: SyncRunId::new_v7(),
+                already_in_flight: true,
+            };
+        }
+
         let mut map = self.inner.accounts.lock().await;
 
         // Opportunistic cleanup of finished entries.
