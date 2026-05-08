@@ -443,6 +443,12 @@ async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
         SpawnEvent::Terminal(error) => {
             return Err(std::io::Error::other(format!("unexpected Terminal: {error:?}")).into());
         }
+        SpawnEvent::HealthChanged(_) => {
+            return Err(std::io::Error::other(
+                "HealthChanged arrived before ChildSpawned",
+            )
+            .into());
+        }
     };
 
     let second = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
@@ -537,6 +543,31 @@ async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
 /// terminally; the no-key implementation may emit ChildSpawned before
 /// Terminal (when the version-check ping completed before the Service
 /// died) or skip straight to Terminal (when it didn't).
+/// Phase 8-1: drain `HealthChanged` events (which arrive interleaved
+/// with the lifecycle events tests assert on) and return the next
+/// non-`HealthChanged` event or `None` on stream close. Tests that
+/// care about a specific lifecycle event call this instead of `recv`
+/// so the assertion isn't polluted by transient health pulses.
+async fn recv_skipping_health(
+    events: &mut tokio::sync::mpsc::Receiver<SpawnEvent>,
+    timeout: std::time::Duration,
+) -> Result<Option<SpawnEvent>, std::io::Error> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .ok_or_else(|| std::io::Error::other("recv_skipping_health: deadline elapsed"))?;
+        let ev = tokio::time::timeout(remaining, events.recv())
+            .await
+            .map_err(|_| std::io::Error::other("recv_skipping_health: deadline elapsed"))?;
+        match ev {
+            None => return Ok(None),
+            Some(SpawnEvent::HealthChanged(_)) => continue,
+            Some(other) => return Ok(Some(other)),
+        }
+    }
+}
+
 async fn await_terminal_with_deadline(
     events: &mut tokio::sync::mpsc::Receiver<SpawnEvent>,
     deadline: std::time::Duration,
@@ -555,6 +586,10 @@ async fn await_terminal_with_deadline(
                     "BootReady arrived where only Terminal was valid (no-key data dir)",
                 )
                 .into());
+            }
+            Ok(Some(SpawnEvent::HealthChanged(_))) => {
+                // Phase 8-1 health pulse - irrelevant to terminal-await
+                // assertions. Continue draining.
             }
             Ok(None) => {
                 return Err(std::io::Error::other(format!(
@@ -779,6 +814,9 @@ async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
         },
         SpawnEvent::ChildSpawned(_) | SpawnEvent::BootReady(_) => {
             panic!("Service B should not reach ChildSpawned / BootReady against contended lock");
+        }
+        SpawnEvent::HealthChanged(h) => {
+            panic!("Service B should not surface HealthChanged against contended lock: {h:?}");
         }
     }
 
@@ -1353,10 +1391,12 @@ async fn stale_notifications_dropped_after_generation_bump_end_to_end() -> TestR
         return Err(std::io::Error::last_os_error().into());
     }
 
-    // Wait for respawn ChildSpawned + BootReady.
-    let respawn_first = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+    // Wait for respawn ChildSpawned + BootReady. Phase 8-1: a
+    // HealthChanged(Respawning) pulse arrives between the kill and the
+    // ChildSpawned; recv_skipping_health drains it.
+    let respawn_first = recv_skipping_health(&mut events, std::time::Duration::from_secs(15))
         .await
-        .map_err(|_| std::io::Error::other("respawn ChildSpawned timeout"))?
+        .map_err(|e| std::io::Error::other(format!("respawn ChildSpawned: {e}")))?
         .ok_or_else(|| std::io::Error::other("event stream closed"))?;
     match respawn_first {
         SpawnEvent::ChildSpawned(_) => {}
@@ -1365,9 +1405,9 @@ async fn stale_notifications_dropped_after_generation_bump_end_to_end() -> TestR
         ))
         .into()),
     }
-    let respawn_second = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+    let respawn_second = recv_skipping_health(&mut events, std::time::Duration::from_secs(15))
         .await
-        .map_err(|_| std::io::Error::other("respawn BootReady timeout"))?
+        .map_err(|e| std::io::Error::other(format!("respawn BootReady: {e}")))?
         .ok_or_else(|| std::io::Error::other("event stream closed"))?;
     match respawn_second {
         SpawnEvent::BootReady(_) => {}

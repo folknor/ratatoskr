@@ -167,6 +167,13 @@ pub enum Message {
     /// is the one case that gets a user-friendly message; everything else
     /// gets a technical message per scope item 16 of phase-1.5-plan.md.
     ServiceBootFailed(crate::service_client::BootFailureReason),
+    /// Phase 8-1: coarse Service health for the status-bar indicator.
+    /// Emitted by `ServiceClient` on transitions (booting -> healthy,
+    /// healthy -> respawning, etc.); the rendering policy is in
+    /// `crates/app/src/ui/status_bar.rs`. Distinct from
+    /// `ServiceBootFailed` (terminal) and from `ServiceNotification`
+    /// (the in-band BootProgress / SyncProgress / etc. stream).
+    ServiceHealthChanged(crate::service_client::ServiceHealth),
     ServiceNotification(service_api::Notification),
     ServiceShutdownComplete(Result<(), String>),
     ToggleSettings,

@@ -426,6 +426,44 @@ pub enum SpawnEvent {
     ChildSpawned(Arc<ServiceClient>),
     BootReady(BootReadyResponse),
     Terminal(ClientError),
+    /// Phase 8-1: coarse-grained Service health for the UI status bar.
+    /// Emitted on transitions (booting -> healthy, healthy -> respawning,
+    /// respawning -> persistently failing, etc.) so a banner / indicator
+    /// component can render without polling. The terminal `Terminal`
+    /// arm above remains the authoritative "Service is gone" signal;
+    /// `HealthChanged` is the lighter-weight surface for transient
+    /// states (the 90 s heartbeat-miss window, the post-crash 1-30 s
+    /// backoff, the multi-respawn-failure path before terminal trips).
+    HealthChanged(ServiceHealth),
+}
+
+/// Phase 8-1: coarse Service health classification surfaced to the UI
+/// status bar. Distinct from `ClientError` (which carries fatal failure
+/// detail) and from `BootProgress` (which is the per-phase progress
+/// stream during boot itself). Rendering policy: only non-`Healthy`
+/// values produce visible chrome; `Healthy` is the default state.
+#[derive(Debug, Clone)]
+pub enum ServiceHealth {
+    /// Last known good state - boot completed and heartbeat is responsive.
+    Healthy,
+    /// Initial boot is in progress. The phase string is the latest
+    /// `BootProgress` notification's phase label, included for the UI
+    /// to render a more specific message ("Loading key", "Applying
+    /// migrations 3/12", etc.) without reaching back into the
+    /// notification stream.
+    Booting { phase: String },
+    /// Service crashed; the respawn loop is sleeping `next_delay`
+    /// before the next attempt. `attempt` counts unbroken crashes; on
+    /// successful boot both fields reset.
+    Respawning {
+        attempt: u32,
+        next_delay: Duration,
+    },
+    /// `CRASHLOOP_THRESHOLD` unbroken crashes occurred without a
+    /// successful boot. The respawn loop has stopped; the user must
+    /// take action (typically: check logs, resolve the underlying
+    /// cause, restart the app).
+    PersistentlyFailing { reason: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -2117,6 +2155,22 @@ impl ServiceClient {
         //     crash into a hard exit.
         let backoff = advance_respawn_backoff(&self.current_backoff_secs);
         log::info!("service respawn backoff: sleeping {backoff:?} before respawn");
+        // Phase 8-1: surface the in-progress respawn so the UI can
+        // render a "Service restarting..." indicator. `attempt` reads
+        // the unbroken-crash counter (already incremented for this
+        // crash by `record_consecutive_crash_and_check` further down,
+        // but the SpawnEvent emit happens before the threshold trip
+        // so we use the +1 logical value).
+        let attempt = self.consecutive_crashes.load(Ordering::Relaxed) + 1;
+        if let Some(config) = self.respawn_config.as_ref() {
+            let _ = config
+                .spawn_event_tx
+                .send(SpawnEvent::HealthChanged(ServiceHealth::Respawning {
+                    attempt,
+                    next_delay: backoff,
+                }))
+                .await;
+        }
         tokio::time::sleep(backoff).await;
         if self.is_shutting_down.load(Ordering::SeqCst) {
             return;
@@ -2186,6 +2240,24 @@ impl ServiceClient {
                 "crashloop detected ({CRASHLOOP_THRESHOLD} unbroken crashes); \
                  terminating with {classification:?}",
             );
+            // Phase 8-1: surface PersistentlyFailing so the UI can
+            // render a "Service can't start - check logs" banner. The
+            // `Terminal` event below is the authoritative no-respawn
+            // signal; `HealthChanged` is the lighter-weight surface
+            // for the same condition that doesn't require the UI to
+            // dispatch terminal-state handling.
+            if let Some(config) = self.respawn_config.as_ref() {
+                let _ = config
+                    .spawn_event_tx
+                    .send(SpawnEvent::HealthChanged(
+                        ServiceHealth::PersistentlyFailing {
+                            reason: format!(
+                                "{CRASHLOOP_THRESHOLD} unbroken crashes; last classification: {classification:?}"
+                            ),
+                        },
+                    ))
+                    .await;
+            }
             let _ = respawn
                 .spawn_event_tx
                 .send(SpawnEvent::Terminal(ClientError::BootFailure {
@@ -2347,11 +2419,21 @@ impl ServiceClient {
         // Phase 8-1: a clean BootReady is the signal "boot succeeded
         // on this respawn." Reset the unbroken-crash counter and the
         // backoff schedule so the *next* crash starts a fresh sequence
-        // rather than counting against the prior series.
-        self.consecutive_crashes.store(0, Ordering::Relaxed);
+        // rather than counting against the prior series. Emit
+        // HealthChanged(Healthy) only when there was a prior crash
+        // sequence to clear - on first boot the BootReady event itself
+        // is the "Service is healthy" signal and a separate
+        // HealthChanged would be redundant noise.
+        let was_in_crash_sequence = self.consecutive_crashes.swap(0, Ordering::Relaxed) > 0;
         self.current_backoff_secs
             .store(BACKOFF_INITIAL_SECS, Ordering::Relaxed);
 
+        if was_in_crash_sequence {
+            let _ = respawn
+                .spawn_event_tx
+                .send(SpawnEvent::HealthChanged(ServiceHealth::Healthy))
+                .await;
+        }
         let _ = respawn
             .spawn_event_tx
             .send(SpawnEvent::BootReady(response))

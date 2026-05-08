@@ -400,6 +400,21 @@ pub enum RequestParams {
     TestPrintln { message: String },
 }
 
+/// Phase 8-1: idempotency classification for `RequestParams::idempotency()`.
+/// See that method's doc-comment for the per-variant semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Idempotency {
+    /// Safe to silently re-issue if the response was lost.
+    Idempotent,
+    /// Must NOT be replayed; duplicate execution produces a duplicate
+    /// observable side effect.
+    Mutating,
+    /// Idempotent given a known target value; replay is safe if and
+    /// only if the target hasn't already been applied. The replay
+    /// machinery verifies before re-issuing.
+    Conditional,
+}
+
 impl RequestParams {
     pub fn method_name(&self) -> &'static str {
         match self {
@@ -568,6 +583,80 @@ impl RequestParams {
             }
             #[cfg(feature = "test-helpers")]
             Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
+        }
+    }
+
+    /// Phase 8-1: per-method idempotency classification. Intended for
+    /// the future client-side replay-on-respawn machinery (T1 cohort,
+    /// harness M4); 8-1 itself only records the contract. Today the
+    /// client unconditionally fails pending requests with
+    /// `ClientError::ServiceCrashed` on respawn; once replay lands, the
+    /// classification picks which path each method takes.
+    ///
+    /// - `Idempotent`: safe to silently re-issue if the response was
+    ///   lost on the wire pre-respawn. Pure reads or "compute from
+    ///   inputs" RPCs.
+    /// - `Mutating`: must NOT be replayed - duplicate execution
+    ///   produces a duplicate observable side effect (sends an email
+    ///   twice, deletes an account twice, consumes the same OAuth
+    ///   authorization code twice). The client must surface the loss
+    ///   as `ServiceCrashed` and let the user retry.
+    /// - `Conditional`: idempotent given a known target value (the
+    ///   "set state to X" shape). Replay is safe if and only if the
+    ///   target hasn't been observed pre-crash. The replay machinery
+    ///   verifies post-respawn before re-issuing; if the target was
+    ///   already applied, the replay becomes a no-op.
+    pub fn idempotency(&self) -> Idempotency {
+        match self {
+            Self::HealthPing
+            | Self::BootReady
+            | Self::ActionJobStatus { .. }
+            | Self::ReadBootstrapSnapshots { .. }
+            | Self::EncryptForStorage { .. }
+            | Self::DecryptForStorage { .. }
+            | Self::AttachmentFetch { .. }
+            | Self::ExtractStatus { .. } => Idempotency::Idempotent,
+
+            Self::Shutdown
+            | Self::ActionExecutePlan { .. }
+            | Self::CalActionExecutePlan { .. }
+            | Self::ActionSend { .. }
+            | Self::OauthExchangeCode { .. }
+            | Self::SyncCancelAccount { .. }
+            | Self::CalendarCancelAccountSync { .. }
+            | Self::SignatureCreate { .. }
+            | Self::SmartFolderCreate { .. }
+            | Self::ContactsGroupSave { .. }
+            | Self::ContactsGroupDelete { .. }
+            | Self::ContactsContactSave { .. }
+            | Self::ContactsContactSaveWithWriteback { .. }
+            | Self::ContactsContactDelete { .. }
+            | Self::AccountCreate { .. }
+            | Self::AccountDelete { .. }
+            | Self::PinnedSearchCreateOrUpdate { .. } => Idempotency::Mutating,
+
+            Self::ActionMarkChatRead { .. }
+            | Self::SyncStartAccount { .. }
+            | Self::CalendarStartAccountSync { .. }
+            | Self::CalendarSetVisibility { .. }
+            | Self::ThreadUiStateSet { .. }
+            | Self::SettingsSet { .. }
+            | Self::SignatureUpdate { .. }
+            | Self::SignatureDelete { .. }
+            | Self::SignatureReorder { .. }
+            | Self::PinnedSearchUpdate { .. }
+            | Self::PinnedSearchDelete { .. }
+            | Self::PinnedSearchDeleteAll { .. }
+            | Self::AccountUpdate { .. }
+            | Self::AccountReorder { .. }
+            | Self::AccountUpdateTokens { .. }
+            | Self::IndexRebuild { .. } => Idempotency::Conditional,
+
+            #[cfg(feature = "test-helpers")]
+            Self::TestPanic
+            | Self::TestVersion { .. }
+            | Self::TestSlow { .. }
+            | Self::TestPrintln { .. } => Idempotency::Idempotent,
         }
     }
 

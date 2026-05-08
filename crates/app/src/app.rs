@@ -87,6 +87,13 @@ pub struct ReadyApp {
     pub(crate) chat_generation: GenerationCounter<rtsk::generation::Chat>,
     pub(crate) chat_list_generation: GenerationCounter<rtsk::generation::ChatList>,
 
+    // Phase 8-1: latest Service health surfaced by `ServiceClient`.
+    // Used by `crates/app/src/ui/status_bar.rs` to render a banner
+    // when not `Healthy`. Defaults to `Healthy` post-`BootReady`;
+    // transitions to `Respawning` / `PersistentlyFailing` on crash
+    // events.
+    pub(crate) service_health: crate::service_client::ServiceHealth,
+
     // Search state
     pub(crate) search_state: Option<Arc<rtsk::search::SearchReadState>>,
     /// Phase 3 task 17: stamped on `Notification::IndexCommitted`
@@ -379,6 +386,7 @@ impl ReadyApp {
             palette: Palette::new(CommandRegistry::new(), resolver),
             undo_stack: UndoStack::default(),
             search_state,
+            service_health: crate::service_client::ServiceHealth::Healthy,
             pending_reader_reload: None,
             pending_calendar_reload: None,
             chat_timeline: None,
@@ -543,6 +551,9 @@ fn spawn_event_stream(
                                     &error,
                                 ),
                             )
+                        }
+                        crate::service_client::SpawnEvent::HealthChanged(health) => {
+                            Message::ServiceHealthChanged(health)
                         }
                     };
                     if output.try_send(msg).is_err() {
