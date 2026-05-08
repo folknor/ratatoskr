@@ -528,3 +528,103 @@ Each sub-slice that lands gets a per-slice retrospective bullet here
 in this plan as it goes (mirroring the convention from
 `phase-7-plan.md`'s § "Phase 7 status (as landed)") so the close-out
 documents what shipped before the file deletes.
+
+## Phase 8 status (as landed)
+
+- **8-1** LANDED in four commits (A-D); two carry-forwards (E, F)
+  deferred behind harness work, called out per-bullet below.
+  - **A** (respawn backoff + heartbeat policy). Replaced the Phase
+    1.5 fixed 1 s cooldown + sliding-window crashloop guard with
+    exponential backoff (1, 2, 4, 8, 16, 30 s cap) and a
+    reset-on-success unbroken-crash counter that closes the
+    "3-crash, 3-recovery, 3-crash within window" false positive.
+    Heartbeat now requires N=3 consecutive misses before tripping
+    and elongates to a 60 s deadline when a `SyncProgress`
+    notification was observed within the last 30 s. The Phase 1.5
+    `crashloop_threshold_emits_terminal_after_third_crash`
+    subprocess test (which encoded the OLD sliding-window
+    semantics) joined the four other libtest-subprocess flakes
+    under `#[ignore]`; harness M4 covers the new unbroken-crash
+    semantics via `unbroken_crashes_trip_persistently_failing.lua`.
+  - **B** (ServiceHealth + idempotency contract). New
+    `ServiceHealth` enum + `SpawnEvent::HealthChanged` variant;
+    emit on respawn / persistent-failure transitions. New
+    `Idempotency` enum + `RequestParams::idempotency()` mapping
+    every variant to `Idempotent` / `Mutating` / `Conditional`.
+    Status-bar visual surface for the health indicator stays
+    deferred as a small UI follow-up; the data plumbing is in.
+  - **C** (drop-watchdog unification + soft-cancel for boot.ready).
+    Named-constant kill-escalation budgets (`DROP_ABORT_DEADLINE`,
+    `DROP_EXIT_DEADLINE_HEALTHY`, `DROP_EXIT_DEADLINE_BOOTING`,
+    `POST_KILL_WAIT`) shared between `async_drop_wait` and
+    `wait_with_kill_watchdog`. The Drop watchdog elongates to 60 s
+    when a `BootProgress` notification is recent (within
+    `BOOT_PROGRESS_RECENT_WINDOW`), avoiding mid-COMMIT SIGKILL
+    during long migrations. The plan-doc's `KillEscalationPolicy`
+    struct is intentionally not extracted - the two paths' work
+    shapes diverge enough that a struct would force a less natural
+    layout; named constants + doc-comments capture the rationale.
+  - **D** (async store init in `from_boot_ready`). Body / inline /
+    search store init now runs as `Task::perform` post-`BootReady`
+    so the splash-to-Ready transition fires immediately rather than
+    blocking on slow-disk file I/O. Three new `Message` variants
+    (`BodyStoreReady`, `InlineImageStoreReady`, `SearchStateReady`)
+    populate the `Option<...>` fields on `ReadyApp` as each init
+    completes. UI surfaces gracefully render their existing
+    "loading..." placeholder while the fields are None.
+  - **E** (class-aware `boot_progress::emit`) DEFERRED behind
+    harness M2. The earlier attempt was reverted because of
+    subprocess-cohort flakes; once M2 lands the wedge scripts as
+    `.lua` (and the `#[ignore]`'d libtest tests are retired), the
+    class-aware emit re-attempt has deterministic verification.
+  - **F** (retry-queue persistence verify) DEFERRED behind harness
+    M4. The `pending_ops` retry queue already persists across
+    restarts; the verify is a real-subprocess test that lands in
+    the M4 T1 cohort.
+
+- **8-2** LANDED. Cross-store invariant pass now bounds its scans
+  via per-store cursors (`clean_shutdown_cursors` table in main
+  DB, advanced on graceful shutdown drain) plus `inserted_at`
+  column on `bodies`. Tantivy orphan iteration added (per-account
+  scope via `find_orphan_message_ids_for_account`).
+  `attachment_extracted_text` orphan sweep folded into the
+  per-account loop. Per-helper elapsed-ms logging in
+  `InvariantPassStats` makes the <5 s typical / <30 s 200 GB exit
+  criterion observable in production.
+
+- **8-3** LANDED. JMAP push hardening: re-arm on re-auth (OAuth +
+  password paths), `fresh_start: bool` knob threaded through
+  `start_account` -> `start_push`, dirty-account discovery via
+  `discover_dirty_accounts` orchestrated in
+  `dispatch::spawn_post_ready_push_startup`. Pre-existing reactive
+  `save_push_disabled` path unchanged.
+
+- **8-4** PARTIAL.
+  - Sub-item 2 LANDED. `Notification::IndexRebuildProgress` /
+    `IndexRebuildCompleted` now drive `ReadyApp::index_rebuild_progress`;
+    completion triggers a `SearchReadState::init` rebind so the new
+    index is reachable in-session. Status-bar visual render is a
+    small follow-up; the data is wired.
+  - Sub-item 1 (PreserveExisting dual-index path) DEFERRED. Largest
+    remaining piece of Phase 8 implementation; reintroduces the
+    dual-writer + atomic-swap plumbing deleted in Phase 7's M12
+    close-out (commit `b2638752`). Threads through `SyncRuntime`
+    because today's `SearchWriteHandle` is moved at construction.
+    Genuinely a meaty follow-up commit; not gated on harness.
+  - Sub-item 3 (`local_drafts` re-emit) DEFERRED. No-op against
+    current code: drafts are not in the search index today (the
+    plan-doc reference predates the current draft-indexing state).
+    Revisit when drafts join the search index.
+
+- **8-5** LANDED. `accounts.is_deleting` column + Service-side
+  defense-in-depth gate in `SyncRuntime::start_account` rejecting
+  starts against accounts with the flag set. UI-side SyncTick
+  filter not landed; the Service-side gate is the
+  correctness-preserving piece, the UI filter is a small UX
+  optimization for follow-up.
+
+- **8-6 through 8-9** (close-out) BLOCKED on harness M1 + M2
+  landing on the ratatoskr side. The brokkr-side scaffolding for
+  M1 + M2 is ready per `notes/ratatoskr-service-harness.md`; the
+  ratatoskr-side `crates/app/src/harness/` module + the wedge
+  scripts unblock the close-out.
