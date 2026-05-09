@@ -549,11 +549,15 @@ Sequencing:
   drives `cal_action.execute_plan` create/update/delete against the
   Graph fixture and asserts local state plus POST/PATCH/DELETE request
   bodies. Google, JMAP, and CalDAV provider-workflow checks remain.
+- **M6.12 (LANDED):** backfill kick on boot.ready now lives in
+  `crates/app/tests/service-harness/m6/`. The script seeds a cached
+  but unindexed text attachment, restarts the Service against the same
+  data dir, and asserts the post-ready extract startup indexes it
+  without an explicit harness `extract.backfill_kick`.
 - **M6.11-M6.14 (READY when M5 lands):** Phase 7 attachment
-  extraction round-trip, backfill kick on boot.ready, palette
-  rebuild, schema-version mismatch rebuild. All have Lua-script
-  shapes already sketched in `docs/harness/manual-test-matrix.md`
-  entries 11-14.
+  extraction round-trip, palette rebuild, and schema-version mismatch
+  rebuild. All have Lua-script shapes already sketched in
+  `docs/harness/manual-test-matrix.md` entries 11, 13, and 14.
 
 **Exit criteria:**
 
