@@ -437,7 +437,7 @@ Real-world fixture corpus lands here: `.pdf` / `.docx` / `.xlsx` /
 `.pptx` files plus a malicious zip-bomb `.docx`, checked into the
 repo at `crates/app/tests/service-harness/fixtures/extract/`.
 
-Landed first slice:
+Landed slices:
 
 - `crates/app/tests/service-harness/extract/backfill_kick_indexes_cached_text_attachment.lua`
   seeds a cached `text/plain` attachment, sends the real
@@ -446,6 +446,10 @@ Landed first slice:
   and advances `extract.status`. The helper surface added for this
   slice is `client:notify(...)`, `TestSeedCachedAttachment`, and
   attachment extraction fields in `TestQueryDbState`.
+- `crates/app/tests/service-harness/extract/backfill_kick_is_status_aware.lua`
+  repeats `extract.backfill_kick` after a cached text attachment has
+  resolved and asserts the second kick does not re-index the row or
+  advance `extract.status` counters.
 
 **Exit criteria:**
 
