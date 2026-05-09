@@ -218,6 +218,19 @@ pub fn upsert_thread_aggregate(
     Ok(())
 }
 
+pub fn ensure_thread_exists(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "INSERT OR IGNORE INTO threads (id, account_id) VALUES (?1, ?2)",
+        rusqlite::params![thread_id, account_id],
+    )
+    .map_err(|e| format!("ensure thread: {e}"))?;
+    Ok(())
+}
+
 pub fn upsert_thread_participants(
     tx: &Transaction,
     account_id: &str,

@@ -6,7 +6,7 @@ features = ["test-helpers"]
 build_packages = ["app"]
 
 [ratatoskr]
-mock_server_binary = "../sæhrimnir/target/release/saehrimnir"
+mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
 fixtures_dir = "../sæhrimnir/fixtures"
 test_endpoint_env_jmap = "RATATOSKR_TEST_JMAP_ENDPOINT"
 test_endpoint_env_imap = "RATATOSKR_TEST_IMAP_ENDPOINT"

@@ -113,7 +113,7 @@ the brokkr repo):
   binary = "app"
 
   [ratatoskr]
-  mock_server_binary = "../sæhrimnir/target/release/saehrimnir"
+  mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
   fixtures_dir = "../sæhrimnir/fixtures"
   test_endpoint_env_jmap = "RATATOSKR_TEST_JMAP_ENDPOINT"
   test_endpoint_env_imap = "RATATOSKR_TEST_IMAP_ENDPOINT"
@@ -550,8 +550,8 @@ Ratatoskr-side M8 surface now in tree:
   unread-message, attachment, and small message-list snapshots for
   sync-harness assertions.
 - `crates/app/tests/sync-harness/jmap-initial.lua` is the first
-  sync-harness script. It targets the `jmap-small` fixture and asserts
-  the two fixture messages land in the local DB.
+  sync-harness script. It targets the `jmap-small.toml` fixture and
+  asserts the two fixture messages land in the local DB.
 
 **Exit criteria:**
 

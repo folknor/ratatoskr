@@ -1,6 +1,6 @@
 -- description: JMAP initial sync imports the small fixture
 -- expected: pass
--- fixture: jmap-small
+-- fixture: jmap-small.toml
 -- protocol: jmap
 -- ceiling: 120s
 

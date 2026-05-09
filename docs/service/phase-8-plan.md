@@ -641,5 +641,5 @@ documents what shipped before the file deletes.
   `test.query_db_state` are script-visible, `client:start_sync` awaits
   terminal sync results through the ServiceClient waiter path, and
   `crates/app/tests/sync-harness/jmap-initial.lua` is in tree for the
-  `jmap-small` fixture. Mock orchestration and wider fixture coverage
-  remain in brokkr + `../sæhrimnir`.
+  `jmap-small.toml` fixture. Mock orchestration and wider fixture
+  coverage remain in brokkr + `../sæhrimnir`.

@@ -155,7 +155,12 @@ fn upsert_thread_record(
         return Ok(());
     }
 
-    // First upsert the incoming messages so they are visible in DB queries
+    // The messages table has an FK to threads; create a placeholder
+    // row before inserting messages, then overwrite it with the real
+    // aggregate computed from those messages below.
+    sync_persistence::ensure_thread_exists(tx, account_id, thread_id)?;
+
+    // Upsert the incoming messages so they are visible in DB queries.
     upsert_messages(tx, account_id, messages)?;
 
     let is_important = messages

@@ -91,7 +91,7 @@ M8's ratatoskr-side sync surface has also started: provider clients
 read test-only mock endpoint env vars, sync-harness scripts can call
 `test.start_sync` and `test.query_db_state`, and
 `crates/app/tests/sync-harness/jmap-initial.lua` targets the
-`jmap-small` fixture. Mock orchestration remains outside ratatoskr.
+`jmap-small.toml` fixture. Mock orchestration remains outside ratatoskr.
 The broader target surface above is still incremental work:
 generic `wait_for`, sentinel watch, parent-death helper bindings,
 generic `wait_exit`, resource summaries, and a complete request
@@ -566,7 +566,7 @@ existing tests do.
 | `action_skips_search_index_write` / `handler_does_not_drive_batch_execute` | `request("TestCounterRead", ...)` before/after, Lua subtraction. |
 | `journal_replays_after_respawn` / `stale_outcomes_dropped_after_respawn` | `request` + `kill` + respawn + `notifications` drain. |
 | `test_fake_schema_propagates_via_terminal` | `spawn_with_events_for_test` first run + `kill` + respawn with `--test-fake-schema=N`, expect `Terminal { SchemaVersionChanged { was, now } }`. |
-| `sync-harness/jmap-initial` | `test.seed_account` with provider `jmap`, `client:start_sync`, `test.query_db_state` assertion over the `jmap-small` mock fixture. |
+| `sync-harness/jmap-initial` | `test.seed_account` with provider `jmap`, `client:start_sync`, `test.query_db_state` assertion over the `jmap-small.toml` mock fixture. |
 | Manual matrix #4 (heartbeat detects killed Service) | `spawn_with_events_for_test`, `kill(service_pid, SIGKILL)`, `wait_for_sentinel { path = "logs/heartbeat-exiting", backstop = "30s" }` or follow-up event. |
 | Manual matrix #5 (SIGTERM triggers shutdown drain) | `spawn_for_test`, `kill(pid, SIGTERM)`, `wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }`, `wait_exit`. |
 
