@@ -170,9 +170,9 @@ pub(crate) struct BootSharedState {
     /// the persisted `.version` differs from
     /// `search::INDEX_SCHEMA_VERSION`. `spawn_post_ready_schema_rebuild`
     /// reads + clears the flag once after `boot.ready` and dispatches
-    /// a Wipe rebuild. Stored as `AtomicBool` so the boot path
-    /// (synchronous) and the post-ready task can interact without a
-    /// lock.
+    /// a PreserveExisting rebuild. Stored as `AtomicBool` so the boot
+    /// path (synchronous) and the post-ready task can interact without
+    /// a lock.
     pending_schema_rebuild: std::sync::atomic::AtomicBool,
     /// Phase 7 (C4 fix): rebuild_id of the most recently *successfully*
     /// completed rebuild. Set by `run_wipe_rebuild_inner` only on the
@@ -1112,15 +1112,13 @@ async fn run_boot_sequence_inner(
 
     boot_progress::emit(&out_tx, BootPhase::OpeningSearchIndex, None);
 
-    // Phase 7-1: schema-version sentinel. Compare the persisted
-    // `<search_index>/.version` to the `search::INDEX_SCHEMA_VERSION`
-    // constant. Phase 7-1 lands as a stub that just persists the current
-    // version on absent or mismatch; phase 7-9 replaces this with the
-    // dual-index PreserveExisting dispatch that opens
-    // `<search_index_next>/` adjacent to the legacy index, keeps reads
-    // serving against the legacy index until catch-up completes, then
-    // atomic-swaps. Called BEFORE the writer spawn so the (future)
-    // dispatch can route writes to the right directory.
+    // Phase 7-1 / Phase 8: schema-version sentinel. Compare the
+    // active index slot's `.version` to `search::INDEX_SCHEMA_VERSION`.
+    // A mismatch is rebuilt post-ready with PreserveExisting: a staging
+    // writer catches up while reads keep serving from the old active
+    // slot, then the active-index pointer flips to the rebuilt slot.
+    // Called before writer spawn so steady-state boots open the active
+    // slot selected by the previous PreserveExisting cutover.
     if let Err(e) = check_schema_version_and_dispatch(&app_data_dir, &state) {
         log::error!("search schema-version check failed: {e}");
         return Err(BootFailure::MigrationFailure);
@@ -1415,7 +1413,7 @@ fn open_db_and_migrate(
 }
 
 /// Phase 7-1 stub, fleshed out in 7-9c. Compares the persisted
-/// `<search_index>/.version` to `search::INDEX_SCHEMA_VERSION`:
+/// active search index `.version` to `search::INDEX_SCHEMA_VERSION`:
 ///
 /// - Absent (first-ever boot): write the current version, no rebuild.
 ///   The writer task creates the index from scratch.
@@ -1423,8 +1421,8 @@ fn open_db_and_migrate(
 /// - Mismatch: leave the `.version` file untouched (sentinel-write
 ///   ordering: only update after a successful rebuild) and mark a
 ///   pending rebuild on `BootSharedState`. The post-ready spawn
-///   dispatches a Wipe rebuild against the now-additive new schema
-///   and rewrites `.version` on success.
+///   dispatches a PreserveExisting rebuild against a staging slot and
+///   rewrites `.version` on success.
 ///
 /// v1 only handles additive schema changes (new fields). The existing
 /// index can be opened with the new schema; pre-existing docs simply
@@ -1433,15 +1431,11 @@ fn open_db_and_migrate(
 /// during boot (before the writer task opens it); that path is not
 /// implemented here. Document if a future bump is non-additive.
 ///
-/// True dual-index PreserveExisting (search-stays-live during
-/// rebuild) is deferred - the v1 user experience is "search briefly
-/// unavailable while the index is rebuilt", with progress surfaced
-/// in the status bar via `IndexRebuildProgress`.
 pub(crate) fn check_schema_version_and_dispatch(
     app_data_dir: &std::path::Path,
     state: &Arc<BootSharedState>,
 ) -> Result<(), String> {
-    let index_dir = app_data_dir.join("search_index");
+    let index_dir = search::active_search_index_dir(app_data_dir);
     std::fs::create_dir_all(&index_dir)
         .map_err(|e| format!("create_dir_all {}: {e}", index_dir.display()))?;
     let version_path = index_dir.join(".version");
@@ -1467,7 +1461,7 @@ pub(crate) fn check_schema_version_and_dispatch(
             log::warn!(
                 "search index .version mismatch: stored={v}, current={}. \
                  Marking pending rebuild; .version will be rewritten after \
-                 successful Wipe rebuild post-boot.ready.",
+                 successful PreserveExisting rebuild post-boot.ready.",
                 search::INDEX_SCHEMA_VERSION
             );
             state.mark_pending_schema_rebuild();
@@ -1485,7 +1479,13 @@ pub(crate) fn check_schema_version_and_dispatch(
 pub(crate) fn write_current_search_index_version(
     app_data_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let index_dir = app_data_dir.join("search_index");
+    let index_dir = search::active_search_index_dir(app_data_dir);
+    write_search_index_version_at(&index_dir)
+}
+
+pub(crate) fn write_search_index_version_at(
+    index_dir: &std::path::Path,
+) -> Result<(), String> {
     let version_path = index_dir.join(".version");
     write_search_index_version(&version_path)
 }

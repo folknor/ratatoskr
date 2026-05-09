@@ -46,8 +46,13 @@ impl ReadyApp {
 
     /// Dispatch delta sync for all active accounts.
     pub(crate) fn sync_all_accounts(&mut self) -> Task<Message> {
-        let account_ids: Vec<String> =
-            self.sidebar.accounts.iter().map(|a| a.id.clone()).collect();
+        let account_ids: Vec<String> = self
+            .sidebar
+            .accounts
+            .iter()
+            .filter(|a| !a.is_deleting)
+            .map(|a| a.id.clone())
+            .collect();
         let tasks: Vec<Task<Message>> = account_ids
             .into_iter()
             .map(|id| self.dispatch_sync_delta(id))

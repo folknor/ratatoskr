@@ -16,7 +16,7 @@
 //! `phase-1.5-plan.md`).
 
 use serde_json::Value;
-use service_api::{BootPhase, BootProgress, MAX_FRAME_BYTES, Notification};
+use service_api::{BootPhase, BootProgress, MAX_FRAME_BYTES, Notification, NotificationClass};
 use std::io;
 use tokio::sync::mpsc;
 
@@ -41,22 +41,37 @@ impl NotificationSender {
         Self { out_tx }
     }
 
-    /// Awaitable send. Backpressure-aware (`mpsc::Sender::send`).
+    /// Class-aware send. MustDeliver notifications await queue
+    /// capacity; Coalesce and Drop notifications use try-send semantics
+    /// and may be dropped when the outbound queue is full.
     pub async fn send(
         &self,
         notification: Notification,
     ) -> Result<(), mpsc::error::SendError<Vec<u8>>> {
+        let class = notification.class();
+        let method = notification.method_name();
         let bytes = match serialize_notification(&notification) {
             Ok(bytes) => bytes,
             Err(error) => {
-                log::warn!(
-                    "failed to serialize {}: {error}",
-                    notification.method_name()
-                );
+                log::warn!("failed to serialize {method}: {error}");
                 return Ok(());
             }
         };
-        self.out_tx.send(bytes).await
+        match class {
+            NotificationClass::MustDeliver => self.out_tx.send(bytes).await,
+            NotificationClass::Coalesce { .. } | NotificationClass::Drop => {
+                match self.out_tx.try_send(bytes) {
+                    Ok(()) => Ok(()),
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        log::warn!("dropping {method} notification because outbound queue is full");
+                        Ok(())
+                    }
+                    Err(mpsc::error::TrySendError::Closed(bytes)) => {
+                        Err(mpsc::error::SendError(bytes))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -108,6 +123,12 @@ pub(crate) fn enqueue_notification(
     notification: &Notification,
 ) {
     let method_name = notification.method_name();
+    if matches!(notification.class(), NotificationClass::MustDeliver) {
+        log::error!(
+            "refusing to enqueue MustDeliver {method_name} with try_send; use NotificationSender::send",
+        );
+        return;
+    }
     let bytes = match serialize_notification(notification) {
         Ok(bytes) => bytes,
         Err(error) => {

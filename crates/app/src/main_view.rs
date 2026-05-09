@@ -336,7 +336,12 @@ impl ReadyApp {
     /// When the setting is off, returns an empty zero-height element.
     pub(crate) fn status_bar_view(&self) -> Element<'_, Message> {
         if self.settings.sync_status_bar {
-            self.status_bar.view().map(Message::StatusBar)
+            self.status_bar
+                .view_with_system_status(
+                    &self.service_health,
+                    self.index_rebuild_progress.as_ref(),
+                )
+                .map(Message::StatusBar)
         } else {
             Space::new().width(0).height(0).into()
         }

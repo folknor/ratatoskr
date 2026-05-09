@@ -53,7 +53,7 @@ use db::db::ReadDbState;
 use tantivy::{IndexWriter, Term};
 use tokio::sync::mpsc;
 
-use search::{AttachmentDocFragment, Fields, build_search_doc, open_or_create_search_index};
+use search::{AttachmentDocFragment, Fields, build_search_doc, open_or_create_search_index_at};
 use service_api::{IndexCommitted, Notification};
 use service_state::search_write::{
     SearchWriteHandle, WriterCommand,
@@ -91,6 +91,19 @@ pub fn spawn(
     notification_tx: NotificationSender,
     service_generation: u32,
 ) -> Result<(SearchWriteHandle, tokio::task::JoinHandle<()>), String> {
+    let index_dir = search::active_search_index_dir(app_data_dir);
+    spawn_in_index_dir(&index_dir, db_read, notification_tx, service_generation)
+}
+
+/// Construct + spawn a writer task for an explicit Tantivy index
+/// directory. Used by the PreserveExisting rebuild path for its
+/// staging writer.
+pub fn spawn_in_index_dir(
+    index_dir: &Path,
+    db_read: ReadDbState,
+    notification_tx: NotificationSender,
+    service_generation: u32,
+) -> Result<(SearchWriteHandle, tokio::task::JoinHandle<()>), String> {
     let handle = tokio::runtime::Handle::try_current()
         .map_err(|_| "search writer requires a tokio runtime".to_string())?;
     if !matches!(
@@ -100,7 +113,7 @@ pub fn spawn(
         return Err("search writer requires multi-threaded tokio runtime".to_string());
     }
 
-    let (index, schema) = open_or_create_search_index(app_data_dir)?;
+    let (index, schema) = open_or_create_search_index_at(index_dir)?;
     let writer: IndexWriter = index
         .writer(WRITER_HEAP_BYTES)
         .map_err(|e| format!("create search writer: {e}"))?;

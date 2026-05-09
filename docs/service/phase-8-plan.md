@@ -1,9 +1,12 @@
 # Service - Phase 8 Plan: crash recovery polish + invariant pass optimization + close-out
 
-**Status:** planning, pre-implementation. This is the final phase of
-the Service-relocation arc that started in Phase 1. When Phase 8
-ships, `docs/service/` is empty and gets deleted. This file deletes
-with it.
+**Status:** active close-out. Most Service-architecture work has
+landed, but Phase 8 is not complete. The remaining implementation
+decision is the 8-4 PreserveExisting dual-index path (or explicitly
+moving it out of Phase 8), plus several small deferred UI polish
+items. Close-out (8-6 through 8-9) is blocked until those decisions
+are resolved. When Phase 8 ships, `docs/service/` is empty and gets
+deleted. This file deletes with it.
 
 The plan has two halves of work:
 
@@ -24,6 +27,8 @@ The plan has two halves of work:
   T1, the Phase 7 extract cohort, manual-matrix automation, the
   `--test-fake-schema=N` e2e) live in the harness roadmap, not here.
   The harness **M2** wedge dependency is satisfied on ratatoskr.
+  The first sync-harness smoke (`jmap-initial`) now passes end to
+  end against `saehrimnir`.
   The implementation work itself does not gate on the harness - code
   changes can land independently of test coverage shape.
 - `docs/harness/architecture.md`, `docs/harness/problem-statement.md`
@@ -462,68 +467,87 @@ Final commit. After 8-6, 8-7, and 8-8 land:
 
 ---
 
-## Exit criteria
+## Current completion ledger
 
-Implementation:
-- ✓ All 8-1 sub-items LANDED. Killing the Service mid-sync results in
-  a respawn within a few seconds; backoff prevents tight crashloops;
-  status indicator surfaces degraded state. A persistently failing
-  Service surfaces a clear UI error rather than silent breakage.
-- ✓ 8-2 LANDED. Invariant pass <5s typical, <30s on 200 GB. Tantivy +
-  `attachment_extracted_text` orphan scans included.
-- ✓ 8-3 LANDED. Push survives token revocation + re-auth without a
-  Service restart; crashed accounts force-clear `push_state` on
-  next start.
-- ✓ 8-4 LANDED. PreserveExisting dual-index path operational; user
-  search stays live during a rebuild. Status-bar progress + reader
-  rebind on completion. `local_drafts` re-emitted across Wipe rebuilds.
-- ✓ 8-5 LANDED. Account deletion is monotonic; no SyncTick re-kick
-  against a deleting account.
-- ✓ Heartbeat false-positive rate (load-induced miss interpreted as
-  crash) goes to zero.
+Landed implementation:
+- ✓ 8-1 A-D landed: respawn backoff, heartbeat policy, ServiceHealth
+  plumbing, idempotency contract, drop-watchdog unification,
+  soft-cancel protection for long boot work, and async store init.
+- ✓ 8-1 F landed in harness M4: retry-queue persistence across
+  respawn is covered by `retry_queue_persists_across_respawn.lua`.
+- ✓ 8-2 landed: invariant pass cursor gating, Tantivy orphan
+  iteration, and `attachment_extracted_text` orphan sweep.
+- ✓ 8-3 landed: JMAP push re-arm and dirty-account fresh-start
+  handling.
+- ✓ 8-4 sub-item 2 partially landed: rebuild progress/completion
+  notifications update app state and rebind the search reader.
+- ✓ 8-5 correctness landed: `accounts.is_deleting` exists and
+  `SyncRuntime::start_account` rejects starts against deleting
+  accounts.
+
+Open implementation decisions:
+- 8-1 E (`boot_progress::emit` class-aware MustDeliver helper) is
+  still deferred. Either land it with M2 verification or explicitly
+  remove it from Phase 8 scope and keep the bounded-emitter tests as
+  the contract.
+- The visible ServiceHealth/status-bar surface from 8-1 B is still
+  deferred UI polish. Decide whether it blocks Phase 8 close-out or
+  becomes a post-Phase-8 UI follow-up.
+- 8-4 sub-item 1 (PreserveExisting dual-index rebuild) is the largest
+  remaining implementation item. It either needs to land or be
+  explicitly descoped from Phase 8.
+- 8-4 sub-item 2 still lacks the status-bar render surface for
+  rebuild progress; the data plumbing and reader rebind are landed.
+- 8-4 sub-item 3 (`local_drafts` re-emit) is currently a no-op
+  because drafts are not indexed. Keep it out of Phase 8 unless draft
+  indexing lands first.
+- 8-5's UI-side SyncTick filter is not landed. The Service-side gate
+  is the correctness piece; the UI filter is a UX optimization unless
+  close-out keeps it in scope.
 
 Test coverage (lives in harness roadmap, listed here as gating):
-- ✓ Harness M2 LANDED. All five wedge scripts
+- ✓ Harness M2 landed. All five wedge scripts
   (`ping_and_shutdown.lua`, `two_phase_spawn.lua`,
   `terminal_on_missing_key.lua`, `respawn_after_sigkill.lua`,
   `pending_at_respawn.lua`) pass consistently, including under
   200-iteration soak.
+- ✓ Harness M4 retry queue coverage landed; focused 50/50 soak passed.
+- ✓ Full T1 directory soak passed 550/550 across 50 cycles on
+  2026-05-08.
+- ✓ First M8 sync smoke landed:
+  `crates/app/tests/sync-harness/jmap-initial.lua` passes against
+  `jmap-small.toml` via `saehrimnir`.
+- Compose-send network coverage is still not in tree. If this remains
+  a Phase 8 close-out gate, land a focused SMTP send smoke or record
+  the explicit deferral.
 
 Close-out:
-- ✓ `docs/architecture.md` contains the IPC contract, process model,
-  boot handshake, cross-store crash consistency, service-generation
-  contract, stdio discipline, and sensitive-value logging policy
-  sections.
-- ✓ `docs/harness/manual-test-matrix.md` exists; the
-  `docs/service/manual-test-matrix.md` path no longer resolves.
-- ✓ `docs/service/` is deleted from the repo.
-- ✓ No link in any surviving doc points at `docs/service/<anything>`.
-- ✓ This file is gone with the directory.
+- 8-6 through 8-9 have not landed.
+- `docs/architecture.md` still needs the promoted Service process /
+  IPC / crash-consistency content before `docs/service/` can go away.
+- `docs/service/manual-test-matrix.md` still needs to move to
+  `docs/harness/manual-test-matrix.md`.
+- `docs/service/` still exists, links to it still exist, and this
+  file is still present.
 
 ## Suggested implementation order
 
-The implementation clusters (8-1 through 8-5) are independent at the
-code level; their internal sequencing is up to whoever picks them
-up. Some natural pairings:
+The remaining work should land in this order:
 
-1. **8-2 first if invariant-pass cost is hurting users.** It's
-   purely Service-internal work, no UI plumbing, no harness
-   gating. Most measurable user-visible improvement.
-2. **8-1 second.** The recovery + boot polish cluster is the most
-   substantial work and the most user-visible. Harness M2 is now
-   available for verification of the class-aware emit re-attempt.
-3. **8-3 in parallel** with 8-1 and 8-2 - different code area,
-   different reviewers.
-4. **8-4 after 8-1 / 8-2 / 8-3.** PreserveExisting is the largest
-   single sub-item and benefits from the rest of Phase 8 being
-   solid first. The status-bar + `local_drafts` work is small and
-   can slot anywhere.
-5. **8-5 anywhere.** Smallest cluster.
-6. **Close-out (8-6 through 8-9) last.** Gated on all
-   implementation landed and on the harness M4 close-out blockers
-   being explicit. The full T1 directory soak is now green; the
-   remaining M4 blocker is the compose-send mock SMTP path in
-   `../sæhrimnir`.
+1. **Decide the deferred-scope boundary.** Class-aware
+   `boot_progress::emit`, ServiceHealth/rebuild status-bar visuals,
+   the 8-5 UI SyncTick filter, and `local_drafts` re-emit are all
+   small or no-op follow-ups unless explicitly kept in Phase 8.
+2. **Finish or descope 8-4 PreserveExisting.** This is the only
+   large implementation item still named by Phase 8. If it stays in
+   scope, land it before close-out.
+3. **Settle compose-send network coverage.** Either land a focused
+   SMTP send smoke now that `saehrimnir` is available, or record the
+   deferral in the harness roadmap and remove it as a Phase 8 gate.
+4. **Run close-out (8-6 through 8-9).** Promote durable Service
+   architecture into `docs/architecture.md`, move the manual matrix
+   to `docs/harness/`, rewrite dangling links, and delete
+   `docs/service/`.
 
 Each sub-slice that lands gets a per-slice retrospective bullet here
 in this plan as it goes (mirroring the convention from
@@ -626,20 +650,17 @@ documents what shipped before the file deletes.
   correctness-preserving piece, the UI filter is a small UX
   optimization for follow-up.
 
-- **8-6 through 8-9** (close-out) BLOCKED on remaining Phase 8
-  implementation and explicit M4 close-out gaps, not on harness M1
-  or M2. M1/M2 have landed on ratatoskr. Remaining blockers:
-  8-4 PreserveExisting dual-index work and compose-send network tests
-  blocked on the mock SMTP path in `../sæhrimnir`. The full T1
+- **8-6 through 8-9** (close-out) BLOCKED on the remaining Phase 8
+  scope decisions above. M1/M2 have landed on ratatoskr. The full T1
   directory soak passed 550/550 runs across 50 cycles on 2026-05-08.
 
-- **Harness M8 ratatoskr-side sync surface** PARTIAL. Under
+- **Harness M8 ratatoskr-side first sync smoke** LANDED. Under
   `test-helpers`, provider clients now read
   `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, the Service
   sync dispatcher runs initial sync for accounts whose
   `initial_sync_completed = 0`, `test.start_sync` /
   `test.query_db_state` are script-visible, `client:start_sync` awaits
   terminal sync results through the ServiceClient waiter path, and
-  `crates/app/tests/sync-harness/jmap-initial.lua` is in tree for the
-  `jmap-small.toml` fixture. Mock orchestration and wider fixture
-  coverage remain in brokkr + `../sæhrimnir`.
+  `crates/app/tests/sync-harness/jmap-initial.lua` passes against the
+  `jmap-small.toml` fixture via `saehrimnir`. Broader fixture coverage
+  remains harness-roadmap work.

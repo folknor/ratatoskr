@@ -20,6 +20,7 @@ pub struct Account {
     pub token_expires_at: Option<i64>,
     pub is_active: bool,
     pub sort_order: i64,
+    pub is_deleting: bool,
 }
 
 /// A shared/delegated mailbox discovered via Autodiscover.

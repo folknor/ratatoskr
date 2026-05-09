@@ -94,6 +94,44 @@ pub(crate) async fn run_wipe_rebuild(
     let _ = boot_state.take_rebuild_task();
 }
 
+/// PreserveExisting rebuild. Builds a staging index while the active
+/// reader stays live, mirrors concurrent writes into that staging
+/// writer, then flips the active-index pointer and routes future
+/// writes to the rebuilt writer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_preserve_existing_rebuild(
+    boot_state: Arc<BootSharedState>,
+    rebuild_id: String,
+    cancel: CancellationToken,
+    db: service_state::WriteDbState,
+    live_search_write: SearchWriteHandle,
+    body_read: BodyStoreReadState,
+    notification_tx: NotificationSender,
+    service_generation: u32,
+) {
+    let outcome = run_preserve_existing_rebuild_inner(
+        Arc::clone(&boot_state),
+        rebuild_id.clone(),
+        cancel.clone(),
+        db,
+        live_search_write,
+        body_read,
+        notification_tx,
+        service_generation,
+    )
+    .await;
+    match outcome {
+        Ok(()) => {
+            log::info!("rebuild {rebuild_id}: preserve-existing completed");
+            boot_state.mark_rebuild_completed(rebuild_id.clone());
+        }
+        Err(e) => {
+            log::warn!("rebuild {rebuild_id}: preserve-existing aborted: {e}");
+        }
+    }
+    let _ = boot_state.take_rebuild_task();
+}
+
 async fn run_wipe_rebuild_inner(
     rebuild_id: String,
     cancel: CancellationToken,
@@ -124,6 +162,146 @@ async fn run_wipe_rebuild_inner(
     }
 
     // Step 3: enumerate all message identities.
+    rebuild_all_messages(
+        &rebuild_id,
+        &cancel,
+        &db,
+        &search_write,
+        &body_read,
+        &notification_tx,
+        service_generation,
+    )
+    .await?;
+
+    emit_rebuild_completed(&rebuild_id, &notification_tx, service_generation).await;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_preserve_existing_rebuild_inner(
+    boot_state: Arc<BootSharedState>,
+    rebuild_id: String,
+    cancel: CancellationToken,
+    db: service_state::WriteDbState,
+    live_search_write: SearchWriteHandle,
+    body_read: BodyStoreReadState,
+    notification_tx: NotificationSender,
+    service_generation: u32,
+) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        return Err("cancelled before start".into());
+    }
+    let app_data_dir = boot_state.app_data_dir().to_path_buf();
+    let staging_dir = search::staging_search_index_dir(&app_data_dir, &rebuild_id);
+    log::info!(
+        "rebuild {rebuild_id}: starting preserve-existing into {}",
+        staging_dir.display(),
+    );
+
+    let db_conn = boot_state
+        .db_conn()
+        .ok_or_else(|| "preserve-existing rebuild: db_conn missing".to_string())?;
+    let staged_db_read = db::db::ReadDbState::from_arc(db_conn);
+    let (staged_write, staged_handle) = crate::search_writer::spawn_in_index_dir(
+        &staging_dir,
+        staged_db_read,
+        notification_tx.clone(),
+        service_generation,
+    )
+    .map_err(|e| format!("spawn staging search writer: {e}"))?;
+
+    staged_write
+        .clear_index()
+        .await
+        .map_err(|e| format!("staging clear_index: {e}"))?;
+    live_search_write
+        .mirror_to(&staged_write)
+        .await
+        .map_err(|e| format!("install staging mirror: {e}"))?;
+
+    let rebuild_result = rebuild_all_messages(
+        &rebuild_id,
+        &cancel,
+        &db,
+        &staged_write,
+        &body_read,
+        &notification_tx,
+        service_generation,
+    )
+    .await;
+    if let Err(e) = rebuild_result {
+        live_search_write.clear_mirror().await;
+        drop(staged_write);
+        staged_handle.abort();
+        let _ = staged_handle.await;
+        return Err(e);
+    }
+    if cancel.is_cancelled() {
+        live_search_write.clear_mirror().await;
+        drop(staged_write);
+        staged_handle.abort();
+        let _ = staged_handle.await;
+        return Err("cancelled before cutover".into());
+    }
+
+    let mut pause = live_search_write.pause_writes().await;
+    if let Err(e) = pause.flush_all().await {
+        drop(pause);
+        live_search_write.clear_mirror().await;
+        drop(staged_write);
+        staged_handle.abort();
+        let _ = staged_handle.await;
+        return Err(format!("flush before preserve cutover: {e}"));
+    }
+    if let Err(e) = crate::boot::write_search_index_version_at(&staging_dir) {
+        drop(pause);
+        live_search_write.clear_mirror().await;
+        drop(staged_write);
+        staged_handle.abort();
+        let _ = staged_handle.await;
+        return Err(e);
+    }
+    if let Err(e) = search::write_active_search_index_dir(&app_data_dir, &staging_dir) {
+        drop(pause);
+        live_search_write.clear_mirror().await;
+        drop(staged_write);
+        staged_handle.abort();
+        let _ = staged_handle.await;
+        return Err(e);
+    }
+    if let Err(e) = pause.set_primary_from(&staged_write).await {
+        drop(pause);
+        live_search_write.clear_mirror().await;
+        drop(staged_write);
+        staged_handle.abort();
+        let _ = staged_handle.await;
+        return Err(format!("route preserve cutover: {e}"));
+    }
+    let old_writer = boot_state.take_search_writer_handle();
+    boot_state.install_search_writer_handle(staged_handle);
+    drop(staged_write);
+    drop(pause);
+
+    if let Some(handle) = old_writer
+        && let Err(e) = handle.await
+    {
+        log::warn!("old search writer join error after preserve cutover: {e}");
+    }
+
+    emit_rebuild_completed(&rebuild_id, &notification_tx, service_generation).await;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn rebuild_all_messages(
+    rebuild_id: &str,
+    cancel: &CancellationToken,
+    db: &service_state::WriteDbState,
+    search_write: &SearchWriteHandle,
+    body_read: &BodyStoreReadState,
+    notification_tx: &NotificationSender,
+    service_generation: u32,
+) -> Result<(), String> {
     let pairs = db
         .with_conn(db::db::queries_extra::select_all_message_ids_for_rebuild)
         .await
@@ -136,11 +314,11 @@ async fn run_wipe_rebuild_inner(
         if cancel.is_cancelled() {
             return Err("cancelled mid-iteration".into());
         }
-        rebuild_chunk(&db, &search_write, &body_read, chunk).await?;
+        rebuild_chunk(db, search_write, body_read, chunk).await?;
         processed = processed.saturating_add(chunk.len() as u64);
         let progress = Notification::IndexRebuildProgress(IndexRebuildProgress {
             service_generation,
-            rebuild_id: rebuild_id.clone(),
+            rebuild_id: rebuild_id.to_string(),
             processed,
             total,
         });
@@ -149,14 +327,21 @@ async fn run_wipe_rebuild_inner(
         }
     }
 
+    Ok(())
+}
+
+async fn emit_rebuild_completed(
+    rebuild_id: &str,
+    notification_tx: &NotificationSender,
+    service_generation: u32,
+) {
     let completed = Notification::IndexRebuildCompleted(IndexRebuildCompleted {
         service_generation,
-        rebuild_id: rebuild_id.clone(),
+        rebuild_id: rebuild_id.to_string(),
     });
     if let Err(e) = notification_tx.send(completed).await {
         log::debug!("rebuild completed send failed: {e}");
     }
-    Ok(())
 }
 
 /// Build SearchDocuments for one chunk and send a single

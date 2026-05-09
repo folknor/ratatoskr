@@ -43,6 +43,13 @@ pub(crate) async fn handle_rebuild(
     boot_state: &Arc<BootSharedState>,
     params: IndexRebuildParams,
 ) -> Result<Value, ServiceError> {
+    let search_write = boot_state
+        .search_write()
+        .or_else(|| boot_state.sync_runtime().map(|runtime| runtime.search_write()))
+        .ok_or_else(|| {
+            ServiceError::Internal("index.rebuild: search_write missing post-boot.ready".into())
+        })?;
+
     // Reject (or pre-empt) a rebuild that's already in flight.
     if let Some(in_flight_id) = boot_state.rebuild_in_flight_id() {
         if !params.force {
@@ -61,6 +68,7 @@ pub(crate) async fn handle_rebuild(
             // rebuild's chunk. abort drops the future at the next
             // await point.
             prev.handle.abort();
+            search_write.clear_mirror().await;
         }
     }
 
@@ -68,9 +76,6 @@ pub(crate) async fn handle_rebuild(
     // bugs (boot completes before any handler is dispatched).
     let db_conn = boot_state.db_conn().ok_or_else(|| {
         ServiceError::Internal("index.rebuild: db_conn missing post-boot.ready".into())
-    })?;
-    let search_write = boot_state.search_write().ok_or_else(|| {
-        ServiceError::Internal("index.rebuild: search_write missing post-boot.ready".into())
     })?;
     let body_read =
         store::body_store::BodyStoreReadState::init(boot_state.app_data_dir()).map_err(|e| {
@@ -85,11 +90,6 @@ pub(crate) async fn handle_rebuild(
     let rebuild_id = uuid::Uuid::new_v4().to_string();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    // Wipe is the only policy in v1; PreserveExisting was dropped from
-    // the wire enum (M12) until Phase 8 implements the dual-index
-    // path. Match here is exhaustive on the single variant; an
-    // explicit match keeps the structure in place for the future
-    // PreserveExisting branch to slot back in.
     match params.policy {
         service_api::RebuildPolicy::Wipe => {
             let db_state = service_state::WriteDbState::from_arc(db_conn);
@@ -98,6 +98,33 @@ pub(crate) async fn handle_rebuild(
             let id_for_task = rebuild_id.clone();
             let handle = tokio::spawn(async move {
                 crate::rebuild::run_wipe_rebuild(
+                    boot_state_for_task,
+                    id_for_task,
+                    cancel_for_task,
+                    db_state,
+                    search_write,
+                    body_read,
+                    notification_tx,
+                    // service_generation is overwritten by the UI's
+                    // reader task at enqueue time per the
+                    // WithGeneration trait contract; emit 0 here.
+                    0,
+                )
+                .await;
+            });
+            boot_state.install_rebuild_task(crate::boot::RebuildTaskState {
+                rebuild_id: rebuild_id.clone(),
+                cancel,
+                handle,
+            });
+        }
+        service_api::RebuildPolicy::PreserveExisting => {
+            let db_state = service_state::WriteDbState::from_arc(db_conn);
+            let boot_state_for_task = Arc::clone(boot_state);
+            let cancel_for_task = cancel.clone();
+            let id_for_task = rebuild_id.clone();
+            let handle = tokio::spawn(async move {
+                crate::rebuild::run_preserve_existing_rebuild(
                     boot_state_for_task,
                     id_for_task,
                     cancel_for_task,

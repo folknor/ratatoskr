@@ -57,6 +57,7 @@ pub struct DbAccount {
     pub account_color: Option<String>,
     pub account_name: Option<String>,
     pub sort_order: i64,
+    pub is_deleting: i64,
 }
 
 // ── Thread ───────────────────────────────────────────────────

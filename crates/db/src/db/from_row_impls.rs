@@ -50,6 +50,7 @@ impl_from_row!(DbAccount {
     account_color,
     account_name,
     sort_order,
+    is_deleting,
 });
 
 // ── Thread ──────────────────────────────────────────────────

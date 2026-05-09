@@ -324,7 +324,100 @@ impl Fields {
 
 // ── Index opener ────────────────────────────────────────────────────────
 
-/// Open or create the Tantivy index in `{app_data_dir}/search_index/`.
+const DEFAULT_INDEX_DIR_NAME: &str = "search_index";
+const ACTIVE_INDEX_FILE_NAME: &str = "search_index.active";
+
+/// Resolve the active Tantivy index directory for `app_data_dir`.
+///
+/// The default slot is `{app_data_dir}/search_index`. PreserveExisting
+/// rebuilds write a pointer file after the rebuilt staging slot is
+/// caught up; new readers and the next boot open that active slot
+/// without renaming a directory that an old reader may still have
+/// mmaped.
+pub fn active_search_index_dir(app_data_dir: &Path) -> std::path::PathBuf {
+    if let Some(name) = read_active_index_dir_name(app_data_dir) {
+        app_data_dir.join(name)
+    } else {
+        app_data_dir.join(DEFAULT_INDEX_DIR_NAME)
+    }
+}
+
+/// Build a unique staging directory for a PreserveExisting rebuild.
+pub fn staging_search_index_dir(app_data_dir: &Path, rebuild_id: &str) -> std::path::PathBuf {
+    let safe_id: String = rebuild_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    app_data_dir.join(format!("search_index_next_{safe_id}"))
+}
+
+/// Atomically point future readers and boots at `index_dir`.
+pub fn write_active_search_index_dir(
+    app_data_dir: &Path,
+    index_dir: &Path,
+) -> Result<(), String> {
+    let name = index_dir
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| format!("active index path has no file name: {}", index_dir.display()))?;
+    validate_active_index_dir_name(name)?;
+    std::fs::create_dir_all(app_data_dir)
+        .map_err(|e| format!("create app data dir {}: {e}", app_data_dir.display()))?;
+    let pointer = app_data_dir.join(ACTIVE_INDEX_FILE_NAME);
+    let tmp = app_data_dir.join(format!("{ACTIVE_INDEX_FILE_NAME}.tmp"));
+    std::fs::write(&tmp, name).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &pointer).map_err(|e| {
+        format!(
+            "rename active index pointer {} -> {}: {e}",
+            tmp.display(),
+            pointer.display(),
+        )
+    })?;
+    Ok(())
+}
+
+fn read_active_index_dir_name(app_data_dir: &Path) -> Option<String> {
+    let pointer = app_data_dir.join(ACTIVE_INDEX_FILE_NAME);
+    let raw = match std::fs::read_to_string(&pointer) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            log::warn!("read active search index pointer {}: {e}", pointer.display());
+            return None;
+        }
+    };
+    let name = raw.trim();
+    if let Err(e) = validate_active_index_dir_name(name) {
+        log::warn!(
+            "ignoring invalid active search index pointer {}: {e}",
+            pointer.display(),
+        );
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn validate_active_index_dir_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("empty index directory name".into());
+    }
+    if name == "." || name == ".." {
+        return Err("index directory name must not be relative traversal".into());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("index directory name must not contain path separators".into());
+    }
+    Ok(())
+}
+
+/// Open or create the Tantivy index in the active search-index slot
+/// for `app_data_dir`.
 ///
 /// Phase 3 task 4 exposes this so the Service writer task and the UI's
 /// `SearchReadState` can both consume the same opener (the writer task
@@ -332,27 +425,32 @@ impl Fields {
 /// it does not exist; the read state opens after the boot handshake
 /// completes).
 pub fn open_or_create_search_index(app_data_dir: &Path) -> Result<(Index, Schema), String> {
-    let index_dir = app_data_dir.join("search_index");
-    std::fs::create_dir_all(&index_dir).map_err(|e| format!("create search index dir: {e}"))?;
+    let index_dir = active_search_index_dir(app_data_dir);
+    open_or_create_search_index_at(&index_dir)
+}
+
+/// Open or create the Tantivy index at an explicit directory.
+pub fn open_or_create_search_index_at(index_dir: &Path) -> Result<(Index, Schema), String> {
+    std::fs::create_dir_all(index_dir).map_err(|e| format!("create search index dir: {e}"))?;
 
     let schema = build_schema();
 
     log::info!("Opening search index at {}", index_dir.display());
 
     let index = if Index::exists(
-        &tantivy::directory::MmapDirectory::open(&index_dir)
+        &tantivy::directory::MmapDirectory::open(index_dir)
             .map_err(|e| format!("open mmap dir: {e}"))?,
     )
     .map_err(|e| format!("check index exists: {e}"))?
     {
         log::info!("Opening existing search index");
-        Index::open_in_dir(&index_dir).map_err(|e| {
+        Index::open_in_dir(index_dir).map_err(|e| {
             log::error!("Failed to open search index: {e}");
             format!("open index: {e}")
         })?
     } else {
         log::info!("Creating new search index");
-        Index::create_in_dir(&index_dir, schema.clone()).map_err(|e| {
+        Index::create_in_dir(index_dir, schema.clone()).map_err(|e| {
             log::error!("Failed to create search index: {e}");
             format!("create index: {e}")
         })?

@@ -42,6 +42,7 @@ impl Db {
                 token_expires_at: row.token_expires_at,
                 is_active: row.is_active != 0,
                 sort_order: row.sort_order,
+                is_deleting: row.is_deleting != 0,
             })
             .collect())
     }

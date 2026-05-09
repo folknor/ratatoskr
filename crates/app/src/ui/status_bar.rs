@@ -8,8 +8,10 @@ use iced::futures::stream::BoxStream;
 use iced::widget::{Space, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length, Subscription};
 
+use crate::app::RebuildProgressState;
 use crate::component::Component;
 use crate::icon;
+use crate::service_client::ServiceHealth;
 use crate::ui::layout::*;
 use crate::ui::theme::{ContainerClass, TextClass};
 
@@ -76,6 +78,13 @@ enum ResolvedContent {
         text: String,
     },
     Confirmation {
+        text: String,
+    },
+    ServiceHealth {
+        text: String,
+        class: TextClass,
+    },
+    RebuildProgress {
         text: String,
     },
     /// At least one account has an active auto-reply / out-of-office.
@@ -413,13 +422,27 @@ impl StatusBar {
 
     // ── Priority resolution ─────────────────────────────
 
-    fn resolve(&self, now: iced::time::Instant) -> ResolvedContent {
-        // 1. Warnings always win.
+    fn resolve(
+        &self,
+        now: iced::time::Instant,
+        service_health: &ServiceHealth,
+        rebuild: Option<&RebuildProgressState>,
+    ) -> ResolvedContent {
+        if let Some(content) = resolve_service_health(service_health) {
+            return content;
+        }
+
+        // 1. Warnings win over normal activity.
         if !self.warnings.is_empty() {
             return self.resolve_warning();
         }
 
-        // 2. Active confirmation briefly preempts sync progress.
+        // 2. Rebuild progress is long-running system work.
+        if let Some(rebuild) = rebuild {
+            return resolve_rebuild_progress(rebuild);
+        }
+
+        // 3. Active confirmation briefly preempts sync progress.
         if let Some(ref conf) = self.confirmation
             && now.duration_since(conf.created_at) < CONFIRMATION_DURATION
         {
@@ -428,12 +451,12 @@ impl StatusBar {
             };
         }
 
-        // 3. Sync progress is the steady-state default.
+        // 4. Sync progress is the steady-state default.
         if !self.sync_progress.is_empty() {
             return self.resolve_sync_progress();
         }
 
-        // 4. Confirmation that arrived with no sync active.
+        // 5. Confirmation that arrived with no sync active.
         if let Some(ref conf) = self.confirmation
             && now.duration_since(conf.created_at) < CONFIRMATION_DURATION
         {
@@ -442,7 +465,7 @@ impl StatusBar {
             };
         }
 
-        // 5. Persistent auto-reply indicator (lowest priority above idle).
+        // 6. Persistent auto-reply indicator (lowest priority above idle).
         if self.auto_reply_active {
             return ResolvedContent::AutoReplyActive;
         }
@@ -516,6 +539,68 @@ impl StatusBar {
 
         ResolvedContent::SyncProgress { text }
     }
+
+    pub fn view_with_system_status(
+        &self,
+        service_health: &ServiceHealth,
+        rebuild: Option<&RebuildProgressState>,
+    ) -> Element<'_, StatusBarMessage> {
+        self.view_resolved(service_health, rebuild)
+    }
+
+    fn view_resolved(
+        &self,
+        service_health: &ServiceHealth,
+        rebuild: Option<&RebuildProgressState>,
+    ) -> Element<'_, StatusBarMessage> {
+        let now = iced::time::Instant::now();
+        let content = self.resolve(now, service_health, rebuild);
+
+        match content {
+            ResolvedContent::Idle => {
+                // Empty bar at fixed height for consistent layout.
+                container(Space::new().height(0))
+                    .width(Length::Fill)
+                    .height(STATUS_BAR_HEIGHT)
+                    .style(ContainerClass::StatusBar.style())
+                    .into()
+            }
+            ResolvedContent::Warning {
+                text: warning_text,
+                clickable,
+                ..
+            } => {
+                let bar =
+                    build_status_row(icon::alert_triangle(), &warning_text, TextClass::Warning);
+
+                if clickable {
+                    mouse_area(bar)
+                        .on_press(StatusBarMessage::WarningClicked)
+                        .interaction(iced::mouse::Interaction::Pointer)
+                        .into()
+                } else {
+                    bar
+                }
+            }
+            ResolvedContent::SyncProgress { text: sync_text } => {
+                build_status_row(icon::refresh(), &sync_text, TextClass::Muted)
+            }
+            ResolvedContent::Confirmation { text: conf_text } => {
+                build_status_row(icon::check(), &conf_text, TextClass::Muted)
+            }
+            ResolvedContent::ServiceHealth { text, class } => {
+                build_status_row(icon::alert_triangle(), &text, class)
+            }
+            ResolvedContent::RebuildProgress { text } => {
+                build_status_row(icon::refresh(), &text, TextClass::Accent)
+            }
+            ResolvedContent::AutoReplyActive => build_status_row(
+                icon::mail(),
+                "Out of Office auto-reply is active",
+                TextClass::Accent,
+            ),
+        }
+    }
 }
 
 // ── Component implementation ────────────────────────────
@@ -562,47 +647,7 @@ impl Component for StatusBar {
     }
 
     fn view(&self) -> Element<'_, StatusBarMessage> {
-        let now = iced::time::Instant::now();
-        let content = self.resolve(now);
-
-        match content {
-            ResolvedContent::Idle => {
-                // Empty bar at fixed height for consistent layout.
-                container(Space::new().height(0))
-                    .width(Length::Fill)
-                    .height(STATUS_BAR_HEIGHT)
-                    .style(ContainerClass::StatusBar.style())
-                    .into()
-            }
-            ResolvedContent::Warning {
-                text: warning_text,
-                clickable,
-                ..
-            } => {
-                let bar =
-                    build_status_row(icon::alert_triangle(), &warning_text, TextClass::Warning);
-
-                if clickable {
-                    mouse_area(bar)
-                        .on_press(StatusBarMessage::WarningClicked)
-                        .interaction(iced::mouse::Interaction::Pointer)
-                        .into()
-                } else {
-                    bar
-                }
-            }
-            ResolvedContent::SyncProgress { text: sync_text } => {
-                build_status_row(icon::refresh(), &sync_text, TextClass::Muted)
-            }
-            ResolvedContent::Confirmation { text: conf_text } => {
-                build_status_row(icon::check(), &conf_text, TextClass::Muted)
-            }
-            ResolvedContent::AutoReplyActive => build_status_row(
-                icon::mail(),
-                "Out of Office auto-reply is active",
-                TextClass::Accent,
-            ),
-        }
+        self.view_resolved(&ServiceHealth::Healthy, None)
     }
 
     fn subscription(&self) -> iced::Subscription<StatusBarMessage> {
@@ -653,4 +698,42 @@ fn format_number(n: u64) -> String {
         result.push(c);
     }
     result.chars().rev().collect()
+}
+
+fn resolve_service_health(health: &ServiceHealth) -> Option<ResolvedContent> {
+    match health {
+        ServiceHealth::Healthy => None,
+        ServiceHealth::Booting { phase } => Some(ResolvedContent::ServiceHealth {
+            text: format!("Service starting: {phase}"),
+            class: TextClass::Muted,
+        }),
+        ServiceHealth::Respawning {
+            attempt,
+            next_delay,
+        } => Some(ResolvedContent::ServiceHealth {
+            text: format!(
+                "Service respawning after crash (attempt {}, retry in {}s)",
+                attempt,
+                next_delay.as_secs().max(1),
+            ),
+            class: TextClass::Warning,
+        }),
+        ServiceHealth::PersistentlyFailing { reason } => Some(ResolvedContent::ServiceHealth {
+            text: format!("Service cannot restart: {reason}"),
+            class: TextClass::Warning,
+        }),
+    }
+}
+
+fn resolve_rebuild_progress(rebuild: &RebuildProgressState) -> ResolvedContent {
+    let text = if rebuild.total == 0 {
+        "Rebuilding search index".to_string()
+    } else {
+        format!(
+            "Rebuilding search index ({} / {})",
+            format_number(rebuild.processed),
+            format_number(rebuild.total),
+        )
+    };
+    ResolvedContent::RebuildProgress { text }
 }

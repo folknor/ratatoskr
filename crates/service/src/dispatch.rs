@@ -176,9 +176,9 @@ where
         app_data_dir.clone(),
     );
 
-    // Phase 7-9c: post-ready schema-rebuild dispatcher. If boot
-    // detected a `.version` mismatch and marked the flag, this task
-    // dispatches a Wipe rebuild and rewrites `.version` on success.
+    // Phase 7-9c / Phase 8: post-ready schema-rebuild dispatcher. If
+    // boot detected a `.version` mismatch and marked the flag, this
+    // task dispatches a PreserveExisting rebuild.
     // No-op when the flag is unset (the steady-state).
     let schema_rebuild_handle = spawn_post_ready_schema_rebuild(
         Arc::clone(&boot_state),
@@ -1206,9 +1206,10 @@ fn spawn_post_ready_extract_startup(
 ///
 /// If `check_schema_version_and_dispatch` marked a pending rebuild
 /// during boot (the persisted `.version` differs from
-/// `INDEX_SCHEMA_VERSION`), this task dispatches a Wipe rebuild via
-/// the in-process IPC handler and rewrites `.version` once the
-/// rebuild emits `IndexRebuildCompleted`. The task awaits the
+/// `INDEX_SCHEMA_VERSION`), this task dispatches a PreserveExisting
+/// rebuild via the in-process IPC handler. The rebuild writes the new
+/// `.version` into its staging slot before publishing the active-index
+/// pointer. The task awaits the
 /// rebuild's completion notification by polling
 /// `boot_state.rebuild_in_flight_id` because subscribing to the
 /// outbound stream from inside the dispatch process is overkill for
@@ -1227,7 +1228,7 @@ fn spawn_post_ready_schema_rebuild(
             return;
         }
         log::info!(
-            "post-ready schema rebuild: dispatching Wipe rebuild for INDEX_SCHEMA_VERSION change",
+            "post-ready schema rebuild: dispatching PreserveExisting rebuild for INDEX_SCHEMA_VERSION change",
         );
 
         // M7 fix: if a rebuild is already in flight (the user fired
@@ -1246,7 +1247,7 @@ fn spawn_post_ready_schema_rebuild(
             in_flight
         } else {
             let params = service_api::IndexRebuildParams {
-                policy: service_api::RebuildPolicy::Wipe,
+                policy: service_api::RebuildPolicy::PreserveExisting,
                 force:  false,
             };
             match crate::handlers::extract::handle_rebuild(&boot_state, params).await {

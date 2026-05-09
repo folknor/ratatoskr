@@ -55,17 +55,17 @@ pub struct ExtractStatusAck {
 // index.rebuild
 // ---------------------------------------------------------------------------
 
-/// Rebuild flavor. v1 ships `Wipe` only (clear + repopulate from
-/// scratch); search is briefly unavailable while the rebuild runs.
-/// The originally-planned `PreserveExisting` (open
-/// `<search_index_next>/` adjacent, route writes there, atomic-swap
-/// when caught up) is a Phase 8 carry-forward - the variant is omitted
-/// from the wire enum until that work lands so external callers can't
-/// burn IPCs against an error path.
+/// Rebuild flavor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RebuildPolicy {
+    /// Clear the active index and repopulate it in place. Search is
+    /// briefly unavailable while the rebuild runs.
     Wipe,
+    /// Build a staging index while the existing reader stays live,
+    /// mirror concurrent writes into staging, then atomically update
+    /// the active-index pointer and rebind the UI reader on completion.
+    PreserveExisting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +156,10 @@ mod tests {
         let json = serde_json::to_value(p).expect("serialize");
         let recovered: RebuildPolicy = serde_json::from_value(json).expect("deserialize");
         assert_eq!(p, recovered);
+        let p = RebuildPolicy::PreserveExisting;
+        let json = serde_json::to_value(p).expect("serialize");
+        let recovered: RebuildPolicy = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(p, recovered);
     }
 
     #[test]
@@ -176,6 +180,8 @@ mod tests {
         let cases = [
             IndexRebuildParams { policy: RebuildPolicy::Wipe, force: false },
             IndexRebuildParams { policy: RebuildPolicy::Wipe, force: true },
+            IndexRebuildParams { policy: RebuildPolicy::PreserveExisting, force: false },
+            IndexRebuildParams { policy: RebuildPolicy::PreserveExisting, force: true },
         ];
         for params in cases {
             let json = serde_json::to_value(&params).expect("serialize");

@@ -43,6 +43,7 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
         account_color: row.get("account_color")?,
         account_name: row.get("account_name")?,
         sort_order: row.get("sort_order")?,
+        is_deleting: row.get("is_deleting")?,
     })
 }
 
