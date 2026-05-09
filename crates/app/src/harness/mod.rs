@@ -13,12 +13,12 @@ use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
-    BootPhaseKind, Notification, OperationId, PlanId, ReadBootstrapSnapshotsParams,
-    RequestParams, SendAttachmentSource, SendWireAttachment, SendWireMessage,
-    SendWireRequest, SettingValue, SettingsSetParams, TestCrashAfterNWritesParams,
+    BootPhaseKind, ClientNotification, ExtractStatusParams, Notification, OperationId, PlanId,
+    ReadBootstrapSnapshotsParams, RequestParams, SendAttachmentSource, SendWireAttachment,
+    SendWireMessage, SendWireRequest, SettingValue, SettingsSetParams, TestCrashAfterNWritesParams,
     TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
-    TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams,
-    WireFolderId, WireMailOperation, WireTagId,
+    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedThreadParams,
+    TestStartSyncParams, TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -733,6 +733,36 @@ fn lua_client_request_async(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_client_notify(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    let method = state.to_string(2)?;
+    if state.get_top() >= 3 && state.typ(3) != LuaType::Nil {
+        return Err(lua_error_message(
+            "client:notify currently supports only params-less notifications",
+        ));
+    }
+    let notification = ClientNotification::from_method_params(&method, &None)
+        .map_err(lua_error_message)?;
+    let ctx = context(state)?;
+    let (handle, client) = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        (guard.handle.clone(), guard.client(id)?)
+    };
+    let result = handle.block_on(client.send_notification(notification));
+    state.set_top(0);
+    match result {
+        Ok(()) => {
+            state.push_boolean(true);
+            state.push_nil();
+        }
+        Err(error) => {
+            state.push_boolean(false);
+            push_client_error(state, &error)?;
+        }
+    }
+    Ok(2)
+}
+
 fn lua_client_shutdown(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     let ctx = context(state)?;
@@ -1180,6 +1210,7 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_number(state, idx, "__harness_id", id as f64)?;
     set_field_fn(state, idx, "request", lua_client_request)?;
     set_field_fn(state, idx, "request_async", lua_client_request_async)?;
+    set_field_fn(state, idx, "notify", lua_client_notify)?;
     set_field_fn(state, idx, "shutdown", lua_client_shutdown)?;
     set_field_fn(state, idx, "child_pid", lua_client_child_pid)?;
     set_field_fn(state, idx, "current_generation", lua_client_current_generation)?;
@@ -1373,6 +1404,9 @@ fn request_params_from_lua(
                 params: ReadBootstrapSnapshotsParams::default(),
             })
         }
+        "ExtractStatus" | "extract.status" => Ok(RequestParams::ExtractStatus {
+            params: ExtractStatusParams::default(),
+        }),
         "TestSlow" | "test.slow" => {
             let millis = if state.get_top() >= params_idx as usize {
                 match state.typ(params_idx) {
@@ -1468,6 +1502,33 @@ fn request_params_from_lua(
                 },
             })
         }
+        "TestSeedCachedAttachment" | "test.seed_cached_attachment" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestSeedCachedAttachment requires params table",
+                ));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
+                lua_error_message("TestSeedCachedAttachment requires params.account_id")
+            })?;
+            let message_id = get_string_field(state, params_idx, "message_id")?.ok_or_else(|| {
+                lua_error_message("TestSeedCachedAttachment requires params.message_id")
+            })?;
+            let content = get_string_field(state, params_idx, "content")?.ok_or_else(|| {
+                lua_error_message("TestSeedCachedAttachment requires params.content")
+            })?;
+            Ok(RequestParams::TestSeedCachedAttachment {
+                params: TestSeedCachedAttachmentParams {
+                    account_id,
+                    message_id,
+                    attachment_id: get_string_field(state, params_idx, "attachment_id")?,
+                    filename: get_string_field(state, params_idx, "filename")?,
+                    mime_type: get_string_field(state, params_idx, "mime_type")?
+                        .or_else(|| get_string_field(state, params_idx, "mime").ok().flatten()),
+                    content,
+                },
+            })
+        }
         "TestThreadRead" | "test.thread_read" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("TestThreadRead requires params table"));
@@ -1521,6 +1582,8 @@ fn request_params_from_lua(
                 TestQueryDbStateParams {
                     account_id: get_string_field(state, params_idx, "account_id")?,
                     message_limit: get_number_field(state, params_idx, "message_limit")?
+                        .map(|value| value as u64),
+                    attachment_limit: get_number_field(state, params_idx, "attachment_limit")?
                         .map(|value| value as u64),
                 }
             } else {

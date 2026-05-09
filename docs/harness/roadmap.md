@@ -423,8 +423,8 @@ plain command also passed 700/700 on 2026-05-09:
 
 ### M5 - Phase 7 integration cohort
 
-**Status:** READY. M3's initial helper slice has landed; the cohort can
-start.
+**Status:** PARTIAL. M3's initial helper slice has landed, and the
+first executable extract script is in tree.
 
 The Phase 7 plan called for `crates/service/tests/extract_in_process.rs`
 to cover end-to-end fetch -> extract -> re-index -> search annotation,
@@ -436,6 +436,16 @@ scripts in `crates/app/tests/service-harness/extract/`.
 Real-world fixture corpus lands here: `.pdf` / `.docx` / `.xlsx` /
 `.pptx` files plus a malicious zip-bomb `.docx`, checked into the
 repo at `crates/app/tests/service-harness/fixtures/extract/`.
+
+Landed first slice:
+
+- `crates/app/tests/service-harness/extract/backfill_kick_indexes_cached_text_attachment.lua`
+  seeds a cached `text/plain` attachment, sends the real
+  `extract.backfill_kick` client notification, and asserts the Service
+  writes `attachment_extracted_text`, marks `attachments.text_indexed_at`,
+  and advances `extract.status`. The helper surface added for this
+  slice is `client:notify(...)`, `TestSeedCachedAttachment`, and
+  attachment extraction fields in `TestQueryDbState`.
 
 **Exit criteria:**
 

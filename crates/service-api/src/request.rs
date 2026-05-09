@@ -112,6 +112,31 @@ pub struct TestSeedThreadAck {
 }
 
 #[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedCachedAttachmentParams {
+    pub account_id: String,
+    pub message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    pub content: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedCachedAttachmentAck {
+    pub account_id: String,
+    pub message_id: String,
+    pub attachment_id: String,
+    pub content_hash: String,
+    pub relative_path: String,
+    pub size_bytes: u64,
+}
+
+#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestThreadReadParams {
     pub account_id: String,
@@ -182,6 +207,8 @@ pub struct TestQueryDbStateParams {
     pub account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_limit: Option<u64>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -220,6 +247,24 @@ pub struct TestDbLocalDraftRow {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbAttachmentRow {
+    pub id: String,
+    pub account_id: String,
+    pub message_id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub local_path: Option<String>,
+    pub cached_at: Option<i64>,
+    pub cache_size: Option<i64>,
+    pub content_hash: Option<String>,
+    pub text_indexed_at: Option<i64>,
+    pub extraction_status: Option<String>,
+    pub extracted_text: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
     pub label_count: u64,
@@ -231,6 +276,7 @@ pub struct TestQueryDbStateAck {
     pub local_draft_count: u64,
     pub messages: Vec<TestDbMessageRow>,
     pub local_drafts: Vec<TestDbLocalDraftRow>,
+    pub attachments: Vec<TestDbAttachmentRow>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -615,6 +661,9 @@ pub enum RequestParams {
     /// Creates a FK-valid thread fixture under a seeded account.
     #[cfg(feature = "test-helpers")]
     TestSeedThread { params: TestSeedThreadParams },
+    /// Inserts a cached attachment fixture under an existing message.
+    #[cfg(feature = "test-helpers")]
+    TestSeedCachedAttachment { params: TestSeedCachedAttachmentParams },
     /// Reads back thread flags and labels for harness assertions.
     #[cfg(feature = "test-helpers")]
     TestThreadRead { params: TestThreadReadParams },
@@ -709,6 +758,8 @@ impl RequestParams {
             Self::TestCrashAfterNWrites { .. } => "test.crash_after_n_writes",
             #[cfg(feature = "test-helpers")]
             Self::TestSeedThread { .. } => "test.seed_thread",
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedCachedAttachment { .. } => "test.seed_cached_attachment",
             #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { .. } => "test.thread_read",
             #[cfg(feature = "test-helpers")]
@@ -836,6 +887,7 @@ impl RequestParams {
             | Self::TestCounterRead { .. }
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
+            | Self::TestSeedCachedAttachment { .. }
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
@@ -928,6 +980,7 @@ impl RequestParams {
             Self::TestSeedAccount { .. }
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
+            | Self::TestSeedCachedAttachment { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
             #[cfg(feature = "test-helpers")]
@@ -1037,6 +1090,10 @@ impl RequestParams {
             }
             #[cfg(feature = "test-helpers")]
             Self::TestSeedThread { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedCachedAttachment { params } => {
+                serde_json::json!({ "params": params })
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
@@ -1492,6 +1549,16 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.seed_thread params: {e}"))?;
                 Ok(Self::TestSeedThread { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.seed_cached_attachment" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestSeedCachedAttachmentParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.seed_cached_attachment params: {e}"))?;
+                Ok(Self::TestSeedCachedAttachment { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.thread_read" => {
@@ -3123,6 +3190,29 @@ mod tests {
 
     #[cfg(feature = "test-helpers")]
     #[test]
+    fn test_seed_cached_attachment_round_trips_from_method_params() {
+        let original = RequestParams::TestSeedCachedAttachment {
+            params: TestSeedCachedAttachmentParams {
+                account_id: "acc-1".into(),
+                message_id: "message-1".into(),
+                attachment_id: Some("attachment-1".into()),
+                filename: Some("body.txt".into()),
+                mime_type: Some("text/plain".into()),
+                content: "attachment body".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.seed_cached_attachment");
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
     fn test_thread_read_round_trips_from_method_params() {
         let original = RequestParams::TestThreadRead {
             params: TestThreadReadParams {
@@ -3186,6 +3276,7 @@ mod tests {
             params: TestQueryDbStateParams {
                 account_id: Some("acc-1".into()),
                 message_limit: Some(10),
+                attachment_limit: Some(20),
             },
         };
         let parsed = RequestParams::from_method_params(

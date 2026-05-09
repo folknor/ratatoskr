@@ -11,10 +11,11 @@ use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestDbLocalDraftRow, TestDbMessageRow, TestPendingOpRow, TestPendingOpsReadAck,
-    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedThreadAck, TestSeedThreadParams,
-    TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
+    TestDbAttachmentRow, TestDbLocalDraftRow, TestDbMessageRow, TestPendingOpRow,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
+    TestQueryDbStateParams, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -158,6 +159,68 @@ pub(super) async fn seed_thread_handle(
     };
     write_db
         .with_conn(move |conn| insert_harness_thread(conn, params, &thread_id, &message_id))
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn seed_cached_attachment_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestSeedCachedAttachmentParams,
+) -> Result<Value, ServiceError> {
+    if params.account_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.seed_cached_attachment".into(),
+            message: "account_id is required".into(),
+        });
+    }
+    if params.message_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.seed_cached_attachment".into(),
+            message: "message_id is required".into(),
+        });
+    }
+    let write_db = boot_state.write_db_state()?;
+    let app_data_dir = boot_state.app_data_dir().to_path_buf();
+    let attachment_id = params
+        .attachment_id
+        .clone()
+        .unwrap_or_else(|| format!("attachment-{}", uuid::Uuid::new_v4()));
+    let filename = params.filename.unwrap_or_else(|| "harness.txt".into());
+    let mime_type = params.mime_type.unwrap_or_else(|| "text/plain".into());
+    let bytes = params.content.into_bytes();
+    let content_hash = store::attachment_cache::hash_bytes(&bytes);
+    let relative_path =
+        store::attachment_cache::write_cached(&app_data_dir, &content_hash, &bytes)
+            .map_err(ServiceError::Internal)?;
+    let size_bytes = u64::try_from(bytes.len())
+        .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
+    let cache_size = i64::try_from(bytes.len())
+        .map_err(|e| ServiceError::Internal(format!("attachment cache size conversion: {e}")))?;
+    let account_id = params.account_id.clone();
+    let message_id = params.message_id.clone();
+    let ack = TestSeedCachedAttachmentAck {
+        account_id: account_id.clone(),
+        message_id: message_id.clone(),
+        attachment_id: attachment_id.clone(),
+        content_hash: content_hash.clone(),
+        relative_path: relative_path.clone(),
+        size_bytes,
+    };
+    write_db
+        .with_conn(move |conn| {
+            insert_harness_cached_attachment(
+                conn,
+                &account_id,
+                &message_id,
+                &attachment_id,
+                &filename,
+                &mime_type,
+                &relative_path,
+                cache_size,
+                &content_hash,
+            )
+        })
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -419,6 +482,52 @@ fn insert_harness_thread(
     tx.commit().map_err(|e| format!("commit: {e}"))
 }
 
+fn insert_harness_cached_attachment(
+    conn: &Connection,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+    filename: &str,
+    mime_type: &str,
+    relative_path: &str,
+    cache_size: i64,
+    content_hash: &str,
+) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+    // Harness fixtures write raw bytes straight into the flat cache,
+    // so size and cache_size intentionally match for seeded rows.
+    tx.execute(
+        "INSERT INTO attachments (
+            id, message_id, account_id, filename, mime_type, size,
+            local_path, cached_at, cache_size, content_hash, text_indexed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch(), ?8, ?9, NULL)
+        ON CONFLICT(id) DO UPDATE SET
+            message_id = excluded.message_id,
+            account_id = excluded.account_id,
+            filename = excluded.filename,
+            mime_type = excluded.mime_type,
+            size = excluded.size,
+            local_path = excluded.local_path,
+            cached_at = unixepoch(),
+            cache_size = excluded.cache_size,
+            content_hash = excluded.content_hash,
+            text_indexed_at = NULL",
+        params![
+            attachment_id,
+            message_id,
+            account_id,
+            filename,
+            mime_type,
+            cache_size,
+            relative_path,
+            cache_size,
+            content_hash,
+        ],
+    )
+    .map_err(|e| format!("insert cached attachment: {e}"))?;
+    tx.commit().map_err(|e| format!("commit: {e}"))
+}
+
 fn read_harness_thread(
     conn: &Connection,
     params: &TestThreadReadParams,
@@ -584,6 +693,7 @@ fn read_harness_db_state(
         local_draft_count: count_account_rows(conn, "local_drafts", account_id)?,
         messages: read_harness_messages(conn, params)?,
         local_drafts: read_harness_local_drafts(conn, params)?,
+        attachments: read_harness_attachments(conn, params)?,
     })
 }
 
@@ -727,6 +837,51 @@ fn read_harness_local_drafts(
     }
 }
 
+fn read_harness_attachments(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbAttachmentRow>, String> {
+    let limit = i64::try_from(params.attachment_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("attachment limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT a.id, a.account_id, a.message_id, a.filename, a.mime_type,
+                            a.size, a.local_path, a.cached_at, a.cache_size,
+                            a.content_hash, a.text_indexed_at, t.status, t.extracted_text
+                     FROM attachments a
+                     LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash
+                     WHERE a.account_id = ?1
+                     ORDER BY a.message_id ASC, a.id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare attachments query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_attachment_from_row)
+                .map_err(|e| format!("query attachments: {e}"))?;
+            collect_rows(mapped, "attachments")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT a.id, a.account_id, a.message_id, a.filename, a.mime_type,
+                            a.size, a.local_path, a.cached_at, a.cache_size,
+                            a.content_hash, a.text_indexed_at, t.status, t.extracted_text
+                     FROM attachments a
+                     LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash
+                     ORDER BY a.account_id ASC, a.message_id ASC, a.id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare attachments query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_attachment_from_row)
+                .map_err(|e| format!("query attachments: {e}"))?;
+            collect_rows(mapped, "attachments")
+        }
+    }
+}
+
 fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbMessageRow> {
     Ok(TestDbMessageRow {
         id: row.get(0)?,
@@ -760,6 +915,26 @@ fn test_db_local_draft_from_row(
         attachments: row.get(12)?,
         signature_separator_index: row.get(13)?,
         sync_status: row.get(14)?,
+    })
+}
+
+fn test_db_attachment_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TestDbAttachmentRow> {
+    Ok(TestDbAttachmentRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        message_id: row.get(2)?,
+        filename: row.get(3)?,
+        mime_type: row.get(4)?,
+        size: row.get(5)?,
+        local_path: row.get(6)?,
+        cached_at: row.get(7)?,
+        cache_size: row.get(8)?,
+        content_hash: row.get(9)?,
+        text_indexed_at: row.get(10)?,
+        extraction_status: row.get(11)?,
+        extracted_text: row.get(12)?,
     })
 }
 

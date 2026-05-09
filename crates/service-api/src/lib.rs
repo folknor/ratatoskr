@@ -93,10 +93,11 @@ pub use redacted::{RedactedBytes, RedactedString};
 #[cfg(feature = "test-helpers")]
 pub use request::{
     TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams,
-    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
+    TestDbAttachmentRow, TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
     TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
     TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedThreadAck, TestSeedThreadParams,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
+    TestSeedCachedAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,
     TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 pub use request::{RequestParams, RequestTimeoutKind};
