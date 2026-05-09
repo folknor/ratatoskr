@@ -632,6 +632,10 @@ Ratatoskr-side M8 surface now in tree:
   the local DB, verifies `$seen` / `$flagged` import into read /
   starred state, and uses saehrimnir's request log to prove the sync
   listed folders, searched UIDs, and fetched messages through IMAP.
+- `crates/app/tests/sync-harness/imap-steady-state-delta.lua` runs
+  the same fixture twice, asserts state stays stable, and uses the
+  request log to prove the second run lists/selects/searches without
+  issuing `UID FETCH` for unchanged messages.
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
@@ -640,8 +644,8 @@ Ratatoskr-side M8 surface now in tree:
 
 - A small-mailbox IMAP fixture syncs end-to-end against a fake
   IMAP server, with assertions on final account/folder/message
-  counts. Initial import coverage has landed; delta and mutation
-  fixtures remain.
+  counts. Initial import and steady-state delta coverage have landed;
+  mutation fixtures remain.
 - A small-mailbox JMAP fixture does the same. Initial import and
   steady-state delta coverage have landed; deeper JMAP fixture cases
   remain.
