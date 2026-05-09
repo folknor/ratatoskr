@@ -79,7 +79,8 @@ the brokkr repo):
   `harness.data_dir`, `harness.spawn`,
   `harness.spawn_with_events`, `harness.kill`,
   `harness.pid_is_alive`, `harness.sleep`, `harness.now_ms`,
-  `harness.path_exists`, `harness.read_json`, `harness.assert`,
+  `harness.path_exists`, `harness.dir_has_prefix`,
+  `harness.read_json`, `harness.write_text`, `harness.assert`,
   `harness.assert_eq`, `harness.same_client`,
   `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
   `harness.http_delete(url)`, `harness.env(name)`, and
@@ -450,7 +451,7 @@ repo at `crates/app/tests/service-harness/fixtures/extract/`.
 
 ### M6 - Manual-matrix automation
 
-**Status:** PARTIAL - items 4, 5, 6, and 8 have landed; the rest
+**Status:** PARTIAL - items 4, 5, 6, 7, and 8 have landed; the rest
 unblocks incrementally as harness capability grows.
 
 The manual test matrix lives at `docs/harness/manual-test-matrix.md`.
@@ -481,8 +482,13 @@ Sequencing:
   the same data dir, and asserts `internal.read_bootstrap_snapshots`
   returns the persisted UI/settings snapshot values. Verified on
   2026-05-09 with a focused `brokkr service-test` run.
-- **M6.7 (READY when fixture-setup API lands in M3):** draft WAL
-  replay needs deterministic data-dir state across multiple runs.
+- **M6.7 (LANDED):** draft WAL replay now lives in
+  `crates/app/tests/service-harness/m6/`. The script seeds an
+  account, writes `drafts.wal` with one valid draft entry and one
+  partial trailing line, boots the Service against the same data dir,
+  and asserts the row replayed plus the WAL rotated to
+  `drafts.wal.replayed.*`. Verified on 2026-05-09 with a focused
+  `brokkr service-test` run.
 - **M6.8 (LANDED):** account.delete cancels in-flight sync now lives
   in `crates/app/tests/service-harness/m6/`. The script uses a
   test-helper `harness-slow-sync` provider that parks until its

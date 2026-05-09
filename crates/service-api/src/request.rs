@@ -200,6 +200,26 @@ pub struct TestDbMessageRow {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbLocalDraftRow {
+    pub id: String,
+    pub account_id: String,
+    pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
+    pub bcc_addresses: Option<String>,
+    pub subject: Option<String>,
+    pub body_html: Option<String>,
+    pub reply_to_message_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub from_email: Option<String>,
+    pub signature_id: Option<String>,
+    pub remote_draft_id: Option<String>,
+    pub attachments: Option<String>,
+    pub signature_separator_index: Option<i64>,
+    pub sync_status: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
     pub label_count: u64,
@@ -208,7 +228,9 @@ pub struct TestQueryDbStateAck {
     pub message_count: u64,
     pub unread_message_count: u64,
     pub attachment_count: u64,
+    pub local_draft_count: u64,
     pub messages: Vec<TestDbMessageRow>,
+    pub local_drafts: Vec<TestDbLocalDraftRow>,
 }
 
 #[cfg(feature = "test-helpers")]

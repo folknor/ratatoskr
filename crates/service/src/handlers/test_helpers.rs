@@ -11,10 +11,10 @@ use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestDbMessageRow, TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
-    TestQueryDbStateAck, TestQueryDbStateParams, TestSeedAccountAck, TestSeedAccountParams,
-    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
-    TestThreadReadParams,
+    TestDbLocalDraftRow, TestDbMessageRow, TestPendingOpRow, TestPendingOpsReadAck,
+    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedThreadAck, TestSeedThreadParams,
+    TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -581,7 +581,9 @@ fn read_harness_db_state(
         message_count: count_account_rows(conn, "messages", account_id)?,
         unread_message_count: count_unread_messages(conn, account_id)?,
         attachment_count: count_account_rows(conn, "attachments", account_id)?,
+        local_draft_count: count_account_rows(conn, "local_drafts", account_id)?,
         messages: read_harness_messages(conn, params)?,
+        local_drafts: read_harness_local_drafts(conn, params)?,
     })
 }
 
@@ -680,6 +682,51 @@ fn read_harness_messages(
     }
 }
 
+fn read_harness_local_drafts(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbLocalDraftRow>, String> {
+    let limit = i64::try_from(params.message_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("message_limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, to_addresses, cc_addresses, bcc_addresses,
+                            subject, body_html, reply_to_message_id, thread_id,
+                            from_email, signature_id, remote_draft_id, attachments,
+                            signature_separator_index, sync_status
+                     FROM local_drafts
+                     WHERE account_id = ?1
+                     ORDER BY updated_at ASC, id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare local drafts query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_local_draft_from_row)
+                .map_err(|e| format!("query local drafts: {e}"))?;
+            collect_rows(mapped, "local drafts")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, to_addresses, cc_addresses, bcc_addresses,
+                            subject, body_html, reply_to_message_id, thread_id,
+                            from_email, signature_id, remote_draft_id, attachments,
+                            signature_separator_index, sync_status
+                     FROM local_drafts
+                     ORDER BY account_id ASC, updated_at ASC, id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare local drafts query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_local_draft_from_row)
+                .map_err(|e| format!("query local drafts: {e}"))?;
+            collect_rows(mapped, "local drafts")
+        }
+    }
+}
+
 fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbMessageRow> {
     Ok(TestDbMessageRow {
         id: row.get(0)?,
@@ -691,6 +738,28 @@ fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbM
         date: row.get(6)?,
         is_read: row.get::<_, i64>(7)? != 0,
         is_starred: row.get::<_, i64>(8)? != 0,
+    })
+}
+
+fn test_db_local_draft_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TestDbLocalDraftRow> {
+    Ok(TestDbLocalDraftRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        to_addresses: row.get(2)?,
+        cc_addresses: row.get(3)?,
+        bcc_addresses: row.get(4)?,
+        subject: row.get(5)?,
+        body_html: row.get(6)?,
+        reply_to_message_id: row.get(7)?,
+        thread_id: row.get(8)?,
+        from_email: row.get(9)?,
+        signature_id: row.get(10)?,
+        remote_draft_id: row.get(11)?,
+        attachments: row.get(12)?,
+        signature_separator_index: row.get(13)?,
+        sync_status: row.get(14)?,
     })
 }
 

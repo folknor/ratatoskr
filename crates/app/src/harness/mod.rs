@@ -100,7 +100,9 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "kill", lua_kill)?;
     set_field_fn(state, table_idx, "pid_is_alive", lua_pid_is_alive)?;
     set_field_fn(state, table_idx, "path_exists", lua_path_exists)?;
+    set_field_fn(state, table_idx, "dir_has_prefix", lua_dir_has_prefix)?;
     set_field_fn(state, table_idx, "read_json", lua_read_json)?;
+    set_field_fn(state, table_idx, "write_text", lua_write_text)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
     set_field_fn(state, table_idx, "uuid", lua_uuid)?;
@@ -391,6 +393,24 @@ fn lua_path_exists(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_dir_has_prefix(state: &mut State) -> dellingr::Result<u8> {
+    let dir = PathBuf::from(state.to_string(1)?);
+    let prefix = state.to_string(2)?;
+    let exists = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(&prefix))
+            })
+        })
+        .unwrap_or(false);
+    state.set_top(0);
+    state.push_boolean(exists);
+    Ok(1)
+}
+
 fn lua_read_json(state: &mut State) -> dellingr::Result<u8> {
     let path = PathBuf::from(state.to_string(1)?);
     let text = std::fs::read_to_string(path).map_err(lua_io)?;
@@ -398,6 +418,17 @@ fn lua_read_json(state: &mut State) -> dellingr::Result<u8> {
     state.set_top(0);
     push_json(state, &value)?;
     Ok(1)
+}
+
+fn lua_write_text(state: &mut State) -> dellingr::Result<u8> {
+    let path = PathBuf::from(state.to_string(1)?);
+    let text = state.to_string(2)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(lua_io)?;
+    }
+    std::fs::write(path, text).map_err(lua_io)?;
+    state.set_top(0);
+    Ok(0)
 }
 
 fn lua_sleep(state: &mut State) -> dellingr::Result<u8> {

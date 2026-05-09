@@ -79,7 +79,7 @@ request/ack shutdown path.
 
 ## Phase 6a / 6a-part-2 - write-surface relocation smoke
 
-The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6 and 8 are now automated. Item 7 remains the local file-system WAL crash-safety check; items 9 and 10 remain provider-workflow checks until fake OAuth/calendar providers land.
+The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6, 7, and 8 are now automated. Items 9 and 10 remain provider-workflow checks until fake OAuth/calendar providers land.
 
 ### 6. Cold-boot bootstrap snapshots (encryption-key handle end-to-end)
 
@@ -93,16 +93,12 @@ phishing settings.
 
 ### 7. Window-close-during-typing draft WAL
 
-Verifies the WAL captures the in-flight keystrokes that the synchronous DB write used to capture pre-relocation, and that the Service drain replays them on next boot before `boot.ready`.
+Automated by `crates/app/tests/service-harness/m6/draft_wal_replays_on_boot.lua`.
 
-1. Open a compose window, start typing a draft (subject + body). Do not wait for the auto-save tick.
-2. Close the compose window via the OS title-bar close (Linux: click the X). The auto-save tick has not fired yet at this point.
-3. Confirm `<app_data>/drafts.wal` exists and contains a JSON line for the just-closed draft.
-4. Quit the app cleanly.
-5. Relaunch the app. The Service boot phase progress should momentarily show "Draining draft WAL..." (BootPhase::DrainingDraftWal).
-6. **Expected:** the draft appears in the Drafts folder with the typed content intact. `drafts.wal` is renamed to `drafts.wal.replayed.<epoch_ms>`; no active WAL remains.
-
-If the draft is empty or missing: the WAL append failed (check logs for "Failed to append compose draft to WAL") or the drainer skipped the entry (check logs for "drafts.wal: skipping unparseable line"). If the file is still active after boot: the rename failed - the next boot will idempotently re-replay, but the rename target may need a permission fix.
+The script seeds an account, writes `drafts.wal` with one valid draft
+entry plus a partial trailing line, boots the Service against the same
+data dir, then asserts the draft row was replayed, the active WAL was
+rotated, and a `drafts.wal.replayed.*` file exists.
 
 ### 8. Account delete cancels in-flight sync
 
