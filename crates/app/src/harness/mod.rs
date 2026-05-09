@@ -116,6 +116,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "same_client", lua_same_client)?;
     set_field_fn(state, table_idx, "expect_quiet", lua_expect_quiet)?;
     set_field_fn(state, table_idx, "http_get", lua_http_get)?;
+    set_field_fn(state, table_idx, "http_post_json", lua_http_post_json)?;
     set_field_fn(state, table_idx, "http_delete", lua_http_delete)?;
     set_field_fn(state, table_idx, "env", lua_env)?;
     set_field_number(state, table_idx, "protocol_version", service_api::PROTOCOL_VERSION as f64)?;
@@ -634,6 +635,43 @@ fn lua_http_get(state: &mut State) -> dellingr::Result<u8> {
     let value: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| {
             lua_error_message(format!("http_get JSON parse: {e}; body={body}"))
+        })?;
+    state.set_top(0);
+    push_json(state, &value)?;
+    Ok(1)
+}
+
+fn lua_http_post_json(state: &mut State) -> dellingr::Result<u8> {
+    let url = state.to_string(1)?;
+    let request_body = state.to_string(2)?;
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let body = handle
+        .block_on(async move {
+            let client = reqwest::Client::new();
+            let response = client
+                .post(&url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(request_body)
+                .send()
+                .await
+                .map_err(|e| format!("http_post_json {url}: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(format!("http_post_json {url}: status {status}"));
+            }
+            response
+                .text()
+                .await
+                .map_err(|e| format!("http_post_json {url} body: {e}"))
+        })
+        .map_err(lua_error_message)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| {
+            lua_error_message(format!("http_post_json JSON parse: {e}; body={body}"))
         })?;
     state.set_top(0);
     push_json(state, &value)?;

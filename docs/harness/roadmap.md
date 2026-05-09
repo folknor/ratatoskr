@@ -83,8 +83,8 @@ the brokkr repo):
   `harness.read_json`, `harness.write_text`, `harness.assert`,
   `harness.assert_eq`, `harness.same_client`,
   `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
-  `harness.http_delete(url)`, `harness.env(name)`, and
-  `harness.protocol_version`.
+  `harness.http_post_json(url, body)`, `harness.http_delete(url)`,
+  `harness.env(name)`, and `harness.protocol_version`.
 - Landed client/event/request methods:
   `client:request`, `client:request_async`, `client:shutdown`,
   `client:child_pid`, `client:current_generation`, `client:drop`,
@@ -648,6 +648,13 @@ Ratatoskr-side M8 surface now in tree:
   `initial_sync_completed`, and uses saehrimnir's request log to
   prove the second run goes through `Mailbox/changes` and
   `Email/changes` without falling back to `Email/query`.
+- `crates/app/tests/sync-harness/jmap-email-set-delta.lua`
+  mutates the mock fixture through a direct JMAP `Email/set`, then
+  runs ratatoskr delta sync and asserts the updated read state is
+  imported via `Email/changes` plus `Email/get` without falling back
+  to `Email/query`. This slice also adds
+  `harness.http_post_json(url, body)` for provider-admin and raw
+  protocol mutation setup.
 - `crates/app/tests/sync-harness/imap-initial.lua` targets the
   `imap-small.toml` fixture, asserts the two fixture messages land in
   the local DB, verifies `$seen` / `$flagged` import into read /
