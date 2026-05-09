@@ -102,6 +102,9 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "assert_eq", lua_assert_eq)?;
     set_field_fn(state, table_idx, "same_client", lua_same_client)?;
     set_field_fn(state, table_idx, "expect_quiet", lua_expect_quiet)?;
+    set_field_fn(state, table_idx, "http_get", lua_http_get)?;
+    set_field_fn(state, table_idx, "http_delete", lua_http_delete)?;
+    set_field_fn(state, table_idx, "env", lua_env)?;
     set_field_number(state, table_idx, "protocol_version", service_api::PROTOCOL_VERSION as f64)?;
     state.set_global("harness");
     Ok(())
@@ -437,6 +440,73 @@ fn lua_same_client(state: &mut State) -> dellingr::Result<u8> {
     state.set_top(0);
     state.push_boolean(same);
     Ok(1)
+}
+
+fn lua_env(state: &mut State) -> dellingr::Result<u8> {
+    let name = state.to_string(1)?;
+    state.set_top(0);
+    match std::env::var(&name) {
+        Ok(value) => state.push_string(&value),
+        Err(_) => state.push_nil(),
+    }
+    Ok(1)
+}
+
+fn lua_http_get(state: &mut State) -> dellingr::Result<u8> {
+    let url = state.to_string(1)?;
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let body = handle
+        .block_on(async move {
+            let response = reqwest::get(&url)
+                .await
+                .map_err(|e| format!("http_get {url}: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(format!("http_get {url}: status {status}"));
+            }
+            response
+                .text()
+                .await
+                .map_err(|e| format!("http_get {url} body: {e}"))
+        })
+        .map_err(lua_error_message)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| {
+            lua_error_message(format!("http_get JSON parse: {e}; body={body}"))
+        })?;
+    state.set_top(0);
+    push_json(state, &value)?;
+    Ok(1)
+}
+
+fn lua_http_delete(state: &mut State) -> dellingr::Result<u8> {
+    let url = state.to_string(1)?;
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    handle
+        .block_on(async move {
+            let client = reqwest::Client::new();
+            let response = client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("http_delete {url}: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(format!("http_delete {url}: status {status}"));
+            }
+            Ok(())
+        })
+        .map_err(lua_error_message)?;
+    state.set_top(0);
+    Ok(0)
 }
 
 fn lua_expect_quiet(state: &mut State) -> dellingr::Result<u8> {

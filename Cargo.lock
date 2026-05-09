@@ -267,6 +267,7 @@ dependencies = [
  "mime_guess",
  "mundy",
  "process-lifetime",
+ "reqwest",
  "rfd",
  "rte",
  "rtsk",

@@ -68,6 +68,70 @@ references. Details below.
 > `docs/harness/roadmap.md`. The text in this section is preserved as
 > the original audit finding.
 
+### Plan: physical relocation of provider sync into `provider-sync`
+
+The audit-time recording of "Current Exception" makes the gap visible
+but does not close it. The plan to actually close it:
+
+**Choice.** Physical relocation into `provider-sync`, not a
+`write-handles` type-split. The architecture document is built on
+strict structural boundaries; the closure must be structural too. The
+constructor-visibility argument that motivates the type-split is
+real but secondary to the principle.
+
+**Current state, post-reconnaissance:**
+
+- `crates/provider-sync/` already exists, holds `SyncProviderCtx`,
+  the `ProviderSyncOps` trait, and four orphan-impls
+  (`{gmail,jmap,graph,imap}_impl.rs`). It depends on each provider
+  crate today (the orphan impls call `jmap::sync::jmap_initial_sync`
+  etc.), so the dep direction is already correct.
+- Five crates still name `service_state::*` types in function
+  signatures, forcing them to keep the Cargo dep:
+  - `sync` - `persistence.rs` (helpers like `store_message_bodies`).
+  - `jmap` - `sync/{mod,storage}.rs`, `shared_mailbox_sync.rs`.
+  - `gmail` - `sync/{mod,storage}.rs`.
+  - `graph` - `sync/{mod,storage,stores}.rs`,
+    `shared_mailbox_sync.rs`.
+  - `imap` - `imap_initial.rs`, `imap_delta.rs`,
+    `imap_delta_janitor.rs`, `sync_pipeline.rs`.
+- The non-sync code in each provider crate (clients, ops, parsers,
+  converters) does not appear to call into its own sync subdir, so
+  the moves should not create reverse-dep cycles. Reconnaissance
+  was interrupted before this was fully verified.
+
+**Move shape:**
+
+- `crates/{gmail,jmap,graph,imap}/src/sync/` -> `crates/provider-sync/src/{gmail,jmap,graph,imap}/`.
+- `crates/{jmap,graph}/src/shared_mailbox_sync.rs` -> matching
+  subdir under `provider-sync`.
+- `crates/imap/src/{imap_initial,imap_delta,imap_delta_janitor,sync_pipeline}.rs` ->
+  `crates/provider-sync/src/imap/` (folded into the imap subdir).
+- `crates/sync/src/persistence.rs` (or its writer-using bits) ->
+  `crates/provider-sync/src/persistence.rs`.
+- Drop `service-state` from the five Cargo.toml files. Add it to
+  `provider-sync` (already there).
+- Add a strict-transitive lockdown test alongside
+  `app_crate_must_not_transitively_depend_on_cal` in
+  `crates/service-state/tests/lockdown.rs`: same Cargo-graph BFS,
+  target `service-state`, blessed set `{service}`. Strike the
+  "open architectural exception" note in `docs/architecture.md`
+  "Current Exceptions" and the matching note in `lockdown.rs`
+  module doc when the test passes.
+
+**Risk shape:**
+
+- Bulk file moves + import rewrites. Best landed as a single
+  mostly-mechanical commit so a regression bisect lands on it.
+- `imap` is the messiest because the sync files live at the crate
+  root rather than in a `sync/` subdir.
+- Verify no cycle is created by `provider-sync -> {provider} -> provider-sync`
+  before each move.
+
+**Status:** plan recorded; implementation deferred. The "Current
+Exception" entry in `docs/architecture.md` stands as the visible
+tracker until the relocation lands.
+
 ### 1. Phase 6d-B / 6d-C strict transitive `service-state` lockdown - orphaned
 
 `docs/service/phase-6d-plan.md:13` (when it existed) explicitly deferred the
