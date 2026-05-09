@@ -18,3 +18,4 @@ sync_script_dir = "crates/app/tests/sync-harness"
 [ratatoskr.harness]
 sweep = "harness"
 binary = "app"
+debug = true

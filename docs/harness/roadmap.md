@@ -424,7 +424,7 @@ plain command also passed 700/700 on 2026-05-09:
 ### M5 - Phase 7 integration cohort
 
 **Status:** PARTIAL. M3's initial helper slice has landed, and the
-first executable extract script is in tree.
+first executable extract backfill scripts are in tree.
 
 The Phase 7 plan called for `crates/service/tests/extract_in_process.rs`
 to cover end-to-end fetch -> extract -> re-index -> search annotation,
@@ -450,6 +450,11 @@ Landed slices:
   repeats `extract.backfill_kick` after a cached text attachment has
   resolved and asserts the second kick does not re-index the row or
   advance `extract.status` counters.
+- `crates/app/tests/service-harness/extract/backfill_kick_marks_new_reference_to_resolved_hash.lua`
+  seeds a second cached attachment with the same content hash after the
+  first one has already resolved and asserts backfill marks the new
+  reference indexed from existing extracted text without advancing
+  extraction counters.
 
 **Exit criteria:**
 
