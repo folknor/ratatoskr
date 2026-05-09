@@ -98,6 +98,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "spawn_with_events", lua_spawn_with_events)?;
     set_field_fn(state, table_idx, "kill", lua_kill)?;
     set_field_fn(state, table_idx, "pid_is_alive", lua_pid_is_alive)?;
+    set_field_fn(state, table_idx, "path_exists", lua_path_exists)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
     set_field_fn(state, table_idx, "uuid", lua_uuid)?;
@@ -378,6 +379,13 @@ fn lua_pid_is_alive(state: &mut State) -> dellingr::Result<u8> {
     let pid = state.to_number(1)? as u32;
     state.set_top(0);
     state.push_boolean(pid_is_alive(pid).map_err(lua_io)?);
+    Ok(1)
+}
+
+fn lua_path_exists(state: &mut State) -> dellingr::Result<u8> {
+    let path = PathBuf::from(state.to_string(1)?);
+    state.set_top(0);
+    state.push_boolean(path.exists());
     Ok(1)
 }
 
@@ -2174,9 +2182,13 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 #[cfg(unix)]
 fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
-    let pid = i32::try_from(pid).map_err(std::io::Error::other)?;
-    let result = unsafe { libc::kill(pid, 0) };
+    let signal_pid = i32::try_from(pid).map_err(std::io::Error::other)?;
+    let result = unsafe { libc::kill(signal_pid, 0) };
     if result == 0 {
+        #[cfg(target_os = "linux")]
+        if let Some(alive) = linux_pid_has_live_state(pid)? {
+            return Ok(alive);
+        }
         return Ok(true);
     }
     let err = std::io::Error::last_os_error();
@@ -2185,6 +2197,20 @@ fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
         Some(libc::EPERM) => Ok(true),
         _ => Err(err),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_pid_has_live_state(pid: u32) -> std::io::Result<Option<bool>> {
+    let path = format!("/proc/{pid}/stat");
+    let stat = match std::fs::read_to_string(path) {
+        Ok(stat) => stat,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Some(false)),
+        Err(err) => return Err(err),
+    };
+    let Some(end_comm) = stat.rfind(") ") else {
+        return Ok(None);
+    };
+    Ok(stat[end_comm + 2..].chars().next().map(|state| state != 'Z'))
 }
 
 #[cfg(not(unix))]

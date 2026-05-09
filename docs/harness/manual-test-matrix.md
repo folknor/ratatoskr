@@ -53,26 +53,29 @@ If the test fails on Windows but passes on Linux: the Windows `claim_stdio` in `
 
 ## Cross-platform smoke checks
 
-These exercise UX behaviors that are too noisy to assert reliably from automation. Run them on Linux and Windows before any phase ship.
+Items 4 and 5 are automated as of the M6 partial pass. They live in:
+
+- `crates/app/tests/service-harness/m6/heartbeat_detects_killed_service.lua` - externally killed Service is detected and recovered by the respawn path.
+- `crates/app/tests/service-harness/m6/sigterm_triggers_shutdown_drain.lua` - SIGTERM enters the unrequested drain path, exits, and leaves no `clean_shutdown` sentinel.
+
+No manual cross-platform smoke items remain for heartbeat or SIGTERM.
 
 ### 4. Heartbeat detects an externally-killed Service
 
-1. Run the app.
-2. Find the Service PID via `ps -ef | grep ratatoskr` (Linux) or Task Manager (Windows).
-3. Kill the Service externally: `kill <service-pid>` on Linux, "End task" in Task Manager on Windows.
-4. **Expected:** the UI's log (Service-side log + UI's stderr) shows "service heartbeat exiting" or similar within ~30 s. No respawn; that's Phase 1.5 work.
-
-If the heartbeat task hangs silently: the `ClientError` variant returned by the heartbeat's `request_value_raw` is not being matched correctly in `crates/app/src/service_client.rs::heartbeat_task`.
+Automated by `crates/app/tests/service-harness/m6/heartbeat_detects_killed_service.lua`.
+The script starts the Service through `spawn_with_events`, sends
+`SIGKILL` to the child, and asserts the event stream produces a new
+`ChildSpawned` followed by `BootReady` with a different PID.
 
 ### 5. SIGTERM to the Service triggers the shutdown drain
 
 Linux only (Windows has no SIGTERM equivalent in this codebase).
+Automated by `crates/app/tests/service-harness/m6/sigterm_triggers_shutdown_drain.lua`.
 
-1. Run the app.
-2. `kill -TERM <service-pid>` (no `-9`).
-3. **Expected:** the Service exits within a second; `clean_shutdown` sentinel is written before exit. UI heartbeat then notices the missed beat per item 4.
-
-If the sentinel is missing: the SIGTERM handler in `crates/service/src/sigterm.rs` is not calling `lifecycle.request_shutdown()`, or the dispatch-loop tail drain is being skipped.
+Current contract: external SIGTERM requests shutdown through the
+unrequested drain path. The Service exits, but does not write
+`clean_shutdown`; that sentinel is reserved for the graceful
+request/ack shutdown path.
 
 ## Phase 6a / 6a-part-2 - write-surface relocation smoke
 

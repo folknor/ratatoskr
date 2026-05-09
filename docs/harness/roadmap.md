@@ -79,10 +79,10 @@ the brokkr repo):
   `harness.data_dir`, `harness.spawn`,
   `harness.spawn_with_events`, `harness.kill`,
   `harness.pid_is_alive`, `harness.sleep`, `harness.now_ms`,
-  `harness.assert`, `harness.assert_eq`, `harness.same_client`,
-  `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
-  `harness.http_delete(url)`, `harness.env(name)`, and
-  `harness.protocol_version`.
+  `harness.path_exists`, `harness.assert`, `harness.assert_eq`,
+  `harness.same_client`, `harness.expect_quiet(events, seconds)`,
+  `harness.http_get(url)`, `harness.http_delete(url)`,
+  `harness.env(name)`, and `harness.protocol_version`.
 - Landed client/event/request methods:
   `client:request`, `client:request_async`, `client:shutdown`,
   `client:child_pid`, `client:current_generation`, `client:drop`,
@@ -226,8 +226,7 @@ coverage:
 
 ### M2.5 - `spawn_harness_with_suffix` cohort
 
-**Status:** PARTIAL; the boot/dispatch lifecycle scripts have landed,
-with soak and forced-hang artefact validation still open.
+**Status:** LANDED for the boot/dispatch lifecycle migration.
 
 Migrate the `crates/service/tests/dispatch_in_process.rs` tests that
 use `spawn_harness_with_suffix`. These tests are not OS-subprocess
@@ -257,8 +256,20 @@ Initial migration list:
   - replaces `boot_progress_notifications_emitted_in_order`
 
 All five scripts pass individually under `brokkr service-test` as of
-2026-05-08. The old libtest bodies remain ignored pointers until the
-M2.5 soak and forced-hang artefact drill close out.
+2026-05-08. A 200-cycle directory soak passed 1000/1000 runs on
+2026-05-09:
+`brokkr service-test crates/app/tests/service-harness/m2_5 -N 200`.
+
+The forced-hang artefact drill was revalidated on 2026-05-09 with a
+temporary `boot.ready` hang script using `--test-boot-delay-ms=60000`.
+The preserved failure artefacts included `steps.jsonl`,
+`frames.jsonl`, `data-dir/`, `service.stderr`, and child `/proc`
+snapshots. `frames.jsonl` showed the outbound `boot.ready` request
+with no response before failure, and `proc-wchan.txt` captured the
+child blocked in `futex_do_wait`.
+
+The old libtest bodies are ignored pointers to the authoritative Lua
+scripts.
 
 The remaining `spawn_harness()` tests in the same file should be
 reviewed after the boot/dispatch subset lands; many may stay as
@@ -319,9 +330,7 @@ under `crates/app/tests/service-harness/m3/`.
 
 ### M4 - T1 cohort
 
-**Status:** PARTIAL; deterministic action/journal, stale-generation,
-bulk-action, retry-queue, crashloop, and compose-send slices have
-landed.
+**Status:** LANDED for the T1 cohort.
 
 Express the Phase 2 plan-specified integration cohort as `.lua`
 scripts. The "T1" cohort:
@@ -392,12 +401,14 @@ propagation on the same retry policy: unknown providers are permanent
 setup errors, while `harness-offline` is a deliberate offline network
 provider for `pending_ops` coverage.
 
-The full T1 directory soak is now green with brokkr directory support:
-`brokkr service-test crates/app/tests/service-harness/t1 -N 50`
-passed 550/550 runs across 50 cycles on 2026-05-08.
-
-Remaining M4 scope: rerun the full T1 directory soak with the
-compose-send scripts included.
+The full T1 directory soak is now green with brokkr directory support.
+The pre-compose slice passed 550/550 runs across 50 cycles on
+2026-05-08. The full 14-script cohort, including the compose-send
+scripts, passed 700/700 runs across 50 cycles on 2026-05-09 with
+manual mock endpoint wiring. After brokkr gained fixture-aware
+`service-test` orchestration for service-harness frontmatter, the
+plain command also passed 700/700 on 2026-05-09:
+`brokkr service-test crates/app/tests/service-harness/t1 -N 50`.
 
 **Exit criteria:**
 
@@ -438,7 +449,7 @@ repo at `crates/app/tests/service-harness/fixtures/extract/`.
 
 ### M6 - Manual-matrix automation
 
-**Status:** PARTIAL - items 4 and 5 are ready after M2; the rest unblocks
+**Status:** PARTIAL - items 4 and 5 have landed; the rest unblocks
 incrementally as harness capability grows.
 
 The manual test matrix lives at `docs/harness/manual-test-matrix.md`.
@@ -449,13 +460,14 @@ explicitly retired.
 
 Sequencing:
 
-- **M6.4 + M6.5 (READY since M2):** heartbeat-detects-killed-Service,
-  SIGTERM-triggers-shutdown-drain. Today flagged "too noisy to
-  assert reliably from automation"; the deterministic harness pulls
-  them in. Lua scripts: `harness.kill(service_pid, SIGKILL)` +
-  follow-up event observation; `harness.kill(pid, SIGTERM)` +
-  `wait_for_sentinel { path = "clean_shutdown", backstop = "5s" }` +
-  `wait_exit`.
+- **M6.4 + M6.5 (LANDED):** heartbeat-detects-killed-Service and
+  SIGTERM-triggers-shutdown-drain now live in
+  `crates/app/tests/service-harness/m6/`. The heartbeat script kills
+  the Service with `SIGKILL` and observes respawn through
+  `ChildSpawned` + `BootReady`. The SIGTERM script verifies the
+  unrequested drain contract: the Service exits and does not write the
+  `clean_shutdown` sentinel. Verified on 2026-05-09 with focused
+  `brokkr service-test` runs for both scripts.
 - **M6.1, M6.2, M6.3 (READY when cross-platform CI exists):**
   Linux / Windows parent-death + clean shutdown handshake + stdio
   defense. Linux items already automate; Windows items need a real
@@ -465,7 +477,7 @@ Sequencing:
 - **M6.6, M6.7 (READY when fixture-setup API lands in M3):**
   cold-boot bootstrap snapshots, draft WAL replay. Both need
   deterministic data-dir state across multiple runs.
-- **M6.8 (READY when M4 lands):** account.delete cancels in-flight
+- **M6.8 (READY since M4):** account.delete cancels in-flight
   sync. Same shape as the `respawn_after_sigkill_succeeds` pattern;
   needs `TestSeedAccount` + `TestSlow`-style sync stub.
 - **M6.9 (BLOCKED on Track 2 OAuth fake server):** OAuth re-auth.
