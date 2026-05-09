@@ -741,6 +741,7 @@ struct HarnessAccountRaw {
     oauth_provider: Option<String>,
     oauth_client_id: Option<String>,
     token_expires_at: Option<i64>,
+    initial_sync_completed: bool,
     access_token: Option<String>,
     refresh_token: Option<String>,
 }
@@ -757,8 +758,8 @@ fn read_harness_accounts(
     };
     let sql = format!(
         "SELECT id, email, provider, auth_method, oauth_provider,
-                oauth_client_id, token_expires_at, access_token,
-                refresh_token
+                oauth_client_id, token_expires_at, initial_sync_completed,
+                access_token, refresh_token
          FROM accounts{where_clause}
          ORDER BY email ASC, id ASC"
     );
@@ -792,8 +793,9 @@ fn account_raw_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HarnessAcco
         oauth_provider: row.get(4)?,
         oauth_client_id: row.get(5)?,
         token_expires_at: row.get(6)?,
-        access_token: row.get(7)?,
-        refresh_token: row.get(8)?,
+        initial_sync_completed: row.get::<_, i64>(7)? != 0,
+        access_token: row.get(8)?,
+        refresh_token: row.get(9)?,
     })
 }
 
@@ -811,6 +813,7 @@ fn test_db_account_from_raw(
         oauth_provider: raw.oauth_provider,
         oauth_client_id: raw.oauth_client_id,
         token_expires_at: raw.token_expires_at,
+        initial_sync_completed: raw.initial_sync_completed,
         access_token_present: access.present,
         refresh_token_present: refresh.present,
         access_token_encrypted: access.encrypted,

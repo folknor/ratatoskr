@@ -237,6 +237,7 @@ pub struct TestDbAccountRow {
     pub oauth_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<i64>,
+    pub initial_sync_completed: bool,
     pub access_token_present: bool,
     pub refresh_token_present: bool,
     pub access_token_encrypted: bool,

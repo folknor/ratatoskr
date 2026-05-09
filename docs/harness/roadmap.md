@@ -622,6 +622,11 @@ Ratatoskr-side M8 surface now in tree:
 - `crates/app/tests/sync-harness/jmap-initial.lua` is the first
   sync-harness script. It targets the `jmap-small.toml` fixture and
   asserts the two fixture messages land in the local DB.
+- `crates/app/tests/sync-harness/jmap-steady-state-delta.lua`
+  runs the same fixture twice, asserts the first run marks
+  `initial_sync_completed`, and uses saehrimnir's request log to
+  prove the second run goes through `Mailbox/changes` and
+  `Email/changes` without falling back to `Email/query`.
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
@@ -631,7 +636,9 @@ Ratatoskr-side M8 surface now in tree:
 - A small-mailbox IMAP fixture syncs end-to-end against a fake
   IMAP server, with assertions on final account/folder/message
   counts.
-- A small-mailbox JMAP fixture does the same.
+- A small-mailbox JMAP fixture does the same. Initial import and
+  steady-state delta coverage have landed; deeper JMAP fixture cases
+  remain.
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
 - M6.10 (calendar) unblocks through the Graph fixture surface, with
