@@ -79,10 +79,11 @@ the brokkr repo):
   `harness.data_dir`, `harness.spawn`,
   `harness.spawn_with_events`, `harness.kill`,
   `harness.pid_is_alive`, `harness.sleep`, `harness.now_ms`,
-  `harness.path_exists`, `harness.assert`, `harness.assert_eq`,
-  `harness.same_client`, `harness.expect_quiet(events, seconds)`,
-  `harness.http_get(url)`, `harness.http_delete(url)`,
-  `harness.env(name)`, and `harness.protocol_version`.
+  `harness.path_exists`, `harness.read_json`, `harness.assert`,
+  `harness.assert_eq`, `harness.same_client`,
+  `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
+  `harness.http_delete(url)`, `harness.env(name)`, and
+  `harness.protocol_version`.
 - Landed client/event/request methods:
   `client:request`, `client:request_async`, `client:shutdown`,
   `client:child_pid`, `client:current_generation`, `client:drop`,
@@ -449,7 +450,7 @@ repo at `crates/app/tests/service-harness/fixtures/extract/`.
 
 ### M6 - Manual-matrix automation
 
-**Status:** PARTIAL - items 4 and 5 have landed; the rest unblocks
+**Status:** PARTIAL - items 4, 5, and 8 have landed; the rest unblocks
 incrementally as harness capability grows.
 
 The manual test matrix lives at `docs/harness/manual-test-matrix.md`.
@@ -477,9 +478,12 @@ Sequencing:
 - **M6.6, M6.7 (READY when fixture-setup API lands in M3):**
   cold-boot bootstrap snapshots, draft WAL replay. Both need
   deterministic data-dir state across multiple runs.
-- **M6.8 (READY since M4):** account.delete cancels in-flight
-  sync. Same shape as the `respawn_after_sigkill_succeeds` pattern;
-  needs `TestSeedAccount` + `TestSlow`-style sync stub.
+- **M6.8 (LANDED):** account.delete cancels in-flight sync now lives
+  in `crates/app/tests/service-harness/m6/`. The script uses a
+  test-helper `harness-slow-sync` provider that parks until its
+  cancellation token fires, then asserts `account.delete` writes a
+  cancelled sync marker and removes the account-scoped rows. Verified
+  on 2026-05-09 with a focused `brokkr service-test` run.
 - **M6.9 (BLOCKED on Track 2 OAuth fake server):** OAuth re-auth.
   Currently manual because there's no fake OAuth provider; M8 (mock
   servers) provides one.

@@ -12,8 +12,8 @@ use crate::service_client::{
 use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
-    ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode, BootPhaseKind,
-    Notification, OperationId, PlanId, RequestParams, SendAttachmentSource,
+    AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
+    BootPhaseKind, Notification, OperationId, PlanId, RequestParams, SendAttachmentSource,
     SendWireAttachment, SendWireMessage, SendWireRequest, TestCrashAfterNWritesParams,
     TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
     TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams,
@@ -99,6 +99,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "kill", lua_kill)?;
     set_field_fn(state, table_idx, "pid_is_alive", lua_pid_is_alive)?;
     set_field_fn(state, table_idx, "path_exists", lua_path_exists)?;
+    set_field_fn(state, table_idx, "read_json", lua_read_json)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
     set_field_fn(state, table_idx, "uuid", lua_uuid)?;
@@ -386,6 +387,15 @@ fn lua_path_exists(state: &mut State) -> dellingr::Result<u8> {
     let path = PathBuf::from(state.to_string(1)?);
     state.set_top(0);
     state.push_boolean(path.exists());
+    Ok(1)
+}
+
+fn lua_read_json(state: &mut State) -> dellingr::Result<u8> {
+    let path = PathBuf::from(state.to_string(1)?);
+    let text = std::fs::read_to_string(path).map_err(lua_io)?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(lua_json)?;
+    state.set_top(0);
+    push_json(state, &value)?;
     Ok(1)
 }
 
@@ -1307,6 +1317,21 @@ fn request_params_from_lua(
                 return Err(lua_error_message("ActionMarkChatRead requires chat_email"));
             };
             Ok(RequestParams::ActionMarkChatRead { chat_email })
+        }
+        "AccountDelete" | "account.delete" => {
+            let account_id = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) == LuaType::Table
+            {
+                get_string_field(state, params_idx, "account_id")?
+                    .ok_or_else(|| lua_error_message("AccountDelete requires account_id"))?
+            } else if state.get_top() >= params_idx as usize {
+                state.to_string(params_idx)?
+            } else {
+                return Err(lua_error_message("AccountDelete requires account_id"));
+            };
+            Ok(RequestParams::AccountDelete {
+                params: AccountDeleteParams { account_id },
+            })
         }
         "TestSlow" | "test.slow" => {
             let millis = if state.get_top() >= params_idx as usize {

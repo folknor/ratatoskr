@@ -44,7 +44,9 @@ pub async fn create_provider(
             Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
         #[cfg(feature = "test-helpers")]
-        "harness-offline" => Ok(Box::new(HarnessOfflineProvider)),
+        "harness-offline" => Ok(Box::new(HarnessOfflineProvider::immediate())),
+        #[cfg(feature = "test-helpers")]
+        "harness-slow-sync" => Ok(Box::new(HarnessOfflineProvider::slow_sync())),
         "imap" => Ok(Box::new(imap::ops::ImapOps::new(encryption_key))),
         other => Err(format!("Unknown provider: {other}")),
     }
@@ -72,12 +74,46 @@ pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
 }
 
 #[cfg(feature = "test-helpers")]
-struct HarnessOfflineProvider;
+#[derive(Clone, Copy)]
+enum HarnessOfflineMode {
+    Immediate,
+    SlowSync,
+}
+
+#[cfg(feature = "test-helpers")]
+struct HarnessOfflineProvider {
+    mode: HarnessOfflineMode,
+}
 
 #[cfg(feature = "test-helpers")]
 impl HarnessOfflineProvider {
+    fn immediate() -> Self {
+        Self {
+            mode: HarnessOfflineMode::Immediate,
+        }
+    }
+
+    fn slow_sync() -> Self {
+        Self {
+            mode: HarnessOfflineMode::SlowSync,
+        }
+    }
+
     fn offline() -> common::error::ProviderError {
         common::error::ProviderError::Network("harness offline".into())
+    }
+
+    async fn sync_result(
+        &self,
+        ctx: &provider_sync::SyncProviderCtx<'_>,
+    ) -> Result<common::types::SyncResult, common::error::ProviderError> {
+        match self.mode {
+            HarnessOfflineMode::Immediate => Err(Self::offline()),
+            HarnessOfflineMode::SlowSync => {
+                ctx.cancellation_token.cancelled().await;
+                Err(Self::offline())
+            }
+        }
     }
 }
 
@@ -264,18 +300,18 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
 impl provider_sync::ProviderSyncOps for HarnessOfflineProvider {
     async fn sync_initial(
         &self,
-        _ctx: &provider_sync::SyncProviderCtx<'_>,
+        ctx: &provider_sync::SyncProviderCtx<'_>,
         _days_back: i64,
     ) -> Result<common::types::SyncResult, common::error::ProviderError> {
-        Err(Self::offline())
+        self.sync_result(ctx).await
     }
 
     async fn sync_delta(
         &self,
-        _ctx: &provider_sync::SyncProviderCtx<'_>,
+        ctx: &provider_sync::SyncProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<common::types::SyncResult, common::error::ProviderError> {
-        Err(Self::offline())
+        self.sync_result(ctx).await
     }
 }
 

@@ -79,7 +79,7 @@ request/ack shutdown path.
 
 ## Phase 6a / 6a-part-2 - write-surface relocation smoke
 
-The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. The items below are the ones whose end-to-end behavior is hard to assert from automation - cold-boot timing, in-flight runner cancellation, file-system-level WAL crash safety. Run on Linux before promoting any phase that touches Service IPC.
+The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Item 8 is now automated; the remaining manual items below are the ones whose end-to-end behavior is hard to assert from automation - cold-boot timing and file-system-level WAL crash safety. Run the remaining items on Linux before promoting any phase that touches Service IPC.
 
 ### 6. Cold-boot bootstrap snapshots (encryption-key handle end-to-end)
 
@@ -106,13 +106,12 @@ If the draft is empty or missing: the WAL append failed (check logs for "Failed 
 
 ### 8. Account delete cancels in-flight sync
 
-Verifies `account.delete` cancels per-account runners and completes external-store cleanup inside the single 60 s IPC, replacing the pre-Phase-3 UI-side `cancel_and_await` orchestration.
+Automated by `crates/app/tests/service-harness/m6/account_delete_cancels_in_flight_sync.lua`.
 
-1. With at least two accounts configured, trigger a manual sync on one of them (sidebar refresh, or wait for the next `SyncTick`). Confirm the sync runner is in flight (Service log: "[sync] account=... starting").
-2. While the sync is mid-flight, delete the syncing account from Settings.
-3. **Expected:** the deletion completes within ~60 s; the Service log carries `account.delete: sync cancel-and-await(<acct>)` followed by the cleanup report (`N bodies, N inline images, N cache files; search_cleaned=true`). The other account's sync continues unaffected. No orphaned rows in `messages` / `attachments` / `local_drafts` after the delete (verifiable via dev-seed inspector or a SQLite shell).
-
-If the Service log shows the sync runner panicking or the cancel-and-await hanging: the cancellation token plumbed through `SyncRuntime::cancel_account_and_await` is not flipping at a checkpoint the runner observes. Inspect the runner body for missing `cancel_token.is_cancelled()` checks between long-running protocol calls.
+The script seeds a `harness-slow-sync` account, starts sync, proves a
+duplicate start observes the same in-flight run, deletes the account
+through `account.delete`, then asserts the sync marker is `cancelled`
+and account-scoped rows are gone.
 
 ### 9. OAuth re-auth via account.update_tokens
 
