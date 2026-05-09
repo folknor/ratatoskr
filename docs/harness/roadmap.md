@@ -523,12 +523,19 @@ Sequencing:
   cancellation token fires, then asserts `account.delete` writes a
   cancelled sync marker and removes the account-scoped rows. Verified
   on 2026-05-09 with a focused `brokkr service-test` run.
-- **M6.9 (BLOCKED on Track 2 OAuth fake server):** OAuth re-auth.
-  Currently manual because there's no fake OAuth provider; M8 (mock
-  servers) provides one.
-- **M6.10 (BLOCKED on Track 2 calendar fake server):** calendar
-  create/update/delete. Same as M6.9 - needs a fake CalDAV /
-  Google Calendar / Graph fixture.
+- **M6.9 (PARTIAL - mock OAuth persistence slice landed):** OAuth
+  re-auth is no longer blocked on the fake provider. The first script
+  in `crates/app/tests/service-harness/m6/` drives
+  `oauth.exchange_code` against saehrimnir's mock OAuth provider,
+  asserts the re-auth ack omits token bytes, and verifies the account
+  row gets new encrypted access / refresh token hashes without
+  changing identity or provider columns. The remaining end-to-end slice
+  is revoked-token sync recovery against an OAuth-enforced fixture.
+- **M6.10 (READY for Graph calendar fake):** calendar
+  create/update/delete. The saehrimnir Graph calendar fixture and
+  request-log endpoints have landed, so the remaining ratatoskr work
+  is Lua binding / assertion coverage for `cal_action.execute_plan`
+  and local calendar state.
 - **M6.11-M6.14 (READY when M5 lands):** Phase 7 attachment
   extraction round-trip, backfill kick on boot.ready, palette
   rebuild, schema-version mismatch rebuild. All have Lua-script
@@ -573,9 +580,12 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 ### M8 - Provider mock servers (Track 2)
 
 **Status:** PARTIAL - ratatoskr's test-only endpoint override,
-sync-trigger, DB-query, and first sync-harness script surfaces have
-landed. The remaining work is mock-server orchestration and protocol
-fixture depth in brokkr + `../sæhrimnir`.
+sync-trigger, DB-query, first sync-harness script, and OAuth re-auth
+persistence harness path have landed. Brokkr can now spawn saehrimnir
+for fixture-frontmatter scripts and inject provider endpoints. Recent
+saehrimnir support adds admin request/reset routes, OAuth token /
+userinfo routes, steady-state JMAP changes, and a Graph calendar
+fixture surface.
 
 Mock IMAP and JMAP servers, fixture sets (small smoke / medium /
 large / huge thread / many folders / duplicate Message-ID / malformed
@@ -607,11 +617,14 @@ Ratatoskr-side M8 surface now in tree:
   because raw `sync.completed` notifications are consumed by the
   client's waiter map before `client:notifications()`.
 - `test.query_db_state` returns account, label, thread, message,
-  unread-message, attachment, and small message-list snapshots for
-  sync-harness assertions.
+  unread-message, attachment, credential-summary, and small
+  message-list snapshots for sync-harness assertions.
 - `crates/app/tests/sync-harness/jmap-initial.lua` is the first
   sync-harness script. It targets the `jmap-small.toml` fixture and
   asserts the two fixture messages land in the local DB.
+- `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
+  targets the `jmap-small.toml` fixture's mock OAuth routes and
+  automates the M6.9 re-auth persistence check.
 
 **Exit criteria:**
 
@@ -619,9 +632,10 @@ Ratatoskr-side M8 surface now in tree:
   IMAP server, with assertions on final account/folder/message
   counts.
 - A small-mailbox JMAP fixture does the same.
-- M6.9 (OAuth re-auth) and M6.10 (calendar) unblock as a
-  side-effect (M8's fixture infrastructure provides the fake
-  servers they need).
+- M6.9's remaining OAuth-enforced sync recovery slice verifies
+  revoked-token failure, re-auth, and successful follow-up sync.
+- M6.10 (calendar) unblocks through the Graph fixture surface, with
+  coverage for create / update / delete request logs and local state.
 
 ---
 
@@ -682,7 +696,7 @@ M2 + M4 + harness stable
        |
        +-- M9 Sync benchmarks
        |
-       +-- M6.9 OAuth re-auth (unblocks via M8 OAuth fake)
+       +-- M6.9 OAuth-enforced sync recovery
        +-- M6.10 Calendar (unblocks via M8 calendar fake)
 ```
 

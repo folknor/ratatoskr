@@ -14,10 +14,11 @@ use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
     BootPhaseKind, ClientNotification, ExtractStatusParams, IndexRebuildParams, Notification,
-    OperationId, PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RequestParams,
-    SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
-    SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
-    TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
+    OauthExchangeCodeParams, OperationId, PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy,
+    RedactedString, RequestParams, SendAttachmentSource, SendWireAttachment, SendWireMessage,
+    SendWireRequest, SettingValue, SettingsSetParams, TestCrashAfterNWritesParams,
+    TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
+    TestSeedAccountParams,
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireFolderId,
     WireMailOperation, WireTagId,
@@ -1418,6 +1419,37 @@ fn request_params_from_lua(
             };
             Ok(RequestParams::AccountDelete {
                 params: AccountDeleteParams { account_id },
+            })
+        }
+        "OauthExchangeCode" | "oauth.exchange_code" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("OauthExchangeCode requires params table"));
+            }
+            let provider_id = get_string_field(state, params_idx, "provider_id")?
+                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.provider_id"))?;
+            let token_url = get_string_field(state, params_idx, "token_url")?
+                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.token_url"))?;
+            let client_id = get_string_field(state, params_idx, "client_id")?
+                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.client_id"))?;
+            let redirect_uri = get_string_field(state, params_idx, "redirect_uri")?
+                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.redirect_uri"))?;
+            let code = get_string_field(state, params_idx, "code")?
+                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.code"))?;
+            Ok(RequestParams::OauthExchangeCode {
+                params: Box::new(OauthExchangeCodeParams {
+                    provider_id,
+                    token_url,
+                    scopes: get_string_array_field(state, params_idx, "scopes")?,
+                    user_info_url: get_string_field(state, params_idx, "user_info_url")?,
+                    use_pkce: get_bool_field(state, params_idx, "use_pkce")?.unwrap_or(false),
+                    client_id,
+                    client_secret: get_string_field(state, params_idx, "client_secret")?
+                        .map(RedactedString::new),
+                    redirect_uri,
+                    code: RedactedString::new(code),
+                    code_verifier: get_string_field(state, params_idx, "code_verifier")?,
+                    reauth_account_id: get_string_field(state, params_idx, "reauth_account_id")?,
+                }),
             })
         }
         "SettingsSet" | "settings.set" => Ok(RequestParams::SettingsSet {

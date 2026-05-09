@@ -79,7 +79,7 @@ request/ack shutdown path.
 
 ## Phase 6a / 6a-part-2 - write-surface relocation smoke
 
-The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6, 7, and 8 are now automated. Items 9 and 10 remain provider-workflow checks until fake OAuth/calendar providers land.
+The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6, 7, and 8 are now automated. Item 9 has an automated OAuth persistence slice, with revoked-token sync recovery still pending. Item 10 remains a provider-workflow check until the Graph calendar harness slice lands.
 
 ### 6. Cold-boot bootstrap snapshots (encryption-key handle end-to-end)
 
@@ -109,17 +109,21 @@ duplicate start observes the same in-flight run, deletes the account
 through `account.delete`, then asserts the sync marker is `cancelled`
 and account-scoped rows are gone.
 
-### 9. OAuth re-auth via account.update_tokens
+### 9. OAuth re-auth via oauth.exchange_code
 
-Verifies the `account.update_tokens` IPC writes new OAuth tokens onto the existing account row without touching identity or provider columns - the path that replaces the two `with_write_conn` callers in `ui/add_account/{state,oauth}.rs`.
+Persistence automation lives in `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`.
+
+Verifies the `oauth.exchange_code` re-auth path writes new OAuth tokens onto the existing account row without touching identity or provider columns - the path that replaces the two `with_write_conn` callers in `ui/add_account/{state,oauth}.rs`.
+
+Remaining automation: run the same flow against an OAuth-enforced sync fixture, start from a revoked/expired token, and assert the follow-up provider sync succeeds with the newly persisted token.
 
 1. Configure a Gmail or Graph (Outlook) account.
 2. Forcibly invalidate the access token (e.g. revoke the OAuth grant from the provider's account-management page, or simulate by setting `token_expires_at = 0` via the dev-seed inspector). The next sync attempt fails with an auth error.
 3. Trigger the in-app re-auth flow (sidebar prompt or Settings -> Re-authenticate).
 4. Complete the OAuth dance in the browser.
-5. **Expected:** the Service log carries `account.update_tokens` dispatch; the next sync succeeds. `crates/app/src/ui/add_account/state.rs` and `oauth.rs` no longer touch the writable connection (verifiable via grep).
+5. **Expected:** the Service log carries `oauth.exchange_code` re-auth persistence; the next sync succeeds. `crates/app/src/ui/add_account/state.rs` and `oauth.rs` no longer touch the writable connection (verifiable via grep).
 
-If the re-auth flow completes in the browser but the next sync still fails: the token persist hit the IPC but landed in the wrong column (provider mismatch in the dynamic-update SET list), or the token-expires-at field was not propagated. Check the Service log for the `account.update_tokens` payload (RedactedString hides the token bytes; the `token_expires_at` and `account_id` are visible).
+If the re-auth flow completes in the browser but the next sync still fails: the token persist hit the IPC but landed in the wrong column (provider mismatch in the dynamic-update SET list), or the token-expires-at field was not propagated. Check the Service log for the `oauth.exchange_code` re-auth line (RedactedString hides the token bytes; the `account_id` is visible).
 
 ### 10. Calendar event create / update / delete via cal_action.execute_plan
 

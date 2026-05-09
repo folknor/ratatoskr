@@ -226,6 +226,29 @@ pub struct TestQueryDbStateParams {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbAccountRow {
+    pub id: String,
+    pub email: String,
+    pub provider: String,
+    pub auth_method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<i64>,
+    pub access_token_present: bool,
+    pub refresh_token_present: bool,
+    pub access_token_encrypted: bool,
+    pub refresh_token_encrypted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token_sha256: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbMessageRow {
     pub id: String,
     pub account_id: String,
@@ -287,6 +310,7 @@ pub struct TestQueryDbStateAck {
     pub unread_message_count: u64,
     pub attachment_count: u64,
     pub local_draft_count: u64,
+    pub accounts: Vec<TestDbAccountRow>,
     pub messages: Vec<TestDbMessageRow>,
     pub local_drafts: Vec<TestDbLocalDraftRow>,
     pub attachments: Vec<TestDbAttachmentRow>,

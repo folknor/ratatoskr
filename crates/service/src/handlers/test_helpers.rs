@@ -10,14 +10,16 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
-    TestCrashAfterNWritesParams, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestDbAttachmentRow, TestDbLocalDraftRow, TestDbMessageRow, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
+    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
+    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
+    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -212,14 +214,16 @@ pub(super) async fn seed_cached_attachment_handle(
         .with_conn(move |conn| {
             insert_harness_cached_attachment(
                 conn,
-                &account_id,
-                &message_id,
-                &attachment_id,
-                &filename,
-                &mime_type,
-                &relative_path,
-                cache_size,
-                &content_hash,
+                &CachedAttachmentInsert {
+                    account_id: &account_id,
+                    message_id: &message_id,
+                    attachment_id: &attachment_id,
+                    filename: &filename,
+                    mime_type: &mime_type,
+                    relative_path: &relative_path,
+                    cache_size,
+                    content_hash: &content_hash,
+                },
             )
         })
         .await
@@ -299,8 +303,9 @@ pub(super) async fn query_db_state_handle(
     params: TestQueryDbStateParams,
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
+    let encryption_key = boot_state.encryption_key();
     let ack = write_db
-        .with_conn(move |conn| read_harness_db_state(conn, &params))
+        .with_conn(move |conn| read_harness_db_state(conn, &params, encryption_key))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -507,16 +512,20 @@ fn insert_harness_thread(
     tx.commit().map_err(|e| format!("commit: {e}"))
 }
 
+struct CachedAttachmentInsert<'a> {
+    account_id: &'a str,
+    message_id: &'a str,
+    attachment_id: &'a str,
+    filename: &'a str,
+    mime_type: &'a str,
+    relative_path: &'a str,
+    cache_size: i64,
+    content_hash: &'a str,
+}
+
 fn insert_harness_cached_attachment(
     conn: &Connection,
-    account_id: &str,
-    message_id: &str,
-    attachment_id: &str,
-    filename: &str,
-    mime_type: &str,
-    relative_path: &str,
-    cache_size: i64,
-    content_hash: &str,
+    insert: &CachedAttachmentInsert<'_>,
 ) -> Result<(), String> {
     let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
     // Harness fixtures write raw bytes straight into the flat cache,
@@ -538,15 +547,15 @@ fn insert_harness_cached_attachment(
             content_hash = excluded.content_hash,
             text_indexed_at = NULL",
         params![
-            attachment_id,
-            message_id,
-            account_id,
-            filename,
-            mime_type,
-            cache_size,
-            relative_path,
-            cache_size,
-            content_hash,
+            insert.attachment_id,
+            insert.message_id,
+            insert.account_id,
+            insert.filename,
+            insert.mime_type,
+            insert.cache_size,
+            insert.relative_path,
+            insert.cache_size,
+            insert.content_hash,
         ],
     )
     .map_err(|e| format!("insert cached attachment: {e}"))?;
@@ -705,6 +714,7 @@ fn read_harness_pending_ops(
 fn read_harness_db_state(
     conn: &Connection,
     params: &TestQueryDbStateParams,
+    encryption_key: Option<[u8; 32]>,
 ) -> Result<TestQueryDbStateAck, String> {
     let account_id = params.account_id.as_deref();
     Ok(TestQueryDbStateAck {
@@ -716,10 +726,144 @@ fn read_harness_db_state(
         unread_message_count: count_unread_messages(conn, account_id)?,
         attachment_count: count_account_rows(conn, "attachments", account_id)?,
         local_draft_count: count_account_rows(conn, "local_drafts", account_id)?,
+        accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
         messages: read_harness_messages(conn, params)?,
         local_drafts: read_harness_local_drafts(conn, params)?,
         attachments: read_harness_attachments(conn, params)?,
     })
+}
+
+struct HarnessAccountRaw {
+    id: String,
+    email: String,
+    provider: String,
+    auth_method: String,
+    oauth_provider: Option<String>,
+    oauth_client_id: Option<String>,
+    token_expires_at: Option<i64>,
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+}
+
+fn read_harness_accounts(
+    conn: &Connection,
+    account_id: Option<&str>,
+    encryption_key: Option<&[u8; 32]>,
+) -> Result<Vec<TestDbAccountRow>, String> {
+    let where_clause = if account_id.is_some() {
+        " WHERE id = ?1"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT id, email, provider, auth_method, oauth_provider,
+                oauth_client_id, token_expires_at, access_token,
+                refresh_token
+         FROM accounts{where_clause}
+         ORDER BY email ASC, id ASC"
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("prepare accounts: {e}"))?;
+    let rows = match account_id {
+        Some(account_id) => stmt
+            .query_map(params![account_id], account_raw_from_row)
+            .map_err(|e| format!("query accounts: {e}"))?,
+        None => stmt
+            .query_map([], account_raw_from_row)
+            .map_err(|e| format!("query accounts: {e}"))?,
+    };
+    let mut accounts = Vec::new();
+    for row in rows {
+        accounts.push(test_db_account_from_raw(
+            row.map_err(|e| format!("collect account: {e}"))?,
+            encryption_key,
+        )?);
+    }
+    Ok(accounts)
+}
+
+fn account_raw_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HarnessAccountRaw> {
+    Ok(HarnessAccountRaw {
+        id: row.get(0)?,
+        email: row.get(1)?,
+        provider: row.get(2)?,
+        auth_method: row.get(3)?,
+        oauth_provider: row.get(4)?,
+        oauth_client_id: row.get(5)?,
+        token_expires_at: row.get(6)?,
+        access_token: row.get(7)?,
+        refresh_token: row.get(8)?,
+    })
+}
+
+fn test_db_account_from_raw(
+    raw: HarnessAccountRaw,
+    encryption_key: Option<&[u8; 32]>,
+) -> Result<TestDbAccountRow, String> {
+    let access = credential_summary(raw.access_token.as_deref(), encryption_key)?;
+    let refresh = credential_summary(raw.refresh_token.as_deref(), encryption_key)?;
+    Ok(TestDbAccountRow {
+        id: raw.id,
+        email: raw.email,
+        provider: raw.provider,
+        auth_method: raw.auth_method,
+        oauth_provider: raw.oauth_provider,
+        oauth_client_id: raw.oauth_client_id,
+        token_expires_at: raw.token_expires_at,
+        access_token_present: access.present,
+        refresh_token_present: refresh.present,
+        access_token_encrypted: access.encrypted,
+        refresh_token_encrypted: refresh.encrypted,
+        access_token_sha256: access.sha256,
+        refresh_token_sha256: refresh.sha256,
+    })
+}
+
+struct CredentialSummary {
+    present: bool,
+    encrypted: bool,
+    sha256: Option<String>,
+}
+
+fn credential_summary(
+    value: Option<&str>,
+    encryption_key: Option<&[u8; 32]>,
+) -> Result<CredentialSummary, String> {
+    let Some(value) = value else {
+        return Ok(CredentialSummary {
+            present: false,
+            encrypted: false,
+            sha256: None,
+        });
+    };
+    let (encrypted, plaintext) =
+        decrypt_if_service_ciphertext(value, encryption_key)?.unwrap_or_else(|| {
+            (false, value.to_string())
+        });
+    let mut hasher = Sha256::new();
+    hasher.update(plaintext.as_bytes());
+    Ok(CredentialSummary {
+        present: true,
+        encrypted,
+        sha256: Some(hex_bytes(&hasher.finalize())),
+    })
+}
+
+fn decrypt_if_service_ciphertext(
+    value: &str,
+    encryption_key: Option<&[u8; 32]>,
+) -> Result<Option<(bool, String)>, String> {
+    if !common::crypto::is_encrypted(value) {
+        return Ok(None);
+    }
+    let key = encryption_key.ok_or_else(|| {
+        "cannot hash encrypted credential before encryption key is loaded".to_string()
+    })?;
+    match common::crypto::decrypt_value(key, value) {
+        Ok(plaintext) => Ok(Some((true, plaintext))),
+        Err(_) => Ok(None),
+    }
 }
 
 fn count_accounts(conn: &Connection, account_id: Option<&str>) -> Result<u64, String> {
@@ -976,6 +1120,15 @@ where
 
 fn non_negative_count(value: i64, label: &str) -> Result<u64, String> {
     u64::try_from(value).map_err(|e| format!("{label} count was negative: {e}"))
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn add_changed_rows(current: u64, changed: usize) -> Result<u64, String> {
