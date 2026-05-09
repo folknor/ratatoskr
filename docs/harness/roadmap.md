@@ -405,7 +405,8 @@ Remaining M4 scope:
 
 ### M5 - Phase 7 integration cohort
 
-**Status:** BLOCKED on M3.
+**Status:** READY. M3's initial helper slice has landed; the cohort can
+start.
 
 The Phase 7 plan called for `crates/service/tests/extract_in_process.rs`
 to cover end-to-end fetch -> extract -> re-index -> search annotation,

@@ -11,13 +11,14 @@
 //! service-state` transitive check together close every UI-reachable
 //! path that the workspace shape allowed at the time. The strict
 //! transitive variant (`app -> ... -> service-state` via *any*
-//! path-dep chain except through `service`) is the Phase 6d-C goal:
-//! after the structural moves in Phase 6d-B (`SyncProviderCtx` out of
-//! `common`, `sync` split into pure-logic + persistence halves,
-//! provider sync impls relocated to a sibling crate), `WriteDbState`,
-//! `BodyStoreWriteState`, `InlineImageStoreWriteState`, and
-//! `SearchWriteHandle` are unreachable from `crates/app/src/`
-//! regardless of the constructors' Rust visibility.
+//! path-dep chain except through `service`) is documented as an open
+//! architectural exception in `docs/architecture.md` "Current
+//! Exceptions"; closing it would require `SyncProviderCtx` out of
+//! `common`, `sync` split into pure-logic + persistence halves, and
+//! provider sync impls relocated to a sibling crate. Not currently
+//! scheduled. `WriteDbState` is still constructed only inside
+//! `service-state` and `service`, so app code cannot accidentally
+//! reach a writer despite the open Cargo edges.
 //!
 //! Why a Cargo.toml lint instead of a Rust visibility flip: the
 //! service crate (also a separate crate from `service-state`)

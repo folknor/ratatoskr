@@ -30,15 +30,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Notify, mpsc};
 
-/// Service-side boot artifacts loaded once at boot. Phase 2's `ActionContext`
-/// will consume the encryption key + DB connection from here once the action
-/// service moves across the boundary; until then the fields are held but
-/// unused (the UI keeps its own key + DB load).
-///
-/// TODO(phase-2): the action service handler reads `encryption_key` and
-/// `db_conn` from this struct, replacing the UI-side
-/// `rtsk::load_encryption_key` and `Db::open` calls in `crates/app/src/app.rs`.
-/// The `#[allow(dead_code)]` markers come off then.
+/// Service-side boot artifacts loaded once at boot. The action worker,
+/// sync runtime, push runtime, calendar runtime, and rebuild path all
+/// consume `encryption_key` and `db_conn` from here via the
+/// `BootSharedState::encryption_key()` / `db_conn()` accessors. The
+/// `#[allow(dead_code)]` markers below cover the lookup pattern (fields
+/// are read through the accessors, not through direct struct access in
+/// every consumer); they are not a TODO.
 pub(crate) struct BootContext {
     /// AES-256-GCM key loaded from `<app_data>/ratatoskr.key`. Held in a
     /// `SecretKey` wrapper so the bytes zeroize on drop - the Service's

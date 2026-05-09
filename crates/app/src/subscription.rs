@@ -129,15 +129,18 @@ impl ReadyApp {
         // Service-side by the existing 24 h cache check inside
         // `refresh_gal_for_account`. Two cadences would mean two failure
         // modes (one timer stops working but the other doesn't); one
-        // cadence + Service-side gating is the simpler shape and
-        // survives the Phase 9 tray-resident move unchanged.
+        // cadence + Service-side gating is the simpler shape.
         //
-        // TODO(phase-9): when tray-resident mode lands, the SyncTick
-        // cadence stops working when the UI window is closed. Move the
-        // cadence Service-side (a tokio::time::interval in the dispatch
-        // loop, gated by per-account staleness). The Service-side
-        // staleness logic (CalendarRuntime::accounts_due_for_sync at 1h,
-        // refresh_gal_for_account's 24h cache check) transplants
+        // The original code-comment here flagged a TODO for tray-resident
+        // mode (a Phase 9 entry that would have moved the cadence
+        // Service-side once the UI window could close without exiting).
+        // Phase 9 was descoped at Phase 8 close-out (no plans for a tray
+        // icon), so the relocation is no longer scheduled. If tray-resident
+        // ever ships, the move is straightforward: a
+        // `tokio::time::interval` in the dispatch loop, per-account
+        // staleness gating, and the existing Service-side staleness logic
+        // (`CalendarRuntime::accounts_due_for_sync` at 1 h,
+        // `refresh_gal_for_account`'s 24 h cache check) transplants
         // unchanged.
 
         // Phase 3 task 17: debounced reader reload after
