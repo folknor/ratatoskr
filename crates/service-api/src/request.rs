@@ -101,6 +101,10 @@ pub struct TestSeedThreadParams {
     pub is_chat_thread: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_html: Option<String>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -360,6 +364,36 @@ pub struct TestQueryDbStateAck {
     pub attachments: Vec<TestDbAttachmentRow>,
     pub calendars: Vec<TestDbCalendarRow>,
     pub calendar_events: Vec<TestDbCalendarEventRow>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSearchIndexParams {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestSearchIndexResult {
+    pub message_id: String,
+    pub account_id: String,
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    pub rank: f32,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestSearchIndexAck {
+    pub total: u64,
+    pub results: Vec<TestSearchIndexResult>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -762,6 +796,9 @@ pub enum RequestParams {
     /// Reads a small DB snapshot for sync-harness assertions.
     #[cfg(feature = "test-helpers")]
     TestQueryDbState { params: TestQueryDbStateParams },
+    /// Flushes and queries the test search index.
+    #[cfg(feature = "test-helpers")]
+    TestSearchIndex { params: TestSearchIndexParams },
     /// Arms a one-shot delay at a named write/crash hook.
     #[cfg(feature = "test-helpers")]
     TestDelayNextWrite { params: TestDelayNextWriteParams },
@@ -858,6 +895,8 @@ impl RequestParams {
             Self::TestStartSync { .. } => "test.start_sync",
             #[cfg(feature = "test-helpers")]
             Self::TestQueryDbState { .. } => "test.query_db_state",
+            #[cfg(feature = "test-helpers")]
+            Self::TestSearchIndex { .. } => "test.search_index",
             #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
         }
@@ -983,6 +1022,7 @@ impl RequestParams {
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
             | Self::TestQueryDbState { .. }
+            | Self::TestSearchIndex { .. }
             | Self::TestDelayNextWrite { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
@@ -1065,7 +1105,8 @@ impl RequestParams {
             | Self::TestCounterRead { .. }
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
-            | Self::TestQueryDbState { .. } => Idempotency::Idempotent,
+            | Self::TestQueryDbState { .. }
+            | Self::TestSearchIndex { .. } => Idempotency::Idempotent,
 
             #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. }
@@ -1198,6 +1239,8 @@ impl RequestParams {
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestQueryDbState { params } => serde_json::json!({ "params": params }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestSearchIndex { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { params } => {
                 serde_json::json!({ "params": params })
@@ -1705,6 +1748,16 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.query_db_state params: {e}"))?;
                 Ok(Self::TestQueryDbState { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.search_index" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestSearchIndexParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.search_index params: {e}"))?;
+                Ok(Self::TestSearchIndex { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.delay_next_write" => {
@@ -3282,6 +3335,8 @@ mod tests {
                 is_muted: true,
                 is_chat_thread: true,
                 chat_email: Some("chat@example.test".into()),
+                body_text: Some("Body text".into()),
+                body_html: Some("<p>Body text</p>".into()),
             },
         };
         let parsed = RequestParams::from_method_params(
@@ -3414,6 +3469,26 @@ mod tests {
         .expect("parse");
         assert_eq!(parsed, original);
         assert_eq!(original.method_name(), "test.query_db_state");
+        assert_eq!(original.idempotency(), Idempotency::Idempotent);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_search_index_round_trips_from_method_params() {
+        let original = RequestParams::TestSearchIndex {
+            params: TestSearchIndexParams {
+                query: "attachment phrase".into(),
+                account_id: Some("acc-1".into()),
+                limit: Some(5),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.search_index");
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 

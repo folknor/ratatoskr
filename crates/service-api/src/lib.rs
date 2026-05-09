@@ -99,7 +99,8 @@ pub use request::{
     TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
+    TestSeedThreadParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
+    TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};

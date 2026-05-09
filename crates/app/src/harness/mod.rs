@@ -20,8 +20,8 @@ use service_api::{
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
-    WireCalendarOperation, WireFolderId, WireMailOperation, WireTagId,
+    TestSearchIndexParams, TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams,
+    WireCalendarEventInput, WireCalendarOperation, WireFolderId, WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1714,6 +1714,8 @@ fn request_params_from_lua(
                     is_chat_thread: get_bool_field(state, params_idx, "is_chat_thread")?
                         .unwrap_or(false),
                     chat_email: get_string_field(state, params_idx, "chat_email")?,
+                    body_text: get_string_field(state, params_idx, "body_text")?,
+                    body_html: get_string_field(state, params_idx, "body_html")?,
                 },
             })
         }
@@ -1823,6 +1825,20 @@ fn request_params_from_lua(
                 TestQueryDbStateParams::default()
             };
             Ok(RequestParams::TestQueryDbState { params })
+        }
+        "TestSearchIndex" | "test.search_index" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestSearchIndex requires params table"));
+            }
+            let query = get_string_field(state, params_idx, "query")?
+                .ok_or_else(|| lua_error_message("TestSearchIndex requires params.query"))?;
+            Ok(RequestParams::TestSearchIndex {
+                params: TestSearchIndexParams {
+                    query,
+                    account_id: get_string_field(state, params_idx, "account_id")?,
+                    limit: get_number_field(state, params_idx, "limit")?.map(|value| value as u64),
+                },
+            })
         }
         "TestDelayNextWrite" | "test.delay_next_write" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {

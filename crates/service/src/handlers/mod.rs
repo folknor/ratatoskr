@@ -207,6 +207,10 @@ pub(crate) async fn dispatch(
             test_helpers::query_db_state_handle(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
+        RequestParams::TestSearchIndex { params } => {
+            test_helpers::search_index_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
         RequestParams::TestDelayNextWrite { params } => {
             test_helpers::delay_next_write_handle(params).await
         }

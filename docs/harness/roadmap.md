@@ -424,7 +424,7 @@ plain command also passed 700/700 on 2026-05-09:
 ### M5 - Phase 7 integration cohort
 
 **Status:** PARTIAL. M3's initial helper slice has landed, and the
-first executable extract backfill scripts are in tree.
+first executable extract and search-index scripts are in tree.
 
 The Phase 7 plan called for `crates/service/tests/extract_in_process.rs`
 to cover end-to-end fetch -> extract -> re-index -> search annotation,
@@ -459,6 +459,11 @@ Landed slices:
   removes a seeded cached blob while leaving the DB cache metadata in
   place, sends `extract.backfill_kick`, and asserts the worker records
   retryable `skipped:bytes_gone` without marking `text_indexed_at`.
+- `crates/app/tests/service-harness/extract/cross_attachment_phrase_non_match.lua`
+  seeds two cached text attachments on one message, verifies phrase
+  searches inside each extracted attachment hit the search index, and
+  asserts a phrase whose terms straddle the attachment boundary does
+  not match.
 - `crates/app/tests/service-harness/extract/index_rebuild_force_preempts_in_flight_wipe.lua`
   drives `index.rebuild` through the Lua harness, holds the search
   writer's `search.clear` command in flight with the test delay hook,

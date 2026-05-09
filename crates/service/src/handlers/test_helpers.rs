@@ -16,6 +16,7 @@ use service_api::{
     TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
     TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
+    TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
@@ -160,8 +161,21 @@ pub(super) async fn seed_thread_handle(
         thread_id: thread_id.clone(),
         message_id: message_id.clone(),
     };
+    let body_html = params.body_html.clone();
+    let body_text = Some(
+        params
+            .body_text
+            .clone()
+            .unwrap_or_else(|| "Harness message".into()),
+    );
+    let app_data_dir = boot_state.app_data_dir().to_path_buf();
     write_db
         .with_conn(move |conn| insert_harness_thread(conn, params, &thread_id, &message_id))
+        .await
+        .map_err(ServiceError::Internal)?;
+    store::body_store::BodyStoreReadState::init(&app_data_dir)
+        .map_err(ServiceError::Internal)?
+        .put(ack.message_id.clone(), body_html, body_text)
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -309,6 +323,80 @@ pub(super) async fn query_db_state_handle(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn search_index_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestSearchIndexParams,
+) -> Result<Value, ServiceError> {
+    let query = params.query.trim().to_string();
+    if query.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.search_index".into(),
+            message: "query is required".into(),
+        });
+    }
+    let limit = usize::try_from(params.limit.unwrap_or(20).min(100))
+        .map_err(|e| ServiceError::Internal(format!("search limit conversion: {e}")))?;
+
+    // Normal post-boot handlers read the writer from BootSharedState.
+    // The sync-runtime fallback covers older harness boot shapes and
+    // tests that construct sync first, where the same writer handle is
+    // reachable through the runtime.
+    if let Some(search_write) = boot_state
+        .search_write()
+        .or_else(|| boot_state.sync_runtime().map(|runtime| runtime.search_write()))
+    {
+        search_write
+            .flush_now()
+            .await
+            .map_err(|e| ServiceError::Internal(format!("test.search_index flush: {e}")))?;
+    }
+
+    let search_read = search::SearchReadState::init(boot_state.app_data_dir())
+        .map_err(|e| ServiceError::Internal(format!("test.search_index open: {e}")))?;
+    search_read
+        .reload()
+        .map_err(|e| ServiceError::Internal(format!("test.search_index reload: {e}")))?;
+
+    let account_ids = params
+        .account_id
+        .filter(|account_id| !account_id.is_empty())
+        .map(|account_id| vec![account_id]);
+    let results = search_read
+        .search_with_filters(&search::SearchParams {
+            account_ids,
+            free_text: Some(query),
+            from: Vec::new(),
+            to: Vec::new(),
+            subject: None,
+            has_attachment: None,
+            is_unread: None,
+            is_starred: None,
+            before: None,
+            after: None,
+            limit: Some(limit),
+        })
+        .map_err(|e| ServiceError::Internal(format!("test.search_index query: {e}")))?;
+
+    let mut rows = Vec::with_capacity(results.len());
+    for result in results {
+        rows.push(TestSearchIndexResult {
+            message_id: result.message_id,
+            account_id: result.account_id,
+            thread_id: result.thread_id,
+            subject: result.subject,
+            snippet: result.snippet,
+            rank: result.rank,
+        });
+    }
+    let total = u64::try_from(rows.len())
+        .map_err(|e| ServiceError::Internal(format!("search total conversion: {e}")))?;
+    serde_json::to_value(TestSearchIndexAck {
+        total,
+        results: rows,
+    })
+    .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
 pub(super) async fn delay_next_write_handle(
