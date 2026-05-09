@@ -305,7 +305,12 @@ async fn sync_google_calendar_account(
     cancellation_token: &CancellationToken,
     mutated: &mut bool,
 ) -> Result<(), String> {
-    let client = gmail.get(account_id).await?;
+    let gmail_key = *gmail.encryption_key();
+    let client = gmail
+        .get_or_try_insert_with(account_id, || {
+            gmail::client::GmailClient::from_account(db, account_id, gmail_key)
+        })
+        .await?;
     let calendars = google_calendar_list_calendars_impl(account_id, db, &client).await?;
     upsert_discovered_calendars_impl(db, account_id, "google", calendars).await?;
     *mutated = true;
@@ -342,7 +347,12 @@ async fn sync_graph_calendar_account(
     cancellation_token: &CancellationToken,
     mutated: &mut bool,
 ) -> Result<(), String> {
-    let client = graph.get(account_id).await?;
+    let graph_key = *graph.encryption_key();
+    let client = graph
+        .get_or_try_insert_with(account_id, || {
+            graph::client::GraphClient::from_account(db, account_id, graph_key)
+        })
+        .await?;
     let calendars = graph_calendar_list_calendars_impl(account_id, db, &client).await?;
     upsert_discovered_calendars_impl(db, account_id, "graph", calendars).await?;
     *mutated = true;

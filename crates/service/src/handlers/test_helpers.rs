@@ -11,10 +11,10 @@ use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
-    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
-    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
-    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesAck,
+    TestDbCalendarEventRow, TestDbCalendarRow, TestDbLocalDraftRow, TestDbMessageRow,
+    TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
@@ -726,10 +726,14 @@ fn read_harness_db_state(
         unread_message_count: count_unread_messages(conn, account_id)?,
         attachment_count: count_account_rows(conn, "attachments", account_id)?,
         local_draft_count: count_account_rows(conn, "local_drafts", account_id)?,
+        calendar_count: count_account_rows(conn, "calendars", account_id)?,
+        calendar_event_count: count_account_rows(conn, "calendar_events", account_id)?,
         accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
         messages: read_harness_messages(conn, params)?,
         local_drafts: read_harness_local_drafts(conn, params)?,
         attachments: read_harness_attachments(conn, params)?,
+        calendars: read_harness_calendars(conn, params)?,
+        calendar_events: read_harness_calendar_events(conn, params)?,
     })
 }
 
@@ -1054,6 +1058,94 @@ fn read_harness_attachments(
     }
 }
 
+fn read_harness_calendars(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbCalendarRow>, String> {
+    let limit = i64::try_from(params.calendar_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("calendar limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, provider, remote_id, display_name,
+                            color, is_primary, is_visible, is_default,
+                            provider_id, can_edit
+                     FROM calendars
+                     WHERE account_id = ?1
+                     ORDER BY sort_order ASC, display_name ASC, id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare calendars query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_calendar_from_row)
+                .map_err(|e| format!("query calendars: {e}"))?;
+            collect_rows(mapped, "calendars")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, provider, remote_id, display_name,
+                            color, is_primary, is_visible, is_default,
+                            provider_id, can_edit
+                     FROM calendars
+                     ORDER BY account_id ASC, sort_order ASC, display_name ASC, id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare calendars query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_calendar_from_row)
+                .map_err(|e| format!("query calendars: {e}"))?;
+            collect_rows(mapped, "calendars")
+        }
+    }
+}
+
+fn read_harness_calendar_events(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbCalendarEventRow>, String> {
+    let limit = i64::try_from(params.calendar_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("calendar limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, calendar_id, google_event_id,
+                            remote_event_id, summary, title, description,
+                            location, start_time, end_time, is_all_day, status,
+                            organizer_email, organizer_name, attendees_json
+                     FROM calendar_events
+                     WHERE account_id = ?1
+                     ORDER BY start_time ASC, id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare calendar events query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_calendar_event_from_row)
+                .map_err(|e| format!("query calendar events: {e}"))?;
+            collect_rows(mapped, "calendar events")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, calendar_id, google_event_id,
+                            remote_event_id, summary, title, description,
+                            location, start_time, end_time, is_all_day, status,
+                            organizer_email, organizer_name, attendees_json
+                     FROM calendar_events
+                     ORDER BY account_id ASC, start_time ASC, id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare calendar events query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_calendar_event_from_row)
+                .map_err(|e| format!("query calendar events: {e}"))?;
+            collect_rows(mapped, "calendar events")
+        }
+    }
+}
+
 fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbMessageRow> {
     Ok(TestDbMessageRow {
         id: row.get(0)?,
@@ -1107,6 +1199,45 @@ fn test_db_attachment_from_row(
         text_indexed_at: row.get(10)?,
         extraction_status: row.get(11)?,
         extracted_text: row.get(12)?,
+    })
+}
+
+fn test_db_calendar_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbCalendarRow> {
+    Ok(TestDbCalendarRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        provider: row.get(2)?,
+        remote_id: row.get(3)?,
+        display_name: row.get(4)?,
+        color: row.get(5)?,
+        is_primary: row.get::<_, i64>(6)? != 0,
+        is_visible: row.get::<_, i64>(7)? != 0,
+        is_default: row.get::<_, i64>(8)? != 0,
+        provider_id: row.get(9)?,
+        can_edit: row.get::<_, i64>(10)? != 0,
+    })
+}
+
+fn test_db_calendar_event_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TestDbCalendarEventRow> {
+    Ok(TestDbCalendarEventRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        calendar_id: row.get(2)?,
+        google_event_id: row.get(3)?,
+        remote_event_id: row.get(4)?,
+        summary: row.get(5)?,
+        title: row.get(6)?,
+        description: row.get(7)?,
+        location: row.get(8)?,
+        start_time: row.get(9)?,
+        end_time: row.get(10)?,
+        is_all_day: row.get::<_, i64>(11)? != 0,
+        status: row.get(12)?,
+        organizer_email: row.get(13)?,
+        organizer_name: row.get(14)?,
+        attendees_json: row.get(15)?,
     })
 }
 

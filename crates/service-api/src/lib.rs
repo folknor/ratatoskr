@@ -93,13 +93,13 @@ pub use redacted::{RedactedBytes, RedactedString};
 #[cfg(feature = "test-helpers")]
 pub use request::{
     TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams,
-    TestDbAccountRow, TestDbAttachmentRow, TestDbLocalDraftRow, TestDbMessageRow,
-    TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
-    TestSeedCachedAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,
-    TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
+    TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow,
+    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck, TestDelayNextWriteParams,
+    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
+    TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};

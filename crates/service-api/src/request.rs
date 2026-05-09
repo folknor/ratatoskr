@@ -222,6 +222,8 @@ pub struct TestQueryDbStateParams {
     pub message_limit: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar_limit: Option<u64>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -302,6 +304,45 @@ pub struct TestDbAttachmentRow {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbCalendarRow {
+    pub id: String,
+    pub account_id: String,
+    pub provider: String,
+    pub remote_id: String,
+    pub display_name: Option<String>,
+    pub color: Option<String>,
+    pub is_primary: bool,
+    pub is_visible: bool,
+    pub is_default: bool,
+    pub provider_id: Option<String>,
+    pub can_edit: bool,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbCalendarEventRow {
+    pub id: String,
+    pub account_id: String,
+    pub calendar_id: Option<String>,
+    /// Legacy DB column name. For non-Google providers this still stores
+    /// the provider's remote event id and backs the cross-provider unique key.
+    pub google_event_id: String,
+    pub remote_event_id: Option<String>,
+    pub summary: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: bool,
+    pub status: Option<String>,
+    pub organizer_email: Option<String>,
+    pub organizer_name: Option<String>,
+    pub attendees_json: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
     pub label_count: u64,
@@ -311,10 +352,14 @@ pub struct TestQueryDbStateAck {
     pub unread_message_count: u64,
     pub attachment_count: u64,
     pub local_draft_count: u64,
+    pub calendar_count: u64,
+    pub calendar_event_count: u64,
     pub accounts: Vec<TestDbAccountRow>,
     pub messages: Vec<TestDbMessageRow>,
     pub local_drafts: Vec<TestDbLocalDraftRow>,
     pub attachments: Vec<TestDbAttachmentRow>,
+    pub calendars: Vec<TestDbCalendarRow>,
+    pub calendar_events: Vec<TestDbCalendarEventRow>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -3359,6 +3404,7 @@ mod tests {
                 account_id: Some("acc-1".into()),
                 message_limit: Some(10),
                 attachment_limit: Some(20),
+                calendar_limit: Some(30),
             },
         };
         let parsed = RequestParams::from_method_params(

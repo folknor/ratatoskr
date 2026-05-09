@@ -531,11 +531,12 @@ Sequencing:
   row gets new encrypted access / refresh token hashes without
   changing identity or provider columns. The remaining end-to-end slice
   is revoked-token sync recovery against an OAuth-enforced fixture.
-- **M6.10 (READY for Graph calendar fake):** calendar
-  create/update/delete. The saehrimnir Graph calendar fixture and
-  request-log endpoints have landed, so the remaining ratatoskr work
-  is Lua binding / assertion coverage for `cal_action.execute_plan`
-  and local calendar state.
+- **M6.10 (PARTIAL - Graph calendar read slice landed):**
+  `crates/app/tests/sync-harness/graph-calendar-initial.lua`
+  runs the Graph calendar fixture through the real calendar runtime
+  and asserts local calendar/event state plus Graph request-log
+  coverage. Calendar create/update/delete still needs Lua binding /
+  assertion coverage for `cal_action.execute_plan`.
 - **M6.11-M6.14 (READY when M5 lands):** Phase 7 attachment
   extraction round-trip, backfill kick on boot.ready, palette
   rebuild, schema-version mismatch rebuild. All have Lua-script
@@ -639,6 +640,12 @@ Ratatoskr-side M8 surface now in tree:
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
+- `crates/app/tests/sync-harness/graph-calendar-initial.lua`
+  targets the `graph-calendar-small.toml` fixture, drives
+  `client:start_calendar_sync`, asserts the Work/Personal calendars
+  and two Work events land in the local DB, and uses saehrimnir's
+  request log to prove Graph calendar list and per-calendar delta
+  endpoints were exercised.
 
 **Exit criteria:**
 
@@ -651,8 +658,8 @@ Ratatoskr-side M8 surface now in tree:
   remain.
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
-- M6.10 (calendar) unblocks through the Graph fixture surface, with
-  coverage for create / update / delete request logs and local state.
+- M6.10 (calendar) has Graph read/sync coverage; create / update /
+  delete request-log and local-state coverage remain.
 
 ---
 

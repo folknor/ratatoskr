@@ -932,6 +932,58 @@ fn lua_client_start_sync(state: &mut State) -> dellingr::Result<u8> {
     Ok(2)
 }
 
+fn lua_client_start_calendar_sync(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    if state.get_top() < 2 {
+        return Err(lua_error_message("start_calendar_sync requires account_id"));
+    }
+    let account_id = if state.typ(2) == LuaType::Table {
+        get_string_field(state, 2, "account_id")?
+            .ok_or_else(|| lua_error_message("start_calendar_sync requires params.account_id"))?
+    } else {
+        state.to_string(2)?
+    };
+    let seconds = if state.get_top() >= 3 {
+        state.to_number(3)?
+    } else {
+        30.0
+    };
+    let ctx = context(state)?;
+    let (handle, client) = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        (guard.handle.clone(), guard.client(id)?)
+    };
+    let result = handle.block_on(async {
+        tokio::time::timeout(
+            duration_from_seconds(seconds),
+            client.start_calendar_sync(account_id),
+        )
+        .await
+    });
+    state.set_top(0);
+    match result {
+        Ok(Ok(sync_result)) => {
+            push_calendar_sync_result_table(state, &sync_result)?;
+            state.push_nil();
+        }
+        Ok(Err(error)) => {
+            state.push_nil();
+            push_client_error(state, &error)?;
+        }
+        Err(_) => {
+            state.push_nil();
+            push_json(
+                state,
+                &serde_json::json!({
+                    "kind": "Timeout",
+                    "detail": format!("calendar sync did not resolve within {seconds}s"),
+                }),
+            )?;
+        }
+    }
+    Ok(2)
+}
+
 fn lua_client_drop(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     context(state)?
@@ -1226,6 +1278,12 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_fn(state, idx, "set_respawn_args", lua_client_set_respawn_args)?;
     set_field_fn(state, idx, "notifications", lua_client_notifications)?;
     set_field_fn(state, idx, "start_sync", lua_client_start_sync)?;
+    set_field_fn(
+        state,
+        idx,
+        "start_calendar_sync",
+        lua_client_start_calendar_sync,
+    )?;
     set_field_fn(state, idx, "drop", lua_client_drop)?;
     Ok(())
 }
@@ -1365,6 +1423,27 @@ fn push_sync_result_table(
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "result", sync_result_name(result))?;
     if let service_api::SyncResult::Failed(error) = result {
+        set_field_string(state, idx, "error", error)?;
+    }
+    Ok(())
+}
+
+fn calendar_sync_result_name(result: &service_api::CalendarSyncResult) -> &'static str {
+    match result {
+        service_api::CalendarSyncResult::Completed => "completed",
+        service_api::CalendarSyncResult::Cancelled => "cancelled",
+        service_api::CalendarSyncResult::Failed(_) => "failed",
+    }
+}
+
+fn push_calendar_sync_result_table(
+    state: &mut State,
+    result: &service_api::CalendarSyncResult,
+) -> dellingr::Result<()> {
+    state.new_table();
+    let idx = state.get_top() as isize;
+    set_field_string(state, idx, "result", calendar_sync_result_name(result))?;
+    if let service_api::CalendarSyncResult::Failed(error) = result {
         set_field_string(state, idx, "error", error)?;
     }
     Ok(())
@@ -1676,6 +1755,8 @@ fn request_params_from_lua(
                     message_limit: get_number_field(state, params_idx, "message_limit")?
                         .map(|value| value as u64),
                     attachment_limit: get_number_field(state, params_idx, "attachment_limit")?
+                        .map(|value| value as u64),
+                    calendar_limit: get_number_field(state, params_idx, "calendar_limit")?
                         .map(|value| value as u64),
                 }
             } else {

@@ -12,7 +12,7 @@
 //! Threading per-batch cancellation through the JMAP calendar pipeline
 //! is tracked with the Gmail/Graph entry-only checks.
 
-use jmap::client::JmapState;
+use jmap::client::{JmapClient, JmapState};
 use rtsk::db::ReadDbState;
 use tokio_util::sync::CancellationToken;
 
@@ -26,7 +26,11 @@ pub(crate) async fn sync_jmap_calendar_account(
     if cancellation_token.is_cancelled() {
         return Err("calendar sync cancelled".to_string());
     }
-    let client = jmap.get(account_id).await?;
+    let client = jmap
+        .get_or_try_insert_with(account_id, || {
+            JmapClient::from_account(db, account_id, jmap.encryption_key())
+        })
+        .await?;
     // sync_calendars writes calendars + events whenever it succeeds
     // partially or in full. The current API doesn't surface a
     // partial-mutation flag, so flip `mutated` unconditionally before
