@@ -331,8 +331,8 @@ impl ReadyApp {
         // through `internal.read_bootstrap_snapshots` (one IPC, both
         // snapshots returned already-decrypted). The N-decrypt-per-boot
         // anti-pattern (one IPC per secure setting under a generic
-        // `decrypt_for_storage`) was rejected in plan revision; see
-        // `docs/service/phase-6a-plan.md` § "Encryption-key handle".
+        // `decrypt_for_storage`) was rejected when the encryption-key
+        // boundary moved fully into the Service.
         //
         // Phase 6d-A removed the last UI-side `load_encryption_key`
         // call: the contacts pipeline now runs Service-side via

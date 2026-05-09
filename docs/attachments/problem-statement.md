@@ -14,7 +14,17 @@ Beyond offline use, a populated local attachment cache also unlocks future work:
 
 ## Relationship to the Service
 
-The orchestration described here (pre-fetch, blob-store writes, eviction, GC, attachment text extraction) all run inside **the Service** - the subprocess worker described in `docs/service/problem-statement.md`. The `BlobStore` trait and its implementations are libraries (in `crates/stores/`) and don't care which process instantiates them; the writer instance lives in the Service, while UI-side reads are positional reads against the immutable on-disk pack files (concurrent-reader-safe, no IPC). Cache-miss attachment fetches from the UI cross the IPC boundary; cache hits do not. The split is detailed in `File operations` below and in the Service problem statement.
+The orchestration described here (pre-fetch, blob-store writes,
+eviction, GC, attachment text extraction) all run inside **the
+Service** - the subprocess worker described in
+`docs/architecture.md` under "Service process model". The `BlobStore`
+trait and its implementations are libraries (in `crates/stores/`) and
+don't care which process instantiates them; the writer instance lives
+in the Service, while UI-side reads are positional reads against the
+immutable on-disk pack files (concurrent-reader-safe, no IPC).
+Cache-miss attachment fetches from the UI cross the IPC boundary;
+cache hits do not. The split is detailed in `File operations` below
+and in the architecture doc.
 
 ## Current state
 
@@ -319,7 +329,12 @@ The `cloud_attachments` table (migration 39) and the upload paths in `crates/gra
 
 ## Implementation phases
 
-Each phase should be commit-sized and independently reviewable. **Note**: Phases 2 and 3 depend on the Service infrastructure (`docs/service/implementation-roadmap.md`) being far enough along to host the orchestration and serve `attachment.fetch` IPC requests. Phase 1a is fully library work and can land before any Service work; Phase 1b can land but stays uncalled until the Service consumes it.
+Each phase should be commit-sized and independently reviewable.
+**Note**: Phases 2 and 3 depend on the Service infrastructure being
+far enough along to host the orchestration and serve `attachment.fetch`
+IPC requests. Phase 1a is fully library work and can land before any
+Service work; Phase 1b can land but stays uncalled until the Service
+consumes it.
 
 **Phase 1a - Pack store (`stores` crate)** *(no Service dependency)*
 - New module `crates/stores/src/attachment_pack.rs` implementing the pack format described above: append-only segments, frame headers with xxh3_64, pack tail with version + crc, tombstone log.

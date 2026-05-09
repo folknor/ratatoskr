@@ -1,7 +1,6 @@
 //! Service-side per-account sync runtime.
 //!
-//! Phase 3 of `docs/service/phase-3-plan.md` relocates sync into the
-//! Service. `SyncRuntime` owns the per-account map (cancellation
+//! `SyncRuntime` owns the per-account map (cancellation
 //! tokens, run ids, supervisor join handles) and drives the runner
 //! lifecycle:
 //!

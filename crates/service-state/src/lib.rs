@@ -1,7 +1,7 @@
 //! Service-only writer-half state types.
 //!
-//! Phase 2 of `docs/service/phase-2-plan.md` introduces a read/write split
-//! at the type level: `db::DbState` becomes `db::ReadDbState` (UI-visible)
+//! The Service boundary uses a read/write split at the type level:
+//! `db::DbState` becomes `db::ReadDbState` (UI-visible)
 //! and `service_state::WriteDbState` (Service-only). The split is enforced
 //! by Cargo dependency graph - the `app` crate does NOT depend on this
 //! crate, so `WriteDbState` cannot be reached from UI source files even

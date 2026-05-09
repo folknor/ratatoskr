@@ -7,10 +7,10 @@ use tokio::sync::{Notify, OnceCell};
 
 /// Why the Service is shutting down. Determines whether the dispatch tail
 /// writes the `clean_shutdown` sentinel: only `GracefulRequest` does, so
-/// every other exit path triggers the Phase 3+ recovery scan on the next
-/// boot. This matches the user-visible exit-path matrix in
-/// `docs/service/problem-statement.md` § "Cross-store crash consistency"
-/// modulo the simplification that we collapse parent-death, external
+/// every other exit path triggers the recovery scan on the next
+/// boot. This matches the cross-store crash-consistency contract in
+/// `docs/architecture.md` modulo the simplification that we collapse
+/// parent-death, external
 /// SIGTERM, and plain stdin EOF into one `Unrequested` arm - the
 /// distinction between them does not change Phase 1.5 behavior, and
 /// recovery scans are idempotent so the cost of "scan when we could have

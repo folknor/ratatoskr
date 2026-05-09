@@ -1,5 +1,4 @@
-//! Internal Service IPCs that mediate the encryption-key boundary
-//! (Phase 6a, `docs/service/phase-6a-plan.md` § "Encryption-key handle").
+//! Internal Service IPCs that mediate the encryption-key boundary.
 //!
 //! Three methods land together so a half-migrated UI cannot reach a
 //! state where it can write a blob it cannot read or boot without

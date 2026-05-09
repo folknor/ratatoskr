@@ -316,9 +316,7 @@ async fn sync_google_calendar_account(
         // patterns. Calendar sync is idempotent against CalDAV CTags /
         // Exchange ETags, so a cancelled run resumes from wherever the next
         // run finds the provider state - no marker-file repair needed.
-        // Point-checks between RPC boundaries, not mid-RPC. See
-        // `docs/service/phase-5-plan.md` § "Cancellation: runtime ->
-        // handler -> provider chain".
+        // Point-checks between RPC boundaries, not mid-RPC.
         if cancellation_token.is_cancelled() {
             return Err("calendar sync cancelled".to_string());
         }

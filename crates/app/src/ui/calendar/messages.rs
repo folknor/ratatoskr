@@ -106,7 +106,7 @@ pub enum CalendarMessage {
     /// Async ack from `calendar.set_visibility`. Carries the calendar id +
     /// the value the IPC was asked to write so the Err arm can roll back
     /// the eager UI flip without snapping back over a newer click.
-    /// Phase 6a (`docs/service/phase-6a-plan.md`).
+    /// Service-side calendar visibility write.
     VisibilityToggled {
         calendar_id: String,
         requested_value: bool,

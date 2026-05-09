@@ -147,8 +147,7 @@ pub async fn imap_initial_sync(
         // dropping a future mid-FETCH leaves unread response data on the
         // wire and breaks the next command. If true mid-RPC interruption is
         // ever needed, pair `select!` with explicit session teardown on the
-        // cancel arm. See `docs/service/phase-5-plan.md` § "Cancellation:
-        // runtime -> handler -> provider chain".
+        // cancel arm.
         if cancellation_token.is_cancelled() {
             return Err("sync cancelled".to_string());
         }

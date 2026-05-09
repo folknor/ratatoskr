@@ -1,6 +1,6 @@
 [package]
 name = "service-state"
-description = "Service-only writer-half state types. The `app` crate does NOT depend on this crate, so `WriteDbState` and friends are unreachable from UI code at the dependency-graph level (per docs/service/phase-2-plan.md scope item 1)."
+description = "Service-only writer-half state types. The `app` crate does NOT depend on this crate, so `WriteDbState` and friends are unreachable from UI code at the dependency-graph level."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

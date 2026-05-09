@@ -1,8 +1,8 @@
 //! Service-side per-account calendar sync runtime.
 //!
-//! Phase 5 of `docs/service/phase-5-plan.md` relocates calendar sync into the
-//! Service alongside email sync. `CalendarRuntime` owns the per-account map
-//! of runner tasks; each runner calls `cal::sync::calendar_sync_account_impl`
+//! Calendar sync runs in the Service alongside email sync.
+//! `CalendarRuntime` owns the per-account map of runner tasks; each
+//! runner calls `cal::sync::calendar_sync_account_impl`
 //! through a panic supervisor and emits the dual notifications
 //! (`CalendarRunCompleted` + `CalendarChanged`).
 //!

@@ -44,7 +44,92 @@ That includes:
 Every email state mutation (archive, delete, star, move, label, send, snooze, mark-chat-read, etc.) must flow through the action service. As of Phase 2 the *execution* surface lives in `service::actions::*` (the relocated home; `core::actions` keeps a shim that re-exports the public API). UI handlers no longer call the execution functions directly - they build an `ActionExecutionPlan`, convert to `ActionWirePlan`, and dispatch via `client.execute_plan(...)`. The Service journals the plan, signals the worker, and per-operation `OperationOutcome` + final `ActionCompleted` notifications stream back over IPC.
 
 **Enforcement:**
-- **Crate boundary** (`docs/service/problem-statement.md` § "Type-level enforcement"). `WriteDbState` is constructed in the `service-state` crate; `app` does not depend on `service-state`, so a UI source file that tries `use service_state::WriteDbState` fails to resolve. Phase 6a-part-2 deleted `Db::with_write_conn`, `Db::with_write_conn_sync`, and `Db::write_db_state` from the app crate; Phase 6d-A deleted the residual `Db::phase_6c_pending_write_state` accessor alongside the `app.action_ctx` field that consumed it (the contacts pipeline relocated to the `contacts.contact_save_with_writeback` + `contacts.contact_delete` IPC pair). Phase 6b's lockdown integration test (`crates/service-state/tests/lockdown.rs`) asserts that `crates/app/Cargo.toml` does not list `service-state` as a direct dependency; Phase 6c-11 layered the `app -> cal` transitive lockdown; Phase 6d-C extends to the strict `app -> ... -> service-state` blackout once 6d-B's structural moves close the remaining `common` / `sync` / per-provider edges.
+- **Crate boundary.** `WriteDbState` is constructed in the `service-state` crate; `app` does not depend on `service-state`, so a UI source file that tries `use service_state::WriteDbState` fails to resolve. Phase 6a-part-2 deleted `Db::with_write_conn`, `Db::with_write_conn_sync`, and `Db::write_db_state` from the app crate; Phase 6d-A deleted the residual `Db::phase_6c_pending_write_state` accessor alongside the `app.action_ctx` field that consumed it (the contacts pipeline relocated to the `contacts.contact_save_with_writeback` + `contacts.contact_delete` IPC pair). Phase 6b's lockdown integration test (`crates/service-state/tests/lockdown.rs`) asserts that `crates/app/Cargo.toml` does not list `service-state` as a direct dependency; Phase 6c-11 layered the `app -> cal` transitive lockdown; Phase 6d-C extends to the strict `app -> ... -> service-state` blackout once 6d-B's structural moves close the remaining `common` / `sync` / per-provider edges.
+
+### Service process model
+
+Ratatoskr runs as two cooperating processes. The UI process owns iced
+rendering, input, UI state, and read-side queries. The Service is a
+child worker process that owns durable writes and long-running work:
+action execution, sync, push receivers, the retry queue, body/inline/
+attachment store writes, attachment text extraction, and the Tantivy
+writer. The Service is not a daemon; closing the app shuts it down.
+
+The boundary is JSON-RPC 2.0 over newline-delimited stdio. Wire types
+live in `service-api`, and frame writing goes through the shared
+compact `write_message` helper so no pretty-printed or multi-line JSON
+can corrupt framing. Large blobs never cross JSON; IPC returns stable
+locations such as content hashes, and the UI reads bytes directly from
+the on-disk store.
+
+Service boot is two phase. The UI first sends `health.ping` with
+`PROTOCOL_VERSION`; a mismatch is a fatal boot error. The Service then
+runs the slow boot sequence: single-instance lock, key load, database
+open, schema migrations, pending-op recovery, draft WAL drain, and
+startup invariant recovery. `boot.ready` returns only after those
+steps complete. Terminal boot exits use `BootExitCode` values and are
+not respawned; post-ready crashes are respawn candidates.
+
+Each Service incarnation is tagged by a UI-side generation counter.
+The reader task stamps notifications with the live generation as it
+enqueues them, and UI dispatch drops notifications whose generation no
+longer matches. This prevents late frames from a dying Service from
+mutating the new incarnation's UI state.
+
+Shutdown is explicit. The UI sends the shutdown request, the Service
+stops accepting new work, drains subsystems in the fixed order
+`Push -> Calendar -> Sync -> Extract -> Rebuild -> search writer`,
+writes the clean-shutdown sentinel, responds, and exits. `kill_on_drop`
+is disabled on the child handle so escalation stays under the explicit
+SIGTERM / SIGKILL or Windows terminate policy.
+
+Parent-death binding is platform-specific. Linux uses
+`PR_SET_PDEATHSIG` plus a startup `getppid() == 1` recheck to close
+the fork-to-registration race. Windows uses a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; the UI holds the job handle for
+the child lifetime, so Service grandchildren inherit the same lifetime
+binding. macOS is not a supported target yet; the retained design is
+`kqueue` parent-exit registration plus a post-registration parent
+recheck.
+
+The Service owns stdout exclusively for JSON-RPC frames. At startup it
+duplicates the real stdio handles for the IPC reader and writer, then
+redirects the process standard stdin/stdout to the platform null
+device. Logging goes to Service log files, never stdout. Sensitive
+values are not loggable: request params, response payloads, auth
+codes, bearer tokens, message bodies, search queries, draft content,
+encryption-key bytes, attachment bytes, and extracted text must be
+redacted or summarized.
+
+Notifications use three delivery classes:
+- `MustDeliver`: awaited send and ordered delivery; used for state
+  changes such as action completions, sync completions, and committed
+  index notifications.
+- `Coalesce { key }`: latest-wins per key; used for progress and view
+  reload hints.
+- `Drop`: advisory events that may be discarded under pressure.
+
+The UI has one ordered notification channel so cross-class order is
+preserved. Inbound frames are capped while reading, handler concurrency
+is bounded by a semaphore, outbound writes are isolated behind the
+writer task, and request timeouts are declared at the API definition
+site.
+
+### Cross-store crash consistency
+
+The Service writes multiple durable stores: main SQLite, `bodies.db`,
+inline-image state, attachment cache files, and Tantivy. A clean
+shutdown writes the sentinel after every writer has drained. Boot
+removes the sentinel after acquiring writers; if the sentinel was
+missing at startup, the Service runs the cross-store invariant pass
+before `boot.ready`.
+
+The invariant pass is idempotent. It reconciles message/body/inline/
+attachment/search references, clears stale provider cursors for dirty
+accounts where needed, removes orphan store rows, and records timing
+stats. Cursor rows in the main database bound the amount scanned after
+an unclean shutdown, so a large mailbox does not require a full-store
+walk every time recovery runs.
 
 ### Calendar action pipeline
 

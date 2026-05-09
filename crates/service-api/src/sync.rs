@@ -1,7 +1,6 @@
 //! Sync wire types.
 //!
-//! Phase 3 of `docs/service/phase-3-plan.md` relocates JMAP delta sync
-//! into the Service. The UI dispatches `sync.start_account` and waits
+//! The Service owns provider sync. The UI dispatches `sync.start_account` and waits
 //! for a `sync.completed` notification correlated by `SyncRunId`. The
 //! Service may also emit `index.committed` notifications when the
 //! Tantivy writer commits a batch; the UI uses those to drive a
@@ -145,8 +144,8 @@ pub enum SyncResult {
 
 /// Emitted once per run after the runner has finished (or panicked,
 /// via the supervisor's synthetic emission). `MustDeliver` notification
-/// (per `docs/service/problem-statement.md` § IPC "notification class
-/// taxonomy"): a dropped completion would leave the UI's pending future
+/// under the Service IPC notification-class taxonomy: a dropped
+/// completion would leave the UI's pending future
 /// hanging forever.
 ///
 /// Routing uses `run_id` as the correlation key so multiple waiters per

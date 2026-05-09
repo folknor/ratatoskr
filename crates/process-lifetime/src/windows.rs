@@ -2,7 +2,7 @@
 //
 // The Windows Job Object parent-death machinery cannot be exercised from
 // the Linux CI host. Three paths in this module land entirely manual until
-// run on a real Windows host (see `docs/service/manual-test-matrix.md`):
+// run on a real Windows host (see `docs/harness/manual-test-matrix.md`):
 //
 // 1. Job creation + KILL_ON_JOB_CLOSE flag actually applied.
 // 2. AssignProcessToJobObject after spawn - the spawn->assign window is

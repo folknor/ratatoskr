@@ -146,7 +146,7 @@ pub enum Notification {
     /// future, so drop-on-overflow is benign. The bridge calls
     /// `SyncRuntime::start_account` *before* emitting this notification,
     /// so any backpressure on the notification queue cannot delay sync
-    /// kicks. See `docs/service/phase-4-plan.md` § "Notification class".
+    /// kicks. Push events are status hints, not sync correctness signals.
     #[serde(rename = "push.event")]
     PushEvent(PushEvent),
     /// Per-run calendar completion. `MustDeliver`: a dropped completion
@@ -783,9 +783,9 @@ mod tests {
     // CalendarRunCompleted (MustDeliver, ServiceClient-consumed) and
     // CalendarChanged (Coalesce per-account, UI-dispatched) are the
     // Phase 5 additions. The dual-routing decision is the heart of
-    // Phase 5's notification design - see calendar.rs and
-    // docs/service/phase-5-plan.md § "Calendar completion notification:
-    // dual routing".
+    // Calendar notification design: per-run awaiters consume
+    // CalendarRunCompleted, while the UI dispatcher receives
+    // CalendarChanged for reloads.
 
     #[test]
     fn calendar_run_completed_classifies_as_must_deliver() {

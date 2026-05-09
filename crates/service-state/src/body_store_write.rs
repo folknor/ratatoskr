@@ -1,7 +1,7 @@
 //! Service-only writer half of the body store.
 //!
-//! Phase 3 of `docs/service/phase-3-plan.md` introduces a read/write
-//! split at the type level: `store::body_store::BodyStoreReadState`
+//! The Service boundary uses a read/write split at the type level:
+//! `store::body_store::BodyStoreReadState`
 //! lives in `crates/stores/` (UI-visible); `BodyStoreWriteState` lives
 //! here (Service-only). The split is enforced by Cargo dependency
 //! graph - the `app` crate does not depend on `service-state`, so

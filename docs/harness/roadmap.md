@@ -435,9 +435,8 @@ repo at `crates/app/tests/service-harness/fixtures/extract/`.
 **Status:** PARTIAL - items 4 and 5 are ready after M2; the rest unblocks
 incrementally as harness capability grows.
 
-The manual test matrix relocates from `docs/service/manual-test-matrix.md`
-to `docs/harness/manual-test-matrix.md` as part of the Service Phase 8
-close-out. It is the **deletable artefact**: when M6 completes,
+The manual test matrix lives at `docs/harness/manual-test-matrix.md`.
+It is the **deletable artefact**: when M6 completes,
 `docs/harness/manual-test-matrix.md` is empty and gets deleted from
 the repo. Every item it contains has either been automated or
 explicitly retired.
@@ -472,7 +471,7 @@ Sequencing:
 - **M6.11-M6.14 (READY when M5 lands):** Phase 7 attachment
   extraction round-trip, backfill kick on boot.ready, palette
   rebuild, schema-version mismatch rebuild. All have Lua-script
-  shapes already sketched in `docs/service/manual-test-matrix.md`
+  shapes already sketched in `docs/harness/manual-test-matrix.md`
   entries 11-14.
 
 **Exit criteria:**
@@ -626,8 +625,7 @@ M2 + M4 + harness stable
        +-- M6.10 Calendar (unblocks via M8 calendar fake)
 ```
 
-The Service Phase 8 close-out (`docs/service/phase-8-plan.md`)
-depends only on M2.
+The Service Phase 8 close-out depends only on M2.
 
 ## Open questions deferred from M1 to "design as we implement"
 

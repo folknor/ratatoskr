@@ -1,7 +1,6 @@
 //! Service-only handle to the Tantivy search writer task.
 //!
-//! Phase 3 of `docs/service/phase-3-plan.md` relocates Tantivy writer
-//! ownership into a Service-internal task. The public type is a cheap
+//! Tantivy writer ownership lives in a Service-internal task. The public type is a cheap
 //! `Clone` mpsc handle - the actual `IndexWriter` lives inside
 //! `crates/service/src/search_writer.rs::run_writer_task` and never
 //! escapes that task. This is the architectural fix for the Phase 3

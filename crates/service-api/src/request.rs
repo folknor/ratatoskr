@@ -329,8 +329,7 @@ pub enum RequestParams {
     CalendarCancelAccountSync {
         params: CalendarCancelAccountSyncParams,
     },
-    /// Phase 6a (`docs/service/phase-6a-plan.md`): set the
-    /// `is_visible` flag on a single `calendars` row. The flat-boolean
+    /// Set the `is_visible` flag on a single `calendars` row. The flat-boolean
     /// half of the calendar UI write surface; event mutations are
     /// Phase 6c.
     ///

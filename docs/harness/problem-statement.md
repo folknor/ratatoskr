@@ -80,8 +80,7 @@ against today's framework would mean rebuilding it once Phase 8's work
 lands."
 
 **Manual-only items already exist where automation should have
-reached.** `docs/service/manual-test-matrix.md` (relocates here as
-`docs/harness/manual-test-matrix.md`) carries 14 items across Linux
+reached.** `docs/harness/manual-test-matrix.md` carries 14 items across Linux
 parent-death, Windows Job Object, clean-shutdown handshake, stdio
 corruption defense, heartbeat-detects-killed-Service,
 SIGTERM-triggers-shutdown-drain, cold-boot bootstrap, draft WAL,

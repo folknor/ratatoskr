@@ -1,7 +1,6 @@
 //! Settings wire types.
 //!
-//! Phase 6a (`docs/service/phase-6a-plan.md`) relocates the global
-//! `settings` key/value table writes Service-side. Today's only call
+//! The Service owns global `settings` key/value table writes. Today's only call
 //! site is `handle_settings_event::PreferencesCommitted` in the app
 //! crate, which writes seven settings in one atomic transaction.
 //!

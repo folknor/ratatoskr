@@ -1,14 +1,14 @@
 //! Service-side Tantivy writer task.
 //!
-//! Phase 3 of `docs/service/phase-3-plan.md` relocates Tantivy writer
-//! ownership into a Service-internal task. The task body lives here
-//! (alongside `NotificationSender` from `service::boot_progress`); the
-//! public handle (`service-state::SearchWriteHandle`) is the cheap
-//! `mpsc::Sender` consumers see.
+//! Tantivy writer ownership lives in a Service-internal task. The task
+//! body lives here alongside `NotificationSender` from
+//! `service::boot_progress`. The public handle
+//! (`service-state::SearchWriteHandle`) is the cheap `mpsc::Sender`
+//! consumers see.
 //!
 //! ## Why a dedicated task
 //!
-//! Three reasons (per `phase-3-plan.md` § "Search writer task"):
+//! Three reasons:
 //!
 //! 1. **Tantivy parallelises adds internally.** Wrapping `IndexWriter`
 //!    in `Arc<Mutex<_>>` would serialise adds across concurrent

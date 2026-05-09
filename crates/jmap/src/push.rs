@@ -26,11 +26,11 @@ use super::client::JmapClient;
 /// the WebSocket on the next connection. Returning an error fails the
 /// connect attempt and counts toward `MAX_CONSECUTIVE_FAILURES`.
 ///
-/// Phase 4 of `docs/service/phase-4-plan.md` introduced this parameter to
-/// fix mid-subscription token-expiry: the previous design captured the
-/// auth header at construction and never re-read it, so a refreshed token
-/// never propagated into the WebSocket and the connection died after
-/// `MAX_CONSECUTIVE_FAILURES` 401s. The Service-side resolver in
+/// This parameter fixes mid-subscription token-expiry: the previous
+/// design captured the auth header at construction and never re-read it.
+/// A refreshed token never propagated into the WebSocket, and the
+/// connection died after `MAX_CONSECUTIVE_FAILURES` 401s. The
+/// Service-side resolver in
 /// `crates/service/src/push.rs` calls `JmapClient::ensure_valid_token`
 /// inside the closure; the legacy in-app resolver in
 /// `crates/core/src/jmap_push.rs` returns the captured header until Phase

@@ -1,7 +1,7 @@
 -- ── Action job journal ──────────────────────────────────────
 --
--- Phase 2 sibling-job model (per docs/service/phase-2-plan.md scope
--- item 18a). One `action_jobs` row per Service-side journaled action
+-- Service-side sibling-job model. One `action_jobs` row per
+-- Service-side journaled action
 -- (mail-plan execution, compose-send, mark-chat-read), discriminated
 -- by `kind`. Multi-op mail plans also have one `action_job_ops` row
 -- per operation; send / mark-chat-read jobs live in `action_jobs`

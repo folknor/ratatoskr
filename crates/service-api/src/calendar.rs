@@ -1,16 +1,15 @@
 //! Calendar wire types.
 //!
-//! Phase 5 of `docs/service/phase-5-plan.md` relocates calendar sync
-//! into the Service alongside email sync. The shape mirrors `sync` -
-//! UI dispatches `calendar.start_account_sync` and waits on a
-//! `calendar.run_completed` notification correlated by
-//! `CalendarRunId` - but with a second view-reload notification
-//! `calendar.changed` (Coalesce) split out from the per-run
-//! completion (MustDeliver). The split exists because a single
-//! notification could not satisfy both per-`run_id` awaiters and
-//! UI view-reload dispatch with their different routing rules
-//! (see `docs/service/phase-5-plan.md` § "Calendar completion
-//! notification: dual routing").
+//! Calendar sync lives in the Service alongside email sync. The shape
+//! mirrors `sync`: UI dispatches `calendar.start_account_sync` and
+//! waits on a `calendar.run_completed` notification correlated by
+//! `CalendarRunId`.
+//!
+//! Calendar has a second view-reload notification:
+//! `calendar.changed` (Coalesce), split out from the per-run
+//! completion (MustDeliver). `CalendarRunCompleted` is routed to
+//! per-run awaiters while `CalendarChanged` is routed to UI reload
+//! handling.
 //!
 //! `CalendarChanged` fires whenever a run mutated calendar tables,
 //! regardless of result: per-discovered-calendar upserts in
@@ -75,7 +74,7 @@ pub struct CalendarStartAck {
 /// `calendar.cancel_account_sync` request body. Reserved for the
 /// **explicit-request** cancel path (manual "Sync now", RSVP-then-resync).
 /// Account deletion uses the piggyback inside `handle_cancel_account` -
-/// see `docs/service/phase-5-plan.md` § "Account-deletion integration".
+/// see the account-deletion integration in the sync cancel handler.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CalendarCancelAccountSyncParams {
     pub account_id: String,
@@ -96,10 +95,9 @@ pub struct CalendarCancelAck {
 // Request params (calendar.set_visibility)
 // ---------------------------------------------------------------------------
 
-/// `calendar.set_visibility` request body. Phase 6a (`docs/service/
-/// phase-6a-plan.md`) relocates the calendar visibility toggle - the
-/// flat-boolean half of `db/calendar.rs` - Service-side. Event
-/// mutations (create/update/delete) stay UI-side until Phase 6c.
+/// `calendar.set_visibility` request body. The calendar visibility
+/// toggle is the flat-boolean half of `db/calendar.rs`; event mutations
+/// use the calendar action pipeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CalendarSetVisibilityParams {
     pub calendar_id: String,

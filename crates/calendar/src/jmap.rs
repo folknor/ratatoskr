@@ -10,8 +10,7 @@
 //! Cancellation is a coarse entry-point check today: the underlying
 //! `jmap::calendar_sync::sync_calendars` does not accept a token.
 //! Threading per-batch cancellation through the JMAP calendar pipeline
-//! is tracked in the same Phase-3-retrospective bucket as the
-//! Gmail/Graph entry-only check (see `docs/service/discrepancies.md`).
+//! is tracked with the Gmail/Graph entry-only checks.
 
 use jmap::client::JmapState;
 use rtsk::db::ReadDbState;

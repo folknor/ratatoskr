@@ -10,8 +10,8 @@
 //! The two `match` arms below are exhaustive without `_` wildcards on
 //! purpose: adding a new variant to `MailOperation` (or
 //! `WireMailOperation`) without a matching arm here is a compile
-//! error, which is exactly the regression guard the static-mirror
-//! contract in `docs/service/phase-2-plan.md` calls for.
+//! error, which is the regression guard the static-mirror contract
+//! requires.
 
 use common::typed_ids::{FolderId, TagId};
 use service_api::{WireFolderId, WireMailOperation, WireTagId};

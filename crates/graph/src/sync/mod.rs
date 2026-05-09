@@ -58,9 +58,8 @@ struct SyncCtx<'a> {
 /// crate destructures its `SyncProviderCtx` at the IPC boundary so the
 /// `provider-sync -> graph -> provider-sync` Cargo cycle is closed. The
 /// `service-state` dep stays in `crates/graph/Cargo.toml` until the per-
-/// store handle types relocate to a UI-safe crate (deferred to Phase 8 -
-/// see `docs/service/implementation-roadmap.md` § "Phase 6d carry-forward
-/// to Phase 8" for the full structural-lockdown plan).
+/// store handle types relocate to a UI-safe crate. The structural
+/// lockdown is enforced by the transitive app dependency tests.
 #[allow(clippy::too_many_arguments)]
 pub async fn graph_initial_sync(
     client: &GraphClient,

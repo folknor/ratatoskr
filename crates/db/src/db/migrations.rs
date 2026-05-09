@@ -106,8 +106,7 @@ pub fn run_all(conn: &Connection) -> Result<u32, String> {
 /// `(0, 1)` then `(1, 1)`; the per-step callback exists for future multi-
 /// migration releases.
 ///
-/// Contract for migration authors (see scope item 19 of
-/// `docs/service/phase-1.5-plan.md`):
+/// Contract for migration authors:
 /// - Each migration must wrap in a single SQLite transaction; the runner's
 ///   BEGIN / COMMIT around `m.sql` is the canonical shape.
 /// - If a future migration MUST batch into multiple committed transactions

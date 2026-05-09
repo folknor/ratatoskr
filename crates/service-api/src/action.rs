@@ -2,7 +2,7 @@
 //!
 //! Phase 2 introduces the action service relocation: the UI sends an
 //! `ActionWirePlan` over IPC; the Service journals it (per the
-//! sibling-job model in `docs/service/phase-2-plan.md` scope item 18a)
+//! sibling-job model)
 //! and a worker drives execution with per-operation `OperationOutcome`
 //! notifications and a final `ActionCompleted`.
 //!
@@ -151,8 +151,7 @@ pub struct ActionPlanAck {
 
 /// Per-operation result emitted by the worker.
 ///
-/// **Phase 2 task 25 lockdown** (per `docs/service/phase-2-plan.md`
-/// scope item 18): the wire is narrower than the domain
+/// **Wire lockdown.** The wire is narrower than the domain
 /// `core::actions::ActionOutcome` / `ActionError` shape. Provider
 /// taxonomies (HTTP 4xx vs 5xx, network vs auth, etc.) collapse into
 /// `RemoteFailure` with a `retryable` flag; action-pipeline errors
@@ -233,8 +232,8 @@ pub struct RemoteFailure {
 }
 
 /// Worker emits one of these per operation. `MustDeliver` notification
-/// (per `docs/service/problem-statement.md` § IPC "notification class
-/// taxonomy"); cross-respawn safety via `service_generation`.
+/// under the Service IPC notification-class taxonomy; cross-respawn
+/// safety via `service_generation`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationOutcome {
     pub plan_id: PlanId,

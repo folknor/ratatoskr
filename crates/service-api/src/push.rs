@@ -1,10 +1,10 @@
 //! JMAP push wire types.
 //!
-//! Phase 4 of `docs/service/phase-4-plan.md` relocates the JMAP push
-//! WebSocket loop into the Service. The Service-internal bridge task
-//! calls `SyncRuntime::start_account` directly on each debounced
-//! StateChange burst and emits a `push.event` notification afterwards
-//! so the UI's status bar can surface "new mail arrived" indicators.
+//! The JMAP push WebSocket loop lives in the Service. The
+//! Service-internal bridge task calls `SyncRuntime::start_account`
+//! directly on each debounced StateChange burst and emits a
+//! `push.event` notification afterwards so the UI's status bar can
+//! surface "new mail arrived" indicators.
 //!
 //! Class is `Coalesce { key: PushEvent(account_id) }` - status-bar
 //! semantics are latest-wins per account; nobody waits on a `PushEvent`

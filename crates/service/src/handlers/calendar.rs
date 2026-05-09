@@ -30,8 +30,7 @@ use crate::boot::BootSharedState;
 /// 1 hour matches the deleted UI-side `Message::GalRefreshTick` cadence
 /// the kick replaces; the actual cadence stays UI-driven on the 5-min
 /// `SyncTick`, with this staleness check enforcing the effective hourly
-/// rate Service-side. See `docs/service/phase-5-plan.md` § "Cadence-
-/// driven kicks" for the design.
+/// rate Service-side.
 const CALENDAR_STALENESS: Duration = Duration::from_secs(60 * 60);
 
 pub(crate) async fn handle_start_account_sync(

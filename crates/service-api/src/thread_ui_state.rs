@@ -1,8 +1,7 @@
 //! Per-thread UI state wire types.
 //!
-//! Phase 6a (`docs/service/phase-6a-plan.md`) relocates writes to the
-//! `thread_ui_state` table - keyed on `(account_id, thread_id)` -
-//! Service-side. Today's only field is `attachments_collapsed`; the
+//! Service owns writes to the `thread_ui_state` table, keyed on
+//! `(account_id, thread_id)`. Today's only field is `attachments_collapsed`; the
 //! IPC carries the full row so future thread-scoped UI flags get a
 //! wire-shape they can extend.
 

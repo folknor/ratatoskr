@@ -1,8 +1,7 @@
 //! Service-side per-account JMAP push runtime.
 //!
-//! Phase 4 of `docs/service/phase-4-plan.md` relocates the JMAP push
-//! WebSocket loop into the Service. `PushRuntime` owns a per-account
-//! map of bridge tasks, each of which:
+//! The JMAP push WebSocket loop runs in the Service. `PushRuntime`
+//! owns a per-account map of bridge tasks, each of which:
 //!
 //! 1. Listens on the `mpsc::Receiver<StateChange>` produced by
 //!    `jmap::push::start_push`.

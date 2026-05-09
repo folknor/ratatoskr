@@ -3,9 +3,8 @@
 //! **Phase 2 search-index contract (scope item 18b / task 16).** This
 //! action does NOT touch the Tantivy index. The local DB row is
 //! removed and the provider is asked to delete server-side; the
-//! search-index entry for the message survives the action. Phase 3's
-//! cross-store invariant pass (`docs/service/problem-statement.md` §
-//! Cross-store crash consistency) drops the orphaned doc on the next
+//! search-index entry for the message survives the action. The
+//! cross-store invariant pass drops the orphaned doc on the next
 //! sentinel-absent boot. The temporary inconsistency window is
 //! intentional: relocating the Tantivy writer in lock-step with
 //! actions would tangle Phase 2 with the Phase 3 sync surgery for no

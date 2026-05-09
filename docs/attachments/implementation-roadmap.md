@@ -4,7 +4,11 @@ Companion to `problem-statement.md`. Each phase below is intended as a **separat
 
 This document is a sketch. Phase scope, interfaces, and risks will firm up when each phase enters its own planning session.
 
-**Cross-document dependency.** Several phases depend on **the Service** (`docs/service/`). Phase 2 onward runs inside the Service, and Phase 3's cold path needs the `attachment.fetch` IPC. Phases 1a and 1b are pure library work and can land before any Service work begins.
+**Cross-document dependency.** Several phases depend on **the
+Service** (`docs/architecture.md` under "Service process model").
+Phase 2 onward runs inside the Service, and Phase 3's cold path needs
+the `attachment.fetch` IPC. Phases 1a and 1b are pure library work and
+can land before any Service work begins.
 
 ## How to read this
 
@@ -85,7 +89,8 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 **Exit criteria.**
 - `brokkr check` clean.
 - Tests pass for the three paths above.
-- Module is documented in `docs/architecture.md` § Settled Patterns ("Attachment fetch orchestration").
+- Module is documented in `docs/architecture.md` under "Settled Patterns"
+  ("Attachment fetch orchestration").
 
 **Risks / open questions.**
 - Squeeze cost on the sync hot path (batch hashing of large attachments). May need to spawn the squeeze on a blocking pool. Resolve with a benchmark in the planning session.

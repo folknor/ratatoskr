@@ -10,9 +10,9 @@
 //!    load-bearing repair: the next JMAP delta sync becomes
 //!    initial-style and re-fetches the cached window from the
 //!    provider, repopulating body / inline / search regardless of
-//!    which leg was partial. (See § "Minimal cross-store invariant
-//!    pass" in `docs/service/phase-3-plan.md` for why per-row repair
-//!    was rejected.)
+//!    which leg was partial. Per-row repair was rejected because the
+//!    provider cursor is the only durable authority after a partial
+//!    cross-store write.
 //! 2. Per dirty account: iterates the Tantivy index for that
 //!    account_id, drops docs whose message_id is no longer in
 //!    `messages`. Bounded by per-account scope; defense-in-depth -
