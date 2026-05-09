@@ -76,6 +76,31 @@ A healthy `brokkr check` finishes well under 4 minutes. If it does not, somethin
 
 Never run `cargo|brokkr fmt`. Formatting is the user's call - leave whitespace, line breaks, and import ordering as written.
 
+## Harness
+
+Lua Service harness scripts live under `crates/app/tests/service-harness/`.
+Sync harness scripts live under `crates/app/tests/sync-harness/`.
+
+- `brokkr service-test <SCRIPT>` - run one Service harness script.
+- `brokkr service-test <DIR> -N <N>` - run a cohort directory; `-N`
+  means cohort cycles.
+- `brokkr service-suite [--filter X]` - run the discovered Service
+  harness suite, optionally filtered.
+- `brokkr service-list` - list scripts and parsed frontmatter.
+
+`brokkr.toml` has two ratatoskr sections:
+
+- `[ratatoskr.harness]` selects the check sweep and app binary that
+  `brokkr service-test` drives (`test-helpers` build of `app`).
+- `[ratatoskr]` wires sync-harness mock servers: installed
+  `saehrimnir` binary, fixture dir, endpoint env var names, and
+  `sync_script_dir`.
+
+`saehrimnir` is the external mock-provider server used by sync harness
+scripts. Brokkr starts it, injects
+`RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, and scripts
+exercise ratatoskr's real provider sync against those endpoints.
+
 ## Dev-Seed
 
 `crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root. When the app is built with `--features dev-seed` (it always is during development), it wipes the entire dev data directory and re-seeds on every launch - there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (a single v100 migration).

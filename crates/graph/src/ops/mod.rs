@@ -58,7 +58,7 @@ impl GraphOps {
 // Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
 // `ProviderOps`. The relocated `ProviderSyncOps` trait
 // (`provider-sync` crate) carries them; `provider-sync/src/graph_impl.rs`
-// holds the orphan-impl that delegates into `super::sync`.
+// holds the orphan-impl and sync entry-point code.
 #[async_trait]
 impl ProviderOps for GraphOps {
     async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {

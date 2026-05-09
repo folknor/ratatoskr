@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use imap::ops::ImapOps;
+use ::imap::ops::ImapOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 
@@ -18,7 +18,7 @@ impl ProviderSyncOps for ImapOps {
         let read_db = ctx.db.to_read_state();
         let imap_config = self.load_config(&read_db, ctx.account_id).await?;
 
-        let result = imap::imap_initial::imap_initial_sync(
+        let result = crate::imap::imap_initial::imap_initial_sync(
             ctx.progress,
             ctx.db,
             ctx.body_store,
@@ -47,7 +47,7 @@ impl ProviderSyncOps for ImapOps {
         let imap_config = self.load_config(&read_db, ctx.account_id).await?;
         let days_back = days_back.unwrap_or(365);
 
-        let result = imap::imap_delta::imap_delta_sync(
+        let result = crate::imap::imap_delta::imap_delta_sync(
             ctx.progress,
             ctx.db,
             ctx.body_store,

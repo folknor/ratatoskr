@@ -48,7 +48,7 @@ pub(crate) async fn graph_contacts_initial_sync(
 /// Delta contact sync: for each contact folder with a stored delta token,
 /// fetch changes and apply creates/updates/deletes.
 /// Handles 410 Gone by falling back to full sync for that folder.
-pub(crate) async fn graph_contacts_delta_sync(
+pub async fn graph_contacts_delta_sync(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,

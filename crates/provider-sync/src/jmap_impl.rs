@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use jmap::ops::JmapOps;
+use ::jmap::ops::JmapOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 
@@ -15,7 +15,7 @@ impl ProviderSyncOps for JmapOps {
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
         self.client.ensure_valid_token().await?;
-        jmap::sync::jmap_initial_sync(
+        crate::jmap::sync::jmap_initial_sync(
             &self.client,
             ctx.account_id,
             days_back,
@@ -29,7 +29,7 @@ impl ProviderSyncOps for JmapOps {
         .await?;
 
         // Sync shared JMAP accounts (discovered from Session in initial sync).
-        let shared_results = jmap::shared_mailbox_sync::sync_all_shared_accounts(
+        let shared_results = crate::jmap::shared_mailbox_sync::sync_all_shared_accounts(
             &self.client,
             ctx.account_id,
             ctx.db,
@@ -55,7 +55,7 @@ impl ProviderSyncOps for JmapOps {
         _days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         self.client.ensure_valid_token().await?;
-        let result = jmap::sync::jmap_delta_sync(
+        let result = crate::jmap::sync::jmap_delta_sync(
             &self.client,
             ctx.account_id,
             ctx.db,
@@ -68,7 +68,7 @@ impl ProviderSyncOps for JmapOps {
         .await?;
 
         // Sync shared JMAP accounts after primary delta sync.
-        let shared_results = jmap::shared_mailbox_sync::sync_all_shared_accounts(
+        let shared_results = crate::jmap::shared_mailbox_sync::sync_all_shared_accounts(
             &self.client,
             ctx.account_id,
             ctx.db,

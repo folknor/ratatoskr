@@ -229,21 +229,4 @@ mod tests {
         assert!(entry.display_name.is_none());
     }
 
-    #[test]
-    fn delta_token_routing_uses_client_mailbox_id() {
-        // Verify that the GraphClient's mailbox_id determines routing.
-        // Primary client: mailbox_id() returns None -> primary token storage.
-        // Shared client: mailbox_id() returns Some -> shared token storage.
-        let primary = GraphClient::test_with_mailbox(None);
-        assert!(primary.mailbox_id().is_none());
-        assert!(!primary.is_shared_mailbox());
-
-        let shared = primary.for_shared_mailbox("shared@example.com".to_string());
-        assert_eq!(shared.mailbox_id(), Some("shared@example.com"));
-        assert!(shared.is_shared_mailbox());
-
-        // The api_path_prefix determines which mailbox API calls target
-        assert_eq!(primary.api_path_prefix(), "/me");
-        assert_eq!(shared.api_path_prefix(), "/users/shared%40example.com");
-    }
 }

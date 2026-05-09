@@ -8,17 +8,10 @@
 //! along with the `app.action_ctx` field that consumed it.
 //!
 //! Phase 6b's direct-dep check + Phase 6c-11's `app -> cal ->
-//! service-state` transitive check together close every UI-reachable
-//! path that the workspace shape allowed at the time. The strict
-//! transitive variant (`app -> ... -> service-state` via *any*
-//! path-dep chain except through `service`) is documented as an open
-//! architectural exception in `docs/architecture.md` "Current
-//! Exceptions"; closing it would require `SyncProviderCtx` out of
-//! `common`, `sync` split into pure-logic + persistence halves, and
-//! provider sync impls relocated to a sibling crate. Not currently
-//! scheduled. `WriteDbState` is still constructed only inside
-//! `service-state` and `service`, so app code cannot accidentally
-//! reach a writer despite the open Cargo edges.
+//! service-state` transitive check closed the known UI-reachable
+//! write escape paths. The strict transitive variant now closes the
+//! remaining Cargo-graph gap: `app` may not reach `service-state`
+//! through any path-dep chain except by descending through `service`.
 //!
 //! Why a Cargo.toml lint instead of a Rust visibility flip: the
 //! service crate (also a separate crate from `service-state`)
@@ -96,24 +89,12 @@ fn workspace_path(suffix: &str) -> PathBuf {
 
 /// Phase 6c-11: cal-out-of-app lockdown (the 6b-deferred check, refocused).
 ///
-/// The original phase-6c-plan envisioned a strict
-/// `app -> ... -> service-state` blackout. That goal is not
-/// achievable in the current workspace shape: `common` (used by
-/// `rtsk`, which `app` depends on) carries provider sync types
-/// parameterised over `&WriteDbState` / `&BodyStoreWriteState` / etc.,
-/// so `app -> rtsk -> common -> service-state` is a structural path
-/// that predates Phase 6 and would require its own multi-phase
-/// refactor (move provider sync types out of `common`, or
-/// separate-crate the sync entry-points). That refactor is tracked
-/// for Phase 6d/8.
-///
-/// What this test enforces *today* is the specific regression class
-/// Phase 6c closed: the `app -> cal -> service-state` path that 6b
-/// documented as the only meaningful UI-reachable writer-half
-/// escape. Phase 6c-10 dropped the `cal` dep from `app/Cargo.toml`;
-/// this test asserts it stays dropped. Re-introducing `cal` (or any
-/// crate that carries `cal`-style write actions) into app's path
-/// cone trips the assert at PR-review time.
+/// This test keeps the Phase 6c regression class visible: the
+/// `app -> cal -> service-state` path that 6b documented as the
+/// meaningful UI-reachable writer-half escape. Phase 6c-10 dropped
+/// the `cal` dep from `app/Cargo.toml`; this test asserts it stays
+/// dropped. The strict `app -> ... -> service-state` blackout is
+/// enforced by the sibling test below.
 ///
 /// Strategy is deliberately schema-light: parses each Cargo.toml,
 /// builds a path-dep adjacency map, and walks from `app` to check
@@ -212,4 +193,86 @@ fn app_crate_must_not_transitively_depend_on_cal() {
         }
     }
     // No path found - lockdown holds.
+}
+
+#[test]
+fn app_crate_must_not_transitively_depend_on_service_state_except_via_service() {
+    let crates_dir = workspace_path("crates");
+    let entries = std::fs::read_dir(&crates_dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", crates_dir.display()));
+
+    let mut graph: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| panic!("dir entry: {e}"));
+        let manifest = entry.path().join("Cargo.toml");
+        if !manifest.is_file() {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&manifest)
+            .unwrap_or_else(|e| panic!("read {}: {e}", manifest.display()));
+        let parsed: toml::Value = toml::from_str(&raw)
+            .unwrap_or_else(|e| panic!("parse {}: {e}", manifest.display()));
+        let crate_name = parsed
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or_else(|| panic!("no [package].name in {}", manifest.display()))
+            .to_string();
+        let mut deps = Vec::new();
+        for table_key in &["dependencies", "dev-dependencies"] {
+            if let Some(table) = parsed.get(*table_key).and_then(|v| v.as_table()) {
+                for (name, value) in table {
+                    let is_path_dep = value
+                        .as_table()
+                        .map(|t| t.contains_key("path"))
+                        .unwrap_or(false);
+                    if is_path_dep {
+                        deps.push(name.clone());
+                    }
+                }
+            }
+        }
+        graph.insert(crate_name, deps);
+    }
+
+    let blessed: std::collections::HashSet<&str> = ["service"].iter().copied().collect();
+    let target = "service-state";
+    let start = "app";
+    let mut parent: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut queue: std::collections::VecDeque<String> =
+        std::collections::VecDeque::new();
+    let mut visited: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    queue.push_back(start.to_string());
+    visited.insert(start.to_string());
+    while let Some(current) = queue.pop_front() {
+        if current == target {
+            let mut chain: Vec<String> = vec![current.clone()];
+            let mut cursor = current;
+            while let Some(p) = parent.get(&cursor).cloned() {
+                chain.push(p.clone());
+                cursor = p;
+            }
+            chain.reverse();
+            panic!(
+                "Strict service-state lockdown failed: app reaches service-state via {}.\n\
+                 UI code must route durable writes through Service IPC. Move writer-half \
+                 dependencies behind the service crate or provider-sync instead.",
+                chain.join(" -> "),
+            );
+        }
+        if blessed.contains(current.as_str()) {
+            continue;
+        }
+        if let Some(deps) = graph.get(&current) {
+            for dep in deps {
+                if visited.insert(dep.clone()) {
+                    parent.insert(dep.clone(), current.clone());
+                    queue.push_back(dep.clone());
+                }
+            }
+        }
+    }
 }

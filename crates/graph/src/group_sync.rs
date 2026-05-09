@@ -183,7 +183,7 @@ pub async fn fetch_user_groups(
 /// Main sync entry point: fetch groups, resolve members, persist to DB.
 ///
 /// Returns the count of synced groups.
-pub(crate) async fn sync_exchange_groups(
+pub async fn sync_exchange_groups(
     client: &GraphClient,
     db: &ReadDbState,
     account_id: &str,

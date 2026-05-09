@@ -26,8 +26,8 @@ const CIRCUIT_BREAKER_DELAY_MS: u64 = 15_000;
 const CIRCUIT_BREAKER_MAX_FAILURES: u32 = 5;
 
 use super::is_connection_error;
-use crate::imap_delta_janitor::sync_flags_on_session;
-use crate::imap_delta_janitor::{run_deletion_detection, sync_flags_without_condstore};
+use super::imap_delta_janitor::sync_flags_on_session;
+use super::imap_delta_janitor::{run_deletion_detection, sync_flags_without_condstore};
 
 fn compute_since_date(days_back: i64) -> String {
     use chrono::{Duration, Utc};
@@ -59,7 +59,7 @@ pub async fn imap_delta_sync(
         let mut session = connect(config).await?;
         let folders = client::list_folders(&mut session).await?;
         let _ =
-            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         folders
     };
     let syncable_folders = get_syncable_folders(&all_folders);
@@ -339,7 +339,7 @@ async fn batch_delta_check(
         let mut session = connect(config).await?;
         let results = client::delta_check_folders(&mut session, cancellation_token, requests).await;
         let _ =
-            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         results
     }
     .await;
@@ -391,7 +391,7 @@ async fn batch_delta_check(
                             }
                         }
                         let _ = tokio::time::timeout(
-                            crate::connection::IMAP_LOGOUT_TIMEOUT,
+                            super::connection::IMAP_LOGOUT_TIMEOUT,
                             session.logout(),
                         )
                         .await;
@@ -441,7 +441,7 @@ async fn per_folder_check(
 
     if changed {
         let _ =
-            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok(DeltaCheckResult {
             folder: folder_path.to_string(),
             uidvalidity: status.uidvalidity,
@@ -465,7 +465,7 @@ async fn per_folder_check(
     };
 
     let new_uids = client::fetch_new_uids(&mut session, folder_path, saved.last_uid).await?;
-    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
 
     Ok(DeltaCheckResult {
         folder: folder_path.to_string(),
@@ -505,7 +505,7 @@ async fn fetch_folder_uids(
 
     if sr.uids.is_empty() {
         let _ =
-            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         // Still persist sync state so this folder isn't treated as "new" on every delta cycle
         let aid = account_id.to_string();
         let fp = folder.raw_path.clone();
@@ -546,7 +546,7 @@ async fn fetch_folder_uids(
     })
     .await?;
 
-    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     Ok(())
 }
 
@@ -702,7 +702,7 @@ async fn process_folder_delta(
             }
         }
         let _ =
-            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
 
         // Persist the server's new (lower) modseq so future syncs use CHANGEDSINCE
         // with the correct baseline.
@@ -737,7 +737,7 @@ async fn process_folder_delta(
         let sr = client::search_folder(&mut session, &folder.raw_path, Some(since_date)).await?;
 
         if sr.uids.is_empty() {
-            let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
+            let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
                 .await;
             // Persist the new uidvalidity even for empty folders, so we don't
             // repeat the expensive UIDVALIDITY recovery on every sync cycle
@@ -781,7 +781,7 @@ async fn process_folder_delta(
         .await?;
 
         let _ =
-            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok(());
     }
 
@@ -818,7 +818,7 @@ async fn process_folder_delta(
                     }
                 }
                 let _ =
-                    tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
+                    tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
                         .await;
             }
         } else if delta.highest_modseq.is_none() {
@@ -923,6 +923,6 @@ async fn process_folder_delta(
     })
     .await?;
 
-    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     Ok(())
 }

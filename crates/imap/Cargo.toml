@@ -26,7 +26,6 @@ store = { path = "../stores" }
 search = { path = "../search" }
 seen = { path = "../seen" }
 common = { path = "../common" }
-service-state = { path = "../service-state" }
 smtp = { path = "../smtp" }
 sync = { path = "../sync" }
 tokio-util = "0.7"

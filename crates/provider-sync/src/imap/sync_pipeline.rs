@@ -10,7 +10,7 @@ use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use seen::MessageAddresses;
 use store::inline_image_store::InlineImage;
-use sync::persistence;
+use crate::persistence;
 
 use super::convert::ConvertedMessage;
 use super::folder_mapper::map_folder_to_label;

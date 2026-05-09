@@ -28,7 +28,6 @@ search = { path = "../search" }
 seen = { path = "../seen" }
 common = { path = "../common" }
 label-colors = { path = "../label-colors" }
-service-state = { path = "../service-state" }
 sync = { path = "../sync" }
 tokio-util = "0.7"
 

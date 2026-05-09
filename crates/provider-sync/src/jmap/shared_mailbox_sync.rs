@@ -17,11 +17,11 @@ use service_state::{
 use sync::state as sync_state;
 use tokio_util::sync::CancellationToken;
 
-use crate::client::JmapClient;
-use crate::mailbox_mapper::MailboxInfo;
-use crate::parse::{ParsedJmapMessage, parse_jmap_email};
-use crate::sync::mailbox::{get_email_state_for, get_mailbox_state_for};
-use crate::sync::{
+use super::client::JmapClient;
+use super::mailbox_mapper::MailboxInfo;
+use super::parse::{ParsedJmapMessage, parse_jmap_email};
+use super::sync::mailbox::{get_email_state_for, get_mailbox_state_for};
+use super::sync::{
     SyncCtx, emit_progress, fetch_email_batch_for, load_sync_state_ctx, query_email_page_for,
     save_sync_state_ctx,
 };
@@ -207,7 +207,7 @@ async fn shared_initial_sync(ctx: &SyncCtx<'_>) -> Result<(), String> {
 
     // Phase 1: Sync mailboxes -> labels
     emit_progress(ctx, "mailboxes", 0, 1);
-    let (mailbox_map, mailbox_data) = crate::sync::mailbox::sync_mailboxes(ctx).await?;
+    let (mailbox_map, mailbox_data) = super::sync::mailbox::sync_mailboxes(ctx).await?;
 
     let mailbox_state = get_mailbox_state_for(ctx.client, Some(jmap_id)).await?;
     save_sync_state_ctx(ctx, "Mailbox", &mailbox_state).await?;
@@ -244,7 +244,7 @@ async fn shared_initial_sync(ctx: &SyncCtx<'_>) -> Result<(), String> {
         let emails = fetch_email_batch_for(ctx.client, Some(jmap_id), &batch_ids).await?;
         let parsed = parse_email_batch(&emails, &mailbox_map)?;
 
-        crate::sync::storage::persist_messages(ctx, &parsed, &mailbox_data).await?;
+        super::sync::storage::persist_messages(ctx, &parsed, &mailbox_data).await?;
 
         #[allow(clippy::cast_possible_truncation)]
         {
@@ -282,7 +282,7 @@ async fn shared_delta_sync(ctx: &SyncCtx<'_>) -> Result<SyncResult, String> {
     }
 
     // Refresh mailbox map
-    let (mailbox_map, _mailbox_data) = crate::sync::mailbox::sync_mailboxes(ctx).await?;
+    let (mailbox_map, _mailbox_data) = super::sync::mailbox::sync_mailboxes(ctx).await?;
 
     // 2. Email changes
     let mut since_state = email_state;
@@ -293,7 +293,7 @@ async fn shared_delta_sync(ctx: &SyncCtx<'_>) -> Result<SyncResult, String> {
         let inner = ctx.client.inner();
         let mut request = inner.build();
         let mut changes = bifrost_jmap::email::EmailChanges::new(jmap_id, &since_state);
-        changes.max_changes(crate::JMAP_MAX_CHANGES);
+        changes.max_changes(super::JMAP_MAX_CHANGES);
         let handle = request
             .call(changes)
             .map_err(|e| format!("Email/changes: {e}"))?;
@@ -337,13 +337,13 @@ async fn shared_delta_sync(ctx: &SyncCtx<'_>) -> Result<SyncResult, String> {
                     }
                 }
 
-                crate::sync::storage::persist_messages(ctx, &parsed, &[]).await?;
+                super::sync::storage::persist_messages(ctx, &parsed, &[]).await?;
             }
         }
 
         if !destroyed.is_empty() {
             let destroyed_refs: Vec<&str> = destroyed.iter().map(String::as_str).collect();
-            crate::sync::storage::delete_messages(ctx, &destroyed_refs).await?;
+            super::sync::storage::delete_messages(ctx, &destroyed_refs).await?;
         }
 
         since_state = changes.new_state().to_string();
@@ -376,7 +376,7 @@ async fn shared_mailbox_changes(
     let inner = ctx.client.inner();
     let mut request = inner.build();
     let mut changes = MailboxChanges::new(jmap_id, since_state);
-    changes.max_changes(crate::JMAP_MAX_CHANGES);
+    changes.max_changes(super::JMAP_MAX_CHANGES);
     let handle = request
         .call(changes)
         .map_err(|e| format!("Mailbox/changes: {e}"))?;
@@ -389,14 +389,14 @@ async fn shared_mailbox_changes(
         Ok(changes) => {
             let new_state = changes.new_state().to_string();
             if new_state != since_state {
-                crate::sync::mailbox::sync_mailboxes(ctx).await?;
+                super::sync::mailbox::sync_mailboxes(ctx).await?;
                 save_sync_state_ctx(ctx, "Mailbox", &new_state).await?;
             }
         }
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("cannotCalculateChanges") {
-                crate::sync::mailbox::sync_mailboxes(ctx).await?;
+                super::sync::mailbox::sync_mailboxes(ctx).await?;
                 let new_state = get_mailbox_state_for(ctx.client, Some(jmap_id)).await?;
                 save_sync_state_ctx(ctx, "Mailbox", &new_state).await?;
             } else {

@@ -397,11 +397,9 @@ fn read_jmap_credentials(
         })
         .map_err(|e| format!("JMAP account {account_id} not found: {e}"))?;
 
-    let mut jmap_url = row.0;
+    let jmap_url = row.0;
     #[cfg(feature = "test-helpers")]
-    if let Some(override_url) = jmap_base_url_override() {
-        jmap_url = Some(override_url);
-    }
+    let jmap_url = jmap_base_url_override().or(jmap_url);
     let jmap_url = jmap_url.ok_or("No jmap_url configured for account")?;
     let email = row.1;
     let enc_password = row.2;

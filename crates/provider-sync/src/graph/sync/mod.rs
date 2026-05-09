@@ -496,11 +496,3 @@ async fn filter_pending_ops(
         |message| &message.base.thread_id,
     ))
 }
-
-/// Public entry point for folder sync (used by ops.rs list_folders).
-pub(crate) async fn sync_folders_public(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<FolderMap, String> {
-    sync_folders(client, ctx).await
-}

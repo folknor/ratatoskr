@@ -23,6 +23,11 @@ mod gmail_impl;
 mod graph_impl;
 mod imap_impl;
 mod jmap_impl;
+pub mod gmail;
+pub mod graph;
+pub mod imap;
+pub mod jmap;
+pub(crate) mod persistence;
 
 use async_trait::async_trait;
 use common::error::ProviderError;

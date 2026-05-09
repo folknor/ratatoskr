@@ -13,13 +13,15 @@ use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode, BootPhaseKind,
-    Notification, OperationId, PlanId, RequestParams, TestCrashAfterNWritesParams,
+    Notification, OperationId, PlanId, RequestParams, SendAttachmentSource,
+    SendWireAttachment, SendWireMessage, SendWireRequest, TestCrashAfterNWritesParams,
     TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
-    TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams,
-    WireFolderId, WireMailOperation, WireTagId,
+    TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
 };
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::Write as _;
+use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -98,6 +100,9 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "pid_is_alive", lua_pid_is_alive)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
+    set_field_fn(state, table_idx, "uuid", lua_uuid)?;
+    set_field_fn(state, table_idx, "repeat_byte", lua_repeat_byte)?;
+    set_field_fn(state, table_idx, "stage_attachment", lua_stage_attachment)?;
     set_field_fn(state, table_idx, "assert", lua_assert)?;
     set_field_fn(state, table_idx, "assert_eq", lua_assert_eq)?;
     set_field_fn(state, table_idx, "same_client", lua_same_client)?;
@@ -391,6 +396,105 @@ fn lua_now_ms(state: &mut State) -> dellingr::Result<u8> {
     };
     state.set_top(0);
     state.push_number(elapsed as f64);
+    Ok(1)
+}
+
+fn lua_uuid(state: &mut State) -> dellingr::Result<u8> {
+    state.set_top(0);
+    state.push_string(PlanId::new_v7().to_string());
+    Ok(1)
+}
+
+/// `harness.repeat_byte(b, n)` -> string of length `n`, every byte equal
+/// to the first byte of `b`.
+///
+/// ASCII-only by construction: `dellingr::push_string` takes `&str`, so
+/// the produced buffer must be valid UTF-8. The cheapest UTF-8 guarantee
+/// is to require `b[0] < 0x80` - repeating any single ASCII byte yields
+/// valid UTF-8. High bytes are rejected up front with a clear message
+/// rather than falling through to a late `from_utf8` error. Test scripts
+/// only need bulk filler ("z" * 5MB), so the ASCII restriction is not
+/// limiting in practice.
+fn lua_repeat_byte(state: &mut State) -> dellingr::Result<u8> {
+    let value = state.to_string(1)?;
+    let byte = value
+        .as_bytes()
+        .first()
+        .copied()
+        .ok_or_else(|| lua_error_message("repeat_byte requires a non-empty byte string"))?;
+    if byte >= 0x80 {
+        return Err(lua_error_message(format!(
+            "repeat_byte requires an ASCII byte (< 0x80), got 0x{byte:02x}"
+        )));
+    }
+    let len = state.to_number(2)? as usize;
+    // byte < 0x80, so `vec![byte; len]` is valid UTF-8.
+    let repeated = String::from_utf8(vec![byte; len])
+        .map_err(|error| lua_error_message(error.to_string()))?;
+    state.set_top(0);
+    state.push_string(repeated);
+    Ok(1)
+}
+
+fn lua_stage_attachment(state: &mut State) -> dellingr::Result<u8> {
+    let app_data_dir = PathBuf::from(state.to_string(1)?);
+    let send_id_value = state.to_string(2)?;
+    let send_id = parse_plan_id(&send_id_value)?;
+    let index = state.to_number(3)? as usize;
+    let relative_path = format!("{index}.bin");
+    let staging_dir = app_data_dir
+        .join("staging")
+        .join(send_id.to_string());
+    std::fs::create_dir_all(&staging_dir).map_err(lua_io)?;
+    // 50 MB attachments hit this path - wrap the file in a BufWriter so the
+    // 8 KiB chunk loop below collapses to a handful of syscalls instead of
+    // ~6400. The wrapper also covers the small-payload branch for free.
+    let file = std::fs::File::create(staging_dir.join(&relative_path)).map_err(lua_io)?;
+    let mut writer = BufWriter::with_capacity(64 * 1024, file);
+    let mut hasher = Sha256::new();
+    let size = if state.typ(4) == LuaType::Table {
+        let len = get_number_field(state, 4, "size")?
+            .ok_or_else(|| lua_error_message("stage_attachment payload requires size"))?
+            as usize;
+        let value = get_string_field(state, 4, "byte")?
+            .ok_or_else(|| lua_error_message("stage_attachment payload requires byte"))?;
+        let byte = value
+            .as_bytes()
+            .first()
+            .copied()
+            .ok_or_else(|| lua_error_message("stage_attachment byte must be non-empty"))?;
+        let chunk = vec![byte; 8192.min(len)];
+        let mut remaining = len;
+        while remaining > 0 {
+            let n = remaining.min(chunk.len());
+            writer.write_all(&chunk[..n]).map_err(lua_io)?;
+            hasher.update(&chunk[..n]);
+            remaining -= n;
+        }
+        len
+    } else {
+        let bytes = state.to_string(4)?;
+        writer.write_all(bytes.as_bytes()).map_err(lua_io)?;
+        hasher.update(bytes.as_bytes());
+        bytes.len()
+    };
+    writer.flush().map_err(lua_io)?;
+    let mut content_hash = [0_u8; 32];
+    content_hash.copy_from_slice(&hasher.finalize());
+    let content_hash_vec = content_hash.to_vec();
+    let value = serde_json::json!({
+        "relative_path": relative_path,
+        "content_hash": content_hash_vec,
+        "content_hash_hex": hex_bytes(&content_hash),
+        "size": size,
+        "source": {
+            "kind": "staging_file",
+            "relative_path": relative_path,
+            "content_hash": content_hash_vec,
+        },
+    });
+    state.set_top(0);
+    push_json(state, &value)?;
     Ok(1)
 }
 
@@ -1177,6 +1281,12 @@ fn request_params_from_lua(
             let plan_id = parse_plan_id_request(state, params_idx, "ActionJobStatus")?;
             Ok(RequestParams::ActionJobStatus { plan_id })
         }
+        "ActionSend" | "action.send" => {
+            let request = parse_send_request(state, params_idx)?;
+            Ok(RequestParams::ActionSend {
+                request: Box::new(request),
+            })
+        }
         "ActionMarkChatRead" | "action.mark_chat_read" => {
             let chat_email = if state.get_top() >= params_idx as usize
                 && state.typ(params_idx) == LuaType::Table
@@ -1414,6 +1524,212 @@ fn parse_plan_id(value: &str) -> dellingr::Result<PlanId> {
     uuid::Uuid::parse_str(value)
         .map(PlanId)
         .map_err(|error| lua_error_message(format!("invalid plan_id {value:?}: {error}")))
+}
+
+fn parse_send_request(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<SendWireRequest> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message("ActionSend requires params table"));
+    }
+
+    let top = state.get_top();
+    let send_id = get_string_field(state, params_idx, "send_id")?
+        .ok_or_else(|| lua_error_message("ActionSend requires send_id"))
+        .and_then(|value| parse_plan_id(&value))?;
+    let from_account_id = get_string_field(state, params_idx, "from_account_id")?
+        .ok_or_else(|| lua_error_message("ActionSend requires from_account_id"))?;
+    let message = parse_send_message(state, params_idx)?;
+    let attachments = parse_send_attachments(state, params_idx)?;
+    state.set_top(top as isize);
+    Ok(SendWireRequest {
+        send_id,
+        from_account_id,
+        message,
+        attachments,
+    })
+}
+
+fn parse_send_message(
+    state: &mut State,
+    request_idx: isize,
+) -> dellingr::Result<SendWireMessage> {
+    let top = state.get_top();
+    state.push_string("message");
+    state.get_table(request_idx)?;
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message("ActionSend requires message table"));
+    }
+    let message_idx = state.get_top() as isize;
+    let message = SendWireMessage {
+        draft_id: get_string_field(state, message_idx, "draft_id")?
+            .ok_or_else(|| lua_error_message("ActionSend message requires draft_id"))?,
+        from: get_string_field(state, message_idx, "from")?
+            .ok_or_else(|| lua_error_message("ActionSend message requires from"))?,
+        to: get_string_array_field(state, message_idx, "to")?,
+        cc: get_string_array_field(state, message_idx, "cc")?,
+        bcc: get_string_array_field(state, message_idx, "bcc")?,
+        subject: get_string_field(state, message_idx, "subject")?,
+        body_html: get_string_field(state, message_idx, "body_html")?
+            .ok_or_else(|| lua_error_message("ActionSend message requires body_html"))?,
+        body_text: get_string_field(state, message_idx, "body_text")?
+            .ok_or_else(|| lua_error_message("ActionSend message requires body_text"))?,
+        in_reply_to: get_string_field(state, message_idx, "in_reply_to")?,
+        references: get_string_field(state, message_idx, "references")?,
+        thread_id: get_string_field(state, message_idx, "thread_id")?,
+    };
+    state.set_top(top as isize);
+    Ok(message)
+}
+
+fn parse_send_attachments(
+    state: &mut State,
+    request_idx: isize,
+) -> dellingr::Result<Vec<SendWireAttachment>> {
+    let top = state.get_top();
+    state.push_string("attachments");
+    state.get_table(request_idx)?;
+    if state.typ(-1) == LuaType::Nil {
+        state.set_top(top as isize);
+        return Ok(Vec::new());
+    }
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message("ActionSend attachments must be a table"));
+    }
+    let attachments_idx = state.get_top() as isize;
+    let len = state.table_len(attachments_idx);
+    let mut attachments = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(attachments_idx)?;
+        if state.typ(-1) != LuaType::Table {
+            state.set_top(top as isize);
+            return Err(lua_error_message("ActionSend attachment must be table"));
+        }
+        let att_idx = state.get_top() as isize;
+        attachments.push(parse_send_attachment(state, att_idx)?);
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(attachments)
+}
+
+fn parse_send_attachment(
+    state: &mut State,
+    att_idx: isize,
+) -> dellingr::Result<SendWireAttachment> {
+    let size = get_number_field(state, att_idx, "size")?
+        .ok_or_else(|| lua_error_message("ActionSend attachment requires size"))?;
+    Ok(SendWireAttachment {
+        source: parse_send_attachment_source(state, att_idx)?,
+        size: size as u64,
+        mime: get_string_field(state, att_idx, "mime")?
+            .or_else(|| get_string_field(state, att_idx, "mime_type").ok().flatten())
+            .ok_or_else(|| lua_error_message("ActionSend attachment requires mime"))?,
+        filename: get_string_field(state, att_idx, "filename")?
+            .ok_or_else(|| lua_error_message("ActionSend attachment requires filename"))?,
+        content_id: get_string_field(state, att_idx, "content_id")?,
+    })
+}
+
+fn parse_send_attachment_source(
+    state: &mut State,
+    att_idx: isize,
+) -> dellingr::Result<SendAttachmentSource> {
+    let top = state.get_top();
+    state.push_string("source");
+    state.get_table(att_idx)?;
+    let source_idx = if state.typ(-1) == LuaType::Table {
+        state.get_top() as isize
+    } else {
+        state.set_top(top as isize);
+        att_idx
+    };
+    let kind = get_string_field(state, source_idx, "kind")?
+        .unwrap_or_else(|| "staging_file".to_string());
+    if kind != "staging_file" {
+        state.set_top(top as isize);
+        return Err(lua_error_message(format!(
+            "unsupported ActionSend attachment source {kind:?}"
+        )));
+    }
+    let relative_path = get_string_field(state, source_idx, "relative_path")?
+        .ok_or_else(|| lua_error_message("ActionSend source requires relative_path"))?;
+    let content_hash = get_content_hash_field(state, source_idx, "content_hash")?
+        .or_else(|| get_content_hash_field(state, source_idx, "content_hash_hex").ok().flatten())
+        .ok_or_else(|| lua_error_message("ActionSend source requires content_hash"))?;
+    state.set_top(top as isize);
+    Ok(SendAttachmentSource::StagingFile {
+        relative_path,
+        content_hash,
+    })
+}
+
+fn get_content_hash_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Option<[u8; 32]>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    let result = match state.typ(-1) {
+        LuaType::Nil => None,
+        LuaType::String => Some(parse_hex_hash(&state.to_string(-1)?)?),
+        LuaType::Table => {
+            let values_idx = state.get_top() as isize;
+            let len = state.table_len(values_idx);
+            if len != 32 {
+                state.set_top(top as isize);
+                return Err(lua_error_message(format!(
+                    "{key} must have 32 byte values, got {len}"
+                )));
+            }
+            let mut bytes = [0_u8; 32];
+            for i in 1..=len {
+                state.push_number(i as f64);
+                state.get_table(values_idx)?;
+                let value = state.to_number(-1)?;
+                if !(0.0..=255.0).contains(&value) {
+                    state.set_top(top as isize);
+                    return Err(lua_error_message(format!(
+                        "{key}[{i}] byte out of range: {value}"
+                    )));
+                }
+                bytes[i - 1] = value as u8;
+                state.pop(1);
+            }
+            Some(bytes)
+        }
+        other => {
+            state.set_top(top as isize);
+            return Err(lua_error_message(format!(
+                "{key} must be a 32-byte table or 64-char hex string, got {}",
+                other.as_str()
+            )));
+        }
+    };
+    state.set_top(top as isize);
+    Ok(result)
+}
+
+fn parse_hex_hash(value: &str) -> dellingr::Result<[u8; 32]> {
+    if value.len() != 64 {
+        return Err(lua_error_message(format!(
+            "content_hash hex must be 64 chars, got {}",
+            value.len()
+        )));
+    }
+    let mut out = [0_u8; 32];
+    for (index, byte) in out.iter_mut().enumerate() {
+        let start = index * 2;
+        *byte = u8::from_str_radix(&value[start..start + 2], 16)
+            .map_err(|error| lua_error_message(format!("invalid content_hash hex: {error}")))?;
+    }
+    Ok(out)
 }
 
 fn parse_action_operations(
@@ -1742,6 +2058,15 @@ fn signal_number(state: &mut State) -> dellingr::Result<i32> {
 
 fn duration_from_seconds(seconds: f64) -> Duration {
     Duration::from_millis((seconds * 1000.0).max(0.0) as u64)
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
 }
 
 fn boot_code_name(code: BootExitCode) -> &'static str {

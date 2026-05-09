@@ -12,13 +12,26 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1"
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "sync", "macros", "time"] }
 log = "0.4"
+futures = "0.3"
+sha2 = "0.11"
 tokio-util = "0.7"
+urlencoding = "2"
+bifrost-jmap = { path = "/home/folk/Programs/jmap-client/crates/jmap", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
 
 # Extracted workspace crates
 db = { path = "../db" }
 common = { path = "../common" }
 service-state = { path = "../service-state" }
+store = { path = "../stores" }
+search = { path = "../search" }
+seen = { path = "../seen" }
+sync = { path = "../sync" }
 
 # Provider crates: provider-sync owns the orphan-impls of
 # `ProviderSyncOps` for each provider's `Ops` type. The trait is
@@ -28,3 +41,6 @@ gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }
 imap = { path = "../imap" }
+
+[features]
+test-helpers = []

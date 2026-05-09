@@ -11,7 +11,7 @@ use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 
 use super::super::parse::ParsedJmapMessage;
 use super::SyncCtx;
-use sync::persistence as sync_persistence;
+use crate::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
 // DB persistence

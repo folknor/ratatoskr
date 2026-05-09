@@ -4,8 +4,8 @@ mod other_contacts;
 use serde::Deserialize;
 
 // Re-export public API
-pub(crate) use google_contacts::sync_google_contacts;
-pub(crate) use other_contacts::sync_google_other_contacts;
+pub use google_contacts::sync_google_contacts;
+pub use other_contacts::sync_google_other_contacts;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -14,7 +14,7 @@ pub(crate) use other_contacts::sync_google_other_contacts;
 /// Result of a Google contacts sync.
 #[derive(Debug)]
 #[allow(dead_code)] // counts surfaced once the sync caller starts logging them
-pub(crate) struct SyncContactsResult {
+pub struct SyncContactsResult {
     pub synced: usize,
     pub deleted: usize,
 }

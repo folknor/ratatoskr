@@ -39,9 +39,6 @@ pub(crate) fn check_cancelled(token: &CancellationToken) -> Result<(), String> {
     }
 }
 
-// Re-export public items
-pub(crate) use mailbox::{fetch_all_mailboxes, role_to_str};
-
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------

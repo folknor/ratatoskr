@@ -38,8 +38,7 @@ impl JmapOps {
 // Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
 // `ProviderOps`. The relocated `ProviderSyncOps` trait
 // (`provider-sync` crate) carries them; `provider-sync/src/jmap_impl.rs`
-// holds the orphan-impl that delegates into `super::sync` and the
-// shared-account-sync helpers.
+// holds the orphan-impl and sync entry-point code.
 #[async_trait]
 impl ProviderOps for JmapOps {
     async fn archive(&self, _ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {

@@ -14,7 +14,7 @@ use super::super::types::{
 };
 use super::SyncCtx;
 use super::stores::{index_messages, store_bodies, store_inline_images};
-use sync::persistence as sync_persistence;
+use crate::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
 // DB persistence (mirrors jmap/sync.rs patterns)

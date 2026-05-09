@@ -6,7 +6,7 @@ use store::inline_image_store::InlineImage;
 
 use super::super::client::GmailClient;
 use super::super::parse::{ParsedGmailMessage, parse_gmail_message};
-use sync::persistence as sync_persistence;
+use crate::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
 // Single-thread fetch + store

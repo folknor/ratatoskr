@@ -5,5 +5,4 @@ pub mod contacts;
 pub mod gdrive;
 pub mod ops;
 pub mod parse;
-pub mod sync;
 pub mod types;

@@ -261,13 +261,6 @@ pub(crate) async fn get_email_state_for(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Fetch all mailboxes using the builder pattern (no filter = all mailboxes).
-pub async fn fetch_all_mailboxes(
-    client: &JmapClient,
-) -> Result<Vec<bifrost_jmap::mailbox::Mailbox<bifrost_jmap::Get>>, String> {
-    fetch_all_mailboxes_for(client, None).await
-}
-
 /// Fetch all mailboxes for a specific JMAP account.
 pub async fn fetch_all_mailboxes_for(
     client: &JmapClient,

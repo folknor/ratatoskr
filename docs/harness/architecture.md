@@ -560,7 +560,7 @@ existing tests do.
 | `deadlocked_service_drop_escalates_to_kill` | `spawn_for_test --test-hang-on-stdin-eof`, `drop`, `pid_is_alive` poll with time-floor + ceiling. |
 | `pre_ack_crash_*` / `post_ack_crash_*` (Phase 8 cohort) | `request("ExecutePlan")`, fault-inject via test-helper RPC, kill, respawn, follow-up `request`, `Notification` drain. |
 | `retry_queue_persists_across_respawn` | M4 landed `test.pending_ops_read`, a test-only `harness-offline` provider, and a real-subprocess `action.execute_plan` retry-queue script; 50/50 focused soak passes. Full T1 directory soak also passed 550/550 across 50 cohort cycles. |
-| `compose_send_50mb_attachment` | Blocked on the mock SMTP path in `../sæhrimnir`: the harness can call `action.send`, but cannot yet exercise and assert the actual network send. |
+| `compose_send_50mb_attachment` / `send_wire_attachment_validation` / `send_wire_oversize_payload_handler_path` | M4 landed the Lua `action.send` path, `harness.stage_attachment` for `<app_data>/staging/<send_id>/` files plus SHA-256 metadata, `harness.repeat_byte` for bounded large payload generation, and the three scripts. The scripts verify SMTP submission metadata through `GET /test/smtp/submissions` / `DELETE /test/smtp/submissions`, and the oversize case asserts rejection before submission. |
 | `bulk_archive_200_threads_under_budget` | Lua loop dispatching 200 `request` calls in parallel, wall-clock budget assertion via `os.time`. |
 | `mark_chat_read_emits_only_action_completed` | `request("MarkChatRead")`, `notifications():drain_for`, cardinality-1 assertion. |
 | `action_skips_search_index_write` / `handler_does_not_drive_batch_execute` | `request("TestCounterRead", ...)` before/after, Lua subtraction. |

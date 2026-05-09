@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use gmail::ops::GmailOps;
+use ::gmail::ops::GmailOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 
@@ -18,7 +18,7 @@ impl ProviderSyncOps for GmailOps {
         ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
-        gmail::sync::gmail_initial_sync(
+        crate::gmail::sync::gmail_initial_sync(
             &self.client,
             ctx.account_id,
             days_back,
@@ -38,7 +38,7 @@ impl ProviderSyncOps for GmailOps {
         ctx: &SyncProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
-        let result = gmail::sync::gmail_delta_sync(
+        let result = crate::gmail::sync::gmail_delta_sync(
             &self.client,
             ctx.account_id,
             ctx.db,

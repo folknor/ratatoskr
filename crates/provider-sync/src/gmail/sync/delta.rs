@@ -155,7 +155,7 @@ async fn collect_history(
 }
 
 fn collect_from_history_item(
-    item: &crate::types::GmailHistoryItem,
+    item: &super::super::types::GmailHistoryItem,
     affected: &mut HashSet<String>,
     new_inbox: &mut HashSet<String>,
 ) {

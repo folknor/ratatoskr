@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use graph::ops::GraphOps;
+use ::graph::ops::GraphOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 
@@ -14,7 +14,7 @@ impl ProviderSyncOps for GraphOps {
         ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
-        graph::sync::graph_initial_sync(
+        crate::graph::sync::graph_initial_sync(
             &self.client,
             ctx.account_id,
             ctx.db,
@@ -34,7 +34,7 @@ impl ProviderSyncOps for GraphOps {
         ctx: &SyncProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
-        graph::sync::graph_delta_sync(
+        crate::graph::sync::graph_delta_sync(
             &self.client,
             ctx.account_id,
             ctx.db,

@@ -78,9 +78,10 @@ the brokkr repo):
 - Landed Lua API surface:
   `harness.data_dir`, `harness.spawn`,
   `harness.spawn_with_events`, `harness.kill`,
-  `harness.pid_is_alive`, `harness.sleep`, `harness.assert`,
-  `harness.assert_eq`, `harness.same_client`,
-  `harness.expect_quiet(events, seconds)`, and
+  `harness.pid_is_alive`, `harness.sleep`, `harness.now_ms`,
+  `harness.assert`, `harness.assert_eq`, `harness.same_client`,
+  `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
+  `harness.http_delete(url)`, `harness.env(name)`, and
   `harness.protocol_version`.
 - Landed client/event/request methods:
   `client:request`, `client:request_async`, `client:shutdown`,
@@ -319,7 +320,8 @@ under `crates/app/tests/service-harness/m3/`.
 ### M4 - T1 cohort
 
 **Status:** PARTIAL; deterministic action/journal, stale-generation,
-bulk-action, retry-queue, and crashloop slices have landed.
+bulk-action, retry-queue, crashloop, and compose-send slices have
+landed.
 
 Express the Phase 2 plan-specified integration cohort as `.lua`
 scripts. The "T1" cohort:
@@ -365,13 +367,20 @@ Current in-tree slice:
 - `bulk_archive_200_threads_under_budget`
 - `retry_queue_persists_across_respawn`
 - `unbroken_crashes_trip_persistently_failing`
+- `compose_send_50mb_attachment`
+- `send_wire_attachment_validation`
+- `send_wire_oversize_payload_handler_path`
 
 This slice also adds the M4-specific helper surface:
 `test.seed_thread`, `test.thread_read`, `test.pending_ops_read`,
 `test.delay_next_write`, Lua bindings for `action.execute_plan`,
-`action.job_status`, and `action.mark_chat_read`,
+`action.job_status`, `action.mark_chat_read`, and `action.send`,
 `client:notification_should_dispatch`, plus notification fields for
-action plan IDs and service generations. The crashloop script combines
+action plan IDs and service generations. Compose-send coverage uses
+`harness.stage_attachment`, `harness.repeat_byte`, and mock SMTP
+submission-log helpers (`harness.env`, `harness.http_get`,
+`harness.http_delete`) to verify attachment staging, captured wire
+metadata, and oversize-frame rejection. The crashloop script combines
 the existing Service-side
 `--test-boot-delay-ms` helper with `SIGKILL` to keep pre-`BootReady`
 respawn failures deterministic.
@@ -387,12 +396,8 @@ The full T1 directory soak is now green with brokkr directory support:
 `brokkr service-test crates/app/tests/service-harness/t1 -N 50`
 passed 550/550 runs across 50 cycles on 2026-05-08.
 
-Remaining M4 scope:
-
-- compose-send attachment and oversize validation scripts. These are
-  blocked on the mock-server network-send path in `../sæhrimnir`:
-  ratatoskr can submit `action.send`, but the mock SMTP side is not
-  ready to exercise and assert the actual network send.
+Remaining M4 scope: rerun the full T1 directory soak with the
+compose-send scripts included.
 
 **Exit criteria:**
 

@@ -129,7 +129,7 @@ pub async fn sync_flags_without_condstore(
     let mut session = connect(config).await?;
     let result =
         sync_flags_on_session(&mut session, folder_path, account_id, db, cancellation_token).await;
-    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }
 
@@ -217,7 +217,7 @@ pub async fn detect_deleted_messages(
 ) -> Result<Vec<String>, String> {
     let mut session = connect(config).await?;
     let result = detect_deleted_on_session(&mut session, folder_path, account_id, db).await;
-    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }
 
@@ -363,6 +363,6 @@ pub async fn run_deletion_detection(
         }
     }
 
-    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     all_affected
 }

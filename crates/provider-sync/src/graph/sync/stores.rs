@@ -4,7 +4,8 @@ use store::inline_image_store::InlineImage;
 
 use super::super::parse::ParsedGraphMessage;
 use super::SyncCtx;
-use sync::{persistence as sync_persistence, progress as sync_progress};
+use crate::persistence as sync_persistence;
+use sync::progress as sync_progress;
 
 // ---------------------------------------------------------------------------
 // Body store helper
