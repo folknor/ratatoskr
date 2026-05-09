@@ -13,15 +13,15 @@ use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
-    BootPhaseKind, ClientNotification, ExtractStatusParams, IndexRebuildParams, Notification,
-    OauthExchangeCodeParams, OperationId, PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy,
-    RedactedString, RequestParams, SendAttachmentSource, SendWireAttachment, SendWireMessage,
-    SendWireRequest, SettingValue, SettingsSetParams, TestCrashAfterNWritesParams,
-    TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
-    TestSeedAccountParams,
+    BootPhaseKind, CalendarActionPlan, CalendarActionWireOperation, ClientNotification,
+    ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
+    PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
+    SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
+    SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
+    TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireFolderId,
-    WireMailOperation, WireTagId,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
+    WireCalendarOperation, WireFolderId, WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -984,6 +984,56 @@ fn lua_client_start_calendar_sync(state: &mut State) -> dellingr::Result<u8> {
     Ok(2)
 }
 
+fn lua_client_execute_calendar_plan(state: &mut State) -> dellingr::Result<u8> {
+    let id = resource_id(state, 1)?;
+    if state.get_top() < 2 {
+        return Err(lua_error_message("execute_calendar_plan requires plan table"));
+    }
+    let plan = parse_calendar_action_plan(state, 2)?;
+    let seconds = if state.get_top() >= 3 {
+        state.to_number(3)?
+    } else {
+        30.0
+    };
+    let ctx = context(state)?;
+    let (handle, client) = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        (guard.handle.clone(), guard.client(id)?)
+    };
+    let result = handle.block_on(async {
+        tokio::time::timeout(duration_from_seconds(seconds), async move {
+            let ack = client.execute_calendar_plan(plan).await?;
+            client.subscribe_or_consume_calendar_action(ack.plan_id).await
+        })
+        .await
+    });
+    state.set_top(0);
+    match result {
+        Ok(Ok(completed)) => {
+            push_json(
+                state,
+                &serde_json::to_value(&completed).map_err(lua_json)?,
+            )?;
+            state.push_nil();
+        }
+        Ok(Err(error)) => {
+            state.push_nil();
+            push_client_error(state, &error)?;
+        }
+        Err(_) => {
+            state.push_nil();
+            push_json(
+                state,
+                &serde_json::json!({
+                    "kind": "Timeout",
+                    "detail": format!("calendar action did not resolve within {seconds}s"),
+                }),
+            )?;
+        }
+    }
+    Ok(2)
+}
+
 fn lua_client_drop(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     context(state)?
@@ -1284,6 +1334,12 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
         "start_calendar_sync",
         lua_client_start_calendar_sync,
     )?;
+    set_field_fn(
+        state,
+        idx,
+        "execute_calendar_plan",
+        lua_client_execute_calendar_plan,
+    )?;
     set_field_fn(state, idx, "drop", lua_client_drop)?;
     Ok(())
 }
@@ -1461,6 +1517,10 @@ fn request_params_from_lua(
         "ActionExecutePlan" | "action.execute_plan" => {
             let plan = parse_action_plan(state, params_idx)?;
             Ok(RequestParams::ActionExecutePlan { plan })
+        }
+        "CalActionExecutePlan" | "cal_action.execute_plan" => {
+            let plan = parse_calendar_action_plan(state, params_idx)?;
+            Ok(RequestParams::CalActionExecutePlan { plan })
         }
         "ActionJobStatus" | "action.job_status" => {
             let plan_id = parse_plan_id_request(state, params_idx, "ActionJobStatus")?;
@@ -1893,6 +1953,36 @@ fn parse_action_plan(state: &mut State, params_idx: isize) -> dellingr::Result<A
     })
 }
 
+fn parse_calendar_action_plan(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<CalendarActionPlan> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message("CalActionExecutePlan requires params table"));
+    }
+
+    let top = state.get_top();
+    state.push_string("plan");
+    state.get_table(params_idx)?;
+    let plan_idx = if state.typ(-1) == LuaType::Table {
+        state.get_top() as isize
+    } else {
+        state.set_top(top as isize);
+        params_idx
+    };
+
+    let plan_id = match get_string_field(state, plan_idx, "plan_id")? {
+        Some(value) => parse_plan_id(&value)?,
+        None => PlanId::new_v7(),
+    };
+    let operations = parse_calendar_action_operations(state, plan_idx)?;
+    state.set_top(top as isize);
+    Ok(CalendarActionPlan {
+        plan_id,
+        operations,
+    })
+}
+
 fn parse_plan_id_request(
     state: &mut State,
     params_idx: isize,
@@ -2152,6 +2242,38 @@ fn parse_action_operations(
     Ok(operations)
 }
 
+fn parse_calendar_action_operations(
+    state: &mut State,
+    plan_idx: isize,
+) -> dellingr::Result<Vec<CalendarActionWireOperation>> {
+    let top = state.get_top();
+    state.push_string("operations");
+    state.get_table(plan_idx)?;
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message(
+            "CalActionExecutePlan requires operations table",
+        ));
+    }
+    let operations_idx = state.get_top() as isize;
+    let len = state.table_len(operations_idx);
+    let mut operations = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(operations_idx)?;
+        if state.typ(-1) != LuaType::Table {
+            state.set_top(top as isize);
+            return Err(lua_error_message("calendar action operation must be table"));
+        }
+        let op_idx = state.get_top() as isize;
+        let operation = parse_calendar_action_operation(state, op_idx, i)?;
+        operations.push(operation);
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(operations)
+}
+
 fn parse_action_operation(
     state: &mut State,
     op_idx: isize,
@@ -2174,6 +2296,105 @@ fn parse_action_operation(
         thread_id,
         operation,
     })
+}
+
+fn parse_calendar_action_operation(
+    state: &mut State,
+    op_idx: isize,
+    ordinal: usize,
+) -> dellingr::Result<CalendarActionWireOperation> {
+    let operation_id = get_number_field(state, op_idx, "operation_id")?
+        .map(|value| value as u32)
+        .unwrap_or_else(|| (ordinal - 1) as u32);
+    let account_id = get_string_field(state, op_idx, "account_id")?
+        .ok_or_else(|| lua_error_message("calendar action operation requires account_id"))?;
+    let op_name = get_string_field(state, op_idx, "operation")?
+        .or_else(|| get_string_field(state, op_idx, "kind").ok().flatten())
+        .ok_or_else(|| lua_error_message("calendar action operation requires operation"))?;
+    let operation = parse_wire_calendar_operation(state, op_idx, &op_name)?;
+    Ok(CalendarActionWireOperation {
+        operation_id: OperationId(operation_id),
+        account_id,
+        operation,
+    })
+}
+
+fn parse_wire_calendar_operation(
+    state: &mut State,
+    op_idx: isize,
+    op_name: &str,
+) -> dellingr::Result<WireCalendarOperation> {
+    match normalize_name(op_name).as_str() {
+        "createevent" | "create" => {
+            let calendar_id = get_string_field(state, op_idx, "calendar_id")?
+                .or_else(|| get_string_field(state, op_idx, "calendar_remote_id").ok().flatten())
+                .ok_or_else(|| {
+                    lua_error_message("CreateEvent requires calendar_id")
+                })?;
+            Ok(WireCalendarOperation::CreateEvent {
+                calendar_remote_id: calendar_id,
+                input: parse_wire_calendar_event_input(state, op_idx, op_name)?,
+            })
+        }
+        "updateevent" | "update" => {
+            let event_id = get_string_field(state, op_idx, "event_id")?
+                .ok_or_else(|| lua_error_message("UpdateEvent requires event_id"))?;
+            Ok(WireCalendarOperation::UpdateEvent {
+                event_id,
+                input: parse_wire_calendar_event_input(state, op_idx, op_name)?,
+            })
+        }
+        "deleteevent" | "delete" => {
+            let event_id = get_string_field(state, op_idx, "event_id")?
+                .ok_or_else(|| lua_error_message("DeleteEvent requires event_id"))?;
+            Ok(WireCalendarOperation::DeleteEvent { event_id })
+        }
+        other => Err(lua_error_message(format!(
+            "unknown calendar operation {other:?}"
+        ))),
+    }
+}
+
+fn parse_wire_calendar_event_input(
+    state: &mut State,
+    op_idx: isize,
+    op_name: &str,
+) -> dellingr::Result<WireCalendarEventInput> {
+    let top = state.get_top();
+    state.push_string("input");
+    state.get_table(op_idx)?;
+    let input_idx = if state.typ(-1) == LuaType::Table {
+        state.get_top() as isize
+    } else {
+        state.set_top(top as isize);
+        op_idx
+    };
+
+    let title = get_first_string_field(state, input_idx, &["title", "summary"])?
+        .ok_or_else(|| lua_error_message(format!("{op_name} requires input.title")))?;
+    let start_time = get_first_number_field(state, input_idx, &["start_time", "start"])?
+        .ok_or_else(|| lua_error_message(format!("{op_name} requires input.start_time")))?
+        as i64;
+    let end_time = get_first_number_field(state, input_idx, &["end_time", "end"])?
+        .ok_or_else(|| lua_error_message(format!("{op_name} requires input.end_time")))?
+        as i64;
+    let input = WireCalendarEventInput {
+        title,
+        description: get_string_field(state, input_idx, "description")?.unwrap_or_default(),
+        location: get_string_field(state, input_idx, "location")?.unwrap_or_default(),
+        start_time,
+        end_time,
+        is_all_day: get_bool_field(state, input_idx, "is_all_day")?
+            .or_else(|| get_bool_field(state, input_idx, "isAllDay").ok().flatten())
+            .unwrap_or(false),
+        timezone: get_string_field(state, input_idx, "timezone")?,
+        recurrence_rule: get_string_field(state, input_idx, "recurrence_rule")?
+            .or_else(|| get_string_field(state, input_idx, "recurrenceRule").ok().flatten()),
+        availability: get_string_field(state, input_idx, "availability")?,
+        visibility: get_string_field(state, input_idx, "visibility")?,
+    };
+    state.set_top(top as isize);
+    Ok(input)
 }
 
 fn parse_wire_mail_operation(
@@ -2359,6 +2580,19 @@ fn get_string_field(
     Ok(result)
 }
 
+fn get_first_string_field(
+    state: &mut State,
+    table_idx: isize,
+    keys: &[&str],
+) -> dellingr::Result<Option<String>> {
+    for key in keys {
+        if let Some(value) = get_string_field(state, table_idx, key)? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
 fn get_number_field(
     state: &mut State,
     table_idx: isize,
@@ -2374,6 +2608,19 @@ fn get_number_field(
     };
     state.set_top(top as isize);
     Ok(result)
+}
+
+fn get_first_number_field(
+    state: &mut State,
+    table_idx: isize,
+    keys: &[&str],
+) -> dellingr::Result<Option<f64>> {
+    for key in keys {
+        if let Some(value) = get_number_field(state, table_idx, key)? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
 }
 
 fn get_bool_field(

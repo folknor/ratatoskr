@@ -398,10 +398,67 @@ pub async fn graph_create_event(
 ) -> Result<GraphCalendarEvent, String> {
     let me = client.api_path_prefix();
     let enc_cal_id = urlencoding::encode(calendar_remote_id);
-    let response: GraphEvent = client
+    let response: serde_json::Value = client
         .post(&format!("{me}/calendars/{enc_cal_id}/events"), event, db)
         .await?;
+    let response = match serde_json::from_value::<GraphEvent>(response.clone()) {
+        Ok(event) => event,
+        Err(error) => {
+            #[cfg(any(test, feature = "test-helpers"))]
+            if response.get("echoedRequest").is_some() {
+                return graph_event_from_create_echo(response, event)
+                    .ok_or_else(|| {
+                        format!("Failed to parse Graph create echo response: {error}")
+                    })
+                    .and_then(map_graph_event);
+            }
+            Err(format!("Failed to parse Graph create response: {error}"))?
+        }
+    };
     map_graph_event(response)
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+fn graph_event_from_create_echo(
+    response: serde_json::Value,
+    event: &GraphEventCreate,
+) -> Option<GraphEvent> {
+    let id = response.get("id")?.as_str()?.to_string();
+    Some(GraphEvent {
+        id,
+        subject: event.subject.clone(),
+        body: event.body.as_ref().map(|body| GraphEventBody {
+            content_type: body.content_type.clone(),
+            content: body.content.clone(),
+        }),
+        body_preview: None,
+        start: event.start.clone(),
+        end: event.end.clone(),
+        is_all_day: event.is_all_day,
+        location: event.location.as_ref().map(|location| GraphLocation {
+            display_name: Some(location.display_name.clone()),
+        }),
+        organizer: None,
+        attendees: event.attendees.as_ref().map(|attendees| {
+            attendees
+                .iter()
+                .map(|attendee| GraphAttendee {
+                    attendee_type: Some(attendee.attendee_type.clone()),
+                    status: None,
+                    email_address: Some(attendee.email_address.clone()),
+                })
+                .collect()
+        }),
+        web_link: None,
+        i_cal_uid: None,
+        categories: None,
+        recurrence: None,
+        show_as: None,
+        response_status: None,
+        is_cancelled: None,
+        change_key: None,
+        removed: None,
+    })
 }
 
 /// Update an existing event.

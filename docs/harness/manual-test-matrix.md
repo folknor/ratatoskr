@@ -79,7 +79,7 @@ request/ack shutdown path.
 
 ## Phase 6a / 6a-part-2 - write-surface relocation smoke
 
-The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6, 7, and 8 are now automated. Item 9 has an automated OAuth persistence slice, with revoked-token sync recovery still pending. Item 10 has Graph calendar read/sync harness coverage, with calendar action mutations still pending.
+The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6, 7, and 8 are now automated. Item 9 has an automated OAuth persistence slice, with revoked-token sync recovery still pending. Item 10 has Graph calendar read/sync and create/update/delete harness coverage, with Google, JMAP, and CalDAV provider-workflow checks still pending.
 
 ### 6. Cold-boot bootstrap snapshots (encryption-key handle end-to-end)
 
@@ -127,7 +127,7 @@ If the re-auth flow completes in the browser but the next sync still fails: the 
 
 ### 10. Calendar event create / update / delete via cal_action.execute_plan
 
-Graph calendar fixture sync is automated by `crates/app/tests/sync-harness/graph-calendar-initial.lua`. It verifies the mock Graph calendar list and delta endpoints populate local calendar/event state before the mutation coverage below.
+Graph calendar fixture sync is automated by `crates/app/tests/sync-harness/graph-calendar-initial.lua`. Graph create/update/delete is automated by `crates/app/tests/service-harness/m6/calendar_actions_graph_crud.lua`, which verifies the Service worker emits Graph POST/PATCH/DELETE requests and updates local calendar state. The remaining manual provider-workflow scope is Google, JMAP, and CalDAV.
 
 Verifies the Phase 6c calendar action pipeline: UI builds a `CalendarActionPlan`, the Service journals as `kind = 'calendar_plan'`, the worker dispatches to `cal_actions::batch_execute`, and the UI awaits the per-plan `CalendarActionCompleted` via `pending_calendar_actions`.
 

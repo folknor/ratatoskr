@@ -891,7 +891,7 @@ pub fn create_calendar_event_sync(
              location, start_time, end_time, is_all_day, status,
              calendar_id, timezone, recurrence_rule, availability,
              visibility, created_at)
-         VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9,
+         VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9,
                  ?10, ?11, ?12, ?13, unixepoch())",
         params![
             id,

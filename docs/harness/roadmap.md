@@ -531,12 +531,14 @@ Sequencing:
   row gets new encrypted access / refresh token hashes without
   changing identity or provider columns. The remaining end-to-end slice
   is revoked-token sync recovery against an OAuth-enforced fixture.
-- **M6.10 (PARTIAL - Graph calendar read slice landed):**
+- **M6.10 (PARTIAL - Graph calendar read + mutation slices landed):**
   `crates/app/tests/sync-harness/graph-calendar-initial.lua`
   runs the Graph calendar fixture through the real calendar runtime
   and asserts local calendar/event state plus Graph request-log
-  coverage. Calendar create/update/delete still needs Lua binding /
-  assertion coverage for `cal_action.execute_plan`.
+  coverage. `crates/app/tests/service-harness/m6/calendar_actions_graph_crud.lua`
+  drives `cal_action.execute_plan` create/update/delete against the
+  Graph fixture and asserts local state plus POST/PATCH/DELETE request
+  bodies. Google, JMAP, and CalDAV provider-workflow checks remain.
 - **M6.11-M6.14 (READY when M5 lands):** Phase 7 attachment
   extraction round-trip, backfill kick on boot.ready, palette
   rebuild, schema-version mismatch rebuild. All have Lua-script
@@ -646,6 +648,11 @@ Ratatoskr-side M8 surface now in tree:
   and two Work events land in the local DB, and uses saehrimnir's
   request log to prove Graph calendar list and per-calendar delta
   endpoints were exercised.
+- `crates/app/tests/service-harness/m6/calendar_actions_graph_crud.lua`
+  targets the same Graph calendar fixture, drives
+  `client:execute_calendar_plan`, and verifies create/update/delete
+  flow through the Service worker into Graph POST/PATCH/DELETE
+  requests and local calendar-event state.
 
 **Exit criteria:**
 
@@ -658,8 +665,8 @@ Ratatoskr-side M8 surface now in tree:
   remain.
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
-- M6.10 (calendar) has Graph read/sync coverage; create / update /
-  delete request-log and local-state coverage remain.
+- M6.10 (calendar) has Graph read/sync and Graph create/update/delete
+  coverage; Google, JMAP, and CalDAV workflow coverage remain manual.
 
 ---
 

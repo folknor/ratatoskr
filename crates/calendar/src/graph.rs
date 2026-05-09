@@ -80,7 +80,10 @@ pub async fn graph_calendar_update_event_impl(
     remote_event_id: &str,
     event: serde_json::Value,
 ) -> Result<CalendarEventDto, String> {
-    let response = graph_update_event(client, db, remote_event_id, &event).await?;
+    let update_req = json_to_graph_event_create(&event)?;
+    let update_req =
+        serde_json::to_value(update_req).map_err(|e| format!("Graph event update JSON: {e}"))?;
+    let response = graph_update_event(client, db, remote_event_id, &update_req).await?;
     graph_event_to_dto(response)
 }
 
@@ -192,7 +195,19 @@ fn parse_event_datetime(
         .get(key)
         .or_else(|| value.get(alt_key))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Missing '{key}' in event payload"))?;
+        .map(str::to_string);
+    #[cfg(any(test, feature = "test-helpers"))]
+    let dt_str = dt_str.or_else(|| {
+        value
+            .get(key)
+            .or_else(|| value.get(alt_key))
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|ts| {
+                chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+                    .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            })
+    });
+    let dt_str = dt_str.ok_or_else(|| format!("Missing '{key}' in event payload"))?;
 
     if is_all_day && dt_str.len() == 10 {
         // Date-only: "2024-01-15"

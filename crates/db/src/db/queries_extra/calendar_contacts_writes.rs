@@ -213,8 +213,9 @@ pub fn delete_calendar_event_by_remote_id(
     Ok(())
 }
 
-/// Set the `remote_event_id` and `etag` on a calendar event after a successful
-/// provider create, when the provider returns a stable remote ID + ETag.
+/// Set the provider remote id and `etag` after a successful provider create.
+/// `google_event_id` is the historical cross-provider conflict key, so it is
+/// moved from the local provisional id to the provider id at the same time.
 pub fn set_calendar_event_remote_id_and_etag(
     conn: &Connection,
     event_id: &str,
@@ -222,7 +223,9 @@ pub fn set_calendar_event_remote_id_and_etag(
     etag: Option<&str>,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE calendar_events SET remote_event_id = ?1, etag = ?2 WHERE id = ?3",
+        "UPDATE calendar_events
+         SET google_event_id = ?1, remote_event_id = ?1, etag = ?2
+         WHERE id = ?3",
         params![remote_event_id, etag, event_id],
     )
     .map_err(|e| format!("set_calendar_event_remote_id_and_etag: {e}"))?;

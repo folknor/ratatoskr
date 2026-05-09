@@ -10,6 +10,7 @@ workspace = true
 [features]
 test-helpers = [
     "service-api/test-helpers",
+    "cal/test-helpers",
     "gmail/test-helpers",
     "graph/test-helpers",
     "imap/test-helpers",
