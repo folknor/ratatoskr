@@ -455,6 +455,11 @@ Landed slices:
   first one has already resolved and asserts backfill marks the new
   reference indexed from existing extracted text without advancing
   extraction counters.
+- `crates/app/tests/service-harness/extract/index_rebuild_force_preempts_in_flight_wipe.lua`
+  drives `index.rebuild` through the Lua harness, holds the search
+  writer's `search.clear` command in flight with the test delay hook,
+  asserts a duplicate non-forced rebuild is rejected, and verifies
+  `force=true` preempts the first rebuild and completes a fresh one.
 
 **Exit criteria:**
 

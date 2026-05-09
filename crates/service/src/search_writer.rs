@@ -269,7 +269,7 @@ async fn apply_command(
                     *first_uncommitted = Some(Instant::now());
                 }
                 #[cfg(feature = "test-helpers")]
-                record_search_write("search.index");
+                record_search_write("search.index").await;
             }
             let _ = ack.send(result);
         }
@@ -287,7 +287,7 @@ async fn apply_command(
                     *first_uncommitted = Some(Instant::now());
                 }
                 #[cfg(feature = "test-helpers")]
-                record_search_write("search.delete");
+                record_search_write("search.delete").await;
             }
             let _ = ack.send(result);
         }
@@ -304,7 +304,7 @@ async fn apply_command(
                 let final_result = result.and(commit_result);
                 if final_result.is_ok() {
                     #[cfg(feature = "test-helpers")]
-                    record_search_write("search.clear");
+                    record_search_write("search.clear").await;
                 }
                 *pending_docs = 0;
                 *first_uncommitted = None;
@@ -318,6 +318,8 @@ async fn apply_command(
             let commit_result =
                 commit_and_notify(writer, notification_tx, service_generation).await;
             if commit_result.is_ok() {
+                #[cfg(feature = "test-helpers")]
+                crate::test_counters::delay_if_configured("search.flush").await;
                 #[cfg(feature = "test-helpers")]
                 crate::test_counters::record("search.flush");
             }
@@ -339,8 +341,12 @@ async fn apply_command(
 }
 
 #[cfg(feature = "test-helpers")]
-fn record_search_write(kind: &str) {
+async fn record_search_write(kind: &str) {
+    // Delay after the writer mutation succeeds and before the command
+    // ack is sent. This stalls command completion, not Tantivy itself.
+    crate::test_counters::delay_if_configured(kind).await;
     crate::test_counters::record(kind);
+    crate::test_counters::delay_if_configured("search.write").await;
     crate::test_counters::record("search.write");
 }
 

@@ -13,12 +13,13 @@ use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
-    BootPhaseKind, ClientNotification, ExtractStatusParams, Notification, OperationId, PlanId,
-    ReadBootstrapSnapshotsParams, RequestParams, SendAttachmentSource, SendWireAttachment,
-    SendWireMessage, SendWireRequest, SettingValue, SettingsSetParams, TestCrashAfterNWritesParams,
-    TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
-    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedThreadParams,
-    TestStartSyncParams, TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
+    BootPhaseKind, ClientNotification, ExtractStatusParams, IndexRebuildParams, Notification,
+    OperationId, PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RequestParams,
+    SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
+    SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
+    TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
+    TestSeedCachedAttachmentParams, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1315,6 +1316,28 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 completed.service_generation as f64,
             )?;
         }
+        Notification::IndexRebuildProgress(progress) => {
+            set_field_string(state, idx, "type", "IndexRebuildProgress")?;
+            set_field_string(state, idx, "rebuild_id", &progress.rebuild_id)?;
+            set_field_number(state, idx, "processed", progress.processed as f64)?;
+            set_field_number(state, idx, "total", progress.total as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                progress.service_generation as f64,
+            )?;
+        }
+        Notification::IndexRebuildCompleted(completed) => {
+            set_field_string(state, idx, "type", "IndexRebuildCompleted")?;
+            set_field_string(state, idx, "rebuild_id", &completed.rebuild_id)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                completed.service_generation as f64,
+            )?;
+        }
         other => {
             set_field_string(state, idx, "type", other.method_name())?;
         }
@@ -1407,6 +1430,26 @@ fn request_params_from_lua(
         "ExtractStatus" | "extract.status" => Ok(RequestParams::ExtractStatus {
             params: ExtractStatusParams::default(),
         }),
+        "IndexRebuild" | "index.rebuild" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("IndexRebuild requires params table"));
+            }
+            let policy = get_string_field(state, params_idx, "policy")?
+                .ok_or_else(|| lua_error_message("IndexRebuild requires params.policy"))?;
+            let policy = match policy.as_str() {
+                "wipe" => RebuildPolicy::Wipe,
+                "preserve_existing" => RebuildPolicy::PreserveExisting,
+                other => {
+                    return Err(lua_error_message(format!(
+                        "IndexRebuild unknown policy {other:?}"
+                    )));
+                }
+            };
+            let force = get_bool_field(state, params_idx, "force")?.unwrap_or(false);
+            Ok(RequestParams::IndexRebuild {
+                params: IndexRebuildParams { policy, force },
+            })
+        }
         "TestSlow" | "test.slow" => {
             let millis = if state.get_top() >= params_idx as usize {
                 match state.typ(params_idx) {
