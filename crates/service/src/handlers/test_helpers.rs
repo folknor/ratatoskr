@@ -13,7 +13,8 @@ use service_api::{
     TestCrashAfterNWritesParams, TestDelayNextWriteAck, TestDelayNextWriteParams,
     TestDbAttachmentRow, TestDbLocalDraftRow, TestDbMessageRow, TestPendingOpRow,
     TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
-    TestQueryDbStateParams, TestSeedAccountAck, TestSeedAccountParams,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
@@ -224,6 +225,30 @@ pub(super) async fn seed_cached_attachment_handle(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn remove_cached_attachment_bytes_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestRemoveCachedAttachmentBytesParams,
+) -> Result<Value, ServiceError> {
+    if params.relative_path.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.remove_cached_attachment_bytes".into(),
+            message: "relative_path is required".into(),
+        });
+    }
+    let app_data_dir = boot_state.app_data_dir().to_path_buf();
+    let full_path = app_data_dir.join(&params.relative_path);
+    let removed = full_path.is_file();
+    if removed {
+        store::attachment_cache::remove_cached_relative(&app_data_dir, &params.relative_path)
+            .map_err(ServiceError::Internal)?;
+    }
+    serde_json::to_value(TestRemoveCachedAttachmentBytesAck {
+        relative_path: params.relative_path,
+        removed,
+    })
+    .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
 pub(super) async fn thread_read_handle(

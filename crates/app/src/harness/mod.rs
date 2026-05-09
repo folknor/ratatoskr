@@ -18,8 +18,9 @@ use service_api::{
     SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
-    TestSeedCachedAttachmentParams, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
+    TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireFolderId,
+    WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1570,6 +1571,22 @@ fn request_params_from_lua(
                         .or_else(|| get_string_field(state, params_idx, "mime").ok().flatten()),
                     content,
                 },
+            })
+        }
+        "TestRemoveCachedAttachmentBytes" | "test.remove_cached_attachment_bytes" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestRemoveCachedAttachmentBytes requires params table",
+                ));
+            }
+            let relative_path =
+                get_string_field(state, params_idx, "relative_path")?.ok_or_else(|| {
+                    lua_error_message(
+                        "TestRemoveCachedAttachmentBytes requires params.relative_path",
+                    )
+                })?;
+            Ok(RequestParams::TestRemoveCachedAttachmentBytes {
+                params: TestRemoveCachedAttachmentBytesParams { relative_path },
             })
         }
         "TestThreadRead" | "test.thread_read" => {

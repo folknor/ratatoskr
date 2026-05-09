@@ -138,6 +138,19 @@ pub struct TestSeedCachedAttachmentAck {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestRemoveCachedAttachmentBytesParams {
+    pub relative_path: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestRemoveCachedAttachmentBytesAck {
+    pub relative_path: String,
+    pub removed: bool,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestThreadReadParams {
     pub account_id: String,
     pub thread_id: String,
@@ -664,6 +677,9 @@ pub enum RequestParams {
     /// Inserts a cached attachment fixture under an existing message.
     #[cfg(feature = "test-helpers")]
     TestSeedCachedAttachment { params: TestSeedCachedAttachmentParams },
+    /// Deletes a cached attachment fixture's backing bytes without changing DB metadata.
+    #[cfg(feature = "test-helpers")]
+    TestRemoveCachedAttachmentBytes { params: TestRemoveCachedAttachmentBytesParams },
     /// Reads back thread flags and labels for harness assertions.
     #[cfg(feature = "test-helpers")]
     TestThreadRead { params: TestThreadReadParams },
@@ -760,6 +776,10 @@ impl RequestParams {
             Self::TestSeedThread { .. } => "test.seed_thread",
             #[cfg(feature = "test-helpers")]
             Self::TestSeedCachedAttachment { .. } => "test.seed_cached_attachment",
+            #[cfg(feature = "test-helpers")]
+            Self::TestRemoveCachedAttachmentBytes { .. } => {
+                "test.remove_cached_attachment_bytes"
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { .. } => "test.thread_read",
             #[cfg(feature = "test-helpers")]
@@ -888,6 +908,7 @@ impl RequestParams {
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
             | Self::TestSeedCachedAttachment { .. }
+            | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
@@ -981,6 +1002,7 @@ impl RequestParams {
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
             | Self::TestSeedCachedAttachment { .. }
+            | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
             #[cfg(feature = "test-helpers")]
@@ -1092,6 +1114,10 @@ impl RequestParams {
             Self::TestSeedThread { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestSeedCachedAttachment { params } => {
+                serde_json::json!({ "params": params })
+            }
+            #[cfg(feature = "test-helpers")]
+            Self::TestRemoveCachedAttachmentBytes { params } => {
                 serde_json::json!({ "params": params })
             }
             #[cfg(feature = "test-helpers")]
@@ -1559,6 +1585,16 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.seed_cached_attachment params: {e}"))?;
                 Ok(Self::TestSeedCachedAttachment { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.remove_cached_attachment_bytes" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestRemoveCachedAttachmentBytesParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.remove_cached_attachment_bytes params: {e}"))?;
+                Ok(Self::TestRemoveCachedAttachmentBytes { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.thread_read" => {
@@ -3208,6 +3244,27 @@ mod tests {
         .expect("parse");
         assert_eq!(parsed, original);
         assert_eq!(original.method_name(), "test.seed_cached_attachment");
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_remove_cached_attachment_bytes_round_trips_from_method_params() {
+        let original = RequestParams::TestRemoveCachedAttachmentBytes {
+            params: TestRemoveCachedAttachmentBytesParams {
+                relative_path: "attachment_cache/hash".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(
+            original.method_name(),
+            "test.remove_cached_attachment_bytes",
+        );
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 

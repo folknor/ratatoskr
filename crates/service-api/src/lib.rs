@@ -96,6 +96,7 @@ pub use request::{
     TestDbAttachmentRow, TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
     TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
     TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
     TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
     TestSeedCachedAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,
     TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
