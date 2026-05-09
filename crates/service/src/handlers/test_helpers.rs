@@ -21,6 +21,7 @@ use service_api::{
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -363,10 +364,10 @@ pub(super) async fn search_index_handle(
         .account_id
         .filter(|account_id| !account_id.is_empty())
         .map(|account_id| vec![account_id]);
-    let results = search_read
+    let mut results = search_read
         .search_with_filters(&search::SearchParams {
             account_ids,
-            free_text: Some(query),
+            free_text: Some(query.clone()),
             from: Vec::new(),
             to: Vec::new(),
             subject: None,
@@ -378,9 +379,18 @@ pub(super) async fn search_index_handle(
             limit: Some(limit),
         })
         .map_err(|e| ServiceError::Internal(format!("test.search_index query: {e}")))?;
+    enrich_test_search_results(boot_state, &search_read, &query, &mut results).await?;
 
     let mut rows = Vec::with_capacity(results.len());
     for result in results {
+        let match_kind = serde_json::to_value(result.match_kind)
+            .map_err(|e| ServiceError::Internal(format!("serialize match_kind: {e}")))?;
+        let also_matched = result
+            .also_matched
+            .into_iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| ServiceError::Internal(format!("serialize also_matched: {e}")))?;
         rows.push(TestSearchIndexResult {
             message_id: result.message_id,
             account_id: result.account_id,
@@ -388,6 +398,8 @@ pub(super) async fn search_index_handle(
             subject: result.subject,
             snippet: result.snippet,
             rank: result.rank,
+            match_kind,
+            also_matched,
         });
     }
     let total = u64::try_from(rows.len())
@@ -397,6 +409,76 @@ pub(super) async fn search_index_handle(
         results: rows,
     })
     .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+async fn enrich_test_search_results(
+    boot_state: &Arc<BootSharedState>,
+    search_read: &search::SearchReadState,
+    query: &str,
+    results: &mut [search::SearchResult],
+) -> Result<(), ServiceError> {
+    if query.trim().is_empty() || results.is_empty() {
+        return Ok(());
+    }
+    let mut rows = Vec::with_capacity(results.len());
+    let mut pairs = Vec::with_capacity(results.len());
+    let mut message_ids = Vec::with_capacity(results.len());
+    for result in results.iter() {
+        rows.push((
+            result.account_id.clone(),
+            result.message_id.clone(),
+            result.subject.clone(),
+            result.from_name.clone(),
+        ));
+        pairs.push((result.account_id.clone(), result.message_id.clone()));
+        message_ids.push(result.message_id.clone());
+    }
+    let body_read = store::body_store::BodyStoreReadState::init(boot_state.app_data_dir())
+        .map_err(|e| ServiceError::Internal(format!("test.search_index body store: {e}")))?;
+    let write_db = boot_state.write_db_state()?;
+    let inputs = write_db
+        .with_conn(move |conn| {
+            let fragments = db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs)?;
+            let mut body_by_mid: HashMap<String, String> = HashMap::new();
+            for body in body_read.get_batch_sync(&message_ids)? {
+                if let Some(text) = body.body_text {
+                    body_by_mid.insert(body.message_id, text);
+                }
+            }
+
+            let mut inputs = HashMap::with_capacity(rows.len());
+            for (account_id, message_id, subject, from_name) in rows {
+                let key = (account_id, message_id.clone());
+                let attachments = fragments
+                    .get(&key)
+                    .map(|rows| {
+                        rows.iter()
+                            .map(|row| search::AttachmentAttributionInput {
+                                attachment_id:  row.attachment_id.clone(),
+                                filename:       row.filename.clone(),
+                                mime:           row.mime_type.clone(),
+                                extracted_text: row.extracted_text.clone(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                inputs.insert(
+                    message_id.clone(),
+                    search::AttributionInputs {
+                        subject: subject.unwrap_or_default(),
+                        from_name: from_name.unwrap_or_default(),
+                        body_text: body_by_mid.remove(&message_id).unwrap_or_default(),
+                        attachments,
+                    },
+                );
+            }
+            Ok(inputs)
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    search_read
+        .enrich_match_kinds(query, results, &inputs)
+        .map_err(|e| ServiceError::Internal(format!("test.search_index attribution: {e}")))
 }
 
 pub(super) async fn delay_next_write_handle(

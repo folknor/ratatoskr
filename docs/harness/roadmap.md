@@ -464,6 +464,11 @@ Landed slices:
   searches inside each extracted attachment hit the search index, and
   asserts a phrase whose terms straddle the attachment boundary does
   not match.
+- `crates/app/tests/service-harness/extract/body_attachment_co_match.lua`
+  seeds a message body and a cached text attachment with the same term,
+  verifies the extracted attachment reaches the search index, and
+  asserts search attribution keeps the body as the primary match while
+  reporting the attachment in `alsoMatched`.
 - `crates/app/tests/service-harness/extract/index_rebuild_force_preempts_in_flight_wipe.lua`
   drives `index.rebuild` through the Lua harness, holds the search
   writer's `search.clear` command in flight with the test delay hook,

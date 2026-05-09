@@ -387,6 +387,10 @@ pub struct TestSearchIndexResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet: Option<String>,
     pub rank: f32,
+    /// Serialized `search::MatchKind` values. Kept as JSON so the
+    /// service-api crate does not depend on search internals.
+    pub match_kind: Value,
+    pub also_matched: Vec<Value>,
 }
 
 #[cfg(feature = "test-helpers")]
