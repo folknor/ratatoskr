@@ -13,11 +13,12 @@ use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
-    BootPhaseKind, Notification, OperationId, PlanId, RequestParams, SendAttachmentSource,
-    SendWireAttachment, SendWireMessage, SendWireRequest, TestCrashAfterNWritesParams,
+    BootPhaseKind, Notification, OperationId, PlanId, ReadBootstrapSnapshotsParams,
+    RequestParams, SendAttachmentSource, SendWireAttachment, SendWireMessage,
+    SendWireRequest, SettingValue, SettingsSetParams, TestCrashAfterNWritesParams,
     TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryDbStateParams,
-    TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadParams, WireFolderId, WireMailOperation, WireTagId,
+    TestSeedAccountParams, TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams,
+    WireFolderId, WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1333,6 +1334,14 @@ fn request_params_from_lua(
                 params: AccountDeleteParams { account_id },
             })
         }
+        "SettingsSet" | "settings.set" => Ok(RequestParams::SettingsSet {
+            params: parse_settings_set_params(state, params_idx)?,
+        }),
+        "ReadBootstrapSnapshots" | "internal.read_bootstrap_snapshots" => {
+            Ok(RequestParams::ReadBootstrapSnapshots {
+                params: ReadBootstrapSnapshotsParams::default(),
+            })
+        }
         "TestSlow" | "test.slow" => {
             let millis = if state.get_top() >= params_idx as usize {
                 match state.typ(params_idx) {
@@ -1507,6 +1516,87 @@ fn request_params_from_lua(
             "request method {other:?} is not registered in harness"
         ))),
     }
+}
+
+fn parse_settings_set_params(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<SettingsSetParams> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message("SettingsSet requires params table"));
+    }
+    let top = state.get_top();
+    state.push_string("values");
+    state.get_table(params_idx)?;
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message("SettingsSet requires values table"));
+    }
+    let values_idx = state.get_top() as isize;
+    let len = state.table_len(values_idx);
+    let mut values = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(values_idx)?;
+        if state.typ(-1) != LuaType::Table {
+            state.set_top(top as isize);
+            return Err(lua_error_message("setting value must be table"));
+        }
+        let value_idx = state.get_top() as isize;
+        values.push(parse_setting_value(state, value_idx)?);
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(SettingsSetParams { values })
+}
+
+fn parse_setting_value(state: &mut State, value_idx: isize) -> dellingr::Result<SettingValue> {
+    let kind = get_string_field(state, value_idx, "type")?
+        .ok_or_else(|| lua_error_message("setting value requires type"))?;
+    match normalize_name(&kind).as_str() {
+        "showsyncstatus" => Ok(SettingValue::ShowSyncStatus(required_setting_bool(
+            state, value_idx, &kind,
+        )?)),
+        "blockremoteimages" => Ok(SettingValue::BlockRemoteImages(required_setting_bool(
+            state, value_idx, &kind,
+        )?)),
+        "phishingdetectionenabled" => Ok(SettingValue::PhishingDetectionEnabled(
+            required_setting_bool(state, value_idx, &kind)?,
+        )),
+        "phishingsensitivity" => Ok(SettingValue::PhishingSensitivity(
+            required_setting_string(state, value_idx, &kind)?,
+        )),
+        "theme" => Ok(SettingValue::Theme(required_setting_string(
+            state, value_idx, &kind,
+        )?)),
+        "fontsize" => Ok(SettingValue::FontSize(required_setting_string(
+            state, value_idx, &kind,
+        )?)),
+        "readingpaneposition" => Ok(SettingValue::ReadingPanePosition(
+            required_setting_string(state, value_idx, &kind)?,
+        )),
+        other => Err(lua_error_message(format!(
+            "unsupported setting value {other:?}"
+        ))),
+    }
+}
+
+fn required_setting_bool(
+    state: &mut State,
+    idx: isize,
+    kind: &str,
+) -> dellingr::Result<bool> {
+    get_bool_field(state, idx, "value")?
+        .ok_or_else(|| lua_error_message(format!("{kind} requires value")))
+}
+
+fn required_setting_string(
+    state: &mut State,
+    idx: isize,
+    kind: &str,
+) -> dellingr::Result<String> {
+    get_string_field(state, idx, "value")?
+        .ok_or_else(|| lua_error_message(format!("{kind} requires value")))
 }
 
 fn parse_action_plan(state: &mut State, params_idx: isize) -> dellingr::Result<ActionWirePlan> {
@@ -1824,12 +1914,7 @@ fn parse_wire_mail_operation(
     op_idx: isize,
     op_name: &str,
 ) -> dellingr::Result<WireMailOperation> {
-    let normalized = op_name
-        .chars()
-        .filter(|ch| *ch != '_' && *ch != '-' && *ch != '.')
-        .collect::<String>()
-        .to_ascii_lowercase();
-    match normalized.as_str() {
+    match normalize_name(op_name).as_str() {
         "archive" => Ok(WireMailOperation::Archive),
         "trash" => Ok(WireMailOperation::Trash),
         "permanentdelete" => Ok(WireMailOperation::PermanentDelete),
@@ -1883,6 +1968,14 @@ fn parse_wire_mail_operation(
             "unsupported action operation {other:?}"
         ))),
     }
+}
+
+fn normalize_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| *ch != '_' && *ch != '-' && *ch != '.')
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 fn required_bool_field(

@@ -79,17 +79,17 @@ request/ack shutdown path.
 
 ## Phase 6a / 6a-part-2 - write-surface relocation smoke
 
-The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Item 8 is now automated; the remaining manual items below are the ones whose end-to-end behavior is hard to assert from automation - cold-boot timing and file-system-level WAL crash safety. Run the remaining items on Linux before promoting any phase that touches Service IPC.
+The 12+ write-surface IPCs added in Phase 6a all have wire-shape round-trip tests + handler unit tests, and the `service_subprocess_*` cohort covers the boundary-crossing path. Items 6 and 8 are now automated. Item 7 remains the local file-system WAL crash-safety check; items 9 and 10 remain provider-workflow checks until fake OAuth/calendar providers land.
 
 ### 6. Cold-boot bootstrap snapshots (encryption-key handle end-to-end)
 
-Verifies that `internal.read_bootstrap_snapshots` lands the persisted preferences before the user can interact with them, and that the Service-side decrypt path returns identical UI state to the pre-relocation local-decrypt path.
+Automated by `crates/app/tests/service-harness/m6/cold_boot_bootstrap_snapshots.lua`.
 
-1. Open Settings, change the theme (e.g. dark), enable Block Remote Images, set Reading Pane to bottom. Wait for the auto-save tick (~1 s) then quit the app cleanly.
-2. Relaunch the app.
-3. **Expected:** the new theme, remote-image setting, and reading-pane position are visible in the first frame after boot.ready - no flash of defaults persisting beyond the initial paint. The Service log carries an `internal.read_bootstrap_snapshots` dispatch line; the UI log carries `bootstrap snapshots IPC failed` only on error.
-
-If the new theme appears for ~1 s of "default" then snaps to dark: the `Message::BootstrapSnapshotsLoaded` arrival is later than the first paint - acceptable today, but the round-trip should land sub-100 ms in steady-state. Investigate if the gap exceeds ~500 ms.
+The script writes persisted preferences through `settings.set`, shuts
+down cleanly, respawns the Service against the same harness data dir,
+then asserts `internal.read_bootstrap_snapshots` returns the persisted
+theme, reading pane, font size, remote-image, sync-status, and
+phishing settings.
 
 ### 7. Window-close-during-typing draft WAL
 

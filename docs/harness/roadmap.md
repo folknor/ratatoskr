@@ -450,8 +450,8 @@ repo at `crates/app/tests/service-harness/fixtures/extract/`.
 
 ### M6 - Manual-matrix automation
 
-**Status:** PARTIAL - items 4, 5, and 8 have landed; the rest unblocks
-incrementally as harness capability grows.
+**Status:** PARTIAL - items 4, 5, 6, and 8 have landed; the rest
+unblocks incrementally as harness capability grows.
 
 The manual test matrix lives at `docs/harness/manual-test-matrix.md`.
 It is the **deletable artefact**: when M6 completes,
@@ -475,9 +475,14 @@ Sequencing:
   Windows host (cross-platform CI runner, dev box, or paid test
   service). The harness scripts are platform-agnostic; the gate is
   the test environment.
-- **M6.6, M6.7 (READY when fixture-setup API lands in M3):**
-  cold-boot bootstrap snapshots, draft WAL replay. Both need
-  deterministic data-dir state across multiple runs.
+- **M6.6 (LANDED):** cold-boot bootstrap snapshots now lives in
+  `crates/app/tests/service-harness/m6/`. The script persists
+  settings via `settings.set`, shuts down cleanly, respawns against
+  the same data dir, and asserts `internal.read_bootstrap_snapshots`
+  returns the persisted UI/settings snapshot values. Verified on
+  2026-05-09 with a focused `brokkr service-test` run.
+- **M6.7 (READY when fixture-setup API lands in M3):** draft WAL
+  replay needs deterministic data-dir state across multiple runs.
 - **M6.8 (LANDED):** account.delete cancels in-flight sync now lives
   in `crates/app/tests/service-harness/m6/`. The script uses a
   test-helper `harness-slow-sync` provider that parks until its
