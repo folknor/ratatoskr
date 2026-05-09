@@ -469,6 +469,10 @@ Landed slices:
   verifies the extracted attachment reaches the search index, and
   asserts search attribution keeps the body as the primary match while
   reporting the attachment in `alsoMatched`.
+- `crates/app/tests/service-harness/extract/attachment_only_search_annotation.lua`
+  seeds a cached text attachment whose unique search term does not occur
+  in the message body and asserts search attribution reports the
+  attachment as the primary match.
 - `crates/app/tests/service-harness/extract/index_rebuild_force_preempts_in_flight_wipe.lua`
   drives `index.rebuild` through the Lua harness, holds the search
   writer's `search.clear` command in flight with the test delay hook,
