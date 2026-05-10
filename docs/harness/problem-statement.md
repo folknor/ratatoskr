@@ -80,15 +80,14 @@ against today's framework would mean rebuilding it once Phase 8's work
 lands."
 
 **Manual-only items already exist where automation should have
-reached.** `docs/harness/manual-test-matrix.md` carries 14 items across Linux
-parent-death, Windows Job Object, clean-shutdown handshake, stdio
-corruption defense, heartbeat-detects-killed-Service,
-SIGTERM-triggers-shutdown-drain, cold-boot bootstrap, draft WAL,
-account.delete cancellation, OAuth re-auth, calendar create/update/
-delete, and the Phase 7 search/extraction round-trip. Items 4 and 5
-(heartbeat, SIGTERM) are explicitly noted as "too noisy to assert
-reliably from automation." That phrasing is correct against the
-existing framework. A deterministic harness pulls them in.
+reached.** The remaining action items from the old manual test matrix
+now live in `docs/harness/roadmap.md`, so the roadmap is the single
+work queue. They cover Windows Job Object parent-death, clean-shutdown
+handshake, stdio corruption defense, Google/JMAP calendar workflows,
+calendar failure behavior, and the remaining Phase 7 search/extraction
+round trips. Items that were once considered "too noisy to assert
+reliably from automation" have been pulled into deterministic harness
+coverage as the harness grew.
 
 ## Goal
 

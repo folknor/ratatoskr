@@ -43,9 +43,11 @@ local account, account_err = client:request("TestSeedAccount", {
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
+harness.marker("SYNC_START")
 local completed, sync_err = client:start_calendar_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(sync_err == nil, "start_calendar_sync failed")
 harness.assert_eq(completed.result, "completed", completed.error or "calendar sync result")
 
@@ -100,26 +102,40 @@ harness.assert_eq(review.end_time, 1769958000, "review end_time")
 harness.assert(review.attendees_json == nil, "empty attendees should stay nil")
 
 local requests = harness.mock_requests(admin_endpoint)
+local calendar_list_requests =
+    harness.request_count(requests, "graph", "GET /v1.0/me/calendars")
+local work_delta_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/calendars/cal-work/calendarView/delta"
+)
+local personal_delta_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/calendars/cal-personal/calendarView/delta"
+)
 harness.assert(
-    harness.request_count(requests, "graph", "GET /v1.0/me/calendars") >= 1,
+    calendar_list_requests >= 1,
     "Graph calendar sync did not list calendars"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/calendars/cal-work/calendarView/delta"
-    ) >= 1,
+    work_delta_requests >= 1,
     "Graph calendar sync did not delta-sync Work"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/calendars/cal-personal/calendarView/delta"
-    ) >= 1,
+    personal_delta_requests >= 1,
     "Graph calendar sync did not delta-sync Personal"
 )
+
+harness.write_summary({
+    correct = 1,
+    calendar_count = state.calendar_count,
+    calendar_event_count = state.calendar_event_count,
+    provider_requests = #requests,
+    graph_calendar_list_requests = calendar_list_requests,
+    graph_work_delta_requests = work_delta_requests,
+    graph_personal_delta_requests = personal_delta_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

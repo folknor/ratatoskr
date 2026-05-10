@@ -48,9 +48,11 @@ local account, account_err = client:request("TestSeedAccount", {
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
+harness.marker("SYNC_START")
 local completed, sync_err = client:start_calendar_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(sync_err == nil, "start_calendar_sync failed")
 harness.assert_eq(completed.result, "completed", completed.error or "calendar sync result")
 
@@ -104,28 +106,49 @@ harness.assert_eq(review.end_time, 1769958000, "review end_time")
 harness.assert(review.attendees_json == nil, "empty attendees should stay nil")
 
 local requests = harness.mock_requests(admin_endpoint)
+local root_propfind_requests = harness.request_count(requests, "caldav", "PROPFIND /")
+local principal_propfind_requests =
+    harness.request_count(requests, "caldav", "PROPFIND /principals/account-1/")
+local calendar_home_propfind_requests =
+    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/")
+local personal_propfind_requests =
+    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/cal-personal/")
+local work_report_requests =
+    harness.request_count(requests, "caldav", "REPORT /calendars/account-1/cal-work/")
 harness.assert(
-    harness.request_count(requests, "caldav", "PROPFIND /") >= 1,
+    root_propfind_requests >= 1,
     "CalDAV sync did not discover principal from root"
 )
 harness.assert(
-    harness.request_count(requests, "caldav", "PROPFIND /principals/account-1/") >= 1,
+    principal_propfind_requests >= 1,
     "CalDAV sync did not discover calendar home"
 )
 harness.assert(
-    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/") >= 1,
+    calendar_home_propfind_requests >= 1,
     "CalDAV sync did not list calendars"
 )
 harness.assert(
-    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/cal-personal/") >= 1,
+    personal_propfind_requests >= 1,
     "CalDAV sync did not inspect Personal events"
 )
 -- Personal is empty, so the CalDAV client lists it but has no event
 -- hrefs to fetch via calendar-multiget REPORT.
 harness.assert(
-    harness.request_count(requests, "caldav", "REPORT /calendars/account-1/cal-work/") >= 1,
+    work_report_requests >= 1,
     "CalDAV sync did not fetch Work events"
 )
+
+harness.write_summary({
+    correct = 1,
+    calendar_count = state.calendar_count,
+    calendar_event_count = state.calendar_event_count,
+    provider_requests = #requests,
+    caldav_root_propfind_requests = root_propfind_requests,
+    caldav_principal_propfind_requests = principal_propfind_requests,
+    caldav_calendar_home_propfind_requests = calendar_home_propfind_requests,
+    caldav_personal_propfind_requests = personal_propfind_requests,
+    caldav_work_report_requests = work_report_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

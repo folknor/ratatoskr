@@ -71,27 +71,33 @@ harness.assert(
 
 harness.clear_mock_requests(admin_endpoint)
 
+harness.marker("SYNC_START")
 local second, second_err = client:start_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(second_err == nil, "delta start_sync failed")
 harness.assert_eq(second.result, "completed", second.error or "delta sync result")
 
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
+local list_requests = harness.request_count(requests, "imap", "LIST")
+local select_requests = harness.request_count(requests, "imap", "SELECT")
+local uid_search_requests = harness.request_count(requests, "imap", "UID SEARCH")
+local body_fetch_requests = body_fetch_count(requests)
 harness.assert(
-    harness.request_count(requests, "imap", "LIST") >= 1,
+    list_requests >= 1,
     "delta sync did not list folders"
 )
 harness.assert(
-    harness.request_count(requests, "imap", "SELECT") >= 1,
+    select_requests >= 1,
     "delta sync did not select folders"
 )
 harness.assert(
-    harness.request_count(requests, "imap", "UID SEARCH") >= 1,
+    uid_search_requests >= 1,
     "delta sync did not check server UIDs"
 )
 harness.assert_eq(
-    body_fetch_count(requests),
+    body_fetch_requests,
     0,
     "steady-state delta unexpectedly fetched message bodies"
 )
@@ -108,6 +114,19 @@ harness.assert_eq(after_delta.label_count, after_initial.label_count, "delta lab
 local delta_account = account_by_id(after_delta, account.account_id)
 harness.assert(delta_account ~= nil, "account missing after delta sync")
 harness.assert(delta_account.initial_sync_completed, "delta cleared initial sync flag")
+
+harness.write_summary({
+    correct = 1,
+    message_count = after_delta.message_count,
+    unread_message_count = after_delta.unread_message_count,
+    thread_count = after_delta.thread_count,
+    label_count = after_delta.label_count,
+    provider_requests = #requests,
+    imap_list_requests = list_requests,
+    imap_select_requests = select_requests,
+    imap_uid_search_requests = uid_search_requests,
+    imap_body_fetch_requests = body_fetch_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

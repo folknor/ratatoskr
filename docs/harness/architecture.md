@@ -413,7 +413,7 @@ This document does not specify the Lua API in syntax-accurate form.
 What it specifies is the **required capabilities** scripts must be
 able to express, derived from the existing tests in
 `crates/app/tests/service_subprocess.rs`, the Phase 8 named cohort,
-and the manual-matrix items moving into automation. The capabilities
+and the former manual-matrix items moving into automation. The capabilities
 below name the `ServiceClient` (and friends) methods that the Lua
 binding has to surface.
 
@@ -520,7 +520,7 @@ existing tests do.
   for data-dir-relative paths, or
   `harness.wait_for_sentinel { absolute = "/var/run/foo", backstop = "5s" }`
   for explicit absolute paths. Required for the `clean_shutdown`
-  sentinel in the manual-matrix items moving into automation; available
+  sentinel in the former manual-matrix items moving into automation; available
   for any future test that benefits from a non-clock readiness signal.
 - **Frame log** - captured under the hood via `ServiceClient`'s wire
   layer (the harness taps stdin/stdout). Diagnostic only; emitted to

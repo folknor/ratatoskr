@@ -62,6 +62,15 @@ local function run_delta(client, account_id, label)
     harness.assert_eq(result.result, "completed", result.error or (label .. " sync result"))
 end
 
+local measured_sync_count = 0
+
+local function run_measured_delta(client, account_id, label)
+    harness.marker("SYNC_START")
+    run_delta(client, account_id, label)
+    harness.marker("SYNC_END")
+    measured_sync_count = measured_sync_count + 1
+end
+
 local function apply_step(endpoint, step_id)
     local response = harness.http_json({
         method = "POST",
@@ -91,6 +100,22 @@ local function assert_delta_path(endpoint, label)
         0,
         label .. " unexpectedly ran Email/query"
     )
+    return requests
+end
+
+local summary_provider_requests = 0
+local summary_email_changes = 0
+local summary_email_get = 0
+local summary_email_query = 0
+
+local function record_jmap_requests(requests)
+    summary_provider_requests = summary_provider_requests + #requests
+    summary_email_changes =
+        summary_email_changes + harness.request_count(requests, "jmap", "Email/changes")
+    summary_email_get =
+        summary_email_get + harness.request_count(requests, "jmap", "Email/get")
+    summary_email_query =
+        summary_email_query + harness.request_count(requests, "jmap", "Email/query")
 end
 
 local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
@@ -143,8 +168,8 @@ assert_has_value(
     "mb-inbox",
     "remote new email did not land in inbox"
 )
-run_delta(client, account.account_id, "new step")
-assert_delta_path(jmap_endpoint, "new step")
+run_measured_delta(client, account.account_id, "new step")
+record_jmap_requests(assert_delta_path(jmap_endpoint, "new step"))
 local after_new = query_state(client, account.account_id)
 harness.assert_eq(after_new.message_count, 3, "message count after new")
 local lunch = message_by_id(after_new, "email-003")
@@ -171,8 +196,8 @@ assert_has_value(
     "$flagged",
     "remote email-002 did not gain $flagged"
 )
-run_delta(client, account.account_id, "change step")
-assert_delta_path(jmap_endpoint, "change step")
+run_measured_delta(client, account.account_id, "change step")
+record_jmap_requests(assert_delta_path(jmap_endpoint, "change step"))
 local after_change = query_state(client, account.account_id)
 local status_update = message_by_id(after_change, "email-002")
 harness.assert(status_update ~= nil, "email-002 missing after change")
@@ -201,7 +226,7 @@ harness.assert(
     fixture_email_by_id(remote_after_delete, "email-001") == nil,
     "remote snapshot retained email-001 after delete"
 )
-run_delta(client, account.account_id, "delete step")
+run_measured_delta(client, account.account_id, "delete step")
 local delete_requests = harness.mock_requests(jmap_endpoint, { stable = true })
 harness.assert(
     harness.request_count(delete_requests, "jmap", "Email/changes") >= 1,
@@ -212,6 +237,7 @@ harness.assert_eq(
     0,
     "delete step unexpectedly ran Email/query"
 )
+record_jmap_requests(delete_requests)
 local after_delete = query_state(client, account.account_id)
 harness.assert_eq(after_delete.message_count, 2, "message count after delete")
 harness.assert(message_by_id(after_delete, "email-001") == nil, "email-001 survived delete")
@@ -236,8 +262,8 @@ assert_lacks_value(
     "mb-inbox",
     "remote email-002 stayed in inbox after move"
 )
-run_delta(client, account.account_id, "move step")
-assert_delta_path(jmap_endpoint, "move step")
+run_measured_delta(client, account.account_id, "move step")
+record_jmap_requests(assert_delta_path(jmap_endpoint, "move step"))
 local after_move = query_state(client, account.account_id)
 local moved = message_by_id(after_move, "email-002")
 harness.assert(moved ~= nil, "email-002 missing after move")
@@ -265,6 +291,16 @@ local end_response = harness.http_json({
 harness.assert(end_response.ok, "end-of-script response failed")
 harness.assert(end_response.step == nil, "end-of-script step should be nil")
 harness.assert(not end_response.applied, "end-of-script should not apply")
+
+harness.write_summary({
+    correct = 1,
+    measured_syncs = measured_sync_count,
+    message_count = after_move.message_count,
+    provider_requests = summary_provider_requests,
+    email_changes_requests = summary_email_changes,
+    email_get_requests = summary_email_get,
+    email_query_requests = summary_email_query,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")
