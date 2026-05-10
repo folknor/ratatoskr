@@ -554,7 +554,11 @@ Sequencing:
   coverage. `crates/app/tests/service-harness/m6/calendar_actions_graph_crud.lua`
   drives `cal_action.execute_plan` create/update/delete against the
   Graph fixture and asserts local state plus POST/PATCH/DELETE request
-  bodies. Google, JMAP, and CalDAV provider-workflow checks remain.
+  bodies. `crates/app/tests/sync-harness/graph-calendar-remote-delta.lua`
+  mutates the mock Graph fixture directly with POST/PATCH/DELETE, then
+  verifies calendar delta sync imports the created, updated, and
+  tombstoned events. Google, JMAP, and CalDAV provider-workflow checks
+  remain.
 - **M6.12 (LANDED):** backfill kick on boot.ready now lives in
   `crates/app/tests/service-harness/m6/`. The script seeds a cached
   but unindexed text attachment, restarts the Service against the same
@@ -682,6 +686,15 @@ Ratatoskr-side M8 surface now in tree:
   `client:execute_calendar_plan`, and verifies create/update/delete
   flow through the Service worker into Graph POST/PATCH/DELETE
   requests and local calendar-event state.
+- `crates/app/tests/sync-harness/graph-calendar-remote-delta.lua`
+  targets the same Graph calendar fixture, mutates the remote mock
+  directly through Graph POST/PATCH/DELETE calls, then drives
+  `client:start_calendar_sync` and verifies the local calendar DB
+  imports the created event, updated event fields, and deleted-event
+  tombstone through normal `calendarView/delta`. This slice also
+  hardens Graph delta parsing so tombstone objects with only `id` and
+  `@removed` deserialize far enough for the deletion path to handle
+  them.
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
@@ -712,12 +725,6 @@ by ratatoskr scripts:
   IMAP and JMAP over the same `Fixture`, mutate through IMAP and then
   verify JMAP `Email/changes` reports the same transition. This
   proves the shared fixture change log is not protocol-local.
-- Graph calendar remote-mutation delta import. Directly mutate the
-  Graph fixture with POST/PATCH/DELETE event calls, run
-  `client:start_calendar_sync`, and assert created, updated, and
-  tombstoned events surface through `calendarView/delta` and land in
-  the local calendar DB. The generic `harness.http_json(...)` helper
-  is available for PATCH/DELETE provider-admin setup.
 - Graph calendar action plus delta confirmation. Extend or pair with
   `calendar_actions_graph_crud.lua` so the Service action path is
   followed by a calendar delta sync against the same fixture, proving
@@ -742,8 +749,9 @@ Lua helper cleanup backlog:
   remain.
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
-- M6.10 (calendar) has Graph read/sync and Graph create/update/delete
-  coverage; Google, JMAP, and CalDAV workflow coverage remain manual.
+- M6.10 (calendar) has Graph read/sync, Graph create/update/delete
+  action coverage, and Graph remote-mutation delta import coverage;
+  Google, JMAP, and CalDAV workflow coverage remain manual.
 
 ---
 

@@ -31,8 +31,10 @@ pub struct GraphEvent {
     pub body: Option<GraphEventBody>,
     #[serde(default)]
     pub body_preview: Option<String>,
-    pub start: GraphDateTimeTimeZone,
-    pub end: GraphDateTimeTimeZone,
+    #[serde(default)]
+    pub start: Option<GraphDateTimeTimeZone>,
+    #[serde(default)]
+    pub end: Option<GraphDateTimeTimeZone>,
     #[serde(default)]
     pub is_all_day: Option<bool>,
     #[serde(default)]
@@ -432,8 +434,8 @@ fn graph_event_from_create_echo(
             content: body.content.clone(),
         }),
         body_preview: None,
-        start: event.start.clone(),
-        end: event.end.clone(),
+        start: Some(event.start.clone()),
+        end: Some(event.end.clone()),
         is_all_day: event.is_all_day,
         location: event.location.as_ref().map(|location| GraphLocation {
             display_name: Some(location.display_name.clone()),
@@ -504,9 +506,17 @@ pub async fn graph_delete_event(
 /// Convert a Graph API event to our intermediate representation.
 fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
     let is_all_day = event.is_all_day.unwrap_or(false);
+    let start = event
+        .start
+        .as_ref()
+        .ok_or_else(|| format!("Graph event {} missing start", event.id))?;
+    let end = event
+        .end
+        .as_ref()
+        .ok_or_else(|| format!("Graph event {} missing end", event.id))?;
 
-    let start_time = parse_graph_datetime(&event.start, is_all_day, "start")?;
-    let end_time = parse_graph_datetime(&event.end, is_all_day, "end")?;
+    let start_time = parse_graph_datetime(start, is_all_day, "start")?;
+    let end_time = parse_graph_datetime(end, is_all_day, "end")?;
 
     // All-day DST correction. The all-day branch of `parse_graph_datetime`
     // resolves both DTSTART and DTEND through chrono::Local independently,
@@ -525,8 +535,8 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
     // resolution.
     let end_time = if is_all_day {
         match (
-            parse_graph_all_day_date(&event.start),
-            parse_graph_all_day_date(&event.end),
+            parse_graph_all_day_date(start),
+            parse_graph_all_day_date(end),
         ) {
             (Some(start_date), Some(end_date)) => {
                 let days = end_date.signed_duration_since(start_date).num_days();
@@ -578,7 +588,7 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
     let timezone = if is_all_day {
         None
     } else {
-        resolve_graph_tz(&event.start.time_zone)
+        resolve_graph_tz(&start.time_zone)
             .and_then(|tz| tz.name().map(std::borrow::Cow::into_owned))
     };
 
