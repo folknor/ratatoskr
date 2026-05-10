@@ -13,6 +13,22 @@ local function account_by_id(state, account_id)
     return nil
 end
 
+local function body_fetch_count(requests)
+    local count = 0
+    for _, request in ipairs(requests) do
+        if request.protocol == "imap" and request.command == "UID FETCH" then
+            harness.assert(
+                request.detail ~= nil and request.detail.body ~= nil,
+                "UID FETCH request missing body detail"
+            )
+            if request.detail.body == true then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
@@ -61,7 +77,7 @@ local second, second_err = client:start_sync({
 harness.assert(second_err == nil, "delta start_sync failed")
 harness.assert_eq(second.result, "completed", second.error or "delta sync result")
 
-local requests = harness.mock_requests(admin_endpoint)
+local requests = harness.mock_requests(admin_endpoint, { stable = true })
 harness.assert(
     harness.request_count(requests, "imap", "LIST") >= 1,
     "delta sync did not list folders"
@@ -74,15 +90,10 @@ harness.assert(
     harness.request_count(requests, "imap", "UID SEARCH") >= 1,
     "delta sync did not check server UIDs"
 )
--- Strict on purpose: with imap-small.toml's CONDSTORE-ish state, a true
--- no-op delta need not issue UID FETCH at all. saehrimnir currently logs
--- only "UID FETCH" without item detail, so this can't yet distinguish
--- BODY.PEEK[] from FLAGS. If a deliberate flag-reconciliation pass lands,
--- extend saehrimnir's log entry and forbid body fetches only.
 harness.assert_eq(
-    harness.request_count(requests, "imap", "UID FETCH"),
+    body_fetch_count(requests),
     0,
-    "steady-state delta unexpectedly fetched message bodies or flags"
+    "steady-state delta unexpectedly fetched message bodies"
 )
 
 local after_delta, after_delta_err = client:request("TestQueryDbState", {

@@ -698,7 +698,7 @@ Ratatoskr-side M8 surface now in tree:
 - `crates/app/tests/sync-harness/imap-steady-state-delta.lua` runs
   the same fixture twice, asserts state stays stable, and uses the
   request log to prove the second run lists/selects/searches without
-  issuing `UID FETCH` for unchanged messages.
+  issuing body-fetching `UID FETCH` calls for unchanged messages.
 - `crates/app/tests/sync-harness/imap-writeback-flags.lua` drives
   real `ActionExecutePlan` SetRead and SetStarred operations against
   an IMAP-synced thread, asserts saehrimnir records `UID STORE`, then
@@ -713,11 +713,29 @@ Ratatoskr-side M8 surface now in tree:
   the moved state and final deletion. This slice also hardens IMAP
   `MoveToFolder` to resolve canonical label IDs to provider mailbox
   paths, records UIDPLUS `COPYUID` mappings so moved rows track their
-  destination mailbox UID, teaches IMAP sync to reuse the existing
-  message row for a repeated `(folder, uid)` fetch instead of creating
-  duplicate folder-derived IDs or placeholder threads, and makes
-  permanent delete provider-first while preserving retry-queue
+  destination mailbox UID, uses `UID EXPUNGE` when available before
+  falling back to plain `EXPUNGE`, teaches IMAP sync to reuse the
+  existing message row for a repeated `(folder, uid)` fetch instead of
+  creating duplicate folder-derived IDs or placeholder threads, and
+  makes permanent delete provider-first while preserving retry-queue
   insertion when provider dispatch fails.
+- `crates/app/tests/sync-harness/imap-incremental-new-change.lua`
+  targets the shared scripted `jmap-incremental.lua` fixture through
+  IMAP, applies saehrimnir's new and flag-change steps, runs
+  ratatoskr IMAP delta sync after each step, and asserts local DB
+  convergence. This also fixes IMAP flag-only fetches to request `UID`
+  alongside `FLAGS`, treats a pinned `HIGHESTMODSEQ = 1` as an
+  untrusted seed value that requires a UID search plus full flag diff
+  while retaining the trusted CONDSTORE fast path for real advancing
+  modseq values, and tightens deletion detection so folders whose
+  server message count dropped can force a server-UID comparison
+  instead of waiting for the normal ten-minute janitor throttle.
+- `crates/app/tests/sync-harness/imap-jmap-shared-state.lua`
+  seeds both an IMAP and a JMAP account against the same fixture, moves
+  a message through the real IMAP `MoveToFolder` action, then runs JMAP
+  delta sync and asserts the move arrives through `Email/changes` /
+  `Email/get` without falling back to `Email/query`. This is the mail
+  sibling of the CalDAV-write to Graph-delta shared-fixture proof.
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
@@ -823,19 +841,17 @@ Ratatoskr-side M8 surface now in tree:
   `summary_conflicts`) so scripts can assert remote-dispatch success
   without reverse-engineering it from provider request logs alone.
 
-Newly unlocked by the latest saehrimnir commits, but not yet covered
-by ratatoskr scripts:
+Remaining saehrimnir dependency for IMAP remote-mutation scripts:
 
-- IMAP remote-mutation delta import. Saehrimnir's
-  `POST /test/fixture/step` route now mutates the shared fixture image,
-  so ratatoskr can cover out-of-band IMAP changes without a raw IMAP
-  Lua client: apply a change step, run IMAP delta sync, and assert
-  local DB state follows the remote fixture. This is the IMAP analogue
-  of `jmap-email-set-delta.lua`.
-- Mixed-protocol shared-state proof. On a fixture that exposes both
-  IMAP and JMAP over the same `Fixture`, mutate through IMAP and then
-  verify JMAP `Email/changes` reports the same transition. This
-  proves the shared fixture change log is not protocol-local.
+- `POST /test/fixture/step` delete/move coverage through IMAP needs
+  stable per-message IMAP UID projection across fixture mutations, or
+  a UIDVALIDITY bump when the projection is rebuilt. The current
+  fixture view derives UIDs from each mailbox's current declaration
+  order, so deleting or moving a lower UID can make later messages
+  inherit that UID. Ratatoskr correctly compares server UID sets, but
+  no IMAP client can safely distinguish that mock-only UID reuse from
+  a real message still present at the old UID.
+
 Lua helper cleanup backlog:
 
 - Do not add another extract/search script that copy-pastes the
@@ -848,8 +864,10 @@ Lua helper cleanup backlog:
 - A small-mailbox IMAP fixture syncs end-to-end against a fake
   IMAP server, with assertions on final account/folder/message
   counts. Initial import and steady-state delta coverage have landed;
-  flag writeback persistence and move/delete writeback persistence
-  have landed. Out-of-band remote mutation import remains.
+  flag writeback persistence, move/delete writeback persistence, and
+  out-of-band remote new/flag-change import have landed. Remote
+  delete/move fixture-step import waits on stable saehrimnir IMAP UIDs
+  across scripted mutations.
 - A small-mailbox JMAP fixture does the same. Initial import,
   steady-state delta, raw `Email/set` mutation, and scripted
   new/change/delete/move incremental coverage have landed; deeper

@@ -16,14 +16,14 @@ use super::is_connection_error;
 const DELETION_CHECK_INTERVAL_SECS: i64 = 600; // 10 minutes
 
 /// Minimum interval between non-CONDSTORE flag sync checks per folder (seconds).
-/// `UID FETCH 1:* (FLAGS)` is cheaper than body fetches but still non-trivial
+/// `UID FETCH 1:* (UID FLAGS)` is cheaper than body fetches but still non-trivial
 /// on large folders.
 const FLAG_SYNC_INTERVAL_SECS: i64 = 300; // 5 minutes
 
 /// Sync flags for servers that don't support CONDSTORE, reusing an existing
 /// IMAP session.
 ///
-/// Fetches all current flags via `UID FETCH 1:* (FLAGS)`, diffs against
+/// Fetches all current flags via `UID FETCH 1:* (UID FLAGS)`, diffs against
 /// locally cached flags, and applies any changes. This is the fallback for
 /// servers like Exchange IMAP, Courier, and hMailServer that lack CONDSTORE.
 ///
@@ -36,6 +36,18 @@ pub(crate) async fn sync_flags_on_session(
     db: &ReadDbState,
     cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
+    sync_flags_on_session_inner(session, folder_path, account_id, db, cancellation_token, false)
+        .await
+}
+
+async fn sync_flags_on_session_inner(
+    session: &mut super::connection::ImapSession,
+    folder_path: &str,
+    account_id: &str,
+    db: &ReadDbState,
+    cancellation_token: &CancellationToken,
+    force: bool,
+) -> Result<u64, String> {
     // Throttle: only check every FLAG_SYNC_INTERVAL_SECS
     let now = chrono::Utc::now().timestamp();
     let aid = account_id.to_string();
@@ -46,7 +58,8 @@ pub(crate) async fn sync_flags_on_session(
 
     // Reuse the deletion check timestamp table for throttling. If we can't
     // read it, proceed anyway (first run).
-    if let Ok(Some(last)) = &last_sync
+    if !force
+        && let Ok(Some(last)) = &last_sync
         && now - last < FLAG_SYNC_INTERVAL_SECS
     {
         return Ok(0);
@@ -133,6 +146,27 @@ pub async fn sync_flags_without_condstore(
     result
 }
 
+pub async fn sync_flags_without_condstore_forced(
+    config: &ImapConfig,
+    folder_path: &str,
+    account_id: &str,
+    db: &ReadDbState,
+    cancellation_token: &CancellationToken,
+) -> Result<u64, String> {
+    let mut session = connect(config).await?;
+    let result = sync_flags_on_session_inner(
+        &mut session,
+        folder_path,
+        account_id,
+        db,
+        cancellation_token,
+        true,
+    )
+    .await;
+    let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+    result
+}
+
 /// Detect messages deleted on the IMAP server by comparing `UID SEARCH ALL`
 /// results against locally-cached UIDs, reusing an existing IMAP session.
 ///
@@ -146,6 +180,7 @@ async fn detect_deleted_on_session(
     folder_path: &str,
     account_id: &str,
     db: &ReadDbState,
+    force: bool,
 ) -> Result<Vec<String>, String> {
     // Throttle: only check every DELETION_CHECK_INTERVAL_SECS
     let now = chrono::Utc::now().timestamp();
@@ -153,13 +188,17 @@ async fn detect_deleted_on_session(
     let fp = folder_path.to_string();
     let should_run = db
         .with_conn(move |conn| {
-            match sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp) {
-                Ok(Some(last)) if now - last < DELETION_CHECK_INTERVAL_SECS => Ok(false),
-                Ok(_) => Ok(true),
-                Err(e) => {
-                    // If the row doesn't exist yet (new folder), skip
-                    log::debug!("get_last_deletion_check_at: {e}");
-                    Ok(false)
+            if force {
+                Ok(true)
+            } else {
+                match sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp) {
+                    Ok(Some(last)) if now - last < DELETION_CHECK_INTERVAL_SECS => Ok(false),
+                    Ok(_) => Ok(true),
+                    Err(e) => {
+                        // If the row doesn't exist yet (new folder), skip
+                        log::debug!("get_last_deletion_check_at: {e}");
+                        Ok(false)
+                    }
                 }
             }
         })
@@ -216,7 +255,7 @@ pub async fn detect_deleted_messages(
     db: &ReadDbState,
 ) -> Result<Vec<String>, String> {
     let mut session = connect(config).await?;
-    let result = detect_deleted_on_session(&mut session, folder_path, account_id, db).await;
+    let result = detect_deleted_on_session(&mut session, folder_path, account_id, db, false).await;
     let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }
@@ -238,6 +277,7 @@ pub async fn run_deletion_detection(
     search: &SearchWriteHandle,
     syncable_folders: &[&super::types::ImapFolder],
     state_map: &HashMap<String, sync_pipeline::FolderSyncState>,
+    force_folders: &HashSet<String>,
 ) -> Vec<String> {
     let mut all_affected = Vec::new();
     if cancellation_token.is_cancelled() {
@@ -270,7 +310,8 @@ pub async fn run_deletion_detection(
         if cancellation_token.is_cancelled() {
             break;
         }
-        match detect_deleted_on_session(&mut session, &folder.raw_path, account_id, db).await {
+        let force = force_folders.contains(&folder.raw_path);
+        match detect_deleted_on_session(&mut session, &folder.raw_path, account_id, db, force).await {
             Ok(deleted_ids) if !deleted_ids.is_empty() => {
                 // Remove from body store
                 if let Err(e) = body_store.delete(deleted_ids.clone()).await {
@@ -311,6 +352,7 @@ pub async fn run_deletion_detection(
                                 &folder.raw_path,
                                 account_id,
                                 db,
+                                force,
                             )
                             .await
                             {

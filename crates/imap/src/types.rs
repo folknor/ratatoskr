@@ -140,6 +140,7 @@ pub struct DeltaCheckRequest {
 pub struct DeltaCheckResult {
     pub folder: String,
     pub uidvalidity: u32,
+    pub exists: u32,
     pub new_uids: Vec<u32>,
     pub uidvalidity_changed: bool,
     /// Server's HIGHESTMODSEQ from the SELECT response. `None` if the server

@@ -27,7 +27,9 @@ const CIRCUIT_BREAKER_MAX_FAILURES: u32 = 5;
 
 use super::is_connection_error;
 use super::imap_delta_janitor::sync_flags_on_session;
-use super::imap_delta_janitor::{run_deletion_detection, sync_flags_without_condstore};
+use super::imap_delta_janitor::{
+    run_deletion_detection, sync_flags_without_condstore, sync_flags_without_condstore_forced,
+};
 
 fn compute_since_date(days_back: i64) -> String {
     use chrono::{Duration, Utc};
@@ -81,6 +83,11 @@ pub async fn imap_delta_sync(
         db.with_conn(move |conn| sync_pipeline::get_all_folder_sync_states(conn, &aid))
             .await?
     };
+    let local_message_counts = {
+        let aid = account_id.to_string();
+        db.with_conn(move |conn| sync_pipeline::get_local_message_counts_by_folder(conn, &aid))
+            .await?
+    };
     let state_map: HashMap<String, sync_pipeline::FolderSyncState> = sync_states
         .into_iter()
         .map(|s| (s.folder_path.clone(), s))
@@ -90,6 +97,7 @@ pub async fn imap_delta_sync(
     let mut all_meta: HashMap<String, MessageMeta> = HashMap::new();
     let mut labels_by_rfc_id: HashMap<String, HashSet<String>> = HashMap::new();
     let mut delta_errors: Vec<String> = Vec::new();
+    let mut force_deletion_folders: HashSet<String> = HashSet::new();
 
     let new_folders: Vec<_> = syncable_folders
         .iter()
@@ -187,6 +195,13 @@ pub async fn imap_delta_sync(
                 Some(r) => r,
                 None => continue,
             };
+            let local_message_count = local_message_counts
+                .get(&folder.raw_path)
+                .copied()
+                .unwrap_or(0);
+            if folder_delta_may_include_deletions(saved, delta, local_message_count) {
+                force_deletion_folders.insert(folder.raw_path.clone());
+            }
 
             if let Err(e) = process_folder_delta(
                 config,
@@ -240,6 +255,7 @@ pub async fn imap_delta_sync(
         search,
         &syncable_folders,
         &state_map,
+        &force_deletion_folders,
     )
     .await;
 
@@ -317,6 +333,23 @@ pub async fn imap_delta_sync(
         new_inbox_message_ids: inbox_ids,
         affected_thread_ids: affected,
     })
+}
+
+fn folder_delta_may_include_deletions(
+    saved: &sync_pipeline::FolderSyncState,
+    delta: &super::types::DeltaCheckResult,
+    local_message_count: u32,
+) -> bool {
+    if delta.exists < local_message_count {
+        return true;
+    }
+    if delta.modseq_unchanged {
+        return false;
+    }
+    if delta.uidvalidity_changed || delta.modseq_reset {
+        return true;
+    }
+    matches!((saved.modseq, delta.highest_modseq), (Some(cached), Some(server)) if server != cached)
 }
 
 /// Batch delta check with reconnect for missed folders.
@@ -445,6 +478,7 @@ async fn per_folder_check(
         return Ok(DeltaCheckResult {
             folder: folder_path.to_string(),
             uidvalidity: status.uidvalidity,
+            exists: status.exists,
             new_uids: vec![],
             uidvalidity_changed: true,
             highest_modseq: status.highest_modseq,
@@ -470,6 +504,7 @@ async fn per_folder_check(
     Ok(DeltaCheckResult {
         folder: folder_path.to_string(),
         uidvalidity: status.uidvalidity,
+        exists: status.exists,
         new_uids,
         uidvalidity_changed: false,
         highest_modseq: status.highest_modseq,
@@ -789,9 +824,37 @@ async fn process_folder_delta(
         // No new UIDs - check for flag changes.
         if let (Some(cached_modseq), Some(server_modseq)) = (saved.modseq, delta.highest_modseq) {
             // CONDSTORE path: modseq changed → use CHANGEDSINCE for efficient diff.
-            if server_modseq > cached_modseq {
+            if server_modseq == 1 && cached_modseq == 1 {
+                // Some simple servers pin HIGHESTMODSEQ at 1 but still accept
+                // normal flag FETCH. Treat that as an untrusted CONDSTORE seed
+                // value and do a full flag diff instead of believing there are
+                // no metadata changes.
+                match sync_flags_without_condstore_forced(
+                    config,
+                    &folder.raw_path,
+                    account_id,
+                    db,
+                    cancellation_token,
+                )
+                .await
+                {
+                    Ok(updated) if updated > 0 => {
+                        log::info!(
+                            "[sync] Pinned-modseq flag sync for {}: {updated} flags updated",
+                            folder.path
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::warn!(
+                            "[sync] Pinned-modseq flag sync failed for {}: {e}",
+                            folder.path
+                        );
+                    }
+                }
+            } else if server_modseq > cached_modseq {
                 log::info!(
-                    "[sync] {} modseq changed ({cached_modseq} → {server_modseq}), fetching flag changes",
+                    "[sync] {} modseq check ({cached_modseq} → {server_modseq}), fetching flag changes",
                     folder.path
                 );
                 let mut session = connect(config).await?;

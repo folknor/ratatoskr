@@ -194,16 +194,19 @@ pub async fn move_messages(
             .await
             .map_err(|_| timeout_err("UID STORE +Deleted", IMAP_CMD_TIMEOUT))??;
 
-            tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
-                let expunge_stream = session
-                    .expunge()
-                    .await
-                    .map_err(|e| format!("EXPUNGE failed: {e}"))?;
-                let _: Vec<_> = expunge_stream.collect().await;
-                Ok::<_, String>(())
-            })
-            .await
-            .map_err(|_| timeout_err("EXPUNGE", IMAP_CMD_TIMEOUT))??;
+            if let Err(e) = run_tagged_command(session, &format!("UID EXPUNGE {uid_set}")).await {
+                log::debug!("UID EXPUNGE failed, falling back to EXPUNGE: {e}");
+                tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+                    let expunge_stream = session
+                        .expunge()
+                        .await
+                        .map_err(|e| format!("EXPUNGE failed: {e}"))?;
+                    let _: Vec<_> = expunge_stream.collect().await;
+                    Ok::<_, String>(())
+                })
+                .await
+                .map_err(|_| timeout_err("EXPUNGE", IMAP_CMD_TIMEOUT))??;
+            }
 
             Ok(copyuid)
         }
@@ -257,6 +260,42 @@ async fn run_uid_transfer_with_copyuid(
                     };
                 }
                 _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| timeout_err(command, IMAP_CMD_TIMEOUT))?
+}
+
+async fn run_tagged_command(session: &mut ImapSession, command: &str) -> Result<(), String> {
+    // Intended for fire-and-forget commands such as UID EXPUNGE. Untagged
+    // responses are discarded; do not reuse this for commands whose data
+    // payload matters.
+    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let id = session
+            .run_command(command)
+            .await
+            .map_err(|e| format!("{command} failed: {e}"))?;
+        loop {
+            let response = session
+                .read_response()
+                .await
+                .map_err(|e| format!("{command} response failed: {e}"))?
+                .ok_or_else(|| format!("{command} connection closed"))?;
+            if let Response::Done {
+                tag,
+                status,
+                code,
+                information,
+            } = response.parsed()
+                && tag == &id
+            {
+                return match status {
+                    Status::Ok => Ok(()),
+                    _ => Err(format!(
+                        "{command} failed: status={status:?}, code={code:?}, info={information:?}"
+                    )),
+                };
             }
         }
     })
@@ -381,7 +420,7 @@ pub async fn get_folder_status(
 
 /// Fetch only messages whose flags changed since the given mod-sequence (RFC 7162 CONDSTORE).
 ///
-/// Issues `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)` which returns only messages
+/// Issues `UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE <modseq>)` which returns only messages
 /// whose metadata changed. The folder must already be SELECTed.
 ///
 /// Returns an empty vec if the server doesn't support CONDSTORE or no flags changed.
@@ -398,8 +437,8 @@ pub async fn fetch_changed_flags(
 
     // Use uid_fetch with the CHANGEDSINCE modifier appended to the query.
     // async-imap passes the query string directly, so this produces:
-    //   UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)
-    let query = format!("(FLAGS) (CHANGEDSINCE {since_modseq})");
+    //   UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE <modseq>)
+    let query = format!("(UID FLAGS) (CHANGEDSINCE {since_modseq})");
     let stream = tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.uid_fetch("1:*", &query))
         .await
         .map_err(|_| {
@@ -454,7 +493,7 @@ pub async fn fetch_changed_flags(
 
 /// Fetch flags for all messages in a folder (non-CONDSTORE fallback).
 ///
-/// Issues `UID FETCH 1:* (FLAGS)` to get the current flag state for every
+/// Issues `UID FETCH 1:* (UID FLAGS)` to get the current flag state for every
 /// message, then diffs against the locally cached flags to produce a list
 /// of changes. This is the fallback for servers that don't support
 /// CONDSTORE (e.g. Exchange IMAP, Courier, hMailServer).
@@ -469,7 +508,7 @@ pub async fn fetch_all_flags(
         .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    let stream = tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.uid_fetch("1:*", "(FLAGS)"))
+    let stream = tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.uid_fetch("1:*", "(UID FLAGS)"))
         .await
         .map_err(|_| timeout_err(&format!("UID FETCH FLAGS {folder}"), IMAP_FETCH_TIMEOUT))?
         .map_err(|e| format!("UID FETCH FLAGS {folder} failed: {e}"))?;

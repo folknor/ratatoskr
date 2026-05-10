@@ -605,6 +605,34 @@ pub fn get_all_folder_sync_states(
     Ok(states)
 }
 
+pub fn get_local_message_counts_by_folder(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<HashMap<String, u32>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT imap_folder, COUNT(*) FROM messages \
+             WHERE account_id = ?1 AND imap_folder IS NOT NULL \
+             GROUP BY imap_folder",
+        )
+        .map_err(|e| format!("prepare local folder message counts: {e}"))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![account_id], |row| {
+            let folder: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((folder, u32::try_from(count).unwrap_or(u32::MAX)))
+        })
+        .map_err(|e| format!("query local folder message counts: {e}"))?;
+
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (folder, count) = row.map_err(|e| format!("read folder message count row: {e}"))?;
+        counts.insert(folder, count);
+    }
+    Ok(counts)
+}
+
 pub struct FolderSyncState {
     pub folder_path: String,
     pub uidvalidity: Option<u32>,

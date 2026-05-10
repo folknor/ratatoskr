@@ -56,6 +56,7 @@ pub async fn delta_check_folders(
             results.push(DeltaCheckResult {
                 folder: req.folder.clone(),
                 uidvalidity: current_uidvalidity,
+                exists: mailbox.exists,
                 new_uids: vec![],
                 uidvalidity_changed: true,
                 highest_modseq: server_modseq,
@@ -82,12 +83,14 @@ pub async fn delta_check_folders(
             // so the caller knows to do a full flag resync instead of CHANGEDSINCE.
         }
 
-        // CONDSTORE fast path: if server's HIGHESTMODSEQ matches our cached
-        // value, nothing changed (no new messages, no flag changes, no deletions).
-        let modseq_unchanged = !modseq_reset
+        let modseq_claims_unchanged = !modseq_reset
             && matches!((req.last_modseq, server_modseq), (Some(cached), Some(server)) if cached == server);
+        let pinned_modseq_seed = modseq_claims_unchanged && server_modseq == Some(1);
 
-        if modseq_unchanged {
+        // Trust real CONDSTORE stability and keep the zero-roundtrip fast path.
+        // A pinned seed value of 1 is the exception: simple servers can report
+        // it forever, so we still need UID SEARCH plus a later full flag diff.
+        if modseq_claims_unchanged && !pinned_modseq_seed {
             log::debug!(
                 "delta_check: {} modseq unchanged ({}), skipping UID SEARCH",
                 req.folder,
@@ -96,6 +99,7 @@ pub async fn delta_check_folders(
             results.push(DeltaCheckResult {
                 folder: req.folder.clone(),
                 uidvalidity: current_uidvalidity,
+                exists: mailbox.exists,
                 new_uids: vec![],
                 uidvalidity_changed: false,
                 highest_modseq: server_modseq,
@@ -129,14 +133,23 @@ pub async fn delta_check_folders(
                 vec![]
             }
         };
+        let modseq_unchanged = modseq_claims_unchanged && new_uids.is_empty() && !pinned_modseq_seed;
+        if modseq_unchanged {
+            log::debug!(
+                "delta_check: {} modseq unchanged ({}) and no new UIDs",
+                req.folder,
+                server_modseq.unwrap_or(0)
+            );
+        }
 
         results.push(DeltaCheckResult {
             folder: req.folder.clone(),
             uidvalidity: current_uidvalidity,
+            exists: mailbox.exists,
             new_uids,
             uidvalidity_changed: false,
             highest_modseq: server_modseq,
-            modseq_unchanged: false,
+            modseq_unchanged,
             modseq_reset,
             supports_custom_keywords: kw_cap,
         });
