@@ -127,7 +127,7 @@ pub(crate) async fn handle_fetch(
                         content_hash: content_hash.clone(),
                         account_id:   params.account_id.clone(),
                         message_id:   params.message_id.clone(),
-                        attachment_id: params.attachment_id.clone(),
+                        attachment_id: info.id.clone(),
                     },
                 );
             }
@@ -142,6 +142,19 @@ pub(crate) async fn handle_fetch(
 
     // 2. Cache miss: dispatch provider.fetch_attachment, stage the
     // bytes at <hash>.tmp, update the row, then rename to final.
+    let provider_attachment_id = info
+        .as_ref()
+        .and_then(|info| {
+            info.gmail_attachment_id
+                .as_deref()
+                .or(info.imap_part_id.as_deref())
+        })
+        .unwrap_or(&params.attachment_id)
+        .to_string();
+    let local_attachment_id = info
+        .as_ref()
+        .map_or_else(|| params.attachment_id.clone(), |info| info.id.clone());
+
     let provider =
         crate::actions::provider::create_provider(&read_db, &params.account_id, key)
             .await
@@ -153,7 +166,7 @@ pub(crate) async fn handle_fetch(
         progress: &db::progress::NoopProgressReporter,
     };
     let attachment = provider
-        .fetch_attachment(&provider_ctx, &params.message_id, &params.attachment_id)
+        .fetch_attachment(&provider_ctx, &params.message_id, &provider_attachment_id)
         .await
         .map_err(|e| ServiceError::Internal(format!("provider fetch_attachment: {e}")))?;
 
@@ -210,7 +223,7 @@ pub(crate) async fn handle_fetch(
             content_hash:  content_hash.clone(),
             account_id:    params.account_id.clone(),
             message_id:    params.message_id.clone(),
-            attachment_id: params.attachment_id.clone(),
+            attachment_id: local_attachment_id,
         },
     );
 

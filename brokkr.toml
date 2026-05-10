@@ -20,3 +20,38 @@ sync_script_dir = "crates/app/tests/sync-harness"
 sweep = "harness"
 binary = "app"
 debug = true
+
+[ratatoskr.gate.jmap_steady_state_delta]
+script = "crates/app/tests/sync-harness/jmap-steady-state-delta.lua"
+baseline_label = "2026-05-10 local jmap steady-state green"
+
+[ratatoskr.gate.jmap_steady_state_delta.baseline]
+# Single-host bootstrap baseline. Other hosts and CI must record their
+# own baseline with --as-baseline before running this gate.
+plantasjen = "5f3457d18d5e438fb59470c9d62c0069"
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics.elapsed_ms]
+# Relative catches normal drift from the host baseline; absolute catches
+# gross hangs even when a local baseline is already slow.
+max_relative = 1.25
+max = 5000
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics.success]
+equal = 1
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics."meta.provider_requests"]
+# Exact-match by design: any new provider request should be reviewed
+# and either justified with a new baseline or fixed.
+max_delta = 0
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics."meta.message_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.jmap_steady_state_delta.metrics."meta.correct"]
+equal = 1

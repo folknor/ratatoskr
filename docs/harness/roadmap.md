@@ -80,7 +80,8 @@ the brokkr repo):
   `harness.spawn_with_events`, `harness.kill`,
   `harness.pid_is_alive`, `harness.sleep`, `harness.now_ms`,
   `harness.path_exists`, `harness.dir_has_prefix`,
-  `harness.read_json`, `harness.read_text`, `harness.write_text`, `harness.assert`,
+  `harness.read_json`, `harness.read_text`, `harness.read_base64`,
+  `harness.write_text`, `harness.assert`,
   `harness.assert_eq`, `harness.same_client`,
   `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
   `harness.http_post_json(url, body)`,
@@ -425,8 +426,7 @@ plain command also passed 700/700 on 2026-05-09:
 
 ### M5 - Phase 7 integration cohort
 
-**Status:** PARTIAL. M3's initial helper slice has landed, and the
-first executable extract and search-index scripts are in tree.
+**Status:** LANDED for the planned automated cohort.
 
 The Phase 7 plan called for `crates/service/tests/extract_in_process.rs`
 to cover end-to-end fetch -> extract -> re-index -> search annotation,
@@ -489,38 +489,41 @@ Landed slices:
   the post-ready schema rebuild to complete, asserts `.version` is
   updated, then reboots against the same data dir and verifies the
   matching version does not trigger another rebuild.
+- `crates/app/tests/service-harness/extract/real_fixture_cache_miss_roundtrip.lua`
+  seeds uncached attachment rows backed by provider bytes registered
+  through the harness-only offline provider, drives real
+  `attachment.fetch` cache misses, waits for extraction, and asserts
+  search attribution for checked-in PDF, DOCX, XLSX, and PPTX fixtures.
+  The same script verifies the hostile archive-shaped DOCX fixture is
+  classified as `skipped:zipbomb` without poisoning the extraction
+  queue.
+- `crates/app/tests/service-harness/fixtures/extract/` now contains the
+  small known-content fixture corpus used by the real cache-miss script:
+  `known-content.pdf`, `known-content.docx`, `known-content.xlsx`,
+  `known-content.pptx`, and `zipbomb-shaped.docx`.
 
 **Exit criteria:**
 
 - All seven test classes from the original plan list pass.
-- The fixture corpus catches at least one regression class beyond
-  what the synthetic byte-literal fixtures already cover (verified by
-  intentionally regressing one extractor and observing fixture-driven
-  test failure).
+- The fixture corpus catches regression classes beyond the synthetic
+  byte-literal fixtures: MIME-specific PDF / OOXML extraction, cache-
+  miss provider fetch registration, and zip central-directory bomb
+  rejection.
 - The Phase 7 plan-doc reference to "integration tests deferred to
   Phase 8" is resolved.
 
 **Remaining actionable work:**
 
-- Add a checked-in real-world extraction fixture corpus under
-  `crates/app/tests/service-harness/fixtures/extract/`, covering at
-  least one small known-content PDF, one OOXML document, and one
-  malformed or hostile archive-shaped fixture that is safe to run in
-  CI.
-- Add or extend an extraction harness script so at least one real
-  fixture drives the cache-miss -> extract -> search-attribution path,
-  not only the synthetic byte-literal cached-text path.
-- Verify the corpus catches a regression by intentionally breaking one
-  extractor locally, observing a fixture-driven failure, then restoring
-  the extractor.
+- None. Future extraction formats can extend the same fixture corpus
+  and script pattern.
 
 ---
 
 ### M6 - Manual-matrix automation
 
 **Status:** PARTIAL - the former manual matrix has been folded into
-this roadmap. Items 4, 5, 6, 7, 8, 9, and 12 have landed; item 10 is
-partial; the remaining action items are listed below.
+this roadmap. Items 4, 5, 6, 7, 8, 9, 11, and 12 have landed; item 10
+is partial; the remaining action items are listed below.
 
 The old `docs/harness/manual-test-matrix.md` file has been deleted so
 this roadmap is the single work queue. Every former manual item is now
@@ -590,7 +593,9 @@ Sequencing:
   verifies calendar delta sync imports the created, updated, and
   tombstoned events. CalDAV now has initial-sync, action CRUD,
   remote-mutation import, and shared-fixture mutation proof through
-  Graph delta. Google and JMAP calendar workflow checks remain manual.
+  Graph delta. Saehrimnir now has JMAP Calendar and Google Calendar v3
+  listeners, so the remaining ratatoskr work is endpoint wiring for
+  Google Calendar plus JMAP/Google calendar scripts.
 - **M6.12 (LANDED):** backfill kick on boot.ready now lives in
   `crates/app/tests/service-harness/m6/`. The script seeds a cached
   but unindexed text attachment, restarts the Service against the same
@@ -606,9 +611,14 @@ Sequencing:
   uses `harness.read_text` to assert the `.version` sentinel is
   rewritten only after a successful rebuild, and verifies the next boot
   is quiet.
-- **M6.11 (READY when M5 lands):** attachment extraction round trip
-  against the real fixture corpus remains open. The actionable script
-  shape is listed below.
+- **M6.11 (LANDED):** attachment extraction cache-miss round trip now
+  lives in
+  `crates/app/tests/service-harness/extract/real_fixture_cache_miss_roundtrip.lua`.
+  The script seeds provider-backed uncached attachment rows, fetches
+  them through the real `attachment.fetch` path, waits for extraction,
+  asserts attachment-only search attribution for PDF, DOCX, XLSX, and
+  PPTX fixtures, and verifies the hostile archive-shaped DOCX is
+  skipped as `skipped:zipbomb`.
 
 **Exit criteria:**
 
@@ -627,23 +637,17 @@ Sequencing:
   to become permanent automation, add Windows-capable Lua or libtest
   coverage and keep the Linux-only SIGTERM script separate.
 - M6.10 Google calendar workflow:
-  add fixture or real-provider coverage for calendar initial sync and
-  create/update/delete action flow, including request-path assertions
-  where a fixture surface exists.
+  add `RATATOSKR_TEST_GCAL_ENDPOINT` override wiring parallel to the
+  existing Gmail override, then add fixture coverage for calendar
+  initial sync and create/update/delete action flow against
+  saehrimnir's Google Calendar v3 listener.
 - M6.10 JMAP calendar workflow:
-  add fixture or real-provider coverage for calendar initial sync and
-  create/update/delete action flow. Prefer the same shape as the Graph
-  and CalDAV scripts once saehrimnir has a JMAP calendar surface.
+  add fixture coverage for calendar initial sync and create/update/
+  delete action flow against saehrimnir's JMAP Calendar surface.
 - M6.10 calendar failure path:
   cover create-on-provider-failure and assert the expected LocalOnly
   behavior, either with a fixture-side failure knob or a real-provider
   manual validation that gets retired with a doc comment.
-- M6.11 attachment extraction round trip:
-  blocked on the M5 real-world fixture corpus. Once that corpus lands,
-  retire the manual cache-miss -> extraction -> search annotation item
-  with a harness script that uses at least one real fixture. If the M5
-  corpus slips, keep M6.11 open rather than adding another synthetic
-  cached-text variant.
 ---
 
 ### M7 - Brokkr-side polish
@@ -689,7 +693,16 @@ cursor-driven change scripts through `POST /test/fixture/step`,
 fixture-image rewind on reset, stable request logs, fixture snapshots,
 per-protocol latency injection, Graph contact fixture/read/delta
 surfaces with contact change scripts, and a CalDAV listener covering
-discovery, PROPFIND/REPORT/GET, PUT, and DELETE.
+discovery, PROPFIND/REPORT/GET, PUT, and DELETE. The newest
+saehrimnir surfaces also add JMAP Calendar
+(`Calendar/get` / `Calendar/changes`, `CalendarEvent/get` /
+`CalendarEvent/changes` / `CalendarEvent/set`), cross-protocol
+`Email::raw_bytes` for JMAP `Email/get` and Gmail `threads.get`, a
+slow-paging fixture recipe, a Google People API listener, and a Google
+Calendar v3 listener. The sentinel now reports PEOPLE and GCAL ports;
+ratatoskr still needs matching `RATATOSKR_TEST_PEOPLE_ENDPOINT` and
+`RATATOSKR_TEST_GCAL_ENDPOINT` overrides before live binaries can use
+those listeners under `sync-bench` / `service-test`.
 
 Mock provider servers and fixture sets (small smoke / medium / large /
 huge thread / many folders / duplicate Message-ID / malformed MIME /
@@ -982,18 +995,19 @@ Lua helper cleanup backlog:
 - JMAP deeper fixture coverage:
   add scripts for at least the medium/large, many-folder,
   duplicate-Message-ID, malformed-MIME, slow-paged-response, and
-  attachment-bearing fixture families once saehrimnir exposes or
-  refreshes those fixtures.
+  attachment-bearing fixture families. Saehrimnir's slow-paging recipe
+  and cross-protocol raw-bytes surface are now available, so this is a
+  ratatoskr script-authoring item when the corresponding fixtures are
+  selected.
 - JMAP calendar:
-  add a JMAP calendar fixture surface in saehrimnir or explicitly
-  retire this provider from M6.10 automation if ratatoskr does not
-  intend to support JMAP calendars in the current milestone.
+  add sync/action scripts against saehrimnir's JMAP Calendar surface.
 - Google calendar:
-  add a Gmail/Google-calendar fixture surface in saehrimnir or keep a
-  documented real-provider validation path until a mock exists.
+  add `RATATOSKR_TEST_GCAL_ENDPOINT` override wiring, then add
+  sync/action scripts against saehrimnir's Google Calendar v3 listener.
 - Gmail People API contacts:
-  add contact sync/action coverage once the People API listener and
-  shared contact fixture entries exist.
+  add `RATATOSKR_TEST_PEOPLE_ENDPOINT` override wiring, then add
+  contact sync/action coverage against saehrimnir's People API
+  listener and shared contact fixture entries.
 - Broader benchmark summaries:
   initial marker/summary adoption now covers JMAP steady-state, JMAP
   Email/set delta, JMAP scripted incremental, IMAP steady-state, IMAP
@@ -1008,15 +1022,23 @@ Lua helper cleanup backlog:
 
 ### M9 - Sync benchmarks
 
-**Status:** PARTIAL - M8 has enough mock-provider coverage for useful
-benchmarks, and brokkr command support has landed. Brokkr
+**Status:** PARTIAL - the first checked-in gate config landed, but the
+baseline was bootstrapped on a dirty tree and is pinned to one host.
+M8 has enough mock-provider coverage for useful benchmarks, and brokkr
+command support has landed. Brokkr
 `sync-bench --gate <name>` records gated runs in
 `.brokkr/ratatoskr/gate.db`, `--as-baseline` prints the per-host
 baseline pin to add under `[ratatoskr.gate.<name>.baseline]`, and gate
 rules can compare top-level scalars plus `sidecar.*` and `meta.*`
-summary fields. Ratatoskr still needs checked-in gate config,
-baselines, and broader marker / summary adoption before M9 is
-complete.
+summary fields. Ratatoskr now has a checked-in
+`jmap_steady_state_delta` gate in `brokkr.toml`, pinned to the local
+`plantasjen` baseline UUID `5f3457d18d5e438fb59470c9d62c0069`.
+That bootstrap baseline was recorded with `--force` because the gate
+block had to exist in `brokkr.toml` before brokkr would accept
+`--as-baseline`; brokkr correctly warns that the baseline row was
+recorded on a dirty tree. Treat the current UUID as a local bootstrap,
+not a portable release/CI baseline, until a clean-tree baseline is
+recorded after commit.
 Saehrimnir's latency knob now has ratatoskr Lua helpers and a JMAP
 smoke script; stable request logs and `GET /test/snapshot-state` also
 exist. Ratatoskr now has Lua helpers for `BROKKR_MARKER_FIFO` markers
@@ -1026,8 +1048,8 @@ IMAP-to-JMAP shared-state delta, Graph calendar initial, Graph
 calendar remote-delta, Graph calendar CalDAV-mutation delta, Graph
 contacts initial, Graph contacts incremental, CalDAV calendar initial,
 and CalDAV calendar remote-delta scripts using them.
-The remaining work is mostly ratatoskr-side gate configuration and
-baseline promotion.
+The remaining work is broader ratatoskr-side gate coverage and
+additional per-host baseline promotion as needed.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The
@@ -1056,24 +1078,24 @@ Brokkr gates can now fail a run when configured thresholds catch:
 **Exit criteria:**
 
 - At least one checked-in `[ratatoskr.gate.<name>]` block points at a
-  stable sync script, has a per-host baseline UUID recorded in
-  `.brokkr/ratatoskr/gate.db`, and `brokkr sync-bench <script> --gate
-  <name> --bench 10` records timings, compares against that baseline,
-  and exits non-zero on regression.
+  stable sync script, has a clean-tree per-host baseline UUID recorded
+  in `.brokkr/ratatoskr/gate.db`, and `brokkr sync-bench <script>
+  --gate <name> --bench 10` records timings, compares against that
+  baseline, and exits non-zero on regression. Provisional local
+  bootstrap was exercised on 2026-05-10 for `jmap_steady_state_delta`;
+  M9 stays PARTIAL until the baseline is re-recorded cleanly.
 
 **Remaining actionable work:**
 
-- Use `crates/app/tests/sync-harness/jmap-steady-state-delta.lua` as
-  the first stable gated script. Revisit only if repeated
-  `sync-bench` runs show fixture or timing instability.
-- Run `brokkr sync-bench crates/app/tests/sync-harness/jmap-steady-state-delta.lua --as-baseline` on this host and
-  record the printed UUID under a checked-in
-  `[ratatoskr.gate.<name>.baseline]` block.
-- Add a checked-in `[ratatoskr.gate.<name>]` rule block that covers at
-  least sync wall time, provider request count, peak RSS, and
-  `meta.correct`.
-- Run `brokkr sync-bench crates/app/tests/sync-harness/jmap-steady-state-delta.lua --gate <name> --bench 10`
-  and record the successful gate run in this roadmap.
+- Re-record the `plantasjen` baseline on a clean checkout and replace
+  the dirty bootstrap UUID before treating M9 as LANDED.
+- Record per-host baselines for any other contributor or CI hosts that
+  should run `jmap_steady_state_delta`; the checked-in baseline map is
+  currently single-host only.
+- Add more checked-in gates for the next stable benchmark scripts once
+  they matter to CI or release decisions. Good candidates are JMAP
+  scripted incremental, IMAP steady-state, Graph calendar remote-delta,
+  and CalDAV calendar remote-delta.
 
 ---
 

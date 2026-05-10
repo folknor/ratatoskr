@@ -9,19 +9,22 @@
 use crate::service_client::{
     ClientError, ServiceClient, ServiceNotificationReceiver, ServiceTraceSink, SpawnEvent,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
-    AccountDeleteParams, ActionWireOperation, ActionWirePlan, BootClassification, BootExitCode,
-    BootPhaseKind, CalendarActionPlan, CalendarActionWireOperation, ClientNotification,
+    AccountDeleteParams, ActionWireOperation, ActionWirePlan, AttachmentFetchParams,
+    BootClassification, BootExitCode, BootPhaseKind, CalendarActionPlan, CalendarActionWireOperation,
+    ClientNotification,
     ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
     PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
-    TestSearchIndexParams, TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams,
-    WireCalendarEventInput, WireCalendarOperation, WireFolderId, WireMailOperation, WireTagId,
+    TestSeedRemoteAttachmentParams, TestSearchIndexParams, TestSeedThreadParams,
+    TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
+    WireFolderId, WireMailOperation, WireTagId,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -106,6 +109,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "dir_has_prefix", lua_dir_has_prefix)?;
     set_field_fn(state, table_idx, "read_json", lua_read_json)?;
     set_field_fn(state, table_idx, "read_text", lua_read_text)?;
+    set_field_fn(state, table_idx, "read_base64", lua_read_base64)?;
     set_field_fn(state, table_idx, "write_text", lua_write_text)?;
     set_field_fn(state, table_idx, "write_summary", lua_write_summary)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
@@ -452,6 +456,14 @@ fn lua_read_text(state: &mut State) -> dellingr::Result<u8> {
     let text = std::fs::read_to_string(path).map_err(lua_io)?;
     state.set_top(0);
     state.push_string(text);
+    Ok(1)
+}
+
+fn lua_read_base64(state: &mut State) -> dellingr::Result<u8> {
+    let path = PathBuf::from(state.to_string(1)?);
+    let bytes = std::fs::read(path).map_err(lua_io)?;
+    state.set_top(0);
+    state.push_string(STANDARD.encode(bytes));
     Ok(1)
 }
 
@@ -2216,6 +2228,26 @@ fn request_params_from_lua(
         "ExtractStatus" | "extract.status" => Ok(RequestParams::ExtractStatus {
             params: ExtractStatusParams::default(),
         }),
+        "AttachmentFetch" | "attachment.fetch" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("AttachmentFetch requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("AttachmentFetch requires params.account_id"))?;
+            let message_id = get_string_field(state, params_idx, "message_id")?
+                .ok_or_else(|| lua_error_message("AttachmentFetch requires params.message_id"))?;
+            let attachment_id = get_string_field(state, params_idx, "attachment_id")?
+                .ok_or_else(|| {
+                    lua_error_message("AttachmentFetch requires params.attachment_id")
+                })?;
+            Ok(RequestParams::AttachmentFetch {
+                params: AttachmentFetchParams {
+                    account_id,
+                    message_id,
+                    attachment_id,
+                },
+            })
+        }
         "IndexRebuild" | "index.rebuild" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("IndexRebuild requires params table"));
@@ -2368,6 +2400,36 @@ fn request_params_from_lua(
                     mime_type: get_string_field(state, params_idx, "mime_type")?
                         .or_else(|| get_string_field(state, params_idx, "mime").ok().flatten()),
                     content,
+                },
+            })
+        }
+        "TestSeedRemoteAttachment" | "test.seed_remote_attachment" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestSeedRemoteAttachment requires params table",
+                ));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
+                lua_error_message("TestSeedRemoteAttachment requires params.account_id")
+            })?;
+            let message_id = get_string_field(state, params_idx, "message_id")?.ok_or_else(|| {
+                lua_error_message("TestSeedRemoteAttachment requires params.message_id")
+            })?;
+            let content_base64 =
+                get_string_field(state, params_idx, "content_base64")?.ok_or_else(|| {
+                    lua_error_message(
+                        "TestSeedRemoteAttachment requires params.content_base64",
+                    )
+                })?;
+            Ok(RequestParams::TestSeedRemoteAttachment {
+                params: TestSeedRemoteAttachmentParams {
+                    account_id,
+                    message_id,
+                    attachment_id: get_string_field(state, params_idx, "attachment_id")?,
+                    filename: get_string_field(state, params_idx, "filename")?,
+                    mime_type: get_string_field(state, params_idx, "mime_type")?
+                        .or_else(|| get_string_field(state, params_idx, "mime").ok().flatten()),
+                    content_base64,
                 },
             })
         }

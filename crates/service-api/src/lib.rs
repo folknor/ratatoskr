@@ -99,7 +99,8 @@ pub use request::{
     TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
     TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
-    TestSeedCachedAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,
+    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
+    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,
     TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult, TestStartSyncParams,
     TestThreadReadAck, TestThreadReadParams,
 };

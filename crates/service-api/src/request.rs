@@ -161,6 +161,29 @@ pub struct TestSeedCachedAttachmentAck {
 }
 
 #[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedRemoteAttachmentParams {
+    pub account_id: String,
+    pub message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    pub content_base64: String,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSeedRemoteAttachmentAck {
+    pub account_id: String,
+    pub message_id: String,
+    pub attachment_id: String,
+    pub size_bytes: u64,
+}
+
+#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRemoveCachedAttachmentBytesParams {
     pub relative_path: String,
@@ -855,6 +878,9 @@ pub enum RequestParams {
     /// Inserts a cached attachment fixture under an existing message.
     #[cfg(feature = "test-helpers")]
     TestSeedCachedAttachment { params: TestSeedCachedAttachmentParams },
+    /// Inserts an uncached attachment row and registers provider bytes for attachment.fetch.
+    #[cfg(feature = "test-helpers")]
+    TestSeedRemoteAttachment { params: TestSeedRemoteAttachmentParams },
     /// Deletes a cached attachment fixture's backing bytes without changing DB metadata.
     #[cfg(feature = "test-helpers")]
     TestRemoveCachedAttachmentBytes { params: TestRemoveCachedAttachmentBytesParams },
@@ -957,6 +983,8 @@ impl RequestParams {
             Self::TestSeedThread { .. } => "test.seed_thread",
             #[cfg(feature = "test-helpers")]
             Self::TestSeedCachedAttachment { .. } => "test.seed_cached_attachment",
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedRemoteAttachment { .. } => "test.seed_remote_attachment",
             #[cfg(feature = "test-helpers")]
             Self::TestRemoveCachedAttachmentBytes { .. } => {
                 "test.remove_cached_attachment_bytes"
@@ -1091,6 +1119,7 @@ impl RequestParams {
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
             | Self::TestSeedCachedAttachment { .. }
+            | Self::TestSeedRemoteAttachment { .. }
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
@@ -1187,6 +1216,7 @@ impl RequestParams {
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
             | Self::TestSeedCachedAttachment { .. }
+            | Self::TestSeedRemoteAttachment { .. }
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
@@ -1299,6 +1329,10 @@ impl RequestParams {
             Self::TestSeedThread { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestSeedCachedAttachment { params } => {
+                serde_json::json!({ "params": params })
+            }
+            #[cfg(feature = "test-helpers")]
+            Self::TestSeedRemoteAttachment { params } => {
                 serde_json::json!({ "params": params })
             }
             #[cfg(feature = "test-helpers")]
@@ -1772,6 +1806,16 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.seed_cached_attachment params: {e}"))?;
                 Ok(Self::TestSeedCachedAttachment { params: p.params })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.seed_remote_attachment" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestSeedRemoteAttachmentParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.seed_remote_attachment params: {e}"))?;
+                Ok(Self::TestSeedRemoteAttachment { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.remove_cached_attachment_bytes" => {
@@ -3453,6 +3497,29 @@ mod tests {
         .expect("parse");
         assert_eq!(parsed, original);
         assert_eq!(original.method_name(), "test.seed_cached_attachment");
+        assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[test]
+    fn test_seed_remote_attachment_round_trips_from_method_params() {
+        let original = RequestParams::TestSeedRemoteAttachment {
+            params: TestSeedRemoteAttachmentParams {
+                account_id: "acc-1".into(),
+                message_id: "message-1".into(),
+                attachment_id: Some("attachment-1".into()),
+                filename: Some("known-content.pdf".into()),
+                mime_type: Some("application/pdf".into()),
+                content_base64: "cGRmcmVhbGZpeHR1cmU=".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "test.seed_remote_attachment");
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 

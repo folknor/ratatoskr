@@ -1,5 +1,9 @@
 use db::db::ReadDbState;
 use provider_sync::ProviderSyncOps;
+#[cfg(feature = "test-helpers")]
+use std::collections::HashMap;
+#[cfg(feature = "test-helpers")]
+use std::sync::{Mutex, OnceLock};
 
 use super::outcome::RemoteFailureKind;
 
@@ -115,6 +119,36 @@ impl HarnessOfflineProvider {
             }
         }
     }
+}
+
+#[cfg(feature = "test-helpers")]
+type HarnessAttachmentKey = (String, String, String);
+
+#[cfg(feature = "test-helpers")]
+fn harness_attachments(
+) -> &'static Mutex<HashMap<HarnessAttachmentKey, common::types::AttachmentData>> {
+    static MAP: OnceLock<Mutex<HashMap<HarnessAttachmentKey, common::types::AttachmentData>>> =
+        OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "test-helpers")]
+pub(crate) fn register_harness_attachment(
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+    data: String,
+    size: usize,
+) {
+    let key = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+    );
+    let mut guard = harness_attachments()
+        .lock()
+        .expect("harness attachment map poisoned");
+    guard.insert(key, common::types::AttachmentData { data, size });
 }
 
 #[cfg(feature = "test-helpers")]
@@ -236,10 +270,23 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
 
     async fn fetch_attachment(
         &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-        _message_id: &str,
-        _attachment_id: &str,
+        ctx: &common::types::ProviderCtx<'_>,
+        message_id: &str,
+        attachment_id: &str,
     ) -> Result<common::types::AttachmentData, common::error::ProviderError> {
+        let key = (
+            ctx.account_id.to_string(),
+            message_id.to_string(),
+            attachment_id.to_string(),
+        );
+        if let Some(data) = harness_attachments()
+            .lock()
+            .expect("harness attachment map poisoned")
+            .get(&key)
+            .cloned()
+        {
+            return Ok(data);
+        }
         Err(Self::offline())
     }
 

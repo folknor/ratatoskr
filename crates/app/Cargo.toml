@@ -51,6 +51,7 @@ dev-seed = { path = "../dev-seed", optional = true }
 hotpath = { workspace = true, optional = true }
 dellingr = { version = "0.2.0", optional = true }
 reqwest = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 
 [target.'cfg(unix)']
 dev-dependencies = {}
@@ -60,13 +61,12 @@ libc = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-base64.workspace = true
 tempfile = "3"
 
 [features]
 default = ["dev-seed"]
 dev-seed = ["dep:dev-seed"]
-test-helpers = ["dep:dellingr", "dep:reqwest", "service/test-helpers", "service-api/test-helpers"]
+test-helpers = ["dep:base64", "dep:dellingr", "dep:reqwest", "service/test-helpers", "service-api/test-helpers"]
 hotpath = [
     "dep:hotpath",
     "hotpath/hotpath",

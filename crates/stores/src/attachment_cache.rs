@@ -144,7 +144,7 @@ pub(crate) fn encode_base64(data: &[u8]) -> String {
 // `db::db::queries_extra::provider_sync_writes`. Re-export the info type so
 // call sites inside this module stay unchanged.
 
-/// Look up an attachment's cache info by message + provider-agnostic remote
+/// Look up an attachment's cache info by message + local or remote
 /// attachment ID.  Delegates to the shared `db` helper.
 pub fn find_cache_info(
     conn: &rusqlite::Connection,

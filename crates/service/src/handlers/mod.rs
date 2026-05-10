@@ -187,6 +187,10 @@ pub(crate) async fn dispatch(
             test_helpers::seed_cached_attachment_handle(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
+        RequestParams::TestSeedRemoteAttachment { params } => {
+            test_helpers::seed_remote_attachment_handle(&boot_state, params).await
+        }
+        #[cfg(feature = "test-helpers")]
         RequestParams::TestRemoveCachedAttachmentBytes { params } => {
             test_helpers::remove_cached_attachment_bytes_handle(&boot_state, params).await
         }

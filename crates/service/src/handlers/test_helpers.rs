@@ -17,7 +17,8 @@ use service_api::{
     TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
-    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams,
+    TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams, TestSeedThreadAck,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
@@ -288,6 +289,76 @@ pub(super) async fn seed_cached_attachment_handle(
         })
         .await
         .map_err(ServiceError::Internal)?;
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn seed_remote_attachment_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestSeedRemoteAttachmentParams,
+) -> Result<Value, ServiceError> {
+    if params.account_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.seed_remote_attachment".into(),
+            message: "account_id is required".into(),
+        });
+    }
+    if params.message_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.seed_remote_attachment".into(),
+            message: "message_id is required".into(),
+        });
+    }
+    let content_base64 = params.content_base64;
+    let bytes = store::attachment_cache::decode_base64(&content_base64)
+        .map_err(ServiceError::Internal)?;
+    let size_bytes = u64::try_from(bytes.len())
+        .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
+    let size_i64 = i64::try_from(bytes.len())
+        .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
+    let attachment_id = params
+        .attachment_id
+        .clone()
+        .unwrap_or_else(|| format!("attachment-{}", uuid::Uuid::new_v4()));
+    let filename = params.filename.unwrap_or_else(|| "harness.bin".into());
+    let mime_type = params
+        .mime_type
+        .unwrap_or_else(|| "application/octet-stream".into());
+    let account_id = params.account_id.clone();
+    let message_id = params.message_id.clone();
+    let registered_account_id = account_id.clone();
+    let registered_message_id = message_id.clone();
+    let registered_attachment_id = attachment_id.clone();
+    let registered_size = bytes.len();
+    let write_db = boot_state.write_db_state()?;
+    let ack = TestSeedRemoteAttachmentAck {
+        account_id: account_id.clone(),
+        message_id: message_id.clone(),
+        attachment_id: attachment_id.clone(),
+        size_bytes,
+    };
+    write_db
+        .with_conn(move |conn| {
+            insert_harness_remote_attachment(
+                conn,
+                &RemoteAttachmentInsert {
+                    account_id: &account_id,
+                    message_id: &message_id,
+                    attachment_id: &attachment_id,
+                    filename: &filename,
+                    mime_type: &mime_type,
+                    size_bytes: size_i64,
+                },
+            )
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    crate::actions::provider::register_harness_attachment(
+        &registered_account_id,
+        &registered_message_id,
+        &registered_attachment_id,
+        content_base64,
+        registered_size,
+    );
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
@@ -738,6 +809,15 @@ struct CachedAttachmentInsert<'a> {
     content_hash: &'a str,
 }
 
+struct RemoteAttachmentInsert<'a> {
+    account_id: &'a str,
+    message_id: &'a str,
+    attachment_id: &'a str,
+    filename: &'a str,
+    mime_type: &'a str,
+    size_bytes: i64,
+}
+
 fn insert_harness_cached_attachment(
     conn: &Connection,
     insert: &CachedAttachmentInsert<'_>,
@@ -774,6 +854,40 @@ fn insert_harness_cached_attachment(
         ],
     )
     .map_err(|e| format!("insert cached attachment: {e}"))?;
+    tx.commit().map_err(|e| format!("commit: {e}"))
+}
+
+fn insert_harness_remote_attachment(
+    conn: &Connection,
+    insert: &RemoteAttachmentInsert<'_>,
+) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+    tx.execute(
+        "INSERT INTO attachments (
+            id, message_id, account_id, filename, mime_type, size,
+            local_path, cached_at, cache_size, content_hash, text_indexed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL, NULL, NULL)
+        ON CONFLICT(id) DO UPDATE SET
+            message_id = excluded.message_id,
+            account_id = excluded.account_id,
+            filename = excluded.filename,
+            mime_type = excluded.mime_type,
+            size = excluded.size,
+            local_path = NULL,
+            cached_at = NULL,
+            cache_size = NULL,
+            content_hash = NULL,
+            text_indexed_at = NULL",
+        params![
+            insert.attachment_id,
+            insert.message_id,
+            insert.account_id,
+            insert.filename,
+            insert.mime_type,
+            insert.size_bytes,
+        ],
+    )
+    .map_err(|e| format!("insert remote attachment: {e}"))?;
     tx.commit().map_err(|e| format!("commit: {e}"))
 }
 
