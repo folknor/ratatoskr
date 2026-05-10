@@ -117,6 +117,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "expect_quiet", lua_expect_quiet)?;
     set_field_fn(state, table_idx, "join_url", lua_join_url)?;
     set_field_fn(state, table_idx, "mock_requests", lua_mock_requests)?;
+    set_field_fn(state, table_idx, "snapshot_state", lua_snapshot_state)?;
     set_field_fn(
         state,
         table_idx,
@@ -631,7 +632,8 @@ fn lua_join_url(state: &mut State) -> dellingr::Result<u8> {
 
 fn lua_mock_requests(state: &mut State) -> dellingr::Result<u8> {
     let endpoint = state.to_string(1)?;
-    let url = mock_requests_url(&endpoint);
+    let stable = mock_requests_stable_option(state)?;
+    let url = mock_requests_url(&endpoint, stable);
     let ctx = context(state)?;
     let handle = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -645,7 +647,7 @@ fn lua_mock_requests(state: &mut State) -> dellingr::Result<u8> {
 
 fn lua_clear_mock_requests(state: &mut State) -> dellingr::Result<u8> {
     let endpoint = state.to_string(1)?;
-    let url = mock_requests_url(&endpoint);
+    let url = mock_requests_url(&endpoint, false);
     let ctx = context(state)?;
     let handle = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -654,6 +656,20 @@ fn lua_clear_mock_requests(state: &mut State) -> dellingr::Result<u8> {
     http_delete(handle, url, "clear_mock_requests")?;
     state.set_top(0);
     Ok(0)
+}
+
+fn lua_snapshot_state(state: &mut State) -> dellingr::Result<u8> {
+    let endpoint = state.to_string(1)?;
+    let url = snapshot_state_url(&endpoint);
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let value = http_get_json(handle, url, "snapshot_state")?;
+    state.set_top(0);
+    push_json(state, &value)?;
+    Ok(1)
 }
 
 fn lua_request_count(state: &mut State) -> dellingr::Result<u8> {
@@ -764,8 +780,31 @@ fn join_url(base: &str, suffix: &str) -> String {
     }
 }
 
-fn mock_requests_url(endpoint: &str) -> String {
-    join_url(endpoint, "test/requests")
+fn mock_requests_stable_option(state: &mut State) -> dellingr::Result<bool> {
+    if state.get_top() < 2 {
+        return Ok(false);
+    }
+    match state.typ(2) {
+        LuaType::Nil => Ok(false),
+        LuaType::Boolean => Ok(state.to_boolean(2)),
+        LuaType::Table => Ok(get_bool_field(state, 2, "stable")?.unwrap_or(false)),
+        other => Err(lua_error_message(format!(
+            "mock_requests options must be nil, boolean, or table, got {}",
+            other.as_str()
+        ))),
+    }
+}
+
+fn mock_requests_url(endpoint: &str, stable: bool) -> String {
+    if stable {
+        join_url(endpoint, "test/requests?stable=true")
+    } else {
+        join_url(endpoint, "test/requests")
+    }
+}
+
+fn snapshot_state_url(endpoint: &str) -> String {
+    join_url(endpoint, "test/snapshot-state")
 }
 
 fn http_json_body_from_field(

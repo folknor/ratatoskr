@@ -608,13 +608,17 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 
 **Status:** PARTIAL - ratatoskr's test-only endpoint override,
 sync-trigger, DB-query, first sync-harness script, OAuth re-auth
-persistence harness path, and one JMAP remote-mutation delta script
-have landed. Brokkr can now spawn saehrimnir for fixture-frontmatter
-scripts and inject provider endpoints. Recent saehrimnir support adds
-admin request/reset routes, OAuth token / userinfo routes,
-steady-state JMAP changes, JMAP `Email/set` / `Mailbox/set`
-changesets, persistent IMAP `UID STORE`, IMAP `UID COPY` /
-`UID EXPUNGE`, and Graph calendar mutation deltas.
+persistence harness path, JMAP remote-mutation and scripted
+incremental delta scripts, plus Graph calendar mutation scripts have
+landed. Brokkr can now spawn
+saehrimnir for fixture-frontmatter scripts and inject provider
+endpoints. Recent saehrimnir support adds admin request/reset routes,
+OAuth token / userinfo routes, steady-state JMAP changes, JMAP
+`Email/set` / `Mailbox/set` changesets, persistent IMAP `UID STORE`,
+IMAP `UID COPY` / `UID EXPUNGE`, Graph calendar mutation deltas,
+cursor-driven change scripts through `POST /test/fixture/step`,
+fixture-image rewind on reset, stable request logs, fixture snapshots,
+and per-protocol latency injection.
 
 Mock IMAP and JMAP servers, fixture sets (small smoke / medium /
 large / huge thread / many folders / duplicate Message-ID / malformed
@@ -663,6 +667,12 @@ Ratatoskr-side M8 surface now in tree:
   to `Email/query`. The mutation now uses
   `harness.http_json({ method, url, body })` with a Lua table body so
   later PATCH/DELETE provider-admin calls can reuse the same helper.
+- `crates/app/tests/sync-harness/jmap-incremental-steps.lua`
+  targets the `jmap-incremental.lua` fixture, walks saehrimnir's
+  cursor-driven `POST /test/fixture/step` script through new, change,
+  delete, and move steps, runs ratatoskr delta sync after each step,
+  and asserts local DB convergence plus `Email/changes` / `Email/get`
+  usage without falling back to `Email/query`.
 - `crates/app/tests/sync-harness/imap-initial.lua` targets the
   `imap-small.toml` fixture, asserts the two fixture messages land in
   the local DB, verifies `$seen` / `$flagged` import into read /
@@ -702,13 +712,23 @@ Ratatoskr-side M8 surface now in tree:
   harness also exposes `harness.http_json({ method, url, body })`,
   which supports table bodies and arbitrary HTTP methods while keeping
   the older `http_get` / `http_post_json` / `http_delete` helpers for
-  compatibility. Existing JMAP, IMAP, Graph calendar, and OAuth
-  fixture scripts use the shared helpers instead of copy-pasting local
-  URL and request-count utilities.
+  compatibility. `harness.mock_requests(endpoint, { stable = true })`
+  requests saehrimnir's deterministic request-log shape. Existing
+  JMAP, IMAP, Graph calendar, and OAuth fixture scripts use the shared
+  helpers instead of copy-pasting local URL and request-count
+  utilities.
+- `harness.snapshot_state(endpoint)` wraps saehrimnir's
+  `GET /test/snapshot-state` fixture projection. The scripted JMAP
+  incremental test uses it after each change step to prove the remote
+  fixture image changed before ratatoskr imports the delta.
 
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
+- Latency and benchmark plumbing. `POST /test/latency` can inject
+  global or per-protocol delay and reset clears it. This unblocks
+  ratatoskr-side slow-provider checks and gives M9 deterministic
+  latency scenarios once brokkr-side benchmark orchestration is ready.
 - IMAP writeback persistence. After an IMAP initial sync, drive
   ratatoskr `ActionExecutePlan` operations such as `SetRead`,
   `SetStarred`, `MoveToFolder`, and `PermanentDelete` against the
@@ -744,9 +764,10 @@ Lua helper cleanup backlog:
   IMAP server, with assertions on final account/folder/message
   counts. Initial import and steady-state delta coverage have landed;
   mutation fixtures remain.
-- A small-mailbox JMAP fixture does the same. Initial import and
-  steady-state delta coverage have landed; deeper JMAP fixture cases
-  remain.
+- A small-mailbox JMAP fixture does the same. Initial import,
+  steady-state delta, raw `Email/set` mutation, and scripted
+  new/change/delete/move incremental coverage have landed; deeper
+  JMAP fixture cases remain.
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
 - M6.10 (calendar) has Graph read/sync, Graph create/update/delete
@@ -757,7 +778,10 @@ Lua helper cleanup backlog:
 
 ### M9 - Sync benchmarks
 
-**Status:** DEFERRED - gated on M8.
+**Status:** DEFERRED - gated on M8 and brokkr command work. The
+saehrimnir-side latency knob, stable request logs, and
+`GET /test/snapshot-state` now exist, so the remaining work is mostly
+ratatoskr-side summary/assertion shape plus brokkr orchestration.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The
