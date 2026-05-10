@@ -1,3 +1,4 @@
+use chrono::{SecondsFormat, TimeZone};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
@@ -40,8 +41,10 @@ struct GoogleCalendarEvent {
     description: Option<String>,
     #[serde(default)]
     location: Option<String>,
-    start: GoogleCalendarDateTime,
-    end: GoogleCalendarDateTime,
+    #[serde(default)]
+    start: Option<GoogleCalendarDateTime>,
+    #[serde(default)]
+    end: Option<GoogleCalendarDateTime>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
@@ -257,6 +260,7 @@ pub async fn google_calendar_create_event_impl(
     let encoded_id = urlencoding::encode(calendar_remote_id);
     let api_base = google_calendar_api_base();
     let url = format!("{api_base}/calendars/{encoded_id}/events");
+    let event = normalize_google_event_body(event)?;
     let response: GoogleCalendarEvent =
         google_calendar_request_with_body(http, client, db, "POST", &url, Some(event)).await?;
     map_google_event(response)
@@ -274,6 +278,7 @@ pub async fn google_calendar_update_event_impl(
     let encoded_event_id = urlencoding::encode(remote_event_id);
     let api_base = google_calendar_api_base();
     let url = format!("{api_base}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
+    let event = normalize_google_event_body(event)?;
     let response: GoogleCalendarEvent =
         google_calendar_request_with_body(http, client, db, "PATCH", &url, Some(event)).await?;
     map_google_event(response)
@@ -412,14 +417,126 @@ async fn google_calendar_check_response_status(response: reqwest::Response) -> R
     Err(format!("Google Calendar API error: {status} {body}"))
 }
 
+fn normalize_google_event_body(mut event: serde_json::Value) -> Result<serde_json::Value, String> {
+    let obj = event
+        .as_object_mut()
+        .ok_or_else(|| "Google Calendar event body must be a JSON object".to_string())?;
+
+    let timezone = obj
+        .remove("timezone")
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "UTC".to_string());
+    let is_all_day = obj
+        .remove("isAllDay")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let recurrence_rule = obj
+        .remove("recurrenceRule")
+        .and_then(|value| value.as_str().map(str::to_string));
+    let availability = obj
+        .remove("availability")
+        .and_then(|value| value.as_str().map(str::to_string));
+
+    let start_is_object = obj.get("start").is_some_and(serde_json::Value::is_object);
+    let end_is_object = obj.get("end").is_some_and(serde_json::Value::is_object);
+
+    if start_is_object || end_is_object {
+        if !start_is_object || !end_is_object {
+            return Err(
+                "Google Calendar event start/end must both be objects or integer timestamps"
+                    .to_string(),
+            );
+        }
+    } else {
+        let start_ts = obj
+            .get("start")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| {
+                "Google Calendar event start must be an integer timestamp or object".to_string()
+            })?;
+        let end_ts = obj
+            .get("end")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| {
+                "Google Calendar event end must be an integer timestamp or object".to_string()
+            })?;
+
+        if is_all_day {
+            obj.insert("start".to_string(), google_date_object(start_ts)?);
+            obj.insert("end".to_string(), google_date_object(end_ts)?);
+        } else {
+            obj.insert(
+                "start".to_string(),
+                google_datetime_object(start_ts, &timezone)?,
+            );
+            obj.insert("end".to_string(), google_datetime_object(end_ts, &timezone)?);
+        }
+    }
+
+    if let Some(rule) = recurrence_rule.filter(|value| !value.is_empty()) {
+        let rule = if rule.starts_with("RRULE:") {
+            rule
+        } else {
+            format!("RRULE:{rule}")
+        };
+        obj.insert("recurrence".to_string(), serde_json::json!([rule]));
+    }
+
+    if let Some(availability) = availability {
+        let transparency = if availability.as_str() == "free" {
+            "transparent"
+        } else {
+            "opaque"
+        };
+        obj.insert(
+            "transparency".to_string(),
+            serde_json::Value::String(transparency.to_string()),
+        );
+    }
+
+    Ok(event)
+}
+
+fn google_datetime_object(ts: i64, timezone: &str) -> Result<serde_json::Value, String> {
+    let dt = chrono::Utc
+        .timestamp_opt(ts, 0)
+        .single()
+        .ok_or_else(|| format!("Invalid Google Calendar timestamp: {ts}"))?;
+    Ok(serde_json::json!({
+        "dateTime": dt.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "timeZone": timezone,
+    }))
+}
+
+fn google_date_object(ts: i64) -> Result<serde_json::Value, String> {
+    let dt = chrono::Utc
+        .timestamp_opt(ts, 0)
+        .single()
+        .ok_or_else(|| format!("Invalid Google Calendar timestamp: {ts}"))?;
+    Ok(serde_json::json!({
+        "date": dt.format("%Y-%m-%d").to_string(),
+    }))
+}
+
 fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, String> {
-    let is_all_day = event.start.date.is_some();
-    let start_time = if let Some(date_time) = event.start.date_time {
-        chrono::DateTime::parse_from_rfc3339(&date_time)
+    let start = event
+        .start
+        .as_ref()
+        .ok_or_else(|| format!("Google Calendar event {} missing start", event.id))?;
+    let end = event
+        .end
+        .as_ref()
+        .ok_or_else(|| format!("Google Calendar event {} missing end", event.id))?;
+
+    let is_all_day = start.date.is_some();
+    let timezone = start.time_zone.clone();
+
+    let start_time = if let Some(date_time) = start.date_time.as_deref() {
+        chrono::DateTime::parse_from_rfc3339(date_time)
             .map_err(|e| format!("Invalid Google Calendar start dateTime: {e}"))?
             .timestamp()
-    } else if let Some(date) = event.start.date {
-        chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+    } else if let Some(date) = start.date.as_deref() {
+        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| format!("Invalid Google Calendar start date: {e}"))?
             .and_hms_opt(0, 0, 0)
             .ok_or_else(|| "Invalid all-day start time".to_string())?
@@ -431,12 +548,12 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
         return Err("Google Calendar event missing start".to_string());
     };
 
-    let end_time = if let Some(date_time) = event.end.date_time {
-        chrono::DateTime::parse_from_rfc3339(&date_time)
+    let end_time = if let Some(date_time) = end.date_time.as_deref() {
+        chrono::DateTime::parse_from_rfc3339(date_time)
             .map_err(|e| format!("Invalid Google Calendar end dateTime: {e}"))?
             .timestamp()
-    } else if let Some(date) = event.end.date {
-        chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+    } else if let Some(date) = end.date.as_deref() {
+        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|e| format!("Invalid Google Calendar end date: {e}"))?
             .and_hms_opt(23, 59, 59)
             .ok_or_else(|| "Invalid all-day end time".to_string())?
@@ -467,8 +584,6 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
         .and_then(|o| o.display_name.clone());
     let organizer_email = event.organizer.map(|o| o.email);
 
-    let timezone = event.start.time_zone.clone();
-
     Ok(CalendarEventDto {
         remote_event_id: event.id,
         uid: event.i_cal_u_i_d,
@@ -496,4 +611,105 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
         visibility: event.visibility,
         ..CalendarEventDto::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::normalize_google_event_body;
+
+    #[test]
+    fn normalize_google_event_body_translates_timed_event_and_strips_consumed_fields() {
+        let normalized = normalize_google_event_body(json!({
+            "summary": "Harness Google created",
+            "description": "Created through cal_action.execute_plan",
+            "location": "Focus Room",
+            "start": 1770112800,
+            "end": 1770114600,
+            "isAllDay": false,
+            "timezone": "UTC",
+            "recurrenceRule": "FREQ=WEEKLY",
+            "availability": "free",
+            "visibility": "public",
+        }))
+        .expect("normalize timed event");
+
+        assert_eq!(
+            normalized["start"]["dateTime"],
+            json!("2026-02-03T10:00:00Z")
+        );
+        assert_eq!(normalized["start"]["timeZone"], json!("UTC"));
+        assert_eq!(
+            normalized["end"]["dateTime"],
+            json!("2026-02-03T10:30:00Z")
+        );
+        assert_eq!(normalized["recurrence"], json!(["RRULE:FREQ=WEEKLY"]));
+        assert_eq!(normalized["transparency"], json!("transparent"));
+        assert_eq!(normalized["visibility"], json!("public"));
+        assert!(normalized.get("timezone").is_none());
+        assert!(normalized.get("isAllDay").is_none());
+        assert!(normalized.get("recurrenceRule").is_none());
+        assert!(normalized.get("availability").is_none());
+    }
+
+    #[test]
+    fn normalize_google_event_body_translates_all_day_event_to_date_objects() {
+        let normalized = normalize_google_event_body(json!({
+            "summary": "All day",
+            "start": 1770076800,
+            "end": 1770163200,
+            "isAllDay": true,
+            "timezone": "UTC",
+        }))
+        .expect("normalize all-day event");
+
+        assert_eq!(normalized["start"], json!({ "date": "2026-02-03" }));
+        assert_eq!(normalized["end"], json!({ "date": "2026-02-04" }));
+        assert!(normalized.get("timezone").is_none());
+        assert!(normalized.get("isAllDay").is_none());
+    }
+
+    #[test]
+    fn normalize_google_event_body_preserves_google_objects_and_strips_neutral_fields() {
+        let normalized = normalize_google_event_body(json!({
+            "summary": "Already Google shaped",
+            "start": {
+                "dateTime": "2026-02-03T10:00:00Z",
+                "timeZone": "UTC"
+            },
+            "end": {
+                "dateTime": "2026-02-03T10:30:00Z",
+                "timeZone": "UTC"
+            },
+            "timezone": "UTC",
+            "isAllDay": false,
+            "recurrenceRule": "RRULE:COUNT=1",
+            "availability": "busy",
+        }))
+        .expect("normalize Google-shaped event");
+
+        assert_eq!(
+            normalized["start"]["dateTime"],
+            json!("2026-02-03T10:00:00Z")
+        );
+        assert_eq!(normalized["recurrence"], json!(["RRULE:COUNT=1"]));
+        assert_eq!(normalized["transparency"], json!("opaque"));
+        assert!(normalized.get("timezone").is_none());
+        assert!(normalized.get("isAllDay").is_none());
+        assert!(normalized.get("recurrenceRule").is_none());
+        assert!(normalized.get("availability").is_none());
+    }
+
+    #[test]
+    fn normalize_google_event_body_rejects_malformed_start_end() {
+        let err = normalize_google_event_body(json!({
+            "summary": "Bad start",
+            "start": "not a timestamp",
+            "end": 1770114600,
+        }))
+        .expect_err("malformed start should fail before provider request");
+
+        assert!(err.contains("start must be an integer timestamp or object"));
+    }
 }

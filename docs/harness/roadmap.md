@@ -126,6 +126,9 @@ the brokkr repo):
   test_endpoint_env_smtp = "RATATOSKR_TEST_SMTP_ENDPOINT"
   test_endpoint_env_graph = "RATATOSKR_TEST_GRAPH_ENDPOINT"
   test_endpoint_env_gmail = "RATATOSKR_TEST_GMAIL_ENDPOINT"
+  test_endpoint_env_caldav = "RATATOSKR_TEST_CALDAV_ENDPOINT"
+  test_endpoint_env_people = "RATATOSKR_TEST_PEOPLE_ENDPOINT"
+  test_endpoint_env_gcal = "RATATOSKR_TEST_GCAL_ENDPOINT"
   sync_script_dir = "crates/app/tests/sync-harness"
   ```
 
@@ -579,7 +582,7 @@ Sequencing:
   seeds a JMAP OAuth account, re-authenticates through saehrimnir's
   token route, and verifies the refreshed tokens can import mail from
   the OAuth-enforced fixture.
-- **M6.10 (PARTIAL - Graph and CalDAV calendar read + mutation slices landed):**
+- **M6.10 (PARTIAL - provider calendar read + mutation slices landed):**
   `crates/app/tests/sync-harness/graph-calendar-initial.lua`
   runs the Graph calendar fixture through the real calendar runtime
   and asserts local calendar/event state plus Graph request-log
@@ -593,11 +596,19 @@ Sequencing:
   verifies calendar delta sync imports the created, updated, and
   tombstoned events. CalDAV now has initial-sync, action CRUD,
   remote-mutation import, and shared-fixture mutation proof through
-  Graph delta. Saehrimnir now has JMAP Calendar and Google Calendar v3
-  listeners, and ratatoskr now has the Google Calendar endpoint
-  override wiring needed to reach the GCAL sentinel port. The remaining
-  ratatoskr work is script authoring for JMAP and Google calendar
-  sync/action coverage.
+  Graph delta. JMAP now has
+  `crates/app/tests/sync-harness/jmap-calendar-initial.lua` plus
+  `crates/app/tests/service-harness/m6/calendar_actions_jmap_crud.lua`,
+  covering `Calendar/get`, `CalendarEvent/get`, and
+  `CalendarEvent/set` create/update/delete through the Service worker.
+  Google Calendar now has
+  `crates/app/tests/sync-harness/gcal-calendar-initial.lua` plus
+  `crates/app/tests/service-harness/m6/calendar_actions_gcal_crud.lua`,
+  covering calendarList/events sync and POST/PATCH/DELETE through
+  the Google Calendar v3 listener. The Google action slice also
+  normalizes provider-neutral action timestamps into Google
+  `dateTime` objects and hardens Google tombstone parsing so
+  cancelled delta events without start/end can delete local rows.
 - **M6.12 (LANDED):** backfill kick on boot.ready now lives in
   `crates/app/tests/service-harness/m6/`. The script seeds a cached
   but unindexed text attachment, restarts the Service against the same
@@ -638,17 +649,6 @@ Sequencing:
   stdio-corruption defense on a real Windows host. If the checks need
   to become permanent automation, add Windows-capable Lua or libtest
   coverage and keep the Linux-only SIGTERM script separate.
-- M6.10 Google calendar workflow:
-  add fixture coverage for calendar initial sync and create/update/
-  delete action flow against saehrimnir's Google Calendar v3 listener.
-  Ratatoskr endpoint override wiring has landed through
-  `RATATOSKR_TEST_GCAL_ENDPOINT`; add the matching brokkr env mapping
-  once the local brokkr config parser accepts GCAL.
-- M6.10 JMAP calendar workflow:
-  add fixture coverage for calendar initial sync and create/update/
-  delete action flow against saehrimnir's JMAP Calendar surface. This
-  should not need a new endpoint override because it rides the existing
-  JMAP mock endpoint.
 - M6.10 calendar failure path:
   cover create-on-provider-failure and assert the expected LocalOnly
   behavior, either with a fixture-side failure knob or a real-provider
@@ -683,14 +683,15 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 **Status:** PARTIAL - ratatoskr's test-only endpoint override,
 sync-trigger, DB-query, first sync-harness script, OAuth re-auth
 persistence harness path, JMAP remote-mutation and scripted
-incremental delta scripts, Graph calendar mutation scripts, plus
-Graph contact and CalDAV calendar coverage have landed. Saehrimnir
-now exposes the remaining major mock surfaces for JMAP Calendar,
-Google Calendar v3, Google People API, attachment raw-bytes, and
-slow-paged fixture recipes. The open work has shifted from mock-server
-enablement to ratatoskr endpoint wiring and script authoring. Brokkr
-can now spawn saehrimnir for fixture-frontmatter scripts and inject
-provider endpoints; its `sync-bench --gate` / `--as-baseline`
+incremental delta scripts, Graph calendar mutation scripts, Graph
+contact coverage, CalDAV calendar coverage, JMAP/Google calendar
+initial/action coverage, and People API initial contact coverage have
+landed. Saehrimnir now exposes the remaining major mock surfaces for
+JMAP Calendar, Google Calendar v3, Google People API, attachment
+raw-bytes, and slow-paged fixture recipes. The open work has shifted
+from mock-server enablement to deeper ratatoskr script authoring.
+Brokkr can now spawn saehrimnir for fixture-frontmatter scripts and
+inject provider endpoints; its `sync-bench --gate` / `--as-baseline`
 path now records per-host baselines in `gate.db` and evaluates
 scalar, `sidecar.*`, and `meta.*` thresholds from `brokkr.toml`.
 Recent saehrimnir support adds admin
@@ -739,9 +740,9 @@ Ratatoskr-side M8 surface now in tree:
   `RATATOSKR_TEST_PEOPLE_ENDPOINT` covers Gmail contact sync, Google
   otherContacts sync, GAL lookup, and Google contact write-back/delete
   URLs. `RATATOSKR_TEST_GCAL_ENDPOINT` covers Google Calendar v3 sync
-  and action URLs. `brokkr.toml` still cannot list PEOPLE / GCAL env
-  keys until the local brokkr config parser accepts
-  `test_endpoint_env_people` and `test_endpoint_env_gcal`.
+  and action URLs. `brokkr.toml` now lists `test_endpoint_env_people`
+  and `test_endpoint_env_gcal`, so brokkr injects all eight
+  saehrimnir endpoint variables for fixture-frontmatter scripts.
 - `test.start_sync` starts the real Service sync runtime. The
   Service sync dispatcher now runs provider initial sync when
   `accounts.initial_sync_completed = 0`, then delta sync afterwards.
@@ -930,6 +931,38 @@ Ratatoskr-side M8 surface now in tree:
   log is shared across the Graph and CalDAV protocol surfaces. It
   emits sync markers and writes `summary.json` with final
   calendar/event counts and Graph delta request counters.
+- `crates/app/tests/sync-harness/jmap-calendar-initial.lua`
+  targets the shared calendar fixture through saehrimnir's JMAP
+  Calendar surface, drives `client:start_calendar_sync`, and asserts
+  the Work/Personal calendars plus Work events land through
+  `Calendar/get` and `CalendarEvent/get`. It emits sync markers and
+  writes `summary.json` with calendar/event counts and JMAP request
+  counters.
+- `crates/app/tests/service-harness/m6/calendar_actions_jmap_crud.lua`
+  targets the same fixture through JMAP, drives
+  `client:execute_calendar_plan`, and verifies create/update/delete
+  through `CalendarEvent/set`, local calendar-event state, and a
+  follow-up `CalendarEvent/changes` sync.
+- `crates/app/tests/sync-harness/gcal-calendar-initial.lua`
+  targets the shared calendar fixture through saehrimnir's Google
+  Calendar v3 listener, drives `client:start_calendar_sync`, and
+  asserts calendarList plus per-calendar events requests import the
+  Work/Personal calendars and Work events. It emits sync markers and
+  writes `summary.json` with calendar/event counts and Google Calendar
+  request counters.
+- `crates/app/tests/service-harness/m6/calendar_actions_gcal_crud.lua`
+  targets the same fixture through Google Calendar v3, drives
+  `client:execute_calendar_plan`, and verifies create/update/delete
+  through POST/PATCH/DELETE requests, local calendar-event state, and
+  a follow-up events sync. This slice also normalizes Google action
+  bodies and accepts cancelled delta tombstones without start/end.
+- `crates/app/tests/sync-harness/people-contacts-initial.lua`
+  targets `graph-contacts-small.toml` through saehrimnir's People API
+  listener, drives Gmail initial sync, and asserts Google contact rows
+  import from `/v1/people/me/connections` while empty
+  `/v1/otherContacts` still bootstraps successfully. It emits sync
+  markers and writes `summary.json` with final contact counts and
+  People request counters.
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
@@ -1004,7 +1037,7 @@ Lua helper cleanup backlog:
   CalDAV create/update/delete action
   coverage, CalDAV remote-mutation import coverage, and a
   CalDAV-write to Graph-delta shared-fixture proof. Google and JMAP
-  calendar workflow coverage remain manual.
+  now have initial-sync plus create/update/delete action coverage.
 
 **Remaining actionable work:**
 
@@ -1017,29 +1050,21 @@ Lua helper cleanup backlog:
   selected. Attachment-bearing scripts should exercise the new raw-byte
   paths for JMAP `Email/get` and Gmail `threads.get`, not only cached
   local fixture bytes.
-- JMAP calendar:
-  add sync/action scripts against saehrimnir's JMAP Calendar surface.
-- Google calendar:
-  add sync/action scripts against saehrimnir's Google Calendar v3
-  listener. `RATATOSKR_TEST_GCAL_ENDPOINT` override wiring has landed;
-  add the matching brokkr env mapping when supported by the installed
-  brokkr binary.
 - Gmail People API contacts:
-  add contact sync/action coverage against saehrimnir's People API
-  listener and shared contact fixture entries.
-  `RATATOSKR_TEST_PEOPLE_ENDPOINT` override wiring now covers
-  `crates/gmail/src/contacts/`, `crates/core/src/contacts/gal.rs`, and
-  `crates/service/src/actions/contacts.rs`; add the matching brokkr env
-  mapping when supported by the installed brokkr binary.
+  initial People API contact import has landed. Add scripted
+  incremental contact coverage through `POST /test/fixture/step` when
+  that cadence needs an explicit gate. Contact write-back/delete
+  remains blocked on saehrimnir adding People API mutation routes.
 - Broader benchmark summaries:
   initial marker/summary adoption now covers JMAP steady-state, JMAP
   Email/set delta, JMAP scripted incremental, IMAP steady-state, IMAP
   scripted incremental, IMAP-to-JMAP shared-state delta, Graph calendar
   initial, Graph calendar remote-delta, Graph calendar CalDAV-mutation
   delta, Graph contacts initial, Graph contacts incremental, CalDAV
-  calendar initial, and CalDAV calendar remote-delta. Add the same
-  marker/summary shape to any additional sync scripts selected for M9
-  gates.
+  calendar initial, CalDAV calendar remote-delta, JMAP calendar
+  initial, Google Calendar initial, and People contacts initial. Add
+  the same marker/summary shape to any additional sync scripts
+  selected for M9 gates.
 
 ---
 
@@ -1070,7 +1095,8 @@ scripted incremental, IMAP steady-state, IMAP scripted incremental,
 IMAP-to-JMAP shared-state delta, Graph calendar initial, Graph
 calendar remote-delta, Graph calendar CalDAV-mutation delta, Graph
 contacts initial, Graph contacts incremental, CalDAV calendar initial,
-and CalDAV calendar remote-delta scripts using them.
+CalDAV calendar remote-delta, JMAP calendar initial, Google Calendar
+initial, and People contacts initial scripts using them.
 The remaining work is broader ratatoskr-side gate coverage and
 additional per-host baseline promotion as needed.
 
