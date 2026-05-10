@@ -525,8 +525,8 @@ Landed slices:
 ### M6 - Manual-matrix automation
 
 **Status:** PARTIAL - the former manual matrix has been folded into
-this roadmap. Items 4, 5, 6, 7, 8, 9, 11, and 12 have landed; item 10
-is partial; the remaining action items are listed below.
+this roadmap. Items 4 through 14 have landed for Linux/non-Windows
+coverage; the remaining action items are listed below.
 
 The old `docs/harness/manual-test-matrix.md` file has been deleted so
 this roadmap is the single work queue. Every former manual item is now
@@ -582,7 +582,7 @@ Sequencing:
   seeds a JMAP OAuth account, re-authenticates through saehrimnir's
   token route, and verifies the refreshed tokens can import mail from
   the OAuth-enforced fixture.
-- **M6.10 (PARTIAL - provider calendar read + mutation slices landed):**
+- **M6.10 (LANDED):**
   `crates/app/tests/sync-harness/graph-calendar-initial.lua`
   runs the Graph calendar fixture through the real calendar runtime
   and asserts local calendar/event state plus Graph request-log
@@ -609,6 +609,11 @@ Sequencing:
   normalizes provider-neutral action timestamps into Google
   `dateTime` objects and hardens Google tombstone parsing so
   cancelled delta events without start/end can delete local rows.
+  `crates/app/tests/service-harness/m6/calendar_create_provider_failure_local_only.lua`
+  covers the create-on-provider-failure lane: a JMAP calendar account
+  imports calendars with a valid OAuth token, the script invalidates
+  that token, and `cal_action.execute_plan` CreateEvent returns
+  `LocalOnly` while keeping the locally-created row unsynced.
 - **M6.12 (LANDED):** backfill kick on boot.ready now lives in
   `crates/app/tests/service-harness/m6/`. The script seeds a cached
   but unindexed text attachment, restarts the Service against the same
@@ -649,10 +654,6 @@ Sequencing:
   stdio-corruption defense on a real Windows host. If the checks need
   to become permanent automation, add Windows-capable Lua or libtest
   coverage and keep the Linux-only SIGTERM script separate.
-- M6.10 calendar failure path:
-  cover create-on-provider-failure and assert the expected LocalOnly
-  behavior, either with a fixture-side failure knob or a real-provider
-  manual validation that gets retired with a doc comment.
 ---
 
 ### M7 - Brokkr-side polish
@@ -1134,7 +1135,9 @@ Lua helper cleanup backlog:
   coverage, CalDAV remote-mutation import coverage, and a
   CalDAV-write to Graph-delta shared-fixture proof. Google and JMAP
   now have initial-sync, create/update/delete action coverage, and
-  remote-mutation delta import coverage.
+  remote-mutation delta import coverage. JMAP also covers
+  create-on-provider-failure returning `LocalOnly` while preserving
+  the unsynced local event row.
 
 **Remaining actionable work:**
 
