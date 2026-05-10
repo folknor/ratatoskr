@@ -92,10 +92,11 @@ pub async fn fetch_google_gal(
     let mut entries = Vec::new();
     let mut page_token: Option<String> = None;
     let read_mask = "names,emailAddresses,phoneNumbers,organizations";
+    let api_base = gmail::contacts::people_api_base();
 
     loop {
         let mut url = format!(
-            "https://people.googleapis.com/v1/people:listDirectoryPeople\
+            "{api_base}/people:listDirectoryPeople\
              ?readMask={read_mask}&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE\
              &pageSize=1000"
         );

@@ -116,6 +116,18 @@ pub(crate) const PAGE_SIZE: u32 = 1000;
 // Helpers
 // ---------------------------------------------------------------------------
 
+pub fn people_api_base() -> String {
+    #[cfg(feature = "test-helpers")]
+    if let Ok(value) = std::env::var("RATATOSKR_TEST_PEOPLE_ENDPOINT")
+        && let Some(api_base) =
+            common::test_endpoint::api_base_from_test_endpoint(&value, "v1")
+    {
+        return api_base;
+    }
+
+    PEOPLE_API_BASE.to_string()
+}
+
 /// Extract the first valid, lowercased email address from a Person.
 pub(crate) fn extract_primary_email(person: &Person) -> Option<String> {
     person
@@ -456,4 +468,5 @@ mod tests {
         assert!(response.other_contacts.is_none());
         assert_eq!(response.total_size, Some(0));
     }
+
 }

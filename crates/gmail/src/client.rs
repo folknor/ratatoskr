@@ -46,28 +46,8 @@ pub fn new_gmail_state(encryption_key: [u8; 32]) -> GmailState {
 }
 
 #[cfg(feature = "test-helpers")]
-fn endpoint_has_non_root_path(endpoint: &str) -> bool {
-    let after_authority = endpoint
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(endpoint);
-    after_authority
-        .find('/')
-        .map(|idx| !after_authority[idx..].trim_matches('/').is_empty())
-        .unwrap_or(false)
-}
-
-#[cfg(feature = "test-helpers")]
 fn gmail_api_base_from_test_endpoint(endpoint: &str) -> Option<String> {
-    let endpoint = endpoint.trim().trim_end_matches('/');
-    if endpoint.is_empty() {
-        return None;
-    }
-    if endpoint_has_non_root_path(endpoint) {
-        Some(endpoint.to_string())
-    } else {
-        Some(format!("{endpoint}/gmail/v1/users/me"))
-    }
+    common::test_endpoint::api_base_from_test_endpoint(endpoint, "gmail/v1/users/me")
 }
 
 fn gmail_api_base() -> String {

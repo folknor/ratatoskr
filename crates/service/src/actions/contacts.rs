@@ -305,8 +305,9 @@ async fn dispatch_write_back(
                 phone, company, notes, "*", // etag "*" = skip optimistic locking
             );
             let field_mask = update_fields.join(",");
+            let api_base = gmail::contacts::people_api_base();
             let url = format!(
-                "https://people.googleapis.com/v1/{server_id}:updateContact?updatePersonFields={field_mask}",
+                "{api_base}/{server_id}:updateContact?updatePersonFields={field_mask}",
             );
             let _resp: serde_json::Value = client
                 .patch_absolute(&url, &body, &ctx.db)
@@ -361,7 +362,8 @@ async fn dispatch_delete(
                 gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
                     .await
                     .map_err(ActionError::remote)?;
-            let url = format!("https://people.googleapis.com/v1/{server_id}:deleteContact");
+            let api_base = gmail::contacts::people_api_base();
+            let url = format!("{api_base}/{server_id}:deleteContact");
             client
                 .delete_absolute(&url, &ctx.db)
                 .await

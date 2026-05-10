@@ -10,8 +10,9 @@ use sync::state as sync_state;
 
 use super::super::client::GmailClient;
 use super::{
-    PAGE_SIZE, PEOPLE_API_BASE, PeopleConnectionsResponse, Person, SyncContactsResult,
+    PAGE_SIZE, PeopleConnectionsResponse, Person, SyncContactsResult,
     extract_avatar_url, extract_display_name, extract_primary_email,
+    people_api_base,
 };
 
 const PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,photos,metadata";
@@ -59,10 +60,11 @@ async fn full_sync(
     let mut all_persons = Vec::new();
     let mut page_token: Option<String> = None;
     let mut sync_token: Option<String> = None;
+    let api_base = people_api_base();
 
     loop {
         let mut url = format!(
-            "{PEOPLE_API_BASE}/people/me/connections?personFields={PERSON_FIELDS}\
+            "{api_base}/people/me/connections?personFields={PERSON_FIELDS}\
              &pageSize={PAGE_SIZE}&requestSyncToken=true"
         );
         if let Some(ref pt) = page_token {
@@ -133,10 +135,11 @@ async fn incremental_sync(
     let mut deleted_resource_names = Vec::new();
     let mut page_token: Option<String> = None;
     let mut new_sync_token: Option<String> = None;
+    let api_base = people_api_base();
 
     loop {
         let mut url = format!(
-            "{PEOPLE_API_BASE}/people/me/connections?personFields={PERSON_FIELDS}\
+            "{api_base}/people/me/connections?personFields={PERSON_FIELDS}\
              &pageSize={PAGE_SIZE}&requestSyncToken=true&syncToken={sync_token}"
         );
         if let Some(ref pt) = page_token {

@@ -16,6 +16,7 @@ pub use common::ops;
 pub use common::parsed_message;
 pub use common::signature_images;
 pub use common::text;
+pub use common::test_endpoint;
 pub use common::token;
 pub use common::tracking_pixels;
 pub use common::typed_ids;

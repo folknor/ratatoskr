@@ -62,18 +62,6 @@ pub fn new_graph_state(encryption_key: [u8; 32]) -> GraphState {
 }
 
 #[cfg(feature = "test-helpers")]
-fn endpoint_has_non_root_path(endpoint: &str) -> bool {
-    let after_authority = endpoint
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(endpoint);
-    after_authority
-        .find('/')
-        .map(|idx| !after_authority[idx..].trim_matches('/').is_empty())
-        .unwrap_or(false)
-}
-
-#[cfg(feature = "test-helpers")]
 fn endpoint_parent(endpoint: &str, segment: &str) -> Option<String> {
     endpoint
         .strip_suffix(segment)
@@ -92,7 +80,7 @@ fn graph_api_bases_from_test_endpoint(endpoint: &str) -> Option<(String, String)
     if let Some(parent) = endpoint_parent(endpoint, "/beta") {
         return Some((format!("{parent}/v1.0"), endpoint.to_string()));
     }
-    if endpoint_has_non_root_path(endpoint) {
+    if common::test_endpoint::endpoint_has_non_root_path(endpoint) {
         Some((endpoint.to_string(), format!("{endpoint}/beta")))
     } else {
         Some((format!("{endpoint}/v1.0"), format!("{endpoint}/beta")))

@@ -6,7 +6,7 @@ use rtsk::db::ReadDbState;
 use rtsk::provider::http;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
-use super::{GOOGLE_CALENDAR_API_BASE, GOOGLE_CALENDAR_RETRY_CONFIG, shared_http_client};
+use super::{GOOGLE_CALENDAR_RETRY_CONFIG, google_calendar_api_base, shared_http_client};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +98,8 @@ pub async fn google_calendar_list_calendars_impl(
     client: &GmailClient,
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let http = shared_http_client();
-    let url = format!("{GOOGLE_CALENDAR_API_BASE}/users/me/calendarList");
+    let api_base = google_calendar_api_base();
+    let url = format!("{api_base}/users/me/calendarList");
     let response: GoogleCalendarListResponse =
         google_calendar_request(http, client, db, &url).await?;
 
@@ -137,6 +138,7 @@ pub async fn google_calendar_sync_events_impl(
     let mut deleted_remote_ids = Vec::new();
     let mut page_token: Option<String> = None;
     let mut next_sync_token: Option<String> = None;
+    let api_base = google_calendar_api_base();
 
     loop {
         // Per-page cancellation checkpoint. Each iteration is a network
@@ -164,7 +166,7 @@ pub async fn google_calendar_sync_events_impl(
             .map(|(key, value)| format!("{key}={}", urlencoding::encode(&value)))
             .collect::<Vec<_>>()
             .join("&");
-        let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
+        let url = format!("{api_base}/calendars/{encoded_id}/events?{query}");
 
         let response = match google_calendar_request::<GoogleEventListResponse>(
             http, client, db, &url,
@@ -227,6 +229,7 @@ pub async fn google_calendar_fetch_events_impl(
 ) -> Result<Vec<CalendarEventDto>, String> {
     let http = shared_http_client();
     let encoded_id = urlencoding::encode(calendar_remote_id);
+    let api_base = google_calendar_api_base();
     let query = [
         ("timeMin", time_min),
         ("timeMax", time_max),
@@ -238,7 +241,7 @@ pub async fn google_calendar_fetch_events_impl(
     .map(|(key, value)| format!("{key}={}", urlencoding::encode(value)))
     .collect::<Vec<_>>()
     .join("&");
-    let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
+    let url = format!("{api_base}/calendars/{encoded_id}/events?{query}");
     let response: GoogleEventListResponse = google_calendar_request(http, client, db, &url).await?;
 
     response.items.into_iter().map(map_google_event).collect()
@@ -252,7 +255,8 @@ pub async fn google_calendar_create_event_impl(
 ) -> Result<CalendarEventDto, String> {
     let http = shared_http_client();
     let encoded_id = urlencoding::encode(calendar_remote_id);
-    let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events");
+    let api_base = google_calendar_api_base();
+    let url = format!("{api_base}/calendars/{encoded_id}/events");
     let response: GoogleCalendarEvent =
         google_calendar_request_with_body(http, client, db, "POST", &url, Some(event)).await?;
     map_google_event(response)
@@ -268,8 +272,8 @@ pub async fn google_calendar_update_event_impl(
     let http = shared_http_client();
     let encoded_cal_id = urlencoding::encode(calendar_remote_id);
     let encoded_event_id = urlencoding::encode(remote_event_id);
-    let url =
-        format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
+    let api_base = google_calendar_api_base();
+    let url = format!("{api_base}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
     let response: GoogleCalendarEvent =
         google_calendar_request_with_body(http, client, db, "PATCH", &url, Some(event)).await?;
     map_google_event(response)
@@ -284,8 +288,8 @@ pub async fn google_calendar_delete_event_impl(
     let http = shared_http_client();
     let encoded_cal_id = urlencoding::encode(calendar_remote_id);
     let encoded_event_id = urlencoding::encode(remote_event_id);
-    let url =
-        format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
+    let api_base = google_calendar_api_base();
+    let url = format!("{api_base}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
     google_calendar_request_empty(http, client, db, "DELETE", &url).await
 }
 

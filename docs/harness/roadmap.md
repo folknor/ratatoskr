@@ -594,8 +594,10 @@ Sequencing:
   tombstoned events. CalDAV now has initial-sync, action CRUD,
   remote-mutation import, and shared-fixture mutation proof through
   Graph delta. Saehrimnir now has JMAP Calendar and Google Calendar v3
-  listeners, so the remaining ratatoskr work is endpoint wiring for
-  Google Calendar plus JMAP/Google calendar scripts.
+  listeners, and ratatoskr now has the Google Calendar endpoint
+  override wiring needed to reach the GCAL sentinel port. The remaining
+  ratatoskr work is script authoring for JMAP and Google calendar
+  sync/action coverage.
 - **M6.12 (LANDED):** backfill kick on boot.ready now lives in
   `crates/app/tests/service-harness/m6/`. The script seeds a cached
   but unindexed text attachment, restarts the Service against the same
@@ -637,13 +639,16 @@ Sequencing:
   to become permanent automation, add Windows-capable Lua or libtest
   coverage and keep the Linux-only SIGTERM script separate.
 - M6.10 Google calendar workflow:
-  add `RATATOSKR_TEST_GCAL_ENDPOINT` override wiring parallel to the
-  existing Gmail override, then add fixture coverage for calendar
-  initial sync and create/update/delete action flow against
-  saehrimnir's Google Calendar v3 listener.
+  add fixture coverage for calendar initial sync and create/update/
+  delete action flow against saehrimnir's Google Calendar v3 listener.
+  Ratatoskr endpoint override wiring has landed through
+  `RATATOSKR_TEST_GCAL_ENDPOINT`; add the matching brokkr env mapping
+  once the local brokkr config parser accepts GCAL.
 - M6.10 JMAP calendar workflow:
   add fixture coverage for calendar initial sync and create/update/
-  delete action flow against saehrimnir's JMAP Calendar surface.
+  delete action flow against saehrimnir's JMAP Calendar surface. This
+  should not need a new endpoint override because it rides the existing
+  JMAP mock endpoint.
 - M6.10 calendar failure path:
   cover create-on-provider-failure and assert the expected LocalOnly
   behavior, either with a fixture-side failure knob or a real-provider
@@ -679,7 +684,11 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 sync-trigger, DB-query, first sync-harness script, OAuth re-auth
 persistence harness path, JMAP remote-mutation and scripted
 incremental delta scripts, Graph calendar mutation scripts, plus
-Graph contact and CalDAV calendar coverage have landed. Brokkr
+Graph contact and CalDAV calendar coverage have landed. Saehrimnir
+now exposes the remaining major mock surfaces for JMAP Calendar,
+Google Calendar v3, Google People API, attachment raw-bytes, and
+slow-paged fixture recipes. The open work has shifted from mock-server
+enablement to ratatoskr endpoint wiring and script authoring. Brokkr
 can now spawn saehrimnir for fixture-frontmatter scripts and inject
 provider endpoints; its `sync-bench --gate` / `--as-baseline`
 path now records per-host baselines in `gate.db` and evaluates
@@ -700,14 +709,15 @@ saehrimnir surfaces also add JMAP Calendar
 `Email::raw_bytes` for JMAP `Email/get` and Gmail `threads.get`, a
 slow-paging fixture recipe, a Google People API listener, and a Google
 Calendar v3 listener. The sentinel now reports PEOPLE and GCAL ports;
-ratatoskr still needs matching `RATATOSKR_TEST_PEOPLE_ENDPOINT` and
-`RATATOSKR_TEST_GCAL_ENDPOINT` overrides before live binaries can use
-those listeners under `sync-bench` / `service-test`.
+ratatoskr now has matching `RATATOSKR_TEST_PEOPLE_ENDPOINT` and
+`RATATOSKR_TEST_GCAL_ENDPOINT` overrides so live binaries can use those
+listeners under `sync-bench` / `service-test`.
 
 Mock provider servers and fixture sets (small smoke / medium / large /
 huge thread / many folders / duplicate Message-ID / malformed MIME /
 slow-paged responses / incremental new+change+delete+move sequence /
-Graph contacts / Graph+CalDAV calendar events), and the brokkr-side
+raw attachment bytes / Graph contacts / Google People contacts /
+Graph+CalDAV+Google+JMAP calendar events), and the brokkr-side
 commands to start/stop them and collect results.
 
 The mock-server design lives in a sibling brokkr-side note
@@ -723,9 +733,15 @@ plus new sync-triggering / state-querying `RequestParams` variants
 
 Ratatoskr-side M8 surface now in tree:
 
-- `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL,CALDAV}_ENDPOINT`
+- `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL,CALDAV,PEOPLE,GCAL}_ENDPOINT`
   are read under the `test-helpers` feature and redirect provider
   clients to the mock endpoints supplied by brokkr.
+  `RATATOSKR_TEST_PEOPLE_ENDPOINT` covers Gmail contact sync, Google
+  otherContacts sync, GAL lookup, and Google contact write-back/delete
+  URLs. `RATATOSKR_TEST_GCAL_ENDPOINT` covers Google Calendar v3 sync
+  and action URLs. `brokkr.toml` still cannot list PEOPLE / GCAL env
+  keys until the local brokkr config parser accepts
+  `test_endpoint_env_people` and `test_endpoint_env_gcal`.
 - `test.start_sync` starts the real Service sync runtime. The
   Service sync dispatcher now runs provider initial sync when
   `accounts.initial_sync_completed = 0`, then delta sync afterwards.
@@ -998,16 +1014,23 @@ Lua helper cleanup backlog:
   attachment-bearing fixture families. Saehrimnir's slow-paging recipe
   and cross-protocol raw-bytes surface are now available, so this is a
   ratatoskr script-authoring item when the corresponding fixtures are
-  selected.
+  selected. Attachment-bearing scripts should exercise the new raw-byte
+  paths for JMAP `Email/get` and Gmail `threads.get`, not only cached
+  local fixture bytes.
 - JMAP calendar:
   add sync/action scripts against saehrimnir's JMAP Calendar surface.
 - Google calendar:
-  add `RATATOSKR_TEST_GCAL_ENDPOINT` override wiring, then add
-  sync/action scripts against saehrimnir's Google Calendar v3 listener.
+  add sync/action scripts against saehrimnir's Google Calendar v3
+  listener. `RATATOSKR_TEST_GCAL_ENDPOINT` override wiring has landed;
+  add the matching brokkr env mapping when supported by the installed
+  brokkr binary.
 - Gmail People API contacts:
-  add `RATATOSKR_TEST_PEOPLE_ENDPOINT` override wiring, then add
-  contact sync/action coverage against saehrimnir's People API
+  add contact sync/action coverage against saehrimnir's People API
   listener and shared contact fixture entries.
+  `RATATOSKR_TEST_PEOPLE_ENDPOINT` override wiring now covers
+  `crates/gmail/src/contacts/`, `crates/core/src/contacts/gal.rs`, and
+  `crates/service/src/actions/contacts.rs`; add the matching brokkr env
+  mapping when supported by the installed brokkr binary.
 - Broader benchmark summaries:
   initial marker/summary adoption now covers JMAP steady-state, JMAP
   Email/set delta, JMAP scripted incremental, IMAP steady-state, IMAP
