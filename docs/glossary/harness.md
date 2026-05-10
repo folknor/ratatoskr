@@ -1,10 +1,10 @@
 # Service test harness - architecture
 
-The motivation is in `problem-statement.md`. The milestone-by-milestone
-implementation plan is in `roadmap.md`. This document records the
-technical shape of the harness: what brokkr provides, what ratatoskr
-provides, the dependency direction, the determinism rule, the cohort
-coverage, and the failure model.
+This document records the motivation behind the harness, the
+technical shape of the runtime, what brokkr provides versus what
+ratatoskr provides, the dependency direction, the determinism rule,
+the cohort coverage, and the failure model. Remaining harness work
+lives in the root `TODO.md`.
 
 The target cohort is not limited to OS-subprocess tests. It includes
 any Service test that starts the Service behind an IO boundary and then
@@ -17,6 +17,48 @@ The architecture is mirrored on the brokkr side as
 `notes/ratatoskr-service-harness.md` in the brokkr repository. Both
 documents stay in sync; this one is authoritative for the ratatoskr
 side.
+
+## Motivation
+
+The harness exists because four failure modes break Service IO-boundary
+testing under a plain `#[tokio::test]` shape.
+
+**Wall-clock timeouts inside the test race against the implementation's
+own ceilings.** A `#[tokio::test]` that issues a `health.ping` with a
+1 s timeout is racing against the Service's own 5 s `health.ping`
+timeout, the spawn-side `request_or_observe_child_exit` 50 ms polling
+interval, the OS scheduler, and the disk's behaviour during a hot
+migration. Running a flaky libtest shape 200 times averages the noise
+rather than eliminating it.
+
+**Failure destroys the diagnostic state.** `DataDirGuard::Drop` in the
+subprocess tests and `TestDataDir::Drop` in the in-process dispatch
+tests clean up the test's app-data directory unconditionally, including
+on failure. SQLite WAL state, the lockfile, the key file, the
+`clean_shutdown` sentinel: all gone the moment the test fails. No
+`/proc` snapshot, no preserved frame log, no preserved Service stderr,
+no structured dump. A failure produces "test timed out at line N" and
+little else; re-running with `dbg!` calls is the only path forward,
+and the bug may not reproduce twice.
+
+**`kill_on_drop(false)` orphans the Service when the test itself is
+killed.** A test that hits its libtest timeout, or that the developer
+`Ctrl-C`'s mid-run, leaves a Service subprocess attached to a now-dead
+parent. Linux `PR_SET_PDEATHSIG` and Windows Job Objects handle real
+parent-death cleanly, but test-process death isn't real parent-death
+from the Service's perspective.
+
+**The cohort facing this problem is large.** Phase 8 of the Service
+roadmap named ~15+ similarly-shaped real-subprocess tests planned
+across Phases 2-7 that hadn't landed because the old framework couldn't
+carry them. The `spawn_harness_with_suffix` cohort in
+`dispatch_in_process.rs` was in the same danger zone. As Phase 8's
+planning notes put it: "building T1 against today's framework would
+mean rebuilding it once Phase 8's work lands."
+
+The harness fixes these by making waits deterministic by construction
+and by preserving a self-contained artefact directory on failure. The
+remaining sections describe the technical shape that delivers both.
 
 ## Brokkr context (for readers new to it)
 
@@ -774,7 +816,11 @@ The data dir copy, protocol/step trace, and `/proc` snapshot for real
 subprocesses are the pieces of state that today's tokio-test pattern
 destroys or never records (`DataDirGuard::Drop` / `TestDataDir::Drop`
 unconditional cleanup; no structured frame/step capture). Recovering
-them is the largest single jump in debug ergonomics.
+them is the largest single jump in debug ergonomics: the difference
+between "the test hung, re-run with verbose logging" and "the writer
+task exited at frame 47 while the shutdown handler was awaiting an
+`ack` that the dispatch loop's in-flight counter shows is still parked
+at 1."
 
 ## Brokkr CLI surface
 
@@ -801,6 +847,12 @@ boot/dispatch protocol, or process/IO boundary is the thing under test.
 
 ## Out of scope
 
+- **Replacing ratatoskr's correctness assertions.** The Lua scripts
+  drive `ServiceClient` methods and assert on returned values; they
+  don't bypass ratatoskr's invariants.
+- **Speaking JSON-RPC from brokkr.** `ServiceClient` lives in
+  ratatoskr; brokkr spawns the binary that embeds it and never parses
+  the wire.
 - **Replacing `brokkr test`.** The cargo single-test runner stays.
   Service IO-boundary tests use the new harness; everything else uses
   `brokkr test`.

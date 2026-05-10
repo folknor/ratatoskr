@@ -232,6 +232,43 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
   - **Inline styles inside `<pre>`.** Style flag bumps are gated by `!self.in_pre` so `<pre>plain<b>bold</b>plain</pre>` flattens to `Preformatted("plainboldplain")` - bold is lost. Correct semantics for pre-as-plain-text but wrong for source-with-syntax-highlighting. Same path-of-least-resistance trade-off until litehtml-rs.
   - **Trailing-text-after-nested-list ordinal renumbering.** `<ol><li>outer<ul>...</ul>after</li></ol>` parses as `1. outer / • inner / 2. after`. The "2." is a side-effect of the flat block model emitting the trailing inline content as its own outer-list item. Same flat-model compromise as the rte parser - users may or may not notice.
 
+## Test Harness
+
+Architecture and design rationale stay in `docs/glossary/harness.md`. The milestone roadmap is retired - remaining work is captured here.
+
+### Environment-blocked (Windows)
+
+The Linux equivalents already automate. The harness scripts are platform-agnostic; the gate is the test environment (cross-platform CI runner, dev box, or paid test service). If any of these become permanent automation, add Windows-capable Lua or libtest coverage and keep the Linux-only SIGTERM script separate.
+
+- [ ] **M6.1 Windows parent-death (Job Object)** - Verify the Service exits when its parent is killed via the Windows Job Object machinery.
+- [ ] **M6.2 Windows clean-shutdown handshake** - Verify SIGTERM-equivalent / `WM_CLOSE` triggers shutdown drain and the `clean_shutdown` sentinel.
+- [ ] **M6.3 Windows stdio-corruption defense** - Verify `println!` from a handler doesn't corrupt JSON-RPC framing on Windows.
+
+### M9 follow-ups (optional)
+
+- [ ] **Per-host baselines for `jmap_steady_state_delta`** - The checked-in baseline map (`brokkr.toml`) is currently single-host (`plantasjen` only). Other contributors or CI hosts that should run the gate need to record their own baseline with `brokkr sync-bench crates/app/tests/sync-harness/jmap-steady-state-delta.lua --gate jmap_steady_state_delta --as-baseline --bench 10` and append the printed line under `[ratatoskr.gate.jmap_steady_state_delta.baseline]`.
+- [ ] **More checked-in gates** - Once a stable benchmark script matters to CI or release decisions, add a `[ratatoskr.gate.<name>]` block to `brokkr.toml` and record per-host baselines. Good candidates: JMAP scripted incremental, IMAP steady-state, Graph calendar remote-delta, CalDAV calendar remote-delta.
+
+### Brokkr polish
+
+- [ ] **`brokkr service-list --json`** - Machine-readable script discovery for failure-triage tooling and editor integrations. Deferred (no current consumer).
+
+### Capability backlog (land when a test needs it)
+
+The original M1 foundation sketch named these as target surface; the M2-M8 cohort all landed without needing them. Each becomes work when a future test names coverage it unblocks.
+
+- [ ] **Generic `harness.wait_for { predicate, child, backstop }`** - Lua-facing wait combinator that races arbitrary predicates against child-exit observation. Today's scripts use typed `ServiceClient` requests, event-stream receives, async request handles, and per-call timeouts.
+- [ ] **`NotificationQueue` Lua userdata** - `queue:recv(timeout)` / `queue:drain_for(duration)` returning `Notification` userdata with `service_generation`, `method`, and a `serde_json::Value`-backed `params` view for filtering on payload details.
+- [ ] **Sentinel-file watch** - `harness.wait_for_sentinel { path, backstop }` for data-dir-relative paths and `{ absolute, backstop }` for explicit absolute paths. No leading-slash auto-detection, no glob support.
+- [ ] **Parent-death helper bindings** - `harness.spawn_parent_death_helper(service_binary, data_dir) -> { service_pid, helper_handle }`. The `parent_death_helper` binary already exists; the binding does not. Required for `linux_parent_sigkill_terminates_service_within_two_seconds`-style coverage.
+- [ ] **Generic `harness.wait_exit(client, backstop) -> ExitStatus`** - With `code()`, `signal()`, `wall_time_ms()` accessors.
+- [ ] **Resource-budget summary** - `harness.resource_summary(client) -> { rss_kb, io_bytes, ... }` reusing brokkr's existing sidecar profiler.
+- [ ] **Parsed `frames.jsonl` payloads** - The frame writer currently records redacted raw frames + length + SHA-256 with `parsed: null`. Structural parsed redaction (per-`RequestParams` field allowlist) is future hardening before any credentialed script lands.
+
+### Lua-helper cleanup
+
+- [ ] **Hoist extract/search script helpers** - Don't add another extract/search script that copy-pastes backfill, attachment polling, search polling, or attachment lookup helpers. First hoist them into shared harness helpers or a supported Lua include path.
+
 ## Refactor Backlog
 
 Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` or `#[allow(clippy::type_complexity)]` so clippy stays clean. Nothing here is blocking - each is a localized API cleanup that would replace a long arg list or nested-Option tuple with a named struct.

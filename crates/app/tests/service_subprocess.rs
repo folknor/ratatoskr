@@ -804,8 +804,8 @@ fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
 ///
 /// FLAKY: same libtest-subprocess-lifecycle flake shape as the other
 /// `#[ignore]`'d tests in this file (passes solo, hangs in the suite
-/// or under `-N`). The proper fix is the harness Lua rewrite under
-/// M2 of `docs/harness/roadmap.md`.
+/// or under `-N`). The proper fix is the harness Lua rewrite documented
+/// in `docs/glossary/harness.md`.
 #[ignore]
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]

@@ -2,7 +2,7 @@
 //
 // The Windows Job Object parent-death machinery cannot be exercised from
 // the Linux CI host. Three paths in this module land entirely manual until
-// run on a real Windows host (see `docs/harness/manual-test-matrix.md`):
+// run on a real Windows host (tracked under "Test Harness" in `TODO.md`):
 //
 // 1. Job creation + KILL_ON_JOB_CLOSE flag actually applied.
 // 2. AssignProcessToJobObject after spawn - the spawn->assign window is
@@ -11,7 +11,7 @@
 // 3. Job inheritance for grandchildren (Phase 7 extractor subprocesses)
 //    when those land.
 //
-// Re-run the manual matrix any time this module changes.
+// Re-run the manual checks any time this module changes.
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::ptr;
