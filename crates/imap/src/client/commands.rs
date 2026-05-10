@@ -4,6 +4,7 @@ use super::super::connection::{IMAP_CMD_TIMEOUT, IMAP_FETCH_TIMEOUT, ImapSession
 use super::super::types::*;
 use super::{mailbox_supports_custom_keywords, timeout_err};
 
+use async_imap::imap_proto::{Response, ResponseCode, Status, UidSetMember};
 use async_imap::types::Flag;
 
 /// Get UIDs of messages newer than `last_uid`.
@@ -168,21 +169,19 @@ pub async fn move_messages(
     source_folder: &str,
     uid_set: &str,
     dest_folder: &str,
-) -> Result<(), String> {
+) -> Result<Vec<(u32, u32)>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(source_folder))
         .await
         .map_err(|_| timeout_err(&format!("SELECT {source_folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {source_folder} failed: {e}"))?;
 
     // Try MOVE extension first
-    match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_mv(uid_set, dest_folder)).await {
-        Ok(Ok(())) => return Ok(()),
+    match run_uid_transfer_with_copyuid(session, "UID MOVE", uid_set, dest_folder).await {
+        Ok(copyuid) => Ok(copyuid),
         _ => {
             // Fallback: COPY, then mark Deleted, then EXPUNGE
-            tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_copy(uid_set, dest_folder))
-                .await
-                .map_err(|_| timeout_err("UID COPY", IMAP_CMD_TIMEOUT))?
-                .map_err(|e| format!("UID COPY failed: {e}"))?;
+            let copyuid =
+                run_uid_transfer_with_copyuid(session, "UID COPY", uid_set, dest_folder).await?;
 
             tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
                 let store_stream = session
@@ -205,10 +204,102 @@ pub async fn move_messages(
             })
             .await
             .map_err(|_| timeout_err("EXPUNGE", IMAP_CMD_TIMEOUT))??;
+
+            Ok(copyuid)
         }
     }
+}
 
-    Ok(())
+async fn run_uid_transfer_with_copyuid(
+    session: &mut ImapSession,
+    command: &str,
+    uid_set: &str,
+    dest_folder: &str,
+) -> Result<Vec<(u32, u32)>, String> {
+    let dest = quote_mailbox_name(dest_folder)?;
+    let wire = format!("{command} {uid_set} {dest}");
+    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let id = session
+            .run_command(&wire)
+            .await
+            .map_err(|e| format!("{command} failed: {e}"))?;
+        let mut copyuid = None;
+        loop {
+            let response = session
+                .read_response()
+                .await
+                .map_err(|e| format!("{command} response failed: {e}"))?
+                .ok_or_else(|| format!("{command} connection closed"))?;
+            match response.parsed() {
+                Response::Data {
+                    status: Status::Ok,
+                    code,
+                    ..
+                } => {
+                    if let Some(ResponseCode::CopyUid(_, src, dst)) = code.as_ref() {
+                        copyuid = Some(copyuid_map(src, dst)?);
+                    }
+                }
+                Response::Done {
+                    tag,
+                    status,
+                    code,
+                    information,
+                } if tag == &id => {
+                    if let Some(ResponseCode::CopyUid(_, src, dst)) = code.as_ref() {
+                        copyuid = Some(copyuid_map(src, dst)?);
+                    }
+                    return match status {
+                        Status::Ok => Ok(copyuid.unwrap_or_default()),
+                        _ => Err(format!(
+                            "{command} failed: status={status:?}, code={code:?}, info={information:?}"
+                        )),
+                    };
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| timeout_err(command, IMAP_CMD_TIMEOUT))?
+}
+
+fn quote_mailbox_name(name: &str) -> Result<String, String> {
+    if name.contains('\n') || name.contains('\r') {
+        return Err("mailbox name contains a newline".to_string());
+    }
+    let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+    Ok(format!("\"{escaped}\""))
+}
+
+fn copyuid_map(src: &[UidSetMember], dst: &[UidSetMember]) -> Result<Vec<(u32, u32)>, String> {
+    let src = expand_uid_set(src);
+    let dst = expand_uid_set(dst);
+    if src.len() != dst.len() {
+        return Err(format!(
+            "COPYUID source/destination length mismatch: {} vs {}",
+            src.len(),
+            dst.len()
+        ));
+    }
+    Ok(src.into_iter().zip(dst).collect())
+}
+
+fn expand_uid_set(members: &[UidSetMember]) -> Vec<u32> {
+    let mut out = Vec::new();
+    for member in members {
+        match member {
+            UidSetMember::Uid(uid) => out.push(*uid),
+            UidSetMember::UidRange(range) => {
+                let start = *range.start();
+                let end = *range.end();
+                if start <= end {
+                    out.extend(start..=end);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Flag messages as deleted and expunge them.

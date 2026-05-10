@@ -1,4 +1,6 @@
-use rusqlite::Connection;
+use std::collections::HashMap;
+
+use rusqlite::{Connection, OptionalExtension};
 
 use db::db::ReadDbState;
 use db::db::queries_extra::{
@@ -31,6 +33,7 @@ pub(crate) const CHUNK_SIZE: usize = 200;
 pub(crate) struct DbInsertData {
     id: String,
     account_id: String,
+    thread_id: String,
     from_address: Option<String>,
     from_name: Option<String>,
     to_addresses: Option<String>,
@@ -76,6 +79,7 @@ impl DbInsertData {
         Self {
             id: c.id.clone(),
             account_id: account_id.to_string(),
+            thread_id: c.id.clone(),
             from_address: imap.from_address.clone(),
             from_name: imap.from_name.clone(),
             to_addresses: imap.to_addresses.clone(),
@@ -118,25 +122,35 @@ impl DbInsertData {
         }
     }
 
+    fn adopt_existing_identity(&mut self, id: &str, thread_id: String) {
+        self.id = id.to_string();
+        self.thread_id = thread_id;
+        for att in &mut self.attachments {
+            att.message_id = id.to_string();
+            att.att_id = format!("{}_{}", id, att.part_id);
+        }
+    }
+
     pub(crate) fn insert(&self, tx: &rusqlite::Transaction) -> Result<(), String> {
-        // Placeholder thread
-        tx.execute(
-            "INSERT OR REPLACE INTO threads \
-             (id, account_id, subject, snippet, last_message_at, message_count, \
-              is_read, is_starred, is_important, has_attachments) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, 0, ?8)",
-            rusqlite::params![
-                self.id,
-                self.account_id,
-                self.subject,
-                self.snippet,
-                self.date,
-                self.is_read,
-                self.is_starred,
-                self.has_attachments,
-            ],
-        )
-        .map_err(|e| format!("upsert placeholder thread: {e}"))?;
+        if self.thread_id == self.id {
+            tx.execute(
+                "INSERT OR REPLACE INTO threads \
+                 (id, account_id, subject, snippet, last_message_at, message_count, \
+                  is_read, is_starred, is_important, has_attachments) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, 0, ?8)",
+                rusqlite::params![
+                    self.id,
+                    self.account_id,
+                    self.subject,
+                    self.snippet,
+                    self.date,
+                    self.is_read,
+                    self.is_starred,
+                    self.has_attachments,
+                ],
+            )
+            .map_err(|e| format!("upsert placeholder thread: {e}"))?;
+        }
 
         let invite_idx = self.attachments.iter().position(|att| {
             common::email_parsing::is_calendar_content_type(&att.mime_type)
@@ -148,7 +162,7 @@ impl DbInsertData {
         let message = MessageInsertRow {
             id: self.id.clone(),
             account_id: self.account_id.clone(),
-            thread_id: self.id.clone(),
+            thread_id: self.thread_id.clone(),
             from_address: self.from_address.clone(),
             from_name: self.from_name.clone(),
             to_addresses: self.to_addresses.clone(),
@@ -204,6 +218,23 @@ impl DbInsertData {
     }
 }
 
+fn existing_imap_message_identity(
+    conn: &Connection,
+    account_id: &str,
+    folder: &str,
+    uid: u32,
+) -> Result<Option<(String, String)>, String> {
+    conn.query_row(
+        "SELECT id, thread_id FROM messages \
+         WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
+         LIMIT 1",
+        rusqlite::params![account_id, folder, i64::from(uid)],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| format!("lookup existing IMAP message: {e}"))
+}
+
 // ---------------------------------------------------------------------------
 // Shared helper: store a chunk of converted messages to DB + body store + search
 // ---------------------------------------------------------------------------
@@ -218,21 +249,30 @@ pub(crate) async fn store_chunk(
     account_id: &str,
 ) -> Result<(), String> {
     // 1. Store to DB (blocking)
-    let db_data: Vec<DbInsertData> = chunk
+    let mut db_data: Vec<DbInsertData> = chunk
         .iter()
         .map(|c| DbInsertData::from_converted(c, account_id))
         .collect();
-    db.with_conn(move |conn| {
+    let resolved_ids = db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
-        for d in &db_data {
+        let mut resolved_ids = Vec::with_capacity(db_data.len());
+        for d in &mut db_data {
+            let original_id = d.id.clone();
+            if let Some((existing_id, existing_thread_id)) =
+                existing_imap_message_identity(&tx, &d.account_id, &d.imap_folder, d.imap_uid)?
+            {
+                d.adopt_existing_identity(&existing_id, existing_thread_id);
+            }
+            resolved_ids.push((original_id, d.id.clone()));
             d.insert(&tx)?;
         }
         tx.commit().map_err(|e| format!("commit: {e}"))?;
-        Ok(())
+        Ok(resolved_ids)
     })
     .await?;
+    let resolved_ids: HashMap<String, String> = resolved_ids.into_iter().collect();
 
     // 2-5. Fire-and-forget post-DB writes - all independent, run concurrently.
     let addr_data: Vec<ImapAddressData> = chunk
@@ -248,9 +288,9 @@ pub(crate) async fn store_chunk(
         .collect();
 
     tokio::join!(
-        store_bodies(body_store, chunk),
+        store_bodies(body_store, chunk, &resolved_ids),
         store_inline_images(inline_images, chunk),
-        index_messages(search, chunk, account_id),
+        index_messages(search, chunk, account_id, &resolved_ids),
         seen::ingest_from_messages(db, account_id, &addr_data),
     );
 
@@ -295,14 +335,26 @@ impl MessageAddresses for ImapAddressData {
 // Body store + search index helpers
 // ---------------------------------------------------------------------------
 
+fn resolved_message_id(resolved_ids: &HashMap<String, String>, original_id: &str) -> String {
+    resolved_ids.get(original_id).cloned().unwrap_or_else(|| {
+        // store_chunk populates every entry. The fallback keeps these helpers
+        // tolerant of focused tests that call them directly with partial maps.
+        original_id.to_string()
+    })
+}
+
 /// Store bodies in the body store (compressed, separate DB).
 /// Fire-and-forget pattern - errors are logged but don't fail the sync.
-pub async fn store_bodies(body_store: &BodyStoreWriteState, messages: &[ConvertedMessage]) {
+pub async fn store_bodies(
+    body_store: &BodyStoreWriteState,
+    messages: &[ConvertedMessage],
+    resolved_ids: &HashMap<String, String>,
+) {
     let bodies: Vec<store::body_store::MessageBody> = messages
         .iter()
         .filter(|m| m.imap_msg.body_html.is_some() || m.imap_msg.body_text.is_some())
         .map(|m| store::body_store::MessageBody {
-            message_id: m.id.clone(),
+            message_id: resolved_message_id(resolved_ids, &m.id),
             body_html: m.imap_msg.body_html.clone(),
             body_text: m.imap_msg.body_text.clone(),
         })
@@ -347,28 +399,36 @@ pub async fn store_inline_images(
 }
 
 /// Index messages in tantivy search. Fire-and-forget.
-pub async fn index_messages(search: &SearchWriteHandle, messages: &[ConvertedMessage], account_id: &str) {
+pub async fn index_messages(
+    search: &SearchWriteHandle,
+    messages: &[ConvertedMessage],
+    account_id: &str,
+    resolved_ids: &HashMap<String, String>,
+) {
     let docs: Vec<SearchDocument> = messages
         .iter()
-        .map(|m| SearchDocument {
-            message_id: m.id.clone(),
-            account_id: account_id.to_string(),
-            thread_id: m.id.clone(), // placeholder, updated after threading
-            subject: m.imap_msg.subject.clone(),
-            from_name: m.imap_msg.from_name.clone(),
-            from_address: m.imap_msg.from_address.clone(),
-            to_addresses: m.imap_msg.to_addresses.clone(),
-            body_text: m.imap_msg.body_text.clone(),
-            snippet: Some(m.meta.snippet.clone()),
-            date: m.meta.date / 1000, // tantivy expects seconds
-            is_read: m.meta.is_read,
-            is_starred: m.meta.is_starred,
-            has_attachment: m.meta.has_attachments,
-            // Phase 7: provider crates emit thin docs with no
-            // attachment fragments; the writer task's apply-time
-            // enrichment populates `attachments` from
-            // attachment_extracted_text in 7-3c.
-            attachments: Vec::new(),
+        .map(|m| {
+            let message_id = resolved_message_id(resolved_ids, &m.id);
+            SearchDocument {
+                message_id: message_id.clone(),
+                account_id: account_id.to_string(),
+                thread_id: message_id, // placeholder, updated after threading
+                subject: m.imap_msg.subject.clone(),
+                from_name: m.imap_msg.from_name.clone(),
+                from_address: m.imap_msg.from_address.clone(),
+                to_addresses: m.imap_msg.to_addresses.clone(),
+                body_text: m.imap_msg.body_text.clone(),
+                snippet: Some(m.meta.snippet.clone()),
+                date: m.meta.date / 1000, // tantivy expects seconds
+                is_read: m.meta.is_read,
+                is_starred: m.meta.is_starred,
+                has_attachment: m.meta.has_attachments,
+                // Phase 7: provider crates emit thin docs with no
+                // attachment fragments; the writer task's apply-time
+                // enrichment populates `attachments` from
+                // attachment_extracted_text in 7-3c.
+                attachments: Vec::new(),
+            }
         })
         .collect();
 

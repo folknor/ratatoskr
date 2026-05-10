@@ -615,7 +615,10 @@ persistence harness path, JMAP remote-mutation and scripted
 incremental delta scripts, Graph calendar mutation scripts, plus
 Graph contact and CalDAV calendar coverage have landed. Brokkr
 can now spawn saehrimnir for fixture-frontmatter scripts and inject
-provider endpoints. Recent saehrimnir support adds admin
+provider endpoints; its `sync-bench --gate` / `--as-baseline`
+path now records per-host baselines in `gate.db` and evaluates
+scalar, `sidecar.*`, and `meta.*` thresholds from `brokkr.toml`.
+Recent saehrimnir support adds admin
 request/reset routes,
 OAuth token / userinfo routes, steady-state JMAP changes, JMAP
 `Email/set` / `Mailbox/set` changesets, persistent IMAP `UID STORE`,
@@ -702,6 +705,19 @@ Ratatoskr-side M8 surface now in tree:
   runs follow-up syncs to prove the persisted fixture flags do not
   revert. This also hardens the action local-write path so SetRead and
   SetStarred update per-message flags as well as thread flags.
+- `crates/app/tests/sync-harness/imap-writeback-move-delete.lua`
+  drives a real `MoveToFolder` action into the fixture Archive mailbox
+  and a real `PermanentDelete` action after a follow-up sync. It
+  asserts saehrimnir records the expected `UID COPY`, `UID STORE`, and
+  `EXPUNGE` / `UID EXPUNGE` traffic, then proves later syncs preserve
+  the moved state and final deletion. This slice also hardens IMAP
+  `MoveToFolder` to resolve canonical label IDs to provider mailbox
+  paths, records UIDPLUS `COPYUID` mappings so moved rows track their
+  destination mailbox UID, teaches IMAP sync to reuse the existing
+  message row for a repeated `(folder, uid)` fetch instead of creating
+  duplicate folder-derived IDs or placeholder threads, and makes
+  permanent delete provider-first while preserving retry-queue
+  insertion when provider dispatch fails.
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
@@ -810,19 +826,12 @@ Ratatoskr-side M8 surface now in tree:
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
-- IMAP move/delete writeback persistence. SetRead and SetStarred
-  writeback now have sync-harness coverage through `UID STORE`.
-  Remaining IMAP action coverage is folder movement and destructive
-  delete: drive operations such as `MoveToFolder`, `Archive`, and
-  `PermanentDelete` against the synced fixture and assert saehrimnir
-  records the expected `UID COPY` / `UID EXPUNGE` flows. A follow-up
-  sync should see the persisted fixture mailbox membership instead of
-  reverting to the original fixture.
-- IMAP remote-mutation delta import. Once the harness has either a
-  raw IMAP helper or a small saehrimnir admin mutation route, mutate
-  flags / copies / expunges out of band, run ratatoskr delta sync, and
-  assert local DB state follows the remote fixture. This is the IMAP
-  analogue of `jmap-email-set-delta.lua`.
+- IMAP remote-mutation delta import. Saehrimnir's
+  `POST /test/fixture/step` route now mutates the shared fixture image,
+  so ratatoskr can cover out-of-band IMAP changes without a raw IMAP
+  Lua client: apply a change step, run IMAP delta sync, and assert
+  local DB state follows the remote fixture. This is the IMAP analogue
+  of `jmap-email-set-delta.lua`.
 - Mixed-protocol shared-state proof. On a fixture that exposes both
   IMAP and JMAP over the same `Fixture`, mutate through IMAP and then
   verify JMAP `Email/changes` reports the same transition. This
@@ -839,8 +848,8 @@ Lua helper cleanup backlog:
 - A small-mailbox IMAP fixture syncs end-to-end against a fake
   IMAP server, with assertions on final account/folder/message
   counts. Initial import and steady-state delta coverage have landed;
-  flag writeback persistence has landed; move/delete mutation fixtures
-  remain.
+  flag writeback persistence and move/delete writeback persistence
+  have landed. Out-of-band remote mutation import remains.
 - A small-mailbox JMAP fixture does the same. Initial import,
   steady-state delta, raw `Email/set` mutation, and scripted
   new/change/delete/move incremental coverage have landed; deeper
@@ -859,13 +868,21 @@ Lua helper cleanup backlog:
 
 ### M9 - Sync benchmarks
 
-**Status:** DEFERRED - gated on M8 and brokkr command work.
+**Status:** PARTIAL - M8 has enough mock-provider coverage for useful
+benchmarks, and brokkr command support has landed. Brokkr
+`sync-bench --gate <name>` records gated runs in
+`.brokkr/ratatoskr/gate.db`, `--as-baseline` prints the per-host
+baseline pin to add under `[ratatoskr.gate.<name>.baseline]`, and gate
+rules can compare top-level scalars plus `sidecar.*` and `meta.*`
+summary fields. Ratatoskr still needs checked-in gate config,
+baselines, and broader marker / summary adoption before M9 is
+complete.
 Saehrimnir's latency knob now has ratatoskr Lua helpers and a JMAP
 smoke script; stable request logs and `GET /test/snapshot-state` also
 exist. Ratatoskr now has Lua helpers for `BROKKR_MARKER_FIFO` markers
 and `summary.json`, plus one JMAP steady-state delta script that uses
 them. The remaining work is mostly broader script adoption plus
-brokkr-side gate/baseline policy.
+ratatoskr-side gate configuration and baseline promotion.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The
@@ -881,20 +898,23 @@ Useful metrics: cold sync wall time, incremental sync wall time,
 messages per second, provider request count, peak RSS, disk read /
 write bytes, final DB and store sizes.
 
-Future brokkr gates could fail a run when:
+Brokkr gates can now fail a run when configured thresholds catch:
 
 - a previously stable Service test hangs;
 - boot or respawn time regresses past a threshold;
 - sync wall time regresses by more than a configured percentage;
 - peak RSS regresses past a configured percentage;
 - provider request count increases unexpectedly;
-- final correctness assertions fail.
+- final correctness assertions fail through `meta.correct` or another
+  script-emitted summary scalar.
 
 **Exit criteria:**
 
-- `brokkr sync-bench --fixture imap-small --bench 10` runs
-  10 iterations, records timings, compares against a stored baseline,
-  exits non-zero on regression.
+- At least one checked-in `[ratatoskr.gate.<name>]` block points at a
+  stable sync script, has a per-host baseline UUID recorded in
+  `.brokkr/ratatoskr/gate.db`, and `brokkr sync-bench <script> --gate
+  <name> --bench 10` records timings, compares against that baseline,
+  and exits non-zero on regression.
 
 ---
 

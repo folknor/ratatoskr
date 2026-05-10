@@ -26,7 +26,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::provider::{classify_provider_error, create_provider};
 use db::db::queries::delete_thread;
 use db::progress::NoopProgressReporter;
 
@@ -49,7 +49,28 @@ pub(crate) async fn permanent_delete_local(
     .and_then(|r| r.map_err(ActionError::db))
 }
 
-/// Provider dispatch for permanent delete (assumes local mutation already applied).
+async fn enqueue_permanent_delete_retry(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    error: &ActionError,
+) {
+    let retry_outcome = ActionOutcome::LocalOnly {
+        reason: error.clone(),
+        retryable: true,
+    };
+    enqueue_if_retryable(
+        ctx,
+        &retry_outcome,
+        account_id,
+        "permanentDelete",
+        thread_id,
+        "{}",
+    )
+    .await;
+}
+
+/// Provider dispatch for permanent delete.
 async fn permanent_delete_dispatch(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
@@ -65,29 +86,28 @@ async fn permanent_delete_dispatch(
     };
 
     let outcome = match provider.permanent_delete(&provider_ctx, thread_id).await {
-        Ok(()) => ActionOutcome::Success,
+        Ok(()) => match permanent_delete_local(ctx, account_id, thread_id).await {
+            Ok(()) => ActionOutcome::Success,
+            Err(e) => ActionOutcome::Failed { error: e },
+        },
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(msg),
-                retryable: true,
+            let error = ActionError::remote(msg);
+            enqueue_permanent_delete_retry(ctx, account_id, thread_id, &error).await;
+            ActionOutcome::Failed {
+                error,
             }
         }
     };
-    enqueue_if_retryable(
-        ctx,
-        &outcome,
-        account_id,
-        "permanentDelete",
-        thread_id,
-        "{}",
-    )
-    .await;
     mlog.emit(&outcome);
     outcome
 }
 
 /// Permanently delete a single thread. Irreversible.
+///
+/// This is provider-first because IMAP and Graph need local message
+/// metadata to address the remote objects. If remote dispatch fails,
+/// the local DB is left intact so a later retry still has those refs.
 pub async fn permanent_delete(
     ctx: &ActionContext,
     account_id: &str,
@@ -95,28 +115,15 @@ pub async fn permanent_delete(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
 
-    if let Err(e) = permanent_delete_local(ctx, account_id, thread_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => permanent_delete_dispatch(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(e),
-                retryable: true,
+            let kind = classify_provider_error(&e);
+            let error = ActionError::remote_with_kind(kind, e);
+            enqueue_permanent_delete_retry(ctx, account_id, thread_id, &error).await;
+            let outcome = ActionOutcome::Failed {
+                error,
             };
-            enqueue_if_retryable(
-                ctx,
-                &outcome,
-                account_id,
-                "permanentDelete",
-                thread_id,
-                "{}",
-            )
-            .await;
             mlog.emit(&outcome);
             outcome
         }
@@ -130,13 +137,5 @@ pub(crate) async fn permanent_delete_with_provider(
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
-
-    if let Err(e) = permanent_delete_local(ctx, account_id, thread_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
     permanent_delete_dispatch(ctx, provider, account_id, thread_id).await
 }

@@ -224,6 +224,30 @@ async fn handle_thread_degraded(
     let name = op_name(op);
     let mlog = MutationLog::begin(name, account_id, thread_id);
 
+    if matches!(op, MailOperation::PermanentDelete) {
+        let error = ActionError::remote_with_kind(error_kind, provider_error);
+        let retry_outcome = ActionOutcome::LocalOnly {
+            reason: error.clone(),
+            retryable: true,
+        };
+        enqueue_if_retryable(
+            ctx,
+            &retry_outcome,
+            account_id,
+            "permanentDelete",
+            thread_id,
+            "{}",
+        )
+        .await;
+        // Permanent delete is provider-first: local rows carry the remote refs
+        // needed for retry, so degraded mode must not delete them locally.
+        let outcome = ActionOutcome::Failed {
+            error,
+        };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
     match op_local(ctx, op, account_id, thread_id).await {
         Ok(false) => {
             let outcome = ActionOutcome::NoOp;

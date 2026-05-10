@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use common::error::ProviderError;
 use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
@@ -91,9 +91,18 @@ fn parse_imap_message_id(message_id: &str, account_id: &str) -> Result<(String, 
 }
 
 /// Minimal info needed to locate a message on the IMAP server.
+#[derive(Clone)]
 struct ImapMessageRef {
+    message_id: String,
     folder: String,
     uid: u32,
+}
+
+/// Local IMAP reference update after a successful server-side move.
+struct MovedMessageRef {
+    message_id: String,
+    folder: String,
+    uid: Option<u32>,
 }
 
 /// Query messages for a thread and extract IMAP folder + UID pairs.
@@ -104,7 +113,7 @@ fn get_thread_message_refs(
 ) -> Result<Vec<ImapMessageRef>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT imap_folder, imap_uid FROM messages \
+            "SELECT id, imap_folder, imap_uid FROM messages \
              WHERE account_id = ?1 AND thread_id = ?2 \
              AND imap_folder IS NOT NULL AND imap_uid IS NOT NULL",
         )
@@ -116,6 +125,7 @@ fn get_thread_message_refs(
             let uid: i64 = row.get("imap_uid")?;
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             Ok(ImapMessageRef {
+                message_id: row.get("id")?,
                 folder,
                 uid: uid as u32,
             })
@@ -133,11 +143,47 @@ fn get_thread_message_refs(
     Ok(rows)
 }
 
+async fn update_message_refs_after_move(
+    db: &db::db::ReadDbState,
+    account_id: String,
+    refs: Vec<MovedMessageRef>,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        for r in refs {
+            if let Some(uid) = r.uid {
+                conn.execute(
+                    "UPDATE messages SET imap_folder = ?1, imap_uid = ?2 \
+                     WHERE account_id = ?3 AND id = ?4",
+                    rusqlite::params![&r.folder, i64::from(uid), &account_id, &r.message_id],
+                )
+                .map_err(|e| format!("update message IMAP folder/uid: {e}"))?;
+            } else {
+                conn.execute(
+                    "UPDATE messages SET imap_folder = ?1 \
+                     WHERE account_id = ?2 AND id = ?3",
+                    rusqlite::params![&r.folder, &account_id, &r.message_id],
+                )
+                .map_err(|e| format!("update message IMAP folder: {e}"))?;
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// Group message refs by folder → list of UIDs.
 fn group_by_folder(refs: &[ImapMessageRef]) -> HashMap<&str, Vec<u32>> {
     let mut map: HashMap<&str, Vec<u32>> = HashMap::new();
     for r in refs {
         map.entry(&r.folder).or_default().push(r.uid);
+    }
+    map
+}
+
+fn group_refs_by_folder(refs: &[ImapMessageRef]) -> HashMap<String, Vec<ImapMessageRef>> {
+    let mut map: HashMap<String, Vec<ImapMessageRef>> = HashMap::new();
+    for r in refs {
+        map.entry(r.folder.clone()).or_default().push(r.clone());
     }
     map
 }
@@ -229,7 +275,8 @@ fn find_special_folder(
             rusqlite::params![account_id, special_use],
             |row| row.get("folder_path"),
         )
-        .ok();
+        .optional()
+        .map_err(|e| format!("find IMAP special folder {special_use}: {e}"))?;
 
     if path.is_some() {
         return Ok(path);
@@ -246,7 +293,8 @@ fn find_special_folder(
                 rusqlite::params![account_id, lid],
                 |row| row.get("folder_path"),
             )
-            .ok();
+            .optional()
+            .map_err(|e| format!("find IMAP fallback folder {lid}: {e}"))?;
 
         if fallback.is_some() {
             return Ok(fallback);
@@ -254,6 +302,29 @@ fn find_special_folder(
     }
 
     Ok(None)
+}
+
+fn resolve_folder_path(
+    conn: &Connection,
+    account_id: &str,
+    folder_id: &str,
+) -> Result<String, String> {
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM labels \
+             WHERE account_id = ?1 AND id = ?2 LIMIT 1",
+            rusqlite::params![account_id, folder_id],
+            |row| row.get("folder_path"),
+        )
+        .optional()
+        .map_err(|e| format!("resolve IMAP folder path {folder_id}: {e}"))?;
+    if let Some(path) = path {
+        return Ok(path);
+    }
+    folder_id
+        .strip_prefix("folder-")
+        .map(str::to_string)
+        .ok_or_else(|| format!("No IMAP folder path found for label id {folder_id:?}"))
 }
 
 /// Connect, run an IMAP session body, then logout - mirroring the
@@ -325,34 +396,65 @@ async fn execute_folder_action(
     config: &super::types::ImapConfig,
     refs: &[ImapMessageRef],
     action: &FolderAction,
-) -> Result<(), String> {
-    let grouped = group_by_folder(refs);
-    let futs: Vec<_> = grouped
-        .iter()
-        .filter(|(folder, _)| match action {
-            FolderAction::Move(dest) => **folder != dest,
-            FolderAction::Delete => true,
-        })
-        .map(|(folder, uids)| {
-            let config = config.clone();
-            let folder = folder.to_string();
-            let uids = uid_set(uids);
-            let action_dest = match action {
-                FolderAction::Move(dest) => Some(dest.clone()),
-                FolderAction::Delete => None,
-            };
-            async move {
-                with_session!(&config, session => {
-                    match action_dest {
-                        Some(dest) => imap_client::move_messages(&mut session, &folder, &uids, &dest).await,
-                        None => imap_client::delete_messages(&mut session, &folder, &uids).await,
+) -> Result<Vec<MovedMessageRef>, String> {
+    match action {
+        FolderAction::Move(dest) => {
+            let grouped = group_refs_by_folder(refs);
+            let futs: Vec<_> = grouped
+                .into_iter()
+                .filter(|(folder, _)| folder != dest)
+                .map(|(folder, refs)| {
+                    let config = config.clone();
+                    let dest = dest.clone();
+                    async move {
+                        let uids = uid_set(&refs.iter().map(|r| r.uid).collect::<Vec<_>>());
+                        let copyuid = with_session!(&config, session => {
+                            imap_client::move_messages(&mut session, &folder, &uids, &dest).await
+                        })?;
+                        let uid_map: HashMap<u32, u32> = copyuid.into_iter().collect();
+                        let missing = refs
+                            .iter()
+                            .filter(|r| !uid_map.contains_key(&r.uid))
+                            .count();
+                        if missing > 0 {
+                            log::warn!(
+                                "IMAP: MOVE/COPY from {folder} to {dest} did not return COPYUID for {missing} message(s); local UID refs stay provisional"
+                            );
+                        }
+                        Ok::<Vec<MovedMessageRef>, String>(
+                            refs.into_iter()
+                                .map(|r| MovedMessageRef {
+                                    uid: uid_map.get(&r.uid).copied(),
+                                    message_id: r.message_id,
+                                    folder: dest.clone(),
+                                })
+                                .collect(),
+                        )
                     }
                 })
-            }
-        })
-        .collect();
-    futures::future::try_join_all(futs).await?;
-    Ok(())
+                .collect();
+            let moved = futures::future::try_join_all(futs).await?;
+            Ok(moved.into_iter().flatten().collect())
+        }
+        FolderAction::Delete => {
+            let grouped = group_by_folder(refs);
+            let futs: Vec<_> = grouped
+                .iter()
+                .map(|(folder, uids)| {
+                    let config = config.clone();
+                    let folder = folder.to_string();
+                    let uids = uid_set(uids);
+                    async move {
+                        with_session!(&config, session => {
+                            imap_client::delete_messages(&mut session, &folder, &uids).await
+                        })
+                    }
+                })
+                .collect();
+            futures::future::try_join_all(futs).await?;
+            Ok(Vec::new())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,18 +474,21 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
+        let query_account_id = account_id.clone();
 
         let (refs, archive_folder) = ctx
             .db
             .with_conn(move |conn| {
-                let refs = get_thread_message_refs(conn, &account_id, &tid)?;
-                let archive = find_special_folder(conn, &account_id, "\\Archive")?
+                let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
+                let archive = find_special_folder(conn, &query_account_id, "\\Archive")?
                     .unwrap_or_else(|| "Archive".to_string());
                 Ok((refs, archive))
             })
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await?;
+        let moved =
+            execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await?;
+        update_message_refs_after_move(ctx.db, account_id, moved).await?;
         Ok(())
     }
 
@@ -391,18 +496,20 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
+        let query_account_id = account_id.clone();
 
         let (refs, trash_folder) = ctx
             .db
             .with_conn(move |conn| {
-                let refs = get_thread_message_refs(conn, &account_id, &tid)?;
-                let trash = find_special_folder(conn, &account_id, "\\Trash")?
+                let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
+                let trash = find_special_folder(conn, &query_account_id, "\\Trash")?
                     .unwrap_or_else(|| "Trash".to_string());
                 Ok((refs, trash))
             })
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
+        let moved = execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
+        update_message_refs_after_move(ctx.db, account_id, moved).await?;
         Ok(())
     }
 
@@ -503,12 +610,13 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
+        let query_account_id = account_id.clone();
 
         let (refs, junk_folder) = ctx
             .db
             .with_conn(move |conn| {
-                let refs = get_thread_message_refs(conn, &account_id, &tid)?;
-                let junk = find_special_folder(conn, &account_id, "\\Junk")?
+                let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
+                let junk = find_special_folder(conn, &query_account_id, "\\Junk")?
                     .unwrap_or_else(|| "Junk".to_string());
                 Ok((refs, junk))
             })
@@ -520,7 +628,8 @@ impl ProviderOps for ImapOps {
             "INBOX".to_string()
         };
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await?;
+        let moved = execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await?;
+        update_message_refs_after_move(ctx.db, account_id, moved).await?;
         Ok(())
     }
 
@@ -532,15 +641,21 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let dest = folder_id.as_str().to_string();
+        let folder_id = folder_id.as_str().to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
+        let query_account_id = account_id.clone();
 
-        let refs = ctx
+        let (refs, dest) = ctx
             .db
-            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+            .with_conn(move |conn| {
+                let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
+                let dest = resolve_folder_path(conn, &query_account_id, &folder_id)?;
+                Ok((refs, dest))
+            })
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await?;
+        let moved = execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await?;
+        update_message_refs_after_move(ctx.db, account_id, moved).await?;
         Ok(())
     }
 
