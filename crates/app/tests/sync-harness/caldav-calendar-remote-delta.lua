@@ -130,9 +130,11 @@ assert_http_ok(deleted, "CalDAV delete")
 
 harness.clear_mock_requests(admin_endpoint)
 
+harness.marker("SYNC_START")
 local delta, delta_err = client:start_calendar_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(delta_err == nil, "delta start_calendar_sync failed")
 harness.assert_eq(delta.result, "completed", delta.error or "delta calendar sync result")
 
@@ -163,14 +165,27 @@ local after_review = event_by_google_event_id(after.calendar_events, "caldav:ev-
 harness.assert(after_review == nil, "remote-deleted review still present")
 
 local requests = harness.mock_requests(admin_endpoint)
+local work_propfind_requests =
+    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/cal-work/")
+local work_report_requests =
+    harness.request_count(requests, "caldav", "REPORT /calendars/account-1/cal-work/")
 harness.assert(
-    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/cal-work/") >= 1,
+    work_propfind_requests >= 1,
     "CalDAV sync did not refresh Work ctag"
 )
 harness.assert(
-    harness.request_count(requests, "caldav", "REPORT /calendars/account-1/cal-work/") >= 1,
+    work_report_requests >= 1,
     "CalDAV sync did not fetch Work changes"
 )
+
+harness.write_summary({
+    correct = 1,
+    calendar_count = after.calendar_count,
+    calendar_event_count = after.calendar_event_count,
+    provider_requests = #requests,
+    caldav_work_propfind_requests = work_propfind_requests,
+    caldav_work_report_requests = work_report_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

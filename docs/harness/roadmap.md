@@ -833,14 +833,16 @@ Ratatoskr-side M8 surface now in tree:
   tombstone through normal `calendarView/delta`. This slice also
   hardens Graph delta parsing so tombstone objects with only `id` and
   `@removed` deserialize far enough for the deletion path to handle
-  them.
+  them. It emits sync markers and writes `summary.json` with final
+  calendar/event counts and Graph delta request counters.
 - `crates/app/tests/sync-harness/graph-contacts-initial.lua`
   targets `graph-contacts-small.toml`, drives the normal
   `client:start_sync` Graph initial-sync path, and asserts the synced
   contact rows include fixture contacts from multiple contact folders,
   skip no-email contacts, carry `source = "graph"` and Graph
   `server_id`, and bootstrap contact delta endpoints for follow-up
-  syncs.
+  syncs. It emits sync markers and writes `summary.json` with final
+  contact counts and Graph contact request counters.
 - `crates/app/tests/sync-harness/graph-contacts-incremental.lua`
   targets `graph-contacts-incremental.lua`, applies saehrimnir's
   scripted contact create/update/delete steps, runs Graph delta sync
@@ -849,7 +851,9 @@ Ratatoskr-side M8 surface now in tree:
   Graph delta cycle counter to persist in sync state instead of living
   only on the per-run `GraphClient`, so the twentieth-cycle contact,
   label, group, and folder-tier work is reachable across separate
-  `start_sync` requests.
+  `start_sync` requests. It emits sync markers around the measured
+  delta-cadence loops and writes `summary.json` with final contact
+  counts and aggregate Graph contact-delta request counters.
 - `TestSeedAccount` now accepts `caldav_url`, `caldav_username`, and
   `caldav_password`, so scripts can seed a real CalDAV account without
   a UI account-create flow.
@@ -872,12 +876,16 @@ Ratatoskr-side M8 surface now in tree:
   mutates the CalDAV fixture directly with raw PUT/DELETE calls, then
   drives `client:start_calendar_sync` and verifies the local calendar
   DB imports the created event, updated event fields, and deleted
-  resource through the normal CalDAV ctag plus REPORT path.
+  resource through the normal CalDAV ctag plus REPORT path. It emits
+  sync markers and writes `summary.json` with final calendar/event
+  counts and CalDAV request counters.
 - `crates/app/tests/sync-harness/graph-calendar-caldav-mutation-delta.lua`
   writes create/update/delete calendar mutations through CalDAV and
   verifies a subsequent Graph `calendarView/delta` imports the same
   shared fixture changes. This proves saehrimnir's calendar mutation
-  log is shared across the Graph and CalDAV protocol surfaces.
+  log is shared across the Graph and CalDAV protocol surfaces. It
+  emits sync markers and writes `summary.json` with final
+  calendar/event counts and Graph delta request counters.
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
@@ -974,9 +982,11 @@ Lua helper cleanup backlog:
 - Broader benchmark summaries:
   initial marker/summary adoption now covers JMAP steady-state, IMAP
   steady-state, JMAP scripted incremental, IMAP scripted incremental,
-  Graph calendar initial, and CalDAV calendar initial. Add the same
-  marker/summary shape to any additional sync scripts selected for M9
-  gates.
+  Graph calendar initial, Graph calendar remote-delta, Graph calendar
+  CalDAV-mutation delta, Graph contacts initial, Graph contacts
+  incremental, CalDAV calendar initial, and CalDAV calendar
+  remote-delta. Add the same marker/summary shape to any additional
+  sync scripts selected for M9 gates.
 
 ---
 
@@ -996,9 +1006,11 @@ smoke script; stable request logs and `GET /test/snapshot-state` also
 exist. Ratatoskr now has Lua helpers for `BROKKR_MARKER_FIFO` markers
 and `summary.json`, with JMAP steady-state, IMAP steady-state, JMAP
 scripted incremental, IMAP scripted incremental, Graph calendar
-initial, and CalDAV calendar initial scripts using them. The remaining
-work is mostly ratatoskr-side gate configuration and baseline
-promotion.
+initial, Graph calendar remote-delta, Graph calendar CalDAV-mutation
+delta, Graph contacts initial, Graph contacts incremental, CalDAV
+calendar initial, and CalDAV calendar remote-delta scripts using them.
+The remaining work is mostly ratatoskr-side gate configuration and
+baseline promotion.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The

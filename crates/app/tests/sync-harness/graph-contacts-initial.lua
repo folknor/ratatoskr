@@ -43,9 +43,11 @@ local account, account_err = client:request("TestSeedAccount", {
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
+harness.marker("SYNC_START")
 local completed, sync_err = client:start_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(sync_err == nil, "start_sync failed")
 harness.assert_eq(completed.result, "completed", completed.error or "sync result")
 
@@ -87,42 +89,60 @@ harness.assert(
 )
 
 local requests = harness.mock_requests(admin_endpoint)
+local folder_list_requests =
+    harness.request_count(requests, "graph", "GET /v1.0/me/contactFolders")
+local default_contact_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/contactFolders/cf-default/contacts"
+)
+local vendor_contact_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/contactFolders/cf-vendors/contacts"
+)
+local default_delta_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/contactFolders/cf-default/contacts/delta"
+)
+local vendor_delta_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/contactFolders/cf-vendors/contacts/delta"
+)
 harness.assert(
-    harness.request_count(requests, "graph", "GET /v1.0/me/contactFolders") >= 1,
+    folder_list_requests >= 1,
     "Graph contact sync did not list contact folders"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/contactFolders/cf-default/contacts"
-    ) >= 1,
+    default_contact_requests >= 1,
     "Graph contact sync did not list default-folder contacts"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/contactFolders/cf-vendors/contacts"
-    ) >= 1,
+    vendor_contact_requests >= 1,
     "Graph contact sync did not list vendor-folder contacts"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/contactFolders/cf-default/contacts/delta"
-    ) >= 1,
+    default_delta_requests >= 1,
     "Graph contact sync did not bootstrap default-folder delta"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/contactFolders/cf-vendors/contacts/delta"
-    ) >= 1,
+    vendor_delta_requests >= 1,
     "Graph contact sync did not bootstrap vendor-folder delta"
 )
+
+harness.write_summary({
+    correct = 1,
+    contact_count = state.contact_count,
+    contact_group_count = state.contact_group_count,
+    provider_requests = #requests,
+    graph_contact_folder_list_requests = folder_list_requests,
+    graph_default_contact_requests = default_contact_requests,
+    graph_vendor_contact_requests = vendor_contact_requests,
+    graph_default_delta_requests = default_delta_requests,
+    graph_vendor_delta_requests = vendor_delta_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

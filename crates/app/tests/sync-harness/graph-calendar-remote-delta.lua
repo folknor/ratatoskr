@@ -133,9 +133,11 @@ harness.http_json({
 
 harness.clear_mock_requests(admin_endpoint)
 
+harness.marker("SYNC_START")
 local delta, delta_err = client:start_calendar_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(delta_err == nil, "delta start_calendar_sync failed")
 harness.assert_eq(delta.result, "completed", delta.error or "delta calendar sync result")
 
@@ -163,22 +165,33 @@ local after_review = event_by_remote_id(after.calendar_events, "ev-002")
 harness.assert(after_review == nil, "remote-deleted review still present")
 
 local requests = harness.mock_requests(admin_endpoint)
+local work_delta_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/calendars/cal-work/calendarView/delta"
+)
+local personal_delta_requests = harness.request_count(
+    requests,
+    "graph",
+    "GET /v1.0/me/calendars/cal-personal/calendarView/delta"
+)
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/calendars/cal-work/calendarView/delta"
-    ) >= 1,
+    work_delta_requests >= 1,
     "delta sync did not call Work calendar delta"
 )
 harness.assert(
-    harness.request_count(
-        requests,
-        "graph",
-        "GET /v1.0/me/calendars/cal-personal/calendarView/delta"
-    ) >= 1,
+    personal_delta_requests >= 1,
     "delta sync did not call Personal calendar delta"
 )
+
+harness.write_summary({
+    correct = 1,
+    calendar_count = after.calendar_count,
+    calendar_event_count = after.calendar_event_count,
+    provider_requests = #requests,
+    graph_work_delta_requests = work_delta_requests,
+    graph_personal_delta_requests = personal_delta_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

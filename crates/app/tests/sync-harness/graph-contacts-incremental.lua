@@ -38,7 +38,7 @@ local function run_until_contact_delta(client, endpoint, account_id, label)
         run_sync(client, account_id, label .. " delta cycle " .. i)
         local requests = harness.mock_requests(endpoint, { stable = true })
         if harness.request_count(requests, "graph", CONTACT_DELTA) >= 1 then
-            return requests
+            return requests, i
         end
     end
     harness.assert(false, label .. " did not call Graph contact delta within 20 syncs")
@@ -56,6 +56,21 @@ local function apply_step(endpoint, step_id)
     harness.assert_eq(response.step, step_id, "fixture step id")
     harness.assert_eq(response.applied, 1, "fixture step applied count")
     return response
+end
+
+local measured_sync_count = 0
+local summary_provider_requests = 0
+local summary_contact_delta_requests = 0
+
+local function run_measured_until_contact_delta(client, endpoint, account_id, label)
+    harness.marker("SYNC_START")
+    local requests, sync_count = run_until_contact_delta(client, endpoint, account_id, label)
+    harness.marker("SYNC_END")
+    measured_sync_count = measured_sync_count + sync_count
+    summary_provider_requests = summary_provider_requests + #requests
+    summary_contact_delta_requests =
+        summary_contact_delta_requests + harness.request_count(requests, "graph", CONTACT_DELTA)
+    return requests
 end
 
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
@@ -86,7 +101,7 @@ harness.assert(contact_by_email(initial.contacts, "bob@example.com") ~= nil, "mi
 
 apply_step(admin_endpoint, "new")
 harness.clear_mock_requests(admin_endpoint)
-run_until_contact_delta(client, admin_endpoint, account.account_id, "new step")
+run_measured_until_contact_delta(client, admin_endpoint, account.account_id, "new step")
 local after_new = query_state(client, account.account_id, "after new")
 harness.assert_eq(after_new.contact_count, 3, "contact count after new")
 local carol = contact_by_email(after_new.contacts, "carol@example.com")
@@ -96,7 +111,7 @@ harness.assert_eq(carol.server_id, "contact-003", "Carol server id")
 
 apply_step(admin_endpoint, "change")
 harness.clear_mock_requests(admin_endpoint)
-run_until_contact_delta(client, admin_endpoint, account.account_id, "change step")
+run_measured_until_contact_delta(client, admin_endpoint, account.account_id, "change step")
 local after_change = query_state(client, account.account_id, "after change")
 harness.assert_eq(after_change.contact_count, 4, "contact count after change")
 local bob = contact_by_email(after_change.contacts, "bob@example.com")
@@ -109,7 +124,7 @@ harness.assert_eq(robert.server_id, "contact-002", "Robert work server id")
 
 apply_step(admin_endpoint, "delete")
 harness.clear_mock_requests(admin_endpoint)
-run_until_contact_delta(client, admin_endpoint, account.account_id, "delete step")
+run_measured_until_contact_delta(client, admin_endpoint, account.account_id, "delete step")
 local after_delete = query_state(client, account.account_id, "after delete")
 harness.assert_eq(after_delete.contact_count, 3, "contact count after delete")
 harness.assert(
@@ -128,6 +143,14 @@ local end_response = harness.http_json({
 harness.assert(end_response.ok, "end-of-script response failed")
 harness.assert(end_response.step == nil, "end-of-script step should be nil")
 harness.assert(not end_response.applied, "end-of-script should not apply")
+
+harness.write_summary({
+    correct = 1,
+    measured_syncs = measured_sync_count,
+    contact_count = after_delete.contact_count,
+    provider_requests = summary_provider_requests,
+    graph_contact_delta_requests = summary_contact_delta_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")
