@@ -8,6 +8,7 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use db::db::queries::set_thread_read;
 use db::progress::NoopProgressReporter;
+use rusqlite::params;
 
 /// Local DB mutation for mark-read (idempotent).
 pub(crate) async fn mark_read_local(
@@ -22,7 +23,18 @@ pub(crate) async fn mark_read_local(
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        set_thread_read(&conn, &aid, &tid, read).map(|_| ())
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin mark-read transaction: {e}"))?;
+        set_thread_read(&tx, &aid, &tid, read)?;
+        tx.execute(
+            "UPDATE messages SET is_read = ?1 WHERE account_id = ?2 AND thread_id = ?3",
+            params![read, aid, tid],
+        )
+        .map_err(|e| format!("update message read flags: {e}"))?;
+        tx.commit()
+            .map_err(|e| format!("commit mark-read transaction: {e}"))?;
+        Ok::<(), String>(())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

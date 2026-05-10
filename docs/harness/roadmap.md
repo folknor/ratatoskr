@@ -554,7 +554,9 @@ Sequencing:
   coverage. `crates/app/tests/service-harness/m6/calendar_actions_graph_crud.lua`
   drives `cal_action.execute_plan` create/update/delete against the
   Graph fixture and asserts local state plus POST/PATCH/DELETE request
-  bodies. `crates/app/tests/sync-harness/graph-calendar-remote-delta.lua`
+  bodies, then follows the action triplet with a calendar delta sync
+  to prove the action-side fixture mutations replay through normal
+  Graph `calendarView/delta`. `crates/app/tests/sync-harness/graph-calendar-remote-delta.lua`
   mutates the mock Graph fixture directly with POST/PATCH/DELETE, then
   verifies calendar delta sync imports the created, updated, and
   tombstoned events. CalDAV now has initial-sync, action CRUD,
@@ -694,6 +696,12 @@ Ratatoskr-side M8 surface now in tree:
   the same fixture twice, asserts state stays stable, and uses the
   request log to prove the second run lists/selects/searches without
   issuing `UID FETCH` for unchanged messages.
+- `crates/app/tests/sync-harness/imap-writeback-flags.lua` drives
+  real `ActionExecutePlan` SetRead and SetStarred operations against
+  an IMAP-synced thread, asserts saehrimnir records `UID STORE`, then
+  runs follow-up syncs to prove the persisted fixture flags do not
+  revert. This also hardens the action local-write path so SetRead and
+  SetStarred update per-message flags as well as thread flags.
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
@@ -707,7 +715,9 @@ Ratatoskr-side M8 surface now in tree:
   targets the same Graph calendar fixture, drives
   `client:execute_calendar_plan`, and verifies create/update/delete
   flow through the Service worker into Graph POST/PATCH/DELETE
-  requests and local calendar-event state.
+  requests and local calendar-event state. It then runs a follow-up
+  calendar sync and asserts the normal Work-calendar delta endpoint
+  sees the action-side mutation log.
 - `crates/app/tests/sync-harness/graph-calendar-remote-delta.lua`
   targets the same Graph calendar fixture, mutates the remote mock
   directly through Graph POST/PATCH/DELETE calls, then drives
@@ -791,17 +801,23 @@ Ratatoskr-side M8 surface now in tree:
   script can run under `service-test`, `sync-smoke`, and
   `sync-bench`. `harness.write_summary(table)` writes a JSON object to
   the run artefact's `summary.json` for brokkr's `meta.*` ingestion.
+- Lua `ActionCompleted` notifications now expose the action plan
+  summary counters (`summary_total`, `summary_remote_succeeded`,
+  `summary_remote_failed`, `summary_local_only`, and
+  `summary_conflicts`) so scripts can assert remote-dispatch success
+  without reverse-engineering it from provider request logs alone.
 
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
-- IMAP writeback persistence. After an IMAP initial sync, drive
-  ratatoskr `ActionExecutePlan` operations such as `SetRead`,
-  `SetStarred`, `MoveToFolder`, and `PermanentDelete` against the
-  synced fixture and assert saehrimnir records the expected
-  `UID STORE`, `UID COPY`, and `UID EXPUNGE` flows. A follow-up sync
-  should see the persisted fixture state instead of reverting to the
-  original fixture keywords or mailbox membership.
+- IMAP move/delete writeback persistence. SetRead and SetStarred
+  writeback now have sync-harness coverage through `UID STORE`.
+  Remaining IMAP action coverage is folder movement and destructive
+  delete: drive operations such as `MoveToFolder`, `Archive`, and
+  `PermanentDelete` against the synced fixture and assert saehrimnir
+  records the expected `UID COPY` / `UID EXPUNGE` flows. A follow-up
+  sync should see the persisted fixture mailbox membership instead of
+  reverting to the original fixture.
 - IMAP remote-mutation delta import. Once the harness has either a
   raw IMAP helper or a small saehrimnir admin mutation route, mutate
   flags / copies / expunges out of band, run ratatoskr delta sync, and
@@ -811,12 +827,6 @@ by ratatoskr scripts:
   IMAP and JMAP over the same `Fixture`, mutate through IMAP and then
   verify JMAP `Email/changes` reports the same transition. This
   proves the shared fixture change log is not protocol-local.
-- Graph calendar action plus delta confirmation. Extend or pair with
-  `calendar_actions_graph_crud.lua` so the Service action path is
-  followed by a calendar delta sync against the same fixture, proving
-  saehrimnir's mutation log can replay the action effects through the
-  normal Graph delta surface.
-
 Lua helper cleanup backlog:
 
 - Do not add another extract/search script that copy-pastes the
@@ -829,7 +839,8 @@ Lua helper cleanup backlog:
 - A small-mailbox IMAP fixture syncs end-to-end against a fake
   IMAP server, with assertions on final account/folder/message
   counts. Initial import and steady-state delta coverage have landed;
-  mutation fixtures remain.
+  flag writeback persistence has landed; move/delete mutation fixtures
+  remain.
 - A small-mailbox JMAP fixture does the same. Initial import,
   steady-state delta, raw `Email/set` mutation, and scripted
   new/change/delete/move incremental coverage have landed; deeper
@@ -838,7 +849,8 @@ Lua helper cleanup backlog:
   revoked-token failure, re-auth, and successful follow-up sync.
 - M6.10 (calendar) has Graph read/sync, Graph create/update/delete
   action coverage, Graph remote-mutation delta import coverage,
-  CalDAV initial-sync coverage, CalDAV create/update/delete action
+  Graph action-to-delta confirmation, CalDAV initial-sync coverage,
+  CalDAV create/update/delete action
   coverage, CalDAV remote-mutation import coverage, and a
   CalDAV-write to Graph-delta shared-fixture proof. Google and JMAP
   calendar workflow coverage remain manual.

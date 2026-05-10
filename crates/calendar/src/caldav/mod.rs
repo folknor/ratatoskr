@@ -483,12 +483,17 @@ fn join_calendar_path(base: &str, segment: &str) -> Result<String, String> {
 }
 
 fn is_precondition_failed(err: &str) -> bool {
-    err.contains("412") || err.contains("Precondition Failed")
+    caldav_error_status(err) == Some(412)
+}
+
+fn caldav_error_status(err: &str) -> Option<u16> {
+    let (_prefix, status_and_body) = err.split_once(" returned ")?;
+    status_and_body.split_whitespace().next()?.parse().ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_precondition_failed, join_calendar_path};
+    use super::{caldav_error_status, is_precondition_failed, join_calendar_path};
 
     #[test]
     fn join_appends_segment_when_base_has_no_trailing_slash() {
@@ -532,5 +537,12 @@ mod tests {
         assert!(!is_precondition_failed(
             "DELETE https://h/cal/ev.ics returned 404 Not Found"
         ));
+        assert!(!is_precondition_failed(
+            "DELETE https://h/cal/ev.ics failed after 412 retries"
+        ));
+        assert_eq!(
+            caldav_error_status("PUT https://h/cal/ev.ics returned 412 Precondition Failed: stale"),
+            Some(412)
+        );
     }
 }

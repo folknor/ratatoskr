@@ -8,6 +8,7 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use db::db::queries::set_thread_starred;
 use db::progress::NoopProgressReporter;
+use rusqlite::params;
 
 /// Local DB mutation for star. Returns true if state changed.
 pub(crate) async fn star_local(
@@ -25,9 +26,22 @@ pub(crate) async fn star_local(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        set_thread_starred(&conn, &aid, &tid, starred)
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| ActionError::db(format!("begin star transaction: {e}")))?;
+        let thread_changed = set_thread_starred(&tx, &aid, &tid, starred)
             .map(|n| n > 0)
-            .map_err(ActionError::db)
+            .map_err(ActionError::db)?;
+        let message_changed = tx
+            .execute(
+                "UPDATE messages SET is_starred = ?1 WHERE account_id = ?2 AND thread_id = ?3",
+                params![starred, aid, tid],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| ActionError::db(format!("update message starred flags: {e}")))?;
+        tx.commit()
+            .map_err(|e| ActionError::db(format!("commit star transaction: {e}")))?;
+        Ok(thread_changed || message_changed)
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?

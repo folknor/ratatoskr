@@ -1992,6 +1992,30 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
             set_field_number(
                 state,
                 idx,
+                "summary_local_only",
+                completed.summary.local_only as f64,
+            )?;
+            set_field_number(
+                state,
+                idx,
+                "summary_remote_succeeded",
+                completed.summary.remote_succeeded as f64,
+            )?;
+            set_field_number(
+                state,
+                idx,
+                "summary_remote_failed",
+                completed.summary.remote_failed as f64,
+            )?;
+            set_field_number(
+                state,
+                idx,
+                "summary_conflicts",
+                completed.summary.conflicts as f64,
+            )?;
+            set_field_number(
+                state,
+                idx,
                 "service_generation",
                 completed.service_generation as f64,
             )?;

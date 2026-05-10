@@ -22,6 +22,15 @@ local function event_by_remote_id(events, remote_id)
     return nil
 end
 
+local function event_by_summary(events, summary)
+    for _, event in ipairs(events) do
+        if event.summary == summary then
+            return event
+        end
+    end
+    return nil
+end
+
 local function assert_success(completed, label)
     harness.assert(completed ~= nil, label .. " missing completion")
     harness.assert_eq(#completed.results, 1, label .. " result count")
@@ -153,10 +162,11 @@ harness.assert_eq(final_standup.location, "Conf Room B", "updated location")
 harness.assert_eq(final_standup.start_time, 1768471200, "updated start")
 harness.assert_eq(final_standup.end_time, 1768473900, "updated end")
 
-local final_created = event_by_remote_id(final.calendar_events, "mock-event-create")
+local final_created = event_by_summary(final.calendar_events, "Harness created")
 harness.assert(final_created ~= nil, "created event missing")
 harness.assert_eq(final_created.summary, "Harness created", "created summary")
 harness.assert_eq(final_created.location, "Focus Room", "created location")
+harness.assert(final_created.remote_event_id ~= nil, "created event missing remote id")
 
 local final_review = event_by_remote_id(final.calendar_events, "ev-002")
 harness.assert(final_review == nil, "deleted review still present")
@@ -187,6 +197,50 @@ harness.assert_eq(
 harness.assert(
     harness.request_count(requests, "graph", "DELETE /v1.0/me/events/ev-002") >= 1,
     "missing delete request"
+)
+
+harness.clear_mock_requests(admin_endpoint)
+
+local delta, delta_err = client:start_calendar_sync({
+    account_id = account.account_id,
+}, 30)
+harness.assert(delta_err == nil, "post-action delta sync failed")
+harness.assert_eq(delta.result, "completed", delta.error or "post-action delta result")
+
+local after_delta, after_delta_err = client:request("TestQueryDbState", {
+    account_id = account.account_id,
+    calendar_limit = 10,
+})
+harness.assert(after_delta_err == nil, "post-action delta TestQueryDbState failed")
+harness.assert_eq(after_delta.calendar_count, 2, "post-action delta calendar count")
+harness.assert_eq(after_delta.calendar_event_count, 2, "post-action delta event count")
+
+local delta_standup = event_by_remote_id(after_delta.calendar_events, "ev-001")
+harness.assert(delta_standup ~= nil, "updated Standup missing after delta")
+harness.assert_eq(delta_standup.summary, "Standup moved", "delta updated summary")
+harness.assert_eq(delta_standup.location, "Conf Room B", "delta updated location")
+harness.assert_eq(delta_standup.start_time, 1768471200, "delta updated start")
+harness.assert_eq(delta_standup.end_time, 1768473900, "delta updated end")
+
+local delta_created = event_by_remote_id(
+    after_delta.calendar_events,
+    final_created.remote_event_id
+)
+harness.assert(delta_created ~= nil, "created event missing after delta")
+harness.assert_eq(delta_created.summary, "Harness created", "delta created summary")
+harness.assert_eq(delta_created.location, "Focus Room", "delta created location")
+
+local delta_review = event_by_remote_id(after_delta.calendar_events, "ev-002")
+harness.assert(delta_review == nil, "deleted review returned after delta")
+
+local delta_requests = harness.mock_requests(admin_endpoint)
+harness.assert(
+    harness.request_count(
+        delta_requests,
+        "graph",
+        "GET /v1.0/me/calendars/cal-work/calendarView/delta"
+    ) >= 1,
+    "post-action sync did not call Work calendar delta"
 )
 
 local ok, shutdown_err = client:shutdown()
