@@ -15,9 +15,9 @@ use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, AttachmentFetchParams,
     BootClassification, BootExitCode, BootPhaseKind, CalendarActionPlan, CalendarActionWireOperation,
-    ClientNotification,
-    ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
-    PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
+    ClientNotification, ContactDeleteParams, ContactSaveParams, ExtractStatusParams,
+    IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId, PlanId,
+    ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
@@ -2220,6 +2220,31 @@ fn request_params_from_lua(
         "SettingsSet" | "settings.set" => Ok(RequestParams::SettingsSet {
             params: parse_settings_set_params(state, params_idx)?,
         }),
+        "ContactsContactSave" | "contacts.contact_save" => {
+            Ok(RequestParams::ContactsContactSave {
+                params: parse_contact_save_params(state, params_idx)?,
+            })
+        }
+        "ContactsContactSaveWithWriteback" | "contacts.contact_save_with_writeback" => {
+            Ok(RequestParams::ContactsContactSaveWithWriteback {
+                params: parse_contact_save_params(state, params_idx)?,
+            })
+        }
+        "ContactsContactDelete" | "contacts.contact_delete" => {
+            let id = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) == LuaType::Table
+            {
+                get_string_field(state, params_idx, "id")?
+                    .ok_or_else(|| lua_error_message("ContactsContactDelete requires params.id"))?
+            } else if state.get_top() >= params_idx as usize {
+                state.to_string(params_idx)?
+            } else {
+                return Err(lua_error_message("ContactsContactDelete requires id"));
+            };
+            Ok(RequestParams::ContactsContactDelete {
+                params: ContactDeleteParams { id },
+            })
+        }
         "ReadBootstrapSnapshots" | "internal.read_bootstrap_snapshots" => {
             Ok(RequestParams::ReadBootstrapSnapshots {
                 params: ReadBootstrapSnapshotsParams::default(),
@@ -2554,6 +2579,35 @@ fn request_params_from_lua(
             "request method {other:?} is not registered in harness"
         ))),
     }
+}
+
+fn parse_contact_save_params(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<ContactSaveParams> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message(
+            "ContactsContactSave requires params table",
+        ));
+    }
+    let id = get_string_field(state, params_idx, "id")?
+        .ok_or_else(|| lua_error_message("ContactsContactSave requires params.id"))?;
+    let email = get_string_field(state, params_idx, "email")?
+        .ok_or_else(|| lua_error_message("ContactsContactSave requires params.email"))?;
+    Ok(ContactSaveParams {
+        id,
+        email,
+        display_name: get_string_field(state, params_idx, "display_name")?,
+        email2: get_string_field(state, params_idx, "email2")?,
+        phone: get_string_field(state, params_idx, "phone")?,
+        company: get_string_field(state, params_idx, "company")?,
+        notes: get_string_field(state, params_idx, "notes")?,
+        account_id: get_string_field(state, params_idx, "account_id")?,
+        account_color: get_string_field(state, params_idx, "account_color")?,
+        groups: get_string_array_field(state, params_idx, "groups")?,
+        source: get_string_field(state, params_idx, "source")?,
+        server_id: get_string_field(state, params_idx, "server_id")?,
+    })
 }
 
 fn parse_settings_set_params(

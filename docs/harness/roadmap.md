@@ -685,8 +685,9 @@ sync-trigger, DB-query, first sync-harness script, OAuth re-auth
 persistence harness path, JMAP remote-mutation and scripted
 incremental delta scripts, Graph calendar mutation scripts, Graph
 contact coverage, CalDAV calendar coverage, JMAP/Google calendar
-initial/action coverage, and People API initial contact coverage have
-landed. Saehrimnir now exposes the remaining major mock surfaces for
+initial/action coverage, People API initial/incremental contact
+coverage, and People API write-back/delete coverage have landed.
+Saehrimnir now exposes the remaining major mock surfaces for
 JMAP Calendar, Google Calendar v3, Google People API, attachment
 raw-bytes, and slow-paged fixture recipes. The open work has shifted
 from mock-server enablement to deeper ratatoskr script authoring.
@@ -743,6 +744,10 @@ Ratatoskr-side M8 surface now in tree:
   and action URLs. `brokkr.toml` now lists `test_endpoint_env_people`
   and `test_endpoint_env_gcal`, so brokkr injects all eight
   saehrimnir endpoint variables for fixture-frontmatter scripts.
+- The Lua service harness now parses the contact IPC methods
+  `contacts.contact_save`, `contacts.contact_save_with_writeback`,
+  and `contacts.contact_delete`, so sync-harness scripts can drive the
+  real Service contact write-back pipeline while saehrimnir is running.
 - `test.start_sync` starts the real Service sync runtime. The
   Service sync dispatcher now runs provider initial sync when
   `accounts.initial_sync_completed = 0`, then delta sync afterwards.
@@ -1006,6 +1011,15 @@ Ratatoskr-side M8 surface now in tree:
   matching the Graph contact cadence fix so separate `start_sync`
   requests can reach the twentieth-cycle contact tier. It emits sync
   markers around the measured cadence loops and writes `summary.json`.
+- `crates/app/tests/sync-harness/people-contacts-writeback-delete.lua`
+  targets `graph-contacts-small.toml` through saehrimnir's People API,
+  drives `contacts.contact_save_with_writeback` against a synced Google
+  contact, verifies the local phone/company/notes update and the
+  provider-side `PATCH /v1/people/{id}:updateContact`, then drives
+  `contacts.contact_delete`, verifies the provider-side
+  `DELETE /v1/people/{id}:deleteContact`, and runs a follow-up People
+  contact-delta cadence loop to prove the deleted contact does not
+  return. It emits sync markers and writes `summary.json`.
 - `crates/app/tests/sync-harness/gmail-attachment-initial.lua`
   targets `jmap-attach.toml` through the Gmail listener and asserts
   Gmail `threads.get` imports attachment metadata for `sample.txt`.
@@ -1106,10 +1120,6 @@ Lua helper cleanup backlog:
   malformed-MIME, and slow-paged-response fixture families.
   Saehrimnir's slow-paging recipe is available, so this is a ratatoskr
   script-authoring item once the exact fixture recipe is selected.
-- Gmail People API contacts:
-  initial and scripted incremental People API contact import have
-  landed. Contact write-back/delete remains blocked on saehrimnir
-  adding People API mutation routes.
 - Broader benchmark summaries:
   initial marker/summary adoption now covers JMAP initial, JMAP
   steady-state, JMAP bulk initial, JMAP bulk steady-state, JMAP
@@ -1121,9 +1131,9 @@ Lua helper cleanup backlog:
   incremental, CalDAV calendar initial, CalDAV calendar remote-delta,
   JMAP calendar initial, JMAP calendar remote-delta, Google Calendar
   initial, Google Calendar remote-delta, People contacts initial,
-  People contacts incremental, and Gmail attachment initial. Add the
-  same marker/summary shape to any additional sync scripts selected
-  for M9 gates.
+  People contacts incremental, People contacts writeback/delete, and
+  Gmail attachment initial. Add the same marker/summary shape to any
+  additional sync scripts selected for M9 gates.
 
 ---
 
@@ -1158,8 +1168,8 @@ CalDAV calendar remote-delta, JMAP initial, JMAP calendar initial,
 JMAP calendar remote-delta, JMAP bulk initial, JMAP bulk steady-state,
 JMAP attachment initial, IMAP initial, Google Calendar initial, Google
 Calendar remote-delta, People contacts initial, People contacts
-incremental, Gmail attachment initial, and Graph attachment initial
-scripts using them.
+incremental, People contacts writeback/delete, Gmail attachment
+initial, and Graph attachment initial scripts using them.
 The remaining work is broader ratatoskr-side gate coverage and
 additional per-host baseline promotion as needed.
 
