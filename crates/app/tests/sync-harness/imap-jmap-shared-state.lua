@@ -3,6 +3,7 @@
 -- fixture: jmap-incremental.lua
 -- protocol: jmap
 -- ceiling: 120s
+-- measured: JMAP convergence sync after the IMAP action mutates shared fixture state
 
 local function message_by_subject(state, subject)
     for _, message in ipairs(state.messages) do
@@ -54,6 +55,15 @@ local function run_sync(client, account_id, label)
     }, 30)
     harness.assert(err == nil, label .. " start_sync failed")
     harness.assert_eq(result.result, "completed", result.error or (label .. " sync result"))
+end
+
+local measured_sync_count = 0
+
+local function run_measured_sync(client, account_id, label)
+    harness.marker("SYNC_START")
+    run_sync(client, account_id, label)
+    harness.marker("SYNC_END")
+    measured_sync_count = measured_sync_count + 1
 end
 
 local function wait_for_action_completed(queue, plan_id, timeout)
@@ -150,19 +160,22 @@ assert_lacks_label(imap_after_move, "INBOX", "IMAP moved thread")
 
 harness.clear_mock_requests(admin_endpoint)
 
-run_sync(client, jmap_account.account_id, "JMAP delta after IMAP move")
+run_measured_sync(client, jmap_account.account_id, "JMAP delta after IMAP move")
 
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
+local email_changes = harness.request_count(requests, "jmap", "Email/changes")
+local email_get = harness.request_count(requests, "jmap", "Email/get")
+local email_query = harness.request_count(requests, "jmap", "Email/query")
 harness.assert(
-    harness.request_count(requests, "jmap", "Email/changes") >= 1,
+    email_changes >= 1,
     "JMAP delta did not call Email/changes"
 )
 harness.assert(
-    harness.request_count(requests, "jmap", "Email/get") >= 1,
+    email_get >= 1,
     "JMAP delta did not fetch changed email ids"
 )
 harness.assert_eq(
-    harness.request_count(requests, "jmap", "Email/query"),
+    email_query,
     0,
     "JMAP delta unexpectedly ran Email/query"
 )
@@ -175,6 +188,16 @@ local jmap_moved_thread =
     read_thread(client, jmap_account.account_id, jmap_moved.thread_id, "JMAP after IMAP move")
 assert_has_label(jmap_moved_thread, "archive", "JMAP moved thread")
 assert_lacks_label(jmap_moved_thread, "INBOX", "JMAP moved thread")
+
+harness.write_summary({
+    correct = 1,
+    measured_syncs = measured_sync_count,
+    provider_requests = #requests,
+    message_count = jmap_after_move.message_count,
+    email_changes = email_changes,
+    email_get = email_get,
+    email_query = email_query,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

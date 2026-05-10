@@ -80,7 +80,7 @@ the brokkr repo):
   `harness.spawn_with_events`, `harness.kill`,
   `harness.pid_is_alive`, `harness.sleep`, `harness.now_ms`,
   `harness.path_exists`, `harness.dir_has_prefix`,
-  `harness.read_json`, `harness.write_text`, `harness.assert`,
+  `harness.read_json`, `harness.read_text`, `harness.write_text`, `harness.assert`,
   `harness.assert_eq`, `harness.same_client`,
   `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
   `harness.http_post_json(url, body)`,
@@ -480,6 +480,15 @@ Landed slices:
   writer's `search.clear` command in flight with the test delay hook,
   asserts a duplicate non-forced rebuild is rejected, and verifies
   `force=true` preempts the first rebuild and completes a fresh one.
+- `crates/app/tests/service-harness/extract/index_rebuild_wipe_roundtrip.lua`
+  drives a normal non-forced Wipe rebuild, waits for
+  `index.rebuild_completed`, then verifies a seeded message body is
+  searchable through a fresh `TestSearchIndex` reader.
+- `crates/app/tests/service-harness/extract/schema_mismatch_triggers_rebuild.lua`
+  seeds a stale `search_index/.version`, boots the Service, waits for
+  the post-ready schema rebuild to complete, asserts `.version` is
+  updated, then reboots against the same data dir and verifies the
+  matching version does not trigger another rebuild.
 
 **Exit criteria:**
 
@@ -587,9 +596,19 @@ Sequencing:
   but unindexed text attachment, restarts the Service against the same
   data dir, and asserts the post-ready extract startup indexes it
   without an explicit harness `extract.backfill_kick`.
-- **M6.11, M6.13, M6.14 (READY when M5 lands):** Phase 7 attachment
-  extraction round-trip, palette rebuild, and schema-version mismatch
-  rebuild. The actionable script shapes are now listed below.
+- **M6.13 (LANDED):** normal search-index Wipe rebuild now lives in
+  `crates/app/tests/service-harness/extract/index_rebuild_wipe_roundtrip.lua`.
+  It covers the Service-side rebuild request that backs the palette
+  command and proves search is usable after completion.
+- **M6.14 (LANDED):** schema-version mismatch rebuild now lives in
+  `crates/app/tests/service-harness/extract/schema_mismatch_triggers_rebuild.lua`.
+  The script exercises the post-ready PreserveExisting rebuild lane,
+  uses `harness.read_text` to assert the `.version` sentinel is
+  rewritten only after a successful rebuild, and verifies the next boot
+  is quiet.
+- **M6.11 (READY when M5 lands):** attachment extraction round trip
+  against the real fixture corpus remains open. The actionable script
+  shape is listed below.
 
 **Exit criteria:**
 
@@ -625,16 +644,6 @@ Sequencing:
   with a harness script that uses at least one real fixture. If the M5
   corpus slips, keep M6.11 open rather than adding another synthetic
   cached-text variant.
-- M6.13 palette rebuild path:
-  cover `CommandId::AppRebuildSearchIndex` or the closest Service
-  request path that proves a normal non-forced Wipe rebuild starts,
-  reports progress/completion, and leaves the rebuilt index usable
-  after reader rebind or restart.
-- M6.14 schema-version mismatch rebuild:
-  add a harness check that starts with a stale `search_index/.version`,
-  boots the Service, observes Wipe rebuild dispatch/completion, and
-  verifies `.version` is updated so the next boot is a no-op.
-
 ---
 
 ### M7 - Brokkr-side polish
@@ -733,6 +742,9 @@ Ratatoskr-side M8 surface now in tree:
   to `Email/query`. The mutation now uses
   `harness.http_json({ method, url, body })` with a Lua table body so
   later PATCH/DELETE provider-admin calls can reuse the same helper.
+  It emits sync markers around the measured delta sync and writes
+  `summary.json` with scalar correctness, message-count, and JMAP
+  request metrics.
 - `crates/app/tests/sync-harness/jmap-incremental-steps.lua`
   targets the `jmap-incremental.lua` fixture, walks saehrimnir's
   cursor-driven `POST /test/fixture/step` script through new, change,
@@ -799,7 +811,10 @@ Ratatoskr-side M8 surface now in tree:
   a message through the real IMAP `MoveToFolder` action, then runs JMAP
   delta sync and asserts the move arrives through `Email/changes` /
   `Email/get` without falling back to `Email/query`. This is the mail
-  sibling of the CalDAV-write to Graph-delta shared-fixture proof.
+  sibling of the CalDAV-write to Graph-delta shared-fixture proof. It
+  emits sync markers around the measured JMAP convergence sync and
+  writes `summary.json` with scalar correctness, message-count, and
+  JMAP request metrics.
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
@@ -980,13 +995,14 @@ Lua helper cleanup backlog:
   add contact sync/action coverage once the People API listener and
   shared contact fixture entries exist.
 - Broader benchmark summaries:
-  initial marker/summary adoption now covers JMAP steady-state, IMAP
-  steady-state, JMAP scripted incremental, IMAP scripted incremental,
-  Graph calendar initial, Graph calendar remote-delta, Graph calendar
-  CalDAV-mutation delta, Graph contacts initial, Graph contacts
-  incremental, CalDAV calendar initial, and CalDAV calendar
-  remote-delta. Add the same marker/summary shape to any additional
-  sync scripts selected for M9 gates.
+  initial marker/summary adoption now covers JMAP steady-state, JMAP
+  Email/set delta, JMAP scripted incremental, IMAP steady-state, IMAP
+  scripted incremental, IMAP-to-JMAP shared-state delta, Graph calendar
+  initial, Graph calendar remote-delta, Graph calendar CalDAV-mutation
+  delta, Graph contacts initial, Graph contacts incremental, CalDAV
+  calendar initial, and CalDAV calendar remote-delta. Add the same
+  marker/summary shape to any additional sync scripts selected for M9
+  gates.
 
 ---
 
@@ -1004,11 +1020,12 @@ complete.
 Saehrimnir's latency knob now has ratatoskr Lua helpers and a JMAP
 smoke script; stable request logs and `GET /test/snapshot-state` also
 exist. Ratatoskr now has Lua helpers for `BROKKR_MARKER_FIFO` markers
-and `summary.json`, with JMAP steady-state, IMAP steady-state, JMAP
-scripted incremental, IMAP scripted incremental, Graph calendar
-initial, Graph calendar remote-delta, Graph calendar CalDAV-mutation
-delta, Graph contacts initial, Graph contacts incremental, CalDAV
-calendar initial, and CalDAV calendar remote-delta scripts using them.
+and `summary.json`, with JMAP steady-state, JMAP Email/set delta, JMAP
+scripted incremental, IMAP steady-state, IMAP scripted incremental,
+IMAP-to-JMAP shared-state delta, Graph calendar initial, Graph
+calendar remote-delta, Graph calendar CalDAV-mutation delta, Graph
+contacts initial, Graph contacts incremental, CalDAV calendar initial,
+and CalDAV calendar remote-delta scripts using them.
 The remaining work is mostly ratatoskr-side gate configuration and
 baseline promotion.
 

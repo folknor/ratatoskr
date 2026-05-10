@@ -105,6 +105,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "path_exists", lua_path_exists)?;
     set_field_fn(state, table_idx, "dir_has_prefix", lua_dir_has_prefix)?;
     set_field_fn(state, table_idx, "read_json", lua_read_json)?;
+    set_field_fn(state, table_idx, "read_text", lua_read_text)?;
     set_field_fn(state, table_idx, "write_text", lua_write_text)?;
     set_field_fn(state, table_idx, "write_summary", lua_write_summary)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
@@ -443,6 +444,14 @@ fn lua_read_json(state: &mut State) -> dellingr::Result<u8> {
     let value: serde_json::Value = serde_json::from_str(&text).map_err(lua_json)?;
     state.set_top(0);
     push_json(state, &value)?;
+    Ok(1)
+}
+
+fn lua_read_text(state: &mut State) -> dellingr::Result<u8> {
+    let path = PathBuf::from(state.to_string(1)?);
+    let text = std::fs::read_to_string(path).map_err(lua_io)?;
+    state.set_top(0);
+    state.push_string(text);
     Ok(1)
 }
 

@@ -87,23 +87,28 @@ harness.assert(
 
 harness.clear_mock_requests(jmap_endpoint)
 
+harness.marker("SYNC_START")
 local delta, delta_err = client:start_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(delta_err == nil, "delta start_sync failed")
 harness.assert_eq(delta.result, "completed", delta.error or "delta sync result")
 
 local requests = harness.mock_requests(jmap_endpoint)
+local email_changes = harness.request_count(requests, "jmap", "Email/changes")
+local email_get = harness.request_count(requests, "jmap", "Email/get")
+local email_query = harness.request_count(requests, "jmap", "Email/query")
 harness.assert(
-    harness.request_count(requests, "jmap", "Email/changes") >= 1,
+    email_changes >= 1,
     "delta sync did not call Email/changes"
 )
 harness.assert(
-    harness.request_count(requests, "jmap", "Email/get") >= 1,
+    email_get >= 1,
     "delta sync did not fetch updated email"
 )
 harness.assert_eq(
-    harness.request_count(requests, "jmap", "Email/query"),
+    email_query,
     0,
     "delta sync unexpectedly ran Email/query"
 )
@@ -117,6 +122,16 @@ harness.assert_eq(after.message_count, 2, "post-delta message count")
 local after_hello = message_by_subject(after, "Hello")
 harness.assert(after_hello ~= nil, "missing Hello after delta")
 harness.assert(after_hello.is_read, "delta sync did not import remote read state")
+
+harness.write_summary({
+    correct = 1,
+    measured_syncs = 1,
+    provider_requests = #requests,
+    message_count = after.message_count,
+    email_changes = email_changes,
+    email_get = email_get,
+    email_query = email_query,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")
