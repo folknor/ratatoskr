@@ -659,7 +659,10 @@ Ratatoskr-side M8 surface now in tree:
   runs the same fixture twice, asserts the first run marks
   `initial_sync_completed`, and uses saehrimnir's request log to
   prove the second run goes through `Mailbox/changes` and
-  `Email/changes` without falling back to `Email/query`.
+  `Email/changes` without falling back to `Email/query`. It now
+  emits `SYNC_START` / `SYNC_END` around the measured delta sync and
+  writes `summary.json` with scalar correctness, DB-count, and
+  provider-request metrics for `brokkr sync-bench` ingestion.
 - `crates/app/tests/sync-harness/jmap-email-set-delta.lua`
   mutates the mock fixture through a direct JMAP `Email/set`, then
   runs ratatoskr delta sync and asserts the updated read state is
@@ -730,6 +733,11 @@ Ratatoskr-side M8 surface now in tree:
   saehrimnir's `GET/POST /test/latency` controls. The setter parses
   Lua numeric fields as non-negative JSON integers so saehrimnir's
   validation sees the same shape as a raw JSON client.
+- `harness.marker(name)` emits sidecar phase markers when
+  `BROKKR_MARKER_FIFO` is present and otherwise no-ops, so the same
+  script can run under `service-test`, `sync-smoke`, and
+  `sync-bench`. `harness.write_summary(table)` writes a JSON object to
+  the run artefact's `summary.json` for brokkr's `meta.*` ingestion.
 
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
@@ -786,8 +794,10 @@ Lua helper cleanup backlog:
 **Status:** DEFERRED - gated on M8 and brokkr command work.
 Saehrimnir's latency knob now has ratatoskr Lua helpers and a JMAP
 smoke script; stable request logs and `GET /test/snapshot-state` also
-exist. The remaining work is mostly ratatoskr-side summary/assertion
-shape plus brokkr orchestration.
+exist. Ratatoskr now has Lua helpers for `BROKKR_MARKER_FIFO` markers
+and `summary.json`, plus one JMAP steady-state delta script that uses
+them. The remaining work is mostly broader script adoption plus
+brokkr-side gate/baseline policy.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The

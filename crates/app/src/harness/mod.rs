@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 type HarnessResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -106,8 +106,10 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "dir_has_prefix", lua_dir_has_prefix)?;
     set_field_fn(state, table_idx, "read_json", lua_read_json)?;
     set_field_fn(state, table_idx, "write_text", lua_write_text)?;
+    set_field_fn(state, table_idx, "write_summary", lua_write_summary)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
+    set_field_fn(state, table_idx, "marker", lua_marker)?;
     set_field_fn(state, table_idx, "uuid", lua_uuid)?;
     set_field_fn(state, table_idx, "repeat_byte", lua_repeat_byte)?;
     set_field_fn(state, table_idx, "stage_attachment", lua_stage_attachment)?;
@@ -448,6 +450,26 @@ fn lua_write_text(state: &mut State) -> dellingr::Result<u8> {
     Ok(0)
 }
 
+fn lua_write_summary(state: &mut State) -> dellingr::Result<u8> {
+    if state.typ(1) != LuaType::Table {
+        return Err(lua_error_message("write_summary requires summary table"));
+    }
+    let value = lua_table_to_json(state, 1)?;
+    if !value.is_object() {
+        return Err(lua_error_message("write_summary root must be a JSON object"));
+    }
+    let text = serde_json::to_string_pretty(&value).map_err(lua_json)?;
+    let path = {
+        let ctx = context(state)?;
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.artefact_dir.join("summary.json")
+    };
+    std::fs::write(&path, text).map_err(lua_io)?;
+    state.set_top(0);
+    state.push_string(path.display().to_string());
+    Ok(1)
+}
+
 fn lua_sleep(state: &mut State) -> dellingr::Result<u8> {
     let millis = state.to_number(1)? as u64;
     std::thread::sleep(Duration::from_millis(millis));
@@ -464,6 +486,54 @@ fn lua_now_ms(state: &mut State) -> dellingr::Result<u8> {
     state.set_top(0);
     state.push_number(elapsed as f64);
     Ok(1)
+}
+
+fn lua_marker(state: &mut State) -> dellingr::Result<u8> {
+    let name = state.to_string(1)?;
+    validate_sidecar_marker_name(&name)?;
+    let emitted = emit_sidecar_marker(&name)?;
+    state.set_top(0);
+    state.push_boolean(emitted);
+    Ok(1)
+}
+
+fn validate_sidecar_marker_name(name: &str) -> dellingr::Result<()> {
+    if name.is_empty() {
+        return Err(lua_error_message("marker name must not be empty"));
+    }
+    if name.starts_with('@') {
+        return Err(lua_error_message(
+            "marker name must not start with @; @ is reserved for sidecar counters",
+        ));
+    }
+    if name.contains('\n') || name.contains('\r') {
+        return Err(lua_error_message("marker name must not contain newlines"));
+    }
+    Ok(())
+}
+
+fn emit_sidecar_marker(name: &str) -> dellingr::Result<bool> {
+    let Ok(path) = std::env::var("BROKKR_MARKER_FIFO") else {
+        return Ok(false);
+    };
+    if path.is_empty() {
+        return Ok(false);
+    }
+    let timestamp_us = sidecar_timestamp_us()?;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .map_err(lua_io)?;
+    writeln!(file, "{timestamp_us} {name}").map_err(lua_io)?;
+    Ok(true)
+}
+
+fn sidecar_timestamp_us() -> dellingr::Result<i64> {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| lua_error_message(format!("system clock before UNIX_EPOCH: {error}")))?;
+    i64::try_from(elapsed.as_micros())
+        .map_err(|_| lua_error_message("sidecar marker timestamp overflow"))
 }
 
 fn lua_uuid(state: &mut State) -> dellingr::Result<u8> {
@@ -2964,14 +3034,29 @@ fn lua_value_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_js
         LuaType::Boolean => Ok(serde_json::Value::Bool(state.to_boolean(idx))),
         LuaType::Number => {
             let number = state.to_number(idx)?;
-            serde_json::Number::from_f64(number)
-                .map(serde_json::Value::Number)
-                .ok_or_else(|| lua_error_message(format!("number is not JSON-safe: {number}")))
+            lua_number_to_json(number)
         }
         LuaType::String => state.to_string(idx).map(serde_json::Value::String),
         LuaType::Table => lua_table_to_json(state, idx),
         LuaType::Function => Err(lua_error_message("function is not JSON-serializable")),
     }
+}
+
+fn lua_number_to_json(number: f64) -> dellingr::Result<serde_json::Value> {
+    const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_991.0;
+    if !number.is_finite() {
+        return Err(lua_error_message(format!(
+            "number is not JSON-safe: {number}"
+        )));
+    }
+    if number.fract() == 0.0 && number.abs() <= MAX_EXACT_INTEGER {
+        return Ok(serde_json::Value::Number(serde_json::Number::from(
+            number as i64,
+        )));
+    }
+    serde_json::Number::from_f64(number)
+        .map(serde_json::Value::Number)
+        .ok_or_else(|| lua_error_message(format!("number is not JSON-safe: {number}")))
 }
 
 fn lua_table_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_json::Value> {

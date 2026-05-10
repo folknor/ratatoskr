@@ -66,23 +66,28 @@ harness.assert(
 
 harness.clear_mock_requests(jmap_endpoint)
 
+harness.marker("SYNC_START")
 local second, second_err = client:start_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(second_err == nil, "delta start_sync failed")
 harness.assert_eq(second.result, "completed", second.error or "delta sync result")
 
 local requests = harness.mock_requests(jmap_endpoint)
+local mailbox_changes = harness.request_count(requests, "jmap", "Mailbox/changes")
+local email_changes = harness.request_count(requests, "jmap", "Email/changes")
+local email_query = harness.request_count(requests, "jmap", "Email/query")
 harness.assert(
-    harness.request_count(requests, "jmap", "Mailbox/changes") >= 1,
+    mailbox_changes >= 1,
     "delta sync did not call Mailbox/changes"
 )
 harness.assert(
-    harness.request_count(requests, "jmap", "Email/changes") >= 1,
+    email_changes >= 1,
     "delta sync did not call Email/changes"
 )
 harness.assert_eq(
-    harness.request_count(requests, "jmap", "Email/query"),
+    email_query,
     0,
     "delta sync unexpectedly ran Email/query"
 )
@@ -98,6 +103,17 @@ harness.assert_eq(after_delta.label_count, after_initial.label_count, "delta lab
 local delta_account = account_by_id(after_delta, account.account_id)
 harness.assert(delta_account ~= nil, "account missing after delta sync")
 harness.assert(delta_account.initial_sync_completed, "delta cleared initial sync flag")
+
+harness.write_summary({
+    correct = 1,
+    message_count = after_delta.message_count,
+    thread_count = after_delta.thread_count,
+    label_count = after_delta.label_count,
+    provider_requests = #requests,
+    mailbox_changes_requests = mailbox_changes,
+    email_changes_requests = email_changes,
+    email_query_requests = email_query,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")
