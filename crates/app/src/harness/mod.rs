@@ -129,10 +129,17 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
         lua_clear_mock_requests,
     )?;
     set_field_fn(state, table_idx, "request_count", lua_request_count)?;
+    set_field_fn(
+        state,
+        table_idx,
+        "request_count_prefix",
+        lua_request_count_prefix,
+    )?;
     set_field_fn(state, table_idx, "http_json", lua_http_json)?;
     set_field_fn(state, table_idx, "http_get", lua_http_get)?;
     set_field_fn(state, table_idx, "http_post_json", lua_http_post_json)?;
     set_field_fn(state, table_idx, "http_delete", lua_http_delete)?;
+    set_field_fn(state, table_idx, "http", lua_http)?;
     set_field_fn(state, table_idx, "env", lua_env)?;
     set_field_number(state, table_idx, "protocol_version", service_api::PROTOCOL_VERSION as f64)?;
     state.set_global("harness");
@@ -781,8 +788,22 @@ fn lua_set_latency(state: &mut State) -> dellingr::Result<u8> {
 }
 
 fn lua_request_count(state: &mut State) -> dellingr::Result<u8> {
+    lua_request_count_impl(state, false, "request_count")
+}
+
+fn lua_request_count_prefix(state: &mut State) -> dellingr::Result<u8> {
+    lua_request_count_impl(state, true, "request_count_prefix")
+}
+
+fn lua_request_count_impl(
+    state: &mut State,
+    prefix: bool,
+    operation: &'static str,
+) -> dellingr::Result<u8> {
     if state.typ(1) != LuaType::Table {
-        return Err(lua_error_message("request_count requires request table"));
+        return Err(lua_error_message(format!(
+            "{operation} requires request table"
+        )));
     }
     let protocol = state.to_string(2)?;
     let command = state.to_string(3)?;
@@ -797,9 +818,14 @@ fn lua_request_count(state: &mut State) -> dellingr::Result<u8> {
             let request_idx = state.get_top() as isize;
             let request_protocol = get_string_field(state, request_idx, "protocol")?;
             let request_command = get_string_field(state, request_idx, "command")?;
-            if request_protocol.as_deref() == Some(protocol.as_str())
-                && request_command.as_deref() == Some(command.as_str())
-            {
+            let command_matches = request_command.as_deref().is_some_and(|request_command| {
+                if prefix {
+                    request_command.starts_with(&command)
+                } else {
+                    request_command == command
+                }
+            });
+            if request_protocol.as_deref() == Some(protocol.as_str()) && command_matches {
                 count = count.saturating_add(1);
             }
         }
@@ -878,6 +904,37 @@ fn lua_http_delete(state: &mut State) -> dellingr::Result<u8> {
     http_delete(handle, url, "http_delete")?;
     state.set_top(0);
     Ok(0)
+}
+
+fn lua_http(state: &mut State) -> dellingr::Result<u8> {
+    if state.typ(1) != LuaType::Table {
+        return Err(lua_error_message("http requires request table"));
+    }
+    let method = get_string_field(state, 1, "method")?
+        .ok_or_else(|| lua_error_message("http requires request.method"))?;
+    let url = get_string_field(state, 1, "url")?
+        .ok_or_else(|| lua_error_message("http requires request.url"))?;
+    let body = get_string_field(state, 1, "body")?;
+    let content_type = get_string_field(state, 1, "content_type")?;
+    let if_match = get_string_field(state, 1, "if_match")?;
+    let method = parse_http_method(&method, "http")?;
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let response = http_request_text(
+        handle,
+        method,
+        url,
+        body,
+        content_type,
+        if_match,
+        "http",
+    )?;
+    state.set_top(0);
+    push_json(state, &response)?;
+    Ok(1)
 }
 
 fn join_url(base: &str, suffix: &str) -> String {
@@ -1124,6 +1181,48 @@ fn http_request_json(
     serde_json::from_str(&body)
         .map(Some)
         .map_err(|e| lua_error_message(format!("{operation} JSON parse: {e}; body={body}")))
+}
+
+fn http_request_text(
+    handle: tokio::runtime::Handle,
+    method: reqwest::Method,
+    url: String,
+    request_body: Option<String>,
+    content_type: Option<String>,
+    if_match: Option<String>,
+    operation: &'static str,
+) -> dellingr::Result<serde_json::Value> {
+    let method_label = method.as_str().to_string();
+    let (status, body) = handle
+        .block_on(async move {
+            let client = reqwest::Client::new();
+            let mut request = client.request(method, &url);
+            if let Some(content_type) = content_type {
+                request = request.header(reqwest::header::CONTENT_TYPE, content_type);
+            }
+            if let Some(if_match) = if_match {
+                request = request.header(reqwest::header::IF_MATCH, if_match);
+            }
+            if let Some(request_body) = request_body {
+                request = request.body(request_body);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|e| format!("{operation} {method_label} {url}: {e}"))?;
+            let status = response.status().as_u16();
+            let body = response
+                .text()
+                .await
+                .map_err(|e| format!("{operation} {method_label} {url} body: {e}"))?;
+            Ok::<_, String>((status, body))
+        })
+        .map_err(lua_error_message)?;
+    Ok(serde_json::json!({
+        "status": status,
+        "ok": (200u16..300u16).contains(&status),
+        "body": body,
+    }))
 }
 
 fn http_delete(

@@ -547,7 +547,7 @@ Sequencing:
   row gets new encrypted access / refresh token hashes without
   changing identity or provider columns. The remaining end-to-end slice
   is revoked-token sync recovery against an OAuth-enforced fixture.
-- **M6.10 (PARTIAL - Graph calendar read + mutation slices landed):**
+- **M6.10 (PARTIAL - Graph and CalDAV calendar read + mutation slices landed):**
   `crates/app/tests/sync-harness/graph-calendar-initial.lua`
   runs the Graph calendar fixture through the real calendar runtime
   and asserts local calendar/event state plus Graph request-log
@@ -557,8 +557,9 @@ Sequencing:
   bodies. `crates/app/tests/sync-harness/graph-calendar-remote-delta.lua`
   mutates the mock Graph fixture directly with POST/PATCH/DELETE, then
   verifies calendar delta sync imports the created, updated, and
-  tombstoned events. Google, JMAP, and CalDAV provider-workflow checks
-  remain.
+  tombstoned events. CalDAV now has initial-sync, action CRUD,
+  remote-mutation import, and shared-fixture mutation proof through
+  Graph delta. Google and JMAP calendar workflow checks remain manual.
 - **M6.12 (LANDED):** backfill kick on boot.ready now lives in
   `crates/app/tests/service-harness/m6/`. The script seeds a cached
   but unindexed text attachment, restarts the Service against the same
@@ -610,7 +611,7 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 sync-trigger, DB-query, first sync-harness script, OAuth re-auth
 persistence harness path, JMAP remote-mutation and scripted
 incremental delta scripts, Graph calendar mutation scripts, plus
-Graph contact and CalDAV initial-sync coverage have landed. Brokkr
+Graph contact and CalDAV calendar coverage have landed. Brokkr
 can now spawn saehrimnir for fixture-frontmatter scripts and inject
 provider endpoints. Recent saehrimnir support adds admin
 request/reset routes,
@@ -741,18 +742,41 @@ Ratatoskr-side M8 surface now in tree:
   `client:start_calendar_sync`, and asserts the same Work/Personal
   calendars and Work events land through PROPFIND plus
   calendar-multiget REPORT.
+- `crates/app/tests/service-harness/m6/calendar_actions_caldav_crud.lua`
+  targets the same fixture through CalDAV, drives
+  `client:execute_calendar_plan`, and verifies create/update/delete
+  flow through the Service worker into CalDAV GET/PUT/DELETE requests
+  and local calendar-event state. This slice also normalizes the
+  provider-neutral calendar action payload into CalDAV's `startTime` /
+  `endTime` iCal write shape, so numeric action timestamps produce
+  dated VEVENTs.
+- `crates/app/tests/sync-harness/caldav-calendar-remote-delta.lua`
+  mutates the CalDAV fixture directly with raw PUT/DELETE calls, then
+  drives `client:start_calendar_sync` and verifies the local calendar
+  DB imports the created event, updated event fields, and deleted
+  resource through the normal CalDAV ctag plus REPORT path.
+- `crates/app/tests/sync-harness/graph-calendar-caldav-mutation-delta.lua`
+  writes create/update/delete calendar mutations through CalDAV and
+  verifies a subsequent Graph `calendarView/delta` imports the same
+  shared fixture changes. This proves saehrimnir's calendar mutation
+  log is shared across the Graph and CalDAV protocol surfaces.
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
-  `harness.request_count(requests, protocol, command)`. The Lua
-  harness also exposes `harness.http_json({ method, url, body })`,
+  `harness.request_count(requests, protocol, command)`, plus
+  `harness.request_count_prefix(requests, protocol, command_prefix)`
+  for requests with generated resource names. The Lua harness also
+  exposes `harness.http_json({ method, url, body })`,
   which supports table bodies and arbitrary HTTP methods while keeping
   the older `http_get` / `http_post_json` / `http_delete` helpers for
-  compatibility. `harness.mock_requests(endpoint, { stable = true })`
+  compatibility. `harness.http({ method, url, body, content_type,
+  if_match })` returns `{ status, ok, body }` for raw text protocols
+  such as CalDAV iCalendar PUT/DELETE. `harness.mock_requests(endpoint,
+  { stable = true })`
   requests saehrimnir's deterministic request-log shape. Existing
-  JMAP, IMAP, Graph calendar, and OAuth fixture scripts use the shared
-  helpers instead of copy-pasting local URL and request-count
-  utilities.
+  JMAP, IMAP, Graph calendar, CalDAV calendar, and OAuth fixture
+  scripts use the shared helpers instead of copy-pasting local URL and
+  request-count utilities.
 - `harness.snapshot_state(endpoint)` wraps saehrimnir's
   `GET /test/snapshot-state` fixture projection. The scripted JMAP
   incremental test uses it after each change step to prove the remote
@@ -771,24 +795,6 @@ Ratatoskr-side M8 surface now in tree:
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
-- CalDAV action and remote-mutation coverage. Saehrimnir now starts a
-  CalDAV listener (`--caldav-port`) over the same `[[calendar]]` /
-  `[[event]]` fixtures used by Graph. The v0 surface covers
-  discovery (`PROPFIND /`, `/.well-known/caldav`,
-  `/principals/{user}/`, `/calendars/{user}/`), calendar and event
-  listings, `GET <event>.ics`, `REPORT calendar-multiget`,
-  `REPORT calendar-query` with UTC `time-range`, `PUT` create/update
-  with `If-Match`, and `DELETE` with `If-Match`. Ratatoskr has the
-  seed-account and Lua script shape for initial sync, and brokkr now
-  accepts saehrimnir's `CALDAV` sentinel and injects
-  `RATATOSKR_TEST_CALDAV_ENDPOINT`. Remaining CalDAV slices are action
-  CRUD and out-of-band remote mutation import.
-- Cross-protocol calendar mutation proof. Because saehrimnir routes
-  CalDAV `PUT` / `DELETE` through the same `Fixture::mutate` seam as
-  Graph, a follow-up ratatoskr script can write via CalDAV and verify a
-  subsequent Graph `calendarView/delta` imports the same created,
-  updated, or destroyed event. This is the calendar analogue of the
-  planned mixed-protocol IMAP/JMAP fixture-state proof.
 - IMAP writeback persistence. After an IMAP initial sync, drive
   ratatoskr `ActionExecutePlan` operations such as `SetRead`,
   `SetStarred`, `MoveToFolder`, and `PermanentDelete` against the
@@ -831,9 +837,11 @@ Lua helper cleanup backlog:
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
 - M6.10 (calendar) has Graph read/sync, Graph create/update/delete
-  action coverage, Graph remote-mutation delta import coverage, and
-  CalDAV initial-sync coverage. Google and JMAP calendar workflow
-  coverage remain manual.
+  action coverage, Graph remote-mutation delta import coverage,
+  CalDAV initial-sync coverage, CalDAV create/update/delete action
+  coverage, CalDAV remote-mutation import coverage, and a
+  CalDAV-write to Graph-delta shared-fixture proof. Google and JMAP
+  calendar workflow coverage remain manual.
 
 ---
 

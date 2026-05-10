@@ -111,9 +111,10 @@ pub async fn caldav_update_event_impl(
     let existing = fetch_caldav_event(&client, remote_event_id).await?;
     let merged = ical::merge_caldav_event_input(&existing, &input);
     let ical_data = ical::build_caldav_ical_event(&merged, existing.uid.as_deref());
+    let if_match = existing.etag.as_deref().or(etag.as_deref());
 
     let put_etag = client
-        .put_event(remote_event_id, &ical_data, etag.as_deref())
+        .put_event(remote_event_id, &ical_data, if_match)
         .await?;
     finalize_event(
         &client,
@@ -211,7 +212,14 @@ pub async fn caldav_delete_event_impl(
 ) -> Result<(), String> {
     let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = build_client(&config).await?;
-    client.delete_event(remote_event_id, etag.as_deref()).await
+    match client.delete_event(remote_event_id, etag.as_deref()).await {
+        Ok(()) => Ok(()),
+        Err(err) if etag.is_some() && is_precondition_failed(&err) => {
+            let (_ical_data, fresh_etag) = client.get_event_ical(remote_event_id).await?;
+            client.delete_event(remote_event_id, fresh_etag.as_deref()).await
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub async fn load_caldav_account_config(
@@ -474,9 +482,13 @@ fn join_calendar_path(base: &str, segment: &str) -> Result<String, String> {
     Ok(joined.to_string())
 }
 
+fn is_precondition_failed(err: &str) -> bool {
+    err.contains("412") || err.contains("Precondition Failed")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::join_calendar_path;
+    use super::{is_precondition_failed, join_calendar_path};
 
     #[test]
     fn join_appends_segment_when_base_has_no_trailing_slash() {
@@ -510,5 +522,15 @@ mod tests {
         // if they ever do, it must not be silently overwritten.
         let got = join_calendar_path("https://h/cal/?base=1", "abc.ics?seg=2").expect("join");
         assert_eq!(got, "https://h/cal/abc.ics?seg=2");
+    }
+
+    #[test]
+    fn precondition_failed_detection_matches_caldav_client_errors() {
+        assert!(is_precondition_failed(
+            "DELETE https://h/cal/ev.ics returned 412 Precondition Failed: stale etag"
+        ));
+        assert!(!is_precondition_failed(
+            "DELETE https://h/cal/ev.ics returned 404 Not Found"
+        ));
     }
 }
