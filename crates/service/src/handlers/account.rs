@@ -216,6 +216,7 @@ pub(crate) async fn handle_create(
         token_expires_at: p.token_expires_at,
         oauth_provider: p.oauth_provider,
         oauth_client_id: p.oauth_client_id,
+        oauth_token_url: None,
         imap_host: p.imap_host,
         imap_port: p.imap_port,
         imap_security: p.imap_security,

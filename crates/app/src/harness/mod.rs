@@ -2269,6 +2269,14 @@ fn request_params_from_lua(
                     caldav_url: get_string_field(state, params_idx, "caldav_url")?,
                     caldav_username: get_string_field(state, params_idx, "caldav_username")?,
                     caldav_password: get_string_field(state, params_idx, "caldav_password")?,
+                    auth_method: get_string_field(state, params_idx, "auth_method")?,
+                    access_token: get_string_field(state, params_idx, "access_token")?,
+                    refresh_token: get_string_field(state, params_idx, "refresh_token")?,
+                    token_expires_at: get_number_field(state, params_idx, "token_expires_at")?
+                        .map(|value| value as i64),
+                    oauth_provider: get_string_field(state, params_idx, "oauth_provider")?,
+                    oauth_client_id: get_string_field(state, params_idx, "oauth_client_id")?,
+                    oauth_token_url: get_string_field(state, params_idx, "oauth_token_url")?,
                 }
             } else {
                 TestSeedAccountParams::default()

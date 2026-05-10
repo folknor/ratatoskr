@@ -55,6 +55,20 @@ pub struct TestSeedAccountParams {
     pub caldav_username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caldav_password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_token_url: Option<String>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -3326,6 +3340,13 @@ mod tests {
                 caldav_url: Some("http://127.0.0.1:12345".into()),
                 caldav_username: Some("account-1".into()),
                 caldav_password: Some("test-password".into()),
+                auth_method: Some("oauth2".into()),
+                access_token: Some("access-token".into()),
+                refresh_token: Some("refresh-token".into()),
+                token_expires_at: Some(1_800_000_000),
+                oauth_provider: Some("oidc:saehrimnir".into()),
+                oauth_client_id: Some("ratatoskr-harness".into()),
+                oauth_token_url: Some("http://127.0.0.1:12345/oauth/token".into()),
             },
         };
         let parsed = RequestParams::from_method_params(

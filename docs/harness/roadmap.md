@@ -539,14 +539,19 @@ Sequencing:
   cancellation token fires, then asserts `account.delete` writes a
   cancelled sync marker and removes the account-scoped rows. Verified
   on 2026-05-09 with a focused `brokkr service-test` run.
-- **M6.9 (PARTIAL - mock OAuth persistence slice landed):** OAuth
-  re-auth is no longer blocked on the fake provider. The first script
-  in `crates/app/tests/service-harness/m6/` drives
-  `oauth.exchange_code` against saehrimnir's mock OAuth provider,
-  asserts the re-auth ack omits token bytes, and verifies the account
-  row gets new encrypted access / refresh token hashes without
-  changing identity or provider columns. The remaining end-to-end slice
-  is revoked-token sync recovery against an OAuth-enforced fixture.
+- **M6.9 (PARTIAL - mock OAuth persistence and post-reauth sync slices landed):**
+  OAuth re-auth is no longer blocked on the fake
+  provider. `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
+  drives `oauth.exchange_code` against saehrimnir's mock OAuth
+  provider, asserts the re-auth ack omits token bytes, and verifies the
+  account row gets new encrypted access / refresh token hashes without
+  changing identity or provider columns. `crates/app/tests/sync-harness/jmap-oauth-recovery.lua`
+  seeds a JMAP OAuth account, re-authenticates through saehrimnir's
+  token route, and verifies the refreshed tokens can import mail from
+  the OAuth-enforced fixture. This proves the manual re-auth persistence
+  path before sync, not expiry-driven recovery. The remaining
+  end-to-end slice is the explicit pre-reauth failed-sync assertion for
+  revoked tokens.
 - **M6.10 (PARTIAL - Graph and CalDAV calendar read + mutation slices landed):**
   `crates/app/tests/sync-harness/graph-calendar-initial.lua`
   runs the Graph calendar fixture through the real calendar runtime
@@ -739,6 +744,10 @@ Ratatoskr-side M8 surface now in tree:
 - `crates/app/tests/service-harness/m6/oauth_reauth_uses_mock_provider.lua`
   targets the `jmap-small.toml` fixture's mock OAuth routes and
   automates the M6.9 re-auth persistence check.
+- `crates/app/tests/sync-harness/jmap-oauth-recovery.lua` targets the
+  `jmap-oauth.toml` fixture, seeds a JMAP OAuth account, runs
+  `oauth.exchange_code`, then verifies the refreshed encrypted tokens
+  can drive a JMAP sync against the OAuth-enforced fixture.
 - `crates/app/tests/sync-harness/graph-calendar-initial.lua`
   targets the `graph-calendar-small.toml` fixture, drives
   `client:start_calendar_sync`, asserts the Work/Personal calendars
@@ -872,8 +881,9 @@ Lua helper cleanup backlog:
   steady-state delta, raw `Email/set` mutation, and scripted
   new/change/delete/move incremental coverage have landed; deeper
   JMAP fixture cases remain.
-- M6.9's remaining OAuth-enforced sync recovery slice verifies
-  revoked-token failure, re-auth, and successful follow-up sync.
+- M6.9's OAuth-enforced sync recovery slice now verifies manual
+  re-auth persistence and successful follow-up sync. The explicit
+  revoked-token failed-sync assertion remains.
 - M6.10 (calendar) has Graph read/sync, Graph create/update/delete
   action coverage, Graph remote-mutation delta import coverage,
   Graph action-to-delta confirmation, CalDAV initial-sync coverage,
@@ -958,7 +968,7 @@ M2 + M4 + harness stable
        |
        +-- M9 Sync benchmarks
        |
-       +-- M6.9 OAuth-enforced sync recovery
+       +-- M6.9 OAuth-enforced failed-sync assertion
        +-- M6.10 Calendar (unblocks via M8 calendar fake)
 ```
 

@@ -17,6 +17,7 @@ pub struct CreateAccountParams {
     pub token_expires_at: Option<i64>,
     pub oauth_provider: Option<String>,
     pub oauth_client_id: Option<String>,
+    pub oauth_token_url: Option<String>,
     // IMAP fields
     pub imap_host: Option<String>,
     pub imap_port: Option<i64>,
@@ -74,7 +75,7 @@ pub fn create_account_sync(
         "INSERT INTO accounts (
             id, email, provider, display_name, account_name, account_color,
             auth_method, access_token, refresh_token, token_expires_at,
-            oauth_provider, oauth_client_id,
+            oauth_provider, oauth_client_id, oauth_token_url,
             imap_host, imap_port, imap_security, imap_username, imap_password,
             smtp_host, smtp_port, smtp_security,
             smtp_username, smtp_password,
@@ -82,11 +83,11 @@ pub fn create_account_sync(
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10,
-            ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17,
-            ?18, ?19, ?20,
-            ?21, ?22,
-            ?23, ?24, ?25
+            ?11, ?12, ?13,
+            ?14, ?15, ?16, ?17, ?18,
+            ?19, ?20, ?21,
+            ?22, ?23,
+            ?24, ?25, ?26
         )",
         params![
             id,
@@ -101,6 +102,7 @@ pub fn create_account_sync(
             params.token_expires_at,
             params.oauth_provider,
             params.oauth_client_id,
+            params.oauth_token_url,
             params.imap_host,
             params.imap_port,
             params.imap_security,

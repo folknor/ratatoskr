@@ -65,12 +65,23 @@ pub(super) async fn seed_account_handle(
     let caldav_url = params.caldav_url;
     let caldav_username = params.caldav_username;
     let caldav_password = params.caldav_password;
-    let oauth_provider = match provider.as_str() {
+    let requested_auth_method = params.auth_method;
+    let default_oauth_provider = match provider.as_str() {
         "gmail_api" => Some("google".to_string()),
         "graph" => Some("microsoft".to_string()),
         _ => None,
     };
-    let uses_oauth = oauth_provider.is_some();
+    let oauth_provider = params.oauth_provider.or(default_oauth_provider);
+    let auth_requires_oauth = requested_auth_method
+        .as_deref()
+        .is_some_and(|method| matches!(method, "oauth2" | "bearer" | "oauthbearer"));
+    if auth_requires_oauth && oauth_provider.is_none() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.seed_account".into(),
+            message: "auth_method requires oauth_provider".into(),
+        });
+    }
+    let uses_oauth = auth_requires_oauth || oauth_provider.is_some();
     let create_params = db::db::queries_extra::CreateAccountParams {
         email: email.clone(),
         provider,
@@ -79,12 +90,27 @@ pub(super) async fn seed_account_handle(
             .account_name
             .unwrap_or_else(|| "Harness Account".into()),
         account_color: "#4285f4".into(),
-        auth_method: if uses_oauth { "oauth2" } else { "password" }.into(),
-        access_token: uses_oauth.then(|| "test-access-token".into()),
-        refresh_token: uses_oauth.then(|| "test-refresh-token".into()),
-        token_expires_at: uses_oauth.then(|| chrono::Utc::now().timestamp() + 3_600),
+        auth_method: requested_auth_method.unwrap_or_else(|| {
+            if uses_oauth {
+                "oauth2".into()
+            } else {
+                "password".into()
+            }
+        }),
+        access_token: params
+            .access_token
+            .or_else(|| uses_oauth.then(|| "test-access-token".into())),
+        refresh_token: params
+            .refresh_token
+            .or_else(|| uses_oauth.then(|| "test-refresh-token".into())),
+        token_expires_at: params
+            .token_expires_at
+            .or_else(|| uses_oauth.then(|| chrono::Utc::now().timestamp() + 3_600)),
         oauth_provider,
-        oauth_client_id: uses_oauth.then(|| "test-client-id".into()),
+        oauth_client_id: params
+            .oauth_client_id
+            .or_else(|| uses_oauth.then(|| "test-client-id".into())),
+        oauth_token_url: params.oauth_token_url,
         imap_host: Some("imap.example.test".into()),
         imap_port: Some(993),
         imap_security: Some("tls".into()),
