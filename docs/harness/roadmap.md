@@ -83,8 +83,10 @@ the brokkr repo):
   `harness.read_json`, `harness.write_text`, `harness.assert`,
   `harness.assert_eq`, `harness.same_client`,
   `harness.expect_quiet(events, seconds)`, `harness.http_get(url)`,
-  `harness.http_post_json(url, body)`, `harness.http_delete(url)`,
-  `harness.env(name)`, and `harness.protocol_version`.
+  `harness.http_post_json(url, body)`,
+  `harness.http_json({ method, url, body })`,
+  `harness.http_delete(url)`, `harness.env(name)`, and
+  `harness.protocol_version`.
 - Landed client/event/request methods:
   `client:request`, `client:request_async`, `client:shutdown`,
   `client:child_pid`, `client:current_generation`, `client:drop`,
@@ -654,9 +656,9 @@ Ratatoskr-side M8 surface now in tree:
   mutates the mock fixture through a direct JMAP `Email/set`, then
   runs ratatoskr delta sync and asserts the updated read state is
   imported via `Email/changes` plus `Email/get` without falling back
-  to `Email/query`. This slice also adds
-  `harness.http_post_json(url, body)` for provider-admin and raw
-  protocol mutation setup.
+  to `Email/query`. The mutation now uses
+  `harness.http_json({ method, url, body })` with a Lua table body so
+  later PATCH/DELETE provider-admin calls can reuse the same helper.
 - `crates/app/tests/sync-harness/imap-initial.lua` targets the
   `imap-small.toml` fixture, asserts the two fixture messages land in
   the local DB, verifies `$seen` / `$flagged` import into read /
@@ -683,10 +685,13 @@ Ratatoskr-side M8 surface now in tree:
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
-  `harness.request_count(requests, protocol, command)`. Existing
-  JMAP, IMAP, Graph calendar, and OAuth fixture scripts use those
-  helpers instead of copy-pasting local URL and request-count
-  utilities.
+  `harness.request_count(requests, protocol, command)`. The Lua
+  harness also exposes `harness.http_json({ method, url, body })`,
+  which supports table bodies and arbitrary HTTP methods while keeping
+  the older `http_get` / `http_post_json` / `http_delete` helpers for
+  compatibility. Existing JMAP, IMAP, Graph calendar, and OAuth
+  fixture scripts use the shared helpers instead of copy-pasting local
+  URL and request-count utilities.
 
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
@@ -711,8 +716,8 @@ by ratatoskr scripts:
   Graph fixture with POST/PATCH/DELETE event calls, run
   `client:start_calendar_sync`, and assert created, updated, and
   tombstoned events surface through `calendarView/delta` and land in
-  the local calendar DB. This may need a generic JSON HTTP helper for
-  methods beyond POST.
+  the local calendar DB. The generic `harness.http_json(...)` helper
+  is available for PATCH/DELETE provider-admin setup.
 - Graph calendar action plus delta confirmation. Extend or pair with
   `calendar_actions_graph_crud.lua` so the Service action path is
   followed by a calendar delta sync against the same fixture, proving
@@ -721,11 +726,6 @@ by ratatoskr scripts:
 
 Lua helper cleanup backlog:
 
-- Consider replacing `harness.http_get`, `harness.http_post_json`,
-  and `harness.http_delete` with or alongside a single
-  `harness.http_json({ method, url, body })` shape before Graph
-  PATCH-based remote-mutation tests. Keep the existing helpers for
-  compatibility with landed scripts.
 - Do not add another extract/search script that copy-pastes the
   backfill, attachment polling, search polling, or attachment lookup
   helpers. First hoist them into shared harness helpers or a supported

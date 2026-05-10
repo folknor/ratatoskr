@@ -53,10 +53,30 @@ harness.assert(not before_hello.is_read, "Hello unexpectedly read before mutatio
 -- `account-1` and `email-001` are fixture IDs from jmap-small.toml.
 -- The raw JMAP mutation intentionally targets the same message that
 -- ratatoskr imported during the initial sync.
-local mutation = harness.http_post_json(
-    jmap_api_url,
-    '{"using":["urn:ietf:params:jmap:core","urn:ietf:params:jmap:mail"],"methodCalls":[["Email/set",{"accountId":"account-1","update":{"email-001":{"keywords/$seen":true}}},"c0"]]}'
-)
+local mutation = harness.http_json({
+    method = "POST",
+    url = jmap_api_url,
+    body = {
+        using = {
+            "urn:ietf:params:jmap:core",
+            "urn:ietf:params:jmap:mail",
+        },
+        methodCalls = {
+            {
+                "Email/set",
+                {
+                    accountId = "account-1",
+                    update = {
+                        ["email-001"] = {
+                            ["keywords/$seen"] = true,
+                        },
+                    },
+                },
+                "c0",
+            },
+        },
+    },
+})
 harness.assert_eq(mutation.methodResponses[1][1], "Email/set", "mutation response method")
 local mutation_body = mutation.methodResponses[1][2]
 harness.assert(mutation_body.updated ~= nil, "mutation did not report updated map")

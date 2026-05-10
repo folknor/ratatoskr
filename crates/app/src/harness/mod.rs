@@ -124,6 +124,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
         lua_clear_mock_requests,
     )?;
     set_field_fn(state, table_idx, "request_count", lua_request_count)?;
+    set_field_fn(state, table_idx, "http_json", lua_http_json)?;
     set_field_fn(state, table_idx, "http_get", lua_http_get)?;
     set_field_fn(state, table_idx, "http_post_json", lua_http_post_json)?;
     set_field_fn(state, table_idx, "http_delete", lua_http_delete)?;
@@ -685,6 +686,30 @@ fn lua_request_count(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_http_json(state: &mut State) -> dellingr::Result<u8> {
+    if state.typ(1) != LuaType::Table {
+        return Err(lua_error_message("http_json requires request table"));
+    }
+    let method = get_string_field(state, 1, "method")?
+        .ok_or_else(|| lua_error_message("http_json requires request.method"))?;
+    let url = get_string_field(state, 1, "url")?
+        .ok_or_else(|| lua_error_message("http_json requires request.url"))?;
+    let request_body = http_json_body_from_field(state, 1, "body")?;
+    let method = parse_http_method(&method, "http_json")?;
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let value = http_request_json(handle, method, url, request_body, "http_json")?;
+    state.set_top(0);
+    match value {
+        Some(value) => push_json(state, &value)?,
+        None => state.push_nil(),
+    }
+    Ok(1)
+}
+
 fn lua_http_get(state: &mut State) -> dellingr::Result<u8> {
     let url = state.to_string(1)?;
     let ctx = context(state)?;
@@ -706,30 +731,14 @@ fn lua_http_post_json(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.handle.clone()
     };
-    let body = handle
-        .block_on(async move {
-            let client = reqwest::Client::new();
-            let response = client
-                .post(&url)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(request_body)
-                .send()
-                .await
-                .map_err(|e| format!("http_post_json {url}: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                return Err(format!("http_post_json {url}: status {status}"));
-            }
-            response
-                .text()
-                .await
-                .map_err(|e| format!("http_post_json {url} body: {e}"))
-        })
-        .map_err(lua_error_message)?;
-    let value: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| {
-            lua_error_message(format!("http_post_json JSON parse: {e}; body={body}"))
-        })?;
+    let value = http_request_json(
+        handle,
+        reqwest::Method::POST,
+        url,
+        Some(request_body),
+        "http_post_json",
+    )?
+    .ok_or_else(|| lua_error_message("http_post_json returned an empty response body"))?;
     state.set_top(0);
     push_json(state, &value)?;
     Ok(1)
@@ -759,27 +768,86 @@ fn mock_requests_url(endpoint: &str) -> String {
     join_url(endpoint, "test/requests")
 }
 
+fn http_json_body_from_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Option<String>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    let result = match state.typ(-1) {
+        LuaType::Nil => Ok(None),
+        LuaType::String => state.to_string(-1).map(Some),
+        LuaType::Boolean | LuaType::Number | LuaType::Table => {
+            let value = lua_value_to_json(state, -1)?;
+            serde_json::to_string(&value)
+                .map(Some)
+                .map_err(lua_json)
+        }
+        other => Err(lua_error_message(format!(
+            "http_json request.{key} must be nil, string, or JSON-like value, got {}",
+            other.as_str()
+        ))),
+    };
+    state.set_top(top as isize);
+    result
+}
+
+fn parse_http_method(method: &str, operation: &'static str) -> dellingr::Result<reqwest::Method> {
+    let method = method.to_ascii_uppercase();
+    reqwest::Method::from_bytes(method.as_bytes()).map_err(|error| {
+        lua_error_message(format!(
+            "{operation} invalid method {method:?}: {error}"
+        ))
+    })
+}
+
 fn http_get_json(
     handle: tokio::runtime::Handle,
     url: String,
     operation: &'static str,
 ) -> dellingr::Result<serde_json::Value> {
+    http_request_json(handle, reqwest::Method::GET, url, None, operation)?
+        .ok_or_else(|| lua_error_message(format!("{operation} returned an empty response body")))
+}
+
+fn http_request_json(
+    handle: tokio::runtime::Handle,
+    method: reqwest::Method,
+    url: String,
+    request_body: Option<String>,
+    operation: &'static str,
+) -> dellingr::Result<Option<serde_json::Value>> {
+    let method_label = method.as_str().to_string();
     let body = handle
         .block_on(async move {
-            let response = reqwest::get(&url)
+            let client = reqwest::Client::new();
+            let mut request = client.request(method, &url);
+            if let Some(request_body) = request_body {
+                request = request
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(request_body);
+            }
+            let response = request
+                .send()
                 .await
-                .map_err(|e| format!("{operation} {url}: {e}"))?;
+                .map_err(|e| format!("{operation} {method_label} {url}: {e}"))?;
             let status = response.status();
             if !status.is_success() {
-                return Err(format!("{operation} {url}: status {status}"));
+                return Err(format!("{operation} {method_label} {url}: status {status}"));
             }
             response
                 .text()
                 .await
-                .map_err(|e| format!("{operation} {url} body: {e}"))
+                .map_err(|e| format!("{operation} {method_label} {url} body: {e}"))
         })
         .map_err(lua_error_message)?;
+    if body.trim().is_empty() {
+        return Ok(None);
+    }
     serde_json::from_str(&body)
+        .map(Some)
         .map_err(|e| lua_error_message(format!("{operation} JSON parse: {e}; body={body}")))
 }
 
@@ -2677,6 +2745,122 @@ fn push_json(state: &mut State, value: &serde_json::Value) -> dellingr::Result<(
         }
     }
     Ok(())
+}
+
+enum LuaJsonKey {
+    ArrayIndex(usize),
+    ObjectKey(String),
+}
+
+fn lua_value_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_json::Value> {
+    let idx = absolute_stack_idx(state, idx);
+    match state.typ(idx) {
+        LuaType::Nil => Ok(serde_json::Value::Null),
+        LuaType::Boolean => Ok(serde_json::Value::Bool(state.to_boolean(idx))),
+        LuaType::Number => {
+            let number = state.to_number(idx)?;
+            serde_json::Number::from_f64(number)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| lua_error_message(format!("number is not JSON-safe: {number}")))
+        }
+        LuaType::String => state.to_string(idx).map(serde_json::Value::String),
+        LuaType::Table => lua_table_to_json(state, idx),
+        LuaType::Function => Err(lua_error_message("function is not JSON-serializable")),
+    }
+}
+
+fn lua_table_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_json::Value> {
+    let idx = absolute_stack_idx(state, idx);
+    let top = state.get_top();
+    let mut array_entries = Vec::new();
+    let mut object_entries = Vec::new();
+    state.push_nil();
+    loop {
+        let has_next = match state.table_next(idx) {
+            Ok(has_next) => has_next,
+            Err(error) => {
+                state.set_top(top as isize);
+                return Err(error);
+            }
+        };
+        if !has_next {
+            break;
+        }
+        let key = match lua_json_key(state, -2) {
+            Ok(key) => key,
+            Err(error) => {
+                state.set_top(top as isize);
+                return Err(error);
+            }
+        };
+        let value = match lua_value_to_json(state, -1) {
+            Ok(value) => value,
+            Err(error) => {
+                state.set_top(top as isize);
+                return Err(error);
+            }
+        };
+        match key {
+            LuaJsonKey::ArrayIndex(index) => array_entries.push((index, value)),
+            LuaJsonKey::ObjectKey(key) => object_entries.push((key, value)),
+        }
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+
+    if object_entries.is_empty() && !array_entries.is_empty() {
+        array_entries.sort_by_key(|(index, _)| *index);
+        let mut values = Vec::with_capacity(array_entries.len());
+        for (offset, (index, value)) in array_entries.into_iter().enumerate() {
+            let expected = offset + 1;
+            if index != expected {
+                return Err(lua_error_message(format!(
+                    "JSON array table must have contiguous 1-based indices; \
+                     expected {expected}, got {index}"
+                )));
+            }
+            values.push(value);
+        }
+        Ok(serde_json::Value::Array(values))
+    } else if array_entries.is_empty() {
+        let mut object = serde_json::Map::new();
+        for (key, value) in object_entries {
+            object.insert(key, value);
+        }
+        Ok(serde_json::Value::Object(object))
+    } else {
+        Err(lua_error_message(
+            "JSON table cannot mix array indices and object keys",
+        ))
+    }
+}
+
+fn lua_json_key(state: &mut State, idx: isize) -> dellingr::Result<LuaJsonKey> {
+    let idx = absolute_stack_idx(state, idx);
+    match state.typ(idx) {
+        LuaType::Number => {
+            let number = state.to_number(idx)?;
+            if !number.is_finite() || number < 1.0 || number.fract() != 0.0 {
+                return Err(lua_error_message(format!(
+                    "JSON array index must be a positive integer, got {number}"
+                )));
+            }
+            Ok(LuaJsonKey::ArrayIndex(number as usize))
+        }
+        LuaType::String => state.to_string(idx).map(LuaJsonKey::ObjectKey),
+        other => Err(lua_error_message(format!(
+            "JSON object key must be string or array index, got {}",
+            other.as_str()
+        ))),
+    }
+}
+
+fn absolute_stack_idx(state: &State, idx: isize) -> isize {
+    if idx < 0 {
+        state.get_top() as isize + idx + 1
+    } else {
+        idx
+    }
 }
 
 fn set_field_fn(
