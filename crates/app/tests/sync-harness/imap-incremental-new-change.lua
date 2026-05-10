@@ -1,4 +1,4 @@
--- description: IMAP delta imports scripted fixture new/change steps
+-- description: IMAP delta imports scripted fixture new/change/delete/move steps
 -- expected: pass
 -- fixture: jmap-incremental.lua
 -- protocol: imap
@@ -22,6 +22,14 @@ local function has_value(values, expected)
     return false
 end
 
+local function assert_has_value(values, expected, message)
+    harness.assert(has_value(values, expected), message)
+end
+
+local function assert_lacks_value(values, expected, message)
+    harness.assert(not has_value(values, expected), message)
+end
+
 local function fixture_email_by_id(snapshot, id)
     for _, email in ipairs(snapshot.emails) do
         if email.id == id then
@@ -38,6 +46,15 @@ local function query_state(client, account_id, label)
     })
     harness.assert(err == nil, label .. " TestQueryDbState failed")
     return state
+end
+
+local function read_thread(client, account_id, thread_id, label)
+    local thread, err = client:request("TestThreadRead", {
+        account_id = account_id,
+        thread_id = thread_id,
+    })
+    harness.assert(err == nil, label .. " TestThreadRead failed")
+    return thread
 end
 
 local function run_sync(client, account_id, label)
@@ -148,6 +165,80 @@ local status_update = message_by_subject(after_change, "Status update")
 harness.assert(status_update ~= nil, "Status update missing after change")
 harness.assert(status_update.is_read, "Status update did not import $seen")
 harness.assert(status_update.is_starred, "Status update did not import $flagged")
+local thread_after_change =
+    read_thread(client, account.account_id, status_update.thread_id, "after change")
+assert_has_value(
+    thread_after_change.label_ids,
+    "STARRED",
+    "Status update thread did not gain STARRED"
+)
+assert_lacks_value(
+    thread_after_change.label_ids,
+    "UNREAD",
+    "Status update thread retained UNREAD after $seen"
+)
+
+harness.clear_mock_requests(admin_endpoint)
+local delete_step = apply_step(admin_endpoint, "delete")
+harness.assert_eq(delete_step.changes.emails.destroyed[1], "email-001", "delete step destroyed id")
+local remote_after_delete = fixture_snapshot(admin_endpoint)
+harness.assert(
+    fixture_email_by_id(remote_after_delete, "email-001") == nil,
+    "remote snapshot retained email-001 after delete"
+)
+run_sync(client, account.account_id, "delete step")
+assert_imap_delta_checked(admin_endpoint, "delete step")
+local after_delete = query_state(client, account.account_id, "after delete")
+harness.assert_eq(after_delete.message_count, 2, "message count after delete")
+harness.assert(message_by_subject(after_delete, "Welcome") == nil, "Welcome survived delete")
+
+harness.clear_mock_requests(admin_endpoint)
+local move_step = apply_step(admin_endpoint, "move")
+harness.assert_eq(move_step.changes.emails.moved[1], "email-002", "move step moved id")
+local remote_after_move = fixture_snapshot(admin_endpoint)
+local remote_moved = fixture_email_by_id(remote_after_move, "email-002")
+harness.assert(remote_moved ~= nil, "remote snapshot missing email-002 after move")
+assert_has_value(
+    remote_moved.mailbox_ids,
+    "mb-archive",
+    "remote email-002 did not move to archive"
+)
+assert_lacks_value(
+    remote_moved.mailbox_ids,
+    "mb-inbox",
+    "remote email-002 stayed in inbox after move"
+)
+run_sync(client, account.account_id, "move step")
+local move_requests = assert_imap_delta_checked(admin_endpoint, "move step")
+harness.assert(
+    harness.request_count(move_requests, "imap", "UID FETCH") >= 1,
+    "move step did not fetch the destination IMAP message"
+)
+local after_move = query_state(client, account.account_id, "after move")
+harness.assert_eq(after_move.message_count, 2, "message count after move")
+local moved_status = message_by_subject(after_move, "Status update")
+harness.assert(moved_status ~= nil, "Status update missing after move")
+local thread_after_move =
+    read_thread(client, account.account_id, moved_status.thread_id, "after move")
+assert_has_value(
+    thread_after_move.label_ids,
+    "archive",
+    "Status update thread did not gain archive after move"
+)
+assert_lacks_value(
+    thread_after_move.label_ids,
+    "INBOX",
+    "Status update thread stayed in INBOX after move"
+)
+
+local end_response = harness.http_json({
+    method = "POST",
+    url = harness.join_url(admin_endpoint, "test/fixture/step"),
+    body = {},
+})
+harness.assert(end_response.ok, "end-of-script response failed")
+harness.assert(end_response.step == nil, "end-of-script step should be nil")
+harness.assert(not end_response.applied, "end-of-script should not apply")
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

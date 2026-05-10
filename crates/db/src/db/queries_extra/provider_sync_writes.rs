@@ -81,6 +81,57 @@ pub fn recompute_thread_read_starred(
     Ok(())
 }
 
+/// Mirror aggregate read/starred state into the synthetic thread label rows.
+///
+/// Initial import derives these rows from message labels. Flag-only IMAP delta
+/// paths update existing messages in place, so they need to keep the same
+/// projection current after recomputing the aggregate thread booleans.
+pub fn sync_thread_read_starred_labels(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    let (has_unread, has_starred): (bool, bool) = conn
+        .query_row(
+            "SELECT \
+               COALESCE(MAX(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0), \
+               COALESCE(MAX(is_starred), 0) \
+             FROM messages \
+             WHERE account_id = ?1 AND thread_id = ?2",
+            params![account_id, thread_id],
+            |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)? != 0)),
+        )
+        .map_err(|e| format!("sync_thread_read_starred_labels aggregate: {e}"))?;
+
+    set_thread_label_presence(conn, account_id, thread_id, "UNREAD", has_unread)?;
+    set_thread_label_presence(conn, account_id, thread_id, "STARRED", has_starred)?;
+    Ok(())
+}
+
+fn set_thread_label_presence(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
+    present: bool,
+) -> Result<(), String> {
+    if present {
+        conn.execute(
+            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+             VALUES (?1, ?2, ?3)",
+            params![account_id, thread_id, label_id],
+        )
+        .map_err(|e| format!("insert thread flag label {label_id}: {e}"))?;
+    } else {
+        conn.execute(
+            "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
+            params![account_id, thread_id, label_id],
+        )
+        .map_err(|e| format!("delete thread flag label {label_id}: {e}"))?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // attachments table
 // ---------------------------------------------------------------------------

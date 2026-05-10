@@ -7,6 +7,7 @@ use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels,
     get_thread_id_for_imap_uid, recompute_thread_read_starred, set_message_imap_flags,
+    sync_thread_read_starred_labels,
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
@@ -680,6 +681,7 @@ pub fn apply_flag_changes(
     // Reaggregate thread-level is_read/is_starred from constituent messages
     for tid in &affected_threads {
         recompute_thread_read_starred(&tx, account_id, tid)?;
+        sync_thread_read_starred_labels(&tx, account_id, tid)?;
     }
 
     // Sync custom keywords to the unified labels system.
