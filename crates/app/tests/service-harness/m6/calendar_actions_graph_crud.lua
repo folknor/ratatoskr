@@ -4,13 +4,6 @@
 -- protocol: graph
 -- ceiling: 120s
 
-local function join_url(base, suffix)
-    if string.sub(base, -1) == "/" then
-        return base .. suffix
-    end
-    return base .. "/" .. suffix
-end
-
 local function calendar_by_remote_id(calendars, remote_id)
     for _, calendar in ipairs(calendars) do
         if calendar.remote_id == remote_id then
@@ -37,16 +30,6 @@ local function assert_success(completed, label)
     harness.assert_eq(result.kind, "success", label .. " result")
 end
 
-local function request_count(requests, protocol, command)
-    local count = 0
-    for _, request in ipairs(requests) do
-        if request.protocol == protocol and request.command == command then
-            count = count + 1
-        end
-    end
-    return count
-end
-
 local function request_body(requests, command)
     for _, request in ipairs(requests) do
         if request.protocol == "graph" and request.command == command then
@@ -61,8 +44,7 @@ end
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-local requests_url = join_url(admin_endpoint, "test/requests")
-harness.http_delete(requests_url)
+harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("m6_calendar_actions_graph_crud")
 local client, err = harness.spawn(dir)
@@ -98,7 +80,7 @@ harness.assert(standup ~= nil, "missing Standup")
 local review = event_by_remote_id(initial.calendar_events, "ev-002")
 harness.assert(review ~= nil, "missing Quarterly review")
 
-harness.http_delete(requests_url)
+harness.clear_mock_requests(admin_endpoint)
 
 local create_input = {
     title = "Harness created",
@@ -179,7 +161,7 @@ harness.assert_eq(final_created.location, "Focus Room", "created location")
 local final_review = event_by_remote_id(final.calendar_events, "ev-002")
 harness.assert(final_review == nil, "deleted review still present")
 
-local requests = harness.http_get(requests_url)
+local requests = harness.mock_requests(admin_endpoint)
 local create_body = request_body(
     requests,
     "POST /v1.0/me/calendars/cal-work/events"
@@ -203,7 +185,7 @@ harness.assert_eq(
     "patch start"
 )
 harness.assert(
-    request_count(requests, "graph", "DELETE /v1.0/me/events/ev-002") >= 1,
+    harness.request_count(requests, "graph", "DELETE /v1.0/me/events/ev-002") >= 1,
     "missing delete request"
 )
 

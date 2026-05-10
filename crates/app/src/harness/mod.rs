@@ -115,6 +115,15 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "assert_eq", lua_assert_eq)?;
     set_field_fn(state, table_idx, "same_client", lua_same_client)?;
     set_field_fn(state, table_idx, "expect_quiet", lua_expect_quiet)?;
+    set_field_fn(state, table_idx, "join_url", lua_join_url)?;
+    set_field_fn(state, table_idx, "mock_requests", lua_mock_requests)?;
+    set_field_fn(
+        state,
+        table_idx,
+        "clear_mock_requests",
+        lua_clear_mock_requests,
+    )?;
+    set_field_fn(state, table_idx, "request_count", lua_request_count)?;
     set_field_fn(state, table_idx, "http_get", lua_http_get)?;
     set_field_fn(state, table_idx, "http_post_json", lua_http_post_json)?;
     set_field_fn(state, table_idx, "http_delete", lua_http_delete)?;
@@ -610,6 +619,72 @@ fn lua_env(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_join_url(state: &mut State) -> dellingr::Result<u8> {
+    let base = state.to_string(1)?;
+    let suffix = state.to_string(2)?;
+    let url = join_url(&base, &suffix);
+    state.set_top(0);
+    state.push_string(&url);
+    Ok(1)
+}
+
+fn lua_mock_requests(state: &mut State) -> dellingr::Result<u8> {
+    let endpoint = state.to_string(1)?;
+    let url = mock_requests_url(&endpoint);
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let value = http_get_json(handle, url, "mock_requests")?;
+    state.set_top(0);
+    push_json(state, &value)?;
+    Ok(1)
+}
+
+fn lua_clear_mock_requests(state: &mut State) -> dellingr::Result<u8> {
+    let endpoint = state.to_string(1)?;
+    let url = mock_requests_url(&endpoint);
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    http_delete(handle, url, "clear_mock_requests")?;
+    state.set_top(0);
+    Ok(0)
+}
+
+fn lua_request_count(state: &mut State) -> dellingr::Result<u8> {
+    if state.typ(1) != LuaType::Table {
+        return Err(lua_error_message("request_count requires request table"));
+    }
+    let protocol = state.to_string(2)?;
+    let command = state.to_string(3)?;
+    let requests_idx = 1;
+    let len = state.table_len(requests_idx);
+    let mut count = 0u64;
+    for i in 1..=len {
+        let top = state.get_top();
+        state.push_number(i as f64);
+        state.get_table(requests_idx)?;
+        if state.typ(-1) == LuaType::Table {
+            let request_idx = state.get_top() as isize;
+            let request_protocol = get_string_field(state, request_idx, "protocol")?;
+            let request_command = get_string_field(state, request_idx, "command")?;
+            if request_protocol.as_deref() == Some(protocol.as_str())
+                && request_command.as_deref() == Some(command.as_str())
+            {
+                count = count.saturating_add(1);
+            }
+        }
+        state.set_top(top as isize);
+    }
+    state.set_top(0);
+    state.push_number(count as f64);
+    Ok(1)
+}
+
 fn lua_http_get(state: &mut State) -> dellingr::Result<u8> {
     let url = state.to_string(1)?;
     let ctx = context(state)?;
@@ -617,25 +692,7 @@ fn lua_http_get(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.handle.clone()
     };
-    let body = handle
-        .block_on(async move {
-            let response = reqwest::get(&url)
-                .await
-                .map_err(|e| format!("http_get {url}: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                return Err(format!("http_get {url}: status {status}"));
-            }
-            response
-                .text()
-                .await
-                .map_err(|e| format!("http_get {url} body: {e}"))
-        })
-        .map_err(lua_error_message)?;
-    let value: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| {
-            lua_error_message(format!("http_get JSON parse: {e}; body={body}"))
-        })?;
+    let value = http_get_json(handle, url, "http_get")?;
     state.set_top(0);
     push_json(state, &value)?;
     Ok(1)
@@ -685,6 +742,52 @@ fn lua_http_delete(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.handle.clone()
     };
+    http_delete(handle, url, "http_delete")?;
+    state.set_top(0);
+    Ok(0)
+}
+
+fn join_url(base: &str, suffix: &str) -> String {
+    match (base.ends_with('/'), suffix.starts_with('/')) {
+        (true, true) => format!("{}{}", base, &suffix[1..]),
+        (true, false) | (false, true) => format!("{base}{suffix}"),
+        (false, false) => format!("{base}/{suffix}"),
+    }
+}
+
+fn mock_requests_url(endpoint: &str) -> String {
+    join_url(endpoint, "test/requests")
+}
+
+fn http_get_json(
+    handle: tokio::runtime::Handle,
+    url: String,
+    operation: &'static str,
+) -> dellingr::Result<serde_json::Value> {
+    let body = handle
+        .block_on(async move {
+            let response = reqwest::get(&url)
+                .await
+                .map_err(|e| format!("{operation} {url}: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(format!("{operation} {url}: status {status}"));
+            }
+            response
+                .text()
+                .await
+                .map_err(|e| format!("{operation} {url} body: {e}"))
+        })
+        .map_err(lua_error_message)?;
+    serde_json::from_str(&body)
+        .map_err(|e| lua_error_message(format!("{operation} JSON parse: {e}; body={body}")))
+}
+
+fn http_delete(
+    handle: tokio::runtime::Handle,
+    url: String,
+    operation: &'static str,
+) -> dellingr::Result<()> {
     handle
         .block_on(async move {
             let client = reqwest::Client::new();
@@ -692,16 +795,14 @@ fn lua_http_delete(state: &mut State) -> dellingr::Result<u8> {
                 .delete(&url)
                 .send()
                 .await
-                .map_err(|e| format!("http_delete {url}: {e}"))?;
+                .map_err(|e| format!("{operation} {url}: {e}"))?;
             let status = response.status();
             if !status.is_success() {
-                return Err(format!("http_delete {url}: status {status}"));
+                return Err(format!("{operation} {url}: status {status}"));
             }
             Ok(())
         })
-        .map_err(lua_error_message)?;
-    state.set_top(0);
-    Ok(0)
+        .map_err(lua_error_message)
 }
 
 fn lua_expect_quiet(state: &mut State) -> dellingr::Result<u8> {

@@ -4,13 +4,6 @@
 -- protocol: jmap
 -- ceiling: 120s
 
-local function join_url(base, suffix)
-    if string.sub(base, -1) == "/" then
-        return base .. suffix
-    end
-    return base .. "/" .. suffix
-end
-
 local function account_by_id(state, account_id)
     for _, account in ipairs(state.accounts) do
         if account.id == account_id then
@@ -20,19 +13,8 @@ local function account_by_id(state, account_id)
     return nil
 end
 
-local function request_count(requests, protocol, command)
-    local count = 0
-    for _, request in ipairs(requests) do
-        if request.protocol == protocol and request.command == command then
-            count = count + 1
-        end
-    end
-    return count
-end
-
 local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
-local requests_url = join_url(jmap_endpoint, "test/requests")
 
 local dir = harness.data_dir("sync_jmap_steady_state_delta")
 local client, err = harness.spawn(dir)
@@ -82,7 +64,7 @@ harness.assert(
     "initial sync did not mark account completed"
 )
 
-harness.http_delete(requests_url)
+harness.clear_mock_requests(jmap_endpoint)
 
 local second, second_err = client:start_sync({
     account_id = account.account_id,
@@ -90,17 +72,17 @@ local second, second_err = client:start_sync({
 harness.assert(second_err == nil, "delta start_sync failed")
 harness.assert_eq(second.result, "completed", second.error or "delta sync result")
 
-local requests = harness.http_get(requests_url)
+local requests = harness.mock_requests(jmap_endpoint)
 harness.assert(
-    request_count(requests, "jmap", "Mailbox/changes") >= 1,
+    harness.request_count(requests, "jmap", "Mailbox/changes") >= 1,
     "delta sync did not call Mailbox/changes"
 )
 harness.assert(
-    request_count(requests, "jmap", "Email/changes") >= 1,
+    harness.request_count(requests, "jmap", "Email/changes") >= 1,
     "delta sync did not call Email/changes"
 )
 harness.assert_eq(
-    request_count(requests, "jmap", "Email/query"),
+    harness.request_count(requests, "jmap", "Email/query"),
     0,
     "delta sync unexpectedly ran Email/query"
 )

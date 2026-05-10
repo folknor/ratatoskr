@@ -4,13 +4,6 @@
 -- protocol: graph
 -- ceiling: 120s
 
-local function join_url(base, suffix)
-    if string.sub(base, -1) == "/" then
-        return base .. suffix
-    end
-    return base .. "/" .. suffix
-end
-
 local function calendar_by_remote_id(calendars, remote_id)
     for _, calendar in ipairs(calendars) do
         if calendar.remote_id == remote_id then
@@ -29,21 +22,10 @@ local function event_by_remote_id(events, remote_id)
     return nil
 end
 
-local function request_count(requests, protocol, command)
-    local count = 0
-    for _, request in ipairs(requests) do
-        if request.protocol == protocol and request.command == command then
-            count = count + 1
-        end
-    end
-    return count
-end
-
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-local requests_url = join_url(admin_endpoint, "test/requests")
-harness.http_delete(requests_url)
+harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("sync_graph_calendar_initial")
 local client, err = harness.spawn(dir)
@@ -117,13 +99,13 @@ harness.assert_eq(review.start_time, 1769954400, "review start_time")
 harness.assert_eq(review.end_time, 1769958000, "review end_time")
 harness.assert(review.attendees_json == nil, "empty attendees should stay nil")
 
-local requests = harness.http_get(requests_url)
+local requests = harness.mock_requests(admin_endpoint)
 harness.assert(
-    request_count(requests, "graph", "GET /v1.0/me/calendars") >= 1,
+    harness.request_count(requests, "graph", "GET /v1.0/me/calendars") >= 1,
     "Graph calendar sync did not list calendars"
 )
 harness.assert(
-    request_count(
+    harness.request_count(
         requests,
         "graph",
         "GET /v1.0/me/calendars/cal-work/calendarView/delta"
@@ -131,7 +113,7 @@ harness.assert(
     "Graph calendar sync did not delta-sync Work"
 )
 harness.assert(
-    request_count(
+    harness.request_count(
         requests,
         "graph",
         "GET /v1.0/me/calendars/cal-personal/calendarView/delta"

@@ -217,7 +217,7 @@ fn parse_event_datetime(
         })
     } else {
         Ok(GraphDateTimeTimeZone {
-            date_time: dt_str.to_string(),
+            date_time: dt_str,
             time_zone: "UTC".to_string(),
         })
     }

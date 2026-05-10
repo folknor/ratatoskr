@@ -406,7 +406,7 @@ pub async fn graph_create_event(
         Err(error) => {
             #[cfg(any(test, feature = "test-helpers"))]
             if response.get("echoedRequest").is_some() {
-                return graph_event_from_create_echo(response, event)
+                return graph_event_from_create_echo(&response, event)
                     .ok_or_else(|| {
                         format!("Failed to parse Graph create echo response: {error}")
                     })
@@ -420,7 +420,7 @@ pub async fn graph_create_event(
 
 #[cfg(any(test, feature = "test-helpers"))]
 fn graph_event_from_create_echo(
-    response: serde_json::Value,
+    response: &serde_json::Value,
     event: &GraphEventCreate,
 ) -> Option<GraphEvent> {
     let id = response.get("id")?.as_str()?.to_string();

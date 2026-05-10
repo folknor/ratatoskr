@@ -3,13 +3,6 @@
 -- protocol: jmap
 -- ceiling: 90s
 
-local function join_url(base, suffix)
-    if string.sub(base, -1) == "/" then
-        return base .. suffix
-    end
-    return base .. "/" .. suffix
-end
-
 local function account_by_id(state, account_id)
     for _, account in ipairs(state.accounts) do
         if account.id == account_id then
@@ -60,9 +53,9 @@ harness.assert(
 local reauth_started_at = math.floor(harness.now_ms() / 1000)
 local ack, oauth_err = client:request("oauth.exchange_code", {
     provider_id = "oidc:saehrimnir",
-    token_url = join_url(jmap_endpoint, "oauth/token"),
+    token_url = harness.join_url(jmap_endpoint, "oauth/token"),
     scopes = { "openid", "email", "profile" },
-    user_info_url = join_url(jmap_endpoint, "oauth/userinfo"),
+    user_info_url = harness.join_url(jmap_endpoint, "oauth/userinfo"),
     use_pkce = false,
     client_id = "ratatoskr-harness",
     redirect_uri = "http://127.0.0.1/oauth-callback",

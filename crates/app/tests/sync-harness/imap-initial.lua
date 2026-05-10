@@ -4,13 +4,6 @@
 -- protocol: imap
 -- ceiling: 120s
 
-local function join_url(base, suffix)
-    if string.sub(base, -1) == "/" then
-        return base .. suffix
-    end
-    return base .. "/" .. suffix
-end
-
 local function account_by_id(state, account_id)
     for _, account in ipairs(state.accounts) do
         if account.id == account_id then
@@ -29,21 +22,10 @@ local function message_by_subject(messages, subject)
     return nil
 end
 
-local function request_count(requests, protocol, command)
-    local count = 0
-    for _, request in ipairs(requests) do
-        if request.protocol == protocol and request.command == command then
-            count = count + 1
-        end
-    end
-    return count
-end
-
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-local requests_url = join_url(admin_endpoint, "test/requests")
-harness.http_delete(requests_url)
+harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("sync_imap_initial")
 local client, err = harness.spawn(dir)
@@ -94,17 +76,17 @@ harness.assert(reply ~= nil, "missing Re: Hello")
 harness.assert(not reply.is_read, "Re: Hello should import as unread")
 harness.assert(reply.is_starred, "Re: Hello should import as starred from $flagged")
 
-local requests = harness.http_get(requests_url)
+local requests = harness.mock_requests(admin_endpoint)
 harness.assert(
-    request_count(requests, "imap", "LIST") >= 1,
+    harness.request_count(requests, "imap", "LIST") >= 1,
     "IMAP sync did not list folders"
 )
 harness.assert(
-    request_count(requests, "imap", "UID SEARCH") >= 1,
+    harness.request_count(requests, "imap", "UID SEARCH") >= 1,
     "IMAP sync did not search UIDs"
 )
 harness.assert(
-    request_count(requests, "imap", "UID FETCH") >= 1,
+    harness.request_count(requests, "imap", "UID FETCH") >= 1,
     "IMAP sync did not fetch messages"
 )
 

@@ -601,12 +601,14 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 ### M8 - Provider mock servers (Track 2)
 
 **Status:** PARTIAL - ratatoskr's test-only endpoint override,
-sync-trigger, DB-query, first sync-harness script, and OAuth re-auth
-persistence harness path have landed. Brokkr can now spawn saehrimnir
-for fixture-frontmatter scripts and inject provider endpoints. Recent
-saehrimnir support adds admin request/reset routes, OAuth token /
-userinfo routes, steady-state JMAP changes, and a Graph calendar
-fixture surface.
+sync-trigger, DB-query, first sync-harness script, OAuth re-auth
+persistence harness path, and one JMAP remote-mutation delta script
+have landed. Brokkr can now spawn saehrimnir for fixture-frontmatter
+scripts and inject provider endpoints. Recent saehrimnir support adds
+admin request/reset routes, OAuth token / userinfo routes,
+steady-state JMAP changes, JMAP `Email/set` / `Mailbox/set`
+changesets, persistent IMAP `UID STORE`, IMAP `UID COPY` /
+`UID EXPUNGE`, and Graph calendar mutation deltas.
 
 Mock IMAP and JMAP servers, fixture sets (small smoke / medium /
 large / huge thread / many folders / duplicate Message-ID / malformed
@@ -678,6 +680,56 @@ Ratatoskr-side M8 surface now in tree:
   `client:execute_calendar_plan`, and verifies create/update/delete
   flow through the Service worker into Graph POST/PATCH/DELETE
   requests and local calendar-event state.
+- Sync-harness request-log helper cleanup has landed. The Lua harness
+  now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
+  `harness.clear_mock_requests(endpoint)`, and
+  `harness.request_count(requests, protocol, command)`. Existing
+  JMAP, IMAP, Graph calendar, and OAuth fixture scripts use those
+  helpers instead of copy-pasting local URL and request-count
+  utilities.
+
+Newly unlocked by the latest saehrimnir commits, but not yet covered
+by ratatoskr scripts:
+
+- IMAP writeback persistence. After an IMAP initial sync, drive
+  ratatoskr `ActionExecutePlan` operations such as `SetRead`,
+  `SetStarred`, `MoveToFolder`, and `PermanentDelete` against the
+  synced fixture and assert saehrimnir records the expected
+  `UID STORE`, `UID COPY`, and `UID EXPUNGE` flows. A follow-up sync
+  should see the persisted fixture state instead of reverting to the
+  original fixture keywords or mailbox membership.
+- IMAP remote-mutation delta import. Once the harness has either a
+  raw IMAP helper or a small saehrimnir admin mutation route, mutate
+  flags / copies / expunges out of band, run ratatoskr delta sync, and
+  assert local DB state follows the remote fixture. This is the IMAP
+  analogue of `jmap-email-set-delta.lua`.
+- Mixed-protocol shared-state proof. On a fixture that exposes both
+  IMAP and JMAP over the same `Fixture`, mutate through IMAP and then
+  verify JMAP `Email/changes` reports the same transition. This
+  proves the shared fixture change log is not protocol-local.
+- Graph calendar remote-mutation delta import. Directly mutate the
+  Graph fixture with POST/PATCH/DELETE event calls, run
+  `client:start_calendar_sync`, and assert created, updated, and
+  tombstoned events surface through `calendarView/delta` and land in
+  the local calendar DB. This may need a generic JSON HTTP helper for
+  methods beyond POST.
+- Graph calendar action plus delta confirmation. Extend or pair with
+  `calendar_actions_graph_crud.lua` so the Service action path is
+  followed by a calendar delta sync against the same fixture, proving
+  saehrimnir's mutation log can replay the action effects through the
+  normal Graph delta surface.
+
+Lua helper cleanup backlog:
+
+- Consider replacing `harness.http_get`, `harness.http_post_json`,
+  and `harness.http_delete` with or alongside a single
+  `harness.http_json({ method, url, body })` shape before Graph
+  PATCH-based remote-mutation tests. Keep the existing helpers for
+  compatibility with landed scripts.
+- Do not add another extract/search script that copy-pastes the
+  backfill, attachment polling, search polling, or attachment lookup
+  helpers. First hoist them into shared harness helpers or a supported
+  Lua include path.
 
 **Exit criteria:**
 
