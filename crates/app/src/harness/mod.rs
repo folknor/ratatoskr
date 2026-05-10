@@ -2143,6 +2143,9 @@ fn request_params_from_lua(
                     display_name: get_string_field(state, params_idx, "display_name")?,
                     account_name: get_string_field(state, params_idx, "account_name")?,
                     provider: get_string_field(state, params_idx, "provider")?,
+                    caldav_url: get_string_field(state, params_idx, "caldav_url")?,
+                    caldav_username: get_string_field(state, params_idx, "caldav_username")?,
+                    caldav_password: get_string_field(state, params_idx, "caldav_password")?,
                 }
             } else {
                 TestSeedAccountParams::default()
@@ -2302,6 +2305,14 @@ fn request_params_from_lua(
                         .map(|value| value as u64),
                     calendar_limit: get_number_field(state, params_idx, "calendar_limit")?
                         .map(|value| value as u64),
+                    contact_limit: get_number_field(state, params_idx, "contact_limit")?
+                        .map(|value| value as u64),
+                    contact_group_limit: get_number_field(
+                        state,
+                        params_idx,
+                        "contact_group_limit",
+                    )?
+                    .map(|value| value as u64),
                 }
             } else {
                 TestQueryDbStateParams::default()

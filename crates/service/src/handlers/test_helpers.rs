@@ -11,9 +11,9 @@ use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
-    TestDbCalendarEventRow, TestDbCalendarRow, TestDbLocalDraftRow, TestDbMessageRow,
-    TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
+    TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
+    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck, TestDelayNextWriteParams,
+    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
     TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
@@ -62,6 +62,9 @@ pub(super) async fn seed_account_handle(
         .email
         .unwrap_or_else(|| format!("harness-{unique}@example.test"));
     let provider = params.provider.unwrap_or_else(|| "imap".into());
+    let caldav_url = params.caldav_url;
+    let caldav_username = params.caldav_username;
+    let caldav_password = params.caldav_password;
     let oauth_provider = match provider.as_str() {
         "gmail_api" => Some("google".to_string()),
         "graph" => Some("microsoft".to_string()),
@@ -100,6 +103,22 @@ pub(super) async fn seed_account_handle(
         .with_conn(move |conn| {
             let account_id =
                 db::db::queries_extra::create_account_sync(conn, &create_params)?;
+            if caldav_url.is_some() || caldav_username.is_some() || caldav_password.is_some() {
+                conn.execute(
+                    "UPDATE accounts
+                     SET caldav_url = ?1,
+                         caldav_username = ?2,
+                         caldav_password = ?3
+                     WHERE id = ?4",
+                    params![
+                        caldav_url,
+                        caldav_username,
+                        caldav_password,
+                        &account_id
+                    ],
+                )
+                .map_err(|e| format!("seed account caldav config: {e}"))?;
+            }
             let label_count = insert_harness_account_rows(conn, &account_id, &email)?;
             Ok((account_id, label_count))
         })
@@ -898,12 +917,16 @@ fn read_harness_db_state(
         local_draft_count: count_account_rows(conn, "local_drafts", account_id)?,
         calendar_count: count_account_rows(conn, "calendars", account_id)?,
         calendar_event_count: count_account_rows(conn, "calendar_events", account_id)?,
+        contact_count: count_account_rows(conn, "contacts", account_id)?,
+        contact_group_count: count_account_rows(conn, "contact_groups", account_id)?,
         accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
         messages: read_harness_messages(conn, params)?,
         local_drafts: read_harness_local_drafts(conn, params)?,
         attachments: read_harness_attachments(conn, params)?,
         calendars: read_harness_calendars(conn, params)?,
         calendar_events: read_harness_calendar_events(conn, params)?,
+        contacts: read_harness_contacts(conn, params)?,
+        contact_groups: read_harness_contact_groups(conn, params)?,
     })
 }
 
@@ -1316,6 +1339,88 @@ fn read_harness_calendar_events(
     }
 }
 
+fn read_harness_contacts(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbContactRow>, String> {
+    let limit = i64::try_from(params.contact_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("contact limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, email, display_name, source, account_id,
+                            server_id, email2, phone, company, notes,
+                            display_name_overridden
+                     FROM contacts
+                     WHERE account_id = ?1
+                     ORDER BY email ASC, id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare contacts query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_contact_from_row)
+                .map_err(|e| format!("query contacts: {e}"))?;
+            collect_rows(mapped, "contacts")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, email, display_name, source, account_id,
+                            server_id, email2, phone, company, notes,
+                            display_name_overridden
+                     FROM contacts
+                     ORDER BY account_id ASC, email ASC, id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare contacts query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_contact_from_row)
+                .map_err(|e| format!("query contacts: {e}"))?;
+            collect_rows(mapped, "contacts")
+        }
+    }
+}
+
+fn read_harness_contact_groups(
+    conn: &Connection,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbContactGroupRow>, String> {
+    let limit = i64::try_from(params.contact_group_limit.unwrap_or(20).min(200))
+        .map_err(|e| format!("contact group limit conversion: {e}"))?;
+    match params.account_id.as_deref() {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, source, account_id, server_id, email, group_type
+                     FROM contact_groups
+                     WHERE account_id = ?1
+                     ORDER BY name ASC, id ASC
+                     LIMIT ?2",
+                )
+                .map_err(|e| format!("prepare contact groups query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id, limit], test_db_contact_group_from_row)
+                .map_err(|e| format!("query contact groups: {e}"))?;
+            collect_rows(mapped, "contact groups")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, source, account_id, server_id, email, group_type
+                     FROM contact_groups
+                     ORDER BY account_id ASC, name ASC, id ASC
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("prepare contact groups query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![limit], test_db_contact_group_from_row)
+                .map_err(|e| format!("query contact groups: {e}"))?;
+            collect_rows(mapped, "contact groups")
+        }
+    }
+}
+
 fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbMessageRow> {
     Ok(TestDbMessageRow {
         id: row.get(0)?,
@@ -1408,6 +1513,36 @@ fn test_db_calendar_event_from_row(
         organizer_email: row.get(13)?,
         organizer_name: row.get(14)?,
         attendees_json: row.get(15)?,
+    })
+}
+
+fn test_db_contact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbContactRow> {
+    Ok(TestDbContactRow {
+        id: row.get(0)?,
+        email: row.get(1)?,
+        display_name: row.get(2)?,
+        source: row.get(3)?,
+        account_id: row.get(4)?,
+        server_id: row.get(5)?,
+        email2: row.get(6)?,
+        phone: row.get(7)?,
+        company: row.get(8)?,
+        notes: row.get(9)?,
+        display_name_overridden: row.get::<_, i64>(10)? != 0,
+    })
+}
+
+fn test_db_contact_group_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TestDbContactGroupRow> {
+    Ok(TestDbContactGroupRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        source: row.get(2)?,
+        account_id: row.get(3)?,
+        server_id: row.get(4)?,
+        email: row.get(5)?,
+        group_type: row.get(6)?,
     })
 }
 

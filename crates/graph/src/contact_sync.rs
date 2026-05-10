@@ -17,8 +17,7 @@ use super::types::{CONTACT_SELECT, GraphContact, GraphContactFolder, ODataCollec
 
 /// Full contact sync: fetch all contact folders, page through all contacts,
 /// upsert into contacts table with source='graph', then prune stale entries.
-#[allow(dead_code)] // wired in once Graph contact sync ships
-pub(crate) async fn graph_contacts_initial_sync(
+pub async fn graph_contacts_initial_sync(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
@@ -34,10 +33,9 @@ pub(crate) async fn graph_contacts_initial_sync(
         folders.len()
     );
 
-    for folder in &folders {
-        full_sync_contact_folder(client, account_id, db, &folder.id).await?;
+    full_sync_contact_folders(client, account_id, db, &folders).await?;
 
-        // Bootstrap delta token for future delta syncs
+    for folder in &folders {
         let delta_link = bootstrap_contact_delta_token(client, db, &folder.id).await?;
         sync_state::save_graph_contact_delta_token(db, account_id, &folder.id, &delta_link).await?;
     }
@@ -65,12 +63,12 @@ pub async fn graph_contacts_delta_sync(
         {
             if e.contains("410") {
                 log::warn!(
-                    "Contact delta token expired for folder {folder_id}, falling back to full sync"
+                    "Contact delta token expired for folder {folder_id}, falling back to full contact sync"
                 );
-                full_sync_contact_folder(client, account_id, db, folder_id).await?;
-                let new_token = bootstrap_contact_delta_token(client, db, folder_id).await?;
-                sync_state::save_graph_contact_delta_token(db, account_id, folder_id, &new_token)
-                    .await?;
+                graph_contacts_initial_sync(client, account_id, db).await?;
+                // Full sync rebootstrapped every contact folder token, so
+                // there is nothing useful left for this delta pass to do.
+                return Ok(());
             } else {
                 return Err(e);
             }
@@ -84,7 +82,6 @@ pub async fn graph_contacts_delta_sync(
 // Folder listing
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)] // wired in once Graph contact sync ships
 async fn fetch_contact_folders(
     client: &GraphClient,
     db: &ReadDbState,
@@ -114,27 +111,33 @@ async fn fetch_contact_folders(
 // Full sync (initial + 410 fallback)
 // ---------------------------------------------------------------------------
 
-/// Fetch all contacts in a folder, upsert them, then prune stale mappings.
-async fn full_sync_contact_folder(
+/// Fetch all contacts across all folders, upsert them, then prune stale mappings.
+async fn full_sync_contact_folders(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
-    folder_id: &str,
+    folders: &[GraphContactFolder],
 ) -> Result<(), String> {
-    let contacts = fetch_folder_contacts(client, db, folder_id).await?;
+    let mut contacts = Vec::new();
 
-    let seen_ids: HashSet<String> = contacts.iter().map(|c| c.id.clone()).collect();
+    for folder in folders {
+        let folder_contacts = fetch_folder_contacts(client, db, &folder.id).await?;
+        contacts.extend(folder_contacts);
+    }
 
     let aid = account_id.to_string();
     let contacts_owned = contacts;
-    let seen_ids_owned = seen_ids;
 
     db.with_conn(move |conn| {
+        let seen_ids: HashSet<&str> = contacts_owned
+            .iter()
+            .map(|contact| contact.id.as_str())
+            .collect();
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
         persist_synced_contacts(&tx, &aid, &contacts_owned)?;
-        prune_stale_contacts(&tx, &aid, &seen_ids_owned)?;
+        prune_stale_contacts(&tx, &aid, &seen_ids)?;
         tx.commit().map_err(|e| format!("commit tx: {e}"))?;
         Ok(())
     })
@@ -384,7 +387,7 @@ fn delete_synced_contact(
 fn prune_stale_contacts(
     conn: &rusqlite::Connection,
     account_id: &str,
-    seen_ids: &HashSet<String>,
+    seen_ids: &HashSet<&str>,
 ) -> Result<(), String> {
     // Find all graph_contact_ids we have mapped for this account
     let mut stmt = conn
@@ -406,7 +409,7 @@ fn prune_stale_contacts(
 
     // Delete mappings and orphaned contacts for IDs not in the current fetch
     for graph_contact_id in &all_mapped {
-        if !seen_ids.contains(graph_contact_id) {
+        if !seen_ids.contains(graph_contact_id.as_str()) {
             delete_synced_contact(conn, account_id, graph_contact_id)?;
         }
     }

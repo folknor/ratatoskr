@@ -164,6 +164,12 @@ pub async fn graph_initial_sync(
         emit_progress(&sctx, "delta", "", current, total_folders, total_messages);
     }
 
+    if let Err(e) =
+        super::contact_sync::graph_contacts_initial_sync(client, account_id, &read_db).await
+    {
+        log::warn!("Contact initial sync failed (non-fatal): {e}");
+    }
+
     let aid = account_id.to_string();
     read_db
         .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))

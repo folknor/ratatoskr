@@ -609,22 +609,25 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 **Status:** PARTIAL - ratatoskr's test-only endpoint override,
 sync-trigger, DB-query, first sync-harness script, OAuth re-auth
 persistence harness path, JMAP remote-mutation and scripted
-incremental delta scripts, plus Graph calendar mutation scripts have
-landed. Brokkr can now spawn
-saehrimnir for fixture-frontmatter scripts and inject provider
-endpoints. Recent saehrimnir support adds admin request/reset routes,
+incremental delta scripts, Graph calendar mutation scripts, plus
+Graph contact and CalDAV initial-sync coverage have landed. Brokkr
+can now spawn saehrimnir for fixture-frontmatter scripts and inject
+provider endpoints. Recent saehrimnir support adds admin
+request/reset routes,
 OAuth token / userinfo routes, steady-state JMAP changes, JMAP
 `Email/set` / `Mailbox/set` changesets, persistent IMAP `UID STORE`,
 IMAP `UID COPY` / `UID EXPUNGE`, Graph calendar mutation deltas,
 cursor-driven change scripts through `POST /test/fixture/step`,
 fixture-image rewind on reset, stable request logs, fixture snapshots,
-and per-protocol latency injection.
+per-protocol latency injection, Graph contact fixture/read/delta
+surfaces with contact change scripts, and a CalDAV listener covering
+discovery, PROPFIND/REPORT/GET, PUT, and DELETE.
 
-Mock IMAP and JMAP servers, fixture sets (small smoke / medium /
-large / huge thread / many folders / duplicate Message-ID / malformed
-MIME / slow-paged responses / incremental new+change+delete+move
-sequence), and the brokkr-side commands to start/stop them and
-collect results.
+Mock provider servers and fixture sets (small smoke / medium / large /
+huge thread / many folders / duplicate Message-ID / malformed MIME /
+slow-paged responses / incremental new+change+delete+move sequence /
+Graph contacts / Graph+CalDAV calendar events), and the brokkr-side
+commands to start/stop them and collect results.
 
 The mock-server design lives in a sibling brokkr-side note
 (`notes/ratatoskr-mock-server.md`); this milestone tracks the
@@ -639,9 +642,9 @@ plus new sync-triggering / state-querying `RequestParams` variants
 
 Ratatoskr-side M8 surface now in tree:
 
-- `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT` are read
-  under the `test-helpers` feature and redirect provider clients to
-  the mock endpoints supplied by brokkr.
+- `RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL,CALDAV}_ENDPOINT`
+  are read under the `test-helpers` feature and redirect provider
+  clients to the mock endpoints supplied by brokkr.
 - `test.start_sync` starts the real Service sync runtime. The
   Service sync dispatcher now runs provider initial sync when
   `accounts.initial_sync_completed = 0`, then delta sync afterwards.
@@ -650,8 +653,9 @@ Ratatoskr-side M8 surface now in tree:
   because raw `sync.completed` notifications are consumed by the
   client's waiter map before `client:notifications()`.
 - `test.query_db_state` returns account, label, thread, message,
-  unread-message, attachment, credential-summary, and small
-  message-list snapshots for sync-harness assertions.
+  unread-message, attachment, calendar, contact, contact-group,
+  credential-summary, and small row snapshots for sync-harness
+  assertions.
 - `crates/app/tests/sync-harness/jmap-initial.lua` is the first
   sync-harness script. It targets the `jmap-small.toml` fixture and
   asserts the two fixture messages land in the local DB.
@@ -712,6 +716,22 @@ Ratatoskr-side M8 surface now in tree:
   hardens Graph delta parsing so tombstone objects with only `id` and
   `@removed` deserialize far enough for the deletion path to handle
   them.
+- `crates/app/tests/sync-harness/graph-contacts-initial.lua`
+  targets `graph-contacts-small.toml`, drives the normal
+  `client:start_sync` Graph initial-sync path, and asserts the synced
+  contact rows include fixture contacts from multiple contact folders,
+  skip no-email contacts, carry `source = "graph"` and Graph
+  `server_id`, and bootstrap contact delta endpoints for follow-up
+  syncs.
+- `TestSeedAccount` now accepts `caldav_url`, `caldav_username`, and
+  `caldav_password`, so scripts can seed a real CalDAV account without
+  a UI account-create flow.
+- `crates/app/tests/sync-harness/caldav-calendar-initial.lua`
+  targets the shared `graph-calendar-small.toml` calendar/event
+  fixture through saehrimnir's CalDAV listener, drives
+  `client:start_calendar_sync`, and asserts the same Work/Personal
+  calendars and Work events land through PROPFIND plus
+  calendar-multiget REPORT.
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
@@ -742,6 +762,34 @@ Ratatoskr-side M8 surface now in tree:
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
+- Graph contacts incremental sync. Saehrimnir also has
+  `fixtures/graph-contacts-incremental.lua`, `contacts/delta`
+  follow-up tokens, Graph tombstones for destroyed contacts, and
+  change-script ops for `contact_create`, `contact_update`,
+  `contact_destroy`, plus the contact-folder create/update/destroy
+  counterparts. Ratatoskr can now assert contact rows through
+  `TestQueryDbState`; the remaining gap is a practical way to force
+  Graph contact delta inside a script despite the production cadence
+  currently running contact deltas only every twentieth mail delta
+  cycle.
+- CalDAV action and remote-mutation coverage. Saehrimnir now starts a
+  CalDAV listener (`--caldav-port`) over the same `[[calendar]]` /
+  `[[event]]` fixtures used by Graph. The v0 surface covers
+  discovery (`PROPFIND /`, `/.well-known/caldav`,
+  `/principals/{user}/`, `/calendars/{user}/`), calendar and event
+  listings, `GET <event>.ics`, `REPORT calendar-multiget`,
+  `REPORT calendar-query` with UTC `time-range`, `PUT` create/update
+  with `If-Match`, and `DELETE` with `If-Match`. Ratatoskr has the
+  seed-account and Lua script shape for initial sync, and brokkr now
+  accepts saehrimnir's `CALDAV` sentinel and injects
+  `RATATOSKR_TEST_CALDAV_ENDPOINT`. Remaining CalDAV slices are action
+  CRUD and out-of-band remote mutation import.
+- Cross-protocol calendar mutation proof. Because saehrimnir routes
+  CalDAV `PUT` / `DELETE` through the same `Fixture::mutate` seam as
+  Graph, a follow-up ratatoskr script can write via CalDAV and verify a
+  subsequent Graph `calendarView/delta` imports the same created,
+  updated, or destroyed event. This is the calendar analogue of the
+  planned mixed-protocol IMAP/JMAP fixture-state proof.
 - IMAP writeback persistence. After an IMAP initial sync, drive
   ratatoskr `ActionExecutePlan` operations such as `SetRead`,
   `SetStarred`, `MoveToFolder`, and `PermanentDelete` against the
@@ -784,8 +832,9 @@ Lua helper cleanup backlog:
 - M6.9's remaining OAuth-enforced sync recovery slice verifies
   revoked-token failure, re-auth, and successful follow-up sync.
 - M6.10 (calendar) has Graph read/sync, Graph create/update/delete
-  action coverage, and Graph remote-mutation delta import coverage;
-  Google, JMAP, and CalDAV workflow coverage remain manual.
+  action coverage, Graph remote-mutation delta import coverage, and
+  CalDAV initial-sync coverage. Google and JMAP calendar workflow
+  coverage remain manual.
 
 ---
 

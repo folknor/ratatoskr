@@ -94,13 +94,14 @@ pub use redacted::{RedactedBytes, RedactedString};
 pub use request::{
     TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams,
     TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow,
-    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
-    TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
-    TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
-    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedThreadAck,
-    TestSeedThreadParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
-    TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
+    TestDbContactGroupRow, TestDbContactRow, TestDbLocalDraftRow, TestDbMessageRow,
+    TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
+    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
+    TestSeedCachedAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,
+    TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult, TestStartSyncParams,
+    TestThreadReadAck, TestThreadReadParams,
 };
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};

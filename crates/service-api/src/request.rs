@@ -49,6 +49,12 @@ pub struct TestSeedAccountParams {
     pub account_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caldav_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caldav_username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caldav_password: Option<String>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -228,6 +234,10 @@ pub struct TestQueryDbStateParams {
     pub attachment_limit: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_group_limit: Option<u64>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -347,6 +357,44 @@ pub struct TestDbCalendarEventRow {
 
 #[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbContactRow {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    pub display_name_overridden: bool,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbContactGroupRow {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_type: Option<String>,
+}
+
+#[cfg(feature = "test-helpers")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
     pub label_count: u64,
@@ -358,12 +406,20 @@ pub struct TestQueryDbStateAck {
     pub local_draft_count: u64,
     pub calendar_count: u64,
     pub calendar_event_count: u64,
+    #[serde(default)]
+    pub contact_count: u64,
+    #[serde(default)]
+    pub contact_group_count: u64,
     pub accounts: Vec<TestDbAccountRow>,
     pub messages: Vec<TestDbMessageRow>,
     pub local_drafts: Vec<TestDbLocalDraftRow>,
     pub attachments: Vec<TestDbAttachmentRow>,
     pub calendars: Vec<TestDbCalendarRow>,
     pub calendar_events: Vec<TestDbCalendarEventRow>,
+    #[serde(default)]
+    pub contacts: Vec<TestDbContactRow>,
+    #[serde(default)]
+    pub contact_groups: Vec<TestDbContactGroupRow>,
 }
 
 #[cfg(feature = "test-helpers")]
@@ -3267,6 +3323,9 @@ mod tests {
                 display_name: Some("Harness".into()),
                 account_name: Some("Harness Account".into()),
                 provider: Some("imap".into()),
+                caldav_url: Some("http://127.0.0.1:12345".into()),
+                caldav_username: Some("account-1".into()),
+                caldav_password: Some("test-password".into()),
             },
         };
         let parsed = RequestParams::from_method_params(
@@ -3464,6 +3523,8 @@ mod tests {
                 message_limit: Some(10),
                 attachment_limit: Some(20),
                 calendar_limit: Some(30),
+                contact_limit: Some(40),
+                contact_group_limit: Some(50),
             },
         };
         let parsed = RequestParams::from_method_params(
