@@ -174,6 +174,37 @@ pub async fn delete_graph_delta_token(
     .await
 }
 
+pub async fn increment_graph_sync_cycle(
+    db: &ReadDbState,
+    account_id: &str,
+) -> Result<u32, String> {
+    let key = format!("graph_sync_cycle:{account_id}");
+
+    db.with_conn(move |conn| {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin graph sync cycle tx: {e}"))?;
+        let stored = db::db::queries::get_setting(&tx, &key)?;
+        let current = match stored.as_deref() {
+            Some(value) => match value.parse::<u32>() {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    log::warn!("Invalid Graph delta cycle value {value:?} for {key}: {e}");
+                    0
+                }
+            },
+            None => 0,
+        };
+        // Counts delta syncs only. Initial sync runs its own bootstrap work.
+        let next = current.checked_add(1).unwrap_or(20);
+        db::db::queries::set_setting(&tx, &key, &next.to_string())?;
+        tx.commit()
+            .map_err(|e| format!("commit graph sync cycle tx: {e}"))?;
+        Ok(next)
+    })
+    .await
+}
+
 // ── Graph contact delta tokens ────────────────────────────
 
 pub async fn save_graph_contact_delta_token(

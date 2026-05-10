@@ -723,6 +723,15 @@ Ratatoskr-side M8 surface now in tree:
   skip no-email contacts, carry `source = "graph"` and Graph
   `server_id`, and bootstrap contact delta endpoints for follow-up
   syncs.
+- `crates/app/tests/sync-harness/graph-contacts-incremental.lua`
+  targets `graph-contacts-incremental.lua`, applies saehrimnir's
+  scripted contact create/update/delete steps, runs Graph delta sync
+  until the production twentieth-cycle contact cadence fires, and
+  asserts contact rows converge after each step. This also fixed the
+  Graph delta cycle counter to persist in sync state instead of living
+  only on the per-run `GraphClient`, so the twentieth-cycle contact,
+  label, group, and folder-tier work is reachable across separate
+  `start_sync` requests.
 - `TestSeedAccount` now accepts `caldav_url`, `caldav_username`, and
   `caldav_password`, so scripts can seed a real CalDAV account without
   a UI account-create flow.
@@ -762,16 +771,6 @@ Ratatoskr-side M8 surface now in tree:
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
-- Graph contacts incremental sync. Saehrimnir also has
-  `fixtures/graph-contacts-incremental.lua`, `contacts/delta`
-  follow-up tokens, Graph tombstones for destroyed contacts, and
-  change-script ops for `contact_create`, `contact_update`,
-  `contact_destroy`, plus the contact-folder create/update/destroy
-  counterparts. Ratatoskr can now assert contact rows through
-  `TestQueryDbState`; the remaining gap is a practical way to force
-  Graph contact delta inside a script despite the production cadence
-  currently running contact deltas only every twentieth mail delta
-  cycle.
 - CalDAV action and remote-mutation coverage. Saehrimnir now starts a
   CalDAV listener (`--caldav-port`) over the same `[[calendar]]` /
   `[[event]]` fixtures used by Graph. The v0 surface covers

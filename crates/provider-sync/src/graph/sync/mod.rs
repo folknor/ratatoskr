@@ -17,7 +17,7 @@ use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
 use super::parse::{ParsedGraphMessage, parse_graph_message};
 use super::types::{GraphMessage, ODataCollection};
-use sync::pending as sync_pending;
+use sync::{pending as sync_pending, state as sync_state};
 
 use self::delta_tokens::{
     bootstrap_delta_token, bootstrap_delta_token_latest, delete_delta_token, load_delta_tokens,
@@ -234,7 +234,7 @@ pub async fn graph_delta_sync(
         cancellation_token,
     };
 
-    let cycle = client.increment_sync_cycle();
+    let cycle = sync_state::increment_graph_sync_cycle(&read_db, account_id).await?;
     log::info!(
         "[Graph] Starting delta sync for account {account_id} (cycle={cycle})"
     );
