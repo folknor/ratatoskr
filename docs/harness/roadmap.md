@@ -673,6 +673,10 @@ Ratatoskr-side M8 surface now in tree:
   delete, and move steps, runs ratatoskr delta sync after each step,
   and asserts local DB convergence plus `Email/changes` / `Email/get`
   usage without falling back to `Email/query`.
+- `crates/app/tests/sync-harness/jmap-latency-smoke.lua` configures
+  saehrimnir global and JMAP latency knobs, proves a direct JMAP probe
+  is delayed, then runs ratatoskr initial sync against the delayed
+  mock endpoint and clears the knobs again.
 - `crates/app/tests/sync-harness/imap-initial.lua` targets the
   `imap-small.toml` fixture, asserts the two fixture messages land in
   the local DB, verifies `$seen` / `$flagged` import into read /
@@ -721,14 +725,15 @@ Ratatoskr-side M8 surface now in tree:
   `GET /test/snapshot-state` fixture projection. The scripted JMAP
   incremental test uses it after each change step to prove the remote
   fixture image changed before ratatoskr imports the delta.
+- `harness.latency(endpoint)` and
+  `harness.set_latency(endpoint, { global_ms, per_protocol })` wrap
+  saehrimnir's `GET/POST /test/latency` controls. The setter parses
+  Lua numeric fields as non-negative JSON integers so saehrimnir's
+  validation sees the same shape as a raw JSON client.
 
 Newly unlocked by the latest saehrimnir commits, but not yet covered
 by ratatoskr scripts:
 
-- Latency and benchmark plumbing. `POST /test/latency` can inject
-  global or per-protocol delay and reset clears it. This unblocks
-  ratatoskr-side slow-provider checks and gives M9 deterministic
-  latency scenarios once brokkr-side benchmark orchestration is ready.
 - IMAP writeback persistence. After an IMAP initial sync, drive
   ratatoskr `ActionExecutePlan` operations such as `SetRead`,
   `SetStarred`, `MoveToFolder`, and `PermanentDelete` against the
@@ -778,10 +783,11 @@ Lua helper cleanup backlog:
 
 ### M9 - Sync benchmarks
 
-**Status:** DEFERRED - gated on M8 and brokkr command work. The
-saehrimnir-side latency knob, stable request logs, and
-`GET /test/snapshot-state` now exist, so the remaining work is mostly
-ratatoskr-side summary/assertion shape plus brokkr orchestration.
+**Status:** DEFERRED - gated on M8 and brokkr command work.
+Saehrimnir's latency knob now has ratatoskr Lua helpers and a JMAP
+smoke script; stable request logs and `GET /test/snapshot-state` also
+exist. The remaining work is mostly ratatoskr-side summary/assertion
+shape plus brokkr orchestration.
 
 Once mock servers are in place, sync workloads can run
 deterministically against them and produce comparable timings. The

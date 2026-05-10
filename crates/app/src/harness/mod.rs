@@ -118,6 +118,8 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "join_url", lua_join_url)?;
     set_field_fn(state, table_idx, "mock_requests", lua_mock_requests)?;
     set_field_fn(state, table_idx, "snapshot_state", lua_snapshot_state)?;
+    set_field_fn(state, table_idx, "latency", lua_latency)?;
+    set_field_fn(state, table_idx, "set_latency", lua_set_latency)?;
     set_field_fn(
         state,
         table_idx,
@@ -672,6 +674,42 @@ fn lua_snapshot_state(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
+fn lua_latency(state: &mut State) -> dellingr::Result<u8> {
+    let endpoint = state.to_string(1)?;
+    let url = latency_url(&endpoint);
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let value = http_get_json(handle, url, "latency")?;
+    state.set_top(0);
+    push_json(state, &value)?;
+    Ok(1)
+}
+
+fn lua_set_latency(state: &mut State) -> dellingr::Result<u8> {
+    let endpoint = state.to_string(1)?;
+    let request_body = latency_body_from_arg(state, 2)?;
+    let url = latency_url(&endpoint);
+    let ctx = context(state)?;
+    let handle = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.handle.clone()
+    };
+    let value = http_request_json(
+        handle,
+        reqwest::Method::POST,
+        url,
+        Some(request_body),
+        "set_latency",
+    )?
+    .ok_or_else(|| lua_error_message("set_latency returned an empty response body"))?;
+    state.set_top(0);
+    push_json(state, &value)?;
+    Ok(1)
+}
+
 fn lua_request_count(state: &mut State) -> dellingr::Result<u8> {
     if state.typ(1) != LuaType::Table {
         return Err(lua_error_message("request_count requires request table"));
@@ -805,6 +843,134 @@ fn mock_requests_url(endpoint: &str, stable: bool) -> String {
 
 fn snapshot_state_url(endpoint: &str) -> String {
     join_url(endpoint, "test/snapshot-state")
+}
+
+fn latency_url(endpoint: &str) -> String {
+    join_url(endpoint, "test/latency")
+}
+
+fn latency_body_from_arg(state: &mut State, idx: isize) -> dellingr::Result<String> {
+    if (state.get_top() as isize) < idx || state.typ(idx) == LuaType::Nil {
+        return Ok("{}".to_string());
+    }
+    if state.typ(idx) != LuaType::Table {
+        return Err(lua_error_message(format!(
+            "set_latency options must be nil or table, got {}",
+            state.typ(idx).as_str()
+        )));
+    }
+
+    let mut body = serde_json::Map::new();
+    if let Some(global_ms) = get_u64_field(state, idx, "global_ms", "set_latency.global_ms")? {
+        body.insert(
+            "global_ms".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(global_ms)),
+        );
+    }
+    if let Some(per_protocol) = latency_per_protocol_field(state, idx)? {
+        body.insert("per_protocol".to_string(), per_protocol);
+    }
+    serde_json::to_string(&serde_json::Value::Object(body)).map_err(lua_json)
+}
+
+fn latency_per_protocol_field(
+    state: &mut State,
+    table_idx: isize,
+) -> dellingr::Result<Option<serde_json::Value>> {
+    let top = state.get_top();
+    state.push_string("per_protocol");
+    state.get_table(table_idx)?;
+    let result = match state.typ(-1) {
+        LuaType::Nil => Ok(None),
+        LuaType::Table => {
+            let per_idx = absolute_stack_idx(state, -1);
+            let mut object = serde_json::Map::new();
+            state.push_nil();
+            loop {
+                let has_next = match state.table_next(per_idx) {
+                    Ok(has_next) => has_next,
+                    Err(error) => {
+                        state.set_top(top as isize);
+                        return Err(error);
+                    }
+                };
+                if !has_next {
+                    break;
+                }
+                let key = match state.typ(-2) {
+                    LuaType::String => state.to_string(-2),
+                    other => Err(lua_error_message(format!(
+                        "set_latency.per_protocol key must be string, got {}",
+                        other.as_str()
+                    ))),
+                };
+                let value = match key {
+                    Ok(key) => match state.typ(-1) {
+                        LuaType::Number => latency_u64(state.to_number(-1)?, &format!(
+                            "set_latency.per_protocol.{key}"
+                        ))
+                        .map(|value| (key, value)),
+                        other => Err(lua_error_message(format!(
+                            "set_latency.per_protocol.{key} must be a non-negative integer, got {}",
+                            other.as_str()
+                        ))),
+                    },
+                    Err(error) => Err(error),
+                };
+                match value {
+                    Ok((key, value)) => {
+                        object.insert(
+                            key,
+                            serde_json::Value::Number(serde_json::Number::from(value)),
+                        );
+                    }
+                    Err(error) => {
+                        state.set_top(top as isize);
+                        return Err(error);
+                    }
+                }
+                state.pop(1);
+            }
+            Ok(Some(serde_json::Value::Object(object)))
+        }
+        other => Err(lua_error_message(format!(
+            "set_latency.per_protocol must be table, got {}",
+            other.as_str()
+        ))),
+    };
+    state.set_top(top as isize);
+    result
+}
+
+fn get_u64_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+    label: &str,
+) -> dellingr::Result<Option<u64>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    let result = match state.typ(-1) {
+        LuaType::Nil => Ok(None),
+        LuaType::Number => latency_u64(state.to_number(-1)?, label).map(Some),
+        other => Err(lua_error_message(format!(
+            "{label} must be a non-negative integer, got {}",
+            other.as_str()
+        ))),
+    };
+    state.set_top(top as isize);
+    result
+}
+
+fn latency_u64(value: f64, label: &str) -> dellingr::Result<u64> {
+    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 {
+        Ok(value as u64)
+    } else {
+        Err(lua_error_message(format!(
+            "{label} must be a non-negative integer, got {value}"
+        )))
+    }
 }
 
 fn http_json_body_from_field(
