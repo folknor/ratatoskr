@@ -6,8 +6,8 @@ use bifrost_jmap::calendar_event::CalendarEvent;
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     CalendarAttendeeWriteRow, CalendarReminderWriteRow, UpsertCalendarEventParams,
-    delete_event_by_remote_id_sync, replace_event_attendees_sync, replace_event_reminders_sync,
-    upsert_calendar_event_sync, upsert_calendar_sync,
+    delete_event_by_account_remote_id_sync, replace_event_attendees_sync,
+    replace_event_reminders_sync, upsert_calendar_event_sync, upsert_calendar_sync,
 };
 
 use super::payload::{
@@ -132,7 +132,8 @@ pub(super) async fn delete_event_by_jmap_id(
     let aid = account_id.to_string();
     let eid = jmap_event_id.to_string();
 
-    db.with_conn(move |conn| delete_event_by_remote_id_sync(conn, &aid, &eid)).await
+    db.with_conn(move |conn| delete_event_by_account_remote_id_sync(conn, &aid, &eid))
+        .await
 }
 
 // ── Sync state persistence ─────────────────────────────────

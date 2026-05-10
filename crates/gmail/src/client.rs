@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -34,7 +33,6 @@ struct ClientInner {
     client_id: String,
     client_secret: Option<String>,
     encryption_key: [u8; 32],
-    sync_cycle_counter: AtomicU32,
 }
 
 /// State holding all Gmail clients and the encryption key.
@@ -91,7 +89,6 @@ impl GmailClient {
                 client_id,
                 client_secret,
                 encryption_key,
-                sync_cycle_counter: AtomicU32::new(0),
             }),
         })
     }
@@ -111,14 +108,6 @@ impl GmailClient {
     /// Used by the TS calendar provider after a 401 response.
     pub async fn force_refresh_token(&self, db: &ReadDbState) -> Result<String, String> {
         self.force_refresh(db).await
-    }
-
-    /// Atomically increment the sync cycle counter and return the new value.
-    pub fn increment_sync_cycle(&self) -> u32 {
-        self.inner
-            .sync_cycle_counter
-            .fetch_add(1, Ordering::Relaxed)
-            + 1
     }
 
     /// Make an authenticated GET request to the Gmail API.

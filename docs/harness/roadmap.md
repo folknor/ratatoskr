@@ -756,7 +756,23 @@ Ratatoskr-side M8 surface now in tree:
   assertions.
 - `crates/app/tests/sync-harness/jmap-initial.lua` is the first
   sync-harness script. It targets the `jmap-small.toml` fixture and
-  asserts the two fixture messages land in the local DB.
+  asserts the two fixture messages land in the local DB. It now emits
+  sync markers and writes `summary.json` with message/thread counts
+  and JMAP request counters.
+- `crates/app/tests/sync-harness/jmap-bulk-initial.lua` targets
+  `jmap-bulk.lua` and proves a 10,001-message fixture imports through
+  the normal JMAP initial-sync path. It emits sync markers and writes
+  `summary.json` with bulk message/thread counts and JMAP request
+  counters.
+- `crates/app/tests/sync-harness/jmap-bulk-steady-state-delta.lua`
+  runs the same 10,001-message fixture twice and asserts the measured
+  steady-state pass uses `Mailbox/changes` and `Email/changes` without
+  falling back to `Email/query`. It emits sync markers around the
+  measured delta and writes `summary.json`.
+- `crates/app/tests/sync-harness/jmap-attachment-initial.lua` targets
+  `jmap-attach.toml` and asserts JMAP `Email/get` raw-byte projection
+  imports attachment metadata for `sample.txt`. It emits sync markers
+  and writes `summary.json` with attachment counts and request metrics.
 - `crates/app/tests/sync-harness/jmap-steady-state-delta.lua`
   runs the same fixture twice, asserts the first run marks
   `initial_sync_completed`, and uses saehrimnir's request log to
@@ -792,6 +808,8 @@ Ratatoskr-side M8 surface now in tree:
   the local DB, verifies `$seen` / `$flagged` import into read /
   starred state, and uses saehrimnir's request log to prove the sync
   listed folders, searched UIDs, and fetched messages through IMAP.
+  It now emits sync markers and writes `summary.json` with message,
+  unread, thread, and IMAP request counters.
 - `crates/app/tests/sync-harness/imap-steady-state-delta.lua` runs
   the same fixture twice, asserts state stays stable, and uses the
   request log to prove the second run lists/selects/searches without
@@ -943,6 +961,15 @@ Ratatoskr-side M8 surface now in tree:
   `client:execute_calendar_plan`, and verifies create/update/delete
   through `CalendarEvent/set`, local calendar-event state, and a
   follow-up `CalendarEvent/changes` sync.
+- `crates/app/tests/sync-harness/jmap-calendar-remote-delta.lua`
+  mutates the shared calendar fixture directly through JMAP
+  `CalendarEvent/set`, then drives `client:start_calendar_sync` and
+  verifies local calendar-event state imports the create/update/delete
+  delta through the normal calendar-list refresh plus
+  `CalendarEvent/changes` and `CalendarEvent/get`. It emits sync
+  markers and writes `summary.json`. The delete assertion also pins
+  the account-scoped JMAP calendar tombstone path, which had previously
+  passed an account ID into a calendar-ID scoped delete helper.
 - `crates/app/tests/sync-harness/gcal-calendar-initial.lua`
   targets the shared calendar fixture through saehrimnir's Google
   Calendar v3 listener, drives `client:start_calendar_sync`, and
@@ -956,6 +983,13 @@ Ratatoskr-side M8 surface now in tree:
   through POST/PATCH/DELETE requests, local calendar-event state, and
   a follow-up events sync. This slice also normalizes Google action
   bodies and accepts cancelled delta tombstones without start/end.
+- `crates/app/tests/sync-harness/gcal-calendar-remote-delta.lua`
+  mutates the shared calendar fixture directly through Google Calendar
+  v3 POST/PATCH/DELETE calls, then drives
+  `client:start_calendar_sync` and verifies the local calendar DB
+  imports the created event, updated event fields, and deleted-event
+  tombstone through normal events sync. It emits sync markers and
+  writes `summary.json`.
 - `crates/app/tests/sync-harness/people-contacts-initial.lua`
   targets `graph-contacts-small.toml` through saehrimnir's People API
   listener, drives Gmail initial sync, and asserts Google contact rows
@@ -963,6 +997,28 @@ Ratatoskr-side M8 surface now in tree:
   `/v1/otherContacts` still bootstraps successfully. It emits sync
   markers and writes `summary.json` with final contact counts and
   People request counters.
+- `crates/app/tests/sync-harness/people-contacts-incremental.lua`
+  targets `graph-contacts-incremental.lua` through the People API,
+  applies saehrimnir's contact create/update/delete change steps, runs
+  Gmail delta sync until the production twentieth-cycle contact
+  cadence fires, and asserts Google contact rows converge after each
+  step. This also persists Gmail's delta-cycle counter in sync state,
+  matching the Graph contact cadence fix so separate `start_sync`
+  requests can reach the twentieth-cycle contact tier. It emits sync
+  markers around the measured cadence loops and writes `summary.json`.
+- `crates/app/tests/sync-harness/gmail-attachment-initial.lua`
+  targets `jmap-attach.toml` through the Gmail listener and asserts
+  Gmail `threads.get` imports attachment metadata for `sample.txt`.
+  It emits sync markers and writes `summary.json` with attachment and
+  Gmail request counters.
+- `crates/app/tests/sync-harness/graph-attachment-initial.lua`
+  targets `jmap-attach.toml` through the Graph listener and asserts
+  Graph mail payloads import attachment metadata for `sample.txt`. It
+  emits sync markers and writes `summary.json` with attachment and
+  Graph request counters. The attachment scripts also hardened JMAP,
+  Gmail, and Graph message persistence so provider sync creates the
+  placeholder thread and message rows before inserting attachment rows;
+  attachment-bearing fixtures now catch FK-order regressions.
 - Sync-harness request-log helper cleanup has landed. The Lua harness
   now exposes `harness.join_url`, `harness.mock_requests(endpoint)`,
   `harness.clear_mock_requests(endpoint)`, and
@@ -1027,7 +1083,9 @@ Lua helper cleanup backlog:
 - A small-mailbox JMAP fixture does the same. Initial import,
   steady-state delta, raw `Email/set` mutation, and scripted
   new/change/delete/move incremental coverage have landed; deeper
-  JMAP fixture cases remain.
+  JMAP fixture cases for bulk and attachment-bearing fixtures have
+  landed; many-folder, duplicate-Message-ID, malformed-MIME, and
+  slow-paged-response cases remain.
 - M6.9's OAuth-enforced sync recovery slice now verifies revoked-token
   failure reporting, manual re-auth persistence, and successful
   follow-up sync.
@@ -1037,34 +1095,35 @@ Lua helper cleanup backlog:
   CalDAV create/update/delete action
   coverage, CalDAV remote-mutation import coverage, and a
   CalDAV-write to Graph-delta shared-fixture proof. Google and JMAP
-  now have initial-sync plus create/update/delete action coverage.
+  now have initial-sync, create/update/delete action coverage, and
+  remote-mutation delta import coverage.
 
 **Remaining actionable work:**
 
 - JMAP deeper fixture coverage:
-  add scripts for at least the medium/large, many-folder,
-  duplicate-Message-ID, malformed-MIME, slow-paged-response, and
-  attachment-bearing fixture families. Saehrimnir's slow-paging recipe
-  and cross-protocol raw-bytes surface are now available, so this is a
-  ratatoskr script-authoring item when the corresponding fixtures are
-  selected. Attachment-bearing scripts should exercise the new raw-byte
-  paths for JMAP `Email/get` and Gmail `threads.get`, not only cached
-  local fixture bytes.
+  bulk/large and attachment-bearing fixture scripts have landed. Add
+  scripts for the remaining many-folder, duplicate-Message-ID,
+  malformed-MIME, and slow-paged-response fixture families.
+  Saehrimnir's slow-paging recipe is available, so this is a ratatoskr
+  script-authoring item once the exact fixture recipe is selected.
 - Gmail People API contacts:
-  initial People API contact import has landed. Add scripted
-  incremental contact coverage through `POST /test/fixture/step` when
-  that cadence needs an explicit gate. Contact write-back/delete
-  remains blocked on saehrimnir adding People API mutation routes.
+  initial and scripted incremental People API contact import have
+  landed. Contact write-back/delete remains blocked on saehrimnir
+  adding People API mutation routes.
 - Broader benchmark summaries:
-  initial marker/summary adoption now covers JMAP steady-state, JMAP
-  Email/set delta, JMAP scripted incremental, IMAP steady-state, IMAP
-  scripted incremental, IMAP-to-JMAP shared-state delta, Graph calendar
-  initial, Graph calendar remote-delta, Graph calendar CalDAV-mutation
-  delta, Graph contacts initial, Graph contacts incremental, CalDAV
-  calendar initial, CalDAV calendar remote-delta, JMAP calendar
-  initial, Google Calendar initial, and People contacts initial. Add
-  the same marker/summary shape to any additional sync scripts
-  selected for M9 gates.
+  initial marker/summary adoption now covers JMAP initial, JMAP
+  steady-state, JMAP bulk initial, JMAP bulk steady-state, JMAP
+  attachment initial, JMAP Email/set delta, JMAP scripted incremental,
+  IMAP initial, IMAP steady-state, IMAP scripted incremental,
+  IMAP-to-JMAP shared-state delta, Graph attachment initial, Graph
+  calendar initial, Graph calendar remote-delta, Graph calendar
+  CalDAV-mutation delta, Graph contacts initial, Graph contacts
+  incremental, CalDAV calendar initial, CalDAV calendar remote-delta,
+  JMAP calendar initial, JMAP calendar remote-delta, Google Calendar
+  initial, Google Calendar remote-delta, People contacts initial,
+  People contacts incremental, and Gmail attachment initial. Add the
+  same marker/summary shape to any additional sync scripts selected
+  for M9 gates.
 
 ---
 
@@ -1095,8 +1154,12 @@ scripted incremental, IMAP steady-state, IMAP scripted incremental,
 IMAP-to-JMAP shared-state delta, Graph calendar initial, Graph
 calendar remote-delta, Graph calendar CalDAV-mutation delta, Graph
 contacts initial, Graph contacts incremental, CalDAV calendar initial,
-CalDAV calendar remote-delta, JMAP calendar initial, Google Calendar
-initial, and People contacts initial scripts using them.
+CalDAV calendar remote-delta, JMAP initial, JMAP calendar initial,
+JMAP calendar remote-delta, JMAP bulk initial, JMAP bulk steady-state,
+JMAP attachment initial, IMAP initial, Google Calendar initial, Google
+Calendar remote-delta, People contacts initial, People contacts
+incremental, Gmail attachment initial, and Graph attachment initial
+scripts using them.
 The remaining work is broader ratatoskr-side gate coverage and
 additional per-host baseline promotion as needed.
 

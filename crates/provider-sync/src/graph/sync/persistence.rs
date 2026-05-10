@@ -126,8 +126,6 @@ fn store_thread_to_db(
     shared_mailbox_id: Option<&str>,
     user_emails: &[String],
 ) -> Result<(), String> {
-    // upsert_thread_record calls upsert_messages internally before aggregating
-    upsert_attachments(tx, account_id, messages)?;
     upsert_thread_record(tx, account_id, thread_id, messages, shared_mailbox_id)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     insert_exchange_reactions(tx, account_id, messages)?;
@@ -176,8 +174,15 @@ fn upsert_thread_record(
         return Ok(());
     }
 
-    // First upsert the incoming messages so they are visible in DB queries
+    // The messages table has an FK to threads; create a placeholder row
+    // before inserting messages, then overwrite it with the real aggregate
+    // computed from those messages below.
+    sync_persistence::ensure_thread_exists(tx, account_id, thread_id)?;
+
+    // First upsert the incoming messages so attachments can satisfy their FK,
+    // then insert attachments before computing the thread aggregate.
     upsert_messages(tx, account_id, messages)?;
+    upsert_attachments(tx, account_id, messages)?;
 
     let is_important = messages
         .iter()

@@ -174,35 +174,56 @@ pub async fn delete_graph_delta_token(
     .await
 }
 
-pub async fn increment_graph_sync_cycle(
+async fn increment_provider_sync_cycle(
     db: &ReadDbState,
     account_id: &str,
+    provider_key: &'static str,
+    provider_label: &'static str,
+    overflow_cycle: u32,
 ) -> Result<u32, String> {
-    let key = format!("graph_sync_cycle:{account_id}");
+    let key = format!("{provider_key}_sync_cycle:{account_id}");
 
     db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
-            .map_err(|e| format!("begin graph sync cycle tx: {e}"))?;
+            .map_err(|e| format!("begin {provider_key} sync cycle tx: {e}"))?;
         let stored = db::db::queries::get_setting(&tx, &key)?;
         let current = match stored.as_deref() {
             Some(value) => match value.parse::<u32>() {
                 Ok(parsed) => parsed,
                 Err(e) => {
-                    log::warn!("Invalid Graph delta cycle value {value:?} for {key}: {e}");
+                    log::warn!(
+                        "Invalid {provider_label} delta cycle value {value:?} for {key}: {e}"
+                    );
                     0
                 }
             },
             None => 0,
         };
         // Counts delta syncs only. Initial sync runs its own bootstrap work.
-        let next = current.checked_add(1).unwrap_or(20);
+        // Overflow lands on the provider's contact-cadence boundary so a wrap
+        // still runs the rare contact tier instead of skipping it.
+        let next = current.checked_add(1).unwrap_or(overflow_cycle);
         db::db::queries::set_setting(&tx, &key, &next.to_string())?;
         tx.commit()
-            .map_err(|e| format!("commit graph sync cycle tx: {e}"))?;
+            .map_err(|e| format!("commit {provider_key} sync cycle tx: {e}"))?;
         Ok(next)
     })
     .await
+}
+
+pub async fn increment_graph_sync_cycle(
+    db: &ReadDbState,
+    account_id: &str,
+) -> Result<u32, String> {
+    increment_provider_sync_cycle(db, account_id, "graph", "Graph", 20).await
+}
+
+pub async fn increment_gmail_sync_cycle(
+    db: &ReadDbState,
+    account_id: &str,
+) -> Result<u32, String> {
+    increment_provider_sync_cycle(db, account_id, "gmail", "Gmail", 20).await
 }
 
 // ── Graph contact delta tokens ────────────────────────────

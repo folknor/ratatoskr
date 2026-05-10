@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -50,7 +49,6 @@ struct ClientInner {
     semaphore: Arc<Semaphore>,
     folder_map: RwLock<Option<FolderMap>>,
     folder_map_last_sync: RwLock<Option<std::time::Instant>>,
-    sync_cycle_counter: AtomicU32,
 }
 
 /// State holding all Graph clients and the encryption key.
@@ -134,7 +132,6 @@ impl GraphClient {
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
-                sync_cycle_counter: AtomicU32::new(0),
             }),
         })
     }
@@ -152,10 +149,10 @@ impl GraphClient {
     ///
     /// Shares the HTTP client, token infrastructure, and semaphore with the
     /// parent client (the delegate authenticates with their own token to access
-    /// the shared mailbox). Has its own folder map, sync cycle counter, and
-    /// category lock because the shared mailbox is a separate folder tree.
+    /// the shared mailbox). Has its own folder map and category lock because
+    /// the shared mailbox is a separate folder tree.
     pub fn for_shared_mailbox(&self, mailbox_id: String) -> Self {
-        // We need a separate ClientInner because folder_map/sync_cycle/category_lock
+        // We need a separate ClientInner because folder_map/category_lock
         // are per-mailbox, but we share the token state via Arc.
         // Since ClientInner isn't Arc-wrapped for individual fields, we clone
         // the token state snapshot - the parent's ensure_valid_token/do_refresh
@@ -184,7 +181,6 @@ impl GraphClient {
                 semaphore: Arc::clone(&self.inner.semaphore),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
-                sync_cycle_counter: AtomicU32::new(0),
             }),
         }
     }
@@ -216,14 +212,6 @@ impl GraphClient {
             .read()
             .await
             .map(|t| t.elapsed())
-    }
-
-    /// Atomically increment the sync cycle counter and return the new value.
-    pub fn increment_sync_cycle(&self) -> u32 {
-        self.inner
-            .sync_cycle_counter
-            .fetch_add(1, Ordering::Relaxed)
-            + 1
     }
 
     /// Acquire the category lock to serialize read-modify-write operations.
@@ -696,36 +684,6 @@ async fn parse_bytes_response(response: reqwest::Response) -> Result<Vec<u8>, St
 }
 
 #[cfg(test)]
-impl GraphClient {
-    /// Build a test GraphClient without DB access.
-    /// Available to other modules' tests within the crate.
-    pub(crate) fn test_with_mailbox(mailbox_id: Option<String>) -> Self {
-        Self {
-            inner: Arc::new(ClientInner {
-                http: reqwest::Client::new(),
-                api_base: GRAPH_API_BASE.to_string(),
-                api_beta_base: GRAPH_API_BETA.to_string(),
-                account_id: "test-account".to_string(),
-                mailbox_id,
-                token: RwLock::new(TokenState {
-                    access_token: "test".to_string(),
-                    refresh_token: "test".to_string(),
-                    expires_at: 0,
-                }),
-                refresh_lock: Mutex::new(()),
-                category_lock: Mutex::new(()),
-                client_id: "test-client-id".to_string(),
-                encryption_key: [0u8; 32],
-                semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
-                folder_map: RwLock::new(None),
-                folder_map_last_sync: RwLock::new(None),
-                sync_cycle_counter: AtomicU32::new(0),
-            }),
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -751,7 +709,6 @@ mod tests {
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
-                sync_cycle_counter: AtomicU32::new(0),
             }),
         }
     }

@@ -43,9 +43,11 @@ local account, account_err = client:request("TestSeedAccount", {
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
+harness.marker("SYNC_START")
 local completed, sync_err = client:start_sync({
     account_id = account.account_id,
 }, 30)
+harness.marker("SYNC_END")
 harness.assert(sync_err == nil, "start_sync failed")
 harness.assert_eq(completed.result, "completed", completed.error or "sync result")
 
@@ -77,18 +79,23 @@ harness.assert(not reply.is_read, "Re: Hello should import as unread")
 harness.assert(reply.is_starred, "Re: Hello should import as starred from $flagged")
 
 local requests = harness.mock_requests(admin_endpoint)
-harness.assert(
-    harness.request_count(requests, "imap", "LIST") >= 1,
-    "IMAP sync did not list folders"
-)
-harness.assert(
-    harness.request_count(requests, "imap", "UID SEARCH") >= 1,
-    "IMAP sync did not search UIDs"
-)
-harness.assert(
-    harness.request_count(requests, "imap", "UID FETCH") >= 1,
-    "IMAP sync did not fetch messages"
-)
+local list_requests = harness.request_count(requests, "imap", "LIST")
+local uid_search_requests = harness.request_count(requests, "imap", "UID SEARCH")
+local uid_fetch_requests = harness.request_count(requests, "imap", "UID FETCH")
+harness.assert(list_requests >= 1, "IMAP sync did not list folders")
+harness.assert(uid_search_requests >= 1, "IMAP sync did not search UIDs")
+harness.assert(uid_fetch_requests >= 1, "IMAP sync did not fetch messages")
+
+harness.write_summary({
+    correct = 1,
+    message_count = state.message_count,
+    unread_message_count = state.unread_message_count,
+    thread_count = state.thread_count,
+    provider_requests = #requests,
+    imap_list_requests = list_requests,
+    imap_uid_search_requests = uid_search_requests,
+    imap_uid_fetch_requests = uid_fetch_requests,
+})
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

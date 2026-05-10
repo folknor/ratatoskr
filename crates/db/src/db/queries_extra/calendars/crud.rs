@@ -417,6 +417,31 @@ pub fn delete_event_by_remote_id_sync(
     Ok(())
 }
 
+pub fn delete_event_by_account_remote_id_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    remote_event_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE event_id IN \
+         (SELECT id FROM calendar_events WHERE account_id = ?1 AND remote_event_id = ?2)",
+        params![account_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE event_id IN \
+         (SELECT id FROM calendar_events WHERE account_id = ?1 AND remote_event_id = ?2)",
+        params![account_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_events WHERE account_id = ?1 AND remote_event_id = ?2",
+        params![account_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn db_upsert_calendar_event(
     db: &ReadDbState,
     p: UpsertCalendarEventParams,

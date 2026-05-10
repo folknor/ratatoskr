@@ -36,7 +36,7 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
     };
     log::debug!("[Gmail] Delta sync from history_id={last_history_id}");
 
-    let cycle = ctx.client.increment_sync_cycle();
+    let cycle = sync_state::increment_gmail_sync_cycle(ctx.db, ctx.account_id).await?;
 
     // Sync signatures on each delta (lightweight - single API call)
     labels::sync_signatures(ctx).await?;

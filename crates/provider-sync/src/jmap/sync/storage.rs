@@ -123,8 +123,6 @@ fn store_thread_to_db(
     shared_mailbox_id: Option<&str>,
     user_emails: &[String],
 ) -> Result<(), String> {
-    // upsert_thread_record calls upsert_messages internally before aggregating
-    upsert_attachments(tx, account_id, messages)?;
     upsert_thread_record(tx, account_id, thread_id, messages, shared_mailbox_id)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     sync_keyword_labels(tx, account_id, thread_id, messages)?;
@@ -162,6 +160,7 @@ fn upsert_thread_record(
 
     // Upsert the incoming messages so they are visible in DB queries.
     upsert_messages(tx, account_id, messages)?;
+    upsert_attachments(tx, account_id, messages)?;
 
     let is_important = messages
         .iter()
