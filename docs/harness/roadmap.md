@@ -1149,23 +1149,21 @@ Lua helper cleanup backlog:
 
 ### M9 - Sync benchmarks
 
-**Status:** PARTIAL - the first checked-in gate config landed, but the
-baseline was bootstrapped on a dirty tree and is pinned to one host.
-M8 has enough mock-provider coverage for useful benchmarks, and brokkr
-command support has landed. Brokkr
+**Status:** LANDED for the first checked-in gate. M8 has enough
+mock-provider coverage for useful benchmarks, and brokkr command
+support has landed. Brokkr
 `sync-bench --gate <name>` records gated runs in
 `.brokkr/ratatoskr/gate.db`, `--as-baseline` prints the per-host
 baseline pin to add under `[ratatoskr.gate.<name>.baseline]`, and gate
 rules can compare top-level scalars plus `sidecar.*` and `meta.*`
-summary fields. Ratatoskr now has a checked-in
-`jmap_steady_state_delta` gate in `brokkr.toml`, pinned to the local
-`plantasjen` baseline UUID `5f3457d18d5e438fb59470c9d62c0069`.
-That bootstrap baseline was recorded with `--force` because the gate
-block had to exist in `brokkr.toml` before brokkr would accept
-`--as-baseline`; brokkr correctly warns that the baseline row was
-recorded on a dirty tree. Treat the current UUID as a local bootstrap,
-not a portable release/CI baseline, until a clean-tree baseline is
-recorded after commit.
+summary fields. Ratatoskr has a checked-in
+`jmap_steady_state_delta` gate in `brokkr.toml`, pinned to the
+clean-tree `plantasjen` baseline UUID
+`5399393bfded447aba4176b586a5905c` (best-of-10, 22 ms). The dirty
+bootstrap UUID was retired on 2026-05-10. The gate evaluates 8/8
+rules cleanly against that baseline, covering elapsed timing,
+sidecar `rss_peak_kb`, provider request count, and the script's
+`meta.correct` / `meta.message_count` summary scalars.
 Saehrimnir's latency knob now has ratatoskr Lua helpers and a JMAP
 smoke script; stable request logs and `GET /test/snapshot-state` also
 exist. Ratatoskr now has Lua helpers for `BROKKR_MARKER_FIFO` markers
@@ -1215,17 +1213,15 @@ Brokkr gates can now fail a run when configured thresholds catch:
   stable sync script, has a clean-tree per-host baseline UUID recorded
   in `.brokkr/ratatoskr/gate.db`, and `brokkr sync-bench <script>
   --gate <name> --bench 10` records timings, compares against that
-  baseline, and exits non-zero on regression. Provisional local
-  bootstrap was exercised on 2026-05-10 for `jmap_steady_state_delta`;
-  M9 stays PARTIAL until the baseline is re-recorded cleanly.
+  baseline, and exits non-zero on regression. Satisfied on 2026-05-10
+  by the clean-tree `jmap_steady_state_delta` baseline
+  (`5399393bfded447aba4176b586a5905c`).
 
-**Remaining actionable work:**
+**Optional follow-ups:**
 
-- Re-record the `plantasjen` baseline on a clean checkout and replace
-  the dirty bootstrap UUID before treating M9 as LANDED.
 - Record per-host baselines for any other contributor or CI hosts that
   should run `jmap_steady_state_delta`; the checked-in baseline map is
-  currently single-host only.
+  currently single-host (`plantasjen`).
 - Add more checked-in gates for the next stable benchmark scripts once
   they matter to CI or release decisions. Good candidates are JMAP
   scripted incremental, IMAP steady-state, Graph calendar remote-delta,

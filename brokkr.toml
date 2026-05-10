@@ -25,12 +25,12 @@ debug = true
 
 [ratatoskr.gate.jmap_steady_state_delta]
 script = "crates/app/tests/sync-harness/jmap-steady-state-delta.lua"
-baseline_label = "2026-05-10 local jmap steady-state green"
+baseline_label = "2026-05-10 clean-tree jmap steady-state green"
 
 [ratatoskr.gate.jmap_steady_state_delta.baseline]
-# Single-host bootstrap baseline. Other hosts and CI must record their
-# own baseline with --as-baseline before running this gate.
-plantasjen = "5f3457d18d5e438fb59470c9d62c0069"
+# Other hosts and CI must record their own baseline with --as-baseline
+# before running this gate.
+plantasjen = "5399393bfded447aba4176b586a5905c"
 
 [ratatoskr.gate.jmap_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
