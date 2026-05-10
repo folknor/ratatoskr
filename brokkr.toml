@@ -7,7 +7,7 @@ build_packages = ["app"]
 
 [ratatoskr]
 mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
-fixtures_dir = "../sæhrimnir/fixtures"
+fixtures_dir = "crates/app/tests/sync-fixtures"
 test_endpoint_env_jmap = "RATATOSKR_TEST_JMAP_ENDPOINT"
 test_endpoint_env_imap = "RATATOSKR_TEST_IMAP_ENDPOINT"
 test_endpoint_env_smtp = "RATATOSKR_TEST_SMTP_ENDPOINT"

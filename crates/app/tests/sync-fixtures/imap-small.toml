@@ -1,0 +1,60 @@
+name = "imap-small"
+
+# Semantic sibling of fixtures/jmap-small.toml: same two-message
+# story (Hello / Re: Hello, same subjects, Message-IDs, thread
+# shape, body text, dates) so ratatoskr's IMAP and JMAP smokes
+# stay comparable. The differences are IMAP-native coverage:
+#
+#   - $seen on email-001, $flagged on email-002 - exercises the
+#     keyword -> IMAP flag mapping and the UNSEEN counter.
+#   - explicit sent_at distinct from received_at - lets tests
+#     assert INTERNALDATE is built from received_at, not sent_at.
+#   - mbx-archive remains empty - LIST coverage of a folder with
+#     no messages.
+#
+# UIDs are derived per-mailbox from declaration order: in mbx-inbox
+# email-001 is UID 1 and email-002 is UID 2. UIDVALIDITY is pinned
+# to 1 by the IMAP layer.
+
+[account]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mbx-archive"
+name = "Archive"
+role = "archive"
+sort_order = 1
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+keywords = ["$seen"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Hello"
+sent_at = "2026-01-15T09:59:50Z"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "First message body."
+
+[[email]]
+id = "email-002"
+mailbox_ids = ["mbx-inbox"]
+keywords = ["$flagged"]
+from = "carol@example.com"
+to = ["bob@example.com"]
+subject = "Re: Hello"
+sent_at = "2026-01-15T10:59:55Z"
+received_at = "2026-01-15T11:00:00Z"
+message_id = ["<email-002@example.com>"]
+in_reply_to = ["<email-001@example.com>"]
+references = ["<email-001@example.com>"]
+body_text = "Reply body."

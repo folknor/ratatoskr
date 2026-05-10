@@ -1,0 +1,57 @@
+name = "graph-contacts-small"
+
+[account]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+# Two folders: the default Contacts folder and a "Vendors" sibling.
+# Empty siblings exercise the zero-contacts list branch.
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact_folder]]
+id = "cf-vendors"
+display_name = "Vendors"
+
+# Three contacts in cf-default exercising:
+#  - bare email-string sugar
+#  - a {name, address} table
+#  - multiple addresses on one contact (Graph emits the array verbatim)
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = [
+    { name = "Alice Anderson", address = "alice@example.com" },
+    "alice.anderson@example.org",
+]
+
+[[contact]]
+id = "contact-002"
+folder_id = "cf-default"
+display_name = "Bob Bell"
+emails = ["bob@example.com"]
+
+# A contact with no display name and no emails: ratatoskr's
+# extract_emails should skip it cleanly. Useful for negative coverage.
+[[contact]]
+id = "contact-003"
+folder_id = "cf-default"
+emails = []
+
+[[contact]]
+id = "contact-100"
+folder_id = "cf-vendors"
+display_name = "Acme Supplies"
+emails = ["sales@acme.example"]

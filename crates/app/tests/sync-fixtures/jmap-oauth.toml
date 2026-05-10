@@ -1,0 +1,38 @@
+name = "jmap-oauth"
+
+# Bearer-enforced variant of jmap-small. JMAP / Graph / Gmail
+# listeners reject requests whose `Authorization: Bearer <token>` is
+# not in the active token set; tokens are minted at
+# `POST /oauth/token` and revoked via `POST /test/oauth/invalidate`.
+# Drives ratatoskr's revoked-token-recovery flow:
+#
+#   1. Client mints a token, sync succeeds.
+#   2. Harness POSTs `/test/oauth/invalidate` with the token.
+#   3. Next provider request returns 401.
+#   4. Client re-runs `oauth.exchange_code`, mints a fresh token.
+#   5. Follow-up sync succeeds.
+#
+# IMAP and SMTP have their own auth surfaces and remain unaffected.
+[oauth]
+enforce = true
+
+[account]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Hello"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "First message body."

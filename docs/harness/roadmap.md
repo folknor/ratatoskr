@@ -120,7 +120,7 @@ the brokkr repo):
 
   [ratatoskr]
   mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
-  fixtures_dir = "../sæhrimnir/fixtures"
+  fixtures_dir = "crates/app/tests/sync-fixtures"
   test_endpoint_env_jmap = "RATATOSKR_TEST_JMAP_ENDPOINT"
   test_endpoint_env_imap = "RATATOSKR_TEST_IMAP_ENDPOINT"
   test_endpoint_env_smtp = "RATATOSKR_TEST_SMTP_ENDPOINT"
@@ -680,17 +680,19 @@ directory-cohort `service-test`, and `service-suite -N` landed;
 
 ### M8 - Provider mock servers (Track 2)
 
-**Status:** PARTIAL - ratatoskr's test-only endpoint override,
-sync-trigger, DB-query, first sync-harness script, OAuth re-auth
-persistence harness path, JMAP remote-mutation and scripted
-incremental delta scripts, Graph calendar mutation scripts, Graph
-contact coverage, CalDAV calendar coverage, JMAP/Google calendar
-initial/action coverage, People API initial/incremental contact
-coverage, and People API write-back/delete coverage have landed.
+**Status:** LANDED for the non-Windows M8 scope - ratatoskr's
+test-only endpoint override, sync-trigger, DB-query, first
+sync-harness script, OAuth re-auth persistence harness path, JMAP
+remote-mutation and scripted incremental delta scripts, Graph calendar
+mutation scripts, Graph contact coverage, CalDAV calendar coverage,
+JMAP/Google calendar initial/action coverage, People API
+initial/incremental contact coverage, People API write-back/delete
+coverage, and the deeper JMAP fixture scripts have landed.
 Saehrimnir now exposes the remaining major mock surfaces for
 JMAP Calendar, Google Calendar v3, Google People API, attachment
-raw-bytes, and slow-paged fixture recipes. The open work has shifted
-from mock-server enablement to deeper ratatoskr script authoring.
+raw-bytes, and slow-paged fixture recipes. Ratatoskr now owns its
+sync fixture corpus under `crates/app/tests/sync-fixtures/`; the
+sibling saehrimnir repository owns the fixture DSL and loader.
 Brokkr can now spawn saehrimnir for fixture-frontmatter scripts and
 inject provider endpoints; its `sync-bench --gate` / `--as-baseline`
 path now records per-host baselines in `gate.db` and evaluates
@@ -759,6 +761,10 @@ Ratatoskr-side M8 surface now in tree:
   unread-message, attachment, calendar, contact, contact-group,
   credential-summary, and small row snapshots for sync-harness
   assertions.
+- Ratatoskr-owned sync fixtures live in
+  `crates/app/tests/sync-fixtures/`. Saehrimnir still owns the fixture
+  DSL and loader; ratatoskr owns this regression corpus because the
+  scripts and assertions are ratatoskr behavior tests.
 - `crates/app/tests/sync-harness/jmap-initial.lua` is the first
   sync-harness script. It targets the `jmap-small.toml` fixture and
   asserts the two fixture messages land in the local DB. It now emits
@@ -778,6 +784,24 @@ Ratatoskr-side M8 surface now in tree:
   `jmap-attach.toml` and asserts JMAP `Email/get` raw-byte projection
   imports attachment metadata for `sample.txt`. It emits sync markers
   and writes `summary.json` with attachment counts and request metrics.
+- `crates/app/tests/sync-harness/jmap-many-folders-initial.lua`
+  targets `jmap-many-folders.lua` and verifies JMAP mailbox import at
+  many-folder scale. It emits sync markers and writes `summary.json`
+  with message, label, and provider-request metrics.
+- `crates/app/tests/sync-harness/jmap-duplicate-message-id-initial.lua`
+  targets `jmap-duplicate-message-id.lua` and verifies that three
+  separate messages sharing one `Message-ID` header survive initial
+  import as three local rows. It emits sync markers and writes
+  `summary.json` with message, thread, and provider-request metrics.
+- `crates/app/tests/sync-harness/jmap-malformed-mime-initial.lua`
+  targets `jmap-malformed-mime.lua` and verifies that malformed raw
+  body bytes do not abort JMAP initial sync. It emits sync markers and
+  writes `summary.json` with message and provider-request metrics.
+- `crates/app/tests/sync-harness/jmap-slow-paged-initial.lua` targets
+  `jmap-slow-paged.lua` and verifies that initial sync completes when
+  a middle `Email/query` page is delayed by the fixture hook. It emits
+  sync markers and writes `summary.json` with message, thread, and
+  provider-request metrics.
 - `crates/app/tests/sync-harness/jmap-steady-state-delta.lua`
   runs the same fixture twice, asserts the first run marks
   `initial_sync_completed`, and uses saehrimnir's request log to
@@ -1097,9 +1121,9 @@ Lua helper cleanup backlog:
 - A small-mailbox JMAP fixture does the same. Initial import,
   steady-state delta, raw `Email/set` mutation, and scripted
   new/change/delete/move incremental coverage have landed; deeper
-  JMAP fixture cases for bulk and attachment-bearing fixtures have
-  landed; many-folder, duplicate-Message-ID, malformed-MIME, and
-  slow-paged-response cases remain.
+  JMAP fixture cases for bulk, attachment-bearing, many-folder,
+  duplicate-Message-ID, malformed-MIME, and slow-paged-response
+  fixtures have landed.
 - M6.9's OAuth-enforced sync recovery slice now verifies revoked-token
   failure reporting, manual re-auth persistence, and successful
   follow-up sync.
@@ -1114,26 +1138,9 @@ Lua helper cleanup backlog:
 
 **Remaining actionable work:**
 
-- JMAP deeper fixture coverage:
-  bulk/large and attachment-bearing fixture scripts have landed. Add
-  scripts for the remaining many-folder, duplicate-Message-ID,
-  malformed-MIME, and slow-paged-response fixture families.
-  Saehrimnir's slow-paging recipe is available, so this is a ratatoskr
-  script-authoring item once the exact fixture recipe is selected.
-- Broader benchmark summaries:
-  initial marker/summary adoption now covers JMAP initial, JMAP
-  steady-state, JMAP bulk initial, JMAP bulk steady-state, JMAP
-  attachment initial, JMAP Email/set delta, JMAP scripted incremental,
-  IMAP initial, IMAP steady-state, IMAP scripted incremental,
-  IMAP-to-JMAP shared-state delta, Graph attachment initial, Graph
-  calendar initial, Graph calendar remote-delta, Graph calendar
-  CalDAV-mutation delta, Graph contacts initial, Graph contacts
-  incremental, CalDAV calendar initial, CalDAV calendar remote-delta,
-  JMAP calendar initial, JMAP calendar remote-delta, Google Calendar
-  initial, Google Calendar remote-delta, People contacts initial,
-  People contacts incremental, People contacts writeback/delete, and
-  Gmail attachment initial. Add the same marker/summary shape to any
-  additional sync scripts selected for M9 gates.
+- None for the non-Windows M8 scope. Additional marker/summary adoption
+  belongs to optional M9 gate expansion when another script is selected
+  as a benchmark gate.
 
 ---
 
@@ -1166,7 +1173,9 @@ calendar remote-delta, Graph calendar CalDAV-mutation delta, Graph
 contacts initial, Graph contacts incremental, CalDAV calendar initial,
 CalDAV calendar remote-delta, JMAP initial, JMAP calendar initial,
 JMAP calendar remote-delta, JMAP bulk initial, JMAP bulk steady-state,
-JMAP attachment initial, IMAP initial, Google Calendar initial, Google
+JMAP attachment initial, JMAP many-folder initial, JMAP duplicate
+Message-ID initial, JMAP malformed-MIME initial, JMAP slow-paged
+initial, IMAP initial, Google Calendar initial, Google
 Calendar remote-delta, People contacts initial, People contacts
 incremental, People contacts writeback/delete, Gmail attachment
 initial, and Graph attachment initial scripts using them.

@@ -1,0 +1,79 @@
+name = "jmap-incremental"
+state = "inc-0"
+
+[account]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mb-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mb-archive"
+name = "Archive"
+role = "archive"
+sort_order = 1
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mb-inbox"]
+keywords = ["$seen"]
+received_at = "2026-01-15T10:00:00Z"
+from = { name = "Alice", email = "alice@example.com" }
+to = ["test@example.com"]
+subject = "Welcome"
+body_text = "Hello there."
+message_id = ["<001@example.com>"]
+
+[[email]]
+id = "email-002"
+mailbox_ids = ["mb-inbox"]
+received_at = "2026-01-15T11:00:00Z"
+from = "bob@example.com"
+to = ["test@example.com"]
+subject = "Status update"
+body_text = "Things are progressing."
+message_id = ["<002@example.com>"]
+
+# Step 1: a new email arrives in the inbox. Most common sync case.
+[[change]]
+id = "new"
+
+[[change.email_create]]
+id = "email-003"
+mailbox_ids = ["mb-inbox"]
+received_at = "2026-01-15T12:00:00Z"
+from = "carol@example.com"
+to = ["test@example.com"]
+subject = "Lunch?"
+body_text = "Free at 12:30?"
+message_id = ["<003@example.com>"]
+
+# Step 2: an existing email's flags change. Drives the "update only
+# keywords" path that ratatoskr's incremental sync collapses into a
+# metadata-only refetch.
+[[change]]
+id = "change"
+
+[[change.email_update]]
+id = "email-002"
+keywords = ["$seen", "$flagged"]
+
+# Step 3: an email is deleted.
+[[change]]
+id = "delete"
+email_destroy = ["email-001"]
+
+# Step 4: an email is moved between mailboxes. Lands in
+# `email_updated` for delta walking; the step response surfaces it
+# under `changes.emails.moved` so the harness can distinguish.
+[[change]]
+id = "move"
+
+[[change.email_move]]
+id = "email-002"
+mailbox_ids = ["mb-archive"]
