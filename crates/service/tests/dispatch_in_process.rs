@@ -70,11 +70,10 @@ impl Drop for TestDataDir {
 
 fn write_dummy_key(dir: &std::path::Path) -> std::io::Result<()> {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    // Non-zero key: crypto-key's `LoadError::AllZeroInRelease` hard-fails
-    // on 32 zero bytes in release builds (the dev-seed fixture pattern),
-    // and brokkr runs tests in release. A constant non-zero pattern is
-    // cheap and gets us through the all-zero check while keeping test
-    // determinism.
+    // Non-zero key: crypto-key's `LoadError::AllZero` rejects 32 zero
+    // bytes in every build profile, so test fixtures use a constant
+    // non-zero pattern. Matches the dev-seed fixture byte for the same
+    // reason.
     let key_bytes = [0xA5u8; 32];
     let encoded = STANDARD.encode(key_bytes);
     std::fs::write(dir.join("ratatoskr.key"), encoded)

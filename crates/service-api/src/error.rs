@@ -20,7 +20,7 @@ pub enum ServiceError {
     Backpressure,
     /// The Service's boot sequence failed. Carries the structured
     /// `BootExitCode` so the UI can surface a friendly per-code message
-    /// (e.g. "Encryption key missing or unreadable" for `KeyLoadFailure`)
+    /// (e.g. "Encryption key load failed" for `KeyLoadFailure`)
     /// without parsing a Display string. This is the wire shape returned by
     /// the `boot.ready` handler when the boot sequence ends in a fatal
     /// failure that gets to ack before the Service exits; if the Service

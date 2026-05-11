@@ -37,8 +37,8 @@ impl AppCryptoState {
 /// The shared crate handles every security property the previous in-line
 /// implementation lacked: TOCTOU-safe permission repair via fchmod on
 /// the open fd, file-owner UID validation (Unix), zeroizing buffer for
-/// the loaded bytes, and release-build hard-fail on the all-zero
-/// dev-seed key. See `crates/crypto-key/src/lib.rs` for details.
+/// the loaded bytes, and unconditional rejection of an all-zero key. See
+/// `crates/crypto-key/src/lib.rs` for details.
 pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
     let secret = crypto_key::load_encryption_key(app_data_dir).map_err(|e| e.to_string())?;
     // Copy out before `secret` drops and zeroes its buffer. Production

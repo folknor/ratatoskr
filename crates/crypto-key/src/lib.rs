@@ -25,12 +25,11 @@
 //!   zeroes the 32-byte buffer. Callers that need the raw bytes for
 //!   AES-256-GCM should `.expose()` and copy into the cipher's key slot
 //!   without keeping the slice alive past the cipher construction.
-//! - **All-zero rejection**: in release builds the loader refuses to
-//!   return an all-zero key. `dev-seed` writes a deterministic zero key
-//!   for ephemeral test data; if a stray dev key file ever ships in a
-//!   release build the silent AES-256-GCM downgrade to a known key would
-//!   be catastrophic, so production hard-fails instead. Debug builds warn
-//!   so dev workflows continue working.
+//! - **All-zero rejection**: the loader unconditionally refuses to return
+//!   an all-zero key. An all-zero KEK would silently downgrade
+//!   AES-256-GCM to a known key, and no legitimate caller produces one -
+//!   `dev-seed` writes a non-zero deterministic pattern, so no profile
+//!   needs to make an exception.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::{Path, PathBuf};
@@ -100,10 +99,10 @@ pub enum LoadError {
     /// File decoded but yielded a buffer of the wrong length. AES-256-GCM
     /// requires exactly 32 bytes.
     WrongLength { expected: usize, actual: usize },
-    /// Production builds refuse to load an all-zero key (the dev-seed
-    /// fixture). Triggers only in release builds; debug builds emit a
-    /// warning and continue.
-    AllZeroInRelease { path: PathBuf },
+    /// File decoded to 32 bytes of zero. An all-zero AES-256-GCM key is
+    /// indistinguishable from a known-public key; no legitimate writer
+    /// produces it. Rejected in every build profile.
+    AllZero { path: PathBuf },
 }
 
 impl std::fmt::Display for LoadError {
@@ -131,9 +130,9 @@ impl std::fmt::Display for LoadError {
                 f,
                 "encryption key length is {actual} bytes; expected {expected}",
             ),
-            Self::AllZeroInRelease { path } => write!(
+            Self::AllZero { path } => write!(
                 f,
-                "encryption key at {} is all zeros (dev-seed fixture); refusing to use it in a release build",
+                "encryption key at {} is all zeros; refusing an all-zero AES-256-GCM key",
                 path.display(),
             ),
         }
@@ -161,10 +160,10 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
     log::debug!("loading encryption key from {}", path.display());
     // `contents` and `decoded` carry the raw key material; both go through
     // `Zeroizing` so the bytes are wiped on every exit path (success, the
-    // wrong-length error, the all-zero release path) rather than waiting
-    // for the allocator to overwrite them. Without this, a heap inspection
-    // of the Service process between key load and the next allocation
-    // would surface plaintext key bytes in the `String` and `Vec<u8>`
+    // wrong-length error, the all-zero rejection) rather than waiting for
+    // the allocator to overwrite them. Without this, a heap inspection of
+    // the Service process between key load and the next allocation would
+    // surface plaintext key bytes in the `String` and `Vec<u8>`
     // intermediate buffers that drop normally otherwise.
     let contents: Zeroizing<String> = Zeroizing::new(open_and_read(&path)?);
 
@@ -183,22 +182,15 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
     buf.copy_from_slice(&decoded);
 
     if buf.iter().all(|&b| b == 0) {
-        // dev-seed writes 32 zero bytes so test data round-trips
-        // through the same crypto path as production. A release build
-        // that boots against a stray dev key would silently downgrade
-        // AES-256-GCM to a known key; refuse rather than continue.
-        if cfg!(debug_assertions) {
-            log::warn!(
-                "loaded all-zero encryption key from {} - this is the dev-seed fixture; \
-                 production builds will refuse to load it",
-                path.display(),
-            );
-        } else {
-            // Zero the local stack buffer before bailing. (`contents` and
-            // `decoded` zeroize via their `Zeroizing` wrappers on drop.)
-            buf.zeroize();
-            return Err(LoadError::AllZeroInRelease { path });
-        }
+        // An all-zero AES-256-GCM key would silently downgrade encryption
+        // to a known-public key. No legitimate writer produces it -
+        // dev-seed writes a non-zero deterministic pattern - so a file
+        // that decodes to 32 zero bytes is either a bug or tampering;
+        // either way, refuse. Zero the local stack buffer before bailing
+        // (`contents` and `decoded` zeroize via their `Zeroizing` wrappers
+        // on drop).
+        buf.zeroize();
+        return Err(LoadError::AllZero { path });
     }
 
     Ok(SecretKey { bytes: buf })
@@ -396,24 +388,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Behaviour split: debug builds warn-and-load on the dev-seed
-    /// all-zero key so local development continues working; release
-    /// builds hard-fail so a stray dev key cannot silently downgrade
-    /// AES-256-GCM. Both arms are covered here so the contract is
-    /// observable from a single test source.
+    /// All-zero keys are rejected unconditionally. An all-zero AES-256-GCM
+    /// key is indistinguishable from a known-public key; no legitimate
+    /// writer produces one (dev-seed writes a non-zero deterministic
+    /// pattern), so the loader refuses regardless of build profile.
     #[test]
-    fn all_zero_key_warn_in_debug_hard_fail_in_release() {
+    fn all_zero_key_is_rejected() {
         let dir = temp_dir("zero").expect("temp dir");
         write_b64_key(&dir.join("ratatoskr.key"), &[0u8; 32]).expect("write");
-        let result = load_encryption_key(&dir);
-        if cfg!(debug_assertions) {
-            let key = result.expect("debug build must load with warn");
-            assert_eq!(key.expose(), &[0u8; 32]);
-        } else {
-            match result {
-                Err(LoadError::AllZeroInRelease { .. }) => {}
-                other => panic!("release must hard-fail; got {other:?}"),
-            }
+        match load_encryption_key(&dir) {
+            Err(LoadError::AllZero { .. }) => {}
+            other => panic!("expected AllZero, got {other:?}"),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

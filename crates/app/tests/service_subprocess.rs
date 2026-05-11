@@ -48,11 +48,10 @@ impl DataDirGuard {
 
 fn write_dummy_key(dir: &Path) -> std::io::Result<()> {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    // Non-zero key: crypto-key's `LoadError::AllZeroInRelease` hard-fails
-    // on 32 zero bytes in release builds (the dev-seed fixture pattern),
-    // and brokkr runs tests in release. A constant non-zero pattern is
-    // cheap and gets us through the all-zero check while keeping test
-    // determinism.
+    // Non-zero key: crypto-key's `LoadError::AllZero` rejects 32 zero
+    // bytes in every build profile, so test fixtures use a constant
+    // non-zero pattern. Matches the dev-seed fixture byte for the same
+    // reason.
     let key_bytes = [0xA5u8; 32];
     let encoded = STANDARD.encode(key_bytes);
     std::fs::write(dir.join("ratatoskr.key"), encoded)
@@ -369,7 +368,7 @@ fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot() {
 /// response before exiting) or via the dying child's exit-code elevation
 /// in `run_spawn_flow` (if the Service exited first). Both paths land at
 /// the same classified terminal-failure surface so the UI shows the
-/// "Encryption key missing or unreadable" message.
+/// "Encryption key load failed" message.
 ///
 /// Uses `await_terminal_with_deadline` rather than per-event timeouts:
 /// the implementation's worst-case to-emit time includes the 5s
@@ -505,8 +504,8 @@ fn assert_terminal_is_key_load_failure(error: &ClientError) {
 
 /// Spawning a Service against a data dir without a `ratatoskr.key` file
 /// must exit with `BootExitCode::KeyLoadFailure` (code 73) - that's the
-/// terminal-failure signal the UI maps to "Encryption key missing or
-/// unreadable" rather than treating it as a generic crash.
+/// terminal-failure signal the UI maps to a key-load failure rather than
+/// treating it as a generic crash.
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_key_file_exits_with_key_load_failure_code() -> TestResult {
     let binary = binary_path()?;

@@ -483,9 +483,7 @@ pub(crate) fn terminal_failure_user_message(reason: &BootFailureReason) -> Strin
             BootExitCode::AnotherInstanceRunning => {
                 "Ratatoskr is already running.".to_string()
             }
-            BootExitCode::KeyLoadFailure => {
-                "Encryption key missing or unreadable.".to_string()
-            }
+            BootExitCode::KeyLoadFailure => "Encryption key load failed.".to_string(),
             BootExitCode::MigrationFailure => "Database migration failed.".to_string(),
             BootExitCode::HandshakeFailure => "Service handshake failed.".to_string(),
             BootExitCode::LockIoFailure => {
@@ -602,8 +600,8 @@ pub enum ClientError {
     /// surface the right user message:
     /// - `BootFailure { code: AnotherInstanceRunning }`: "Ratatoskr is
     ///   already running."
-    /// - `BootFailure { code: KeyLoadFailure }`: "Encryption key missing
-    ///   or unreadable."
+    /// - `BootFailure { code: KeyLoadFailure }`: "Encryption key load
+    ///   failed."
     /// - `BootFailure { code: MigrationFailure }`: "Database migration
     ///   failed."
     /// - `UnexpectedExit { .. }`: "Service exited unexpectedly."
@@ -3915,6 +3913,17 @@ mod tests {
         assert_eq!(
             terminal_failure_user_message(&reason),
             "Ratatoskr is already running.",
+        );
+    }
+
+    #[test]
+    fn terminal_message_for_key_load_failure_is_generic() {
+        let reason = BootFailureReason::Classified(BootClassification::BootFailure {
+            code: BootExitCode::KeyLoadFailure,
+        });
+        assert_eq!(
+            terminal_failure_user_message(&reason),
+            "Encryption key load failed.",
         );
     }
 

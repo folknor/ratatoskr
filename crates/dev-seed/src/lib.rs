@@ -229,22 +229,19 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
     Ok(())
 }
 
-/// Write a deterministic 32-byte zero encryption key to `ratatoskr.key`.
+/// Write a deterministic 32-byte encryption key to `ratatoskr.key`.
 ///
-/// `load_encryption_key` expects base64-encoded 32 bytes; 32 zero bytes
-/// encode to a known fixed string, so no base64 dependency is needed.
-///
-/// This zero key is the dev-seed fixture: ephemeral test data round-trips
-/// through the same crypto path as production. The `crypto-key` crate
-/// hard-fails on this exact byte pattern in release builds (see
-/// `LoadError::AllZeroInRelease`) so a stray dev key file cannot ship to
-/// production and silently downgrade AES-256-GCM. Debug builds warn
-/// instead so dev workflows continue working.
+/// `load_encryption_key` expects base64-encoded 32 bytes. The byte
+/// pattern `0xA5` is the same one Service tests use for in-process key
+/// fixtures (`crates/service/tests/dispatch_in_process.rs`,
+/// `crates/app/tests/service_subprocess.rs`); reusing it keeps the
+/// dev-seed fixture and the test fixtures aligned, and avoids the
+/// all-zero pattern that crypto-key rejects unconditionally.
 fn write_dev_encryption_key(app_data_dir: &Path) -> Result<(), String> {
     let key_path = app_data_dir.join("ratatoskr.key");
-    // base64(b'\x00' * 32) = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    const ZERO_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-    std::fs::write(&key_path, ZERO_KEY_B64).map_err(|e| format!("write key file: {e}"))?;
+    // base64(b'\xA5' * 32) = ten "paWl" groups + trailing "paU=" pad.
+    const DEV_KEY_B64: &str = "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaU=";
+    std::fs::write(&key_path, DEV_KEY_B64).map_err(|e| format!("write key file: {e}"))?;
 
     #[cfg(unix)]
     {
