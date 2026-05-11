@@ -1,8 +1,8 @@
 //! The dispatch loop. Watches three sources concurrently:
 //!
-//! - `lifecycle.notified()` — SIGTERM / parent-death.
-//! - `boot_failure_rx.recv()` — a fatal boot failure from the boot task.
-//! - `lines.next_line()` — the next JSON-RPC frame off stdin.
+//! - `lifecycle.notified()` - SIGTERM / parent-death.
+//! - `boot_failure_rx.recv()` - a fatal boot failure from the boot task.
+//! - `lines.next_line()` - the next JSON-RPC frame off stdin.
 //!
 //! First to fire wins. On stdin frames, `handle_line` dispatches
 //! requests / notifications and (for the `Shutdown` request) records

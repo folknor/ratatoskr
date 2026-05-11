@@ -10,6 +10,7 @@
 use crate::boot::BootSharedState;
 use crate::dispatch::config::DispatchConfig;
 use crate::lifecycle::ServiceLifecycle;
+use crate::subsystems::Subsystems;
 use service_api::{BootExitCode, BoundedLineReader};
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,14 +32,13 @@ pub(crate) struct DispatchState<R> {
     pub lines: BoundedLineReader<R>,
 
     pub boot_state: Arc<BootSharedState>,
-    pub boot_handle: JoinHandle<()>,
     pub boot_failure_rx: mpsc::Receiver<BootExitCode>,
 
-    pub action_worker_handle: JoinHandle<()>,
-    pub push_startup_handle: JoinHandle<()>,
-    pub calendar_startup_handle: JoinHandle<()>,
-    pub extract_startup_handle: JoinHandle<()>,
-    pub schema_rebuild_handle: JoinHandle<()>,
+    /// All long-lived task handles spawned by `init_dispatch` (boot
+    /// task, action worker, four post-ready startup tasks). Replaces
+    /// six separate `JoinHandle<()>` fields. The shutdown drain
+    /// consumes this via `Subsystems::abort_tasks`.
+    pub subsystems: Subsystems,
 
     /// Set to `Some(id)` by the dispatch loop when a `Shutdown` request
     /// arrives; consumed by the shutdown drain to ack after the

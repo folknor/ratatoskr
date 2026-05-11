@@ -13,6 +13,7 @@ use crate::dispatch::post_ready::{
 };
 use crate::dispatch::state::DispatchState;
 use crate::lifecycle::ServiceLifecycle;
+use crate::subsystems::Subsystems;
 use service_api::{BootExitCode, BoundedLineReader};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -117,13 +118,15 @@ where
         notifications_in_flight,
         lines,
         boot_state,
-        boot_handle,
         boot_failure_rx,
-        action_worker_handle,
-        push_startup_handle,
-        calendar_startup_handle,
-        extract_startup_handle,
-        schema_rebuild_handle,
+        subsystems: Subsystems {
+            boot: boot_handle,
+            action_worker: action_worker_handle,
+            push_startup: push_startup_handle,
+            calendar_startup: calendar_startup_handle,
+            extract_startup: extract_startup_handle,
+            schema_rebuild: schema_rebuild_handle,
+        },
         pending_shutdown_id: None,
         boot_exit_code: None,
     }

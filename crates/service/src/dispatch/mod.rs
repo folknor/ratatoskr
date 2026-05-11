@@ -2,15 +2,15 @@
 //!
 //! Three named phases run in sequence:
 //!
-//! 1. [`init::init_dispatch`] — build [`state::DispatchState`]: spawn
+//! 1. [`init::init_dispatch`] - build [`state::DispatchState`]: spawn
 //!    the writer task, boot task, action worker, and four post-ready
 //!    startup tasks; clone `out_tx` into each holder; install the
 //!    parsed [`config::DispatchConfig`] on [`crate::boot::BootSharedState`].
-//! 2. [`loop_body::run_dispatch_loop`] — `tokio::select!` over
+//! 2. [`loop_body::run_dispatch_loop`] - `tokio::select!` over
 //!    `lifecycle.notified()`, the boot-failure channel, and stdin
 //!    frames. Exits on graceful shutdown, fatal boot failure, EOF, or
 //!    a fatal frame I/O error.
-//! 3. [`shutdown::run_shutdown_drain`] — drain in-flight handlers and
+//! 3. [`shutdown::run_shutdown_drain`] - drain in-flight handlers and
 //!    each subsystem in load-bearing order, write the
 //!    `clean_shutdown` sentinel, ack any pending Shutdown request,
 //!    drop `out_tx`, await the writer task.

@@ -28,6 +28,7 @@ mod lifecycle;
 mod logging;
 mod sigterm;
 mod stdio_defense;
+mod subsystems;
 
 use service_api::BootExitCode;
 use std::path::PathBuf;
