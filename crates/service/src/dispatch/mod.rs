@@ -11,17 +11,25 @@
 //!    frames. Exits on graceful shutdown, fatal boot failure, EOF, or
 //!    a fatal frame I/O error.
 //! 3. [`shutdown::run_shutdown_drain`] - drain in-flight handlers and
-//!    each subsystem in load-bearing order, write the
-//!    `clean_shutdown` sentinel, ack any pending Shutdown request,
-//!    drop `out_tx`, await the writer task.
+//!    delegate to [`crate::subsystems::Subsystems`] for the ordered
+//!    teardown, write the `clean_shutdown` sentinel, ack any pending
+//!    Shutdown request, drop `out_tx`, await the writer task.
 //!
-//! When adding a new long-lived task to the dispatch lifecycle: add a
-//! field to [`state::DispatchState`], spawn it inside
-//! [`init::init_dispatch`], and add a teardown step (typically
-//! `abort()` + `await`) inside [`shutdown::run_shutdown_drain`] in
-//! the correct order relative to `drop(out_tx)`. Phase 2 of the
-//! bulletproofing refactor introduces a `Subsystems` registry that
-//! collapses the per-subsystem drain steps into one named place.
+//! Adding a new long-lived dispatch task:
+//!
+//! 1. Add a field to [`crate::subsystems::Subsystems`].
+//! 2. Spawn it inside [`init::init_dispatch`] and populate the field
+//!    in the `Subsystems { ... }` literal.
+//! 3. Add an `abort_and_await` call inside
+//!    [`crate::subsystems::Subsystems::abort_tasks`].
+//!
+//! If the task holds a `BootSharedState`-resident runtime (push,
+//! calendar, sync, extract, rebuild), add a `drain_*` step inside
+//! [`crate::subsystems::Subsystems::drain_runtimes`] in the
+//! load-bearing order documented there. If the task performs
+//! long-running or multi-stage work, also have it `select!` on
+//! `boot_state.shutdown_token().cancelled()` so it exits promptly
+//! instead of waiting out per-iteration timeouts.
 
 mod config;
 mod handlers;
