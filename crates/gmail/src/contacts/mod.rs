@@ -117,7 +117,6 @@ pub(crate) const PAGE_SIZE: u32 = 1000;
 // ---------------------------------------------------------------------------
 
 pub fn people_api_base() -> String {
-    #[cfg(feature = "test-helpers")]
     if let Ok(value) = std::env::var("RATATOSKR_TEST_PEOPLE_ENDPOINT")
         && let Some(api_base) =
             common::test_endpoint::api_base_from_test_endpoint(&value, "v1")

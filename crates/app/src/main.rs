@@ -5,7 +5,6 @@ fn main() -> iced::Result {
     if std::env::args().any(|arg| arg == "--service") {
         service::run_service_blocking();
     }
-    #[cfg(feature = "test-helpers")]
     if let Some(script) = test_harness_script_arg() {
         return match app::harness::run(script) {
             Ok(()) => Ok(()),
@@ -18,7 +17,6 @@ fn main() -> iced::Result {
     app::run()
 }
 
-#[cfg(feature = "test-helpers")]
 fn test_harness_script_arg() -> Option<std::path::PathBuf> {
     let mut args = std::env::args_os();
     while let Some(arg) = args.next() {

@@ -118,13 +118,12 @@ site.
 Service tests that need deterministic IO-boundary behavior - boot,
 dispatch, drain, crash, framing - go through the Lua-driven harness
 under `crates/app/tests/service-harness/` and `sync-harness/`, not
-libtest. The runtime lives in `app`'s harness module behind
-`test-helpers`, embeds the `dellingr` Lua VM, and is orchestrated from
-outside by brokkr (`brokkr service-test`, `service-suite`,
-`sync-bench`). Tests are `.lua` scripts; failure preserves a
-self-contained artefact directory with frames, events, step trace,
-`/proc` snapshot, and a copy of the data dir. See
-`docs/glossary/harness.md`.
+libtest. The runtime lives in `app`'s harness module, embeds the
+`dellingr` Lua VM, and is orchestrated from outside by brokkr
+(`brokkr service-test`, `service-suite`, `sync-bench`). Tests are
+`.lua` scripts; failure preserves a self-contained artefact directory
+with frames, events, step trace, `/proc` snapshot, and a copy of the
+data dir. See `docs/glossary/harness.md`.
 
 ### Cross-store crash consistency
 

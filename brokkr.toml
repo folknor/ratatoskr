@@ -1,10 +1,5 @@
 project = "ratatoskr"
 
-[[check]]
-name = "harness"
-features = ["test-helpers"]
-build_packages = ["app"]
-
 [ratatoskr]
 mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
 fixtures_dir = "crates/app/tests/sync-fixtures"
@@ -19,8 +14,7 @@ test_endpoint_env_gcal = "RATATOSKR_TEST_GCAL_ENDPOINT"
 sync_script_dir = "crates/app/tests/sync-harness"
 
 [ratatoskr.harness]
-sweep = "harness"
-binary = "app"
+package = "app"
 debug = true
 
 [ratatoskr.gate.jmap_steady_state_delta]

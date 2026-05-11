@@ -847,10 +847,7 @@ pub(crate) async fn run_boot_sequence(
     .await;
     let (result, context) = match inner {
         Ok(ctx) => {
-            #[cfg(feature = "test-helpers")]
             let schema_version = crate::test_fake_schema().unwrap_or(ctx.schema_version);
-            #[cfg(not(feature = "test-helpers"))]
-            let schema_version = ctx.schema_version;
             (
                 Ok(BootReadyResponse {
                     ready: true,
@@ -877,29 +874,20 @@ pub(crate) async fn run_boot_sequence(
 /// rather than racing past via a fast-DB no-delay path. The delay is
 /// process-wide; tests that drive it must serialize on
 /// `crate::boot::TEST_BOOT_DELAY_LOCK` so they don't race each other.
-/// Always returns 0 in release builds where the test-helpers feature is
-/// not compiled in.
-#[cfg(feature = "test-helpers")]
+/// Returns 0 by default - the static is only set by tests.
 fn test_boot_delay_ms() -> u64 {
     use std::sync::atomic::Ordering;
     TEST_BOOT_DELAY_MS.load(Ordering::SeqCst)
 }
 
-#[cfg(not(feature = "test-helpers"))]
-fn test_boot_delay_ms() -> u64 {
-    0
-}
-
 /// Test-only knob: set the artificial boot delay (in milliseconds) inserted
 /// at the start of `run_boot_sequence_inner`. Process-wide; serialize via
 /// `TEST_BOOT_DELAY_LOCK` from tests that need exclusive control over it.
-#[cfg(feature = "test-helpers")]
 pub static TEST_BOOT_DELAY_MS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
 /// Test-only mutex used to serialize tests that set `TEST_BOOT_DELAY_MS`.
 /// Tests acquire this guard, set the atomic, run the boot, then reset.
-#[cfg(feature = "test-helpers")]
 pub static TEST_BOOT_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 async fn run_boot_sequence_inner(

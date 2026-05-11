@@ -38,7 +38,6 @@ type MailboxCache = Option<(Vec<MailboxListEntry>, std::time::Instant)>;
 /// Mailbox cache TTL - 60 seconds matches Graph's folder_map_age threshold.
 const MAILBOX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
-#[cfg(feature = "test-helpers")]
 fn jmap_base_url_from_test_endpoint(endpoint: &str) -> Option<String> {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.is_empty() {
@@ -47,7 +46,6 @@ fn jmap_base_url_from_test_endpoint(endpoint: &str) -> Option<String> {
     Some(endpoint.to_string())
 }
 
-#[cfg(feature = "test-helpers")]
 fn jmap_base_url_override() -> Option<String> {
     std::env::var("RATATOSKR_TEST_JMAP_ENDPOINT")
         .ok()
@@ -398,7 +396,6 @@ fn read_jmap_credentials(
         .map_err(|e| format!("JMAP account {account_id} not found: {e}"))?;
 
     let jmap_url = row.0;
-    #[cfg(feature = "test-helpers")]
     let jmap_url = jmap_base_url_override().or(jmap_url);
     let jmap_url = jmap_url.ok_or("No jmap_url configured for account")?;
     let email = row.1;
@@ -473,7 +470,6 @@ mod tests {
         assert_eq!(url.unwrap(), "https://example.com/token");
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_jmap_endpoint_origin_maps_to_base_url() {
         let url = jmap_base_url_from_test_endpoint("http://127.0.0.1:8080")
@@ -481,7 +477,6 @@ mod tests {
         assert_eq!(url, "http://127.0.0.1:8080");
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_jmap_endpoint_keeps_explicit_path() {
         let url = jmap_base_url_from_test_endpoint("http://127.0.0.1:8080/custom")

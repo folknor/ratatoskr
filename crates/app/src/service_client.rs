@@ -128,7 +128,6 @@ pub(crate) struct ServiceTraceSink {
 }
 
 impl ServiceTraceSink {
-    #[cfg(feature = "test-helpers")]
     pub(crate) fn new(artefact_dir: &Path) -> std::io::Result<Arc<Self>> {
         std::fs::create_dir_all(artefact_dir)?;
         let frames = std::fs::OpenOptions::new()
@@ -754,7 +753,6 @@ impl ServiceClient {
 
     /// Test-only variant of `spawn_with_events` that lets tests override the
     /// binary path and pass extra args. Mirrors `spawn_for_test` in shape.
-    #[cfg(feature = "test-helpers")]
     pub fn spawn_with_events_for_test(
         binary: PathBuf,
         app_data_dir: PathBuf,
@@ -767,7 +765,6 @@ impl ServiceClient {
         rx
     }
 
-    #[cfg(feature = "test-helpers")]
     pub(crate) fn spawn_with_events_for_harness(
         binary: PathBuf,
         app_data_dir: PathBuf,
@@ -789,7 +786,6 @@ impl ServiceClient {
     /// Clients returned from this path have `respawn_config = None`: a
     /// crash tears down the state and stops, with no respawn attempt. The
     /// test owns orchestration.
-    #[cfg(feature = "test-helpers")]
     pub async fn spawn_for_test(
         binary: &Path,
         app_data_dir: &Path,
@@ -798,7 +794,6 @@ impl ServiceClient {
         Self::spawn_inner(binary, app_data_dir, extra_args, None).await
     }
 
-    #[cfg(feature = "test-helpers")]
     pub(crate) async fn spawn_for_harness(
         binary: &Path,
         app_data_dir: &Path,
@@ -907,7 +902,6 @@ impl ServiceClient {
         Ok(client)
     }
 
-    #[cfg(feature = "test-helpers")]
     pub(crate) async fn request_value_for_harness(
         &self,
         params: RequestParams,
@@ -915,7 +909,6 @@ impl ServiceClient {
         self.request_value(params).await
     }
 
-    #[cfg(feature = "test-helpers")]
     pub(crate) fn set_respawn_extra_args_for_harness(
         &self,
         extra_args: Vec<String>,

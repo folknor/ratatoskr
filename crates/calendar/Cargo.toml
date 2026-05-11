@@ -32,6 +32,5 @@ uuid = { version = "1.23.1", features = ["v4"] }
 hotpath = { workspace = true, optional = true }
 
 [features]
-test-helpers = ["graph/test-helpers"]
 hotpath = ["dep:hotpath", "hotpath/hotpath", "rtsk/hotpath", "gmail/hotpath", "graph/hotpath", "jmap/hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "rtsk/hotpath-alloc", "gmail/hotpath-alloc", "graph/hotpath-alloc", "jmap/hotpath-alloc"]

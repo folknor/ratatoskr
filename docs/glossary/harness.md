@@ -1,9 +1,8 @@
 # Service test harness
 
 Lua-driven test runtime for Service IO-boundary tests. Lives in
-ratatoskr's `app` crate behind the `test-helpers` feature; orchestrated
-from outside by brokkr. Remaining harness work is in the root
-`TODO.md`.
+ratatoskr's `app` crate; orchestrated from outside by brokkr. Remaining
+harness work is in the root `TODO.md`.
 
 The architecture is mirrored on the brokkr side as
 `notes/ratatoskr-service-harness.md` in the brokkr repository. Both
@@ -72,9 +71,9 @@ from outside (build, spawn, artefact dir, history). Concretely:
 ```
 brokkr service-test foo.lua
     |
-    +-- builds [ratatoskr.harness].binary via the configured [[check]] sweep
+    +-- builds [ratatoskr.harness].package (defaults: binary=package, dev profile per debug=true)
     +-- allocates .brokkr/ratatoskr/<test>/run-N/ as artefact dir
-    +-- spawns: <project_root>/<target>/<profile>/app --test-harness foo.lua
+    +-- spawns: <project_root>/<target>/<profile>/<binary> --test-harness foo.lua
     |       env: BROKKR_HARNESS_ARTEFACT_DIR=<artefact dir>
     |            BROKKR_TEST_BIN_DIR=<bin dir>
     +-- waits for child exit (sync, std::process::Command-level)
@@ -93,8 +92,9 @@ Inside `app --test-harness`:
 ```
 
 Brokkr's responsibilities at a glance: project gating + CLI surface,
-sweep-aware build via `[ratatoskr.harness] sweep / binary` matched
-against a `[[check]]` entry, subprocess spawn + capture at
+self-contained build of `[ratatoskr.harness].package` (no
+`[[check]]` cross-reference - bare `brokkr check` is blind to
+orchestration blocks), subprocess spawn + capture at
 `std::process::Command::output()` concurrency, per-run artefact
 directory lifecycle, script discovery (recursive over
 `crates/app/tests/service-harness/**/*.lua` with frontmatter parsing),
@@ -109,10 +109,10 @@ must not depend on brokkr; brokkr must not depend on ratatoskr.
 Cross-process communication is by subprocess spawn + env vars only.
 
 The Lua VM and `ServiceClient` userdata bindings live in ratatoskr's
-`app` crate (already where `ServiceClient` is defined); ratatoskr takes
-a `dellingr` dep, exposes the runtime via `app --test-harness` gated
-behind the existing `test-helpers` feature. Brokkr orchestrates only:
-project gating, sweep-aware build, lockfile, per-run artefact-dir
+`app` crate (already where `ServiceClient` is defined); ratatoskr
+takes an unconditional `dellingr` dep and exposes the runtime via
+`app --test-harness`. Brokkr orchestrates only: project gating,
+self-contained orchestration build, lockfile, per-run artefact-dir
 lifecycle, history-DB recording, soak/suite. Brokkr ships zero
 ratatoskr or dellingr deps; brokkr stays sync (no tokio).
 
@@ -269,9 +269,11 @@ those capabilities unblock.
 
 `app --service --app-data-dir <dir>` is the canonical Service
 subprocess entrypoint. `app --test-harness <script.lua>` is its
-sibling, gated behind `test-helpers`.
+sibling.
 
-Test-only flags are kept intentional and behind `test-helpers`:
+Test-only flags are intentional and unconditionally compiled in
+(ratatoskr is pre-release; there is no production binary surface to
+guard):
 
 - fake protocol version (`--test-fake-version=N`),
 - fake schema (`--test-fake-schema=N`),
@@ -280,8 +282,9 @@ Test-only flags are kept intentional and behind `test-helpers`:
 - println/framing canary (`TestPrintln { message }`),
 - boot-delay (`--test-boot-delay-ms=N`).
 
-Provider mock endpoints are test-scoped env vars, consumed only when
-the relevant provider crate is compiled with `test-helpers`:
+Provider mock endpoints are env vars consulted on every provider boot;
+unset in normal use, set by the harness to redirect traffic to
+`saehrimnir`-hosted mocks:
 
 ```
 RATATOSKR_TEST_JMAP_ENDPOINT

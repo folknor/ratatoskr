@@ -22,6 +22,3 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
 toml = "1.1"
-
-[features]
-test-helpers = []

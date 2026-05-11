@@ -41,6 +41,3 @@ gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }
 imap = { path = "../imap" }
-
-[features]
-test-helpers = []

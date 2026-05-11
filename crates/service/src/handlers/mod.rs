@@ -20,7 +20,6 @@ mod signature;
 mod smart_folder;
 mod sync;
 mod thread_ui_state;
-#[cfg(feature = "test-helpers")]
 mod test_helpers;
 
 pub(crate) use action_mark_chat_read::JournaledChatRead;
@@ -158,63 +157,46 @@ pub(crate) async fn dispatch(
         RequestParams::DecryptForStorage { params } => {
             internal::handle_decrypt_for_storage(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestVersion { version } => test_helpers::version_handle(version).await,
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestSlow { millis } => test_helpers::slow_handle(millis).await,
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestPrintln { message } => test_helpers::println_handle(message).await,
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestSeedAccount { params } => {
             test_helpers::seed_account_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestCounterRead { counter } => {
             test_helpers::counter_read_handle(counter).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestCrashAfterNWrites { params } => {
             test_helpers::crash_after_n_writes_handle(params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestSeedThread { params } => {
             test_helpers::seed_thread_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestSeedCachedAttachment { params } => {
             test_helpers::seed_cached_attachment_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestSeedRemoteAttachment { params } => {
             test_helpers::seed_remote_attachment_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestRemoveCachedAttachmentBytes { params } => {
             test_helpers::remove_cached_attachment_bytes_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestThreadRead { params } => {
             test_helpers::thread_read_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestPendingOpsRead { params } => {
             test_helpers::pending_ops_read_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestStartSync { params } => {
             test_helpers::start_sync_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestQueryDbState { params } => {
             test_helpers::query_db_state_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestSearchIndex { params } => {
             test_helpers::search_index_handle(&boot_state, params).await
         }
-        #[cfg(feature = "test-helpers")]
         RequestParams::TestDelayNextWrite { params } => {
             test_helpers::delay_next_write_handle(params).await
         }

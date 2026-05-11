@@ -90,7 +90,6 @@ pub use framing::{
 pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
 pub use push::PushEvent;
 pub use redacted::{RedactedBytes, RedactedString};
-#[cfg(feature = "test-helpers")]
 pub use request::{
     TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams,
     TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow,

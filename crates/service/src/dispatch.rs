@@ -236,7 +236,6 @@ where
                         // would do; the test client uses SIGKILL via
                         // start_kill which the kernel handles outside
                         // the runtime.
-                        #[cfg(feature = "test-helpers")]
                         if crate::test_hang_on_stdin_eof() {
                             log::warn!(
                                 "test-hang-on-stdin-eof: ignoring stdin EOF, parking forever",

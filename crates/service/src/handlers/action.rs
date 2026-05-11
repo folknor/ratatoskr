@@ -35,7 +35,6 @@ pub(super) async fn handle(
     let plan_id_bytes = *plan_id.0.as_bytes();
     let ops = serialize_ops(plan)?;
 
-    #[cfg(feature = "test-helpers")]
     {
         crate::test_counters::delay_if_configured("action.before_journal_write").await;
         crate::test_counters::record("action.before_journal_write");
@@ -51,7 +50,6 @@ pub(super) async fn handle(
     .map_err(|e| ServiceError::Internal(format!("spawn_blocking: {e}")))?
     .map_err(ServiceError::Internal)?;
 
-    #[cfg(feature = "test-helpers")]
     crate::test_counters::record("action.journal_write");
 
     // Worker wakeup wires in with task 9c. For now, the journal rows

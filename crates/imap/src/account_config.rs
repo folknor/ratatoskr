@@ -33,7 +33,6 @@ pub struct ImapAndSmtpConfig {
     pub smtp: SmtpConfig,
 }
 
-#[cfg(feature = "test-helpers")]
 fn test_endpoint_host_port(
     env_name: &str,
     default_port: u16,
@@ -48,7 +47,6 @@ fn test_endpoint_host_port(
     parse_test_endpoint_host_port(endpoint, default_port, env_name).map(Some)
 }
 
-#[cfg(feature = "test-helpers")]
 fn parse_test_endpoint_host_port(
     value: &str,
     default_port: u16,
@@ -238,7 +236,6 @@ fn imap_config_from_record(
     username: String,
     password: String,
 ) -> Result<ImapConfig, String> {
-    #[cfg(feature = "test-helpers")]
     if let Some((host, port)) =
         test_endpoint_host_port("RATATOSKR_TEST_IMAP_ENDPOINT", 143)?
     {
@@ -276,7 +273,6 @@ fn smtp_config_from_record(
     username: String,
     password: String,
 ) -> Result<SmtpConfig, String> {
-    #[cfg(feature = "test-helpers")]
     if let Some((host, port)) =
         test_endpoint_host_port("RATATOSKR_TEST_SMTP_ENDPOINT", 25)?
     {
@@ -357,7 +353,6 @@ mod tests {
         assert!(err.contains("decrypt credential"));
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_endpoint_host_port_parses_mock_endpoint() {
         let parsed = parse_test_endpoint_host_port("127.0.0.1:2525", 25, "TEST")
@@ -365,7 +360,6 @@ mod tests {
         assert_eq!(parsed, ("127.0.0.1".to_string(), 2525));
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_endpoint_host_port_defaults_port() {
         let parsed = parse_test_endpoint_host_port("imap://localhost", 143, "TEST")

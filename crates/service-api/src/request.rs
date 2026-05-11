@@ -38,7 +38,6 @@ pub enum RequestTimeoutKind {
     Infinite,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedAccountParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,7 +70,6 @@ pub struct TestSeedAccountParams {
     pub oauth_token_url: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedAccountAck {
     pub account_id: String,
@@ -79,25 +77,21 @@ pub struct TestSeedAccountAck {
     pub label_count: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestCounterReadAck {
     pub counter: String,
     pub value: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestCrashAfterNWritesParams {
     pub kind: String,
     pub n: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestCrashAfterNWritesAck;
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedThreadParams {
     pub account_id: String,
@@ -127,7 +121,6 @@ pub struct TestSeedThreadParams {
     pub body_html: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedThreadAck {
     pub account_id: String,
@@ -135,7 +128,6 @@ pub struct TestSeedThreadAck {
     pub message_id: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedCachedAttachmentParams {
     pub account_id: String,
@@ -149,7 +141,6 @@ pub struct TestSeedCachedAttachmentParams {
     pub content: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedCachedAttachmentAck {
     pub account_id: String,
@@ -160,7 +151,6 @@ pub struct TestSeedCachedAttachmentAck {
     pub size_bytes: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedRemoteAttachmentParams {
     pub account_id: String,
@@ -174,7 +164,6 @@ pub struct TestSeedRemoteAttachmentParams {
     pub content_base64: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSeedRemoteAttachmentAck {
     pub account_id: String,
@@ -183,27 +172,23 @@ pub struct TestSeedRemoteAttachmentAck {
     pub size_bytes: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRemoveCachedAttachmentBytesParams {
     pub relative_path: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRemoveCachedAttachmentBytesAck {
     pub relative_path: String,
     pub removed: bool,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestThreadReadParams {
     pub account_id: String,
     pub thread_id: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestThreadReadAck {
     pub exists: bool,
@@ -216,7 +201,6 @@ pub struct TestThreadReadAck {
     pub unread_messages: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestPendingOpsReadParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,7 +213,6 @@ pub struct TestPendingOpsReadParams {
     pub status: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestPendingOpRow {
     pub id: String,
@@ -245,7 +228,6 @@ pub struct TestPendingOpRow {
     pub error_message: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestPendingOpsReadAck {
     pub total: u64,
@@ -254,13 +236,11 @@ pub struct TestPendingOpsReadAck {
     pub operations: Vec<TestPendingOpRow>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestStartSyncParams {
     pub account_id: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -277,7 +257,6 @@ pub struct TestQueryDbStateParams {
     pub contact_group_limit: Option<u64>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbAccountRow {
     pub id: String,
@@ -301,7 +280,6 @@ pub struct TestDbAccountRow {
     pub refresh_token_sha256: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbMessageRow {
     pub id: String,
@@ -315,7 +293,6 @@ pub struct TestDbMessageRow {
     pub is_starred: bool,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbLocalDraftRow {
     pub id: String,
@@ -335,7 +312,6 @@ pub struct TestDbLocalDraftRow {
     pub sync_status: String,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbAttachmentRow {
     pub id: String,
@@ -353,7 +329,6 @@ pub struct TestDbAttachmentRow {
     pub extracted_text: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbCalendarRow {
     pub id: String,
@@ -369,7 +344,6 @@ pub struct TestDbCalendarRow {
     pub can_edit: bool,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbCalendarEventRow {
     pub id: String,
@@ -392,7 +366,6 @@ pub struct TestDbCalendarEventRow {
     pub attendees_json: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbContactRow {
     pub id: String,
@@ -414,7 +387,6 @@ pub struct TestDbContactRow {
     pub display_name_overridden: bool,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbContactGroupRow {
     pub id: String,
@@ -430,7 +402,6 @@ pub struct TestDbContactGroupRow {
     pub group_type: Option<String>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
@@ -459,7 +430,6 @@ pub struct TestQueryDbStateAck {
     pub contact_groups: Vec<TestDbContactGroupRow>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestSearchIndexParams {
     pub query: String,
@@ -469,7 +439,6 @@ pub struct TestSearchIndexParams {
     pub limit: Option<u64>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TestSearchIndexResult {
     pub message_id: String,
@@ -486,21 +455,18 @@ pub struct TestSearchIndexResult {
     pub also_matched: Vec<Value>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TestSearchIndexAck {
     pub total: u64,
     pub results: Vec<TestSearchIndexResult>,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDelayNextWriteParams {
     pub kind: String,
     pub millis: u64,
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDelayNextWriteAck;
 
@@ -849,58 +815,41 @@ pub enum RequestParams {
     /// `index.rebuild_completed` notifications.
     IndexRebuild { params: IndexRebuildParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
-    #[cfg(feature = "test-helpers")]
     TestPanic,
     /// Returns a `HealthPingResponse` with the requested protocol version.
     /// Used to drive `ClientError::VersionMismatch` from the handshake.
-    #[cfg(feature = "test-helpers")]
     TestVersion { version: u32 },
     /// Sleeps for `millis` before responding. Used to verify the in-flight
     /// semaphore cap and the heartbeat-bypasses-semaphore property.
-    #[cfg(feature = "test-helpers")]
     TestSlow { millis: u64 },
     /// Calls `println!` (or its global-stdout-handle equivalent on Windows)
     /// before responding. Used to verify the stdio corruption defense.
-    #[cfg(feature = "test-helpers")]
     TestPrintln { message: String },
     /// Creates a FK-valid account fixture plus baseline labels.
-    #[cfg(feature = "test-helpers")]
     TestSeedAccount { params: TestSeedAccountParams },
     /// Reads a service-side test counter by name.
-    #[cfg(feature = "test-helpers")]
     TestCounterRead { counter: String },
     /// Arms a crash rule that exits after the Nth matching write.
-    #[cfg(feature = "test-helpers")]
     TestCrashAfterNWrites { params: TestCrashAfterNWritesParams },
     /// Creates a FK-valid thread fixture under a seeded account.
-    #[cfg(feature = "test-helpers")]
     TestSeedThread { params: TestSeedThreadParams },
     /// Inserts a cached attachment fixture under an existing message.
-    #[cfg(feature = "test-helpers")]
     TestSeedCachedAttachment { params: TestSeedCachedAttachmentParams },
     /// Inserts an uncached attachment row and registers provider bytes for attachment.fetch.
-    #[cfg(feature = "test-helpers")]
     TestSeedRemoteAttachment { params: TestSeedRemoteAttachmentParams },
     /// Deletes a cached attachment fixture's backing bytes without changing DB metadata.
-    #[cfg(feature = "test-helpers")]
     TestRemoveCachedAttachmentBytes { params: TestRemoveCachedAttachmentBytesParams },
     /// Reads back thread flags and labels for harness assertions.
-    #[cfg(feature = "test-helpers")]
     TestThreadRead { params: TestThreadReadParams },
     /// Reads pending retry-queue rows for harness assertions.
-    #[cfg(feature = "test-helpers")]
     TestPendingOpsRead { params: TestPendingOpsReadParams },
     /// Starts the real sync runtime from sync-harness scripts.
-    #[cfg(feature = "test-helpers")]
     TestStartSync { params: TestStartSyncParams },
     /// Reads a small DB snapshot for sync-harness assertions.
-    #[cfg(feature = "test-helpers")]
     TestQueryDbState { params: TestQueryDbStateParams },
     /// Flushes and queries the test search index.
-    #[cfg(feature = "test-helpers")]
     TestSearchIndex { params: TestSearchIndexParams },
     /// Arms a one-shot delay at a named write/crash hook.
-    #[cfg(feature = "test-helpers")]
     TestDelayNextWrite { params: TestDelayNextWriteParams },
 }
 
@@ -965,41 +914,24 @@ impl RequestParams {
             Self::AttachmentFetch { .. } => "attachment.fetch",
             Self::ExtractStatus { .. } => "extract.status",
             Self::IndexRebuild { .. } => "index.rebuild",
-            #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
-            #[cfg(feature = "test-helpers")]
             Self::TestVersion { .. } => "test.version",
-            #[cfg(feature = "test-helpers")]
             Self::TestSlow { .. } => "test.slow",
-            #[cfg(feature = "test-helpers")]
             Self::TestPrintln { .. } => "test.println",
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. } => "test.seed_account",
-            #[cfg(feature = "test-helpers")]
             Self::TestCounterRead { .. } => "test.counter_read",
-            #[cfg(feature = "test-helpers")]
             Self::TestCrashAfterNWrites { .. } => "test.crash_after_n_writes",
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedThread { .. } => "test.seed_thread",
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedCachedAttachment { .. } => "test.seed_cached_attachment",
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedRemoteAttachment { .. } => "test.seed_remote_attachment",
-            #[cfg(feature = "test-helpers")]
             Self::TestRemoveCachedAttachmentBytes { .. } => {
                 "test.remove_cached_attachment_bytes"
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { .. } => "test.thread_read",
-            #[cfg(feature = "test-helpers")]
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
-            #[cfg(feature = "test-helpers")]
             Self::TestStartSync { .. } => "test.start_sync",
-            #[cfg(feature = "test-helpers")]
             Self::TestQueryDbState { .. } => "test.query_db_state",
-            #[cfg(feature = "test-helpers")]
             Self::TestSearchIndex { .. } => "test.search_index",
-            #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
         }
     }
@@ -1109,11 +1041,9 @@ impl RequestParams {
             // immediately with the rebuild_id; the rebuild itself runs
             // asynchronously.
             Self::IndexRebuild { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
-            #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. }
             | Self::TestCounterRead { .. }
             | Self::TestCrashAfterNWrites { .. }
@@ -1129,7 +1059,6 @@ impl RequestParams {
             | Self::TestDelayNextWrite { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
         }
     }
@@ -1200,7 +1129,6 @@ impl RequestParams {
             | Self::AccountUpdateTokens { .. }
             | Self::IndexRebuild { .. } => Idempotency::Conditional,
 
-            #[cfg(feature = "test-helpers")]
             Self::TestPanic
             | Self::TestVersion { .. }
             | Self::TestSlow { .. }
@@ -1211,7 +1139,6 @@ impl RequestParams {
             | Self::TestQueryDbState { .. }
             | Self::TestSearchIndex { .. } => Idempotency::Idempotent,
 
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { .. }
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
@@ -1220,7 +1147,6 @@ impl RequestParams {
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
-            #[cfg(feature = "test-helpers")]
             Self::TestStartSync { .. } => Idempotency::Conditional,
         }
     }
@@ -1309,47 +1235,30 @@ impl RequestParams {
             Self::AttachmentFetch { params } => serde_json::json!({ "params": params }),
             Self::ExtractStatus { params } => serde_json::json!({ "params": params }),
             Self::IndexRebuild { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
-            #[cfg(feature = "test-helpers")]
             Self::TestVersion { version } => serde_json::json!({ "version": version }),
-            #[cfg(feature = "test-helpers")]
             Self::TestSlow { millis } => serde_json::json!({ "millis": millis }),
-            #[cfg(feature = "test-helpers")]
             Self::TestPrintln { message } => serde_json::json!({ "message": message }),
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedAccount { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestCounterRead { counter } => serde_json::json!({ "counter": counter }),
-            #[cfg(feature = "test-helpers")]
             Self::TestCrashAfterNWrites { params } => {
                 serde_json::json!({ "params": params })
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedThread { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedCachedAttachment { params } => {
                 serde_json::json!({ "params": params })
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestSeedRemoteAttachment { params } => {
                 serde_json::json!({ "params": params })
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestRemoveCachedAttachmentBytes { params } => {
                 serde_json::json!({ "params": params })
             }
-            #[cfg(feature = "test-helpers")]
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestQueryDbState { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestSearchIndex { params } => serde_json::json!({ "params": params }),
-            #[cfg(feature = "test-helpers")]
             Self::TestDelayNextWrite { params } => {
                 serde_json::json!({ "params": params })
             }
@@ -1722,12 +1631,10 @@ impl RequestParams {
                     .map_err(|e| format!("index.rebuild params: {e}"))?;
                 Ok(Self::IndexRebuild { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.panic" => {
                 expect_no_params(method, params)?;
                 Ok(Self::TestPanic)
             }
-            #[cfg(feature = "test-helpers")]
             "test.version" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1737,7 +1644,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.version params: {e}"))?;
                 Ok(Self::TestVersion { version: p.version })
             }
-            #[cfg(feature = "test-helpers")]
             "test.slow" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1747,7 +1653,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.slow params: {e}"))?;
                 Ok(Self::TestSlow { millis: p.millis })
             }
-            #[cfg(feature = "test-helpers")]
             "test.println" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1757,7 +1662,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.println params: {e}"))?;
                 Ok(Self::TestPrintln { message: p.message })
             }
-            #[cfg(feature = "test-helpers")]
             "test.seed_account" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1767,7 +1671,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.seed_account params: {e}"))?;
                 Ok(Self::TestSeedAccount { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.counter_read" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1777,7 +1680,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.counter_read params: {e}"))?;
                 Ok(Self::TestCounterRead { counter: p.counter })
             }
-            #[cfg(feature = "test-helpers")]
             "test.crash_after_n_writes" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1787,7 +1689,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.crash_after_n_writes params: {e}"))?;
                 Ok(Self::TestCrashAfterNWrites { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.seed_thread" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1797,7 +1698,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.seed_thread params: {e}"))?;
                 Ok(Self::TestSeedThread { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.seed_cached_attachment" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1807,7 +1707,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.seed_cached_attachment params: {e}"))?;
                 Ok(Self::TestSeedCachedAttachment { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.seed_remote_attachment" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1817,7 +1716,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.seed_remote_attachment params: {e}"))?;
                 Ok(Self::TestSeedRemoteAttachment { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.remove_cached_attachment_bytes" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1827,7 +1725,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.remove_cached_attachment_bytes params: {e}"))?;
                 Ok(Self::TestRemoveCachedAttachmentBytes { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.thread_read" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1837,7 +1734,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.thread_read params: {e}"))?;
                 Ok(Self::TestThreadRead { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.pending_ops_read" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1847,7 +1743,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.pending_ops_read params: {e}"))?;
                 Ok(Self::TestPendingOpsRead { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.start_sync" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1857,7 +1752,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.start_sync params: {e}"))?;
                 Ok(Self::TestStartSync { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.query_db_state" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1867,7 +1761,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.query_db_state params: {e}"))?;
                 Ok(Self::TestQueryDbState { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.search_index" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1877,7 +1770,6 @@ impl RequestParams {
                     .map_err(|e| format!("test.search_index params: {e}"))?;
                 Ok(Self::TestSearchIndex { params: p.params })
             }
-            #[cfg(feature = "test-helpers")]
             "test.delay_next_write" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -3372,7 +3264,6 @@ mod tests {
         assert!(!q.bypasses_admission());
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_seed_account_round_trips_from_method_params() {
         let original = RequestParams::TestSeedAccount {
@@ -3406,7 +3297,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_counter_read_round_trips_from_method_params() {
         let original = RequestParams::TestCounterRead {
@@ -3425,7 +3315,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_crash_after_n_writes_round_trips_from_method_params() {
         let original = RequestParams::TestCrashAfterNWrites {
@@ -3447,7 +3336,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_seed_thread_round_trips_from_method_params() {
         let original = RequestParams::TestSeedThread {
@@ -3477,7 +3365,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_seed_cached_attachment_round_trips_from_method_params() {
         let original = RequestParams::TestSeedCachedAttachment {
@@ -3500,7 +3387,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_seed_remote_attachment_round_trips_from_method_params() {
         let original = RequestParams::TestSeedRemoteAttachment {
@@ -3523,7 +3409,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_remove_cached_attachment_bytes_round_trips_from_method_params() {
         let original = RequestParams::TestRemoveCachedAttachmentBytes {
@@ -3544,7 +3429,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Mutating);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_thread_read_round_trips_from_method_params() {
         let original = RequestParams::TestThreadRead {
@@ -3563,7 +3447,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_pending_ops_read_round_trips_from_method_params() {
         let original = RequestParams::TestPendingOpsRead {
@@ -3584,7 +3467,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_start_sync_round_trips_from_method_params() {
         let original = RequestParams::TestStartSync {
@@ -3602,7 +3484,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Conditional);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_query_db_state_round_trips_from_method_params() {
         let original = RequestParams::TestQueryDbState {
@@ -3625,7 +3506,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_search_index_round_trips_from_method_params() {
         let original = RequestParams::TestSearchIndex {
@@ -3645,7 +3525,6 @@ mod tests {
         assert_eq!(original.idempotency(), Idempotency::Idempotent);
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_delay_next_write_round_trips_from_method_params() {
         let original = RequestParams::TestDelayNextWrite {

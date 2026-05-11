@@ -196,7 +196,6 @@ fn parse_event_datetime(
         .or_else(|| value.get(alt_key))
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    #[cfg(any(test, feature = "test-helpers"))]
     let dt_str = dt_str.or_else(|| {
         value
             .get(key)

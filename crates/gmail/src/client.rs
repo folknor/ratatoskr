@@ -43,13 +43,11 @@ pub fn new_gmail_state(encryption_key: [u8; 32]) -> GmailState {
     GmailState::new(encryption_key, "Gmail")
 }
 
-#[cfg(feature = "test-helpers")]
 fn gmail_api_base_from_test_endpoint(endpoint: &str) -> Option<String> {
     common::test_endpoint::api_base_from_test_endpoint(endpoint, "gmail/v1/users/me")
 }
 
 fn gmail_api_base() -> String {
-    #[cfg(feature = "test-helpers")]
     if let Ok(value) = std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
         && let Some(api_base) = gmail_api_base_from_test_endpoint(&value)
     {
@@ -474,7 +472,7 @@ async fn persist_refreshed_token(
     .await
 }
 
-#[cfg(all(test, feature = "test-helpers"))]
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

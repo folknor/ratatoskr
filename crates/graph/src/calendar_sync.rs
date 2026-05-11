@@ -406,7 +406,6 @@ pub async fn graph_create_event(
     let response = match serde_json::from_value::<GraphEvent>(response.clone()) {
         Ok(event) => event,
         Err(error) => {
-            #[cfg(any(test, feature = "test-helpers"))]
             if response.get("echoedRequest").is_some() {
                 return graph_event_from_create_echo(&response, event)
                     .ok_or_else(|| {
@@ -420,7 +419,6 @@ pub async fn graph_create_event(
     map_graph_event(response)
 }
 
-#[cfg(any(test, feature = "test-helpers"))]
 fn graph_event_from_create_echo(
     response: &serde_json::Value,
     event: &GraphEventCreate,

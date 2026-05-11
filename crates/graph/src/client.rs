@@ -59,14 +59,12 @@ pub fn new_graph_state(encryption_key: [u8; 32]) -> GraphState {
     GraphState::new(encryption_key, "Graph")
 }
 
-#[cfg(feature = "test-helpers")]
 fn endpoint_parent(endpoint: &str, segment: &str) -> Option<String> {
     endpoint
         .strip_suffix(segment)
         .map(|parent| parent.trim_end_matches('/').to_string())
 }
 
-#[cfg(feature = "test-helpers")]
 fn graph_api_bases_from_test_endpoint(endpoint: &str) -> Option<(String, String)> {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.is_empty() {
@@ -86,7 +84,6 @@ fn graph_api_bases_from_test_endpoint(endpoint: &str) -> Option<(String, String)
 }
 
 fn graph_api_bases() -> (String, String) {
-    #[cfg(feature = "test-helpers")]
     if let Ok(value) = std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT")
         && let Some(bases) = graph_api_bases_from_test_endpoint(&value)
     {
@@ -737,7 +734,6 @@ mod tests {
         assert_eq!(shared.api_path_prefix(), "/users/team%40contoso.com");
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_graph_endpoint_origin_maps_to_api_bases() {
         let (api, beta) =
@@ -747,7 +743,6 @@ mod tests {
         assert_eq!(beta, "http://127.0.0.1:8080/beta");
     }
 
-    #[cfg(feature = "test-helpers")]
     #[test]
     fn test_graph_endpoint_v1_derives_beta_base() {
         let (api, beta) =

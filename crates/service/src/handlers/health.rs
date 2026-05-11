@@ -13,12 +13,6 @@ pub(super) async fn handle(started_at: Instant) -> Result<Value, ServiceError> {
     .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
-#[cfg(feature = "test-helpers")]
 fn report_version() -> u32 {
     crate::test_fake_version().unwrap_or(PROTOCOL_VERSION)
-}
-
-#[cfg(not(feature = "test-helpers"))]
-fn report_version() -> u32 {
-    PROTOCOL_VERSION
 }

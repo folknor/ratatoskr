@@ -18,14 +18,12 @@ mod snooze_runner;
 pub(crate) mod startup_invariants;
 pub(crate) mod sync;
 pub(crate) mod sync_dispatch;
-#[cfg(feature = "test-helpers")]
 pub(crate) mod test_counters;
 pub(crate) mod text_extract;
 
 /// Re-export test-helpers knobs for the in-process integration tests so
 /// they can drive the artificial boot delay without `pub mod boot` leaking
 /// every internal item. Compiled out of release builds.
-#[cfg(feature = "test-helpers")]
 pub use boot::{TEST_BOOT_DELAY_LOCK, TEST_BOOT_DELAY_MS};
 mod dispatch;
 mod handlers;
@@ -79,7 +77,6 @@ pub fn run_service_blocking() -> ! {
         .unwrap_or_else(default_app_data_dir);
     let _ = logging::init(&app_data_dir);
     logging::install_panic_hook();
-    #[cfg(feature = "test-helpers")]
     install_test_boot_delay_from_args();
     if arg_app_data_dir.is_none() {
         // Production launches always pass --app-data-dir from the UI; a
@@ -177,7 +174,6 @@ fn app_data_dir_from_args() -> Option<PathBuf> {
 /// Test-only override for the version reported in `health.ping` responses.
 /// Triggered by `--test-fake-version=N` on the Service command line. Used
 /// by the version-mismatch integration test; off in production builds.
-#[cfg(feature = "test-helpers")]
 pub(crate) fn test_fake_version() -> Option<u32> {
     let mut args = std::env::args();
     while let Some(arg) = args.next() {
@@ -194,7 +190,6 @@ pub(crate) fn test_fake_version() -> Option<u32> {
 /// Test-only override for the schema version reported in `boot.ready`.
 /// Triggered by `--test-fake-schema=N` on the Service command line. Used
 /// by the respawn harness to verify the terminal binary-swap guard.
-#[cfg(feature = "test-helpers")]
 pub(crate) fn test_fake_schema() -> Option<u32> {
     let mut args = std::env::args();
     while let Some(arg) = args.next() {
@@ -214,14 +209,12 @@ pub(crate) fn test_fake_schema() -> Option<u32> {
 /// etc.) so the client-Drop kill-escalation path can be exercised
 /// end-to-end. Triggered by `--test-hang-on-stdin-eof` on the command
 /// line; off in production builds.
-#[cfg(feature = "test-helpers")]
 pub(crate) fn test_hang_on_stdin_eof() -> bool {
     std::env::args().any(|arg| arg == "--test-hang-on-stdin-eof")
 }
 
 /// Test-only artificial boot delay for subprocess harness scripts.
 /// Triggered by `--test-boot-delay-ms=N` on the Service command line.
-#[cfg(feature = "test-helpers")]
 fn install_test_boot_delay_from_args() {
     use std::sync::atomic::Ordering;
 

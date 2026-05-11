@@ -1,8 +1,6 @@
 use db::db::ReadDbState;
 use provider_sync::ProviderSyncOps;
-#[cfg(feature = "test-helpers")]
 use std::collections::HashMap;
-#[cfg(feature = "test-helpers")]
 use std::sync::{Mutex, OnceLock};
 
 use super::outcome::RemoteFailureKind;
@@ -47,9 +45,7 @@ pub async fn create_provider(
                 jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
             Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
-        #[cfg(feature = "test-helpers")]
         "harness-offline" => Ok(Box::new(HarnessOfflineProvider::immediate())),
-        #[cfg(feature = "test-helpers")]
         "harness-slow-sync" => Ok(Box::new(HarnessOfflineProvider::slow_sync())),
         "imap" => Ok(Box::new(imap::ops::ImapOps::new(encryption_key))),
         other => Err(format!("Unknown provider: {other}")),
@@ -77,19 +73,16 @@ pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
     }
 }
 
-#[cfg(feature = "test-helpers")]
 #[derive(Clone, Copy)]
 enum HarnessOfflineMode {
     Immediate,
     SlowSync,
 }
 
-#[cfg(feature = "test-helpers")]
 struct HarnessOfflineProvider {
     mode: HarnessOfflineMode,
 }
 
-#[cfg(feature = "test-helpers")]
 impl HarnessOfflineProvider {
     fn immediate() -> Self {
         Self {
@@ -121,10 +114,8 @@ impl HarnessOfflineProvider {
     }
 }
 
-#[cfg(feature = "test-helpers")]
 type HarnessAttachmentKey = (String, String, String);
 
-#[cfg(feature = "test-helpers")]
 fn harness_attachments(
 ) -> &'static Mutex<HashMap<HarnessAttachmentKey, common::types::AttachmentData>> {
     static MAP: OnceLock<Mutex<HashMap<HarnessAttachmentKey, common::types::AttachmentData>>> =
@@ -132,7 +123,6 @@ fn harness_attachments(
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "test-helpers")]
 pub(crate) fn register_harness_attachment(
     account_id: &str,
     message_id: &str,
@@ -151,7 +141,6 @@ pub(crate) fn register_harness_attachment(
     guard.insert(key, common::types::AttachmentData { data, size });
 }
 
-#[cfg(feature = "test-helpers")]
 #[async_trait::async_trait]
 impl common::ops::ProviderOps for HarnessOfflineProvider {
     async fn archive(
@@ -342,7 +331,6 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
     }
 }
 
-#[cfg(feature = "test-helpers")]
 #[async_trait::async_trait]
 impl provider_sync::ProviderSyncOps for HarnessOfflineProvider {
     async fn sync_initial(

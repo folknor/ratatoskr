@@ -91,8 +91,10 @@ Sync harness scripts live under `crates/app/tests/sync-harness/`.
 
 `brokkr.toml` has two ratatoskr sections:
 
-- `[ratatoskr.harness]` selects the check sweep and app binary that
-  `brokkr service-test` drives (`test-helpers` build of `app`).
+- `[ratatoskr.harness]` describes the orchestration build: `package`
+  to build (defaults to also being the spawned `binary`) and `debug`
+  to pick the dev profile. Self-contained; not referenced by bare
+  `brokkr check`.
 - `[ratatoskr]` wires sync-harness mock servers: installed
   `saehrimnir` binary, fixture dir, endpoint env var names, and
   `sync_script_dir`.

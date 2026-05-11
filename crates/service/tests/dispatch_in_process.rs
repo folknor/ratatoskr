@@ -194,7 +194,6 @@ async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
     shutdown(harness).await
 }
 
-#[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> TestResult {
@@ -225,7 +224,6 @@ async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> T
     shutdown(harness).await
 }
 
-#[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -> TestResult {
@@ -359,7 +357,6 @@ async fn boot_ready_returns_after_sequence_completes() -> TestResult {
 /// notification writer (scope item 18 of phase-1.5-plan.md). Without this
 /// test, a regression that ran the boot sequence on the runtime worker
 /// pool instead of `spawn_blocking` would not be caught.
-#[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "covered by crates/app/tests/service-harness/m2_5/health_ping_succeeds_during_long_migration.lua"]
 async fn health_ping_succeeds_during_long_migration() -> TestResult {
@@ -481,7 +478,6 @@ async fn health_ping_works_concurrently_with_boot_ready() -> TestResult {
 /// `boot_progress_notifications_emitted_in_order` hang triaged for
 /// Phase 8 - the suspected fix is already on the horizon for the
 /// service plan; pulling this test off the default sweep until then.
-#[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "covered by crates/app/tests/service-harness/m2_5/boot_ready_blocks_until_sequence_completes.lua"]
 async fn boot_ready_blocks_until_sequence_completes() -> TestResult {
@@ -542,7 +538,6 @@ async fn boot_ready_blocks_until_sequence_completes() -> TestResult {
 /// `test-helpers` so a future
 /// brokkr config that drops the feature from the default sweep can
 /// pull this off the per-test schedule entirely.
-#[cfg(feature = "test-helpers")]
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "covered by crates/app/tests/service-harness/m2_5/boot_progress_notifications_emitted_in_order.lua"]
 async fn boot_progress_notifications_emitted_in_order() -> TestResult {
