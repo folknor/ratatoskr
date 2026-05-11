@@ -489,6 +489,9 @@ pub(crate) fn terminal_failure_user_message(reason: &BootFailureReason) -> Strin
                 "Could not acquire the Ratatoskr instance lock (check disk space and \
                  directory permissions).".to_string()
             }
+            BootExitCode::DispatchPanic => {
+                "Service dispatch runtime panicked.".to_string()
+            }
         },
         BootFailureReason::Classified(BootClassification::UnexpectedExit { code }) => {
             match code {
@@ -3931,6 +3934,7 @@ mod tests {
             BootExitCode::MigrationFailure,
             BootExitCode::HandshakeFailure,
             BootExitCode::LockIoFailure,
+            BootExitCode::DispatchPanic,
         ]
         .into_iter()
         .map(|code| {

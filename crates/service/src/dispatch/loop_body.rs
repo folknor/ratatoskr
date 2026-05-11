@@ -19,6 +19,7 @@ use service_api::{
     parse_client_message,
 };
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 use tokio::io::AsyncRead;
 use tokio::sync::{Semaphore, mpsc};
@@ -55,6 +56,7 @@ where
                             &mut state.notifications_in_flight,
                             state.started_at,
                             &state.boot_state,
+                            &state.diagnostic_drops,
                         ).await {
                             HandleOutcome::Continue => {}
                             HandleOutcome::Shutdown(id) => {
@@ -87,6 +89,7 @@ where
                             &state.out_tx,
                             None,
                             JsonRpcErrorObject::parse_error("frame too large"),
+                            &state.diagnostic_drops,
                         );
                     }
                     Err(FrameError::InvalidUtf8(error)) => {
@@ -95,6 +98,7 @@ where
                             &state.out_tx,
                             None,
                             JsonRpcErrorObject::parse_error("invalid utf-8"),
+                            &state.diagnostic_drops,
                         );
                     }
                     Err(FrameError::Io(error)) => {
@@ -114,6 +118,11 @@ enum HandleOutcome {
     Shutdown(u64),
 }
 
+// Eight args - several &mut Joinsets and a &AtomicU64 over and above
+// the dispatch-state references. Bundling them into a struct would just
+// invent a name that means "the dispatch loop's state minus its lifecycle
+// fields"; the destructuring at the call site already conveys that.
+#[allow(clippy::too_many_arguments)]
 async fn handle_line(
     line: &str,
     out_tx: &mpsc::Sender<Vec<u8>>,
@@ -122,6 +131,7 @@ async fn handle_line(
     notifications_in_flight: &mut JoinSet<()>,
     started_at: Instant,
     boot_state: &Arc<boot::BootSharedState>,
+    diagnostic_drops: &AtomicU64,
 ) -> HandleOutcome {
     match parse_client_message(line) {
         Ok(ParsedClientMessage::Request { id, params })
@@ -178,6 +188,7 @@ async fn handle_line(
                 out_tx,
                 response_id,
                 JsonRpcErrorObject::parse_error(error.to_string()),
+                diagnostic_drops,
             );
             HandleOutcome::Continue
         }

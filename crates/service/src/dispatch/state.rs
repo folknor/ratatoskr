@@ -13,6 +13,7 @@ use crate::lifecycle::ServiceLifecycle;
 use crate::subsystems::Subsystems;
 use service_api::{BootExitCode, BoundedLineReader};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::{JoinHandle, JoinSet};
@@ -49,4 +50,10 @@ pub(crate) struct DispatchState<R> {
     /// gates whether the Service exits non-zero and whether the
     /// Shutdown ack is suppressed.
     pub boot_exit_code: Option<BootExitCode>,
+
+    /// Count of diagnostic error responses (parse error, oversized
+    /// frame, invalid utf-8) that `try_send_error` dropped because the
+    /// outbound mpsc was full. Logged at shutdown if non-zero so a
+    /// flood of malformed input doesn't become invisible.
+    pub diagnostic_drops: Arc<AtomicU64>,
 }

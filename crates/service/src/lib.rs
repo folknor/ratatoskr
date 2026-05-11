@@ -131,29 +131,52 @@ pub fn run_service_blocking() -> ! {
     };
 
     let config = dispatch::DispatchConfig::from_cli_args();
-    let exit_code = runtime.block_on(async move {
-        let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir.clone()));
-        sigterm::spawn(lifecycle.clone());
+    // Wrap the runtime entry in catch_unwind so a panic in the dispatch
+    // loop, shutdown drain, or any framing helper exits with a
+    // dedicated `DispatchPanic` code instead of the catch-all
+    // `UnexpectedExit { code: None }` produced by `panic = "abort"`
+    // or the raw exit-code-1 produced by the default panic-hook+abort
+    // pair. Per-handler panics already convert to `ServiceError::Panic`
+    // inside `dispatch_with_panic_safety`; this is the runtime-wide
+    // backstop for everything else.
+    let runtime_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        runtime.block_on(async move {
+            let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir.clone()));
+            sigterm::spawn(lifecycle.clone());
 
-        // 6. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
-        //    have a runtime context.
-        match stdio_defense::adopt_into_runtime(saved_stdio) {
-            Ok((stdin, stdout)) => {
-                dispatch::run_service_with_io_and_lifecycle(
-                    stdin,
-                    stdout,
-                    lifecycle,
-                    config,
-                    app_data_dir,
-                )
-                .await
+            // Wrap the saved FDs/HANDLEs into tokio I/O types now that
+            // we have a runtime context.
+            match stdio_defense::adopt_into_runtime(saved_stdio) {
+                Ok((stdin, stdout)) => {
+                    dispatch::run_service_with_io_and_lifecycle(
+                        stdin,
+                        stdout,
+                        lifecycle,
+                        config,
+                        app_data_dir,
+                    )
+                    .await
+                }
+                Err(error) => {
+                    log::error!("failed to adopt service stdio into runtime: {error}");
+                    1
+                }
             }
-            Err(error) => {
-                log::error!("failed to adopt service stdio into runtime: {error}");
-                1
-            }
+        })
+    }));
+
+    let exit_code = match runtime_result {
+        Ok(code) => code,
+        Err(_panic) => {
+            // The panic hook (`logging::install_panic_hook`) already
+            // logged the location + payload + backtrace; catch_unwind
+            // here just bounds the process exit so the UI can map
+            // DispatchPanic to a specific surfaced message instead of
+            // a generic "Service exited unexpectedly".
+            log::error!("service dispatch runtime panicked; exiting with DispatchPanic");
+            BootExitCode::DispatchPanic.as_i32()
         }
-    });
+    };
 
     drop(_instance_lock);
     std::process::exit(exit_code);

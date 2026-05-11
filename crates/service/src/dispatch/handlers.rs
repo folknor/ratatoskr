@@ -27,20 +27,47 @@ use tokio::task::JoinSet;
 /// first I/O error so a closed pipe doesn't loop forever; the shutdown
 /// drain awaits this task's JoinHandle after every `out_tx` clone has
 /// been released.
+///
+/// On a mid-stream I/O error the task drains the remaining queued
+/// frames before exiting and logs the drop count. Silent loss of the
+/// Shutdown ack used to be invisible (the UI just saw
+/// `ServiceCrashed`); this gives log triage a concrete count to start
+/// from when the ack was supposed to land but didn't.
 pub(crate) async fn writer_task<W>(mut writer: W, mut out_rx: mpsc::Receiver<Vec<u8>>)
 where
     W: AsyncWrite + Unpin,
 {
+    let mut written = 0u64;
     while let Some(bytes) = out_rx.recv().await {
         if let Err(error) = writer.write_all(&bytes).await {
-            log::warn!("service stdout write failed: {error}");
-            break;
+            let dropped = drain_remaining(&mut out_rx);
+            log::warn!(
+                "service stdout write failed after {written} frame(s); \
+                 dropped {dropped} queued frame(s): {error}",
+            );
+            return;
         }
         if let Err(error) = writer.flush().await {
-            log::warn!("service stdout flush failed: {error}");
-            break;
+            let dropped = drain_remaining(&mut out_rx);
+            log::warn!(
+                "service stdout flush failed after {written} frame(s); \
+                 dropped {dropped} queued frame(s): {error}",
+            );
+            return;
         }
+        written += 1;
     }
+}
+
+/// Pop every remaining queued frame from the outbound mpsc without
+/// touching the wire. Used after a writer-side I/O error so the log
+/// line names a concrete drop count.
+fn drain_remaining(out_rx: &mut mpsc::Receiver<Vec<u8>>) -> u64 {
+    let mut dropped = 0u64;
+    while out_rx.try_recv().is_ok() {
+        dropped += 1;
+    }
+    dropped
 }
 
 /// Spawn a request handler. Acquires the in-flight permit *inside* the
@@ -222,15 +249,21 @@ async fn send_error(out_tx: &mpsc::Sender<Vec<u8>>, id: Option<u64>, error: Json
 /// `out_tx.send` here would stall stdin reads when the outbound queue
 /// is full; for parse errors and frame errors that's the wrong trade
 /// - drop the diagnostic and keep reading.
+///
+/// `diagnostic_drops` bumps once per dropped diagnostic so a flood of
+/// malformed input registers as a count instead of just a stream of
+/// warn lines. The shutdown drain logs the total at exit.
 pub(crate) fn try_send_error(
     out_tx: &mpsc::Sender<Vec<u8>>,
     id: Option<u64>,
     error: JsonRpcErrorObject,
+    diagnostic_drops: &std::sync::atomic::AtomicU64,
 ) {
     let response = JsonRpcErrorResponse::new(id, error);
     match encode_message(&response) {
         Ok(bytes) => {
             if let Err(send_err) = out_tx.try_send(bytes) {
+                diagnostic_drops.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 log::warn!("dropped diagnostic error response: {send_err}");
             }
         }

@@ -17,6 +17,7 @@ use crate::subsystems::Subsystems;
 use service_api::{BootExitCode, BoundedLineReader};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Semaphore, mpsc};
@@ -119,6 +120,7 @@ where
         lines,
         boot_state,
         boot_failure_rx,
+        diagnostic_drops: Arc::new(AtomicU64::new(0)),
         subsystems: Subsystems {
             boot: boot_handle,
             action_worker: action_worker_handle,

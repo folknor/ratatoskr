@@ -72,6 +72,15 @@ where
     drop(state.out_tx);
     let _ = state.writer_handle.await;
 
+    let drops = state
+        .diagnostic_drops
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if drops > 0 {
+        log::warn!(
+            "dispatch shutdown: {drops} diagnostic error response(s) dropped (outbound queue full)",
+        );
+    }
+
     state
         .boot_exit_code
         .map(service_api::BootExitCode::as_i32)

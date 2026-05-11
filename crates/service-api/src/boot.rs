@@ -28,6 +28,14 @@ pub enum BootExitCode {
     /// surface a path-specific message naming `<app_data>/ratatoskr.lock`
     /// rather than the catch-all "Service exited unexpectedly".
     LockIoFailure = 74,
+    /// The dispatch runtime panicked outside any handler's `catch_unwind`
+    /// wrapper (i.e. inside the dispatch loop, shutdown drain, or one
+    /// of the framing helpers). Distinct from a per-handler panic
+    /// (which produces `ServiceError::Panic` on the wire and exit 0)
+    /// and from `panic = "abort"` SIGABRT (which lands as
+    /// `UnexpectedExit { code: None }`). Surfaced by the top-level
+    /// `catch_unwind` in `run_service_blocking`.
+    DispatchPanic = 75,
 }
 
 impl BootExitCode {
@@ -42,6 +50,7 @@ impl BootExitCode {
             72 => Some(Self::MigrationFailure),
             73 => Some(Self::KeyLoadFailure),
             74 => Some(Self::LockIoFailure),
+            75 => Some(Self::DispatchPanic),
             _ => None,
         }
     }
@@ -232,6 +241,7 @@ mod tests {
             BootExitCode::MigrationFailure,
             BootExitCode::KeyLoadFailure,
             BootExitCode::LockIoFailure,
+            BootExitCode::DispatchPanic,
         ] {
             assert_eq!(BootExitCode::from_i32(code.as_i32()), Some(code));
         }
@@ -250,6 +260,7 @@ mod tests {
             BootExitCode::MigrationFailure,
             BootExitCode::KeyLoadFailure,
             BootExitCode::LockIoFailure,
+            BootExitCode::DispatchPanic,
         ] {
             let value = code.as_i32();
             assert_ne!(value, 0);
