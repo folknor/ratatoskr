@@ -9,14 +9,27 @@ The architecture is mirrored on the brokkr side as
 documents stay in sync; this one is authoritative for the ratatoskr
 side.
 
-The target cohort is any Service test that starts the Service behind
-an IO boundary and then waits on boot, dispatch, drain, crash, or
-framing behaviour. The libtest cohort that originally lived in
+The target cohort is Service tests that start the Service behind an
+**OS-level IO boundary** - a subprocess - and then wait on boot,
+dispatch, drain, crash, or framing behaviour. The wall-clock-timeout
+and child-exit-race failure modes that motivate the harness only
+apply when there's a real child process to race against.
+
+The libtest cohort that originally lived in
 `crates/app/tests/service_subprocess.rs` is fully migrated to Lua
-scripts under `crates/app/tests/service-harness/`; the
-`spawn_harness_with_suffix` family in
-`crates/service/tests/dispatch_in_process.rs` is the remaining
-in-process libtest cohort scheduled for migration in M2.5.
+scripts under `crates/app/tests/service-harness/`.
+
+The `spawn_harness_with_suffix` family in
+`crates/service/tests/dispatch_in_process.rs` is **not** a migration
+target. It uses in-memory `tokio::io::duplex` pipes against
+`service::run_service_with_io` - no subprocess, no PID, no race
+against the OS scheduler. Wire-level parser tests (malformed JSON,
+oversized frames, invalid UTF-8) and protocol-level concerns
+(panicking handler, in-flight semaphore + heartbeat bypass) live
+there and are simpler to drive as in-process libtest. The
+boot-failure paths (`boot_sequence_returns_key_load_failure_when_key_file_is_missing`,
+`boot_sequence_returns_migration_failure_when_db_is_corrupt`)
+follow the same pattern.
 
 ## Motivation
 

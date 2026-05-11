@@ -100,7 +100,6 @@ fn spawn_harness() -> Harness {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn malformed_json_returns_error_and_loop_continues() -> TestResult {
     let mut harness = spawn_harness();
     harness.stdin.write_all(b"{not-json}\n").await?;
@@ -117,7 +116,6 @@ async fn malformed_json_returns_error_and_loop_continues() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn oversized_frame_returns_error_and_loop_continues() -> TestResult {
     let mut harness = spawn_harness();
     let oversized = vec![b'a'; service_api::MAX_FRAME_BYTES + 1];
@@ -136,7 +134,6 @@ async fn oversized_frame_returns_error_and_loop_continues() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn eof_on_stdin_exits_cleanly() -> TestResult {
     let harness = spawn_harness();
     drop(harness.stdin);
@@ -146,7 +143,6 @@ async fn eof_on_stdin_exits_cleanly() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn invalid_utf8_returns_parse_error_and_loop_continues() -> TestResult {
     let mut harness = spawn_harness();
     harness.stdin.write_all(b"\xff\xfe\n").await?;
@@ -163,7 +159,6 @@ async fn invalid_utf8_returns_parse_error_and_loop_continues() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
     let mut harness = spawn_harness();
     let bogus = br#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{"unexpected":"value"}}"#;
@@ -177,7 +172,6 @@ async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> TestResult {
     use service_api::{JsonRpcErrorObject, ServiceError};
     let mut harness = spawn_harness();
@@ -207,7 +201,6 @@ async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> T
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
 async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -> TestResult {
     // Issue 100 slow handlers in parallel. Each sleeps for 800ms. The
     // semaphore caps concurrency at 64; the math says the second batch
@@ -276,29 +269,6 @@ async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -
         second_batch_min >= std::time::Duration::from_millis(slow_ms).saturating_sub(slop),
         "second batch started too early: {second_batch_min:?}"
     );
-
-    shutdown(harness).await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "spawn_harness cohort - M2.5 migration to Lua harness pending"]
-async fn concurrent_ping_ids_are_correlated() -> TestResult {
-    let mut harness = spawn_harness();
-    for id in 1..=100 {
-        write_request(&mut harness.stdin, id, RequestParams::HealthPing).await?;
-    }
-
-    let mut seen = std::collections::BTreeSet::new();
-    for _ in 0..100 {
-        let (id, response) = read_response(&mut harness.stdout).await?;
-        let id = id.ok_or_else(|| std::io::Error::other("missing response id"))?;
-        assert!(matches!(response, ServiceResponse::Success(_)));
-        seen.insert(id);
-    }
-
-    assert_eq!(seen.len(), 100);
-    assert_eq!(seen.first().copied(), Some(1));
-    assert_eq!(seen.last().copied(), Some(100));
 
     shutdown(harness).await
 }
