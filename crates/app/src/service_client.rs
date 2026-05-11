@@ -2052,11 +2052,11 @@ impl ServiceClient {
     /// to drop notifications from a dying-but-still-flushing reader after
     /// a respawn (scope item 20 of `phase-1.5-plan.md`).
     ///
-    /// `pub` (not `pub(crate)`) because integration tests in
-    /// `crates/app/tests/service_subprocess.rs` live in a separate crate
-    /// and need to assert respawn bumped this counter end-to-end. The
-    /// counter exposes only the running incarnation count, no secret
-    /// state.
+    /// `pub` (not `pub(crate)`) because the Lua harness module exposes
+    /// it as `client:current_generation()` for scripts that need to
+    /// assert respawn bumped this counter end-to-end (see
+    /// `stale_notifications_after_respawn.lua`). The counter exposes
+    /// only the running incarnation count, no secret state.
     pub fn current_generation(&self) -> u32 {
         self.current_generation.load(Ordering::SeqCst)
     }

@@ -103,6 +103,12 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "data_dir", lua_data_dir)?;
     set_field_fn(state, table_idx, "spawn", lua_spawn)?;
     set_field_fn(state, table_idx, "spawn_with_events", lua_spawn_with_events)?;
+    set_field_fn(
+        state,
+        table_idx,
+        "spawn_parent_death_helper",
+        lua_spawn_parent_death_helper,
+    )?;
     set_field_fn(state, table_idx, "kill", lua_kill)?;
     set_field_fn(state, table_idx, "pid_is_alive", lua_pid_is_alive)?;
     set_field_fn(state, table_idx, "path_exists", lua_path_exists)?;
@@ -295,6 +301,11 @@ enum HarnessResource {
     Events(mpsc::Receiver<SpawnEvent>),
     Notifications(ServiceNotificationReceiver),
     Request(tokio::task::JoinHandle<Result<serde_json::Value, ClientError>>),
+    /// A sibling-binary child the harness drives directly (parent_death_helper).
+    /// Held here so kill_on_drop fires on teardown and SIGCHLD reaps the child
+    /// through the tokio runtime before the harness process exits. The Child
+    /// itself is never read after insertion - it exists for Drop side effects.
+    Helper(#[allow(dead_code)] tokio::process::Child),
 }
 
 fn lua_data_dir(state: &mut State) -> dellingr::Result<u8> {
@@ -383,6 +394,97 @@ fn lua_spawn_with_events(state: &mut State) -> dellingr::Result<u8> {
     state.set_top(0);
     push_events_table(state, id)?;
     Ok(1)
+}
+
+/// Spawn `parent_death_helper` as a child of the harness, which in turn
+/// spawns the Service with `PR_SET_PDEATHSIG = SIGTERM` set via
+/// `pre_exec`. The helper prints the Service's pid to stdout and sleeps;
+/// the Lua test then SIGKILLs the helper and polls the Service pid.
+///
+/// Returns a Lua table `{ helper_pid, service_pid }`. The tokio Child
+/// handle is held in `HarnessResource::Helper` for the lifetime of the
+/// harness context so `kill_on_drop` fires on teardown and tokio's
+/// runtime reaps the zombie before the harness binary exits.
+///
+/// Linux-only - the helper's `main` bails non-zero on other platforms,
+/// so the read-pid step will fail with EOF.
+fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
+    let data_dir = PathBuf::from(state.to_string(1)?);
+    let ctx = context(state)?;
+    let (handle, app_binary) = {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        (guard.handle.clone(), guard.app_binary.clone())
+    };
+    let helper_binary = parent_death_helper_path(&app_binary)?;
+
+    // tokio::process::Command::spawn requires the tokio runtime to be in
+    // scope; the BufReader read for the pid line is async. Wrap both in
+    // a single block_on so the runtime context is correct for spawn AND
+    // the read.
+    let (child, helper_pid, service_pid) = handle
+        .block_on(async move {
+            let mut child = tokio::process::Command::new(&helper_binary)
+                .arg(&app_binary)
+                .arg(&data_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .kill_on_drop(true)
+                .spawn()?;
+            let helper_pid = child
+                .id()
+                .ok_or_else(|| std::io::Error::other("parent_death_helper has no pid"))?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| std::io::Error::other("parent_death_helper has no stdout"))?;
+            use tokio::io::AsyncBufReadExt;
+            let mut reader = tokio::io::BufReader::new(stdout);
+            let mut line = String::new();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                reader.read_line(&mut line),
+            )
+            .await
+            .map_err(|_| {
+                std::io::Error::other("parent_death_helper did not print pid in time")
+            })??;
+            let service_pid = line.trim().parse::<u32>().map_err(|e| {
+                std::io::Error::other(format!("parse helper pid {line:?}: {e}"))
+            })?;
+            Ok::<_, std::io::Error>((child, helper_pid, service_pid))
+        })
+        .map_err(lua_io)?;
+
+    {
+        let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.record_step("spawn_parent_death_helper", "spawn", "ok");
+        let _ = guard.insert(HarnessResource::Helper(child));
+    }
+
+    state.set_top(0);
+    state.new_table();
+    let idx = state.get_top() as isize;
+    set_field_number(state, idx, "helper_pid", helper_pid as f64)?;
+    set_field_number(state, idx, "service_pid", service_pid as f64)?;
+    Ok(1)
+}
+
+fn parent_death_helper_path(app_binary: &Path) -> dellingr::Result<PathBuf> {
+    if let Some(dir) = std::env::var_os("BROKKR_TEST_BIN_DIR") {
+        let candidate = PathBuf::from(dir).join("parent_death_helper");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    if let Some(parent) = app_binary.parent() {
+        let candidate = parent.join("parent_death_helper");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(lua_io(std::io::Error::other(
+        "parent_death_helper binary not found alongside app",
+    )))
 }
 
 fn lua_kill(state: &mut State) -> dellingr::Result<u8> {

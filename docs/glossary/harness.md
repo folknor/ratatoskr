@@ -9,12 +9,14 @@ The architecture is mirrored on the brokkr side as
 documents stay in sync; this one is authoritative for the ratatoskr
 side.
 
-The target cohort is not limited to OS-subprocess tests. It includes
-any Service test that starts the Service behind an IO boundary and
-then waits on boot, dispatch, drain, crash, or framing behaviour. Today
-that means both `crates/app/tests/service_subprocess.rs` and the
+The target cohort is any Service test that starts the Service behind
+an IO boundary and then waits on boot, dispatch, drain, crash, or
+framing behaviour. The libtest cohort that originally lived in
+`crates/app/tests/service_subprocess.rs` is fully migrated to Lua
+scripts under `crates/app/tests/service-harness/`; the
 `spawn_harness_with_suffix` family in
-`crates/service/tests/dispatch_in_process.rs`.
+`crates/service/tests/dispatch_in_process.rs` is the remaining
+in-process libtest cohort scheduled for migration in M2.5.
 
 ## Motivation
 

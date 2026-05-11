@@ -233,10 +233,9 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 ///
 /// `load_encryption_key` expects base64-encoded 32 bytes. The byte
 /// pattern `0xA5` is the same one Service tests use for in-process key
-/// fixtures (`crates/service/tests/dispatch_in_process.rs`,
-/// `crates/app/tests/service_subprocess.rs`); reusing it keeps the
-/// dev-seed fixture and the test fixtures aligned, and avoids the
-/// all-zero pattern that crypto-key rejects unconditionally.
+/// fixtures (`crates/service/tests/dispatch_in_process.rs`); reusing it
+/// keeps the dev-seed fixture and the test fixtures aligned, and avoids
+/// the all-zero pattern that crypto-key rejects unconditionally.
 fn write_dev_encryption_key(app_data_dir: &Path) -> Result<(), String> {
     let key_path = app_data_dir.join("ratatoskr.key");
     // base64(b'\xA5' * 32) = ten "paWl" groups + trailing "paU=" pad.
