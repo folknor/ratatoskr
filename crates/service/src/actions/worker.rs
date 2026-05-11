@@ -145,7 +145,20 @@ async fn run(
         // both fire `boot_state.notify_action_worker()` so either
         // trigger does the same work.
         super::pending::process_pending_ops(&action_ctx).await;
-        boot_state.await_action_worker_wakeup().await;
+        // Park until either the next handler-side wakeup OR shutdown.
+        // Cooperative cancellation lets the worker exit immediately
+        // instead of waiting for `Subsystems::abort_tasks` to abort
+        // the JoinHandle (which doesn't stop blocking SQLite writes
+        // anyway). Tokio's mpsc / Notify guarantee that a wakeup
+        // arriving while we're inside this select! is observed by
+        // the next iteration.
+        tokio::select! {
+            () = boot_state.shutdown_token().cancelled() => {
+                log::info!("action worker: shutdown token fired, exiting");
+                return;
+            }
+            () = boot_state.await_action_worker_wakeup() => {}
+        }
     }
 }
 

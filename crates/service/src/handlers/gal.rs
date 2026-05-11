@@ -78,6 +78,16 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
     log::debug!("gal.kick: iterating {} accounts", account_ids.len());
 
     for account_id in account_ids {
+        if boot_state.shutdown_token().is_cancelled() {
+            // Cooperative shutdown: bail out between accounts rather
+            // than waiting out PER_ACCOUNT_TIMEOUT for accounts we
+            // know the Service is about to abort anyway. The
+            // already-running per-account refresh keeps its own
+            // 24 h cache write idempotent, so re-running on the next
+            // gal.kick after a fresh boot is harmless.
+            log::info!("[GAL] shutdown token fired mid-iteration, exiting");
+            return Ok(());
+        }
         match tokio::time::timeout(
             PER_ACCOUNT_TIMEOUT,
             rtsk::contacts::gal::refresh_gal_for_account(&read_db, &account_id, encryption_key),

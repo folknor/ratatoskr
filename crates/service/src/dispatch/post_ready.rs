@@ -214,6 +214,14 @@ pub(crate) fn spawn_post_ready_extract_startup(
         let db_state = service_state::WriteDbState::from_arc(db_conn);
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
 
+        // ExtractRuntime shares the parent shutdown token via a child:
+        // when `Subsystems::drain_runtimes` fires the parent at step 0,
+        // the child fires too and the extract worker exits cleanly. A
+        // child token (not the parent itself) so a future caller of
+        // `extract_runtime.shutdown()` outside the consolidated drain
+        // doesn't accidentally cascade to other shutdown_token
+        // subscribers.
+        let cancellation = boot_state.shutdown_token().child_token();
         let extract_runtime = crate::extract::ExtractRuntime::new(
             db_state,
             app_data_dir,
@@ -221,6 +229,7 @@ pub(crate) fn spawn_post_ready_extract_startup(
             body_read,
             notification_tx,
             0,
+            cancellation,
         );
         boot_state.install_extract_runtime(extract_runtime);
 

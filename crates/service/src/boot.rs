@@ -18,6 +18,7 @@
 use crate::boot_progress;
 use crate::dispatch::DispatchConfig;
 use crypto_key::SecretKey;
+use tokio_util::sync::CancellationToken;
 use db::db::action_journal::recover_stale_leases;
 use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
 use db::db::queries_extra::{
@@ -197,6 +198,20 @@ pub(crate) struct BootSharedState {
     /// `crate::test_fake_*()` globals so handlers don't reach across
     /// the crate to read process state.
     config: DispatchConfig,
+    /// Cooperative cancellation signal. Fired by
+    /// `Subsystems::drain_runtimes` at the start of the consolidated
+    /// shutdown drain. Long-running handlers and runtime workers
+    /// (`ExtractRuntime` worker, action worker lease loop, GAL
+    /// handler) should `select!` on this token alongside their normal
+    /// work so they exit promptly instead of waiting out 60 s
+    /// per-account timeouts.
+    ///
+    /// Sub-second `spawn_blocking` DB writes do NOT need to check
+    /// this - aborting the outer async future on shutdown is
+    /// sufficient for their durations. Handlers with chains of slow
+    /// `spawn_blocking` calls or multi-account loops should retrofit
+    /// when added.
+    shutdown_token: CancellationToken,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -229,6 +244,7 @@ impl BootSharedState {
             last_completed_rebuild_id: Mutex::new(None),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             config,
+            shutdown_token: CancellationToken::new(),
         })
     }
 
@@ -237,6 +253,13 @@ impl BootSharedState {
     /// default (all `false` / `None`).
     pub(crate) fn config(&self) -> &DispatchConfig {
         &self.config
+    }
+
+    /// Cooperative cancellation token, fired at the start of the
+    /// shutdown drain. Long-running handlers should `select!` on
+    /// `shutdown_token().cancelled()` alongside their normal work.
+    pub(crate) fn shutdown_token(&self) -> &CancellationToken {
+        &self.shutdown_token
     }
 
     /// Phase 7 (H1 fix): mark the boot state as shutting down. Future

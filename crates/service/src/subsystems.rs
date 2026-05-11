@@ -1,12 +1,12 @@
 //! Concrete registry of the long-lived tasks the dispatch loop has
 //! spawned. Exposes two ordered shutdown entry points:
 //!
-//! - [`Subsystems::drain_runtimes`] — drains the `BootSharedState`-resident
+//! - [`Subsystems::drain_runtimes`] - drains the `BootSharedState`-resident
 //!   subsystem runtimes (push, calendar, sync, extract, rebuild) and the
 //!   search-writer task. Runs *before* the lifecycle drain so the
 //!   `clean_shutdown` sentinel doesn't land while in-flight writes are
 //!   still in progress.
-//! - [`Subsystems::abort_tasks`] — aborts the boot task, action worker,
+//! - [`Subsystems::abort_tasks`] - aborts the boot task, action worker,
 //!   and the four post-ready startup tasks. Runs *after* the lifecycle
 //!   drain and the optional Shutdown ack so the writer task gets a
 //!   chance to flush them before `out_tx` is dropped.
@@ -70,6 +70,15 @@ impl Subsystems {
     ///   `install_extract_runtime`'s mutex; if set, the runtime is
     ///   dropped instead of installed, which releases its handle clone.
     pub async fn drain_runtimes(boot_state: &Arc<BootSharedState>) {
+        // Step 0: fire the cooperative cancellation signal. Workers
+        // that select on `boot_state.shutdown_token().cancelled()`
+        // (ExtractRuntime, action worker, GAL handler) exit promptly
+        // instead of waiting out their per-iteration timeouts. Workers
+        // that don't observe the token are still aborted by
+        // `Subsystems::abort_tasks` below; this is the cooperative
+        // fast path, the abort is the backstop.
+        boot_state.shutdown_token().cancel();
+
         drain_push(boot_state).await;
         drain_calendar(boot_state).await;
         drain_sync(boot_state).await;

@@ -125,9 +125,9 @@ impl ExtractRuntime {
         body_read: BodyStoreReadState,
         notification_tx: NotificationSender,
         service_generation: u32,
+        cancellation: CancellationToken,
     ) -> Self {
         let (tx, rx) = mpsc::channel::<ExtractWork>(COMMAND_QUEUE_CAPACITY);
-        let cancellation = CancellationToken::new();
         let inner = Arc::new(ExtractRuntimeInner {
             closed: AtomicBool::new(false),
             in_flight_hashes: Mutex::new(HashSet::new()),
@@ -908,6 +908,7 @@ mod tests {
             body_read,
             notification_tx,
             0,
+            CancellationToken::new(),
         );
         runtime.shutdown().await;
         let result = runtime
@@ -948,6 +949,7 @@ mod tests {
             body_read,
             notification_tx,
             0,
+            CancellationToken::new(),
         );
 
         // Pre-load the dedupe set so the second enqueue is dedupe'd.
@@ -1032,6 +1034,7 @@ mod tests {
             body_read,
             notification_tx,
             0,
+            CancellationToken::new(),
         );
 
         // `fan_out_reindex` sends a command and awaits its oneshot ack
@@ -1101,6 +1104,7 @@ mod tests {
             body_read,
             notification_tx,
             0,
+            CancellationToken::new(),
         );
 
         fan_out_reindex(&runtime.inner, "no-such-hash").await;
