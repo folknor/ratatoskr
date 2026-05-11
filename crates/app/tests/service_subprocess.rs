@@ -1,8 +1,7 @@
 use app::service_client::{ClientError, ServiceClient, SpawnEvent};
 use service_api::{
-    BootClassification, BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest,
-    ParsedServiceMessage, RequestParams, ServiceError, ServiceResponse, parse_service_message,
-    write_message,
+    BootClassification, BootExitCode, BoundedLineReader, JsonRpcRequest, ParsedServiceMessage,
+    RequestParams, ServiceResponse, parse_service_message, write_message,
 };
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -28,6 +27,7 @@ impl DataDirGuard {
         Ok(guard)
     }
 
+    #[allow(dead_code)] // kept for symmetry with DataDirGuard::new; surviving tests don't use it
     fn without_key(suffix: &str) -> std::io::Result<Self> {
         Self::create(&format!("nokey-{suffix}"))
     }
@@ -67,21 +67,15 @@ impl Drop for DataDirGuard {
 ///
 /// Preferred source: the `BROKKR_TEST_BIN_DIR` env var that brokkr's test
 /// harness sets to the directory containing the just-rebuilt
-/// `build_packages` artefacts (see brokkr's README under "Env vars
-/// exported to `cargo test`"). This is the source of truth when brokkr
-/// is rebuilding `app` separately from the test crate's compile, which
-/// happens any time a `[[check]]` entry sets `build_packages = ["app"]`
-/// with feature flags that differ from the test crate's own compile.
-/// Reading `cfg!(debug_assertions)` is unreliable per the brokkr README
-/// because `[profile.test]` overrides can flip `debug-assertions` in the
-/// test binary even though the rebuilt binary lives under `debug/`.
+/// `build_packages` artefacts. Reading `cfg!(debug_assertions)` is
+/// unreliable because `[profile.test]` overrides can flip
+/// `debug-assertions` in the test binary even though the rebuilt binary
+/// lives under `debug/`.
 ///
 /// Fallback: `CARGO_BIN_EXE_app`, the path cargo wires in at compile
 /// time of the test crate. This is correct under plain `cargo test` (no
 /// brokkr) and under `brokkr check` / `brokkr test` when `build_packages`
-/// is unset, since both point at the same binary in those cases. The
-/// fallback keeps test runs outside brokkr (`cargo test -p app
-/// service_subprocess_ping_and_shutdown`) working unchanged.
+/// is unset, since both point at the same binary in those cases.
 fn binary_path() -> Result<std::path::PathBuf, std::io::Error> {
     if let Ok(dir) = std::env::var("BROKKR_TEST_BIN_DIR") {
         let candidate = std::path::PathBuf::from(dir).join("app");
@@ -102,12 +96,6 @@ fn binary_path() -> Result<std::path::PathBuf, std::io::Error> {
         })
 }
 
-#[ignore = "covered by crates/app/tests/service-harness/ping_and_shutdown.lua"]
-#[test]
-fn service_subprocess_ping_and_shutdown() {
-    // Authoritative coverage moved to `brokkr service-test`.
-}
-
 async fn read_response<R>(
     stdout: &mut BoundedLineReader<R>,
 ) -> TestResult<(Option<u64>, ServiceResponse)>
@@ -126,57 +114,6 @@ where
             ParsedServiceMessage::Response { id, response } => return Ok((id, response)),
             ParsedServiceMessage::Notification(_) => continue,
         }
-    }
-}
-
-/// Drop ServiceClient without calling shutdown(). The OS-level child must
-/// exit promptly via the explicit Drop teardown (abort tasks, close stdin,
-/// SIGKILL fallback). No orphan should remain.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn dropping_client_terminates_child_within_one_second() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("drop_no_shutdown")?;
-    let client = ServiceClient::spawn_for_test(&binary, data_dir.path(), &[]).await?;
-    let pid = client
-        .child_pid()
-        .ok_or_else(|| std::io::Error::other("child has no pid"))?;
-    drop(client);
-
-    let started = std::time::Instant::now();
-    while started.elapsed() < std::time::Duration::from_millis(1500) {
-        if !pid_is_alive(pid)? {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    Err(std::io::Error::other(format!(
-        "Service pid {pid} still alive {:?} after Drop",
-        started.elapsed()
-    ))
-    .into())
-}
-
-/// Pointing at a non-existent binary must surface a clear error rather than
-/// hang. Tests the spawn-failure path of ServiceClient::spawn_for_test.
-#[tokio::test]
-async fn spawn_failure_against_missing_binary_returns_io_error() -> TestResult {
-    let data_dir = DataDirGuard::new("spawn_failure")?;
-    let bogus = data_dir.path().join("does-not-exist");
-    let result =
-        tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            ServiceClient::spawn_for_test(&bogus, data_dir.path(), &[]),
-        )
-        .await
-        .map_err(|_| std::io::Error::other("spawn hung past timeout"))?;
-    match result {
-        Err(ClientError::Io(_)) => Ok(()),
-        Err(other) => Err(std::io::Error::other(format!(
-            "expected ClientError::Io, got {other:?}"
-        ))
-        .into()),
-        Ok(_) => Err(std::io::Error::other("spawn unexpectedly succeeded").into()),
     }
 }
 
@@ -246,176 +183,11 @@ async fn linux_parent_sigkill_terminates_service_within_two_seconds() -> TestRes
     .into())
 }
 
-/// Service handler calls `println!` from inside the dispatch loop.
-/// Without the stdio-defense (dup the original stdin/stdout to saved fds,
-/// redirect the globals to /dev/null), the println would corrupt the
-/// JSON-RPC pipe and the next request would fail to parse. With it in
-/// place, the TestPrintln response is well-formed and a follow-up ping
-/// still round-trips.
-#[tokio::test]
-async fn println_from_handler_does_not_corrupt_json_rpc_framing() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("println_defense")?;
-    let client = ServiceClient::spawn_for_test(&binary, data_dir.path(), &[]).await?;
-
-    let _: () = client
-        .request(RequestParams::TestPrintln {
-            message: "STDIO-CORRUPTION-CANARY-XYZ".to_string(),
-        })
-        .await?;
-
-    let ping: HealthPingResponse = client.request(RequestParams::HealthPing).await?;
-    assert_eq!(ping.version, service_api::PROTOCOL_VERSION);
-
-    Ok(())
-}
-
-/// Service returns a wrong protocol version (driven by the test-helpers
-/// `--test-fake-version` flag); ServiceClient::spawn must surface
-/// `ClientError::VersionMismatch` rather than continuing with a bogus
-/// peer.
-#[tokio::test]
-async fn version_mismatch_surfaces_during_handshake() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("version_mismatch")?;
-    let result = ServiceClient::spawn_for_test(
-        &binary,
-        data_dir.path(),
-        &["--test-fake-version=999"],
-    )
-    .await;
-    match result {
-        Err(ClientError::VersionMismatch { ui, service }) => {
-            assert_eq!(ui, service_api::PROTOCOL_VERSION);
-            assert_eq!(service, 999);
-            Ok(())
-        }
-        Err(other) => Err(std::io::Error::other(format!(
-            "expected VersionMismatch, got {other:?}"
-        ))
-        .into()),
-        Ok(_) => Err(std::io::Error::other("spawn unexpectedly succeeded").into()),
-    }
-}
-
-/// EOF on the child's stdout (Service crashed / killed mid-request) must
-/// propagate to every pending caller as `ClientError::ServiceCrashed`. The
-/// reader task evicts the pending map on EOF; this test verifies the eviction
-/// is observable end-to-end.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::new("eof_during_pending")?;
-    let client = ServiceClient::spawn_for_test(&binary, data_dir.path(), &[]).await?;
-    let pid = client
-        .child_pid()
-        .ok_or_else(|| std::io::Error::other("child has no pid"))?;
-
-    // Issue a long-running request in the background so the request is
-    // genuinely pending when we kill the child. Use TestSlow with a duration
-    // longer than the test's overall budget so the only way the future
-    // resolves is via the EOF eviction path.
-    let request_client = std::sync::Arc::clone(&client);
-    let request_task = tokio::spawn(async move {
-        request_client
-            .request::<()>(RequestParams::TestSlow { millis: 60_000 })
-            .await
-    });
-
-    // Wait briefly for the request to be in-flight on the wire. The handler
-    // is sleeping; the Service has not yet sent a response.
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    let pid_signed = i32::try_from(pid).map_err(std::io::Error::other)?;
-    // SAFETY: SIGKILL on a known PID we just spawned. The ServiceClient
-    // holds the Child handle so the kernel keeps the PID stable.
-    let kill_result = unsafe { libc::kill(pid_signed, libc::SIGKILL) };
-    if kill_result != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), request_task)
-        .await
-        .map_err(|_| std::io::Error::other("pending request did not resolve after SIGKILL"))?
-        .map_err(|e| std::io::Error::other(format!("request task join: {e}")))?;
-
-    match outcome {
-        Err(ClientError::ServiceCrashed) => Ok(()),
-        Err(other) => Err(std::io::Error::other(format!(
-            "expected ClientError::ServiceCrashed, got {other:?}"
-        ))
-        .into()),
-        Ok(()) => Err(std::io::Error::other(
-            "pending request unexpectedly succeeded after SIGKILL",
-        )
-        .into()),
-    }
-}
-
-#[ignore = "covered by crates/app/tests/service-harness/two_phase_spawn.lua"]
-#[test]
-fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot() {
-    // Authoritative coverage moved to `brokkr service-test`.
-}
-
-/// `spawn_with_events` against a data dir without `ratatoskr.key`: ping
-/// succeeds (Service is up), so ChildSpawned arrives. boot.ready then fails
-/// because the boot sequence's key-load step exits the Service with
-/// `BootExitCode::KeyLoadFailure`. The Terminal must carry the structured
-/// `BootFailure { code: KeyLoadFailure }` classification - either via
-/// `ServiceError::BootFailure` on the wire (if the Service flushed the
-/// response before exiting) or via the dying child's exit-code elevation
-/// in `run_spawn_flow` (if the Service exited first). Both paths land at
-/// the same classified terminal-failure surface so the UI shows the
-/// "Encryption key load failed" message.
-///
-/// Uses `await_terminal_with_deadline` rather than per-event timeouts:
-/// the implementation's worst-case to-emit time includes the 5s
-/// `HealthPing` ceiling plus elevation (~1s now, ~3s historically), so
-/// any per-event budget at or below 5s would race against the ping
-/// timeout itself and produce intermittent flakes under parallel-test
-/// scheduling pressure (`brokkr check` does not set --test-threads=1
-/// and reviewers explicitly rejected setting it). The helper waits for
-/// `Terminal` regardless of whether `ChildSpawned` fired first.
-#[ignore = "covered by crates/app/tests/service-harness/terminal_on_missing_key.lua"]
-#[test]
-fn spawn_with_events_emits_terminal_on_missing_key() {
-    // Authoritative coverage moved to `brokkr service-test`.
-}
-
-/// Wait for a `Terminal` event (or unrecoverable failure) on a spawn-event
-/// stream, with one overall deadline rather than per-event timeouts.
-///
-/// **Why this exists**: per-event deadlines on `events.recv()` are
-/// structurally racy when the implementation's worst-case to-emit time
-/// includes a `RequestParams::HealthPing` 5s timeout plus elevation
-/// (~1-3s). A 5s first-event budget is indistinguishable from "the
-/// implementation hit its ping ceiling" - the test would fail with a
-/// generic "first event did not arrive" io::Error before the
-/// implementation could emit `Terminal` correctly. Both arch and bugs
-/// reviewers flagged this anti-pattern explicitly.
-///
-/// The helper consumes events until one of:
-/// - `Terminal(error)` arrives - returns `Ok(error)`. The caller then
-///   asserts the classification.
-/// - `BootReady(_)` arrives - returns Err. A successful boot is invalid
-///   for the no-key tests this helper serves; the caller would have
-///   asserted the same thing inline.
-/// - The stream closes without `Terminal` - returns Err.
-/// - The overall `deadline` expires - returns Err naming the trace of
-///   events seen so far so a CI failure surfaces what actually happened
-///   rather than a bare "did not arrive".
-///
-/// `ChildSpawned` events along the way are recorded but not consumed
-/// terminally; the no-key implementation may emit ChildSpawned before
-/// Terminal (when the version-check ping completed before the Service
-/// died) or skip straight to Terminal (when it didn't).
-/// Phase 8-1: drain `HealthChanged` events (which arrive interleaved
-/// with the lifecycle events tests assert on) and return the next
-/// non-`HealthChanged` event or `None` on stream close. Tests that
-/// care about a specific lifecycle event call this instead of `recv`
-/// so the assertion isn't polluted by transient health pulses.
+/// Drain `HealthChanged` events (which arrive interleaved with the
+/// lifecycle events tests assert on) and return the next non-`HealthChanged`
+/// event or `None` on stream close. Tests that care about a specific
+/// lifecycle event call this instead of `recv` so the assertion isn't
+/// polluted by transient health pulses.
 async fn recv_skipping_health(
     events: &mut tokio::sync::mpsc::Receiver<SpawnEvent>,
     timeout: std::time::Duration,
@@ -434,107 +206,6 @@ async fn recv_skipping_health(
             Some(other) => return Ok(Some(other)),
         }
     }
-}
-
-async fn await_terminal_with_deadline(
-    events: &mut tokio::sync::mpsc::Receiver<SpawnEvent>,
-    deadline: std::time::Duration,
-) -> Result<ClientError, Box<dyn std::error::Error>> {
-    let started = std::time::Instant::now();
-    let mut saw_child_spawned = false;
-    while started.elapsed() < deadline {
-        let remaining = deadline.saturating_sub(started.elapsed());
-        match tokio::time::timeout(remaining, events.recv()).await {
-            Ok(Some(SpawnEvent::ChildSpawned(_))) => {
-                saw_child_spawned = true;
-            }
-            Ok(Some(SpawnEvent::Terminal(error))) => return Ok(error),
-            Ok(Some(SpawnEvent::BootReady(_))) => {
-                return Err(std::io::Error::other(
-                    "BootReady arrived where only Terminal was valid (no-key data dir)",
-                )
-                .into());
-            }
-            Ok(Some(SpawnEvent::HealthChanged(_))) => {
-                // Phase 8-1 health pulse - irrelevant to terminal-await
-                // assertions. Continue draining.
-            }
-            Ok(None) => {
-                return Err(std::io::Error::other(format!(
-                    "event stream closed without Terminal (saw_child_spawned={saw_child_spawned})",
-                ))
-                .into());
-            }
-            Err(_) => break,
-        }
-    }
-    Err(std::io::Error::other(format!(
-        "Terminal did not arrive within {deadline:?} (saw_child_spawned={saw_child_spawned}, elapsed={:?})",
-        started.elapsed(),
-    ))
-    .into())
-}
-
-/// Pin the contract that a missing-key Terminal carries the structured
-/// classification. Two valid shapes per `BootFailureReason::from_client_error`:
-///
-/// - `ClientError::Service(ServiceError::BootFailure { code: KeyLoadFailure })`
-///   - the boot.ready response was flushed before the Service exited.
-/// - `ClientError::BootFailure { classification: BootFailure { KeyLoadFailure } }`
-///   - the Service exited before the response was flushed and the spawn
-///     flow elevated `ServiceCrashed` / `Timeout` from the dying child's
-///     exit code.
-///
-/// Anything else (raw `ServiceCrashed`, generic `Internal`, etc.) means the
-/// initial-boot classification path regressed; fail loudly.
-fn assert_terminal_is_key_load_failure(error: &ClientError) {
-    match error {
-        ClientError::Service(ServiceError::BootFailure {
-            code: BootExitCode::KeyLoadFailure,
-        }) => {}
-        ClientError::BootFailure {
-            classification:
-                BootClassification::BootFailure {
-                    code: BootExitCode::KeyLoadFailure,
-                },
-        } => {}
-        other => panic!("expected classified KeyLoadFailure, got {other:?}"),
-    }
-}
-
-/// Spawning a Service against a data dir without a `ratatoskr.key` file
-/// must exit with `BootExitCode::KeyLoadFailure` (code 73) - that's the
-/// terminal-failure signal the UI maps to a key-load failure rather than
-/// treating it as a generic crash.
-#[tokio::test(flavor = "multi_thread")]
-async fn missing_key_file_exits_with_key_load_failure_code() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::without_key("missing_key")?;
-    let mut child = Command::new(binary)
-        .arg("--service")
-        .arg("--app-data-dir")
-        .arg(data_dir.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()?;
-    // Hold the parent's writer end of stdin so `child.wait()` does NOT drop
-    // it (tokio::process::Child::wait() implicitly drops self.stdin.take()
-    // to keep blocked children from hanging forever, but here we want the
-    // boot sequence to fail on its own terms - on stdin EOF the dispatch
-    // loop would break before the key-load step finishes).
-    let _stdin_keepalive = child
-        .stdin
-        .take()
-        .ok_or_else(|| std::io::Error::other("child has no stdin"))?;
-    let status = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await??;
-    assert_eq!(
-        status.code(),
-        Some(BootExitCode::KeyLoadFailure.as_i32()),
-        "expected KeyLoadFailure (73), got {status:?}"
-    );
-    Ok(())
 }
 
 /// Two `--service` instances against the same data dir: the first takes the
@@ -700,75 +371,6 @@ async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
     let (id, _response) = read_response(&mut a_reader).await?;
     assert_eq!(id, Some(2));
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), a.wait()).await??;
-    Ok(())
-}
-
-#[ignore = "covered by crates/app/tests/service-harness/respawn_after_sigkill.lua"]
-#[cfg(unix)]
-#[test]
-fn respawn_after_sigkill_succeeds() {
-    // Authoritative coverage moved to `brokkr service-test`.
-}
-
-#[ignore = "covered by crates/app/tests/service-harness/pending_at_respawn.lua"]
-#[cfg(unix)]
-#[test]
-fn pending_request_fails_at_respawn_then_subsequent_succeeds() {
-    // Authoritative coverage moved to `brokkr service-test`.
-}
-
-/// Boot-time KeyLoadFailure must NOT trigger respawn: handle_crash sees
-/// `first_boot_ready` is None and defers to run_spawn_flow (which already
-/// surfaces Terminal). No follow-up events should arrive on the receiver.
-/// Closes the crashloop concern from scope item 15: a missing key file
-/// would otherwise produce one Service-per-second forever.
-///
-/// Like `spawn_with_events_emits_terminal_on_missing_key`, this test
-/// uses `await_terminal_with_deadline` with a generous overall budget
-/// rather than per-event timeouts. Per-event timeouts at or below the
-/// 5s `HealthPing` ceiling produced intermittent flakes under
-/// parallel-test scheduling pressure. After Terminal arrives, the
-/// "no respawn" property is asserted with its own (separate) post-
-/// terminal window.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
-    let binary = binary_path()?;
-    let data_dir = DataDirGuard::without_key("terminal_no_respawn")?;
-    let mut events = ServiceClient::spawn_with_events_for_test(
-        binary,
-        data_dir.path().to_path_buf(),
-        Vec::new(),
-    );
-
-    let error =
-        await_terminal_with_deadline(&mut events, std::time::Duration::from_secs(30)).await?;
-    assert_terminal_is_key_load_failure(&error);
-
-    // Window for respawn would be ~1s sleep + spawn + boot.ready. Wait
-    // longer than that and assert no follow-up event arrives. The
-    // post-Terminal window is independent of the pre-Terminal deadline:
-    // `handle_crash`'s deferral fires immediately on first_boot_ready
-    // being None, so any spurious respawn event would arrive within
-    // a few seconds of Terminal regardless of how long the pre-Terminal
-    // wait took.
-    let post_terminal =
-        tokio::time::timeout(std::time::Duration::from_secs(4), events.recv()).await;
-    match post_terminal {
-        Ok(Some(unexpected)) => {
-            return Err(std::io::Error::other(format!(
-                "expected no respawn after Terminal; got {unexpected:?}"
-            ))
-            .into());
-        }
-        Ok(None) => {
-            // Sender dropped; that's fine - no respawn fired.
-        }
-        Err(_) => {
-            // Timeout: no event arrived in the post-Terminal window.
-            // That's the pass condition.
-        }
-    }
     Ok(())
 }
 
@@ -1087,11 +689,10 @@ async fn stale_notifications_dropped_after_generation_bump_end_to_end() -> TestR
 /// Drop a ServiceClient whose child Service is wedged: the dispatch loop
 /// is parked on a sleep instead of exiting on stdin EOF (simulating a
 /// panic-handler that doesn't terminate, kernel-level lock contention,
-/// etc.). The pre-existing
-/// `dropping_client_terminates_child_within_one_second` test verifies the
-/// happy path where the Service exits cleanly on EOF; this test verifies
-/// the kill-escalation path that is the only line of defense when the
-/// happy path doesn't fire. Without this test, a regression that removed
+/// etc.). The drop_terminates_child.lua harness script verifies the happy
+/// path where the Service exits cleanly on EOF; this test verifies the
+/// kill-escalation path that is the only line of defense when the happy
+/// path doesn't fire. Without this test, a regression that removed
 /// `start_kill` from Drop's escalation would not be caught.
 ///
 /// Acceptance: child is dead within ~2.5s of `drop(client)`. The Drop
