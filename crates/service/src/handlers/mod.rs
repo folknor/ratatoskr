@@ -42,7 +42,7 @@ pub(crate) async fn dispatch(
     boot_state: Arc<BootSharedState>,
 ) -> Result<Value, ServiceError> {
     match params {
-        RequestParams::HealthPing => health::handle(started_at).await,
+        RequestParams::HealthPing => health::handle(started_at, &boot_state).await,
         RequestParams::Shutdown => Err(ServiceError::Internal(
             "shutdown reached handler dispatch; lifecycle layer should have intercepted".into(),
         )),

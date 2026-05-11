@@ -16,6 +16,7 @@
 //! the boot exit code into an actual `std::process::exit`.
 
 use crate::boot_progress;
+use crate::dispatch::DispatchConfig;
 use crypto_key::SecretKey;
 use db::db::action_journal::recover_stale_leases;
 use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
@@ -189,6 +190,13 @@ pub(crate) struct BootSharedState {
     /// after drain had already taken extract_runtime, leaving the
     /// writer-task await blocked on the orphan clone.
     shutting_down: std::sync::atomic::AtomicBool,
+    /// Test-only Service knobs parsed once from argv at Service launch.
+    /// Read by the boot sequence (`fake_schema_version`, `boot_delay_ms`)
+    /// and by `health.ping` (`fake_protocol_version`). Replaces the
+    /// previous module-level `pub static TEST_BOOT_DELAY_MS` /
+    /// `crate::test_fake_*()` globals so handlers don't reach across
+    /// the crate to read process state.
+    config: DispatchConfig,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -201,7 +209,7 @@ pub(crate) struct RebuildTaskState {
 }
 
 impl BootSharedState {
-    pub(crate) fn new(app_data_dir: PathBuf) -> Arc<Self> {
+    pub(crate) fn new(app_data_dir: PathBuf, config: DispatchConfig) -> Arc<Self> {
         Arc::new(Self {
             notify: Notify::new(),
             result: Mutex::new(None),
@@ -220,7 +228,15 @@ impl BootSharedState {
             pending_schema_rebuild: std::sync::atomic::AtomicBool::new(false),
             last_completed_rebuild_id: Mutex::new(None),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
+            config,
         })
+    }
+
+    /// Test-only Service knobs parsed once at launch. Read by the
+    /// boot sequence and `health.ping`; production builds see the
+    /// default (all `false` / `None`).
+    pub(crate) fn config(&self) -> &DispatchConfig {
+        &self.config
     }
 
     /// Phase 7 (H1 fix): mark the boot state as shutting down. Future
@@ -847,7 +863,10 @@ pub(crate) async fn run_boot_sequence(
     .await;
     let (result, context) = match inner {
         Ok(ctx) => {
-            let schema_version = crate::test_fake_schema().unwrap_or(ctx.schema_version);
+            let schema_version = state
+                .config()
+                .fake_schema_version
+                .unwrap_or(ctx.schema_version);
             (
                 Ok(BootReadyResponse {
                     ready: true,
@@ -868,35 +887,18 @@ pub(crate) async fn run_boot_sequence(
     outcome
 }
 
-/// Test-only artificial delay inserted at the start of the boot sequence,
-/// before the LoadingKey phase emits. Used by the in-process integration
-/// tests to verify that `boot.ready` actually parks on `BootSharedState`
-/// rather than racing past via a fast-DB no-delay path. The delay is
-/// process-wide; tests that drive it must serialize on
-/// `crate::boot::TEST_BOOT_DELAY_LOCK` so they don't race each other.
-/// Returns 0 by default - the static is only set by tests.
-fn test_boot_delay_ms() -> u64 {
-    use std::sync::atomic::Ordering;
-    TEST_BOOT_DELAY_MS.load(Ordering::SeqCst)
-}
-
-/// Test-only knob: set the artificial boot delay (in milliseconds) inserted
-/// at the start of `run_boot_sequence_inner`. Process-wide; serialize via
-/// `TEST_BOOT_DELAY_LOCK` from tests that need exclusive control over it.
-pub static TEST_BOOT_DELAY_MS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// Test-only mutex used to serialize tests that set `TEST_BOOT_DELAY_MS`.
-/// Tests acquire this guard, set the atomic, run the boot, then reset.
-pub static TEST_BOOT_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 async fn run_boot_sequence_inner(
     out_tx: mpsc::Sender<Vec<u8>>,
     app_data_dir: PathBuf,
     state: Arc<BootSharedState>,
     had_clean_shutdown: bool,
 ) -> Result<BootContext, BootFailure> {
-    let delay = test_boot_delay_ms();
+    // Test-only: `--test-boot-delay-ms=N` inserts an artificial sleep
+    // before the LoadingKey phase emits so the in-process integration
+    // tests can verify that `boot.ready` actually parks on
+    // `BootSharedState` rather than racing past via a fast-DB no-delay
+    // path. Returns 0 by default in production builds.
+    let delay = state.config().boot_delay_ms.unwrap_or(0);
     if delay > 0 {
         log::debug!("test-helpers: artificial boot delay {delay}ms before LoadingKey");
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
@@ -1524,7 +1526,7 @@ mod tests {
     /// downstream Phase 2 test today; this catches it at the boot crate.
     #[test]
     fn signal_ready_symmetry_success_populates_context() {
-        let state = BootSharedState::new(PathBuf::new());
+        let state = BootSharedState::new(PathBuf::new(), DispatchConfig::default());
         let conn = Connection::open_in_memory().expect("open in-memory db");
         let ctx = BootContext {
             encryption_key: SecretKey::from_bytes([1u8; 32]),
@@ -1556,7 +1558,7 @@ mod tests {
 
     #[test]
     fn signal_ready_symmetry_failure_leaves_context_empty() {
-        let state = BootSharedState::new(PathBuf::new());
+        let state = BootSharedState::new(PathBuf::new(), DispatchConfig::default());
         state.signal_ready(Err(BootFailure::KeyLoadFailure), None);
         let got_result = state
             .result
@@ -1579,7 +1581,7 @@ mod tests {
     /// versa) after the first signal.
     #[test]
     fn signal_ready_second_call_is_no_op() {
-        let state = BootSharedState::new(PathBuf::new());
+        let state = BootSharedState::new(PathBuf::new(), DispatchConfig::default());
         let response = BootReadyResponse {
             ready: true,
             schema_version: 100,
@@ -1606,7 +1608,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let app_data = tmp.path();
         let version_path = app_data.join("search_index").join(".version");
-        let state = BootSharedState::new(app_data.to_path_buf());
+        let state = BootSharedState::new(app_data.to_path_buf(), DispatchConfig::default());
 
         // First call: file is absent, function writes the current version.
         check_schema_version_and_dispatch(app_data, &state).expect("first call");
@@ -1638,7 +1640,7 @@ mod tests {
 
         // Seed a deliberately wrong version.
         std::fs::write(&version_path, "999").expect("seed .version");
-        let state = BootSharedState::new(app_data.to_path_buf());
+        let state = BootSharedState::new(app_data.to_path_buf(), DispatchConfig::default());
 
         check_schema_version_and_dispatch(app_data, &state).expect("dispatch");
 

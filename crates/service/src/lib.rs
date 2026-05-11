@@ -21,10 +21,6 @@ pub(crate) mod sync_dispatch;
 pub(crate) mod test_counters;
 pub(crate) mod text_extract;
 
-/// Re-export test-helpers knobs for the in-process integration tests so
-/// they can drive the artificial boot delay without `pub mod boot` leaking
-/// every internal item. Compiled out of release builds.
-pub use boot::{TEST_BOOT_DELAY_LOCK, TEST_BOOT_DELAY_MS};
 mod dispatch;
 mod handlers;
 mod instance_lock;
@@ -77,7 +73,6 @@ pub fn run_service_blocking() -> ! {
         .unwrap_or_else(default_app_data_dir);
     let _ = logging::init(&app_data_dir);
     logging::install_panic_hook();
-    install_test_boot_delay_from_args();
     if arg_app_data_dir.is_none() {
         // Production launches always pass --app-data-dir from the UI; a
         // missing arg is most likely a debug-session invocation
@@ -134,6 +129,7 @@ pub fn run_service_blocking() -> ! {
         }
     };
 
+    let config = dispatch::DispatchConfig::from_cli_args();
     let exit_code = runtime.block_on(async move {
         let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir.clone()));
         sigterm::spawn(lifecycle.clone());
@@ -146,6 +142,7 @@ pub fn run_service_blocking() -> ! {
                     stdin,
                     stdout,
                     lifecycle,
+                    config,
                     app_data_dir,
                 )
                 .await
@@ -169,70 +166,6 @@ fn app_data_dir_from_args() -> Option<PathBuf> {
         }
     }
     None
-}
-
-/// Test-only override for the version reported in `health.ping` responses.
-/// Triggered by `--test-fake-version=N` on the Service command line. Used
-/// by the version-mismatch integration test; off in production builds.
-pub(crate) fn test_fake_version() -> Option<u32> {
-    let mut args = std::env::args();
-    while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--test-fake-version=") {
-            return value.parse().ok();
-        }
-        if arg == "--test-fake-version" {
-            return args.next().and_then(|v| v.parse().ok());
-        }
-    }
-    None
-}
-
-/// Test-only override for the schema version reported in `boot.ready`.
-/// Triggered by `--test-fake-schema=N` on the Service command line. Used
-/// by the respawn harness to verify the terminal binary-swap guard.
-pub(crate) fn test_fake_schema() -> Option<u32> {
-    let mut args = std::env::args();
-    while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--test-fake-schema=") {
-            return value.parse().ok();
-        }
-        if arg == "--test-fake-schema" {
-            return args.next().and_then(|v| v.parse().ok());
-        }
-    }
-    None
-}
-
-/// Test-only flag: when set, the dispatch loop ignores stdin EOF and
-/// parks indefinitely instead of exiting. Simulates a wedged Service
-/// (panic-handler that doesn't terminate, kernel-level lock contention,
-/// etc.) so the client-Drop kill-escalation path can be exercised
-/// end-to-end. Triggered by `--test-hang-on-stdin-eof` on the command
-/// line; off in production builds.
-pub(crate) fn test_hang_on_stdin_eof() -> bool {
-    std::env::args().any(|arg| arg == "--test-hang-on-stdin-eof")
-}
-
-/// Test-only artificial boot delay for subprocess harness scripts.
-/// Triggered by `--test-boot-delay-ms=N` on the Service command line.
-fn install_test_boot_delay_from_args() {
-    use std::sync::atomic::Ordering;
-
-    let mut args = std::env::args();
-    while let Some(arg) = args.next() {
-        let parsed = if let Some(value) = arg.strip_prefix("--test-boot-delay-ms=") {
-            value.parse().ok()
-        } else if arg == "--test-boot-delay-ms" {
-            args.next().and_then(|value| value.parse().ok())
-        } else {
-            None
-        };
-        if let Some(delay_ms) = parsed {
-            boot::TEST_BOOT_DELAY_MS.store(delay_ms, Ordering::SeqCst);
-            log::info!("test-helpers: configured boot delay {delay_ms}ms");
-            return;
-        }
-    }
 }
 
 fn default_app_data_dir() -> PathBuf {
