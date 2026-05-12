@@ -3714,7 +3714,6 @@ fn boot_code_name(code: BootExitCode) -> &'static str {
         BootExitCode::MigrationFailure => "MigrationFailure",
         BootExitCode::KeyLoadFailure => "KeyLoadFailure",
         BootExitCode::LockIoFailure => "LockIoFailure",
-        BootExitCode::DispatchPanic => "DispatchPanic",
     }
 }
 

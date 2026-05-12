@@ -263,9 +263,9 @@ impl BootSharedState {
     }
 
     /// Phase 7 (H1 fix): mark the boot state as shutting down. Future
-    /// `install_extract_runtime` calls drop their argument instead of
-    /// installing. Called by `run_shutdown_drain` before it takes the
-    /// extract runtime slot.
+    /// post-ready runtime installs drop their argument instead of
+    /// installing. Called by `run_shutdown_drain` before it takes
+    /// runtime slots.
     pub(crate) fn mark_shutting_down(&self) {
         self.shutting_down
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -562,6 +562,12 @@ impl BootSharedState {
             .push_runtime
             .lock()
             .expect("push_runtime mutex poisoned");
+        if self.is_shutting_down() {
+            log::debug!(
+                "BootSharedState::install_push_runtime called during shutdown; dropping runtime",
+            );
+            return;
+        }
         if guard.is_some() {
             log::warn!(
                 "BootSharedState::install_push_runtime called twice; second install ignored",
@@ -606,6 +612,12 @@ impl BootSharedState {
             .calendar_runtime
             .lock()
             .expect("calendar_runtime mutex poisoned");
+        if self.is_shutting_down() {
+            log::debug!(
+                "BootSharedState::install_calendar_runtime called during shutdown; dropping runtime",
+            );
+            return;
+        }
         if guard.is_some() {
             log::warn!(
                 "BootSharedState::install_calendar_runtime called twice; second install ignored",
@@ -705,6 +717,14 @@ impl BootSharedState {
     /// cache instead of failing.
     pub(crate) fn cached_result(&self) -> Option<Result<BootReadyResponse, BootFailure>> {
         self.result.lock().expect("boot result poisoned").clone()
+    }
+
+    /// True only after the boot sequence has completed successfully.
+    /// Used by the shutdown drain to avoid writing a clean-shutdown
+    /// sentinel for a Shutdown request that arrived while boot was still
+    /// incomplete.
+    pub(crate) fn boot_succeeded(&self) -> bool {
+        matches!(self.cached_result(), Some(Ok(_)))
     }
 
     /// Wake up the action worker so it drains the journal. Called by

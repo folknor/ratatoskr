@@ -6,14 +6,19 @@
 //!   search-writer task. Runs *before* the lifecycle drain so the
 //!   `clean_shutdown` sentinel doesn't land while in-flight writes are
 //!   still in progress.
-//! - [`Subsystems::abort_tasks`] - aborts the boot task, action worker,
-//!   and the four post-ready startup tasks. Runs *after* the lifecycle
-//!   drain and the optional Shutdown ack so the writer task gets a
-//!   chance to flush them before `out_tx` is dropped.
+//! - [`Subsystems::join_boot`] / [`Subsystems::abort_boot`] - complete
+//!   or abort the boot task after in-flight request handlers are
+//!   drained, before any clean-shutdown sentinel can be written.
+//! - [`Subsystems::abort_startup_tasks`] - aborts post-ready startup
+//!   tasks before runtime slots are drained, so they cannot install a
+//!   runtime after its slot has already been checked.
+//! - [`Subsystems::abort_tasks`] - aborts any remaining long-lived task
+//!   handles after the lifecycle drain and optional Shutdown ack so the
+//!   writer task gets a chance to flush them before `out_tx` is dropped.
 //!
 //! Adding a new long-lived dispatch task means adding a field, spawning
-//! it inside `init::init_dispatch`, and adding an `abort_and_await`
-//! call inside [`Subsystems::abort_tasks`] - one place, three edits.
+//! it inside `init::init_dispatch`, and adding it to the matching
+//! [`Subsystems`] join/drain/abort method - one place, three edits.
 //! Replaces the open-coded "200 lines into `run_service_with_io`,
 //! remember to abort X" pattern that grew the H1/M7/C4/L6 fix-stickers.
 
@@ -25,25 +30,25 @@ pub(crate) struct Subsystems {
     /// The boot sequence task. Aborted after drain so the boot.ready
     /// IPC handler (which parks on `wait_for_ready`) doesn't deadlock
     /// the in-flight drain.
-    pub boot: JoinHandle<()>,
+    pub boot: Option<JoinHandle<()>>,
     /// The action worker, processing the journal in a long-lived loop.
     /// Holds an `out_tx` clone directly, so it MUST be aborted before
     /// `drop(out_tx)` or the writer task's EOF wait pins forever.
     pub action_worker: JoinHandle<()>,
     /// Post-ready: builds + installs `PushRuntime` once boot.ready
     /// resolves, then spawns per-account starts. Idempotent on shutdown.
-    pub push_startup: JoinHandle<()>,
+    pub push_startup: Option<JoinHandle<()>>,
     /// Post-ready: builds + installs `CalendarRuntime`. Kick-driven, so
     /// it does not iterate accounts.
-    pub calendar_startup: JoinHandle<()>,
+    pub calendar_startup: Option<JoinHandle<()>>,
     /// Post-ready: builds + installs `ExtractRuntime` and fires the
     /// initial backfill kick. The runtime holds a `SearchWriteHandle`
     /// and `NotificationSender` clone; the drain ordering in
     /// `drain_runtimes` releases them before the search-writer await.
-    pub extract_startup: JoinHandle<()>,
+    pub extract_startup: Option<JoinHandle<()>>,
     /// Post-ready: dispatches a `PreserveExisting` rebuild when boot
     /// detected a `.version` mismatch. No-op in the steady state.
-    pub schema_rebuild: JoinHandle<()>,
+    pub schema_rebuild: Option<JoinHandle<()>>,
 }
 
 impl Subsystems {
@@ -70,19 +75,15 @@ impl Subsystems {
     ///   `install_extract_runtime`'s mutex; if set, the runtime is
     ///   dropped instead of installed, which releases its handle clone.
     pub async fn drain_runtimes(boot_state: &Arc<BootSharedState>) {
-        // Step 0: fire the cooperative cancellation signal. Workers
-        // that select on `boot_state.shutdown_token().cancelled()`
-        // (ExtractRuntime, action worker, GAL handler) exit promptly
-        // instead of waiting out their per-iteration timeouts. Workers
-        // that don't observe the token are still aborted by
-        // `Subsystems::abort_tasks` below; this is the cooperative
-        // fast path, the abort is the backstop.
+        // The shutdown drain normally fires this before draining
+        // in-flight notifications so GAL can observe it. Keep the call
+        // here as an idempotent backstop for direct/future call sites.
         boot_state.shutdown_token().cancel();
 
+        boot_state.mark_shutting_down();
         drain_push(boot_state).await;
         drain_calendar(boot_state).await;
         drain_sync(boot_state).await;
-        boot_state.mark_shutting_down();
         drain_extract(boot_state).await;
         drain_rebuild(boot_state).await;
         // Defensive: clear the slots that handlers may have populated
@@ -108,13 +109,40 @@ impl Subsystems {
     /// because the `boot.ready` IPC handler parks on
     /// `BootSharedState::wait_for_ready` and would never return if we
     /// aborted boot first.
-    pub async fn abort_tasks(self) {
-        abort_and_await(self.boot, "boot").await;
+    pub async fn join_boot(&mut self) {
+        if let Some(handle) = self.boot.take()
+            && let Err(e) = handle.await
+            && !e.is_cancelled()
+        {
+            log::warn!("boot task join error during shutdown: {e}");
+        }
+    }
+
+    pub async fn abort_boot(&mut self) {
+        if let Some(handle) = self.boot.take() {
+            abort_and_await(handle, "boot").await;
+        }
+    }
+
+    pub async fn abort_startup_tasks(&mut self) {
+        if let Some(handle) = self.push_startup.take() {
+            abort_and_await(handle, "push_startup").await;
+        }
+        if let Some(handle) = self.calendar_startup.take() {
+            abort_and_await(handle, "calendar_startup").await;
+        }
+        if let Some(handle) = self.extract_startup.take() {
+            abort_and_await(handle, "extract_startup").await;
+        }
+        if let Some(handle) = self.schema_rebuild.take() {
+            abort_and_await(handle, "schema_rebuild").await;
+        }
+    }
+
+    pub async fn abort_tasks(mut self) {
+        self.abort_boot().await;
+        self.abort_startup_tasks().await;
         abort_and_await(self.action_worker, "action_worker").await;
-        abort_and_await(self.push_startup, "push_startup").await;
-        abort_and_await(self.calendar_startup, "calendar_startup").await;
-        abort_and_await(self.extract_startup, "extract_startup").await;
-        abort_and_await(self.schema_rebuild, "schema_rebuild").await;
     }
 }
 

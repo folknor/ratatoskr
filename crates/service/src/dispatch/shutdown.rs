@@ -1,4 +1,4 @@
-//! The shutdown drain. Eight named steps; the per-subsystem teardown
+//! The shutdown drain. Eleven named steps; the per-subsystem teardown
 //! lives in [`crate::subsystems::Subsystems`].
 //!
 //! Order matters and is documented inline; if you add a new long-lived
@@ -24,50 +24,80 @@ pub(crate) async fn run_shutdown_drain<R>(mut state: DispatchState<R>) -> i32
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
-    // 1. Drain in-flight request and notification handlers BEFORE
-    //    anything else. Any Phase 2+ mutation must finish before the
-    //    sentinel is written, and `Subsystems::abort_tasks` cannot
-    //    safely abort the boot task until the in-flight drain is done
-    //    (the `boot.ready` handler parks on `wait_for_ready`).
+    // 1. Drain request handlers before firing cooperative
+    //    cancellation. Request handlers can enqueue journal work and
+    //    wake the action worker; cancelling first would let the worker
+    //    exit before seeing the last wakeup.
     drain_in_flight(&mut state.handlers_in_flight).await;
+
+    // 2. Fire cooperative cancellation before draining in-flight
+    //    notifications. Notification handlers like GAL check this
+    //    token between long-running account iterations, so it must be
+    //    visible before the notification drain waits on them.
+    state.boot_state.shutdown_token().cancel();
+
+    // 3. Drain in-flight notifications before writing any sentinel.
+    //    The boot task cannot be safely aborted until after the
+    //    request drain above because the `boot.ready` handler parks on
+    //    `wait_for_ready`.
     drain_notifications_bounded(&mut state.notifications_in_flight, NOTIFICATION_DRAIN_BOUND).await;
 
-    // 2. Decide the shutdown cause from the dispatch loop's exit
+    // 4. Resolve the boot task before any clean-shutdown sentinel can
+    //    be written. For an explicit Shutdown request, let boot finish:
+    //    some in-process clients never call boot.ready but still expect
+    //    Shutdown to drain cleanly once boot has actually completed. For
+    //    unrequested exits, abort boot so post-ready startup tasks cannot
+    //    race runtime installs after the runtime drain.
+    if state.pending_shutdown_id.is_some() && state.boot_exit_code.is_none() {
+        state.subsystems.join_boot().await;
+        while let Ok(code) = state.boot_failure_rx.try_recv() {
+            state.boot_exit_code = Some(code);
+        }
+    }
+    state.subsystems.abort_boot().await;
+
+    // Stop post-ready startup tasks before draining runtime slots. If
+    // boot just completed due to the join above, these tasks may have
+    // woken but not yet installed their runtimes; aborting them here
+    // prevents a late install after the matching drain step has passed.
+    state.subsystems.abort_startup_tasks().await;
+
+    // 5. Decide the shutdown cause from the dispatch loop's exit
     //    reason. Order: BootFailure > GracefulRequest > Unrequested.
     let cause = decide_shutdown_cause(&state);
 
-    // 3. Drain the BootSharedState-resident subsystem runtimes (push,
+    // 6. Drain the BootSharedState-resident subsystem runtimes (push,
     //    calendar, sync, extract, rebuild) and await the search-writer
     //    task. This releases every `NotificationSender` and
     //    `SearchWriteHandle` clone the runtimes own.
     Subsystems::drain_runtimes(&state.boot_state).await;
 
-    // 4. Lifecycle drain (sentinel + Phase-3 hooks). Idempotent via the
+    // 7. Lifecycle drain (sentinel + Phase-3 hooks). Idempotent via the
     //    `OnceCell` inside `ServiceLifecycle`; safe under panic.
     let flushed_ok = panic_safe_drain(&state.lifecycle, cause).await;
     if !flushed_ok {
         log::warn!("shutdown drain completed with errors");
     }
 
-    // 5. Ack the pending Shutdown request, if any. Suppressed on boot
+    // 8. Ack the pending Shutdown request, if any. Suppressed on boot
     //    failure - answering "shutdown ok" while exiting with code
     //    71/72/73 is misleading in log triage; the UI's
     //    shutdown-request future returns `ServiceCrashed` which is
     //    correct for a Service exiting mid-shutdown.
-    maybe_send_shutdown_ack(&state, flushed_ok).await;
+    maybe_send_shutdown_ack(&state, cause, flushed_ok).await;
 
-    // 6. Abort the long-lived task handles (boot, action worker, four
+    // 9. Abort the remaining long-lived task handles (action worker, four
     //    post-ready startup tasks). The action worker holds an
     //    `out_tx` clone directly; the post-ready tasks hold clones
-    //    through their constructed runtimes (which step 3 drained).
+    //    through their constructed runtimes (which step 6 drained).
     state.subsystems.abort_tasks().await;
 
-    // 7. Phase 8-2: advance the per-store `clean_shutdown_cursors` rows
+    // 10. Phase 8-2: advance the per-store `clean_shutdown_cursors` rows
     //    so the next dirty boot's invariant pass can bound its scans.
     //    Skipped on non-graceful exits.
     maybe_advance_cursors(&state.boot_state, cause).await;
 
-    // 8. Drop the last out_tx clone so the writer task observes EOF,
+    // 11. Drop the last out_tx clone so the writer task observes EOF,
     //    then await its termination.
     drop(state.out_tx);
     let _ = state.writer_handle.await;
@@ -90,14 +120,18 @@ where
 fn decide_shutdown_cause<R>(state: &DispatchState<R>) -> ShutdownCause {
     if state.boot_exit_code.is_some() {
         ShutdownCause::BootFailure
-    } else if state.pending_shutdown_id.is_some() {
+    } else if state.pending_shutdown_id.is_some() && state.boot_state.boot_succeeded() {
         ShutdownCause::GracefulRequest
     } else {
         ShutdownCause::Unrequested
     }
 }
 
-async fn maybe_send_shutdown_ack<R>(state: &DispatchState<R>, flushed_ok: bool) {
+async fn maybe_send_shutdown_ack<R>(
+    state: &DispatchState<R>,
+    cause: ShutdownCause,
+    flushed_ok: bool,
+) {
     let Some(id) = state.pending_shutdown_id else {
         return;
     };
@@ -105,6 +139,7 @@ async fn maybe_send_shutdown_ack<R>(state: &DispatchState<R>, flushed_ok: bool) 
         log::info!("dispatch end method=shutdown id={id} outcome=skipped_boot_failed");
         return;
     }
+    let flushed_ok = flushed_ok && matches!(cause, ShutdownCause::GracefulRequest);
     let outcome = if flushed_ok { "ok" } else { "internal" };
     log::info!("dispatch end method=shutdown id={id} outcome={outcome}");
     let result = serde_json::to_value(ShutdownResponse { flushed_ok })
