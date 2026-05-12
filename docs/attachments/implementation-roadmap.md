@@ -4,11 +4,11 @@ Companion to `problem-statement.md`. Each phase below is intended as a **separat
 
 This document is a sketch. Phase scope, interfaces, and risks will firm up when each phase enters its own planning session.
 
-**Cross-document dependency.** Several phases depend on **the
-Service** (`docs/architecture.md` under "Service process model").
-Phase 2 onward runs inside the Service, and Phase 3's cold path needs
-the `attachment.fetch` IPC. Phases 1a and 1b are pure library work and
-can land before any Service work begins.
+**Cross-document dependency.** Phase 2 onward runs inside **the
+Service** (`docs/architecture.md` § "Service process model"); Phase 3's
+cold path uses the `attachment.fetch` IPC defined in
+`crates/service-api/src/attachment.rs`. Phases 1a and 1b are pure
+library work.
 
 ## How to read this
 
@@ -23,7 +23,7 @@ can land before any Service work begins.
 
 ## Phase 1a - Pack store
 
-**Goal.** A self-contained pack-file blob store under `crates/stores/src/attachment_pack.rs` supporting content-addressed put / get / unref / GC, with a SQLite index, full crash safety, and a `recover` path that rebuilds the index from pack tails.
+**Goal.** A self-contained pack-file blob store under `crates/stores/src/attachment_pack.rs` supporting content-addressed put / get / tombstone / GC, with a SQLite index, full crash safety, and a `recover` path that rebuilds the index from pack tails.
 
 **Entry criteria.**
 - Problem statement approved.
@@ -31,35 +31,52 @@ can land before any Service work begins.
 - Decision made on chunking-or-not (current proposal: no chunking in v1; revisit after squeeze measurement lands in Phase 7).
 
 **In scope.**
-- `crates/stores/src/attachment_pack.rs` with `PackStore::open`, `put`, `get`, `unref`, `gc`, `recover`.
-- New SQLite migration: drop unused `attachments.local_path / cached_at / cache_size` columns, add `attachment_blobs` table with `(content_hash PK, pack_file_id, offset, length, refcount, written_at, last_read_at)`.
+
+*Library:*
+- `crates/stores/src/attachment_pack.rs` with `PackStore::open`, `put`, `get`, `tombstone`, `gc`, `recover`.
+- New SQLite migration: drop the flat-cache addressing columns on `attachments` (`local_path`, `cached_at`, `cache_size`) and add `attachment_blobs` with `(content_hash BLOB(32) PK, pack_file_id, offset, length, written_at, last_read_at, tombstoned_at)`. No `refcount` column - counts are derived from `attachments` at query time. Migrate `attachments.content_hash` to `BLOB(32)` BLAKE3 in lockstep (the existing TEXT-xxh3 column dies in the same migration). **This is an addressing-scheme swap plus a hash-algorithm swap, not a column drop**: see the migration-scope risk below.
 - Frame writer: 4-byte magic + 4-byte length + 8-byte xxh3_64 of payload + payload, batched fsync, atomic index update via SQLite transaction.
 - Pack tail writer with version + frame_count + crc.
-- Tombstone log format and read-side enforcement (refuse to return tombstoned data even on stale index hit).
+- Tombstone log format and read-side enforcement (refuse to return tombstoned data even on stale index hit; `tombstoned_at IS NOT NULL` in the index is the fast path, tombstone log is the durable record).
 - Pack rotation when `PACK_TARGET_SIZE` (256 MB default) exceeded.
 - One-writer-per-pack mutex; lock-free positional reads.
-- Unit tests: round-trip, dedup (two `put`s of identical bytes append once), refcount lifecycle, tombstone honored on read, recover from missing index, recover from torn last frame, GC on mixed live/dead pack.
+
+*Service integration:*
+- Boot-phase placement: `PackStore::open` runs after `BootPhase::SchemaMigrations` (needs the `attachment_blobs` table) and as part of the cross-store invariant pass (since pack-vs-index reconciliation is exactly that). On unclean shutdown (missing sentinel), `PackStore::recover` walks the open pack and reconciles the index *before* `boot.ready`. The recovery path also replays the tombstone log so `tombstoned_at` is rebuilt correctly if the SQLite index was lost.
+- Per-fetch transient extraction: the `attachment.fetch` handler reads `(pack_file_id, offset, length)` from `attachment_blobs`, extracts the blob to `<app_data>/attachment_fetch_tmp/<content_hash>` (write-to-tmp + rename, atomic), and returns that path in the `AttachmentFetchAck`. UI sees the same `relative_path` contract as flat cache. Cleanup pass on idle removes `attachment_fetch_tmp/*` older than 10 minutes.
+- Drain integration: GC is on-idle and gets cancelled on shutdown signal; no separate slot in the drain order. Tombstone writes flow through whatever subsystem owns the eviction selector (`Prefetch` after the eviction sweep, `Sync` after account-delete cleanup) and inherit that slot's drain ordering.
+- Clean-shutdown sentinel: PackStore is a writer, so the sentinel write waits for `PackStore::flush` (final fsync of open pack + index) before recording.
+
+*Tests:*
+- Unit tests (library): round-trip, dedup (two `put`s of identical bytes append once, no counter mutation), tombstone honored on read, recover from missing index, recover from torn last frame, GC on mixed live/dead pack.
+- Harness scripts (Service IO boundary, under `crates/app/tests/service-harness/`): SIGKILL mid-write (partial trailing frame on the open pack, boot recovers cleanly), SIGKILL mid-repack (partial new pack with no tail, boot discards it and old pack stays authoritative), boot with deleted SQLite index (`--rebuild-attachment-index` walks pack tails and regenerates), boot with sentinel missing after clean-looking shutdown (invariant pass runs, no data loss).
 
 **Out of scope.**
 - Encryption (deferred - tracked under "Mail content stores not encrypted at rest" in TODO.md).
 - Restic format compatibility (deferred to v2).
 - Chunking large blobs into smaller frames (out of v1 unless squeeze measurement says otherwise).
-- Anyone calling the store. This phase is just the storage layer.
+- Anyone calling the store *as a producer*. The Service's boot/drain wiring lands in this phase so PackStore is correctly lifecycle-managed; actual put/get callers (sync, `fetch_or_load`, eviction) come in Phase 1b onward.
 
 **Touchpoints.**
 - New: `crates/stores/src/attachment_pack.rs`, `crates/stores/src/lib.rs` (re-export).
 - New SQL migration touching `crates/db/src/db/schema/02_mail.sql`.
+- `crates/service/src/dispatch/init.rs` and `crates/service/src/boot.rs` - PackStore::open call site, invariant-pass integration, drain wiring.
+- `crates/service/src/subsystems.rs` - GC scheduler hook.
+- `crates/app/tests/service-harness/` - new harness scripts named above.
 - Old `crates/stores/src/attachment_cache.rs` - kept for now but no longer called by the new path; deleted in a follow-up commit once nothing references it.
 
 **Exit criteria.**
 - `brokkr check` clean.
-- Test suite covers the 8 scenarios above.
+- Unit tests cover the six scenarios above.
+- Harness scripts pass under `brokkr service-suite` and preserve artefact dirs on intentional failure.
 - A small benchmark exists (insert 10k 4 KB blobs + 1k 1 MB blobs, time per op, total disk usage, inode count) for future regression checks.
 
 **Risks / open questions.**
+- **Migration scope.** `attachments.local_path`, `cached_at`, and `cache_size` are not unused - they're the current flat-cache addressing scheme. Phase 1a is an addressing-scheme swap, not a column drop. Callsites that change in lockstep: `crates/stores/src/attachment_cache.rs` (read/write paths through `find_cache_info`, `update_cache_fields`, `enforce_cache_limit`, `try_cache_hit`, `cache_after_fetch`), the Service's `attachment.fetch` handler (today reads `local_path` to produce the `relative_path` ack), and the startup cross-store invariant pass. Any in-flight cached bytes need a one-shot migration into pack files at first boot under the new scheme, or a tombstoning-and-refetch fallback if migration complexity isn't worth it.
+- **GC-during-shutdown ordering.** GC reads from immutable closed packs and writes to a fresh pack at the chain tail. A shutdown signal during an in-flight repack must either complete the repack (slow shutdown) or discard the partial new pack and leave the old one authoritative (fast shutdown, GC re-runs next idle). Pick the policy as part of the drain integration.
 - Whether to put the open pack in its own file or always rotate on startup. Trade-off: in-place open-pack means recovery has to scan; always-rotate means more pack files. Probably in-place; rotation only on size cap.
 - fsync batching cadence. Too aggressive = slow writes; too lax = larger crash recovery scan. Probably "every 16 frames or 100 ms, whichever first."
-- xxh3_64 collision risk at our scale. Birthday-paradox math: at 10M blobs, P(any collision) ≈ 0.000027. Acceptable. If we want stronger guarantees, upgrade to xxh3_128 (still fast, 128 bits = effectively zero collision risk forever).
+- Hash choice is BLAKE3, not xxh3. xxh3 is non-cryptographic and email attachments are adversarial input (a sender controls the bytes); a second-preimage attack against xxh3_64 is trivial and would let a sender substitute cached bytes via `INSERT OR IGNORE` collision. BLAKE3 is collision-resistant and within a constant factor of xxh3 on throughput. xxh3 stays as the frame-payload checksum *inside* pack files (corruption detection only).
 
 ---
 
@@ -74,8 +91,8 @@ can land before any Service work begins.
 - `crates/core/src/attachments/mod.rs` with `fetch_or_load`, `prefetch_one`, `prefetch_message`, `prefetch_messages`.
 - A `ParentRef` enum (`Message { ... } | Event { ... }`) so calendar can plug in later. Only the `Message` variant is wired in this phase.
 - Unit tests for: pack-store hit fast path, inline-image-hit fast path, full fetch + squeeze + put + update path (mocked provider).
-- Wiring `squeeze::compress` into the write path (lossless defaults).
-- Touch-on-read: bump `attachment_blobs.last_read_at` when `PackStore::get` succeeds.
+- Wiring `squeeze::compress` into the write path (lossless defaults, signed-content bypass active from day one - detection lives inside the `squeeze` crate, not in `core::attachments`).
+- Touch-on-read: bump `attachment_blobs.last_read_at` when `PackStore::get` succeeds (informational stat).
 
 **Out of scope.**
 - Calling the new module from anywhere. Sync, reading pane, pop-out viewer all untouched. This phase just lands the building block.
@@ -98,40 +115,51 @@ can land before any Service work begins.
 
 ---
 
-## Phase 2 - Sync-time pre-fetch (JMAP first)
+## Phase 2 - Cache population (JMAP first)
 
-**Goal.** New JMAP messages get their attachments cached during sync, respecting per-account policy and a size threshold.
+**Goal.** JMAP attachments inside the configured retention window are cached, via sync-time pre-fetch for new messages and first-launch / account-add / window-extend backfill for historical ones.
 
 **Entry criteria.**
 - Phase 1a + 1b landed.
 - `core::attachments::prefetch_messages(...)` exists and is tested.
-- The Service hosts the JMAP sync path (Service roadmap phase that relocates sync into the Service has shipped).
 
 **In scope.**
-- After `persist_messages` in `crates/jmap/src/sync/storage.rs` writes attachment metadata (now running inside the Service), invoke `prefetch_messages` as a Service-internal task.
-- Per-account policy reads from settings (toggle + threshold). Defaults if unset (true / 25 MB).
-- Per-message size cap (skip if total exceeds 100 MB).
-- Failures logged, never block sync completion.
+- New `PrefetchRuntime` in `crates/service/src/prefetch.rs`, mirroring `ExtractRuntime` (`crates/service/src/extract.rs`): two priority queues (sync-time capacity 64, backfill capacity 256, sync drained first so backfill can't starve live work), per-account semaphore at 4, bounded `Arc<Mutex<HashSet>>` enqueue dedupe (cap 10K, oldest-drop policy when full), `CancellationToken` + stored `JoinHandle`, 5 min per-fetch wallclock timeout, per-provider circuit breaker (5 consecutive timeouts in 60s opens the circuit, exponential backoff 30s → 5min cap), ENOSPC safety backstop (skip the write + log warning if `statvfs` reports free space below `min_disk_free_gb`, default 5 GB).
+- Drain-order insertion: `Push -> Calendar -> Sync -> Prefetch -> Extract -> Rebuild -> search writer`. Edit `docs/architecture.md` § "Service process model" in lockstep.
+- Sync trigger: after `persist_messages` in `crates/jmap/src/sync/storage.rs` writes attachment metadata for messages within the retention window, enqueue onto `PrefetchRuntime`.
+- Backfill trigger: on first launch, account-add, and retention-window-extended, a backfill driver walks historical messages whose date now falls inside the window and enqueues missing attachments onto the runtime's *backfill* queue. Same fetch path; lower priority than the sync-time queue so live mail doesn't wait behind a multi-GB backfill.
+- Account deletion handler: synchronous tombstoning. When an account is deleted, walk `attachments WHERE account_id = ?` in one transaction, drop those rows, then tombstone every `attachment_blobs` row whose `content_hash` no longer has any surviving `attachments` references. Disk reclamation is async (GC), but the privacy contract (bytes no longer reachable through the live store) is met before account-delete returns.
+- Boot-time recovery kick: on Service boot, walk `attachments WHERE content_hash IS NULL AND message.date >= window_start` per account and re-enqueue. Idempotent (dedupe set + row-level check).
+- Per-account policy reads from settings (toggle + retention window). Defaults if unset (true / 1 year).
+- No size thresholds. Everything inside the window is cached regardless of per-attachment or per-message size.
+- Failures logged, never block sync completion. Failed rows stay `content_hash IS NULL` and get re-attempted by the next sync or the next boot kick.
 - Progress events through the existing `ProgressReporter`, surfaced to the UI as Service notifications on the existing sync-progress channel.
 
 **Out of scope.**
 - Other providers (phase 5).
 - Settings UI (phase 4) - read raw values from the prefs table for now.
-- Backfill of existing messages.
 
 **Touchpoints.**
-- `crates/jmap/src/sync/storage.rs` - call site.
+- `crates/service/src/prefetch.rs` - new `PrefetchRuntime` module (sibling of `extract.rs`).
+- `crates/service/src/dispatch/...` - boot wiring + drain-order insertion.
+- `docs/architecture.md` § "Service process model" - drain-order update.
+- `crates/jmap/src/sync/storage.rs` - sync trigger call site (enqueues onto `PrefetchRuntime`).
+- A Service-side backfill driver (likely `crates/service/src/prefetch_backfill.rs` or folded into `prefetch.rs`) that enumerates historical in-window messages and enqueues missing attachments.
 - `crates/db/src/db/queries.rs` or a dedicated prefs helper - read pre-fetch policy.
 - `crates/core/src/progress.rs` - new event variants if needed (`AttachmentCached { message_id, attachment_id, bytes }`).
 
 **Exit criteria.**
-- After a JMAP sync, `SELECT COUNT(*) FROM attachment_blobs WHERE refcount > 0` increases.
-- Status bar shows progress events during pre-fetch.
+- After a JMAP sync, `SELECT COUNT(*) FROM attachment_blobs WHERE tombstoned_at IS NULL` increases for messages within the window.
+- After account-add or window-extend, backfill runs and the same count grows over historical in-window messages.
+- Service shutdown during active prefetch drains cleanly (no detached tasks); the next boot's recovery kick resumes from `content_hash IS NULL`.
+- Status bar shows progress events during sync-time and backfill caching.
 - Pre-fetch failures don't break sync; a retried sync re-attempts the same attachments.
 
 **Risks / open questions.**
-- Hammering the JMAP server with N-attachment requests in parallel. Need a semaphore (probably 4 concurrent fetches per account).
-- Sync completion timing: dispatch is fire-and-forget, but the sync UI today says "sync complete" the moment metadata lands. Decide whether pre-fetch needs its own progress separate from sync state.
+- Sync completion timing: enqueue is bounded but not awaited, and the sync UI today says "sync complete" the moment metadata lands. Decide whether `PrefetchRuntime` queue depth should surface as its own progress separate from sync state.
+- Backfill of a multi-year window on a heavy mailbox may be many GB of fetches. The boot recovery kick (walks `content_hash IS NULL`) covers crash resumption; the dedupe `HashSet` is *not* meant to survive restarts (it's a perf hint, not a durability contract), and the row-level `content_hash IS NULL` check is what actually prevents double-fetch.
+- Circuit breaker calibration: K=5, W=60s, backoff 30s→5min is a starting point. Real provider misbehavior (e.g. transient 429 storms vs persistent auth failure) may want different thresholds; Phase 5 cross-provider parity is the natural place to revisit.
+- ENOSPC backstop interaction with backfill: a long backfill that hits the disk-free floor will drop work on the floor and log. Decide whether to surface this to the UI as "Cache paused: low disk space" or stay silent.
 
 ---
 
@@ -141,13 +169,12 @@ can land before any Service work begins.
 
 **Entry criteria.**
 - Phase 1a + 1b landed (`fetch_or_load` exists, backed by `PackStore`).
-- The Service exposes the `attachment.fetch` IPC method (covers the cold path).
 - Phase 2 *helpful but not required* - phase 3 works equally well in fetch-on-click mode if no pre-fetch has happened.
 
 **In scope.**
 - New shared module `crates/app/src/handlers/attachments.rs` with `handle_open_attachment`, `handle_save_attachment`, `handle_save_all_attachments`.
-- Hot-path: UI looks up `attachment_blobs` via direct read, reads positionally from the pack file. No IPC.
-- Cold-path: UI sends `attachment.fetch` to the Service; Service runs `fetch_or_load`; UI receives bytes (or just the resulting `content_hash`, then re-reads from disk).
+- All reads go through `attachment.fetch` (hit or miss); the Service handler disambiguates internally. Ack returns `AttachmentFetchAck { content_hash, size_bytes, relative_path }` and the UI re-opens the file positionally. Bytes never cross JSON (see `crates/service-api/src/attachment.rs`).
+- UI does not read `attachment_blobs` directly, link `BlobStore`, or otherwise know about the storage layout. Storage stays Service-internal across the trait + backend boundary.
 - Wire from `ui/reading_pane.rs:370/374` (currently stubbed).
 - Wire from `handlers/pop_out/message_view.rs:69/73/77` (currently stubbed).
 - File dialogs via `rfd::AsyncFileDialog`. Folder picker for Save All.
@@ -180,36 +207,33 @@ can land before any Service work begins.
 
 ## Phase 4 - Settings UI
 
-**Goal.** Users can configure pre-fetch behavior, cache size cap, and squeeze policy from settings.
+**Goal.** Users can configure caching, retention window, and squeeze policy from settings.
 
 **Entry criteria.**
 - Phase 1-3 landed. Pre-fetch and Open/Save read their config from prefs - settings UI just wraps the prefs.
 
 **In scope.**
-- Per-account section ("Mail" or new "Storage" tab on the Account editor):
+- Per-account section ("Storage" tab on the Account editor):
   - `Cache attachments for offline use` (toggle).
-  - `Pre-fetch threshold` (slider, 1 - 100 MB).
+  - `Mail to keep offline` (Outlook-style slider: 1 month / 3 months / 6 months / 1 year / 2 years / All; default 1 year).
 - Global settings, new "Storage" section (sibling to "Notifications", "Composing"):
-  - `Attachment cache size cap` (slider, 1 - 50 GB; default raised from current 500 MB to 5 GB as part of this work).
   - `Compress cached attachments` (toggle, default on).
   - `Allow lossy compression (JPEG re-encoding)` (toggle, default off).
   - `Cleanup opened-files temp folder after N days` (slider, default 7).
-  - Live "Cache currently using X.Y GB of Z GB" readout below the slider.
+  - Live "Cache currently using X.Y GB" readout (informational; no cap to compare against).
 
 **Out of scope.**
-- A "Cache all attachments now" backfill button (deferred indefinitely - lazy fill plus eager pre-fetch covers it).
 - A "Clear cache now" button (probably wanted but defer to a follow-up phase).
 
 **Touchpoints.**
 - `crates/app/src/ui/settings/tabs/...` - new section.
 - `crates/app/src/ui/settings/types/...` - new pref keys + bootstrap snapshots.
 - `crates/db/src/db/queries.rs` - getters/setters for the new prefs.
-- `crates/stores/src/attachment_pack.rs` - cap is already read from `attachment_cache_max_mb`; default raised here.
 
 **Exit criteria.**
 - Settings persist across restarts.
-- Changing the cache cap triggers Phase 1 eviction in the pack store.
-- Disabling pre-fetch on an account stops new attachments from being downloaded by sync (fetch-on-click still works).
+- Shortening the retention window triggers a Phase 1 eviction sweep; extending it triggers a backfill.
+- Disabling caching on an account stops new attachments from being downloaded by sync or backfill (fetch-on-click still works).
 
 **Risks / open questions.**
 - Where does the per-account toggle actually live - on the Account editor sheet, or on a new global "Storage" tab with a per-account dropdown? Probably the editor sheet, matching how other per-account settings work.
@@ -240,7 +264,7 @@ can land before any Service work begins.
 - Possibly `crates/imap/src/client/sessions.rs` to add session reuse for attachment fetches inside the same folder.
 
 **Exit criteria.**
-- After a sync on each provider type, `local_path IS NOT NULL` rows appear for that account.
+- After a sync on each provider type, `attachment_blobs` rows with `tombstoned_at IS NULL` appear for that account (joined back to `attachments` via `content_hash`).
 - IMAP attachment fetches reuse the existing folder session (no extra LOGIN/SELECT round-trips).
 
 **Risks / open questions.**
@@ -251,33 +275,33 @@ can land before any Service work begins.
 
 ## Phase 6 - Eviction policy + GC + retention
 
-**Goal.** Cache stays bounded under realistic usage. Phase 1 (logical eviction via tombstones) and Phase 2 (GC pack repack) are wired and tuned. Opened-files temp folder gets reaped.
+**Goal.** Cache stays within the configured retention window. Phase 1 (logical eviction via tombstones, selected by message date) and Phase 2 (GC pack repack) are wired and tuned. Opened-files temp folder gets reaped.
 
 **Entry criteria.**
 - Phase 1-5 landed. Real cache pressure exists from observed usage (or a synthetic stress test).
 
 **In scope.**
-- LRU candidate selection by `attachment_blobs.last_read_at` after sync batches (Phase 1 logical eviction).
+- Date-based candidate selection (Phase 1): `attachment_blobs JOIN attachments ON content_hash WHERE message.date < window_start`. Triggered at startup, after sync batches, and on window shrink.
 - GC pass (Phase 2 pack repack) triggered on app idle when tombstone density crosses threshold (default: 25% of any single pack, or 10% of total cache bytes).
-- Size-aware skip in pre-fetch: if pre-fetching one item would force more than X% of the cache to be evicted in one go, skip the item rather than thrash.
-- Periodic cleanup of `<app-data>/opened_attachments/` based on the configured retention window.
+- Periodic cleanup of `<app-data>/opened_attachments/` based on the configured cleanup window.
 - A "Clear attachment cache now" button in the Storage settings panel - tombstones every blob, then runs GC.
 
 **Out of scope.**
-- Per-account cache quotas. The cap is global; per-account enforcement would need substantial rework of the eviction selector.
+- Heuristics for when to extend / shrink the window automatically. The window is user-controlled; no auto-adjustment based on disk pressure or access patterns.
 
 **Touchpoints.**
-- `crates/stores/src/attachment_pack.rs` - `evict_lru` and `gc` methods.
+- `crates/stores/src/attachment_pack.rs` - date-based eviction + `gc` methods.
 - `crates/app/src/subscription.rs` - new periodic timer for GC.
 - `crates/app/src/handlers/attachments.rs` - opened-files cleanup.
 
 **Exit criteria.**
-- A 24-hour idle test with synthetic cache churn shows cache size stays at or below cap; GC reclaims space when triggered.
-- `opened_attachments/` files older than the retention window are removed on startup.
+- After a sync that crosses the window edge, blobs older than `window_start` are tombstoned within one sync cycle.
+- After GC fires on high-tombstone-density packs, the affected pack files are repacked and disk usage drops.
+- `opened_attachments/` files older than the configured cleanup window are removed on startup.
 
 **Risks / open questions.**
-- Whether eviction during pre-fetch is acceptable (could thrash if we're constantly evicting one item to make room for the next). Probably need a "headroom" buffer (e.g. evict to cap minus 10%).
 - GC during active sync writes - need a clear ordering so GC doesn't read a frame from a pack that's being rotated.
+- A retention window shrink from "All" to "1 month" on a multi-GB cache could tombstone tens of thousands of blobs in one operation. The sweep needs to be chunked so it doesn't block the Service write path during the SQL update.
 
 ---
 
@@ -291,6 +315,7 @@ can land before any Service work begins.
 **In scope.**
 - Instrument the squeeze path to log compression ratios per mime type.
 - Aggregate report (CLI tool or settings panel section) showing `original_bytes -> compressed_bytes` per type, savings percent, time spent.
+- Bypass-rate calibration: log how often the signed-content bypass fires, broken out by mime. Zero hits across a populated mailbox suggests detection is broken; an unexpectedly high rate suggests overly aggressive sniffing.
 - Decide whether to:
   - Adjust the default per-mime squeeze policy (e.g. always squeeze PDFs, never bother with already-compressed Office docs).
   - Make the lossy-JPEG toggle default-on if the win is large enough.
@@ -327,7 +352,7 @@ can land before any Service work begins.
 - Rolling-image storage: `<app-data>/attachment_packs/data-NNNNNN.erofs`, ~256 MB each, never modified after bake.
 - Staging area for in-flight writes (small flat-file directory or in-memory queue with periodic durability sync) until the next bake.
 - Bake trigger: staging exceeds threshold (size or time-based), shell out to `mkfs.erofs` (or a library equivalent), drop the resulting image, clear staging.
-- Index in SQLite: `attachment_blobs_erofs(content_hash PK, image_id, path_within_image, refcount, written_at, last_read_at)`. Distinct from the `PackStore` index since the location semantics differ (path-within-image vs offset-in-pack).
+- Index in SQLite: `attachment_blobs_erofs(content_hash PK, image_id, path_within_image, written_at, last_read_at, tombstoned_at)`. Distinct from the `PackStore` index since the location semantics differ (path-within-image vs offset-in-pack). Counts derived from `attachments`, same as `PackStore`.
 - Eviction: tombstone individual blobs (refuse on read); whole-image delete only when *all* blobs in an image are tombstoned. No partial repack - that would mean rebaking, which is expensive and probably not worth it given the natural turnover.
 - A migration tool to move existing v1 `PackStore` blobs into `ErofsStore` images on first run with the new backend (or, simpler: leave `PackStore` blobs in place and only put new writes through `ErofsStore` until eviction naturally drains the old store).
 

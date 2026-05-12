@@ -15,26 +15,25 @@ Beyond offline use, a populated local attachment cache also unlocks future work:
 ## Relationship to the Service
 
 The orchestration described here (pre-fetch, blob-store writes,
-eviction, GC, attachment text extraction) all run inside **the
-Service** - the subprocess worker described in
-`docs/architecture.md` under "Service process model". The `BlobStore`
-trait and its implementations are libraries (in `crates/stores/`) and
-don't care which process instantiates them; the writer instance lives
-in the Service, while UI-side reads are positional reads against the
-immutable on-disk pack files (concurrent-reader-safe, no IPC).
-Cache-miss attachment fetches from the UI cross the IPC boundary;
-cache hits do not. The split is detailed in `File operations` below
-and in the architecture doc.
+eviction, GC) runs inside **the Service** - the subprocess worker
+described in `docs/architecture.md` § "Service process model". The
+`BlobStore` trait and its implementations are Service-internal; the
+UI never reads storage layout directly. Every attachment read - hit
+or miss - goes through the `attachment.fetch` IPC, and the Service
+is the sole owner of the on-disk format. This keeps storage layout
+swappable (flat cache today, `PackStore` tomorrow, anything else
+later) without coordinated UI changes. The wire contract is detailed
+in `File operations` below.
 
 ## Current state
 
-What's on disk today:
+What's on disk today (pre-Phase-1a; this is the state Phase 1a migrates *away from*, not the v1 target):
 
-- **Schema is ready.** `attachments` (in `crates/db/src/db/schema/02_mail.sql`) has `local_path TEXT`, `cached_at INTEGER`, `cache_size INTEGER`, `content_hash TEXT`, with an index on `content_hash` for dedup queries. The schema was designed for caching - it just isn't populated.
-- **Storage primitives are ready.** `crates/stores/src/attachment_cache.rs` has the full set of building blocks: `read_cached`, `write_cached`, `find_cache_info`, `update_cache_fields`, `try_cache_hit`, `try_inline_image_hit`, `cache_after_fetch`. None of them are called from the mail-fetch path - only the inline-image store gets seeded during sync (small CID images).
-- **Eviction is ready.** `enforce_cache_limit` does LRU eviction by `cached_at`, is dedup-aware (only deletes the file if no other row references the same content hash), and reads its bound from a `attachment_cache_max_mb` setting that defaults to 500 MB. There's no UI to change it yet.
-- **Provider fetch is ready.** All four providers implement `ProviderOps::fetch_attachment(message_id, attachment_id) -> AttachmentData`. The function exists everywhere and is called from nowhere.
-- **Squeeze is ready.** `squeeze::compress(bytes, mime_type, &Config)` returns a `CompressResult` (or `Unchanged` if not worthwhile). It is currently used as a CLI and in inline-image storage; it is not used in the attachment-cache path.
+- **Existing schema.** `attachments` (in `crates/db/src/db/schema/02_mail.sql`) has `local_path TEXT`, `cached_at INTEGER`, `cache_size INTEGER`, `content_hash TEXT`, with an index on `content_hash` for dedup queries. Designed for caching, currently unused at the mail-fetch path. Phase 1a's addressing-scheme swap replaces these columns with `attachment_blobs(content_hash BLOB, pack_file_id, offset, length, ...)`.
+- **Existing flat-cache primitives.** `crates/stores/src/attachment_cache.rs` has `read_cached`, `write_cached`, `find_cache_info`, `update_cache_fields`, `try_cache_hit`, `try_inline_image_hit`, `cache_after_fetch`. Wired into the inline-image-store path (small CID images) but not into the mail-fetch path. Phase 1a removes the flat-file backing and re-implements the relevant entry points against `PackStore`.
+- **Existing LRU eviction.** `enforce_cache_limit` does LRU eviction by `cached_at` against a size cap (`attachment_cache_max_mb`, default 500 MB). Both the LRU strategy and the size cap go away under the time-windowed retention model (see "Cache eviction and GC"). Phase 6 replaces this code path entirely.
+- **Provider fetch is ready.** All four providers implement `ProviderOps::fetch_attachment(message_id, attachment_id) -> AttachmentData`. The function exists everywhere and is called from nowhere. This survives Phase 1a unchanged.
+- **Squeeze is ready.** `squeeze::compress(bytes, mime_type, &Config)` returns a `CompressResult` (or `Unchanged` if not worthwhile). Currently used as a CLI and in inline-image storage. Phase 1b wires it into the attachment write path with the signed-content bypass active from day one.
 
 What's missing:
 
@@ -91,26 +90,25 @@ The pipeline operates on a `BlobStore` trait, not a concrete storage type. This 
 pub trait BlobStore: Send + Sync {
     fn put(&self, bytes: &[u8]) -> Result<BlobHash, Error>;
     fn get(&self, hash: &BlobHash) -> Result<Option<Vec<u8>>, Error>;
-    fn unref(&self, hash: &BlobHash) -> Result<(), Error>;
-    fn evict_lru(&self, target_free_bytes: u64) -> Result<u64, Error>;
+    fn tombstone(&self, hash: &BlobHash) -> Result<(), Error>;
     fn gc(&self) -> Result<GcStats, Error>;
     fn recover(&self) -> Result<(), Error>;
 }
 ```
 
-`put` is content-addressed and idempotent - two `put`s of identical bytes return the same hash and increment a refcount rather than re-storing. The orchestration layer never sees the storage details.
+`put` is content-addressed and idempotent - two `put`s of identical bytes return the same hash and the second is a no-op on the blob side; reference accounting is derived from `attachments` rows, not tracked in the store. Selection of *which* blobs to tombstone (date-window predicate, orphan detection) lives in the orchestration layer; `BlobStore::tombstone` is just the primitive. The orchestration layer never sees the storage details.
 
 ### Storage tiers
 
 Three storage tiers, with the middle tier accessed through `BlobStore`:
 
-1. **Inline image store** (`crates/stores/src/inline_image_store.rs`) - SQLite blob store for images <= `MAX_INLINE_SIZE` (currently 64 KB). Already populated during sync for inline CID images. Stays as-is - SQLite blob storage is fine at this size class and the existing infrastructure works. Not a `BlobStore` impl; lives parallel to it for the small-image case it already serves.
+1. **Inline image store** (`crates/stores/src/inline_image_store.rs`) - SQLite blob store for images <= `MAX_INLINE_SIZE` (currently 64 KB). Already populated during sync for inline CID images. Stays as-is - SQLite blob storage is fine at this size class and the existing infrastructure works. Not a `BlobStore` impl; lives parallel to it for the small-image case it already serves. **The two stores do not share a content-hash namespace**, so a 65 KB image in packs and a 63 KB copy of the same image in the inline store will not dedup across the boundary. Accepted trade-off: cross-store dedup would require both stores to compute and store BLAKE3 keys, and the inline store's existing xxh3 keying is good enough for its size class. The dedup miss only fires when the same image arrives at sizes straddling 64 KB, which is rare in practice.
 
 2. **Attachment blob store** (new, `BlobStore` impl). v1 implementation: `PackStore` (`crates/stores/src/attachment_pack.rs`) - **content-addressed pack files**, ~256 MB segments under `<app-data>/attachment_packs/data-NNNNNN.pack`. Each blob is appended once and referenced by `(pack_file_id, offset, length)` from a SQLite index table. Multiple attachment rows that hash to the same content reference the same `(pack_file_id, offset, length)` triple. Cross-platform; this is what ships in v1 everywhere.
 
 3. **Provider** - source of truth, fetched on cache miss. Network round-trip.
 
-The pack store replaces the existing `crates/stores/src/attachment_cache.rs` file-per-blob design (currently unused - the `local_path`, `cached_at`, `cache_size`, `content_hash` columns exist on `attachments` but are never populated). At our 150-200 GB target with the long tail of small blobs (avatars, signatures, tracking pixels), a flat-file-per-blob layout produces ~2 million inodes with corresponding metadata pressure, terrible backup-tool throughput, and per-blob SSD-page read overhead even for sub-KB content. Pack files reduce inode count by ~3 orders of magnitude, give us sequential write patterns, and let multiple small blobs share an SSD page on read. See "Considered alternatives" below for the full rationale.
+The pack store replaces the existing `crates/stores/src/attachment_cache.rs` file-per-blob design. The flat-file infrastructure is wired into the inline-image-store path today but not the mail-fetch path; the schema columns (`local_path`, `cached_at`, `cache_size`, `content_hash` on `attachments`) are present and consumed by `enforce_cache_limit` and the cache-info helpers, but the mail-fetch write side is dark. Phase 1a's migration replaces both the dark side and the live LRU/cap path with `attachment_blobs` + pack files. At our 150-200 GB target with the long tail of small blobs (avatars, signatures, tracking pixels), a flat-file-per-blob layout produces ~2 million inodes with corresponding metadata pressure, terrible backup-tool throughput, and per-blob SSD-page read overhead even for sub-KB content. Pack files reduce inode count by ~3 orders of magnitude, give us sequential write patterns, and let multiple small blobs share an SSD page on read. See "Considered alternatives" below for the full rationale.
 
 ### Pack file format (v1)
 
@@ -132,7 +130,7 @@ Append-only segments, rotated when the current segment exceeds `PACK_TARGET_SIZE
 - **Versioned**: a `version` byte in the tail lets us evolve the format without breaking older segments.
 - **No encryption in v1**: framed for it - encryption would replace the payload region of each frame with `nonce | ciphertext | tag`. Tracked separately under "Mail content stores not encrypted at rest" in TODO.md.
 
-A separate "tombstones" file (`tombstones-NNNNNN.log`) records `(pack_id, blob_xxh3)` pairs for blobs that have been logically deleted. Tombstones are consulted during read for safety (refuse to return tombstoned data even if the index has a stale row) and consumed by the GC pass.
+A separate "tombstones" file (`tombstones-NNNNNN.log`) records `(pack_id, content_hash)` pairs for blobs that have been logically deleted. The log is the durable record used to rebuild `attachment_blobs.tombstoned_at` after index corruption; the column is the runtime authority for reads (see "Tombstone authority" under "Cache eviction and GC").
 
 ### SQLite index (PackStore-specific)
 
@@ -140,18 +138,22 @@ Every `BlobStore` implementation owns its own on-disk index format. For `PackSto
 
 ```sql
 CREATE TABLE attachment_blobs (
-    content_hash TEXT PRIMARY KEY,   -- xxh3_64 hex
-    pack_file_id INTEGER NOT NULL,   -- which pack-NNNNNN.pack
-    offset INTEGER NOT NULL,         -- byte offset within the pack
-    length INTEGER NOT NULL,         -- payload length (post-squeeze)
-    refcount INTEGER NOT NULL,       -- number of attachments rows pointing here
+    content_hash BLOB(32) PRIMARY KEY, -- BLAKE3, raw 32 bytes
+    pack_file_id INTEGER NOT NULL,     -- which pack-NNNNNN.pack
+    offset INTEGER NOT NULL,           -- byte offset within the pack
+    length INTEGER NOT NULL,           -- payload length (post-squeeze)
     written_at INTEGER NOT NULL,
-    last_read_at INTEGER             -- updated by `fetch_or_load` on cache hit
+    last_read_at INTEGER,              -- bumped on cache hit; informational only
+    tombstoned_at INTEGER              -- NULL = live; non-NULL = logically evicted
 );
-CREATE INDEX idx_attachment_blobs_lru ON attachment_blobs(last_read_at);
+CREATE INDEX idx_attachment_blobs_tombstoned ON attachment_blobs(tombstoned_at);
 ```
 
-The existing `attachments.content_hash` column becomes the join key. `attachments.local_path`, `cached_at`, and `cache_size` are dropped (or migrated and then dropped) - that information now lives on `attachment_blobs`.
+**Content hash is BLAKE3, not xxh3.** Email attachments are adversarial input - bytes arrive from the public internet, controlled by senders we don't trust. A non-cryptographic hash like xxh3 is vulnerable to second-preimage attacks: an attacker who knows what's in your cache (e.g. because they planted it via an earlier mail) can craft a different blob with the same hash, mail it to you, and have your `INSERT OR IGNORE` silently serve the cached (malicious) bytes on the new attachment's open. BLAKE3 is collision-resistant against this attack and within a small constant factor of xxh3 on throughput (~1 GB/s vs ~30 GB/s on modern x86) - negligible compared to the network fetch the squeeze pipeline already runs. xxh3_64 stays as the frame-payload checksum *inside* pack files (corruption detection, not identity) - the threat models are different.
+
+`attachments.content_hash` becomes the join key, migrated from `TEXT` (xxh3 hex) to `BLOB(32)` (BLAKE3) in the same migration. `attachments.local_path`, `cached_at`, and `cache_size` are dropped - that information now lives on `attachment_blobs`.
+
+**Reference counts are derived, not stored.** `attachments` is the source of truth for which blobs are referenced. "How many messages point at this blob?" is `SELECT COUNT(*) FROM attachments WHERE content_hash = ?`; "which blobs are orphans?" is `attachment_blobs LEFT JOIN attachments ON content_hash WHERE attachments.attachment_id IS NULL`. Eviction selection (Finding #1's date predicate) already needs `attachments` joined in for the date check, so the derivation cost is amortized into the same query. Carrying a separate `refcount` column would create a second source of truth that has to track every callsite touching `attachments.content_hash` - account deletion, stale-row recovery, future calendar-attachment plumbing - and a missed increment silently tombstones a still-referenced blob. The derived approach can't drift.
 
 The index is **rebuildable** from pack tails on corruption: walk every pack, replay frames, regenerate the table. This is the same recoverability story restic / borg / kopia provide.
 
@@ -175,18 +177,30 @@ The index is **rebuildable** from pack tails on corruption: walk every pack, rep
 - **Lossy gains**: JPEG (mozjpeg). **Off by default** for cached attachments - we don't want to silently re-encode user bytes. Optional setting if users want it.
 - **Skip**: zip / 7z / mp4 / already-compressed binaries - `squeeze` returns `Unchanged`. Pack stores the original bytes.
 
+**Signed-content bypass (runs first):** Before any lossless work, the candidate bytes are sniffed for embedded digital signatures. On detect, `squeeze` returns `Unchanged` and the pack stores the originals. Lossless-at-the-application-level (a re-encoded PNG decodes to the same pixels, a re-packed PDF renders identically) is *not* byte-equivalent, and digital signatures live at the byte level - re-packing an e-signed contract or a regulated-industry OOXML doc invalidates the signature. The bypass covers:
+
+- **PDF** - presence of a `/Type /Sig` or `/ByteRange` entry in the cross-reference table.
+- **OOXML** (`.docx` / `.xlsx` / `.pptx`) and **ODF** - a ZIP entry under `_xmlsignatures/` or `META-INF/documentsignatures.xml`.
+- **S/MIME envelopes** (`.p7s`, `.p7m`, `application/pkcs7-mime` / `application/pkcs7-signature`) - mime-based skip; the wrapper is opaque CMS and squeeze can't improve it.
+
+Detection is intentionally **biased toward false positives**. A false positive skips squeeze on an unsigned doc (harmless: pack stores originals). A false negative re-packs a signed doc and silently invalidates the signature (high-cost, low-frequency, only surfaces during compliance audits or court evidence). Any signature-shaped marker wins the bypass. The detection logic has its own unit-test surface, separate from the squeeze backends, with corpus coverage of real signed PDFs / OOXML / ODF samples.
+
+**Known gaps in detection:**
+- XAdES-signed SVG / generic XML - hard to detect cheaply without parsing for the `xmldsig` namespace. SVG squeeze stripping is a small win; revisit if a real signed-SVG-in-email workflow surfaces.
+- Detached signatures (`.asc`, GPG `.sig`) referring to a separate cached attachment - the referenced file would be skipped by the bypass *only* if it carries its own embedded signature. A detached-sig workflow that hashes an attachment we then re-pack will fail verification. Documented limitation; mitigation is the same as for XAdES-SVG (await a real workflow).
+
 The pack stores the post-squeeze bytes. The DB row records `attachment_blobs.length` (post-squeeze) and `attachments.size` (pre-squeeze, from the provider's metadata), so the user-visible size in the UI stays accurate.
 
-If the user later opens or forwards the attachment, the cached bytes are returned as-is. For lossless squeeze (the default), this is byte-equivalent to the original at the application level (a re-encoded PNG decodes to the same pixels; a re-packed PDF renders identically). Forwarding a squeezed attachment sends the squeezed bytes - this is fine; recipients will receive a smaller file with no semantic loss.
+If the user later opens or forwards the attachment, the cached bytes are returned as-is. For squeezed content this is application-level equivalent (decodes / renders identically) but not byte-equivalent; the signed-content bypass above is what protects signature-sensitive workflows.
 
 ### Content-addressable dedup
 
 The `content_hash` is the primary key on `attachment_blobs`. Insert-or-ignore semantics:
 
-- Hash the bytes after squeeze (xxh3_64 - fast, 64-bit, more than enough for the keyspace we're addressing).
-- `INSERT OR IGNORE INTO attachment_blobs(content_hash, ...) VALUES (?, ...)`. If the row already exists, the bytes are not re-appended to a pack - we just `UPDATE attachment_blobs SET refcount = refcount + 1 WHERE content_hash = ?`.
-- The new `attachments` row gets `content_hash` populated and is otherwise unchanged.
-- Result: a 12 MB company-wide PowerPoint sent to 200 people is appended to a pack exactly once and referenced 200 times.
+- Hash the bytes after squeeze with BLAKE3 (cryptographic; resists second-preimage attacks against adversarial-input keyspaces).
+- `INSERT OR IGNORE INTO attachment_blobs(content_hash, ...) VALUES (?, ...)`. If the row already exists, the bytes are not re-appended to a pack and the call is a no-op on the blob side.
+- The new `attachments` row gets `content_hash` populated and is otherwise unchanged. That row is the only reference accounting the blob needs; counts are derived on demand (see SQLite index above).
+- Result: a 12 MB company-wide PowerPoint sent to 200 people is appended to a pack exactly once. 200 `attachments` rows share the same `content_hash`. No counter is incremented anywhere.
 
 ### Considered alternatives
 
@@ -206,54 +220,89 @@ Why pack files and not one of these:
 
 ## Pre-fetch policy
 
-Pre-fetch happens in the sync pipeline, after `insert_attachments` writes metadata rows. It runs as a background task spawned per-batch - sync completion does **not** wait for pre-fetch.
+The cache is populated by **time-windowed retention**, mirroring Outlook's "Mail to keep offline" model. Every attachment on a message whose date falls inside the window is pre-fetched; messages outside the window are fetch-on-click. The window is per-account.
+
+Pre-fetch fires from two triggers:
+- **Sync-time** - after `persist_messages` writes attachment metadata for newly-synced messages within the window, the Service enqueues the pre-fetch.
+- **Backfill** - on first launch, on account-add, and when the window is extended, the Service walks historical messages whose date now falls inside the window and enqueues missing attachments. This is the core mechanism, not a deferred feature.
+
+Both triggers share the same fetch path; only the source of the message set differs.
 
 **Defaults:**
-- **Enabled per account on creation** (`prefetch_attachments: true`).
-- **Per-attachment size threshold**: 25 MB. Above this, do not pre-fetch; user can still trigger fetch on Open/Save click.
-- **Per-message threshold**: skip pre-fetch entirely for messages whose summed attachment size exceeds 100 MB (a single 200-MB email shouldn't dominate the sync queue).
-- **Cache cap**: respects existing `attachment_cache_max_mb` (default 500 MB; bumped to a saner default - probably 5 GB - as part of this work).
-- **Backfill**: on first run after the feature lands, do not retroactively pre-fetch existing messages. The cache populates lazily for old messages (fetch-on-click cache-write-back) and eagerly for new ones (sync-time pre-fetch). A future "Cache all attachments now" button can do the backfill on demand.
+- **`Mail to keep offline` slider:** 1 month / 3 months / 6 months / 1 year / 2 years / All. Default 1 year (matches Outlook's current default).
+- **Enabled per account on creation** (`cache_attachments: true`).
+- **No size thresholds.** Everything inside the window is cached, regardless of per-attachment or per-message size. Time-window *is* the policy.
+- **No global cache cap.** If the user picks "All" and has 80 GB of email, the cache holds 80 GB. Disk-space protection is the OS's responsibility, not the cache's.
 
-**Per-account opt-out:** Users can disable pre-fetch per account from settings. With pre-fetch off, attachments only enter the cache when the user clicks Open/Save (fetch-on-click write-back). This matches the Gmail-web model for users who want it.
+**Per-account opt-out:** Users can disable caching per account from settings. With caching off, no pre-fetch and no backfill; attachments enter the cache only via fetch-on-click. This matches the Gmail-web model for users who want it.
 
-**Failure behavior:** Pre-fetch errors are logged but never fail the sync. The attachment row stays metadata-only and gets fetched on demand instead.
+### Runtime shape
 
-**Progress reporting:** The existing `ProgressReporter` trait emits "Caching attachments... 42 / 120" events that the status bar already knows how to render.
+Pre-fetch runs inside a **`PrefetchRuntime`**, a sibling of `ExtractRuntime` (`crates/service/src/extract.rs`). Both triggers (sync, backfill) enqueue onto the same runtime; nothing spawns a detached task. The runtime shape:
+
+- **Two priority queues**, sync-time and backfill, drained sync-first. A multi-year backfill on a heavy mailbox can't starve live sync's prefetch of newly-arriving messages. Each queue is a bounded mpsc (sync capacity 64, backfill capacity 256). Enqueuers `send.await`; backpressure throttles producers when the runtime is saturated.
+- **Bounded enqueue dedupe** via `Arc<Mutex<HashSet<(account_id, message_id, attachment_id)>>>` capped at 10K entries. When the set is full, new enqueues that aren't already present are dropped on the floor - the next sync or the next boot recovery kick will pick them up. The set is a perf hint, not a correctness contract; the row-level `content_hash IS NULL` check at fetch time is what actually prevents duplicate work.
+- **Bounded concurrency**: per-account semaphore at 4. No separate global cap.
+- **Per-fetch timeout**: 5 min wallclock per work item.
+- **Per-provider circuit breaker.** K consecutive timeouts within window W (K=5, W=60s default) open the circuit for that provider: all queued items for that provider are drained without fetching, the circuit reopens after a backoff (start 30s, exponential to 5 min cap). Prevents one misbehaving provider from parking all four semaphore slots for 20 minutes.
+- **ENOSPC safety backstop.** Before every pack write the runtime checks free disk space via `statvfs` (`GetDiskFreeSpaceExW` on Windows). If free space is below `min_disk_free_gb` (default 5 GB), the fetch is dropped with a logged warning and the attachment row stays `content_hash IS NULL`. This is system-protection, not a cache cap - "no global cache cap" means the cache doesn't impose a ceiling on its own size, but it doesn't mean we knowingly fill the user's disk to ENOSPC mid-sync-write and corrupt SQLite WAL.
+- **`CancellationToken` + stored worker `JoinHandle`**, drained on Service shutdown.
+
+**Drain order:** `PrefetchRuntime` joins the Service's fixed drain order between `Sync` and `Extract`. Sync produces prefetch work; prefetch's writes feed extract. The canonical order lives in `docs/architecture.md` § "Service process model".
+
+**Crash recovery:** On Service boot, after `attachments.text_indexed_at`-shaped extract backfill kicks, a parallel **prefetch backfill kick** walks `attachments WHERE content_hash IS NULL AND message.date >= window_start` per account and re-enqueues. Idempotent because the row-level `content_hash IS NULL` check rejects already-cached work even if the dedupe `HashSet` was lost across the restart.
+
+**Account deletion.** Synchronous, not "eventually evicted". When an account is deleted, the Service walks `attachments WHERE account_id = ?` in a single transaction, drops the rows, and tombstones every `attachment_blobs` row whose `content_hash` no longer has any surviving `attachments` references (i.e. orphaned by the delete). This is a privacy contract: removing an account must remove its cached attachment bytes from the live store immediately, not at the next eviction sweep. GC reclaims disk space asynchronously, as usual.
+
+**Failure behavior:** Pre-fetch errors are logged but never fail the sync. The attachment row stays `content_hash IS NULL` and gets re-attempted by the next sync, by the boot-time backfill kick, or by user-initiated fetch-on-click.
+
+**Progress reporting:** The existing `ProgressReporter` trait emits "Caching attachments... 42 / 120" events that the status bar already knows how to render. Backfill emits the same shape; the surface is trigger-agnostic.
 
 ## Cache eviction and GC
 
-Eviction is a two-phase process because the on-disk pack format is append-only.
+Eviction is driven by the configured retention window, not by access patterns or size pressure. Anything outside the window is eligible for eviction; everything inside is retained.
 
 **Phase 1 - logical eviction (cheap, frequent):**
-- LRU candidates picked from `attachment_blobs ORDER BY last_read_at ASC` until the live byte count would fall under the cap.
-- For each candidate: `UPDATE attachment_blobs SET refcount = 0` + append a tombstone to `tombstones-NNNNNN.log`. The bytes are still on disk in the pack file but unreferenced and unreadable (reads consult the tombstone log).
-- The space is *logically* freed immediately - new writes won't push us over cap because `SUM(length WHERE refcount > 0)` is what we measure.
+- Candidates selected by message date: blobs whose every referencing `attachments` row is older than `window_start` (`attachment_blobs LEFT JOIN attachments ON content_hash` filtered by `MAX(date) < window_start`, or blobs with no surviving `attachments` row at all - orphans from account deletion).
+- For each candidate, in one SQLite transaction: `UPDATE attachment_blobs SET tombstoned_at = ?now` + append a tombstone to `tombstones-NNNNNN.log`. The bytes are still on disk in the pack file but unreadable.
+- Runs at app startup, after every sync batch (to drop newly-aged-out blobs), and whenever the retention window is shortened.
+
+**Tombstone authority.** The `tombstoned_at` column is the runtime authority: every read consults it first via the same SQLite path that resolves the pack location, so there's no read-path cost compared to "is this row present at all?". The `tombstones-NNNNNN.log` file is the durable record used to rebuild the column after index corruption (the `recover()` path replays the log when regenerating `attachment_blobs` from pack tails). On disagreement at runtime, the column wins; on rebuild after corruption, the log wins. The two are always written in the same transaction so divergence implies index damage, which is exactly when the log-wins-on-rebuild rule fires.
 
 **Phase 2 - GC (expensive, rare):**
 - Runs on app idle when total tombstoned bytes exceed a threshold (e.g. 25% of any single pack, or 10% of total cache).
 - For each pack with high tombstone density: read the pack, copy live frames to a fresh pack at the end of the chain, update `pack_file_id` + `offset` for each surviving blob in the index, atomically delete the old pack file.
 - Worst-case cost: read+rewrite of one pack (~256 MB sequential I/O). Runs in the background via the existing `enforce_cache_limit` task path, refactored to drive Phase 2.
 
-**Tweaks for the new pre-fetch volume:**
+**Notes:**
 
-1. **Default cap raised** from current `attachment_cache_max_mb=500` to **5 GB**. Settings UI exposes the value with a slider (1 GB - 50 GB).
-2. **Touch on read**: `fetch_or_load` updates `last_read_at` on a cache hit so frequently-opened files survive Phase 1 eviction. Done in the same SQLite transaction as the read response so we don't add a round-trip.
-3. **Eviction trigger**: Phase 1 runs after every sync batch (cheap). Phase 2 runs on app idle every N minutes if the tombstone threshold is met.
-4. **Cache-bypass for oversize items**: if pre-fetching one item would force Phase 1 to evict more than X% of the cache, skip the item entirely rather than thrash. Configurable; default X=10%.
+1. **Window shrink** - changing the retention window from 2 years to 6 months triggers a Phase 1 sweep over messages whose dates fall between the old and new edges. Phase 2 follows when tombstone density crosses threshold.
+2. **Window extend** - the reverse triggers a backfill (see "Pre-fetch policy"), not an eviction pass.
+3. **`last_read_at` is informational.** Not used for eviction (date is the policy); kept as a stat for storage analytics.
+4. **GC vs. active writes** - GC reads from immutable closed packs and writes to a fresh pack at the chain tail; it never collides with the open-pack writer.
 
 ## File operations: Open, Save, Save All
 
-The three button operations all sit on top of the same `fetch_or_load` orchestration. UI handlers are shared between the reading pane and the pop-out viewer (currently both surfaces have their own stubbed copies). The orchestration itself runs in the Service; the UI calls into it via IPC for cache-miss fetches and reads cache-hit bytes directly from disk.
+The three button operations all sit on top of the same `fetch_or_load` orchestration. UI handlers are shared between the reading pane and the pop-out viewer (currently both surfaces have their own stubbed copies). The orchestration runs in the Service; the UI calls into it via IPC.
 
-**Hot path (cache hit):** UI looks up `attachment_blobs` row by `content_hash`, reads the bytes positionally from the immutable pack file at `(pack_file_id, offset, length)`. No IPC. The blob store's read API is in the `stores` crate and the UI links it directly.
+Every UI read - cache hit or miss - goes through `attachment.fetch { account_id, message_id, attachment_id }`. The Service handler disambiguates hit from miss internally, runs the full pipeline on miss (provider fetch -> squeeze -> `BlobStore::put`), and returns `AttachmentFetchAck { content_hash, size_bytes, relative_path }`. The UI re-opens the file at the returned path and reads positionally. Bytes never cross JSON; on the current flat cache the open fd is the read pin against eviction. The pipeline updates `last_read_at` regardless of path.
 
-**Cold path (cache miss):** UI sends `attachment.fetch { account_id, message_id, attachment_id }` to the Service. The Service runs the full pipeline (provider fetch -> squeeze -> `BlobStore::put`), then returns either the bytes inline (small) or just the resulting `content_hash` (large; UI re-reads from disk). The pipeline updates `attachment_blobs.last_read_at` regardless of path.
+The UI does not read `attachment_blobs` directly, link `BlobStore`, or know about pack files or offsets.
+
+**Materialization under `PackStore`.** Today's flat-cache `relative_path` ack points at the on-disk cache file directly. Under `PackStore`, blobs live inside pack files at `(pack_id, offset, length)` - there is no user-readable file at a relative path. The Service bridges this by **per-fetch transient extraction**: on `attachment.fetch`, the handler extracts the requested blob from its pack to `<app_data>/attachment_fetch_tmp/<content_hash>` (write-to-tmp + rename, atomic) and returns that path in the ack. The UI opens the tmp file positionally exactly as it does today. The IPC contract is identical between flat and pack backends; no lease IDs, no `BlobStore::get_with_lease`, no UI-side awareness of which backend is live.
+
+The UI's open fd is the lifetime pin for the tmp file. `unlink` on Linux is fd-safe (the file is removed from the directory but the kernel reclaims its space only when the last fd closes); on Windows the Service opens with `FILE_SHARE_DELETE` so a concurrent unlink doesn't fail the UI's read. The Service runs an on-idle cleanup pass that removes any `attachment_fetch_tmp/*` entry older than 10 minutes - by that point any UI consumer has either finished reading or has the fd open and survives the unlink.
+
+Eviction during read is now race-free without lease counters: tombstoning a blob in `attachment_blobs` and eventual GC of its pack frame is completely independent of any in-flight UI read, because the in-flight read is against a *separate* tmp file. The "open fd is the read pin" story stays true - just against the tmp file, not the pack.
+
+Two consequences:
+- The same blob fetched twice in quick succession produces two tmp files. Acceptable: the cleanup pass bounds storage, and tmp-stage dedup would re-introduce the lease lifetime problem we just sidestepped.
+- The tmp directory is a real on-disk write per fetch even on cache hit - measurable cost on small frequent fetches. If profiling shows it matters, an in-process zero-copy path (memfd_create on Linux, similar on Windows) can replace the tmp file without changing the UI's contract; that's a Phase-after-1a optimization, not v1.
 
 ### Open
 
-1. Try the hot path. If it misses, send `attachment.fetch` to the Service and await the response.
-2. Write the bytes to `<app-data>/opened_attachments/<safe_filename>` (NOT `/tmp` - CLAUDE.md forbids `/tmp` use).
+1. Send `attachment.fetch` to the Service and await the ack.
+2. Read the bytes from the returned `relative_path`, write them to `<app-data>/opened_attachments/<safe_filename>` (NOT `/tmp` - CLAUDE.md forbids `/tmp` use).
 3. OS-default open via `xdg-open` (Linux) / `open` (macOS) / `cmd /c start` (Windows). Pattern is already established at `reading_pane.rs:917-925` for link-click handling.
 4. Files in `opened_attachments/` are not deleted on close (the OS handler may keep the file open or move it). They get reaped by a periodic cleanup (configurable, default: 7 days).
 
@@ -262,15 +311,15 @@ The three button operations all sit on top of the same `fetch_or_load` orchestra
 ### Save
 
 1. `rfd::AsyncFileDialog::save_file()` with the original filename pre-filled, mime-derived extension filter.
-2. Hot path / cold path as in Open.
+2. Send `attachment.fetch`; read bytes from the returned `relative_path`.
 3. Write to the chosen path with `std::fs::write`.
 4. Remember the chosen folder per thread (see "Last folder per thread" below).
 
 ### Save All
 
 1. `rfd::AsyncFileDialog::pick_folder()`.
-2. For each attachment on the message: hot path / cold path; write to `<chosen_folder>/<safe_filename>`. Filename collisions get a `(N)` suffix.
-3. Aggregate progress reported through `ProgressReporter` (notifications from the Service for cold-path items). Errors collected and shown as a single end-of-operation toast (once the toast system lands - until then, log).
+2. For each attachment on the message: send `attachment.fetch`, read from the returned path, write to `<chosen_folder>/<safe_filename>`. Filename collisions get a `(N)` suffix.
+3. Aggregate progress reported through `ProgressReporter` (notifications from the Service). Errors collected and shown as a single end-of-operation toast (once the toast system lands - until then, log).
 
 ### Last folder per thread
 
@@ -278,14 +327,13 @@ Currently a separate TODO entry. Subsumed into this work since it's natural to w
 
 ## Settings
 
-Two new sections under per-account settings ("Mail" / "Storage"), one global ("Storage"):
+One per-account section ("Storage" tab on the Account editor), one global ("Storage"):
 
 **Per account:**
 - `Cache attachments for offline use` (boolean, default true)
-- `Pre-fetch threshold` (slider, 1 - 100 MB, default 25 MB)
+- `Mail to keep offline` (slider, mirrors Outlook: 1 month / 3 months / 6 months / 1 year / 2 years / All; default 1 year)
 
 **Global:**
-- `Attachment cache size cap` (slider, 1 - 50 GB, default 5 GB)
 - `Compress cached attachments` (toggle, default on - controls squeeze pipeline)
 - `Allow lossy compression (JPEG re-encoding)` (toggle, default off)
 - `Cleanup opened-files temp folder after N days` (slider, default 7 days)
@@ -318,62 +366,71 @@ The two features intersect at:
 
 The `cloud_attachments` table (migration 39) and the upload paths in `crates/graph/src/onedrive.rs` and `crates/gmail/src/gdrive.rs` are unaffected by this work.
 
+## Relationship to encryption at rest
+
+Content-addressed dedup and per-account encryption at rest are in tension. The dedup win ("12 MB company-wide PowerPoint sent to 200 people stored once") depends on identical plaintext producing identical bytes on disk. Per-account symmetric encryption with distinct keys produces 200 different ciphertexts from the same plaintext, and dedup goes to zero.
+
+This doc's position: **rely on full-disk encryption** (FileVault, LUKS, BitLocker) for at-rest protection of cached attachment bytes. The "Mail content stores not encrypted at rest" TODO.md item applies uniformly to body store, inline image store, and attachment cache; addressing it for *some* stores via FDE while leaving the dedup-sensitive store unencrypted at the app layer is a coherent stance for a v1 enterprise client, since the target audience already runs managed laptops with FDE policies enforced.
+
+If app-layer encryption of the attachment cache is later required (regulated workflows where FDE alone isn't sufficient), **convergent encryption** is the option that preserves dedup: derive the encryption key from the plaintext content hash itself, so identical plaintext → identical ciphertext → dedup works. The trade-off is loss of semantic security: an attacker who can guess the plaintext (e.g. a known phishing template) can verify whether you have it cached. For attachments delivered over an untrusted network in the first place, this is a defensible trade. Per-account encryption with rotating keys is incompatible with cross-account dedup and would have to be scoped per-account (defeating the headline storage win).
+
+The frame format's "encryption hook" (`nonce | ciphertext | tag` payload region) is preserved as a future option, but the design's expectation is that the attachment cache uses FDE for confidentiality and BLAKE3 content hashes for integrity. Frame xxh3 checksums catch on-disk corruption; BLAKE3 content hashes catch substitution attacks at the index layer.
+
+## Relationship to text extraction
+
+Attachment text extraction and Tantivy indexing ship as a sibling pipeline owned by `docs/architecture.md` § "Text extraction pipeline" - not a phase of this work. Extraction is content-hash-keyed (persisted in `attachment_extracted_text`), so the indexed text survives attachment-cache eviction and carries over unchanged when Phase 1a swaps the flat-file cache for `PackStore`.
+
 ## Out of scope (v1)
 
-- **Search inside attachment content** (PDF text extraction, OOXML text extraction). Possible follow-up once the cache is populated, but a substantial separate piece of work (text extractors, FTS index integration, language detection).
 - **Attachment preview rendering inside Ratatoskr** (PDF viewer, image gallery). Open in OS handler is sufficient for v1.
-- **Backfill UI** ("Cache all attachments for this account now"). Lazy fill via fetch-on-click + sync-time pre-fetch covers it; a backfill button can come later if users ask.
 - **Attachment encryption at rest**. Tracked separately under "Mail content stores not encrypted at rest" in TODO.md - applies to the body store, inline image store, and attachment cache uniformly.
 - **Calendar event attachments**. Modeled here so the orchestration is calendar-ready; actual capture in calendar sync is separate work.
-- **Attachment retention policy beyond LRU** ("evict everything older than N days regardless of cache size"). LRU on size cap is enough for v1.
-
 ## Implementation phases
 
-Each phase should be commit-sized and independently reviewable.
-**Note**: Phases 2 and 3 depend on the Service infrastructure being
-far enough along to host the orchestration and serve `attachment.fetch`
-IPC requests. Phase 1a is fully library work and can land before any
-Service work; Phase 1b can land but stays uncalled until the Service
-consumes it.
+Each phase should be commit-sized and independently reviewable. The
+Service hosts sync and exposes `attachment.fetch` today; Phase 1a is
+mostly library work plus the Service lifecycle wiring needed to host
+`PackStore`, Phase 1b is pure library, and Phases 2 and 3 plug into
+the existing Service surface.
 
-**Phase 1a - Pack store (`stores` crate)** *(no Service dependency)*
+**Phase 1a - Pack store + Service lifecycle**
 - New module `crates/stores/src/attachment_pack.rs` implementing the pack format described above: append-only segments, frame headers with xxh3_64, pack tail with version + crc, tombstone log.
-- New SQLite table `attachment_blobs` (and migration that drops the unused `attachments.local_path / cached_at / cache_size` columns).
-- Public API: `PackStore::open(dir, db)`, `put(bytes) -> Hash` (insert-or-ignore semantics, returns hash), `get(&Hash) -> Option<Vec<u8>>`, `unref(&Hash)` (decrements refcount, tombstones if zero), `gc(threshold)`, `recover()` (rebuilds index from pack tails).
-- Unit tests: round-trip, dedup (two puts of same bytes append once), refcount increment/decrement, tombstone honored on read, recover from missing index, recover from torn last frame, GC with mixed live/dead frames.
+- New SQLite table `attachment_blobs` (and migration that drops the flat-cache addressing columns `attachments.local_path / cached_at / cache_size`). This is an addressing-scheme swap, not a column drop: every reader/writer in `attachment_cache.rs`, the Service's `attachment.fetch` handler, `enforce_cache_limit`, and the startup cross-store invariant pass moves over in the same migration. See the Phase 1a risks in `implementation-roadmap.md`.
+- Public API: `PackStore::open(dir, db)`, `put(bytes) -> Hash` (insert-or-ignore semantics, returns hash), `get(&Hash) -> Option<Vec<u8>>`, `tombstone(&Hash)` (sets `tombstoned_at`, appends tombstone log entry), `gc(threshold)`, `recover()` (rebuilds index from pack tails).
+- Service-side lifecycle: `PackStore::open` runs after schema migrations and inside the cross-store invariant pass on unclean shutdown; clean-shutdown sentinel waits for `PackStore::flush`; on-idle GC cancels on shutdown signal.
+- Unit tests (library) + harness scripts (Service IO boundary): SIGKILL mid-write, SIGKILL mid-repack, index rebuild from pack tails, sentinel-missing recovery. Full list in `implementation-roadmap.md`.
 
-**Phase 1b - Core orchestration** *(no Service dependency yet; consumed by the Service when it lands)*
+**Phase 1b - Core orchestration**
 - New module `crates/core/src/attachments/` with `fetch_or_load`, `prefetch_message`, `prefetch_messages`.
 - `fetch_or_load` does inline-image hit -> pack-store hit -> provider fetch -> squeeze -> `PackStore::put` -> update `attachments.content_hash`.
 - Unit tests for the hit paths; integration test for the full fetch path (mocked provider) writing into a temp `PackStore`.
 - No callers yet - just the building block.
 
-**Phase 2 - Sync wiring (one provider end-to-end)** *(requires Service hosting sync)*
+**Phase 2 - Cache population (JMAP first)**
 - JMAP first (single blob endpoint, simplest).
-- After `persist_messages` writes attachment metadata (in the Service), invoke `prefetch_messages` as a Service-internal task.
-- Respect the per-account toggle and size threshold (read from settings, default if unset).
+- Sync-time: after `persist_messages` writes attachment metadata for messages within the retention window, the Service enqueues pre-fetch.
+- Backfill: on first launch, account-add, and window-extend, the Service walks historical messages within the window and enqueues missing attachments. Same fetch path, different driver.
+- Respect the per-account toggle and retention window (read from settings, default if unset).
 - Progress events through the existing `ProgressReporter`, surfaced to the UI as Service notifications.
 
-**Phase 3 - Open / Save / Save All handlers** *(requires Service exposing `attachment.fetch` IPC)*
+**Phase 3 - Open / Save / Save All handlers**
 - New module `crates/app/src/handlers/attachments.rs` shared between reading pane and pop-out.
-- Hot-path: UI looks up `attachment_blobs` and reads positionally from the pack file directly. No IPC.
-- Cold-path: UI sends `attachment.fetch` to the Service; Service runs `fetch_or_load`; UI receives bytes (or just `content_hash`, then re-reads from disk).
+- All reads go through `attachment.fetch`; the Service handler disambiguates hit/miss internally. Ack returns `AttachmentFetchAck { content_hash, size_bytes, relative_path }` and the UI re-opens the file positionally. Bytes never cross JSON.
 - Wire the existing Message variants (`OpenAttachment`, `SaveAttachment`, `SaveAllAttachments`) in both surfaces to call into the shared module.
 - File dialogs via `rfd`, OS-default open via the platform-specific Command pattern.
 - Last-folder-per-thread state.
 
 **Phase 4 - Settings UI**
-- Per-account: pre-fetch toggle + threshold (in Account editor).
-- Global: cache cap + squeeze toggles + opened-files retention (new "Storage" section in global settings).
+- Per-account: cache toggle + "Mail to keep offline" slider (in Account editor).
+- Global: squeeze toggles + opened-files retention (new "Storage" section in global settings).
 
 **Phase 5 - Port pre-fetch to other providers**
 - Gmail, Graph, IMAP. Each is a small change once the core orchestration is in place.
 
 **Phase 6 - Cache eviction + GC**
-- `last_read_at` touched on `fetch_or_load` cache hits (in the same transaction as the read).
-- Phase 1 LRU eviction (tombstones) triggered after sync batches and on cap pressure.
+- Phase 1 eviction selects by message date (`message.date < window_start`); runs at startup, after sync batches, and on window shrink.
 - Phase 2 GC (pack repack) triggered on app idle when tombstone density crosses threshold.
-- Size-aware skip for oversize items.
+- Periodic cleanup of `<app-data>/opened_attachments/`.
 
 **Phase 7 - Squeeze measurement**
 - Instrument the pipeline to log compression ratios per mime type on a real mailbox.
@@ -386,12 +443,12 @@ consumes it.
 End-to-end behavior to test once Phase 1-3 land:
 
 1. Add a JMAP account with a mailbox containing attachments. Sync.
-2. After sync settles, `<app-data>/attachment_packs/` should contain at least one `data-NNNNNN.pack` file. `SELECT COUNT(*) FROM attachment_blobs WHERE refcount > 0` should be > 0; `SELECT COUNT(*) FROM attachments WHERE content_hash IS NOT NULL` should match.
+2. After sync settles, `<app-data>/attachment_packs/` should contain at least one `data-NNNNNN.pack` file. `SELECT COUNT(*) FROM attachment_blobs WHERE tombstoned_at IS NULL` should be > 0; `SELECT COUNT(*) FROM attachments WHERE content_hash IS NOT NULL` should match.
 3. Disable the network. Open a thread with an attachment. Click Open: file opens in the OS default handler.
-4. Click Save: file dialog opens, save, file on disk matches the original bytes (modulo squeeze for compressible formats - decoded content is byte-equivalent).
+4. Click Save: file dialog opens, save, file on disk matches the original bytes (modulo squeeze for compressible formats - decoded content is byte-equivalent; signed PDFs / OOXML / S/MIME envelopes are byte-identical thanks to the signed-content bypass).
 5. Click Save All on a multi-attachment message: folder picker, all files written.
-6. Re-enable the network. Send a copy of the message to a different account. Sync that account. Both accounts share one `attachment_blobs` row: `SELECT refcount FROM attachment_blobs WHERE content_hash = ?` returns >1; pack file size hasn't grown.
-7. Delete the account. `attachment_blobs.refcount` decrements for every formerly-referenced blob. Tombstones added for blobs whose refcount hits zero. Pack file sizes unchanged (until next GC).
-8. Set cache cap to a value below current usage. Trigger sync. Phase 1 eviction tombstones oldest-by-`last_read_at` entries until live bytes are under cap. Manually run GC; pack files shrink, freed bytes returned to the filesystem.
+6. Re-enable the network. Send a copy of the message to a different account. Sync that account. Both accounts share one `attachment_blobs` row: `SELECT COUNT(*) FROM attachments WHERE content_hash = ?` returns >1 and the pack file size hasn't grown.
+7. Delete the account. The corresponding `attachments` rows are removed; `attachment_blobs` rows that no longer have any matching `attachments` row become orphans and are tombstoned by the next eviction sweep. Pack file sizes unchanged (until next GC).
+8. Shorten the retention window from 1 year to 1 month. Phase 1 eviction tombstones blobs whose every referencing message's date is older than the new edge. Manually run GC; pack files shrink, freed bytes returned to the filesystem.
 9. Kill the process mid-write (e.g. SIGKILL during a sync that's appending to a pack). Restart. `PackStore::recover` walks the open pack, truncates any partial trailing frame, and the index is consistent with what's on disk.
-10. Delete the SQLite index entirely. Restart with `--rebuild-attachment-index` (or whatever the equivalent CLI knob is). Index is rebuilt from pack tails; no data loss.
+10. Drop the `attachment_blobs` table (e.g. via the dev-seed wipe path or a deliberate corruption test). Restart with `--rebuild-attachment-index` (or whatever the equivalent CLI knob is). Index is rebuilt from pack tails; tombstone log is replayed; `attachments.content_hash` survives in the main DB so the references still resolve. No data loss.
