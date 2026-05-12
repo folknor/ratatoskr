@@ -1,6 +1,6 @@
 [package]
 name = "import"
-description = "Contact import from CSV and vCard files"
+description = "Contact import from CSV, XLSX, and vCard files"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,10 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+quick-xml.workspace = true
 encoding_rs = "0.8"
 calcard = "0.3"
+zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
 hotpath = { workspace = true, optional = true }
 
 [features]

@@ -20,6 +20,7 @@ pub enum ImportStep {
 pub struct ImportResult {
     pub imported: usize,
     pub skipped_no_email: usize,
+    pub skipped_invalid_email: usize,
     pub skipped_duplicate: usize,
     pub updated: usize,
     pub groups_created: usize,
@@ -33,14 +34,12 @@ pub struct ImportWizardState {
     pub file_path: Option<String>,
     /// Parsed import source.
     pub source: Option<import::ImportSource>,
-    /// Preview data (for CSV).
+    /// Preview data for the selected source.
     pub preview: Option<import::ImportPreview>,
     /// Column mappings (one per header column).
     pub mappings: Vec<ImportContactField>,
     /// Whether the first row is treated as a header.
     pub has_header: bool,
-    /// Parsed vCard contacts (for VCF files).
-    pub vcf_contacts: Vec<import::ImportedContact>,
     /// Target account for import.
     pub account_id: Option<String>,
     /// Whether to update existing contacts on duplicate email.
@@ -58,7 +57,6 @@ impl ImportWizardState {
             preview: None,
             mappings: Vec::new(),
             has_header: true,
-            vcf_contacts: Vec::new(),
             account_id: None,
             update_existing: false,
             result: None,

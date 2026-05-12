@@ -597,10 +597,10 @@ impl ReadyApp {
             SettingsEvent::DeleteGroup(id) => self.handle_delete_group(id),
             SettingsEvent::LoadGroupMembers(group_id) => self.handle_load_group_members(group_id),
             SettingsEvent::ExecuteContactImport {
-                contacts,
+                prepared,
                 account_id,
                 update_existing,
-            } => self.handle_import_contacts(contacts, account_id, update_existing),
+            } => self.handle_import_contacts(prepared, account_id, update_existing),
             SettingsEvent::ReorderAccounts(orders) => self.handle_reorder_accounts(orders),
             SettingsEvent::ReauthenticateAccount(account_id) => {
                 self.handle_open_reauth_wizard(account_id)

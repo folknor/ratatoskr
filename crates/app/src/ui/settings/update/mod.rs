@@ -246,6 +246,7 @@ impl Component for Settings {
                             wizard.result = Some(ImportResult {
                                 imported: 0,
                                 skipped_no_email: 0,
+                                skipped_invalid_email: 0,
                                 skipped_duplicate: 0,
                                 updated: 0,
                                 groups_created: 0,
@@ -263,7 +264,6 @@ impl Component for Settings {
                             wizard.source = None;
                             wizard.preview = None;
                             wizard.mappings.clear();
-                            wizard.vcf_contacts.clear();
                         }
                         ImportStep::Summary => {
                             self.import_wizard = None;

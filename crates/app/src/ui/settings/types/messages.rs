@@ -211,7 +211,7 @@ pub enum SettingsEvent {
     LoadGroupMembers(String),
     /// Request the App to execute a contact import.
     ExecuteContactImport {
-        contacts: Vec<import::ImportedContact>,
+        prepared: import::PreparedImport,
         account_id: Option<String>,
         update_existing: bool,
     },

@@ -166,48 +166,38 @@ impl Settings {
             return Task::none();
         };
 
-        let lower_path = path.to_lowercase();
-        let format = if lower_path.ends_with(".vcf") || lower_path.ends_with(".vcard") {
-            import::ImportFormat::Vcf
-        } else {
-            import::ImportFormat::Csv
+        let source = match import::ImportSource::detect(path.clone(), data) {
+            Ok(source) => source,
+            Err(e) => {
+                log::error!("Import format detection error: {e}");
+                return Task::none();
+            }
         };
 
-        let source = import::ImportSource {
-            format,
-            data,
-            filename: path.clone(),
-        };
-
-        match format {
-            import::ImportFormat::Csv => match import::parse_csv(&source, 20) {
-                Ok(preview) => {
-                    let auto_mappings = import::auto_detect_mappings(&preview.headers);
-                    wizard.mappings = auto_mappings
-                        .iter()
-                        .map(|m| ImportContactField::from_import_field(m.target_field))
-                        .collect();
-                    wizard.has_header = preview.has_header;
-                    wizard.preview = Some(preview);
-                    wizard.source = Some(source);
-                    wizard.file_path = Some(path);
-                    wizard.step = ImportStep::Mapping;
-                }
-                Err(e) => {
-                    log::error!("CSV parse error: {e}");
-                }
-            },
-            import::ImportFormat::Vcf => match import::parse_vcf(&source.data) {
-                Ok(contacts) => {
-                    wizard.vcf_contacts = contacts;
-                    wizard.source = Some(source);
-                    wizard.file_path = Some(path);
-                    wizard.step = ImportStep::VcfPreview;
-                }
-                Err(e) => {
-                    log::error!("VCF parse error: {e}");
-                }
-            },
+        let options = import::ImportOptions::default();
+        match import::preview_source(&source, options) {
+            Ok(import::ImportPreview::Table(preview)) => {
+                wizard.mappings = preview
+                    .mappings
+                    .iter()
+                    .map(|m| ImportContactField::from_import_field(m.target_field))
+                    .collect();
+                wizard.has_header = preview.has_header;
+                wizard.preview = Some(import::ImportPreview::Table(preview));
+                wizard.source = Some(source);
+                wizard.file_path = Some(path);
+                wizard.step = ImportStep::Mapping;
+            }
+            Ok(import::ImportPreview::Contacts(preview)) => {
+                wizard.has_header = false;
+                wizard.preview = Some(import::ImportPreview::Contacts(preview));
+                wizard.source = Some(source);
+                wizard.file_path = Some(path);
+                wizard.step = ImportStep::VcfPreview;
+            }
+            Err(e) => {
+                log::error!("Import preview error: {e}");
+            }
         }
 
         Task::none()
@@ -219,16 +209,27 @@ impl Settings {
         };
         wizard.has_header = has_header;
 
-        if let Some(ref source) = wizard.source
-            && source.format == import::ImportFormat::Csv
-            && let Ok(preview) = import::csv_parser::parse_csv_with_header(source, 20, has_header)
-        {
-            let auto_mappings = import::auto_detect_mappings(&preview.headers);
-            wizard.mappings = auto_mappings
-                .iter()
-                .map(|m| ImportContactField::from_import_field(m.target_field))
-                .collect();
-            wizard.preview = Some(preview);
+        if let Some(ref source) = wizard.source {
+            let mut options = import::ImportOptions::default().with_header(has_header);
+            if let Some(import::ImportPreview::Table(table)) = wizard.preview.as_ref() {
+                options.sheet_index = table.selected_sheet;
+            }
+            match import::preview_source(source, options) {
+                Ok(import::ImportPreview::Table(preview)) => {
+                    wizard.mappings = preview
+                        .mappings
+                        .iter()
+                        .map(|m| ImportContactField::from_import_field(m.target_field))
+                        .collect();
+                    wizard.preview = Some(import::ImportPreview::Table(preview));
+                }
+                Ok(import::ImportPreview::Contacts(preview)) => {
+                    wizard.preview = Some(import::ImportPreview::Contacts(preview));
+                }
+                Err(e) => {
+                    log::error!("Import header-toggle preview error: {e}");
+                }
+            }
         }
 
         Task::none()
@@ -239,40 +240,37 @@ impl Settings {
             return (Task::none(), None);
         };
 
-        let contacts: Vec<import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format)
-        {
-            Some(import::ImportFormat::Csv) => {
-                let Some(ref source) = wizard.source else {
-                    return (Task::none(), None);
-                };
-                let mappings: Vec<import::ColumnMapping> = wizard
+        let Some(ref source) = wizard.source else {
+            return (Task::none(), None);
+        };
+        let mut options = import::ImportOptions::default().with_header(wizard.has_header);
+        let mappings: Vec<import::ColumnMapping> =
+            if let Some(import::ImportPreview::Table(table)) = wizard.preview.as_ref() {
+                options.sheet_index = table.selected_sheet;
+                wizard
                     .mappings
                     .iter()
                     .enumerate()
                     .map(|(i, field)| {
-                        let header = wizard
-                            .preview
-                            .as_ref()
-                            .and_then(|p| p.headers.get(i))
-                            .cloned()
-                            .unwrap_or_default();
+                        let header = table.headers.get(i).cloned().unwrap_or_default();
                         import::ColumnMapping {
                             source_index: i,
                             source_column: header,
                             target_field: field.to_import_field(),
+                            confidence: import::MappingConfidence::High,
                         }
                     })
-                    .collect();
-                match import::csv_parser::execute_csv_import(source, &mappings, wizard.has_header) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        log::error!("CSV import error: {e}");
-                        return (Task::none(), None);
-                    }
-                }
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+        let prepared = match import::prepare_import(source, &mappings, options) {
+            Ok(prepared) => prepared,
+            Err(e) => {
+                log::error!("Import prepare error: {e}");
+                return (Task::none(), None);
             }
-            Some(import::ImportFormat::Vcf) => wizard.vcf_contacts.clone(),
-            None => return (Task::none(), None),
         };
 
         wizard.step = ImportStep::Importing;
@@ -282,7 +280,7 @@ impl Settings {
         (
             Task::none(),
             Some(SettingsEvent::ExecuteContactImport {
-                contacts,
+                prepared,
                 account_id,
                 update_existing,
             }),

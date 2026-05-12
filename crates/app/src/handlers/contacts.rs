@@ -187,7 +187,7 @@ impl ReadyApp {
 
     pub(crate) fn handle_import_contacts(
         &self,
-        contacts: Vec<import::ImportedContact>,
+        prepared: import::PreparedImport,
         account_id: Option<String>,
         update_existing: bool,
     ) -> Task<Message> {
@@ -198,15 +198,16 @@ impl ReadyApp {
                 let Some(client) = client else {
                     return Err("contacts import: ServiceClient not yet available".to_string());
                 };
-                execute_contact_import(&db, &client, contacts, account_id, update_existing).await
+                execute_contact_import(&db, &client, prepared, account_id, update_existing).await
             },
             |result| {
                 let mapped = result.map(|r| crate::ui::settings::ImportResult {
                     imported: r.0,
                     skipped_no_email: r.1,
-                    skipped_duplicate: r.2,
-                    updated: r.3,
-                    groups_created: r.4,
+                    skipped_invalid_email: r.2,
+                    skipped_duplicate: r.3,
+                    updated: r.4,
+                    groups_created: r.5,
                 });
                 Message::Settings(SettingsMessage::ImportExecuted(mapped))
             },
@@ -218,13 +219,14 @@ impl ReadyApp {
 async fn execute_contact_import(
     db: &Arc<Db>,
     client: &crate::service_client::ServiceClient,
-    contacts: Vec<import::ImportedContact>,
+    prepared: import::PreparedImport,
     account_id: Option<String>,
     update_existing: bool,
-) -> Result<(usize, usize, usize, usize, usize), String> {
+) -> Result<(usize, usize, usize, usize, usize, usize), String> {
     let mut imported = 0usize;
-    let mut skipped_no_email = 0usize;
-    let mut skipped_duplicate = 0usize;
+    let mut skipped_no_email = prepared.stats.skipped_no_email;
+    let skipped_invalid_email = prepared.stats.skipped_invalid_email;
+    let mut skipped_duplicate = prepared.stats.skipped_duplicate;
     let mut updated = 0usize;
     let mut failed = 0usize;
 
@@ -235,7 +237,7 @@ async fn execute_contact_import(
     // delete. A future batch-IPC redesign would let the handler
     // commit-or-rollback as a unit; until then, log + continue
     // matches the documented intent.
-    for contact in &contacts {
+    for contact in &prepared.contacts {
         let Some(email) = contact.normalized_email() else {
             skipped_no_email += 1;
             continue;
@@ -294,7 +296,7 @@ async fn execute_contact_import(
         std::collections::HashMap::new();
 
     // Collect group memberships
-    for contact in &contacts {
+    for contact in &prepared.contacts {
         let Some(email) = contact.normalized_email() else {
             continue;
         };
@@ -350,6 +352,7 @@ async fn execute_contact_import(
     Ok((
         imported,
         skipped_no_email,
+        skipped_invalid_email,
         skipped_duplicate,
         updated,
         groups_created,

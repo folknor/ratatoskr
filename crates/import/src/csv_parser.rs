@@ -1,240 +1,168 @@
-use crate::detect::{decode_to_utf8, detect_delimiter, detect_has_header};
-use crate::mapping::ColumnMapping;
-use crate::types::{ImportError, ImportPreview, ImportSource, ImportedContact};
+use crate::detect::{decode_to_utf8, detect_delimiter};
+use crate::table::{build_table_preview, prepare_table_import};
+use crate::types::{
+    ColumnMapping, ImportError, ImportFormat, ImportOptions, ImportSource, PreparedImport,
+    TablePreview,
+};
 
-/// Parse a CSV file into a preview with auto-detected settings.
-///
-/// Detects encoding, delimiter, and header presence. Returns a preview
-/// with the first `preview_rows` rows and suggested column mappings.
-pub fn parse_csv(source: &ImportSource, preview_rows: usize) -> Result<ImportPreview, ImportError> {
-    let text = decode_to_utf8(&source.data).map_err(ImportError::EncodingError)?;
-
-    if text.trim().is_empty() {
-        return Err(ImportError::EmptyFile);
-    }
-
-    let delimiter = detect_delimiter(&text);
-    let all_rows = parse_csv_text(&text, delimiter)?;
-
-    if all_rows.is_empty() {
-        return Err(ImportError::EmptyFile);
-    }
-
-    let has_header = detect_has_header(&all_rows);
-
-    let (headers, data_rows) = if has_header {
-        let headers = all_rows[0].clone();
-        let data = all_rows[1..].to_vec();
-        (headers, data)
-    } else {
-        // Generate synthetic headers
-        let col_count = all_rows.iter().map(Vec::len).max().unwrap_or(0);
-        let headers: Vec<String> = (1..=col_count).map(|i| format!("Column {i}")).collect();
-        (headers, all_rows)
-    };
-
-    let total_rows = data_rows.len();
-    let sample_rows: Vec<Vec<String>> = data_rows.into_iter().take(preview_rows).collect();
-
-    Ok(ImportPreview {
-        headers,
-        sample_rows,
-        total_rows,
-        has_header,
-        delimiter: Some(delimiter),
-    })
-}
-
-/// Parse a CSV file with an explicit header override.
-///
-/// Like `parse_csv`, but the caller specifies whether the first row
-/// is a header instead of auto-detecting.
-pub fn parse_csv_with_header(
+/// Parse a CSV file into a table preview.
+pub fn preview_csv(
     source: &ImportSource,
-    preview_rows: usize,
-    has_header: bool,
-) -> Result<ImportPreview, ImportError> {
-    let text = decode_to_utf8(&source.data).map_err(ImportError::EncodingError)?;
-
-    if text.trim().is_empty() {
-        return Err(ImportError::EmptyFile);
-    }
-
-    let delimiter = detect_delimiter(&text);
-    let all_rows = parse_csv_text(&text, delimiter)?;
-
-    if all_rows.is_empty() {
-        return Err(ImportError::EmptyFile);
-    }
-
-    let (headers, data_rows) = if has_header {
-        let headers = all_rows[0].clone();
-        let data = all_rows[1..].to_vec();
-        (headers, data)
-    } else {
-        let col_count = all_rows.iter().map(Vec::len).max().unwrap_or(0);
-        let headers: Vec<String> = (1..=col_count).map(|i| format!("Column {i}")).collect();
-        (headers, all_rows)
-    };
-
-    let total_rows = data_rows.len();
-    let sample_rows: Vec<Vec<String>> = data_rows.into_iter().take(preview_rows).collect();
-
-    Ok(ImportPreview {
-        headers,
-        sample_rows,
-        total_rows,
-        has_header,
-        delimiter: Some(delimiter),
-    })
+    options: ImportOptions,
+) -> Result<TablePreview, ImportError> {
+    let (rows, delimiter) = load_csv_rows(source)?;
+    build_table_preview(
+        ImportFormat::Csv,
+        rows,
+        Some(delimiter),
+        Vec::new(),
+        None,
+        options,
+    )
 }
 
 /// Execute a CSV import with the given column mappings.
-///
-/// Parses the full file and applies mappings to produce contacts.
-pub fn execute_csv_import(
+pub fn prepare_csv_import(
     source: &ImportSource,
     mappings: &[ColumnMapping],
-    has_header: bool,
-) -> Result<Vec<ImportedContact>, ImportError> {
+    options: ImportOptions,
+) -> Result<PreparedImport, ImportError> {
+    let (rows, _) = load_csv_rows(source)?;
+    let has_header = options
+        .has_header
+        .unwrap_or_else(|| crate::detect::detect_has_header(&rows));
+    Ok(prepare_table_import(rows, mappings, has_header))
+}
+
+pub(crate) fn load_csv_rows(source: &ImportSource) -> Result<(Vec<Vec<String>>, u8), ImportError> {
     let text = decode_to_utf8(&source.data).map_err(ImportError::EncodingError)?;
-    let delimiter = detect_delimiter(&text);
-    let all_rows = parse_csv_text(&text, delimiter)?;
 
-    let data_rows = if has_header && !all_rows.is_empty() {
-        &all_rows[1..]
-    } else {
-        &all_rows
+    if text.trim().is_empty() {
+        return Err(ImportError::EmptyFile);
+    }
+
+    let (text, delimiter) = csv_text_and_delimiter(&text);
+    let rows = parse_csv_text(text, delimiter)?;
+
+    if rows.is_empty() {
+        return Err(ImportError::EmptyFile);
+    }
+
+    Ok((rows, delimiter))
+}
+
+fn csv_text_and_delimiter(text: &str) -> (&str, u8) {
+    let Some(first_line_end) = text.find(['\n', '\r']) else {
+        return (text, detect_delimiter(text));
     };
+    let first_line = text[..first_line_end].trim();
+    let Some(delimiter_text) = first_line.strip_prefix("sep=") else {
+        return (text, detect_delimiter(text));
+    };
+    let mut chars = delimiter_text.chars();
+    let Some(delimiter) = chars.next() else {
+        return (text, detect_delimiter(text));
+    };
+    if chars.next().is_some() || !matches!(delimiter, ',' | ';' | '\t') {
+        return (text, detect_delimiter(text));
+    }
 
-    let contacts: Vec<ImportedContact> = data_rows
-        .iter()
-        .map(|row| row_to_contact(row, mappings))
-        .collect();
-
-    Ok(contacts)
+    let body_start = if text[first_line_end..].starts_with("\r\n") {
+        first_line_end + 2
+    } else {
+        first_line_end + 1
+    };
+    let delimiter = match delimiter {
+        ',' => b',',
+        ';' => b';',
+        '\t' => b'\t',
+        _ => return (text, detect_delimiter(text)),
+    };
+    (&text[body_start..], delimiter)
 }
 
 /// Parse raw CSV text into rows of cells.
 fn parse_csv_text(text: &str, delimiter: u8) -> Result<Vec<Vec<String>>, ImportError> {
-    let delim = delimiter as char;
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut current_row: Vec<String> = Vec::new();
+    let delim = char::from(delimiter);
+    let mut rows = Vec::new();
+    let mut current_row = Vec::new();
     let mut current_cell = String::new();
     let mut in_quotes = false;
-    let mut prev_was_quote = false;
+    let mut chars = text.chars().peekable();
 
-    for ch in text.chars() {
-        if prev_was_quote {
-            prev_was_quote = false;
-            if ch == '"' {
-                // Escaped quote inside quoted field
-                current_cell.push('"');
-                continue;
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            match ch {
+                '"' => {
+                    if chars.peek() == Some(&'"') {
+                        let _ = chars.next();
+                        current_cell.push('"');
+                    } else {
+                        in_quotes = false;
+                    }
+                }
+                _ => current_cell.push(ch),
             }
-            // End of quoted field
-            in_quotes = false;
-            // Fall through to handle the current char normally
+            continue;
         }
 
-        if ch == '"' && !in_quotes && current_cell.is_empty() {
+        if ch == '"' && current_cell.trim().is_empty() {
+            current_cell.clear();
             in_quotes = true;
             continue;
         }
 
-        if ch == '"' && in_quotes {
-            prev_was_quote = true;
+        if ch == delim {
+            push_cell(&mut current_row, &mut current_cell);
             continue;
         }
 
-        if ch == delim && !in_quotes {
-            current_row.push(current_cell.trim().to_string());
-            current_cell = String::new();
-            continue;
-        }
-
-        if (ch == '\n' || ch == '\r') && !in_quotes {
-            if ch == '\r' {
-                // Skip \r, the \n will end the row (or if \r alone, end here)
-                continue;
+        if ch == '\n' || ch == '\r' {
+            if ch == '\r' && chars.peek() == Some(&'\n') {
+                let _ = chars.next();
             }
-            current_row.push(current_cell.trim().to_string());
-            current_cell = String::new();
-            if !current_row.iter().all(String::is_empty) {
-                rows.push(current_row);
-            }
-            current_row = Vec::new();
+            push_cell(&mut current_row, &mut current_cell);
+            push_row(&mut rows, &mut current_row);
             continue;
         }
 
         current_cell.push(ch);
     }
 
-    // Handle final row
-    if prev_was_quote {
-        in_quotes = false;
+    if in_quotes {
+        return Err(ImportError::ParseError(
+            "unterminated quoted CSV field".to_string(),
+        ));
     }
-    let _ = in_quotes; // consumed
+
     if !current_cell.is_empty() || !current_row.is_empty() {
-        current_row.push(current_cell.trim().to_string());
-        if !current_row.iter().all(String::is_empty) {
-            rows.push(current_row);
-        }
+        push_cell(&mut current_row, &mut current_cell);
+        push_row(&mut rows, &mut current_row);
     }
 
     Ok(rows)
 }
 
-/// Convert a single CSV row into an `ImportedContact` using the mappings.
-fn row_to_contact(row: &[String], mappings: &[ColumnMapping]) -> ImportedContact {
-    let mut contact = ImportedContact::default();
+fn push_cell(row: &mut Vec<String>, cell: &mut String) {
+    row.push(cell.trim().to_string());
+    cell.clear();
+}
 
-    for mapping in mappings {
-        let value = row
-            .get(mapping.source_index)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-
-        if value.is_empty() {
-            continue;
-        }
-
-        match mapping.target_field {
-            crate::types::ContactField::DisplayName => contact.display_name = Some(value),
-            crate::types::ContactField::FirstName => contact.first_name = Some(value),
-            crate::types::ContactField::LastName => contact.last_name = Some(value),
-            crate::types::ContactField::Email => contact.email = Some(value.to_lowercase()),
-            crate::types::ContactField::Email2 => contact.email2 = Some(value.to_lowercase()),
-            crate::types::ContactField::Phone => contact.phone = Some(value),
-            crate::types::ContactField::Company => contact.company = Some(value),
-            crate::types::ContactField::Notes => contact.notes = Some(value),
-            crate::types::ContactField::Group => {
-                // Split on common group delimiters
-                let groups: Vec<String> = value
-                    .split([';', ',', '|'])
-                    .map(|g| g.trim().to_string())
-                    .filter(|g| !g.is_empty())
-                    .collect();
-                contact.groups.extend(groups);
-            }
-            crate::types::ContactField::Ignore => {}
-        }
+fn push_row(rows: &mut Vec<Vec<String>>, row: &mut Vec<String>) {
+    if !row.iter().all(String::is_empty) {
+        rows.push(std::mem::take(row));
+    } else {
+        row.clear();
     }
-
-    contact
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ImportFormat;
+    use crate::types::{ContactField, ImportSource, MappingConfidence};
 
     fn make_source(csv_text: &str) -> ImportSource {
-        ImportSource {
-            format: ImportFormat::Csv,
-            data: csv_text.as_bytes().to_vec(),
-            filename: "test.csv".into(),
-        }
+        ImportSource::with_format("test.csv", csv_text.as_bytes().to_vec(), ImportFormat::Csv)
     }
 
     #[test]
@@ -242,67 +170,76 @@ mod tests {
         let source = make_source(
             "Name,Email,Phone\nAlice,alice@test.com,555-1234\nBob,bob@test.com,555-5678\n",
         );
-        let preview = parse_csv(&source, 10).expect("should parse");
+        let preview = preview_csv(&source, ImportOptions::default()).expect("should parse");
         assert_eq!(preview.headers, vec!["Name", "Email", "Phone"]);
-        assert_eq!(preview.sample_rows.len(), 2);
+        assert_eq!(preview.rows.len(), 2);
         assert_eq!(preview.total_rows, 2);
         assert!(preview.has_header);
+        assert_eq!(preview.stats.importable, 2);
     }
 
     #[test]
     fn parse_csv_quoted_fields() {
         let source = make_source("Name,Email\n\"Smith, Alice\",alice@test.com\n");
-        let preview = parse_csv(&source, 10).expect("should parse");
-        assert_eq!(preview.sample_rows[0][0], "Smith, Alice");
+        let preview = preview_csv(&source, ImportOptions::default()).expect("should parse");
+        assert_eq!(preview.rows[0].cells[0], "Smith, Alice");
     }
 
     #[test]
-    fn parse_csv_semicolon_delimiter() {
-        let source = make_source("Name;Email;Phone\nAlice;alice@test.com;555\n");
-        let preview = parse_csv(&source, 10).expect("should parse");
-        assert_eq!(preview.headers, vec!["Name", "Email", "Phone"]);
-        assert_eq!(preview.delimiter, Some(b';'));
+    fn parse_csv_carriage_return_line_endings() {
+        let source = make_source("Name,Email\rAlice,alice@test.com\r");
+        let preview = preview_csv(&source, ImportOptions::default()).expect("should parse");
+        assert_eq!(preview.total_rows, 1);
+        assert_eq!(preview.rows[0].cells[0], "Alice");
     }
 
     #[test]
-    fn parse_csv_no_header() {
+    fn parse_csv_no_header_detects_email_by_content() {
         let source =
             make_source("alice@test.com,Alice,+1-555-1234\nbob@test.com,Bob,+1-555-5678\n");
-        let preview = parse_csv(&source, 10).expect("should parse");
+        let preview = preview_csv(&source, ImportOptions::default()).expect("should parse");
         assert!(!preview.has_header);
         assert_eq!(preview.total_rows, 2);
+        assert_eq!(preview.mappings[0].target_field, ContactField::Email);
+        assert_eq!(preview.stats.importable, 2);
     }
 
     #[test]
-    fn execute_csv_with_mappings() {
-        let source = make_source("Name,Email,Phone\nAlice,alice@test.com,555-1234\n");
+    fn parse_excel_sep_directive() {
+        let source = make_source("sep=;\nName;Email\nAlice;alice@test.com\n");
+        let preview = preview_csv(&source, ImportOptions::default()).expect("should parse");
+        assert_eq!(preview.delimiter, Some(b';'));
+        assert_eq!(preview.headers, vec!["Name", "Email"]);
+        assert_eq!(preview.total_rows, 1);
+    }
+
+    #[test]
+    fn prepare_csv_import_returns_prepared_batch() {
+        let source = make_source("Name,Email\nAlice, Alice@Test.COM \nBad,not-an-email\n");
         let mappings = vec![
             ColumnMapping {
                 source_index: 0,
-                source_column: "Name".into(),
-                target_field: crate::types::ContactField::DisplayName,
+                source_column: "Name".to_string(),
+                target_field: ContactField::DisplayName,
+                confidence: MappingConfidence::High,
             },
             ColumnMapping {
                 source_index: 1,
-                source_column: "Email".into(),
-                target_field: crate::types::ContactField::Email,
-            },
-            ColumnMapping {
-                source_index: 2,
-                source_column: "Phone".into(),
-                target_field: crate::types::ContactField::Phone,
+                source_column: "Email".to_string(),
+                target_field: ContactField::Email,
+                confidence: MappingConfidence::High,
             },
         ];
-        let contacts = execute_csv_import(&source, &mappings, true).expect("should import");
-        assert_eq!(contacts.len(), 1);
-        assert_eq!(contacts[0].display_name.as_deref(), Some("Alice"));
-        assert_eq!(contacts[0].email.as_deref(), Some("alice@test.com"));
-        assert_eq!(contacts[0].phone.as_deref(), Some("555-1234"));
+        let options = ImportOptions::default().with_header(true);
+        let prepared = prepare_csv_import(&source, &mappings, options).expect("should prepare");
+        assert_eq!(prepared.contacts.len(), 1);
+        assert_eq!(prepared.contacts[0].email.as_deref(), Some("alice@test.com"));
+        assert_eq!(prepared.stats.skipped_invalid_email, 1);
     }
 
     #[test]
-    fn empty_csv_returns_error() {
-        let source = make_source("");
-        assert!(parse_csv(&source, 10).is_err());
+    fn unterminated_quote_is_error() {
+        let source = make_source("Name,Email\n\"Alice,alice@test.com\n");
+        assert!(preview_csv(&source, ImportOptions::default()).is_err());
     }
 }

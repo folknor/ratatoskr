@@ -207,18 +207,9 @@ fn handle_token_input_message(
             *selected = None;
         }
         TokenInputMessage::TokenizeText(text) => {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() && token_input::is_plausible_email(trimmed) {
-                let id = value.next_token_id();
-                let label = trimmed.to_string();
-                value.tokens.push(token_input::Token {
-                    id,
-                    email: label.clone(),
-                    label,
-                    is_group: false,
-                    group_id: None,
-                    member_count: None,
-                });
+            let parsed =
+                import::parse_recipient_paste(&import::RecipientPastePayload::from_plain_text(text));
+            if push_parsed_recipients(value, parsed.recipients) > 0 {
                 value.text.clear();
             }
         }
@@ -248,32 +239,45 @@ fn handle_token_input_message(
         | TokenInputMessage::AutocompleteDismissKey
         | TokenInputMessage::DragStarted(_) => {}
         TokenInputMessage::Paste(content) => {
-            let mut parsed = crate::ui::token_input_parse::parse_pasted_addresses(&content);
-            crate::ui::token_input_parse::dedup_parsed(&mut parsed);
+            let parsed = import::parse_recipient_paste(
+                &import::RecipientPastePayload::from_plain_text(content),
+            );
+            let mut recipients = parsed.recipients;
             let existing: std::collections::HashSet<String> = value
                 .tokens
                 .iter()
                 .map(|t| t.email.to_lowercase())
                 .collect();
-            parsed.retain(|addr| !existing.contains(&addr.email.to_lowercase()));
-            for addr in parsed {
-                let label = addr
-                    .display_name
-                    .as_deref()
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or(&addr.email)
-                    .to_string();
-                let id = value.next_token_id();
-                value.tokens.push(token_input::Token {
-                    id,
-                    email: addr.email,
-                    label,
-                    is_group: false,
-                    group_id: None,
-                    member_count: None,
-                });
+            recipients.retain(|addr| !existing.contains(&addr.email.to_lowercase()));
+            if push_parsed_recipients(value, recipients) > 0 {
+                value.text.clear();
             }
-            value.text.clear();
         }
     }
+}
+
+fn push_parsed_recipients(
+    value: &mut TokenInputValue,
+    parsed: Vec<import::ParsedRecipient>,
+) -> usize {
+    let mut added = 0usize;
+    for addr in parsed {
+        let label = addr
+            .display_name
+            .as_deref()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&addr.email)
+            .to_string();
+        let id = value.next_token_id();
+        value.tokens.push(token_input::Token {
+            id,
+            email: addr.email,
+            label,
+            is_group: false,
+            group_id: None,
+            member_count: None,
+        });
+        added += 1;
+    }
+    added
 }

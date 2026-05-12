@@ -17,15 +17,3 @@ mod widget;
 
 pub use types::*;
 pub use widget::*;
-
-/// Minimal validation - catches obvious typos, not RFC 5321.
-pub fn is_plausible_email(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let Some((local, domain)) = trimmed.split_once('@') else {
-        return false;
-    };
-    !local.is_empty() && domain.contains('.')
-}

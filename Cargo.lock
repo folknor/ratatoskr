@@ -3295,6 +3295,8 @@ dependencies = [
  "calcard",
  "encoding_rs",
  "hotpath",
+ "quick-xml 0.39.3",
+ "zip",
 ]
 
 [[package]]

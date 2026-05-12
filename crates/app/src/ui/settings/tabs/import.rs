@@ -43,11 +43,11 @@ fn import_step_file_select(_wizard: &ImportWizardState) -> Element<'_, SettingsM
 }
 
 fn import_file_select_row() -> RowBuilder<'static> {
-    let description = "Select a .csv or .vcf file to import contacts from.";
+    let description = "Select a .csv, .xlsx, or .vcf file to import contacts from.";
     settings_row_container(
         SETTINGS_TOGGLE_ROW_HEIGHT,
         column![
-            text("Choose a CSV or vCard file to import.")
+            text("Choose a CSV, Excel, or vCard file to import.")
                 .size(TEXT_LG)
                 .style(text::base),
             Space::new().height(SPACE_XS),
@@ -55,7 +55,7 @@ fn import_file_select_row() -> RowBuilder<'static> {
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
             Space::new().height(SPACE_SM),
-            text("Use the file browser to select a file. Supported formats: .csv, .vcf")
+            text("Use the file browser to select a file. Supported formats: .csv, .xlsx, .vcf")
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
         ],
@@ -74,7 +74,7 @@ fn import_step_mapping<'a>(
 
     col = col.push(import_header_toggle(wizard.has_header));
 
-    if let Some(ref preview) = wizard.preview {
+    if let Some(import::ImportPreview::Table(preview)) = wizard.preview.as_ref() {
         col = col.push(import_mapping_table(preview, &wizard.mappings));
         col = col.push(import_preview_stats(preview, &wizard.mappings));
     }
@@ -110,7 +110,7 @@ fn import_header_toggle(has_header: bool) -> Element<'static, SettingsMessage> {
 }
 
 fn import_mapping_table<'a>(
-    preview: &'a ::import::ImportPreview,
+    preview: &'a ::import::TablePreview,
     mappings: &'a [ImportContactField],
 ) -> Element<'a, SettingsMessage> {
     let mut items: Vec<RowBuilder<'a>> = Vec::new();
@@ -123,10 +123,10 @@ fn import_mapping_table<'a>(
         items.push(import_column_mapping_row(i, header, current_field));
     }
 
-    let sample_count = preview.sample_rows.len().min(5);
+    let sample_count = preview.rows.len().min(5);
     if sample_count > 0 {
         items.push(import_sample_header());
-        for row in preview.sample_rows.iter().take(sample_count) {
+        for row in preview.rows.iter().take(sample_count) {
             items.push(import_sample_row(row));
         }
     }
@@ -197,21 +197,40 @@ fn import_sample_header<'a>() -> RowBuilder<'a> {
     )
 }
 
-fn import_sample_row(row: &[String]) -> RowBuilder<'_> {
-    let display = row.join("  |  ");
+fn import_sample_row(row: &::import::ImportPreviewRow) -> RowBuilder<'_> {
+    let display = row.cells.join("  |  ");
+    let status = row.status;
     settings_row_container(
         SETTINGS_ROW_HEIGHT,
-        text(display).size(TEXT_SM).style(text::secondary),
+        row![
+            text(display)
+                .size(TEXT_SM)
+                .style(if status.is_importable() { text::secondary } else { text::danger })
+                .width(Length::Fill),
+            text(status.label())
+                .size(TEXT_SM)
+                .style(if status.is_importable() { text::secondary } else { text::danger }),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center),
     )
 }
 
 fn import_preview_stats<'a>(
-    preview: &'a ::import::ImportPreview,
+    preview: &'a ::import::TablePreview,
     mappings: &'a [ImportContactField],
 ) -> Element<'a, SettingsMessage> {
     let has_email = mappings.contains(&ImportContactField::Email);
     let status = if has_email {
-        format!("{} rows to import.", preview.total_rows)
+        let skipped = preview.stats.skipped_total();
+        if skipped > 0 {
+            format!(
+                "{} rows to import. {skipped} skipped.",
+                preview.stats.importable
+            )
+        } else {
+            format!("{} rows to import.", preview.stats.importable)
+        }
     } else {
         "No Email column mapped. Map at least one column to Email.".to_string()
     };
@@ -305,13 +324,13 @@ fn import_step_vcf_preview<'a>(
         col = col.push(import_file_info_row(path));
     }
 
-    let valid_count = wizard
-        .vcf_contacts
-        .iter()
-        .filter(|c| c.has_valid_email())
-        .count();
-    let total = wizard.vcf_contacts.len();
-    let skipped = total - valid_count;
+    let Some(import::ImportPreview::Contacts(preview)) = wizard.preview.as_ref() else {
+        return col.into();
+    };
+
+    let valid_count = preview.stats.importable;
+    let total = preview.total_rows;
+    let skipped = preview.stats.skipped_total();
 
     let stat_text =
         format!("{total} contacts found. {valid_count} with valid email, {skipped} without.",);
@@ -321,8 +340,8 @@ fn import_step_vcf_preview<'a>(
     )));
 
     let mut preview_items: Vec<RowBuilder<'a>> = Vec::new();
-    for contact in wizard.vcf_contacts.iter().take(10) {
-        preview_items.push(import_vcf_contact_row(contact));
+    for row in preview.rows.iter().take(10) {
+        preview_items.push(import_vcf_contact_row(row));
     }
     if !preview_items.is_empty() {
         col = col.push(section("Preview", preview_items));
@@ -337,7 +356,8 @@ fn import_step_vcf_preview<'a>(
     col.into()
 }
 
-fn import_vcf_contact_row(contact: &::import::ImportedContact) -> RowBuilder<'_> {
+fn import_vcf_contact_row(row: &::import::ContactPreviewRow) -> RowBuilder<'_> {
+    let contact = &row.contact;
     let name = contact
         .effective_display_name()
         .unwrap_or_else(|| "(no name)".to_string());
@@ -345,7 +365,7 @@ fn import_vcf_contact_row(contact: &::import::ImportedContact) -> RowBuilder<'_>
         .normalized_email()
         .unwrap_or_else(|| "(no email)".to_string());
 
-    let email_style: fn(&iced::Theme) -> text::Style = if contact.has_valid_email() {
+    let email_style: fn(&iced::Theme) -> text::Style = if row.status.is_importable() {
         text::secondary
     } else {
         text::danger
@@ -362,6 +382,10 @@ fn import_vcf_contact_row(contact: &::import::ImportedContact) -> RowBuilder<'_>
                 .size(TEXT_SM)
                 .style(email_style)
                 .width(Length::FillPortion(1)),
+            text(row.status.label())
+                .size(TEXT_SM)
+                .style(email_style)
+                .width(Length::Shrink),
         ]
         .spacing(SPACE_SM)
         .align_y(Alignment::Center),
@@ -396,6 +420,12 @@ fn import_step_summary(wizard: &ImportWizardState) -> Element<'_, SettingsMessag
             stats.push(import_stat_row(
                 "Skipped (no email)",
                 result.skipped_no_email,
+            ));
+        }
+        if result.skipped_invalid_email > 0 {
+            stats.push(import_stat_row(
+                "Skipped (invalid email)",
+                result.skipped_invalid_email,
             ));
         }
         if result.skipped_duplicate > 0 {

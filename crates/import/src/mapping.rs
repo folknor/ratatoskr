@@ -1,49 +1,51 @@
-use crate::types::ContactField;
+use crate::types::{
+    ColumnMapping, ContactField, ImportRowStatus, MappingConfidence, is_valid_email,
+};
 
-/// A mapping from a source column to a target contact field.
-#[derive(Debug, Clone)]
-pub struct ColumnMapping {
-    /// Index of the source column (0-based).
-    pub source_index: usize,
-    /// Original column header text.
-    pub source_column: String,
-    /// Target contact field.
-    pub target_field: ContactField,
-}
-
-/// Auto-detect column mappings by matching header names against known patterns.
+/// Auto-detect column mappings using headers first, then cell content.
 ///
-/// Returns a mapping for each header. Unrecognized headers are mapped to `Ignore`.
-/// Each target field (except Ignore) is only assigned once; the first match wins.
-pub fn auto_detect_mappings(headers: &[String]) -> Vec<ColumnMapping> {
+/// When a file has no header row, synthetic headers like "Column 1" are
+/// intentionally ignored and content sniffing does the useful work.
+pub fn auto_detect_mappings(
+    headers: &[String],
+    sample_rows: &[Vec<String>],
+    has_header: bool,
+) -> Vec<ColumnMapping> {
     let mut mappings = Vec::with_capacity(headers.len());
     let mut used_fields: Vec<ContactField> = Vec::new();
 
     for (index, header) in headers.iter().enumerate() {
-        let normalized = header.trim().to_lowercase();
-        let field = detect_field(&normalized, &used_fields);
+        let detected = if has_header {
+            detect_from_header(header, &used_fields)
+        } else {
+            None
+        }
+        .or_else(|| detect_from_content(index, sample_rows, &used_fields));
 
-        if field != ContactField::Ignore {
-            used_fields.push(field);
+        let (target_field, confidence) = detected.unwrap_or((ContactField::Ignore, MappingConfidence::None));
+        if target_field != ContactField::Ignore {
+            used_fields.push(target_field);
         }
 
         mappings.push(ColumnMapping {
             source_index: index,
             source_column: header.clone(),
-            target_field: field,
+            target_field,
+            confidence,
         });
     }
 
     mappings
 }
 
-/// Detect the contact field from a header name, respecting already-used fields.
-fn detect_field(normalized: &str, used: &[ContactField]) -> ContactField {
-    // Try each pattern set in priority order
+fn detect_from_header(
+    header: &str,
+    used: &[ContactField],
+) -> Option<(ContactField, MappingConfidence)> {
+    let normalized = normalize_header(header);
+
     // FirstName/LastName must precede DisplayName: NAME_PATTERNS contains
-    // generic substrings like "name" and "navn" that are also present in
-    // "First Name" / "Fornavn" / "Etternavn", so DisplayName would otherwise
-    // win on a substring match.
+    // generic substrings like "name" and "navn".
     let candidates = [
         (ContactField::Email, EMAIL_PATTERNS),
         (ContactField::FirstName, FIRST_NAME_PATTERNS),
@@ -56,47 +58,160 @@ fn detect_field(normalized: &str, used: &[ContactField]) -> ContactField {
         (ContactField::Group, GROUP_PATTERNS),
     ];
 
-    for (field, patterns) in &candidates {
-        if used.contains(field) {
-            // Special case: if Email is taken and we match an email pattern,
-            // try Email2 instead.
-            if *field == ContactField::Email
+    for (field, patterns) in candidates {
+        if used.contains(&field) {
+            if field == ContactField::Email
                 && !used.contains(&ContactField::Email2)
-                && patterns.iter().any(|p| matches_pattern(normalized, p))
+                && patterns.iter().any(|p| matches_pattern(&normalized, p))
             {
-                return ContactField::Email2;
+                return Some((ContactField::Email2, MappingConfidence::High));
             }
             continue;
         }
-        if patterns.iter().any(|p| matches_pattern(normalized, p)) {
-            return *field;
+        if patterns.iter().any(|p| matches_pattern(&normalized, p)) {
+            return Some((field, MappingConfidence::High));
         }
     }
 
-    ContactField::Ignore
+    None
 }
 
-/// Check if a normalized header matches a pattern.
-///
-/// Supports exact match and substring containment.
+fn detect_from_content(
+    index: usize,
+    rows: &[Vec<String>],
+    used: &[ContactField],
+) -> Option<(ContactField, MappingConfidence)> {
+    let mut non_empty = 0usize;
+    let mut emailish = 0usize;
+    let mut phoneish = 0usize;
+    let mut groupish = 0usize;
+
+    for row in rows {
+        let Some(value) = row.get(index).map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        non_empty += 1;
+        if is_valid_email(value) || !crate::recipient_parser::parse_recipient_list(value).is_empty() {
+            emailish += 1;
+        }
+        if looks_like_phone(value) {
+            phoneish += 1;
+        }
+        if looks_like_group_list(value) {
+            groupish += 1;
+        }
+    }
+
+    if non_empty == 0 {
+        return None;
+    }
+
+    if emailish * 2 >= non_empty && !used.contains(&ContactField::Email) {
+        return Some((ContactField::Email, MappingConfidence::Medium));
+    }
+    if emailish * 2 >= non_empty && !used.contains(&ContactField::Email2) {
+        return Some((ContactField::Email2, MappingConfidence::Medium));
+    }
+    if phoneish * 2 >= non_empty && !used.contains(&ContactField::Phone) {
+        return Some((ContactField::Phone, MappingConfidence::Low));
+    }
+    if groupish * 2 >= non_empty && !used.contains(&ContactField::Group) {
+        return Some((ContactField::Group, MappingConfidence::Low));
+    }
+
+    None
+}
+
+fn normalize_header(header: &str) -> String {
+    header
+        .trim()
+        .to_lowercase()
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn matches_pattern(normalized: &str, pattern: &str) -> bool {
-    // Exact match
     if normalized == pattern {
         return true;
     }
-    // Contains the pattern as a word (surrounded by non-alphanumeric or at boundaries)
-    normalized.contains(pattern)
+
+    let normalized_tokens: Vec<&str> = normalized.split_whitespace().collect();
+    let pattern_tokens: Vec<&str> = pattern.split_whitespace().collect();
+
+    if pattern_tokens.len() == 1 {
+        return normalized_tokens.contains(&pattern);
+    }
+
+    normalized_tokens
+        .windows(pattern_tokens.len())
+        .any(|window| window == pattern_tokens.as_slice())
 }
 
-// ── Pattern lists ─────────────────────────────────────────
+fn looks_like_phone(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.len() < 5 {
+        return false;
+    }
+    let digit_count = trimmed.chars().filter(char::is_ascii_digit).count();
+    if digit_count < 5 {
+        return false;
+    }
+    let allowed_count = trimmed
+        .chars()
+        .filter(|ch| {
+            ch.is_ascii_digit()
+                || matches!(
+                    ch,
+                    '+' | '-' | '(' | ')' | ' ' | '.' | '\u{00A0}' | '/'
+                )
+        })
+        .count();
+    allowed_count == trimmed.chars().count()
+}
+
+fn looks_like_group_list(value: &str) -> bool {
+    value.contains(';') || value.contains('|')
+}
+
+pub(crate) fn row_status(contact: &crate::types::ImportedContact) -> ImportRowStatus {
+    let Some(email) = contact.normalized_email() else {
+        return ImportRowStatus::MissingEmail;
+    };
+    if is_valid_email(&email) {
+        ImportRowStatus::Ready
+    } else {
+        ImportRowStatus::InvalidEmail
+    }
+}
+
+pub(crate) fn row_status_with_seen(
+    contact: &crate::types::ImportedContact,
+    seen_emails: &mut std::collections::HashSet<String>,
+) -> ImportRowStatus {
+    let status = row_status(contact);
+    if status != ImportRowStatus::Ready {
+        return status;
+    }
+
+    let Some(email) = contact.normalized_email() else {
+        return ImportRowStatus::MissingEmail;
+    };
+    if seen_emails.insert(email) {
+        ImportRowStatus::Ready
+    } else {
+        ImportRowStatus::DuplicateEmail
+    }
+}
 
 const EMAIL_PATTERNS: &[&str] = &[
     "email",
-    "e-mail",
+    "e mail",
     "email address",
-    "e-mail address",
+    "e mail address",
     "mail",
-    "e-post",
+    "e post",
     "epost",
     "correo",
 ];
@@ -104,7 +219,7 @@ const EMAIL_PATTERNS: &[&str] = &[
 const EMAIL2_PATTERNS: &[&str] = &[
     "email 2",
     "email2",
-    "e-mail 2",
+    "e mail 2",
     "secondary email",
     "other email",
     "home email",
@@ -197,13 +312,13 @@ mod tests {
 
     #[test]
     fn auto_detect_common_headers() {
-        let headers: Vec<String> = vec![
-            "Name".into(),
-            "Email".into(),
-            "Phone".into(),
-            "Company".into(),
+        let headers = vec![
+            "Name".to_string(),
+            "Email".to_string(),
+            "Phone".to_string(),
+            "Company".to_string(),
         ];
-        let mappings = auto_detect_mappings(&headers);
+        let mappings = auto_detect_mappings(&headers, &[], true);
         assert_eq!(mappings[0].target_field, ContactField::DisplayName);
         assert_eq!(mappings[1].target_field, ContactField::Email);
         assert_eq!(mappings[2].target_field, ContactField::Phone);
@@ -212,40 +327,82 @@ mod tests {
 
     #[test]
     fn auto_detect_first_last_name() {
-        let headers: Vec<String> = vec!["First Name".into(), "Last Name".into(), "E-Mail".into()];
-        let mappings = auto_detect_mappings(&headers);
+        let headers = vec![
+            "First Name".to_string(),
+            "Last Name".to_string(),
+            "E-Mail".to_string(),
+        ];
+        let mappings = auto_detect_mappings(&headers, &[], true);
         assert_eq!(mappings[0].target_field, ContactField::FirstName);
         assert_eq!(mappings[1].target_field, ContactField::LastName);
         assert_eq!(mappings[2].target_field, ContactField::Email);
     }
 
     #[test]
-    fn auto_detect_two_email_columns() {
-        let headers: Vec<String> = vec!["Email".into(), "Work Email".into(), "Name".into()];
-        let mappings = auto_detect_mappings(&headers);
+    fn content_detects_no_header_email_and_phone() {
+        let headers = vec![
+            "Column 1".to_string(),
+            "Column 2".to_string(),
+            "Column 3".to_string(),
+        ];
+        let rows = vec![
+            vec![
+                "alice@example.com".to_string(),
+                "Alice".to_string(),
+                "+47 123 45 678".to_string(),
+            ],
+            vec![
+                "bob@example.com".to_string(),
+                "Bob".to_string(),
+                "+47 555 12 345".to_string(),
+            ],
+        ];
+        let mappings = auto_detect_mappings(&headers, &rows, false);
         assert_eq!(mappings[0].target_field, ContactField::Email);
-        assert_eq!(mappings[1].target_field, ContactField::Email2);
-        assert_eq!(mappings[2].target_field, ContactField::DisplayName);
+        assert_eq!(mappings[1].target_field, ContactField::Ignore);
+        assert_eq!(mappings[2].target_field, ContactField::Phone);
     }
 
     #[test]
-    fn unknown_headers_are_ignored() {
-        let headers: Vec<String> = vec!["ID".into(), "Random Column".into()];
-        let mappings = auto_detect_mappings(&headers);
+    fn content_detects_email_inside_display_address() {
+        let headers = vec!["Column 1".to_string(), "Column 2".to_string()];
+        let rows = vec![
+            vec![
+                "Alice Smith <alice@example.com>".to_string(),
+                "Engineering".to_string(),
+            ],
+            vec![
+                "Bob Jones <bob@example.com>".to_string(),
+                "Sales".to_string(),
+            ],
+        ];
+
+        let mappings = auto_detect_mappings(&headers, &rows, false);
+        assert_eq!(mappings[0].target_field, ContactField::Email);
+    }
+
+    #[test]
+    fn header_matching_avoids_substring_false_positives() {
+        let headers = vec![
+            "Mailing Address".to_string(),
+            "Email".to_string(),
+        ];
+
+        let mappings = auto_detect_mappings(&headers, &[], true);
         assert_eq!(mappings[0].target_field, ContactField::Ignore);
-        assert_eq!(mappings[1].target_field, ContactField::Ignore);
+        assert_eq!(mappings[1].target_field, ContactField::Email);
     }
 
     #[test]
     fn norwegian_headers() {
-        let headers: Vec<String> = vec![
-            "Fornavn".into(),
-            "Etternavn".into(),
-            "E-post".into(),
-            "Telefon".into(),
-            "Firma".into(),
+        let headers = vec![
+            "Fornavn".to_string(),
+            "Etternavn".to_string(),
+            "E-post".to_string(),
+            "Telefon".to_string(),
+            "Firma".to_string(),
         ];
-        let mappings = auto_detect_mappings(&headers);
+        let mappings = auto_detect_mappings(&headers, &[], true);
         assert_eq!(mappings[0].target_field, ContactField::FirstName);
         assert_eq!(mappings[1].target_field, ContactField::LastName);
         assert_eq!(mappings[2].target_field, ContactField::Email);

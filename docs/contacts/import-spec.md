@@ -23,6 +23,110 @@ This is a self-contained problem warranting its own crate (`crates/import/`).
    - CardDAV vCard parsing already exists in `crates/core/src/carddav/parse.rs`
    - A single .vcf file can contain multiple contacts
 
+## Recipient Paste Input
+
+The import crate also owns normalization for recipient lists pasted into
+compose To/Cc/Bcc fields and contact-group member inputs. This is not a full
+wizard flow, but it is the same business problem: users bring recipient data
+from spreadsheets, Word documents, Outlook messages, and ad-hoc corporate
+lists, and the app should turn that data into valid contacts/recipients with
+consistent normalization and diagnostics.
+
+This path must handle malformed address text such as:
+
+- `Name <email>` entries with missing quotes, missing angle brackets, or mixed
+  delimiters
+- bare email addresses mixed with display names
+- TSV-like rows copied from spreadsheet cells
+- contact names and email addresses pasted into the middle of other entries
+- duplicate recipients in the same paste operation
+
+### Rich Clipboard Reality
+
+Modern spreadsheet and rich-text applications place multiple representations of
+the same selection on the clipboard. Rich editors choose the richest format they
+recognize, which is why copying cells from Excel and pasting into Word or
+WordPad creates an actual table. Plain-text consumers receive a lossy fallback,
+often tab-separated text.
+
+Important formats to support:
+
+- Windows:
+  - `CF_UNICODETEXT` / text fallback
+  - registered `HTML Format` (`CF_HTML`), including `StartHTML`,
+    `EndHTML`, `StartFragment`, and `EndFragment` byte offsets
+  - registered `Rich Text Format`
+  - Excel-specific clipboard formats such as BIFF/BIFF12, CSV, text,
+    RTF, and table/value formats
+- macOS:
+  - `NSPasteboard.PasteboardType.string`
+  - `tabularText`
+  - `html`
+  - `rtf`
+- Linux desktops:
+  - `text/html`
+  - `text/rtf`
+  - `text/plain;charset=utf-8`
+  - `UTF8_STRING`
+  - `text/plain`
+
+References:
+
+- Microsoft: Windows clipboard formats - https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats
+- Microsoft: HTML clipboard format - https://learn.microsoft.com/en-gb/windows/win32/dataxchg/html-clipboard-format
+- Microsoft: Excel supported clipboard formats - https://support.microsoft.com/en-us/office/file-formats-that-are-supported-in-excel-0943ff2c-6014-4e8d-aaea-b83d51d46247
+- Microsoft: `XlClipboardFormat` enumeration - https://learn.microsoft.com/en-us/office/vba/api/excel.xlclipboardformat
+- Apple: `NSPasteboard.PasteboardType` - https://developer.apple.com/documentation/appkit/nspasteboard/pasteboardtype
+
+### Current Limitation
+
+The current iced clipboard abstraction exposes only text:
+`Clipboard::read(kind) -> Option<String>`. The token input therefore emits only
+`TokenInputMessage::Paste(String)`. That lets the import crate parse the
+plain-text fallback, but it cannot see the HTML/RTF/table structure that Excel
+or Word actually placed on the clipboard.
+
+The underlying clipboard stack has the same limitation today. `window_clipboard`
+exposes `read() -> String`, Windows reads only `get_clipboard_string()`, and the
+Wayland path accepts only plain-text MIME targets. Full rich paste support
+therefore requires extending or bypassing the iced/window clipboard layer, not
+only improving the parser.
+
+### Target API
+
+The app should pass all available recipient-paste representations to the import
+crate:
+
+```rust
+pub struct RecipientPastePayload {
+    pub plain_text: Option<String>,
+    pub html: Option<String>,
+    pub rtf: Option<String>,
+}
+
+pub struct RecipientPasteResult {
+    pub recipients: Vec<ParsedRecipient>,
+    pub skipped: Vec<SkippedRecipient>,
+    pub source_format: RecipientPasteSourceFormat,
+}
+
+pub fn parse_recipient_paste(payload: &RecipientPastePayload) -> RecipientPasteResult;
+```
+
+Parser preference order:
+
+1. **HTML table or fragment** - extract rows/cells, then reuse the import
+   crate's table mapping heuristics to detect email/name columns.
+2. **RTF table text** - use `\cell` and `\row` boundaries as table hints when
+   available, otherwise reduce to text.
+3. **Plain text** - use the forgiving recipient scanner for address lists,
+   missing punctuation, TSV rows, and glued entries.
+
+The parser output should be suitable for both compose fields and group-member
+inputs: normalized email addresses, display names when recoverable, duplicate
+suppression, and skipped-row diagnostics for values that could not become
+recipients.
+
 ## The Column Mapping Problem
 
 CSV and XLSX files have no standardized column headers. The importer must:

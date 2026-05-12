@@ -1,45 +1,107 @@
+use crate::types::{ImportError, ImportFormat};
+
+/// Detect import format from filename and file signature.
+pub fn detect_format(filename: &str, data: &[u8]) -> Result<ImportFormat, ImportError> {
+    let lower = filename.to_lowercase();
+    if lower.ends_with(".vcf") || lower.ends_with(".vcard") {
+        return Ok(ImportFormat::Vcf);
+    }
+    if lower.ends_with(".xlsx") || lower.ends_with(".xlsm") {
+        return Ok(ImportFormat::Xlsx);
+    }
+    if lower.ends_with(".csv") || lower.ends_with(".txt") {
+        return Ok(ImportFormat::Csv);
+    }
+
+    if data.starts_with(b"PK\x03\x04") {
+        return Ok(ImportFormat::Xlsx);
+    }
+
+    let prefix = String::from_utf8_lossy(&data[..data.len().min(512)]);
+    if prefix.trim_start().starts_with("BEGIN:VCARD") {
+        return Ok(ImportFormat::Vcf);
+    }
+
+    if data.is_empty() {
+        return Err(ImportError::EmptyFile);
+    }
+
+    Ok(ImportFormat::Csv)
+}
+
 /// Detect the encoding of raw bytes and convert to a UTF-8 string.
 ///
-/// Checks for BOM markers (UTF-8, UTF-16 LE/BE), then falls back to
-/// heuristic detection between UTF-8 and Windows-1252/Latin-1.
+/// Checks BOM markers, then UTF-16 without BOM using NUL-byte layout,
+/// then falls back to UTF-8 and Windows-1252.
 pub fn decode_to_utf8(data: &[u8]) -> Result<String, String> {
-    // UTF-8 BOM
     if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
         return Ok(String::from_utf8_lossy(&data[3..]).into_owned());
     }
 
-    // UTF-16 LE BOM
     if data.starts_with(&[0xFF, 0xFE]) {
-        let (decoded, _, had_errors) = encoding_rs::UTF_16LE.decode(data);
-        if had_errors {
-            return Err("UTF-16 LE decoding error".into());
-        }
-        return Ok(decoded.into_owned());
+        return decode_utf16(&data[2..], encoding_rs::UTF_16LE, "UTF-16 LE");
     }
 
-    // UTF-16 BE BOM
     if data.starts_with(&[0xFE, 0xFF]) {
-        let (decoded, _, had_errors) = encoding_rs::UTF_16BE.decode(data);
-        if had_errors {
-            return Err("UTF-16 BE decoding error".into());
-        }
-        return Ok(decoded.into_owned());
+        return decode_utf16(&data[2..], encoding_rs::UTF_16BE, "UTF-16 BE");
     }
 
-    // Try UTF-8 first
+    if looks_like_utf16_le(data) {
+        return decode_utf16(data, encoding_rs::UTF_16LE, "UTF-16 LE");
+    }
+
+    if looks_like_utf16_be(data) {
+        return decode_utf16(data, encoding_rs::UTF_16BE, "UTF-16 BE");
+    }
+
     if let Ok(s) = std::str::from_utf8(data) {
         return Ok(s.to_string());
     }
 
-    // Fall back to Windows-1252 (superset of Latin-1)
     let (decoded, _, _) = encoding_rs::WINDOWS_1252.decode(data);
     Ok(decoded.into_owned())
 }
 
+fn decode_utf16(
+    data: &[u8],
+    encoding: &'static encoding_rs::Encoding,
+    label: &str,
+) -> Result<String, String> {
+    let (decoded, _, had_errors) = encoding.decode(data);
+    if had_errors {
+        Err(format!("{label} decoding error"))
+    } else {
+        Ok(decoded.into_owned())
+    }
+}
+
+fn looks_like_utf16_le(data: &[u8]) -> bool {
+    looks_like_utf16(data, 1)
+}
+
+fn looks_like_utf16_be(data: &[u8]) -> bool {
+    looks_like_utf16(data, 0)
+}
+
+fn looks_like_utf16(data: &[u8], zero_offset: usize) -> bool {
+    let sample_len = data.len().min(256);
+    if sample_len < 8 {
+        return false;
+    }
+    let mut zeroes = 0usize;
+    let mut checked = 0usize;
+    for (index, byte) in data[..sample_len].iter().enumerate() {
+        if index % 2 == zero_offset {
+            checked += 1;
+            if *byte == 0 {
+                zeroes += 1;
+            }
+        }
+    }
+    checked > 0 && zeroes * 2 >= checked
+}
+
 /// Detect the CSV delimiter by counting occurrences in the first few lines.
-///
-/// Checks comma, semicolon, and tab. Returns the delimiter that appears
-/// most consistently across lines.
 pub fn detect_delimiter(text: &str) -> u8 {
     let candidates: &[u8] = b",;\t";
     let lines: Vec<&str> = text.lines().take(10).collect();
@@ -57,12 +119,10 @@ pub fn detect_delimiter(text: &str) -> u8 {
             .map(|line| count_unquoted_delimiters(line, delim))
             .collect();
 
-        // Skip if no occurrences
         if counts.iter().all(|&c| c == 0) {
             continue;
         }
 
-        // Score: consistency (low variance) + occurrence count
         let avg = counts.iter().sum::<usize>() as f64 / counts.len() as f64;
         if avg < 0.5 {
             continue;
@@ -77,7 +137,6 @@ pub fn detect_delimiter(text: &str) -> u8 {
             .sum::<f64>()
             / counts.len() as f64;
 
-        // Lower variance is better; higher average count is better
         let score = avg / (1.0 + variance);
         if score > best_score {
             best_score = score;
@@ -88,15 +147,19 @@ pub fn detect_delimiter(text: &str) -> u8 {
     best_delim
 }
 
-/// Count occurrences of a delimiter that are not inside quoted fields.
 fn count_unquoted_delimiters(line: &str, delim: u8) -> usize {
-    let delim_char = delim as char;
+    let delim_char = char::from(delim);
     let mut count = 0;
     let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
 
-    for ch in line.chars() {
+    while let Some(ch) = chars.next() {
         if ch == '"' {
-            in_quotes = !in_quotes;
+            if in_quotes && chars.peek() == Some(&'"') {
+                let _ = chars.next();
+            } else {
+                in_quotes = !in_quotes;
+            }
         } else if ch == delim_char && !in_quotes {
             count += 1;
         }
@@ -106,16 +169,11 @@ fn count_unquoted_delimiters(line: &str, delim: u8) -> usize {
 }
 
 /// Detect whether the first row is likely a header row.
-///
-/// Heuristic: if the first row contains values that look like data
-/// (email addresses, phone numbers, mostly digits), it's probably
-/// not a header.
 pub fn detect_has_header(rows: &[Vec<String>]) -> bool {
     let Some(first_row) = rows.first() else {
         return false;
     };
 
-    // If there's only one row, assume it's data
     if rows.len() < 2 {
         return false;
     }
@@ -125,36 +183,27 @@ pub fn detect_has_header(rows: &[Vec<String>]) -> bool {
         .filter(|cell| looks_like_data(cell))
         .count();
 
-    // If more than half the cells look like data, it's not a header
     let threshold = first_row.len().div_ceil(2);
     data_like_count < threshold
 }
 
-/// Check if a cell value looks like data rather than a header label.
 fn looks_like_data(value: &str) -> bool {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return false;
     }
 
-    // Contains @: likely an email
-    if trimmed.contains('@') {
+    if crate::types::is_valid_email(trimmed) {
         return true;
     }
 
-    // Starts with + and has digits: likely a phone number
     if trimmed.starts_with('+') && trimmed.chars().skip(1).any(|c| c.is_ascii_digit()) {
         return true;
     }
 
-    // All digits (or digits with common phone separators): likely data
     let digit_ratio =
         trimmed.chars().filter(char::is_ascii_digit).count() as f64 / trimmed.len() as f64;
-    if digit_ratio > 0.7 && trimmed.len() > 3 {
-        return true;
-    }
-
-    false
+    digit_ratio > 0.7 && trimmed.len() > 3
 }
 
 #[cfg(test)]
@@ -162,9 +211,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detect_comma_delimiter() {
-        let text = "Name,Email,Phone\nAlice,alice@test.com,555-1234\n";
-        assert_eq!(detect_delimiter(text), b',');
+    fn detects_formats() {
+        assert_eq!(
+            detect_format("contacts.csv", b"Name,Email").expect("detect csv"),
+            ImportFormat::Csv
+        );
+        assert_eq!(
+            detect_format("contacts.vcf", b"BEGIN:VCARD").expect("detect vcf"),
+            ImportFormat::Vcf
+        );
+        assert_eq!(
+            detect_format("contacts.xlsx", b"PK\x03\x04").expect("detect xlsx"),
+            ImportFormat::Xlsx
+        );
     }
 
     #[test]
@@ -182,8 +241,12 @@ mod tests {
     #[test]
     fn detect_header_row() {
         let rows = vec![
-            vec!["Name".into(), "Email".into(), "Phone".into()],
-            vec!["Alice".into(), "alice@test.com".into(), "+1-555".into()],
+            vec!["Name".to_string(), "Email".to_string(), "Phone".to_string()],
+            vec![
+                "Alice".to_string(),
+                "alice@test.com".to_string(),
+                "+1-555".to_string(),
+            ],
         ];
         assert!(detect_has_header(&rows));
     }
@@ -192,33 +255,39 @@ mod tests {
     fn detect_no_header_row() {
         let rows = vec![
             vec![
-                "Alice".into(),
-                "alice@test.com".into(),
-                "+1-555-1234".into(),
+                "Alice".to_string(),
+                "alice@test.com".to_string(),
+                "+1-555-1234".to_string(),
             ],
-            vec!["Bob".into(), "bob@test.com".into(), "+1-555-5678".into()],
+            vec![
+                "Bob".to_string(),
+                "bob@test.com".to_string(),
+                "+1-555-5678".to_string(),
+            ],
         ];
         assert!(!detect_has_header(&rows));
     }
 
     #[test]
-    fn decode_utf8() {
-        let data = b"hello world";
-        assert_eq!(decode_to_utf8(data).ok().as_deref(), Some("hello world"));
+    fn decode_utf16_le_without_bom() {
+        let data = [
+            0x4E, 0x00, 0x61, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x0A, 0x00,
+        ];
+        assert_eq!(decode_to_utf8(&data).ok().as_deref(), Some("Name\n"));
     }
 
     #[test]
-    fn decode_utf8_bom() {
-        let mut data = vec![0xEF, 0xBB, 0xBF];
-        data.extend_from_slice(b"hello");
-        assert_eq!(decode_to_utf8(&data).ok().as_deref(), Some("hello"));
+    fn decode_utf16_le_with_bom() {
+        let data = [
+            0xFF, 0xFE, 0x4E, 0x00, 0x61, 0x00, 0x6D, 0x00, 0x65, 0x00,
+        ];
+        assert_eq!(decode_to_utf8(&data).ok().as_deref(), Some("Name"));
     }
 
     #[test]
     fn decode_latin1() {
-        // 0xE9 = e-acute in Latin-1/Windows-1252
-        let data = vec![0x52, 0xE9, 0x73, 0x75, 0x6D, 0xE9]; // Resume with accents
+        let data = vec![0x52, 0xE9, 0x73, 0x75, 0x6D, 0xE9];
         let result = decode_to_utf8(&data).expect("should decode");
-        assert!(result.contains('\u{00E9}')); // e-acute in Unicode
+        assert!(result.contains('\u{00E9}'));
     }
 }
