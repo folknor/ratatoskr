@@ -40,6 +40,7 @@ That includes:
 **Enforcement:** `app` no longer depends on `rusqlite`. `core` no longer depends on `rusqlite`. Provider and sync crates now route shared-table writes through `db` APIs instead of embedding their own SQL for those tables.
 
 ### Action service as mutation gate
+<!-- coverage: architecture.action_service_as_mutation_gate enforcement=rust-test -->
 
 Every email state mutation (archive, delete, star, move, label, send, snooze, mark-chat-read, etc.) must flow through the action service. As of Phase 2 the *execution* surface lives in `service::actions::*` (the relocated home; `core::actions` keeps a shim that re-exports the public API). UI handlers no longer call the execution functions directly - they build an `ActionExecutionPlan`, convert to `ActionWirePlan`, and dispatch via `client.execute_plan(...)`. The Service journals the plan, signals the worker, and per-operation `OperationOutcome` + final `ActionCompleted` notifications stream back over IPC.
 
@@ -161,6 +162,7 @@ The `ExtractRuntime` lifecycle mirrors `CalendarRuntime`: a `CancellationToken` 
 - **Tri-state in-flight tracking** (`crates/app/src/app.rs::PlanState`). UI plans live as `Pending` / `Acked` / `AckUnknown`; `ServiceCrashed` while `Pending` defers rollback to post-respawn `action.job_status` reconciliation, while `ServiceCrashed` while `Acked` does nothing because the journal will replay.
 
 ### Provider trait as abstraction layer
+<!-- coverage: architecture.provider_trait_as_abstraction_layer enforcement=compiler -->
 
 The four providers are unified behind `ProviderOps`. All provider-specific behavior is behind this trait - callers should never branch on provider type.
 
@@ -178,6 +180,7 @@ The active scope (which account, shared mailbox, or public folder the user is lo
 **Enforcement:** `ViewScope` enum (`AllAccounts`, `Account`, `SharedMailbox`, `PublicFolder`) in `crates/core/src/scope.rs`. The sidebar stores `selected_scope: ViewScope` as the single source of truth. `fire_navigation_load()` and `load_threads_for_current_view()` dispatch on the enum - shared mailboxes and public folders use dedicated query paths, personal accounts use `AccountScope`-based queries. Shared mailbox threads are distinguished by `threads.shared_mailbox_id`; personal queries filter `shared_mailbox_id IS NULL`. Public folder items come from the separate `public_folder_items` table. Actions are gated for public folder scope.
 
 ### Generation counters for async safety
+<!-- coverage: architecture.generation_counters_for_async_safety enforcement=compiler -->
 
 Async loads (nav, threads, search, etc.) must not overwrite fresher state. Each load site captures a generation counter before dispatch and checks it on completion - stale results are discarded.
 
@@ -196,6 +199,7 @@ Workflow state is authoritative for lifecycle meaning and identity. The editor s
 **Enforcement:** handlers update workflow first and then synchronize surfaces. Editable event data is read from the editor session, not from `active_modal`.
 
 ### Folder vs label semantics are explicit
+<!-- coverage: architecture.folder_vs_label_semantics_are_explicit enforcement=lua-harness -->
 
 Ratatoskr has exactly two persisted sidebar concepts:
 - folders: `label_kind = "container"`
@@ -206,6 +210,7 @@ The `labels` table stores both. Provider-native concepts must be normalized into
 **Enforcement:** provider label/folder sync paths map their payloads into shared `db` label writes with explicit `label_kind`. Sidebar/navigation code branches on `label_kind` rather than provider-specific heuristics.
 
 ## Adding a New Email Action
+<!-- coverage: architecture.adding_a_new_email_action enforcement=compiler -->
 
 The action pipeline flows: `MailActionIntent → resolve_intent → build_execution_plan → ActionWirePlan → action.execute_plan IPC → service::actions::batch_execute → OperationOutcome notifications → handle_action_completed`. Adding a new action requires:
 

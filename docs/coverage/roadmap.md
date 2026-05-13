@@ -12,21 +12,27 @@ The foundational decision. The marker scheme is what makes a doc section a regis
 
 - A marker scheme that is visible in rendered markdown without breaking reading flow, carries a stable ID, survives doc reorganization, and is greppable from a tool.
 - A parser that walks `docs/` and returns the set of `(file, section, contract_id)` triples plus any associated metadata (status, enforcement hint).
-- A lint that rejects duplicate IDs, malformed markers, and orphaned markers (a marker with no surrounding section).
+- A lint that rejects duplicate IDs, malformed markers, invalid metadata, orphaned markers (a marker with no surrounding section), and misplaced markers.
 - A smoke catalog: mark up three to five sections in `docs/architecture.md` to validate the scheme before committing to it. Examples: action service as mutation gate, generation counters for async safety, folder-vs-label semantics.
 
 **Design decisions to resolve in this slice:**
 
-- Marker form. Candidates: HTML comment near the section header (`<!-- coverage: architecture.action_service_as_mutation_gate -->`), a fenced YAML/TOML block above the section, or a structured heading suffix. The HTML comment is the leading candidate because it renders invisibly, is easy to grep, and does not require a markdown extension.
-- ID grammar. Lowercase, dotted, no spaces. Whether the dotted prefix must mirror the file path or is free-form.
+- Marker form. Decision: HTML comment immediately below the section header (`<!-- coverage: architecture.action_service_as_mutation_gate -->`). Blank lines are allowed between heading and marker; prose or other content before the marker is rejected. The marker renders invisibly, is easy to grep, and does not require a markdown extension.
+- ID grammar. Decision: lowercase dotted slug, with each segment starting with a letter and continuing with lowercase letters, digits, or underscores. The dotted prefix is conventional rather than mechanically tied to the file path.
 - How a contract that spans sibling sections is represented. Likely one marker on the parent section, with the children implied. Alternatively, multiple markers sharing an ID.
-- Status field. The problem statement implies contracts are "required" by default; the marker may need to express "retired" or "compile-enforced." This is the minimum status set.
-- Enforcement hint. Free-form string or a small enum (`compiler`, `rust-test`, `lua-harness`, `convention`). The hint is informational in this slice; the tool may consume it later.
+- Status field. Decision: `required` by default, plus `gap`, `retired`, and `compile-enforced`.
+- Enforcement hint. Decision: small enum, currently `compiler`, `rust-test`, `lua-harness`, `convention`, and `mixed`.
+
+**Current implementation notes:**
+
+- The initial parser lives in `crates/coverage/` and exposes a `ratatoskr-coverage` process entrypoint. This keeps Ratatoskr independent of brokkr's source while leaving a concrete command brokkr can wrap later.
+- The smoke catalog currently marks five sections in `docs/architecture.md`: action service gate, provider trait abstraction, generation counters, folder-vs-label semantics, and adding a new email action.
+- The parser ignores fenced code blocks so docs can show marker examples without registering duplicate contracts.
 
 **Out of scope for this slice:**
 
-- The Lua frontmatter format (slice 2).
-- The tool that consumes the parser output (slice 3).
+- Enforcing Lua frontmatter in the harness loader.
+- Project-wide coverage failure.
 - Marking up every architectural boundary in the doc. The smoke catalog is enough to validate the scheme.
 
 **Depends on:** Nothing. This is the foundation.
@@ -38,18 +44,19 @@ The other foundational decision. The Lua harness loader already parses frontmatt
 **What needs to be built:**
 
 - A frontmatter format for `covers` in Lua harness scripts that lists one or more contract IDs.
-- An update to the existing harness loader (under `crates/app/tests/sync-harness/` and `crates/app/tests/service-harness/`) to parse the field.
-- Validation that IDs are syntactically valid (matches the grammar from slice 1). Existence-check against the registry is deferred until slice 3.
+- A read-only parser that scans `crates/app/tests/sync-harness/` and `crates/app/tests/service-harness/` for claims.
+- A later update to the existing harness loader to parse and reject malformed pilot-area claims when strict mode is enabled.
+- Validation that IDs are syntactically valid (matches the grammar from slice 1). Existence-check against the registry is reported by the read-only tool.
 - A short author-facing note in the harness doc (`docs/glossary/harness.md`) describing the format.
 
 **Design decisions to resolve in this slice:**
 
-- Syntactic form. Likely `-- @covers: id` repeated on multiple lines, or a single line with comma-separated IDs. Repeated lines are easier to diff and harder to typo.
-- Whether a missing `covers` is a hard error from the start or a warning until slice 5. The problem statement is clear that the end-state has no grace mode, but during slices 2 through 4 the catalog is incomplete by definition, so a hard error here would block harness development. Likely a warning in this slice; hardened in slice 5 for the pilot area.
+- Syntactic form. Decision: repeated `-- @covers: id` lines in the initial frontmatter comment block. Each line names exactly one contract ID. Comma-separated or space-separated multi-ID lines are rejected.
+- Whether a missing `covers` is a hard error from the start or a warning until slice 5. Decision for now: missing claims are reported, not loader errors, until a pilot area is backfilled and strict mode is scoped to that area.
 
 **Out of scope for this slice:**
 
-- Validating that claimed IDs exist (slice 3).
+- Failing on unknown claimed IDs.
 - Rust-side claim mechanism (slice 6).
 
 **Depends on:** Slice 1 (uses the ID space, but parser does not need to validate against registry yet).
@@ -70,6 +77,11 @@ The first user-visible deliverable. A subcommand that reads doc anchors and Lua 
   - Lua tests with claims that are syntactically malformed.
 - Plain-text output by default. JSON output via a flag for later consumption.
 - Exit code zero regardless of findings. Reporting only.
+
+**Current implementation notes:**
+
+- `ratatoskr-coverage report [WORKSPACE_ROOT]` already produces the read-only plain-text report shape from the Ratatoskr side. The brokkr integration remains pending because brokkr lives in a separate repository.
+- Contracts with `status=gap`, `status=retired`, `status=compile-enforced`, or `enforcement=compiler` remain visible in the report but are excluded from the "registered contracts with no Lua claim" list.
 
 **Design decisions to resolve in this slice:**
 
@@ -102,6 +114,12 @@ The first real use of the system. Pick one bounded area, bring its contracts to 
 - Pilot area choice.
 - How a "known gap" is expressed. Likely a status on the contract marker (`status: gap`, `tracking: issue-url`) or a separate `gaps.toml` file. The former keeps it local to the doc; the latter keeps the doc clean.
 
+**Current implementation notes:**
+
+- Pilot area chosen: folders-labels semantics. The pilot contracts live in `docs/glossary/folders-labels.md`, backed by focused sync-harness claims for Graph categories as tag labels, JMAP mailboxes as container folders, account-scoped Gmail label identity, canonical system IDs, and provider-prefixed non-system IDs.
+- `ratatoskr-coverage report --area glossary.folders_labels` is the narrow report loop for this pilot. `ratatoskr-coverage report --area architecture` shows the architecture-level smoke catalog.
+- `brokkr check -p coverage` now enforces the pilot report shape through a repository smoke test: `glossary.folders_labels` must have no uncovered contracts and no unknown Lua claims.
+
 **Out of scope for this slice:**
 
 - Backfill of areas outside the pilot.
@@ -119,6 +137,11 @@ Flip the switch on the pilot. The harness loader rejects pilot-area tests that f
 - Lua harness loader rejects a pilot-area test that claims an unknown ID.
 - `brokkr coverage --strict --area=<pilot>` (or equivalent scoping) exits non-zero when the pilot area has registered contracts with zero claims.
 - Integration with `brokkr check`: the strict invocation is wired into the default check flow so violations break CI for the pilot area.
+
+**Current implementation notes:**
+
+- The Ratatoskr-side equivalent exists as `ratatoskr-coverage report --area glossary.folders_labels --strict`.
+- The dedicated brokkr command and harness-loader rejection are still pending. Until then, the coverage crate smoke test gives the pilot an in-workspace regression gate.
 
 **Design decisions to resolve in this slice:**
 

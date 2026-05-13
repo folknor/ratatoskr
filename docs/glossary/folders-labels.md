@@ -11,6 +11,7 @@ Other documents that discuss folders or labels should reference this glossary en
 Ratatoskr has two kinds of email organization objects: **folders** and **labels**. That's it.
 
 ### Folder
+<!-- coverage: glossary.folders_labels.folder_rows_are_containers enforcement=lua-harness -->
 
 A container. A message can be in one or more folders. The UI presents folder operations as **moves** - when a user drags a thread from Inbox to Archive, it leaves Inbox and appears in Archive. The action service translates this intent to whatever the provider requires (Gmail: remove one label, add another. IMAP: COPY + DELETE. Graph: move API. JMAP: update mailbox memberships).
 
@@ -30,6 +31,7 @@ Displayed in sidebar section 2 (provider folders).
 Gmail calls its folders "labels." Ratatoskr does not.
 
 ### Label
+<!-- coverage: glossary.folders_labels.label_rows_are_tags enforcement=lua-harness -->
 
 An annotation you stick on a message. A message can have any number of labels. Applying a label does not affect which folder the message is in. Operations on labels are **additive**.
 
@@ -47,6 +49,7 @@ Displayed in sidebar section 4 (labels).
 | JMAP | Keyword | Label |
 
 ### Why both are in the `labels` table
+<!-- coverage: glossary.folders_labels.labels_table_discriminates_folders_and_labels enforcement=lua-harness -->
 
 The `labels` table stores both folders and labels. The `label_kind` column distinguishes them: `'container'` for folders, `'tag'` for labels. This is a storage-level discriminant, not a separate concept. There is one table, two kinds of rows.
 
@@ -57,6 +60,9 @@ The `thread_labels` junction table records associations between threads and both
 ## Identity
 
 ### Label ID
+<!-- coverage: glossary.folders_labels.label_identity_is_account_scoped enforcement=lua-harness -->
+<!-- coverage: glossary.folders_labels.system_folder_ids_are_canonical enforcement=lua-harness -->
+<!-- coverage: glossary.folders_labels.non_system_ids_keep_provider_prefixes enforcement=lua-harness -->
 
 The identifier for a folder or label, scoped to an account: `(account_id, label_id)`.
 
@@ -136,6 +142,7 @@ An action that intentionally has no provider dispatch. Pin and mute are local-on
 ---
 
 ## Provider Translation
+<!-- coverage: glossary.folders_labels.provider_terms_translate_to_folder_label_semantics enforcement=lua-harness -->
 
 When reading provider documentation or provider crate code, use this table to translate back to Ratatoskr terms:
 

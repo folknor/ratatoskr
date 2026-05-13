@@ -33,6 +33,7 @@ members = [
 "crates/service-state",
 "crates/action-types",
 "crates/provider-sync",
+"crates/coverage",
 ]
 
 exclude = [

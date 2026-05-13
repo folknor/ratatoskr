@@ -73,18 +73,24 @@ The dots are convention for readability; the tool does not parse them. The ID is
 
 ### 2. Doc Sections Mark Themselves as Contracts
 
-A doc section becomes a registered contract when its author explicitly marks it. Not every prose paragraph is a contract. The marker form is open (see Open Questions) but at minimum it must:
+A doc section becomes a registered contract when its author explicitly marks it. Not every prose paragraph is a contract. The marker form is an HTML comment immediately below the section heading:
 
-- Be visible in the rendered markdown without breaking reading flow.
+```
+<!-- coverage: architecture.action_service_as_mutation_gate -->
+```
+
+Blank lines may appear between the heading and marker. Other content before the marker is rejected so the contract identity remains visually tied to the section it registers. The marker must:
+
+- Avoid breaking rendered markdown reading flow.
 - Carry the stable ID.
 - Survive doc reorganization without breaking claims.
 - Be greppable from the tool.
 
-The likely shape is an HTML comment near the section header (`<!-- coverage: architecture.action_service_as_mutation_gate -->`) or a one-line frontmatter-style pin. The decision is deferred to the spec.
+See `docs/coverage/marker-spec.md` for the exact grammar and metadata fields.
 
 ### 3. Every Test Claims at Least One Contract
 
-Lua harness scripts gain a required `covers` field in their frontmatter. The field lists one or more contract IDs.
+Lua harness scripts gain a required `covers` field in their frontmatter. The field lists one contract ID per line.
 
 ```
 -- @covers: architecture.action_service_as_mutation_gate
@@ -165,7 +171,7 @@ The backfill is staged by doc area so it does not block on a single giant commit
 
 ## Open Questions
 
-1. **What marks a doc section as a contract?** Options include an HTML comment near the section header (`<!-- coverage: id -->`), a one-line pin in a sidecar file, or a slug convention on the section header itself. Decision affects how the tool finds anchors and how stable IDs survive doc edits.
+1. **How does brokkr consume the Ratatoskr parser?** The initial parser lives in Ratatoskr's `coverage` crate and exposes a process entrypoint. Brokkr is a separate repository and should not take a source dependency on Ratatoskr. The integration choice is whether `brokkr coverage` shells out to `ratatoskr-coverage`, reimplements the same parser in brokkr, or both repositories depend on a third shared tool crate.
 
 2. **Where does the `ContractId` enum live?** Candidate: a new `coverage` crate in the workspace whose build script discovers harness scripts and generates the enum. Affects how Rust integration tests reference the IDs.
 

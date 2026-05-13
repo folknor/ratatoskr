@@ -1,4 +1,9 @@
 -- description: JMAP secondary Mailbox/set create imports as a local folder
+-- @covers: architecture.folder_vs_label_semantics_are_explicit
+-- @covers: glossary.folders_labels.folder_rows_are_containers
+-- @covers: glossary.folders_labels.labels_table_discriminates_folders_and_labels
+-- @covers: glossary.folders_labels.non_system_ids_keep_provider_prefixes
+-- @covers: glossary.folders_labels.provider_terms_translate_to_folder_label_semantics
 -- expected: pass
 -- fixture: multi-account-secondary-primary.toml
 -- protocol: jmap

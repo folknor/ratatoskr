@@ -1,4 +1,5 @@
 -- description: JMAP scripted fixture steps are imported by incremental sync
+-- @covers: glossary.folders_labels.system_folder_ids_are_canonical
 -- expected: pass
 -- fixture: jmap-incremental.lua
 -- protocol: jmap

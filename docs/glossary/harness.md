@@ -235,6 +235,18 @@ abort - `while true do end` is free by design, so wall-clock is the
 right mechanism. Scripts may set frontmatter `-- ceiling: 60s`;
 omitted scripts use a sane default.
 
+Coverage claims live in the same initial frontmatter comment block. Use one
+line per contract ID:
+
+```
+-- @covers: architecture.folder_vs_label_semantics_are_explicit
+```
+
+The current coverage parser accepts repeated `-- @covers: id` lines, validates
+the ID grammar, and reports missing or unknown claims. It is read-only for now:
+missing claims are not harness-loader errors until a pilot area has been
+backfilled and strict mode is enabled for that area.
+
 The `harness` global exposes:
 
 - spawn helpers (`spawn`, `spawn_with_events`, `data_dir`),

@@ -1,0 +1,21 @@
+[package]
+name = "coverage"
+description = "Contract coverage catalog parser for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "coverage"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ratatoskr-coverage"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]

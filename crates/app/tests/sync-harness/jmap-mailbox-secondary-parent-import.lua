@@ -1,4 +1,5 @@
 -- description: JMAP secondary Mailbox/set create preserves same-account parent binding
+-- @covers: glossary.folders_labels.system_folder_ids_are_canonical
 -- expected: pass
 -- fixture: multi-account-secondary-primary.toml
 -- protocol: jmap

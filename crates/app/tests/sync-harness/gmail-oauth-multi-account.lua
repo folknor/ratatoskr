@@ -1,4 +1,6 @@
 -- description: Gmail sync scopes labels, threads, and messages by the bearer token's account_id
+-- @covers: glossary.folders_labels.label_identity_is_account_scoped
+-- @covers: glossary.folders_labels.system_folder_ids_are_canonical
 -- expected: pass
 -- fixture: multi-account-small.toml
 -- protocol: gmail
@@ -27,6 +29,15 @@ local function message_by_subject(messages, subject)
     for _, message in ipairs(messages) do
         if message.subject == subject then
             return message
+        end
+    end
+    return nil
+end
+
+local function label_by_id(labels, id)
+    for _, label in ipairs(labels) do
+        if label.id == id then
+            return label
         end
     end
     return nil
@@ -134,6 +145,14 @@ local function assert_labels_scoped(state, expected_account_id, label)
             label .. " label " .. lbl.id .. " has wrong account_id"
         )
     end
+    local inbox = label_by_id(state.labels, "INBOX")
+    harness.assert(inbox ~= nil, label .. " missing canonical INBOX label")
+    harness.assert_eq(
+        inbox.account_id,
+        expected_account_id,
+        label .. " INBOX label has wrong account_id"
+    )
+    harness.assert_eq(inbox.label_kind, "container", label .. " INBOX label_kind")
 end
 
 assert_labels_scoped(primary_state, primary.account_id, "primary")
