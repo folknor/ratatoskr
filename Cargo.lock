@@ -6878,6 +6878,7 @@ name = "store"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "crc32fast",
  "db",
  "flate2",
  "hotpath 0.16.0",
@@ -6885,6 +6886,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "xxhash-rust",
 ]

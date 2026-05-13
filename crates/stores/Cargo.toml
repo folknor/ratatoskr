@@ -20,6 +20,8 @@ serde.workspace = true
 log = "0.4"
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+crc32fast = "1"
+thiserror.workspace = true
 hotpath = { workspace = true, optional = true }
 
 [features]

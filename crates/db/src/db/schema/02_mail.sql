@@ -191,6 +191,26 @@ CREATE TABLE IF NOT EXISTS attachment_extracted_text (
 CREATE INDEX IF NOT EXISTS idx_attachment_extracted_text_schema_version
     ON attachment_extracted_text(schema_version);
 
+-- Phase 2 (attachments roadmap): pack-store index. Bytes live in
+-- `attachment_packs/data-NNNNNN.pack`; this table is the lookup from a
+-- BLAKE3 content hash to its (pack, offset, length) location. No
+-- refcount column - the count of referencing `attachments` rows is the
+-- source of truth (see problem-statement.md "Reference counts are
+-- derived, not stored"). `tombstoned_at` non-NULL means the blob is
+-- logically evicted and reads must refuse it even if the bytes are
+-- still in the pack.
+CREATE TABLE IF NOT EXISTS attachment_blobs (
+    content_hash  BLOB    PRIMARY KEY,
+    pack_file_id  INTEGER NOT NULL,
+    offset        INTEGER NOT NULL,
+    length        INTEGER NOT NULL,
+    written_at    INTEGER NOT NULL,
+    last_read_at  INTEGER,
+    tombstoned_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_attachment_blobs_tombstoned
+    ON attachment_blobs(tombstoned_at);
+
 CREATE TABLE IF NOT EXISTS cloud_attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id TEXT,
