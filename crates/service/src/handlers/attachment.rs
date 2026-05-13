@@ -22,6 +22,31 @@ use service_api::{AttachmentFetchAck, AttachmentFetchParams, ServiceError};
 use crate::attachment_materialize::{self, MaterializedBlob};
 use crate::boot::BootSharedState;
 
+/// Inline-image fallback for the cache-hit path. Provider sync writes
+/// small CID images to `inline_images.db` and never calls
+/// `PackStore::put`, so the cache-hit branch has to consult that
+/// store first for `is_inline = 1` rows. Returns `None` if the inline
+/// store has no row for this hash (the caller falls through to
+/// PackStore, which will surface the absence as an error).
+async fn try_inline_image_materialize(
+    boot_state: &Arc<BootSharedState>,
+    content_hash: &db::blob_hash::BlobHash,
+) -> Result<Option<MaterializedBlob>, ServiceError> {
+    let app_data = boot_state.app_data_dir().to_path_buf();
+    let read = store::inline_image_store::InlineImageStoreReadState::init(&app_data)
+        .map_err(|e| {
+            ServiceError::Internal(format!("inline image store open: {e}"))
+        })?;
+    let hit = read
+        .get(content_hash.to_hex())
+        .await
+        .map_err(|e| ServiceError::Internal(format!("inline image get: {e}")))?;
+    let Some((bytes, _mime)) = hit else { return Ok(None) };
+    let materialized =
+        attachment_materialize::write_bytes_to_tmp(boot_state, content_hash, bytes).await?;
+    Ok(Some(materialized))
+}
+
 pub(crate) async fn handle_fetch(
     boot_state: &Arc<BootSharedState>,
     params: AttachmentFetchParams,
@@ -57,13 +82,31 @@ pub(crate) async fn handle_fetch(
     if let Some(ref info) = info
         && let Some(content_hash) = info.content_hash
     {
-        // Cache hit: PackStore already has the bytes. Materialize to a
-        // tmp file and ack.
+        // Cache hit: bytes already live either in PackStore (the
+        // common case) or in `inline_images.db` (small CID images;
+        // provider sync writes them straight to that store without
+        // ever consulting PackStore). The inline image store is a
+        // sibling tier, not a PackStore impl, so we check it first
+        // for is_inline rows before going to the pack.
+        let materialized = if info.is_inline {
+            match try_inline_image_materialize(boot_state, &content_hash).await? {
+                Some(m) => m,
+                None => {
+                    // is_inline row but no row in inline_images -
+                    // could be a stale sync that never persisted.
+                    // Fall through to PackStore which will surface
+                    // the absence as ServiceError::Internal.
+                    attachment_materialize::materialize_blob(boot_state, &content_hash).await?
+                }
+            }
+        } else {
+            attachment_materialize::materialize_blob(boot_state, &content_hash).await?
+        };
         let MaterializedBlob {
             path: _,
             relative_path,
             size_bytes,
-        } = attachment_materialize::materialize_blob(boot_state, &content_hash).await?;
+        } = materialized;
 
         if should_enqueue_extraction(info.extraction_status.as_deref()) {
             enqueue_extraction_if_runtime_installed(

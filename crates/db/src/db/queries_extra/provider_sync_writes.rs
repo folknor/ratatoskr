@@ -149,6 +149,7 @@ pub struct AttachmentCacheInfo {
     pub imap_part_id: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub mime_type: Option<String>,
+    pub is_inline: bool,
     pub text_indexed_at: Option<i64>,
     pub extraction_status: Option<String>,
 }
@@ -166,7 +167,7 @@ pub fn find_attachment_cache_info(
     let mut stmt = conn
         .prepare(
             "SELECT a.id, a.remote_attachment_id, a.imap_part_id, a.content_hash, \
-                    a.mime_type, a.text_indexed_at, t.status AS extraction_status \
+                    a.mime_type, a.is_inline, a.text_indexed_at, t.status AS extraction_status \
              FROM attachments a \
              LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash \
              WHERE a.account_id = ?1 AND a.message_id = ?2 \
@@ -185,6 +186,7 @@ pub fn find_attachment_cache_info(
                     imap_part_id: row.get("imap_part_id")?,
                     content_hash: row.get("content_hash")?,
                     mime_type: row.get("mime_type")?,
+                    is_inline: row.get::<_, i64>("is_inline")? != 0,
                     text_indexed_at: row.get("text_indexed_at")?,
                     extraction_status: row.get("extraction_status")?,
                 })

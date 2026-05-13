@@ -55,6 +55,18 @@ pub(crate) async fn materialize_blob(
             ))
         })?;
 
+    write_bytes_to_tmp(boot_state, content_hash, bytes).await
+}
+
+/// Write a pre-fetched byte buffer to the same tmp-file layout
+/// `materialize_blob` uses. Inline-image attachments take this path
+/// (bytes come from `inline_images.db`, not PackStore) so the wire
+/// ack stays uniform.
+pub(crate) async fn write_bytes_to_tmp(
+    boot_state: &Arc<BootSharedState>,
+    content_hash: &BlobHash,
+    bytes: Vec<u8>,
+) -> Result<MaterializedBlob, ServiceError> {
     let size_bytes = bytes.len() as u64;
     let app_data = boot_state.app_data_dir().to_path_buf();
     let tmp_dir = app_data.join(TMP_DIR);
