@@ -401,11 +401,12 @@ pub enum Message {
     SnoozeResurfaceComplete(Result<usize, String>),
 
     /// Phase 7-6: hourly fan-out for `extract.backfill_kick`. The
-    /// Service-side handler scans `attachments WHERE cached_at IS NOT
-    /// NULL AND text_indexed_at IS NULL LIMIT 1000` and enqueues each
-    /// into the `ExtractRuntime`. Drop class - missed ticks self-heal
-    /// on the next hour. Also fired once on `ServiceBootReady` to
-    /// catch up after a Service crash mid-extraction.
+    /// Service-side handler scans `attachments` JOINed against
+    /// `attachment_blobs` for live (non-tombstoned) bytes with
+    /// `text_indexed_at IS NULL` and enqueues each into the
+    /// `ExtractRuntime`. Drop class - missed ticks self-heal on the
+    /// next hour. Also fired once on `ServiceBootReady` to catch up
+    /// after a Service crash mid-extraction.
     ExtractBackfillTick,
 
     /// Phase 7-9d: dispatched from the palette

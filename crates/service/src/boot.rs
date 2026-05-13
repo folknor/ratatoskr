@@ -160,6 +160,15 @@ pub(crate) struct BootSharedState {
     /// and the ExtractRuntime worker. Drain flushes the open pack
     /// before the clean-shutdown sentinel write.
     pack_store: Mutex<Option<Arc<store::PackStore>>>,
+    /// Attachments roadmap Phase 3: shared `InlineImageStoreReadState`
+    /// for the cache-hit fallback in `attachment.fetch`. The handler
+    /// previously called `InlineImageStoreReadState::init` per fetch,
+    /// opening a fresh SQLite connection + PRAGMAs each time. A single
+    /// shared handle is enough: `InlineImageStoreReadState` is `Clone`
+    /// (cheap `Arc<Mutex<Connection>>`) so callers can take a clone
+    /// without contending the boot-state mutex.
+    inline_image_read:
+        Mutex<Option<store::inline_image_store::InlineImageStoreReadState>>,
     /// Phase 7-9: in-flight `index.rebuild` task. Holds the
     /// rebuild_id, the `JoinHandle` for the spawned rebuild, and a
     /// `CancellationToken` the dispatch-side drain can cancel.
@@ -246,6 +255,7 @@ impl BootSharedState {
             search_writer_handle: Mutex::new(None),
             search_write: Mutex::new(None),
             pack_store: Mutex::new(None),
+            inline_image_read: Mutex::new(None),
             rebuild_task: Mutex::new(None),
             out_tx: Mutex::new(None),
             pending_schema_rebuild: std::sync::atomic::AtomicBool::new(false),
@@ -441,6 +451,35 @@ impl BootSharedState {
             .lock()
             .expect("pack_store mutex poisoned")
             .take()
+    }
+
+    /// Install the boot-constructed `InlineImageStoreReadState`. Called
+    /// once during the inline-image-store init step. Subsequent
+    /// installs are logged and ignored.
+    pub(crate) fn install_inline_image_read(
+        &self,
+        read: store::inline_image_store::InlineImageStoreReadState,
+    ) {
+        let mut slot = self
+            .inline_image_read
+            .lock()
+            .expect("inline_image_read mutex poisoned");
+        if slot.is_some() {
+            log::warn!("install_inline_image_read called twice; second install ignored");
+            return;
+        }
+        *slot = Some(read);
+    }
+
+    /// Clone the installed `InlineImageStoreReadState`. Returns `None`
+    /// if boot has not opened the store yet.
+    pub(crate) fn inline_image_read(
+        &self,
+    ) -> Option<store::inline_image_store::InlineImageStoreReadState> {
+        self.inline_image_read
+            .lock()
+            .expect("inline_image_read mutex poisoned")
+            .clone()
     }
 
     /// Phase 7-4d: install the `ExtractRuntime` once the post-ready
@@ -1184,6 +1223,13 @@ async fn run_boot_sequence_inner(
             log::error!("inline image store write init failed: {e}");
             BootFailure::MigrationFailure
         })?;
+    let inline_read =
+        store::inline_image_store::InlineImageStoreReadState::init(&app_data_dir)
+            .map_err(|e| {
+                log::error!("inline image store read init failed: {e}");
+                BootFailure::MigrationFailure
+            })?;
+    state.install_inline_image_read(inline_read);
 
     // Attachments roadmap Phase 3: open the pack store against the
     // main DB connection. `PackStore::open` runs the in-place open-pack

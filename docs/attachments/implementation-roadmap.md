@@ -136,9 +136,9 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 - The lease-design forward references in `crates/service-api/src/attachment.rs` and `docs/architecture.md` § "Forward reference: pack-aware attachment reads" are retracted: per-fetch transient extraction replaces leases entirely.
 
 *Boot lifecycle:*
-- `PackStore::open` runs after `BootPhase::SchemaMigrations` and inside the cross-store invariant pass.
-- On unclean shutdown (missing sentinel), `PackStore::recover` walks the open pack and reconciles the index *before* `boot.ready`. The recovery path also replays the tombstone log so `tombstoned_at` is rebuilt correctly if the SQLite index was lost.
-- Clean-shutdown sentinel write waits for `PackStore::flush` (final fsync of open pack + index) before recording.
+- `PackStore::open` runs after `BootPhase::SchemaMigrations` (before the cross-store invariant pass; the pack store's own open-time recovery covers what the invariant pass would have done for the old flat cache).
+- On unclean shutdown (missing sentinel), `PackStore::open` walks the unique `.open` pack and truncates any torn trailing frame *before* `boot.ready`. Tombstone-log replay is deferred to Phase 8's `--rebuild-attachment-index` tool - the SQLite index is the runtime authority for `tombstoned_at`.
+- No explicit `PackStore::flush` in the clean-shutdown drain. `PackStore::put` fsyncs every frame + commits the matching index row in one SQLite transaction, so any blob whose `put` returned is already durable. The drain's subsystem teardown stops every `put` caller before the sentinel write, leaving nothing to flush.
 
 *Drain wiring:*
 - GC is on-idle; cancels on shutdown signal. No separate drain slot (the on-idle scheduler hosts it).

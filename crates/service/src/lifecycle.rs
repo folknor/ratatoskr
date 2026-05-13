@@ -104,6 +104,16 @@ impl ServiceLifecycle {
     /// sentinel claimed clean state, leaving the next boot's invariant
     /// pass unable to detect the gap. The drain consolidation in
     /// `dispatch.rs` is what closes the race.
+    ///
+    /// PackStore is intentionally absent from the step list. The
+    /// attachments roadmap Phase 3 boot lifecycle sketched an explicit
+    /// `PackStore::flush()` call here, but `PackStore::put` already
+    /// fsyncs every frame + commits the matching index row inside a
+    /// single SQLite transaction, so any blob whose `put` returned has
+    /// already landed durably. By the time this sentinel runs steps 1-7
+    /// have stopped every subsystem that could call `put`, so there is
+    /// nothing to flush. The on-disk state is consistent without any
+    /// extra ordering.
     pub(crate) async fn drain(&self, cause: ShutdownCause) -> bool {
         *self
             .drain_result

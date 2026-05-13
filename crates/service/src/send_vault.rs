@@ -3,7 +3,7 @@
 //! Phase 2 task 13's bytes-ownership boundary. The UI writes attachment
 //! bytes into `<app_data>/staging/<send_id>/<index>.bin` before issuing
 //! `action.send`; the handler validates each path, verifies the
-//! declared SHA-256 hash, and atomically renames the file into the
+//! declared BLAKE3 hash, and atomically renames the file into the
 //! Service-owned vault under `<app_data>/send_vault/<send_id>/`. After
 //! the rename + journal write, the staging directory is the UI's
 //! responsibility; the vault is the Service's, unlinked when the job

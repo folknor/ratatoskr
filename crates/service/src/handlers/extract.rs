@@ -164,8 +164,8 @@ pub(crate) async fn handle_rebuild(
 /// Skips:
 /// - rows with no `content_hash` (the worker can't extract without
 ///   one; sync's normal write path always populates the hash before
-///   `cached_at`, so a NULL here means a sync ordering bug or a
-///   manually-injected row).
+///   the matching `attachment_blobs` row, so a NULL here means a sync
+///   ordering bug or a manually-injected row).
 /// - the call entirely if no `ExtractRuntime` is installed - this is
 ///   the case during shutdown and during the brief window before the
 ///   post-ready spawn finishes installing the runtime.

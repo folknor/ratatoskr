@@ -391,45 +391,51 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
             .or_insert_with(|| mime_type.clone());
     }
 
-    // Download unique blobs in parallel with bounded concurrency
-    let blob_cache: HashMap<String, (String, Vec<u8>, String)> = stream::iter(unique_blobs)
-        .map(|(blob_id, mime_type)| async move {
-            let inner = ctx.client.inner();
-            match inner.download(&blob_id).await {
-                Ok(data) if data.len() <= MAX_INLINE_SIZE => {
-                    let content_hash = db::blob_hash::BlobHash::hash(&data).to_hex();
-                    Some((blob_id, (content_hash, data.to_vec(), mime_type)))
+    // Download unique blobs in parallel with bounded concurrency.
+    // `attachments.content_hash` is a `BLOB(32)` BLAKE3; `inline_images`
+    // is a separate SQLite store keyed by hex. Carry the `BlobHash`
+    // through the update path and convert to hex only at the
+    // `InlineImage` boundary so the column types stay aligned with the
+    // rest of the attachment subsystem.
+    let blob_cache: HashMap<String, (db::blob_hash::BlobHash, Vec<u8>, String)> =
+        stream::iter(unique_blobs)
+            .map(|(blob_id, mime_type)| async move {
+                let inner = ctx.client.inner();
+                match inner.download(&blob_id).await {
+                    Ok(data) if data.len() <= MAX_INLINE_SIZE => {
+                        let content_hash = db::blob_hash::BlobHash::hash(&data);
+                        Some((blob_id, (content_hash, data.to_vec(), mime_type)))
+                    }
+                    Ok(_) => None,
+                    Err(error) => {
+                        log::warn!("Failed to download JMAP inline blob {blob_id}: {error}");
+                        None
+                    }
                 }
-                Ok(_) => None,
-                Err(error) => {
-                    log::warn!("Failed to download JMAP inline blob {blob_id}: {error}");
-                    None
-                }
-            }
-        })
-        .buffer_unordered(INLINE_BLOB_CONCURRENCY)
-        .filter_map(|opt| async { opt })
-        .collect()
-        .await;
+            })
+            .buffer_unordered(INLINE_BLOB_CONCURRENCY)
+            .filter_map(|opt| async { opt })
+            .collect()
+            .await;
 
     if blob_cache.is_empty() {
         return;
     }
 
-    // Build attachment -> content_hash mapping for DB updates
-    let updates: Vec<(String, String)> = eligible
+    // Build attachment -> content_hash mapping for DB updates.
+    let updates: Vec<(String, db::blob_hash::BlobHash)> = eligible
         .iter()
         .filter_map(|(attachment_row_id, blob_id, _)| {
             blob_cache
                 .get(blob_id)
-                .map(|(content_hash, _, _)| (attachment_row_id.clone(), content_hash.clone()))
+                .map(|(content_hash, _, _)| (attachment_row_id.clone(), *content_hash))
         })
         .collect();
 
     let images: Vec<InlineImage> = blob_cache
         .into_values()
         .map(|(content_hash, data, mime_type)| InlineImage {
-            content_hash,
+            content_hash: content_hash.to_hex(),
             data,
             mime_type,
         })

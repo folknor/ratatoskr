@@ -261,8 +261,8 @@ pub(super) async fn seed_cached_attachment_handle(
     let bytes = params.content.into_bytes();
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
-    let cache_size = i64::try_from(bytes.len())
-        .map_err(|e| ServiceError::Internal(format!("attachment cache size conversion: {e}")))?;
+    let size_i64 = i64::try_from(bytes.len())
+        .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
     let content_hash = pack_store
         .put(bytes)
         .await
@@ -295,7 +295,7 @@ pub(super) async fn seed_cached_attachment_handle(
                     attachment_id: &attachment_id,
                     filename: &filename,
                     mime_type: &mime_type,
-                    cache_size,
+                    size_bytes: size_i64,
                     content_hash: &content_hash,
                 },
             )
@@ -837,7 +837,7 @@ struct CachedAttachmentInsert<'a> {
     attachment_id: &'a str,
     filename: &'a str,
     mime_type: &'a str,
-    cache_size: i64,
+    size_bytes: i64,
     content_hash: &'a db::blob_hash::BlobHash,
 }
 
@@ -874,7 +874,7 @@ fn insert_harness_cached_attachment(
             insert.account_id,
             insert.filename,
             insert.mime_type,
-            insert.cache_size,
+            insert.size_bytes,
             insert.content_hash,
         ],
     )
@@ -1501,8 +1501,8 @@ fn read_harness_attachments(
             let mut stmt = conn
                 .prepare(
                     "SELECT a.id, a.account_id, a.message_id, a.filename, a.mime_type,
-                            a.size, a.local_path, a.cached_at, a.cache_size,
-                            a.content_hash, a.text_indexed_at, t.status, t.extracted_text
+                            a.size, a.content_hash, a.text_indexed_at,
+                            t.status, t.extracted_text
                      FROM attachments a
                      LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash
                      WHERE a.account_id = ?1
@@ -1519,8 +1519,8 @@ fn read_harness_attachments(
             let mut stmt = conn
                 .prepare(
                     "SELECT a.id, a.account_id, a.message_id, a.filename, a.mime_type,
-                            a.size, a.local_path, a.cached_at, a.cache_size,
-                            a.content_hash, a.text_indexed_at, t.status, t.extracted_text
+                            a.size, a.content_hash, a.text_indexed_at,
+                            t.status, t.extracted_text
                      FROM attachments a
                      LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash
                      ORDER BY a.account_id ASC, a.message_id ASC, a.id ASC
@@ -1753,15 +1753,12 @@ fn test_db_attachment_from_row(
         filename: row.get(3)?,
         mime_type: row.get(4)?,
         size: row.get(5)?,
-        local_path: row.get(6)?,
-        cached_at: row.get(7)?,
-        cache_size: row.get(8)?,
         content_hash: row
-            .get::<_, Option<db::blob_hash::BlobHash>>(9)?
+            .get::<_, Option<db::blob_hash::BlobHash>>(6)?
             .map(|h| h.to_hex()),
-        text_indexed_at: row.get(10)?,
-        extraction_status: row.get(11)?,
-        extracted_text: row.get(12)?,
+        text_indexed_at: row.get(7)?,
+        extraction_status: row.get(8)?,
+        extracted_text: row.get(9)?,
     })
 }
 

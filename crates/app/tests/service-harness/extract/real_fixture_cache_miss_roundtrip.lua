@@ -75,7 +75,6 @@ local function seed_remote_attachment(client, account_id, message_id, spec)
     local before = query_attachment(client, account_id, ack.attachment_id)
     harness.assert(before ~= nil, spec.filename .. " row missing before fetch")
     harness.assert(before.content_hash == nil, spec.filename .. " unexpectedly cached before fetch")
-    harness.assert(before.local_path == nil, spec.filename .. " unexpectedly has local path")
 
     local fetched, fetch_err = client:request("AttachmentFetch", {
         account_id = account_id,

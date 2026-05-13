@@ -1,5 +1,16 @@
--- description: extract backfill records bytes_gone when cached bytes vanish
+-- description: extract backfill skips tombstoned (bytes-gone) attachment rows
 -- ceiling: 90s
+--
+-- Attachments roadmap Phase 3 changed the semantics this test exercises.
+-- Pre-Phase-3 the flat cache stored bytes at `attachment_cache/<hash>`
+-- and removing the file left the `attachments` row pointing at a path
+-- with no bytes; backfill picked that up and the worker recorded
+-- `skipped:bytes_gone`. Post-Phase-3 the bytes live in PackStore and
+-- `TestRemoveCachedAttachmentBytes` *tombstones* the blob. The Phase-3
+-- backfill query joins `attachment_blobs` with `tombstoned_at IS NULL`,
+-- so a tombstoned row is intentionally never enqueued. The Phase-3
+-- invariant this test now asserts: backfill does not touch tombstoned
+-- rows (extraction_status stays nil).
 
 local function attachment_by_id(state, attachment_id)
     for _, attachment in ipairs(state.attachments) do
@@ -88,28 +99,33 @@ local before = query_attachment(
     attachment.attachment_id
 )
 harness.assert(before ~= nil, "seeded attachment row missing")
-harness.assert_eq(before.local_path, attachment.relative_path, "cache metadata path")
-harness.assert(before.cached_at ~= nil, "cache metadata timestamp")
+harness.assert(before.content_hash ~= nil, "seeded row missing content_hash")
 harness.assert(before.text_indexed_at == nil, "initial text indexed marker")
 harness.assert(before.extraction_status == nil, "initial extraction status")
 
 request_backfill(client)
-local skipped = wait_for_extraction_status(
+-- Allow the backfill kick to complete its scan. With the row's blob
+-- tombstoned, the Phase-3 backfill query filters it out and the worker
+-- never sees an enqueue; the assertions below pin that behavior.
+harness.sleep(2000)
+
+local after = query_attachment(
     client,
     account.account_id,
-    attachment.attachment_id,
-    "skipped:bytes_gone",
-    30
+    attachment.attachment_id
 )
-harness.assert(skipped ~= nil, "missing bytes were not recorded as bytes_gone")
-harness.assert(skipped.text_indexed_at == nil, "bytes_gone text indexed marker")
-harness.assert(skipped.extracted_text == nil, "bytes_gone extracted text")
+harness.assert(after ~= nil, "attachment row missing after backfill")
+harness.assert(after.extraction_status == nil, "tombstoned row should not be processed")
+harness.assert(after.text_indexed_at == nil, "tombstoned row should not be indexed")
+harness.assert(after.extracted_text == nil, "tombstoned row should not have extracted text")
 
 local status, status_err = client:request("ExtractStatus")
 harness.assert(status_err == nil, "extract.status failed")
 harness.assert_eq(status.queue_depth, 0, "queue depth")
 harness.assert_eq(status.indexed_total, 0, "indexed total")
-harness.assert_eq(status.skipped_total, 1, "skipped total")
+-- Phase 3: tombstoned rows are filtered out by the backfill query
+-- and never reach the worker; no skip is recorded.
+harness.assert_eq(status.skipped_total, 0, "skipped total")
 harness.assert_eq(status.failed_total, 0, "failed total")
 
 local ok, shutdown_err = client:shutdown()

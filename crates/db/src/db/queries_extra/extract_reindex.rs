@@ -186,8 +186,9 @@ pub fn reset_extracted_text_for_rebuild(conn: &Connection) -> Result<(), String>
 }
 
 /// Phase 7-6: post-boot backfill query. Returns up to `limit`
-/// attachment rows that are cached on disk (`cached_at IS NOT NULL`)
-/// but have no extracted-text pointer yet (`text_indexed_at IS NULL`).
+/// attachment rows whose bytes are still live in PackStore
+/// (`attachment_blobs.tombstoned_at IS NULL`) but have no
+/// extracted-text pointer yet (`text_indexed_at IS NULL`).
 /// Uses the partial `idx_attachments_text_indexed_at` index.
 ///
 /// Caller (`handle_backfill_kick`) iterates the result and enqueues

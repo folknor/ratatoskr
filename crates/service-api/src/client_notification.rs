@@ -73,13 +73,14 @@ pub enum ClientNotification {
     /// Phase 7-6: "The UI's tick fired (or boot.ready just resolved);
     /// please consider scanning cached + unindexed attachments and
     /// enqueuing them into the ExtractRuntime." The Service handler
-    /// runs `SELECT id, content_hash, account_id, message_id FROM
-    /// attachments WHERE cached_at IS NOT NULL AND text_indexed_at IS
-    /// NULL LIMIT 1000` and enqueues each. NOT fanned out from the
-    /// 5-min `Message::SyncTick` always-on path - the UI emits this
-    /// once on `boot.ready` plus from a separate hourly subscription
-    /// (event-driven cadence per the post-review revision). `Drop`
-    /// class - missed kicks self-heal on the next hourly trigger.
+    /// SELECTs up to 1000 `attachments` rows JOINed against
+    /// `attachment_blobs` (filtered on `tombstoned_at IS NULL`) where
+    /// `text_indexed_at IS NULL` and enqueues each. NOT fanned out
+    /// from the 5-min `Message::SyncTick` always-on path - the UI
+    /// emits this once on `boot.ready` plus from a separate hourly
+    /// subscription (event-driven cadence per the post-review
+    /// revision). `Drop` class - missed kicks self-heal on the next
+    /// hourly trigger.
     #[serde(rename = "extract.backfill_kick")]
     ExtractBackfillKick,
 }

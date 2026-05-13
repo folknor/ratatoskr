@@ -32,11 +32,13 @@ async fn try_inline_image_materialize(
     boot_state: &Arc<BootSharedState>,
     content_hash: &db::blob_hash::BlobHash,
 ) -> Result<Option<MaterializedBlob>, ServiceError> {
-    let app_data = boot_state.app_data_dir().to_path_buf();
-    let read = store::inline_image_store::InlineImageStoreReadState::init(&app_data)
-        .map_err(|e| {
-            ServiceError::Internal(format!("inline image store open: {e}"))
-        })?;
+    let read = boot_state.inline_image_read().ok_or_else(|| {
+        ServiceError::Internal(
+            "inline image store not installed; UI must wait for boot.ready before \
+             attachment.fetch"
+                .into(),
+        )
+    })?;
     let hit = read
         .get(content_hash.to_hex())
         .await

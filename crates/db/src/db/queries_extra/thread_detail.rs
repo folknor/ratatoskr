@@ -513,15 +513,19 @@ pub fn query_inline_cid_hashes(
              WHERE a.account_id = ?1 AND m.thread_id = ?2 \
                AND a.is_inline = 1 \
                AND a.content_id IS NOT NULL AND a.content_id != '' \
-               AND a.content_hash IS NOT NULL AND a.content_hash != ''",
+               AND a.content_hash IS NOT NULL",
         )
         .map_err(|e| format!("prepare inline CID query: {e}"))?;
 
+    // `attachments.content_hash` is a `BLOB(32)` BLAKE3; the inline
+    // image store is keyed by hex. Read as `BlobHash` and convert at
+    // the boundary so the column type stays uniform.
     let rows = stmt
         .query_map(params![account_id, thread_id], |row| {
             Ok((
                 row.get::<_, String>("content_id")?,
-                row.get::<_, String>("content_hash")?,
+                row.get::<_, crate::blob_hash::BlobHash>("content_hash")?
+                    .to_hex(),
             ))
         })
         .map_err(|e| format!("query inline CIDs: {e}"))?

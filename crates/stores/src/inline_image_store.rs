@@ -46,8 +46,16 @@ pub fn open_inline_image_store_connection(app_data_dir: &Path) -> Result<Connect
 
 /// Separate SQLite database for small inline images (signatures, logos).
 ///
-/// Content-addressed by xxh3 hash. Identical blobs across messages share
-/// one row. No compression - images are already compressed (PNG, JPEG, GIF).
+/// Content-addressed by hex-encoded hash. Identical blobs across
+/// messages share one row. No compression - images are already
+/// compressed (PNG, JPEG, GIF).
+///
+/// Hash algorithm note: rows written by the JMAP inline sync path and
+/// the local-attachment compose path use BLAKE3 hex (matching the
+/// `attachments.content_hash` BLOB so the table can be joined). The
+/// older `signature_images.rs` path still emits xxh3 hex. Both kinds
+/// of keys coexist in the same table; the column is opaque
+/// `TEXT PRIMARY KEY`.
 #[derive(Clone)]
 pub struct InlineImageStoreReadState {
     conn: Arc<Mutex<Connection>>,

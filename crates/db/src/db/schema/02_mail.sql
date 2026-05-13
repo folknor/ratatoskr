@@ -168,9 +168,9 @@ CREATE INDEX IF NOT EXISTS idx_attachments_text_indexed_at
 
 -- Phase 7: attachment text extraction store, keyed by content_hash so two
 -- attachments with identical bytes share one row and so the row survives
--- attachment-cache eviction (eviction nulls local_path/cached_at/cache_size
--- but keeps content_hash). status taxonomy (string-tagged so future-
--- extensible without enum migration):
+-- attachment-cache eviction (PackStore tombstones the blob in
+-- `attachment_blobs`; `attachments.content_hash` is untouched).
+-- status taxonomy (string-tagged so future-extensible without enum migration):
 --   permanent (no retry): 'indexed', 'skipped:opaque', 'skipped:encrypted',
 --     'skipped:oversize', 'skipped:encoding', 'skipped:empty',
 --     'skipped:ocr', 'skipped:unknown_mime', 'skipped:privacy',

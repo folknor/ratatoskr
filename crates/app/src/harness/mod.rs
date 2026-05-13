@@ -26,7 +26,6 @@ use service_api::{
     TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
     WireFolderId, WireMailOperation, WireTagId,
 };
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
@@ -718,7 +717,11 @@ fn lua_stage_attachment(state: &mut State) -> dellingr::Result<u8> {
     // ~6400. The wrapper also covers the small-payload branch for free.
     let file = std::fs::File::create(staging_dir.join(&relative_path)).map_err(lua_io)?;
     let mut writer = BufWriter::with_capacity(64 * 1024, file);
-    let mut hasher = Sha256::new();
+    // BLAKE3 to match `service::send_vault::verify_and_transfer`,
+    // which re-hashes the staged file with `blake3_file` and rejects
+    // any hash that does not match. The harness previously hashed
+    // with SHA-256, which mismatched on every staged send.
+    let mut hasher = blake3::Hasher::new();
     let size = if state.typ(4) == LuaType::Table {
         let len = get_number_field(state, 4, "size")?
             .ok_or_else(|| lua_error_message("stage_attachment payload requires size"))?
@@ -746,8 +749,7 @@ fn lua_stage_attachment(state: &mut State) -> dellingr::Result<u8> {
         bytes.len()
     };
     writer.flush().map_err(lua_io)?;
-    let mut content_hash = [0_u8; 32];
-    content_hash.copy_from_slice(&hasher.finalize());
+    let content_hash = *hasher.finalize().as_bytes();
     let content_hash_vec = content_hash.to_vec();
     let value = serde_json::json!({
         "relative_path": relative_path,

@@ -202,12 +202,8 @@ pub fn find_attachment_cache_info(
 }
 
 /// Record the content hash of an attachment row after its bytes have
-/// been persisted in PackStore. `cache_size` mirrors the persisted
-/// length and stays informational on `attachments.size` only if the
-/// caller chose to pre-fill that column (the wire-side provider sync
-/// already does); this function does not touch `size`. The flat-cache
-/// columns (`local_path`, `cached_at`, `cache_size`) retired with the
-/// attachments roadmap Phase 3 flat-cache retirement.
+/// been persisted in PackStore. Only touches `content_hash`;
+/// `attachments.size` is expected to be pre-filled by the sync path.
 pub fn update_attachment_cache_fields(
     conn: &Connection,
     attachment_id: &str,
