@@ -138,6 +138,12 @@ pub(crate) struct BootSharedState {
     /// shape churn. Same install-once pattern as `calendar_runtime`.
     #[allow(dead_code)] // 7-4 follow-up wires producers.
     extract_runtime: Mutex<Option<crate::extract::ExtractRuntime>>,
+    /// Attachments roadmap Phase 4: `PrefetchRuntime` slot. Installed
+    /// by `spawn_post_ready_prefetch_startup`. Drain order in
+    /// `Subsystems::drain_runtimes` takes it between
+    /// `drain_sync` (sync feeds prefetch) and `drain_extract`
+    /// (whose backfill consumes the same rows once bytes land).
+    prefetch_runtime: Mutex<Option<crate::prefetch::PrefetchRuntime>>,
     /// `JoinHandle` of the search-writer task. Phase 3 spawned it and
     /// discarded the handle; Phase 4 review-pass fix captures it so the
     /// consolidated drain can await termination after every
@@ -252,6 +258,7 @@ impl BootSharedState {
             push_runtime: Mutex::new(None),
             calendar_runtime: Mutex::new(None),
             extract_runtime: Mutex::new(None),
+            prefetch_runtime: Mutex::new(None),
             search_writer_handle: Mutex::new(None),
             search_write: Mutex::new(None),
             pack_store: Mutex::new(None),
@@ -541,6 +548,55 @@ impl BootSharedState {
         self.extract_runtime
             .lock()
             .expect("extract_runtime mutex poisoned")
+            .take()
+    }
+
+    /// Attachments roadmap Phase 4: install the `PrefetchRuntime`.
+    /// Shape mirrors `install_extract_runtime` - guarded by
+    /// `is_shutting_down` so a startup spawn that loses the race
+    /// against drain drops the runtime cleanly instead of orphaning
+    /// the worker's `NotificationSender` clone.
+    pub(crate) fn install_prefetch_runtime(
+        &self,
+        runtime: crate::prefetch::PrefetchRuntime,
+    ) {
+        let mut guard = self
+            .prefetch_runtime
+            .lock()
+            .expect("prefetch_runtime mutex poisoned");
+        if self.is_shutting_down() {
+            log::debug!(
+                "BootSharedState::install_prefetch_runtime called during shutdown; dropping",
+            );
+            drop(guard);
+            drop(runtime);
+            return;
+        }
+        if guard.is_some() {
+            log::warn!(
+                "BootSharedState::install_prefetch_runtime called twice; second install ignored",
+            );
+            return;
+        }
+        *guard = Some(runtime);
+    }
+
+    /// Attachments roadmap Phase 4: snapshot the `PrefetchRuntime`
+    /// for enqueue sites (post-sync sweep, account-add kick).
+    pub(crate) fn prefetch_runtime(&self) -> Option<crate::prefetch::PrefetchRuntime> {
+        self.prefetch_runtime
+            .lock()
+            .expect("prefetch_runtime mutex poisoned")
+            .clone()
+    }
+
+    /// Attachments roadmap Phase 4: drain helper takes the runtime out
+    /// so its `shutdown()` releases the `NotificationSender` clone
+    /// before the action-worker await.
+    pub(crate) fn take_prefetch_runtime(&self) -> Option<crate::prefetch::PrefetchRuntime> {
+        self.prefetch_runtime
+            .lock()
+            .expect("prefetch_runtime mutex poisoned")
             .take()
     }
 
@@ -1365,6 +1421,7 @@ async fn run_boot_sequence_inner(
         notification_tx,
         app_data_dir.clone(),
         0,
+        Arc::clone(&state),
     ));
     state.install_sync_runtime(runtime);
 

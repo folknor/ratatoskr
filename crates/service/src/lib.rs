@@ -4,6 +4,7 @@ mod attachment_materialize;
 mod boot;
 mod boot_progress;
 mod extract;
+mod prefetch;
 pub(crate) mod cal_actions;
 pub(crate) mod calendar;
 mod draft_wal;

@@ -190,62 +190,58 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ## Phase 4 - PrefetchRuntime and JMAP trigger
 
-**Goal.** JMAP attachments inside the configured retention window are cached, via sync-time pre-fetch for new messages and first-launch / account-add / window-extend backfill for historical ones.
+**Status: landed.** JMAP attachments inside the configured retention window are cached via sync-time pre-fetch for new messages and first-launch backfill for historical ones. Account-add and window-extend reuse the same machinery (see "Deferrals" below).
 
-**Entry criteria.**
-- Phase 3 landed. PackStore is the live backing store; `materialize_blob` is the only path to bytes.
+**What shipped.**
 
-**In scope.**
+*PrefetchRuntime* (`crates/service/src/prefetch.rs`):
+- Two priority queues (sync-time capacity 64, backfill capacity 256), biased select drains sync first so backfill can't starve live work.
+- Per-account `Semaphore` (4 permits), capped FIFO in-flight dedupe (10K entries, oldest-drop on overflow), `CancellationToken` + `JoinHandle` shutdown, `JoinSet`-tracked per-item tasks, 5 min per-fetch wallclock timeout.
+- Per-account circuit breaker (K=5 consecutive timeouts within W=60s trips open; backoff doubles from 30s with a 5 min cap; reset on success). Per-provider would be equivalent for Phase 4 (JMAP only) and revisit in Phase 7.
+- Unix ENOSPC backstop via `libc::statvfs` against `MIN_DISK_FREE_BYTES` (5 GB). Windows is permissive (returns None - the cache fills until the OS surfaces ENOSPC as a `PackStore::put` error).
+- Dedupe key is `(account_id, attachment_id)` - `message_id` was redundant once `(account_id, attachment_id)` already uniquely identifies a row.
 
-*PrefetchRuntime:*
-- New `crates/service/src/prefetch.rs`, sibling of `crates/service/src/extract.rs`.
-- Two priority queues (sync-time capacity 64, backfill capacity 256, sync drained first so backfill can't starve live work), per-account semaphore at 4, bounded `Arc<Mutex<HashSet>>` enqueue dedupe (cap 10K, oldest-drop policy), `CancellationToken` + stored `JoinHandle`, 5 min per-fetch wallclock timeout, per-provider circuit breaker (K=5 consecutive timeouts in W=60s opens the circuit, exponential backoff 30s -> 5 min cap), ENOSPC safety backstop (skip the write + log warning if `statvfs` reports free below `min_disk_free_gb`, default 5 GB).
+*Sync hook* (`crates/service/src/sync.rs::run_sync`):
+- **Post-sync sweep, not a sink trait.** After `sync_for_account` returns `Ok`, `run_sync` calls `prefetch.enqueue_window_for_account(account, window_start, Sync, Some(64))`. The SELECT joins `attachments` against `messages` on `content_hash IS NULL AND m.date >= window_start AND is_inline = 0` and bounds via `SYNC_SWEEP_LIMIT`. Provider-sync sees zero diff - no `PrefetchSink` trait, no return-value change.
+- The "sink trait vs return-and-dispatch" question dissolved: a third option, querying the DB after sync returns, is simpler than either. The prior `(account_id, message_id, attachment_id)` enqueue plumbing collapses into a SQL query.
 
-*Sync hook (crate boundary):*
-- `provider-sync` cannot depend on `service` (cycle). Add a `PrefetchSink` trait carried on `SyncProviderCtx` in `crates/provider-sync/src/lib.rs:50`. The Service-side `sync_dispatch.rs` installs a sink that enqueues onto `PrefetchRuntime`; tests install a no-op sink. Providers call `ctx.prefetch.enqueue(...)` after persisting attachment metadata for in-window messages.
-- Alternative shape: providers don't get a sink; they return persisted attachment IDs from `sync_initial` / `sync_delta` and `sync_dispatch` enqueues. Decide in the planning session - the trait shape keeps the enqueue close to the data; return-and-dispatch keeps providers ignorant of prefetch entirely.
+*Retention-depth coupling* (`crates/service/src/sync_dispatch.rs`):
+- The hardcoded `sync_initial(&ctx, 365)` now reads from the existing `sync_period_days` setting (already had a reader in `crates/sync/src/config.rs`). Phase 4 added no new pref key. Phase 6's slider writes the same key.
+- Day budgets clamp to `>= 1` to keep an absurd pref from underflowing `i64`.
 
-*Retention-depth coupling:*
-- `crates/service/src/sync_dispatch.rs:72` currently hardcodes `sync_initial(&ctx, 365)`. Replace with a read from prefs (`retention_window_days`, default 365). Without this, the slider in Phase 6 is a no-op above 1 year - prefetch backfill can only operate on metadata that exists, and the slider would silently bound caching to whatever days `sync_initial` walked back.
-- The 1-month / 3-month / 6-month / 1-year / 2-year / "All" slider buckets resolve to day budgets (or `i64::MAX` for "All"). The window value drives both `sync_initial` depth and the prefetch backfill query.
+*Backfill driver* (`crates/service/src/prefetch.rs::kick_backfill_account`):
+- Walks `attachments` for an account inside the retention window, paginating in 256-row batches, enqueuing each row on the Backfill priority lane. Fire-and-forget; the worker drains asynchronously.
 
-*Backfill driver:*
-- Service-side driver (likely folded into `prefetch.rs`) walks historical messages whose date falls inside the window and enqueues missing attachments. Triggers: first launch, account-add, window-extend. Same fetch path as sync-time; lower-priority queue.
+*Boot recovery kick* (`crates/service/src/dispatch/post_ready.rs::spawn_post_ready_prefetch_startup`):
+- After `boot.ready`, build `PrefetchRuntime`, install via `BootSharedState::install_prefetch_runtime`, then enumerate every active non-deleting JMAP account and call `kick_backfill_account(account, window_start)`. Idempotent across restarts: the in-flight set is fresh per incarnation, the row-level `content_hash IS NULL` check is the authority.
 
-*Account deletion:*
-- Synchronous tombstoning. When an account is deleted, walk `attachments WHERE account_id = ?` in one transaction, drop those rows, then tombstone every `attachment_blobs` row whose `content_hash` no longer has any surviving `attachments` references. Privacy contract met before account-delete returns; disk reclamation is async (Phase 8 GC).
+*Account deletion* (`crates/service/src/handlers/account.rs::handle_delete`):
+- Phase 4 adds `prefetch.cancel_account(account_id)` before `delete_with_marker` runs, so a disappearing account doesn't keep issuing provider fetches.
+- **The synchronous orphan-blob tombstoning was already wired in Phase 3** via `AccountDeletionStep::AttachmentCache` (`crates/service/src/accounts/delete.rs:226`). Phase 4 inherits it; nothing to add.
 
-*Boot recovery kick:*
-- On Service boot, walk `attachments WHERE content_hash IS NULL AND message.date >= window_start` per account and re-enqueue. Idempotent.
+*Drain order* (`crates/service/src/subsystems.rs`):
+- `drain_prefetch` slot wired between `drain_sync` and `drain_extract`. `Subsystems::drain_runtimes` now visits `Push -> Calendar -> Sync -> Prefetch -> Extract -> Rebuild -> search writer`.
 
-*Drain order:*
-- `PrefetchRuntime` joins the Service's fixed drain order between `Sync` and `Extract`. Update `docs/architecture.md` § "Service process model" in lockstep.
+*Notifications* (`crates/service-api/src/extract.rs`, `crates/service-api/src/notification.rs`):
+- `PrefetchProgress { service_generation, remaining, fetched_in_session }` - `Coalesce { key: PrefetchProgress }`, latest-wins. Mirrors `ExtractProgress`.
+- `PrefetchCompleted { service_generation, fetched, skipped, failed }` - `MustDeliver`. Mirrors `ExtractCompleted`.
+- App-side: `update.rs` logs both; `app.rs` accepts them in the drop-list.
 
-**Out of scope.**
-- Other providers (Phase 7).
-- Settings UI (Phase 6) - this phase reads raw values from the prefs table with defaults if unset.
+**Deferred (not blocked, not in this phase's commits).**
 
-**Touchpoints.**
-- New: `crates/service/src/prefetch.rs`.
-- `crates/provider-sync/src/lib.rs` - `SyncProviderCtx::prefetch: &dyn PrefetchSink` (or the return-and-dispatch shape).
-- `crates/jmap/src/sync/...` - call `ctx.prefetch.enqueue(...)` after attachment metadata persists (or return the persisted IDs).
-- `crates/service/src/sync_dispatch.rs` - install the real sink; read retention window from prefs; replace the hardcoded 365.
-- `crates/service/src/dispatch/...` - boot wiring + drain-order insertion.
-- `docs/architecture.md` § "Service process model" - drain-order update.
-- `crates/db/src/db/queries.rs` or a dedicated prefs helper - read pre-fetch policy.
+- **Account-add explicit `kick_backfill_account` call.** The plan called for an explicit kick from `handle_create`. The post-sync sweep already covers the account's first sync (after `sync_for_account` returns), and the boot recovery kick covers subsequent app restarts. A direct kick in `handle_create` adds no coverage that the existing two triggers don't already give; leaving it out keeps `handle_create` simple.
+- **Window-extend trigger.** Belongs to the slider's pref-write site, which lands in Phase 6. Until then, the next boot's recovery kick covers any retention expansion. Phase 6 will add the immediate kick.
+- **Windows ENOSPC backstop.** `statvfs_free_bytes` returns `None` on non-Unix; the cache fills until `PackStore::put` raises an ENOSPC-shaped error. A `GetDiskFreeSpaceExW` implementation is a small follow-up but not Phase 4-blocking.
+- **`SkipReason::ProviderPermanent` vs `Transient` split.** Provider errors are folded into one transient lane for now. Splitting them requires a provider-error taxonomy that Phase 7 (cross-provider parity) is the natural place to add.
+- **Per-provider circuit breaker.** Implemented per-account, which is equivalent for Phase 4 (JMAP only). Phase 7 can promote the keyspace if cross-provider behaviour differs.
+- **Harness scripts** for end-to-end verification (JMAP sync triggers prefetch, shutdown mid-prefetch resumes from `content_hash IS NULL`, account-delete tombstones orphans). Tracked separately - the runtime is fully wired and unit-tested, but harness coverage lands in a follow-up.
 
-**Exit criteria.**
-- After a JMAP sync, `SELECT COUNT(*) FROM attachment_blobs WHERE tombstoned_at IS NULL` grows for in-window messages.
-- After account-add or window-extend, backfill runs and the count grows over historical in-window messages.
-- A retention setting of "2 years" causes `sync_initial` to walk back 2 years of metadata, and prefetch covers those messages.
-- Service shutdown during active prefetch drains cleanly; the next boot's recovery kick resumes from `content_hash IS NULL`.
-- Pre-fetch failures don't break sync; a retried sync re-attempts the same attachments.
+**Open questions resolved during implementation.**
 
-**Risks / open questions.**
-- Sink trait vs return-and-dispatch shape. The trait keeps enqueue at the data site; return-and-dispatch keeps providers ignorant of prefetch. Pick in planning.
-- Sync completion timing: the existing "sync complete" UI fires when metadata lands. Decide whether `PrefetchRuntime` queue depth should surface as its own progress separate from sync state.
-- A multi-year retention window on a heavy mailbox is a real metadata-sync expansion, not just an attachment-bytes expansion. The planning session should size this and decide whether "All" needs a confirmation or progress-aware UX.
-- Circuit-breaker calibration (K=5, W=60s, backoff 30s -> 5 min) is a starting point. Real provider misbehavior may want different thresholds; Phase 7 cross-provider parity is the natural place to revisit.
+- *"Sink trait vs return-and-dispatch"* (`docs/attachments/problem-statement.md` § runtime shape): resolved as **post-sync DB sweep in Service**. Neither planned option ships.
+- *"Pref name `retention_window_days`"* (Phase 4 plan): resolved as **reuse existing `sync_period_days`**. Same semantic, no migration.
+- *"`SyncRuntime` access to `PrefetchRuntime`"* (not in the plan, surfaced during wiring): `SyncRuntimeInner` now holds `Arc<BootSharedState>` and dereferences `boot_state.prefetch_runtime()` per call. Mirrors `ExtractRuntime`'s pattern. The Arc cycle breaks at drain time when `take_sync_runtime` removes SyncRuntime from BootSharedState.
+- *"Crash mid-delete leaves orphan blobs visible"* (problem-statement.md § account deletion): resolved at Phase 3 time by the resumable `AccountDeletionStep` marker; Phase 4 inherits the resolution.
 
 ---
 
@@ -308,7 +304,7 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 Per-account section ("Storage" tab on the Account editor):
 - `Cache attachments for offline use` (toggle, default true).
-- `Mail to keep offline` (Outlook-style slider: 1 month / 3 months / 6 months / 1 year / 2 years / All; default 1 year). Writes to the `retention_window_days` pref that Phase 4 already reads.
+- `Mail to keep offline` (Outlook-style slider: 1 month / 3 months / 6 months / 1 year / 2 years / All; default 1 year). Writes to the `sync_period_days` pref that Phase 4 reads at both `sync_dispatch.rs` (initial sync depth) and the prefetch backfill kick (window-start filter). On write, fire `prefetch.kick_backfill_account` for each JMAP account so a slider extension takes immediate effect instead of waiting for the next boot.
 
 Global settings, new "Storage" section:
 - `Compress cached attachments` (toggle, default on).
@@ -340,22 +336,21 @@ Global settings, new "Storage" section:
 **Goal.** Pre-fetch parity across all four mail providers.
 
 **Entry criteria.**
-- Phase 4 landed for JMAP. The PrefetchSink (or return-and-dispatch) pattern is proven.
+- Phase 4 landed for JMAP. The post-sync sweep + boot recovery kick pattern is proven against `saehrimnir`.
 
 **In scope.**
-- Wire the same enqueue mechanism in:
-  - `crates/gmail/src/sync/...`
-  - `crates/graph/src/sync/...`
-  - `crates/imap/src/sync_pipeline.rs` (or wherever the post-persist hook is)
-- IMAP-specific: respect per-folder session reuse so we don't open a new connection per attachment.
-- Per-provider concurrency limits (4 for Gmail/Graph, 1 per folder for IMAP).
+- Drop the `WHERE provider = 'jmap'` filter from the boot recovery kick (`spawn_post_ready_prefetch_startup`) and from any provider-gated logic that accumulates. The post-sync sweep in `run_sync` is already provider-agnostic (`create_provider` dispatches by row); enabling other providers is mostly a matter of removing the filter and exercising the path.
+- Per-provider rate-limit tuning: revisit the per-account `Semaphore` cap (4) for Gmail/Graph quotas. IMAP probably wants 1 per folder rather than 4 per account.
+- IMAP-specific: respect per-folder session reuse so we don't open a new connection per attachment. Wire `imap_part_id` (already populated by IMAP sync, already preserved by the sweep's COALESCE fallback) into the fetch path.
+- Promote the per-account circuit breaker keyspace to per-provider if observed cross-account behaviour clusters by provider.
 
 **Out of scope.**
 - IMAP partial-fetch optimization (`BODY[part]<offset.length>`).
 - Reference-attachment handling on Graph - URL-only, not bytes; surface as cloud links via the cloud-attachments path.
 
 **Touchpoints.**
-- The three sync paths above.
+- `crates/service/src/dispatch/post_ready.rs::spawn_post_ready_prefetch_startup` - lift the `provider = 'jmap'` filter.
+- `crates/service/src/prefetch.rs` - per-provider concurrency tuning if needed.
 - Possibly `crates/imap/src/client/sessions.rs` for session reuse on attachment fetches inside the same folder.
 
 **Exit criteria.**

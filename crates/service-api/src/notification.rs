@@ -4,6 +4,7 @@ use crate::cal_action::{CalendarActionCompleted, CalendarOperationOutcome};
 use crate::calendar::{CalendarChanged, CalendarRunCompleted};
 use crate::extract::{
     ExtractCompleted, ExtractProgress, IndexRebuildCompleted, IndexRebuildProgress,
+    PrefetchCompleted, PrefetchProgress,
 };
 use crate::push::PushEvent;
 use crate::sync::{IndexCommitted, SyncCompleted};
@@ -73,6 +74,9 @@ pub enum CoalesceKey {
     /// wins globally so the status-bar indicator collapses chatty
     /// per-extraction emissions to one update.
     ExtractProgress,
+    /// Phase 4 (attachments roadmap): PrefetchRuntime per-tick progress.
+    /// No sub-key - latest-wins globally, mirroring `ExtractProgress`.
+    PrefetchProgress,
     /// Phase 7-4: per-rebuild progress, keyed by `rebuild_id` so two
     /// concurrent rebuilds (rare) don't collapse onto each other.
     IndexRebuildProgress(String),
@@ -185,6 +189,15 @@ pub enum Notification {
     /// `MustDeliver`: the UI's status-bar dismiss logic awaits this.
     #[serde(rename = "extract.completed")]
     ExtractCompleted(ExtractCompleted),
+    /// Phase 4 (attachments roadmap): per-tick PrefetchRuntime progress.
+    /// `Coalesce`: latest-wins for the status-bar "Caching attachments..."
+    /// indicator.
+    #[serde(rename = "prefetch.progress")]
+    PrefetchProgress(PrefetchProgress),
+    /// Phase 4 (attachments roadmap): PrefetchRuntime queue-drained-to-
+    /// zero summary. `MustDeliver`.
+    #[serde(rename = "prefetch.completed")]
+    PrefetchCompleted(PrefetchCompleted),
     /// Phase 7-4: per-rebuild progress, `Coalesce` keyed by
     /// `rebuild_id` so concurrent rebuilds don't collapse together.
     #[serde(rename = "index.rebuild_progress")]
@@ -237,6 +250,10 @@ impl Notification {
                 key: CoalesceKey::ExtractProgress,
             },
             Self::ExtractCompleted(_) => NotificationClass::MustDeliver,
+            Self::PrefetchProgress(_) => NotificationClass::Coalesce {
+                key: CoalesceKey::PrefetchProgress,
+            },
+            Self::PrefetchCompleted(_) => NotificationClass::MustDeliver,
             Self::IndexRebuildProgress(p) => NotificationClass::Coalesce {
                 key: CoalesceKey::IndexRebuildProgress(p.rebuild_id.clone()),
             },
@@ -263,6 +280,8 @@ impl Notification {
             Self::CalendarActionCompleted(_) => "cal_action.completed",
             Self::ExtractProgress(_) => "extract.progress",
             Self::ExtractCompleted(_) => "extract.completed",
+            Self::PrefetchProgress(_) => "prefetch.progress",
+            Self::PrefetchCompleted(_) => "prefetch.completed",
             Self::IndexRebuildProgress(_) => "index.rebuild_progress",
             Self::IndexRebuildCompleted(_) => "index.rebuild_completed",
             #[cfg(test)]
@@ -312,6 +331,8 @@ impl Notification {
             Self::CalendarActionCompleted(completed) => Some(completed.generation()),
             Self::ExtractProgress(progress) => Some(progress.generation()),
             Self::ExtractCompleted(completed) => Some(completed.generation()),
+            Self::PrefetchProgress(progress) => Some(progress.generation()),
+            Self::PrefetchCompleted(completed) => Some(completed.generation()),
             Self::IndexRebuildProgress(progress) => Some(progress.generation()),
             Self::IndexRebuildCompleted(completed) => Some(completed.generation()),
             #[cfg(test)]
@@ -343,6 +364,8 @@ impl Notification {
             Self::CalendarActionCompleted(completed) => completed.set_generation(generation),
             Self::ExtractProgress(progress) => progress.set_generation(generation),
             Self::ExtractCompleted(completed) => completed.set_generation(generation),
+            Self::PrefetchProgress(progress) => progress.set_generation(generation),
+            Self::PrefetchCompleted(completed) => completed.set_generation(generation),
             Self::IndexRebuildProgress(progress) => progress.set_generation(generation),
             Self::IndexRebuildCompleted(completed) => completed.set_generation(generation),
             #[cfg(test)]

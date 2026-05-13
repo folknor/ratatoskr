@@ -249,6 +249,103 @@ pub(crate) fn spawn_post_ready_extract_startup(
     })
 }
 
+/// Attachments roadmap Phase 4: post-ready prefetch startup. Mirrors
+/// `spawn_post_ready_extract_startup`. Waits for boot.ready, builds a
+/// `PrefetchRuntime`, installs it on `BootSharedState`, then fires a
+/// boot-recovery backfill kick for every JMAP account inside the
+/// configured `sync_period_days` window.
+pub(crate) fn spawn_post_ready_prefetch_startup(
+    boot_state: Arc<boot::BootSharedState>,
+    out_tx: mpsc::Sender<Vec<u8>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if boot_state.wait_for_ready().await.is_err() {
+            log::debug!("post-ready prefetch startup: boot failed, skipping");
+            return;
+        }
+        let Some(db_conn) = boot_state.db_conn() else {
+            log::error!(
+                "post-ready prefetch startup: db_conn missing after boot.ready - programming error",
+            );
+            return;
+        };
+        let db_state = service_state::WriteDbState::from_arc(db_conn);
+        let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
+        let cancellation = boot_state.shutdown_token().child_token();
+        let runtime = crate::prefetch::PrefetchRuntime::new(
+            db_state.clone(),
+            Arc::clone(&boot_state),
+            notification_tx,
+            0,
+            cancellation,
+        );
+        boot_state.install_prefetch_runtime(runtime);
+        let Some(runtime) = boot_state.prefetch_runtime() else {
+            // Lost the race with drain. Nothing to do.
+            log::debug!(
+                "post-ready prefetch startup: runtime was drained before backfill kick",
+            );
+            return;
+        };
+
+        log::info!("post-ready prefetch startup: PrefetchRuntime installed");
+
+        // Boot recovery kick: for every JMAP account, walk every
+        // attachment row with NULL content_hash inside the retention
+        // window and enqueue. Idempotent w.r.t. the post-sync sweep
+        // (in-flight dedupe blocks duplicates).
+        let window_days = match db_state
+            .with_conn(|conn| Ok(sync::config::get_sync_period_days(conn)))
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("post-ready prefetch startup: sync_period_days read failed: {e}");
+                return;
+            }
+        };
+        let window_start_unix = chrono::Utc::now().timestamp()
+            - window_days.saturating_mul(86_400);
+        let accounts: Vec<String> = match db_state
+            .with_conn(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id FROM accounts \
+                         WHERE provider = 'jmap' \
+                           AND COALESCE(is_active, 1) = 1 \
+                           AND COALESCE(is_deleting, 0) = 0",
+                    )
+                    .map_err(|e| format!("prepare prefetch boot-kick: {e}"))?;
+                let it = stmt
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|e| format!("query prefetch boot-kick: {e}"))?;
+                let mut out = Vec::new();
+                for r in it {
+                    out.push(r.map_err(|e| format!("row prefetch boot-kick: {e}"))?);
+                }
+                Ok(out)
+            })
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("post-ready prefetch startup: account enum failed: {e}");
+                return;
+            }
+        };
+        for account_id in accounts {
+            if let Err(e) = runtime
+                .kick_backfill_account(&account_id, window_start_unix)
+                .await
+            {
+                log::debug!(
+                    "post-ready prefetch startup: backfill kick {account_id} failed: {e}",
+                );
+            }
+        }
+    })
+}
+
 /// Phase 7-9c: post-ready schema-version rebuild dispatcher.
 ///
 /// If `check_schema_version_and_dispatch` marked a pending rebuild

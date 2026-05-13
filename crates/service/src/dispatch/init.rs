@@ -9,7 +9,8 @@ use crate::dispatch::config::{DispatchConfig, MAX_IN_FLIGHT, OUTBOUND_QUEUE_CAP}
 use crate::dispatch::handlers::writer_task;
 use crate::dispatch::post_ready::{
     spawn_post_ready_calendar_startup, spawn_post_ready_extract_startup,
-    spawn_post_ready_push_startup, spawn_post_ready_schema_rebuild,
+    spawn_post_ready_prefetch_startup, spawn_post_ready_push_startup,
+    spawn_post_ready_schema_rebuild,
 };
 use crate::dispatch::state::DispatchState;
 use crate::lifecycle::ServiceLifecycle;
@@ -105,6 +106,8 @@ where
         out_tx.clone(),
         app_data_dir.clone(),
     );
+    let prefetch_startup_handle =
+        spawn_post_ready_prefetch_startup(Arc::clone(&boot_state), out_tx.clone());
     let schema_rebuild_handle =
         spawn_post_ready_schema_rebuild(Arc::clone(&boot_state), app_data_dir.clone());
 
@@ -127,6 +130,7 @@ where
             push_startup: Some(push_startup_handle),
             calendar_startup: Some(calendar_startup_handle),
             extract_startup: Some(extract_startup_handle),
+            prefetch_startup: Some(prefetch_startup_handle),
             schema_rebuild: Some(schema_rebuild_handle),
         },
         pending_shutdown_id: None,

@@ -66,10 +66,20 @@ pub async fn sync_for_account(
         progress,
         cancellation_token,
     };
+    // Attachments roadmap Phase 4: initial sync walks back
+    // `sync_period_days` so the metadata exists for the prefetch
+    // backfill driver to find. Fallback to 365 if the setting is
+    // missing or out of range; saturating cast keeps an absurd
+    // pref value from underflowing.
+    let initial_window_days: i64 = {
+        let conn = write_db.conn();
+        let conn = conn.lock().expect("write_db conn poisoned");
+        sync::config::get_sync_period_days(&conn).max(1)
+    };
     let result = if initial_sync_completed {
         provider.sync_delta(&ctx, None).await
     } else {
-        provider.sync_initial(&ctx, 365).await
+        provider.sync_initial(&ctx, initial_window_days).await
     };
     result.map(|_| ()).map_err(|e| e.to_string())
 }

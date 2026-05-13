@@ -116,6 +116,41 @@ impl WithGeneration for ExtractCompleted {
     fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
 }
 
+/// Phase 4 (attachments roadmap): per-tick `PrefetchRuntime` progress.
+/// `Coalesce { key: () }`: latest-wins for the status-bar "Caching
+/// attachments... N / M" indicator. Mirrors `ExtractProgress`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrefetchProgress {
+    pub service_generation: u32,
+    /// Items still queued or in-flight across both priority queues.
+    pub remaining:          u64,
+    /// Items whose bytes were successfully written to PackStore in
+    /// this Service-incarnation.
+    pub fetched_in_session: u64,
+}
+
+impl WithGeneration for PrefetchProgress {
+    fn generation(&self) -> u32 { self.service_generation }
+    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+}
+
+/// Phase 4 (attachments roadmap): `PrefetchRuntime` queue-drained-to-
+/// zero summary. Fired once when both queues are empty and nothing is
+/// in-flight. `MustDeliver`: the UI's status-bar dismiss logic awaits
+/// this.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrefetchCompleted {
+    pub service_generation: u32,
+    pub fetched: u64,
+    pub skipped: u64,
+    pub failed:  u64,
+}
+
+impl WithGeneration for PrefetchCompleted {
+    fn generation(&self) -> u32 { self.service_generation }
+    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+}
+
 /// Per-rebuild progress. `Coalesce { key: rebuild_id }`: a viral
 /// progress emission collapses to the latest-per-rebuild, but
 /// concurrent rebuilds (rare) don't collide.

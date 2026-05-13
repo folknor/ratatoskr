@@ -46,6 +46,12 @@ pub(crate) struct Subsystems {
     /// and `NotificationSender` clone; the drain ordering in
     /// `drain_runtimes` releases them before the search-writer await.
     pub extract_startup: Option<JoinHandle<()>>,
+    /// Post-ready: builds + installs `PrefetchRuntime` (attachments
+    /// roadmap Phase 4) and fires the initial boot-recovery backfill.
+    /// The runtime holds a `NotificationSender` clone; drain ordering
+    /// in `drain_runtimes` releases it between sync (which feeds
+    /// prefetch) and extract (whose backfill consumes the same rows).
+    pub prefetch_startup: Option<JoinHandle<()>>,
     /// Post-ready: dispatches a `PreserveExisting` rebuild when boot
     /// detected a `.version` mismatch. No-op in the steady state.
     pub schema_rebuild: Option<JoinHandle<()>>,
@@ -84,6 +90,7 @@ impl Subsystems {
         drain_push(boot_state).await;
         drain_calendar(boot_state).await;
         drain_sync(boot_state).await;
+        drain_prefetch(boot_state).await;
         drain_extract(boot_state).await;
         drain_rebuild(boot_state).await;
         // Defensive: clear the slots that handlers may have populated
@@ -146,6 +153,9 @@ impl Subsystems {
         if let Some(handle) = self.extract_startup.take() {
             abort_and_await(handle, "extract_startup").await;
         }
+        if let Some(handle) = self.prefetch_startup.take() {
+            abort_and_await(handle, "prefetch_startup").await;
+        }
         if let Some(handle) = self.schema_rebuild.take() {
             abort_and_await(handle, "schema_rebuild").await;
         }
@@ -181,6 +191,13 @@ async fn drain_sync(boot_state: &Arc<BootSharedState>) {
 
 async fn drain_extract(boot_state: &Arc<BootSharedState>) {
     if let Some(runtime) = boot_state.take_extract_runtime() {
+        runtime.shutdown().await;
+        drop(runtime);
+    }
+}
+
+async fn drain_prefetch(boot_state: &Arc<BootSharedState>) {
+    if let Some(runtime) = boot_state.take_prefetch_runtime() {
         runtime.shutdown().await;
         drop(runtime);
     }

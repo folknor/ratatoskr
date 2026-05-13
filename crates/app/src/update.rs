@@ -365,6 +365,20 @@ impl ReadyApp {
                         );
                         Task::none()
                     }
+                    service_api::Notification::PrefetchProgress(p) => {
+                        log::debug!(
+                            "prefetch progress: remaining={}, fetched_in_session={}",
+                            p.remaining, p.fetched_in_session,
+                        );
+                        Task::none()
+                    }
+                    service_api::Notification::PrefetchCompleted(c) => {
+                        log::info!(
+                            "prefetch completed: fetched={}, skipped={}, failed={}",
+                            c.fetched, c.skipped, c.failed,
+                        );
+                        Task::none()
+                    }
                     service_api::Notification::IndexRebuildProgress(p) => {
                         log::debug!(
                             "index rebuild {}: {}/{}",

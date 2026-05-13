@@ -80,7 +80,7 @@ pub use error::{JsonRpcErrorObject, ServiceError};
 pub use extract::{
     ExtractCompleted, ExtractProgress, ExtractStatusAck, ExtractStatusParams,
     IndexRebuildAck, IndexRebuildCompleted, IndexRebuildParams, IndexRebuildProgress,
-    RebuildPolicy,
+    PrefetchCompleted, PrefetchProgress, RebuildPolicy,
 };
 pub use framing::{
     BoundedLineReader, FrameError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse,

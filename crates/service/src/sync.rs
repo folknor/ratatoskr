@@ -138,6 +138,13 @@ pub(crate) struct SyncRuntimeInner {
     pub(crate) notification_tx: NotificationSender,
     pub(crate) app_data_dir: PathBuf,
     pub(crate) service_generation: u32,
+    /// Attachments roadmap Phase 4: handle back to the boot state so
+    /// `run_sync` can fire a post-sync prefetch sweep without going
+    /// through provider-sync (which stays prefetch-ignorant). Held as
+    /// `Arc` for symmetry with `ExtractRuntime`; the reference cycle
+    /// is broken at drain time when `BootSharedState::take_sync_runtime`
+    /// removes the SyncRuntime from its slot.
+    pub(crate) boot_state: Arc<crate::boot::BootSharedState>,
 }
 
 impl SyncRuntime {
@@ -152,6 +159,7 @@ impl SyncRuntime {
         notification_tx: NotificationSender,
         app_data_dir: PathBuf,
         service_generation: u32,
+        boot_state: Arc<crate::boot::BootSharedState>,
     ) -> Self {
         Self {
             inner: Arc::new(SyncRuntimeInner {
@@ -165,6 +173,7 @@ impl SyncRuntime {
                 notification_tx,
                 app_data_dir,
                 service_generation,
+                boot_state,
             }),
         }
     }
@@ -494,6 +503,32 @@ async fn run_sync(
         }
         Err(e) => (SyncResult::Failed(e), MarkerStatus::Failed),
     };
+
+    // Attachments roadmap Phase 4: post-sync prefetch sweep. Fires on
+    // Ok only; cancelled and failed syncs leave NULL-hash rows for the
+    // next backfill kick (or for re-sync) to pick up. Errors here are
+    // logged but do not affect the sync result the UI sees.
+    if matches!(sync_result, SyncResult::Completed)
+        && let Some(prefetch) = inner.boot_state.prefetch_runtime()
+    {
+        let window_start_unix = match inner.db.with_conn(|conn| {
+            Ok(sync::config::get_sync_period_days(conn))
+        }).await {
+            Ok(days) => chrono::Utc::now().timestamp() - days.saturating_mul(86_400),
+            Err(e) => {
+                log::debug!("post-sync prefetch sweep: sync_period_days read failed: {e}");
+                0
+            }
+        };
+        if let Err(e) = prefetch.enqueue_window_for_account(
+            &account_id,
+            window_start_unix,
+            crate::prefetch::PrefetchPriority::Sync,
+            Some(crate::prefetch::SYNC_SWEEP_LIMIT),
+        ).await {
+            log::debug!("post-sync prefetch sweep {account_id}: {e}");
+        }
+    }
 
     update_marker_status(&inner.app_data_dir, &account_id, marker_status).await;
     emit_completed(&inner, &account_id, run_id, sync_result).await;

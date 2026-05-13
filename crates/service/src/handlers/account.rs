@@ -289,6 +289,14 @@ pub(crate) async fn handle_delete(
             "account.delete: sync cancel-and-await({account_id}) returned error: {e}; proceeding",
         );
     }
+    // Attachments roadmap Phase 4: drop any queued prefetch work for
+    // this account so we don't issue provider fetches against a
+    // disappearing row set. In-flight items continue to completion
+    // (provider calls are uncancellable), but their PackStore writes
+    // are content-hash idempotent so they cause no harm.
+    if let Some(prefetch) = boot_state.prefetch_runtime() {
+        prefetch.cancel_account(&account_id).await;
+    }
     if let Some(push) = boot_state.push_runtime() {
         let _ = push.cancel_account(&account_id).await;
     }
