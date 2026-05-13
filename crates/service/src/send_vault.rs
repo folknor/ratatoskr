@@ -31,7 +31,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use service_api::PlanId;
-use sha2::{Digest, Sha256};
 
 /// Errors surfaced from the send vault module. The handler maps these
 /// to `ServiceError` variants; the boot-time orphan cleanup logs and
@@ -120,12 +119,12 @@ pub(crate) fn validate_relative_path(rel: &str) -> Result<(), VaultError> {
     Ok(())
 }
 
-/// Compute the SHA-256 of a file's contents. Caller has already
+/// Compute the BLAKE3 of a file's contents. Caller has already
 /// verified the path is non-symlinked via `lstat`.
-fn sha256_file(path: &Path) -> Result<[u8; 32], std::io::Error> {
+fn blake3_file(path: &Path) -> Result<[u8; 32], std::io::Error> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
+    let mut hasher = blake3::Hasher::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file.read(&mut buf)?;
@@ -134,10 +133,7 @@ fn sha256_file(path: &Path) -> Result<[u8; 32], std::io::Error> {
         }
         hasher.update(&buf[..n]);
     }
-    let out = hasher.finalize();
-    let mut bytes = [0u8; 32];
-    bytes.copy_from_slice(&out);
-    Ok(bytes)
+    Ok(*hasher.finalize().as_bytes())
 }
 
 /// Validate, hash-verify, and atomically transfer a staged attachment
@@ -170,7 +166,7 @@ pub(crate) fn verify_and_transfer(
         return Err(VaultError::StagingSymlink(staging_path));
     }
 
-    let actual_hash = sha256_file(&staging_path)
+    let actual_hash = blake3_file(&staging_path)
         .map_err(|e| VaultError::StagingIo(staging_path.clone(), e))?;
     if &actual_hash != expected_hash {
         return Err(VaultError::HashMismatch(staging_path));
@@ -273,11 +269,7 @@ mod tests {
     fn write_staged(staging: &Path, name: &str, bytes: &[u8]) -> [u8; 32] {
         let mut file = std::fs::File::create(staging.join(name)).expect("create");
         file.write_all(bytes).expect("write");
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        let mut hash = [0u8; 32];
-        hash.copy_from_slice(&hasher.finalize());
-        hash
+        *blake3::hash(bytes).as_bytes()
     }
 
     #[test]

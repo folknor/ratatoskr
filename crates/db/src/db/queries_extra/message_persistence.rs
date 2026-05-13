@@ -43,7 +43,7 @@ pub struct AttachmentInsertRow {
     pub mime_type: Option<String>,
     pub size: Option<i64>,
     pub remote_attachment_id: Option<String>,
-    pub content_hash: Option<String>,
+    pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub content_id: Option<String>,
     pub is_inline: bool,
 }
@@ -106,11 +106,11 @@ pub fn insert_attachments(tx: &Transaction, rows: &[AttachmentInsertRow]) -> Res
         tx.execute(
             "INSERT INTO attachments \
              (id, message_id, account_id, filename, mime_type, size, \
-              gmail_attachment_id, content_hash, content_id, is_inline) \
+              remote_attachment_id, content_hash, content_id, is_inline) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO UPDATE SET \
                filename = ?4, mime_type = ?5, size = ?6, \
-               gmail_attachment_id = ?7, content_hash = ?8, content_id = ?9, is_inline = ?10",
+               remote_attachment_id = ?7, content_hash = ?8, content_id = ?9, is_inline = ?10",
             params![
                 row.id,
                 row.message_id,

@@ -89,8 +89,8 @@ pub struct AccountOAuthCredentials {
 /// Data collected from the DB before account deletion for cleanup purposes.
 pub struct AccountDeletionData {
     pub message_ids: Vec<String>,
-    pub cached_files: Vec<(String, String)>,
-    pub inline_hashes: Vec<String>,
+    pub cached_files: Vec<(String, db::blob_hash::BlobHash)>,
+    pub inline_hashes: Vec<db::blob_hash::BlobHash>,
 }
 
 /// Result of the synchronous phase of account deletion: gathered data plus
@@ -98,9 +98,9 @@ pub struct AccountDeletionData {
 pub struct AccountDeletionPlan {
     pub data: AccountDeletionData,
     /// Cached-file content hashes referenced by at least one other account.
-    pub shared_cache_hashes: std::collections::HashSet<String>,
+    pub shared_cache_hashes: std::collections::HashSet<db::blob_hash::BlobHash>,
     /// Inline-image content hashes referenced by at least one other account.
-    pub shared_inline_hashes: std::collections::HashSet<String>,
+    pub shared_inline_hashes: std::collections::HashSet<db::blob_hash::BlobHash>,
 }
 
 /// Report of best-effort cleanup after account deletion.

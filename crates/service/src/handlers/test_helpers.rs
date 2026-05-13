@@ -255,9 +255,10 @@ pub(super) async fn seed_cached_attachment_handle(
     let filename = params.filename.unwrap_or_else(|| "harness.txt".into());
     let mime_type = params.mime_type.unwrap_or_else(|| "text/plain".into());
     let bytes = params.content.into_bytes();
-    let content_hash = store::attachment_cache::hash_bytes(&bytes);
+    let content_hash = db::blob_hash::BlobHash::hash(&bytes);
+    let hash_hex = content_hash.to_hex();
     let relative_path =
-        store::attachment_cache::write_cached(&app_data_dir, &content_hash, &bytes)
+        store::attachment_cache::write_cached(&app_data_dir, &hash_hex, &bytes)
             .map_err(ServiceError::Internal)?;
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
@@ -269,7 +270,7 @@ pub(super) async fn seed_cached_attachment_handle(
         account_id: account_id.clone(),
         message_id: message_id.clone(),
         attachment_id: attachment_id.clone(),
-        content_hash: content_hash.clone(),
+        content_hash: hash_hex.clone(),
         relative_path: relative_path.clone(),
         size_bytes,
     };
@@ -310,8 +311,7 @@ pub(super) async fn seed_remote_attachment_handle(
             message: "message_id is required".into(),
         });
     }
-    let content_base64 = params.content_base64;
-    let bytes = store::attachment_cache::decode_base64(&content_base64)
+    let bytes = store::attachment_cache::decode_base64(&params.content_base64)
         .map_err(ServiceError::Internal)?;
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
@@ -330,7 +330,7 @@ pub(super) async fn seed_remote_attachment_handle(
     let registered_account_id = account_id.clone();
     let registered_message_id = message_id.clone();
     let registered_attachment_id = attachment_id.clone();
-    let registered_size = bytes.len();
+    let registered_bytes = bytes.clone();
     let write_db = boot_state.write_db_state()?;
     let ack = TestSeedRemoteAttachmentAck {
         account_id: account_id.clone(),
@@ -358,8 +358,7 @@ pub(super) async fn seed_remote_attachment_handle(
         &registered_account_id,
         &registered_message_id,
         &registered_attachment_id,
-        content_base64,
-        registered_size,
+        registered_bytes,
     );
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
@@ -808,7 +807,7 @@ struct CachedAttachmentInsert<'a> {
     mime_type: &'a str,
     relative_path: &'a str,
     cache_size: i64,
-    content_hash: &'a str,
+    content_hash: &'a db::blob_hash::BlobHash,
 }
 
 struct RemoteAttachmentInsert<'a> {
@@ -1736,7 +1735,9 @@ fn test_db_attachment_from_row(
         local_path: row.get(6)?,
         cached_at: row.get(7)?,
         cache_size: row.get(8)?,
-        content_hash: row.get(9)?,
+        content_hash: row
+            .get::<_, Option<db::blob_hash::BlobHash>>(9)?
+            .map(|h| h.to_hex()),
         text_indexed_at: row.get(10)?,
         extraction_status: row.get(11)?,
         extracted_text: row.get(12)?,

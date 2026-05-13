@@ -286,7 +286,7 @@ fn upsert_attachments(
                 mime_type: att.mime_type.clone(),
                 size: att.size,
                 remote_attachment_id: Some(att.id.clone()),
-                content_hash: att.content_hash.clone(),
+                content_hash: att.content_hash,
                 content_id: att.content_id.clone(),
                 is_inline: att.is_inline,
             })

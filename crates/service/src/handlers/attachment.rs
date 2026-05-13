@@ -89,24 +89,16 @@ pub(crate) async fn handle_fetch(
         .map_err(ServiceError::Internal)?;
 
     if let Some(ref info) = info
-        && let Some(ref content_hash) = info.content_hash
+        && let Some(content_hash) = info.content_hash
     {
-        // Defensive: hex-only hashes (xxh3 emits 16-char hex via
-        // hash_bytes). A corrupted/migrated row containing path
-        // separators would escape the cache dir; rejecting here
-        // avoids that even though it should not happen in practice.
-        if !content_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(ServiceError::Internal(format!(
-                "rejecting non-hex content_hash: {content_hash}"
-            )));
-        }
         // Hold the eviction lock for the metadata check + cached_at
         // bump + ack serialization so eviction cannot unlink the
         // file underneath us before we ack. The UI-side window
         // between ack and open remains open until lease semantics
         // land - documented at the module level.
         let _hit_guard = SWEEP_LOCK.read().await;
-        let file_path = app_data.join(CACHE_DIR).join(content_hash);
+        let hash_hex = content_hash.to_hex();
+        let file_path = app_data.join(CACHE_DIR).join(&hash_hex);
         if let Ok(meta) = std::fs::metadata(&file_path) {
             let bump_id = info.id.clone();
             let _ = write_db
@@ -124,7 +116,7 @@ pub(crate) async fn handle_fetch(
                 enqueue_extraction_if_runtime_installed(
                     boot_state,
                     crate::extract::ExtractWork {
-                        content_hash: content_hash.clone(),
+                        content_hash,
                         account_id:   params.account_id.clone(),
                         message_id:   params.message_id.clone(),
                         attachment_id: info.id.clone(),
@@ -132,9 +124,9 @@ pub(crate) async fn handle_fetch(
                 );
             }
             return serde_json::to_value(AttachmentFetchAck {
-                content_hash: content_hash.clone(),
+                content_hash: hash_hex.clone(),
                 size_bytes: meta.len(),
-                relative_path: format!("{CACHE_DIR}/{content_hash}"),
+                relative_path: format!("{CACHE_DIR}/{hash_hex}"),
             })
             .map_err(|e| ServiceError::Internal(e.to_string()));
         }
@@ -145,7 +137,7 @@ pub(crate) async fn handle_fetch(
     let provider_attachment_id = info
         .as_ref()
         .and_then(|info| {
-            info.gmail_attachment_id
+            info.remote_attachment_id
                 .as_deref()
                 .or(info.imap_part_id.as_deref())
         })
@@ -170,13 +162,13 @@ pub(crate) async fn handle_fetch(
         .await
         .map_err(|e| ServiceError::Internal(format!("provider fetch_attachment: {e}")))?;
 
-    let bytes = store::attachment_cache::decode_base64(&attachment.data)
-        .map_err(ServiceError::Internal)?;
-    let content_hash = store::attachment_cache::hash_bytes(&bytes);
+    let bytes = attachment.bytes;
+    let content_hash = db::blob_hash::BlobHash::hash(&bytes);
+    let hash_hex = content_hash.to_hex();
     #[allow(clippy::cast_possible_wrap)]
     let cache_size = bytes.len() as i64;
     let size_bytes = bytes.len() as u64;
-    let relative_path = format!("{CACHE_DIR}/{content_hash}");
+    let relative_path = format!("{CACHE_DIR}/{hash_hex}");
 
     // Hold the eviction lock for the (stage -> commit-row -> rename)
     // span so a sweep racing the commit observes either the
@@ -185,13 +177,12 @@ pub(crate) async fn handle_fetch(
     let _miss_guard = SWEEP_LOCK.read().await;
 
     let tmp_path =
-        store::attachment_cache::write_cached_tmp(&app_data, &content_hash, &bytes)
+        store::attachment_cache::write_cached_tmp(&app_data, &hash_hex, &bytes)
             .map_err(ServiceError::Internal)?;
 
     if let Some(info) = info {
         let id = info.id;
         let local_path_for_db = relative_path.clone();
-        let hash_for_db = content_hash.clone();
         write_db
             .with_conn(move |conn| {
                 db::db::queries_extra::update_attachment_cache_fields(
@@ -199,7 +190,7 @@ pub(crate) async fn handle_fetch(
                     &id,
                     &local_path_for_db,
                     cache_size,
-                    &hash_for_db,
+                    &content_hash,
                 )
             })
             .await
@@ -210,7 +201,7 @@ pub(crate) async fn handle_fetch(
     // already existed (shared blob), `tmp_path` is None and there
     // is nothing to rename.
     if let Some(tmp) = tmp_path {
-        store::attachment_cache::commit_cached_tmp(&app_data, &tmp, &content_hash)
+        store::attachment_cache::commit_cached_tmp(&app_data, &tmp, &hash_hex)
             .map_err(ServiceError::Internal)?;
     }
 
@@ -220,7 +211,7 @@ pub(crate) async fn handle_fetch(
     enqueue_extraction_if_runtime_installed(
         boot_state,
         crate::extract::ExtractWork {
-            content_hash:  content_hash.clone(),
+            content_hash,
             account_id:    params.account_id.clone(),
             message_id:    params.message_id.clone(),
             attachment_id: local_attachment_id,
@@ -228,7 +219,7 @@ pub(crate) async fn handle_fetch(
     );
 
     serde_json::to_value(AttachmentFetchAck {
-        content_hash,
+        content_hash: hash_hex,
         size_bytes,
         relative_path,
     })
@@ -276,7 +267,7 @@ fn enqueue_extraction_if_runtime_installed(
         );
         return;
     };
-    let hash_for_log = work.content_hash.clone();
+    let hash_for_log = work.content_hash;
     if let Err(e) = runtime.try_enqueue(work) {
         log::debug!("attachment.fetch try_enqueue {hash_for_log}: {e}");
     }
@@ -330,10 +321,14 @@ pub(crate) async fn handle_eviction_kick(
                 )
                 .map_err(|e| format!("eviction prepare: {e}"))?;
             let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
+                .query_map([], |row| row.get::<_, db::blob_hash::BlobHash>(0))
                 .map_err(|e| format!("eviction query: {e}"))?;
-            let hashes: std::collections::HashSet<String> =
-                rows.filter_map(Result::ok).collect();
+            // Cache files are named by lowercase hex; carry the hex form so
+            // the orphan sweep can do a plain `HashSet<String>::contains(stem)`.
+            let hashes: std::collections::HashSet<String> = rows
+                .filter_map(Result::ok)
+                .map(|h| h.to_hex())
+                .collect();
             Ok(hashes)
         })
         .await?;
@@ -425,7 +420,7 @@ async fn sweep_lru(
 
     let mut freed: i64 = 0;
     let mut ids_to_clear: Vec<String> = Vec::new();
-    let mut paths_with_hashes: Vec<(String, Option<String>)> = Vec::new();
+    let mut paths_with_hashes: Vec<(String, Option<db::blob_hash::BlobHash>)> = Vec::new();
     for row in candidates {
         if freed >= target {
             break;
@@ -448,10 +443,9 @@ async fn sweep_lru(
 
     for (local_path, content_hash) in paths_with_hashes {
         let still_referenced = if let Some(hash) = content_hash {
-            let h = hash.clone();
             read_db
                 .with_conn(move |conn| {
-                    db::db::queries_extra::count_cached_attachment_refs(conn, &h)
+                    db::db::queries_extra::count_cached_attachment_refs(conn, &hash)
                 })
                 .await
                 .map(|n| n > 0)

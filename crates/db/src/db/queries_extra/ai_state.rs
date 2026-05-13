@@ -24,7 +24,7 @@ pub async fn db_uncached_recent_attachments(
     db.with_conn(move |conn| {
         query_as::<UncachedAttachment>(
             conn,
-            "SELECT a.id, a.message_id, a.account_id, a.size, a.gmail_attachment_id, a.imap_part_id
+            "SELECT a.id, a.message_id, a.account_id, a.size, a.remote_attachment_id, a.imap_part_id
                  FROM attachments a
                  INNER JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id
                  WHERE a.cached_at IS NULL

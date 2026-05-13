@@ -36,7 +36,7 @@ struct ChatImagePalette {
 
 struct ChatImageEntry {
     bytes: Vec<u8>,
-    content_hash: String,
+    content_hash: db::blob_hash::BlobHash,
     mime_type: &'static str,
 }
 
@@ -57,7 +57,7 @@ impl ChatImagePalette {
             .iter()
             .map(|&(r, g, b, w, h)| {
                 let bytes = solid_png(r, g, b, w, h);
-                let hash = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(&bytes));
+                let hash = db::blob_hash::BlobHash::hash(&bytes);
                 ChatImageEntry {
                     bytes,
                     content_hash: hash,
@@ -216,7 +216,7 @@ pub fn seed_chats(
     let now = chrono::Utc::now().timestamp();
     let palette = ChatImagePalette::new();
     let mut already_used: HashSet<String> = HashSet::new();
-    let mut palette_pushed: HashSet<String> = HashSet::new();
+    let mut palette_pushed: HashSet<db::blob_hash::BlobHash> = HashSet::new();
     let mut sort_order: i64 = 0;
     let mut imap_uid_counter: u32 = CHAT_IMAP_UID_BASE;
     let mut picked_total: u32 = 0;
@@ -421,9 +421,10 @@ pub fn seed_chats(
                 {
                     let entry = &palette.entries[rng.random_range(0..palette.entries.len())];
                     let attach_id = crate::next_uuid(rng);
-                    let cid = format!("<{}@chat.ratatoskr.test>", entry.content_hash);
+                    let hash_hex = entry.content_hash.to_hex();
+                    let cid = format!("<{hash_hex}@chat.ratatoskr.test>");
                     let size = i64::try_from(entry.bytes.len()).unwrap_or(i64::MAX);
-                    let filename = format!("inline-{}.png", &entry.content_hash[..8]);
+                    let filename = format!("inline-{}.png", &hash_hex[..8]);
 
                     conn.execute(
                         "INSERT INTO attachments (id, message_id, account_id, filename, \
@@ -444,9 +445,9 @@ pub fn seed_chats(
                     stats.attachments += 1;
                     stats.chat_inline_images += 1;
 
-                    if palette_pushed.insert(entry.content_hash.clone()) {
+                    if palette_pushed.insert(entry.content_hash) {
                         inline_images.push(PendingInlineImage {
-                            content_hash: entry.content_hash.clone(),
+                            content_hash: hash_hex,
                             bytes: entry.bytes.clone(),
                             mime_type: entry.mime_type.to_string(),
                         });

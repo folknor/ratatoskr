@@ -79,11 +79,11 @@ pub async fn db_upsert_attachment(
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
-            "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, size, gmail_attachment_id, content_id, is_inline)
+            "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, size, remote_attachment_id, content_id, is_inline)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET
                    filename = ?4, mime_type = ?5, size = ?6,
-                   gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9",
+                   remote_attachment_id = ?7, content_id = ?8, is_inline = ?9",
             params![
                 id,
                 message_id,
@@ -112,7 +112,7 @@ pub async fn db_get_attachments_for_account(
         let mut stmt = conn
             .prepare(
                 "SELECT a.id, a.message_id, a.account_id, a.filename, a.mime_type, a.size,
-                            a.gmail_attachment_id, a.content_id, a.is_inline, a.local_path,
+                            a.remote_attachment_id, a.content_id, a.is_inline, a.local_path,
                             a.content_hash,
                             m.from_address, m.from_name, m.date, m.subject, m.thread_id
                      FROM attachments a
@@ -130,7 +130,7 @@ pub async fn db_get_attachments_for_account(
                 filename: row.get("filename")?,
                 mime_type: row.get("mime_type")?,
                 size: row.get("size")?,
-                gmail_attachment_id: row.get("gmail_attachment_id")?,
+                remote_attachment_id: row.get("remote_attachment_id")?,
                 content_id: row.get("content_id")?,
                 is_inline: row.get("is_inline")?,
                 local_path: row.get("local_path")?,

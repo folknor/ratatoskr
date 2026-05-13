@@ -2,7 +2,6 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use iced::Task;
-use sha2::{Digest, Sha256};
 
 use crate::pop_out::PopOutWindow;
 use crate::{Message, ReadyApp};
@@ -256,10 +255,7 @@ fn stage_and_build_wire(
                 staged_path.display()
             ));
         }
-        let mut hasher = Sha256::new();
-        hasher.update(&att.data);
-        let mut content_hash = [0u8; 32];
-        content_hash.copy_from_slice(&hasher.finalize());
+        let content_hash = *rtsk::blob_hash::BlobHash::hash(&att.data).as_bytes();
         let size = att.data.len() as u64;
         wire_attachments.push(service_api::SendWireAttachment {
             source: service_api::SendAttachmentSource::StagingFile {

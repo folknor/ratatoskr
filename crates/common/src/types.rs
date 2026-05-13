@@ -87,7 +87,13 @@ pub struct ProviderFolderMutation {
     pub color_fg: Option<String>,
 }
 
-pub use store::attachment_cache::AttachmentData;
+/// Raw attachment bytes returned by a provider's `fetch_attachment` impl.
+/// Bytes never round-trip through base64 inside the Service.
+#[derive(Debug, Clone)]
+pub struct FetchedAttachment {
+    pub bytes: Vec<u8>,
+    pub size: u64,
+}
 
 /// Provider-agnostic parsed attachment metadata.
 #[derive(Debug, Clone, Serialize)]

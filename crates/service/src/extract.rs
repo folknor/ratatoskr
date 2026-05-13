@@ -59,7 +59,7 @@ const COMMAND_QUEUE_CAPACITY: usize = 256;
 /// Single extraction work item.
 #[derive(Debug, Clone)]
 pub(crate) struct ExtractWork {
-    pub content_hash:  String,
+    pub content_hash:  db::blob_hash::BlobHash,
     pub account_id:    String,
     pub message_id:    String,
     #[allow(dead_code)] // Surfaced in 7-7's re-index fan-out + 7-8's attribution.
@@ -68,7 +68,7 @@ pub(crate) struct ExtractWork {
 
 pub(crate) struct ExtractRuntimeInner {
     closed: AtomicBool,
-    in_flight_hashes: Mutex<HashSet<String>>,
+    in_flight_hashes: Mutex<HashSet<db::blob_hash::BlobHash>>,
     tx: mpsc::Sender<ExtractWork>,
     db: WriteDbState,
     app_data_dir: PathBuf,
@@ -171,7 +171,7 @@ impl ExtractRuntime {
         // is the worker's pre-flight check.
         {
             let mut hashes = self.inner.in_flight_hashes.lock().await;
-            if !hashes.insert(work.content_hash.clone()) {
+            if !hashes.insert(work.content_hash) {
                 return Ok(());
             }
         }
@@ -203,9 +203,9 @@ impl ExtractRuntime {
             return Err("ExtractRuntime is shutting down".into());
         }
 
-        let hash = work.content_hash.clone();
+        let hash = work.content_hash;
         let inserted = match self.inner.in_flight_hashes.try_lock() {
-            Ok(mut set) => set.insert(hash.clone()),
+            Ok(mut set) => set.insert(hash),
             Err(_) => {
                 // Concurrent dedupe-set lock contention; treat as
                 // "another caller is mid-enqueue" and skip.
@@ -385,7 +385,7 @@ async fn process_one(inner: Arc<ExtractRuntimeInner>, work: ExtractWork) {
     finalize_item(&inner, &work.content_hash).await;
 }
 
-async fn finalize_item(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
+async fn finalize_item(inner: &Arc<ExtractRuntimeInner>, content_hash: &db::blob_hash::BlobHash) {
     // M11 fix: read the in-flight set's len under the same lock that
     // does the remove, and gate completion on (new_depth == 0 &&
     // in_flight_empty). Pre-fix the gate was new_depth == 0 only,
@@ -455,7 +455,7 @@ async fn run_extraction_pipeline(
     work: &ExtractWork,
 ) -> ExtractionOutcome {
     // Status-aware idempotency pre-flight: skip permanent statuses.
-    let hash_for_check = work.content_hash.clone();
+    let hash_for_check = work.content_hash;
     let existing = inner
         .db
         .to_read_state()
@@ -492,7 +492,7 @@ async fn run_extraction_pipeline(
         //    in its Tantivy doc - the worker short-circuits before
         //    `fan_out_reindex` and sync's thin doc never enriches via
         //    the extract path.
-        let hash_for_update = work.content_hash.clone();
+        let hash_for_update = work.content_hash;
         if let Err(e) = inner
             .db
             .with_conn(move |conn| {
@@ -526,7 +526,7 @@ async fn run_extraction_pipeline(
     // the content_hash for every other live attachment that shares it.
     // Picking ANY surviving row with non-empty filename keeps mime
     // dispatch deterministic and unblocks honest siblings.
-    let hash_for_meta = work.content_hash.clone();
+    let hash_for_meta = work.content_hash;
     let meta = inner
         .db
         .to_read_state()
@@ -564,7 +564,7 @@ async fn run_extraction_pipeline(
     let cache_path = inner
         .app_data_dir
         .join("attachment_cache")
-        .join(&work.content_hash);
+        .join(work.content_hash.to_hex());
     let bytes = match tokio::fs::read(&cache_path).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -658,7 +658,7 @@ async fn run_extraction_pipeline(
         ExtractionOutcome::AlreadyResolved { .. } => false, // pre-flight handled
     };
     if should_mark_indexed {
-        let hash = work.content_hash.clone();
+        let hash = work.content_hash;
         let _ = inner
             .db
             .with_conn(move |conn| {
@@ -673,7 +673,7 @@ async fn run_extraction_pipeline(
 
 async fn persist_outcome_row(
     inner: &Arc<ExtractRuntimeInner>,
-    content_hash: &str,
+    content_hash: &db::blob_hash::BlobHash,
     mime_type: &str,
     outcome: &ExtractionOutcome,
 ) {
@@ -689,7 +689,7 @@ async fn persist_outcome_row(
             return;
         }
     };
-    let hash = content_hash.to_string();
+    let hash = *content_hash;
     let mime = mime_type.to_string();
     let result = inner
         .db
@@ -732,8 +732,8 @@ const FANOUT_CHUNK_SIZE: usize = 200;
 /// chunk: the `attachment_extracted_text` row + `text_indexed_at`
 /// UPDATE are already committed, so a future enqueue of the same hash
 /// (or an `extract.backfill_kick`) sees canonical state and re-emits.
-async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
-    let hash = content_hash.to_string();
+async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &db::blob_hash::BlobHash) {
+    let hash = *content_hash;
     let pairs_result = inner
         .db
         .to_read_state()
@@ -763,7 +763,7 @@ async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &str) {
 
 async fn fan_out_reindex_chunk(
     inner: &Arc<ExtractRuntimeInner>,
-    content_hash: &str,
+    content_hash: &db::blob_hash::BlobHash,
     pairs: &[(String, String)],
 ) -> Result<(), String> {
     let pairs_for_msgs = pairs.to_vec();
@@ -913,7 +913,7 @@ mod tests {
         runtime.shutdown().await;
         let result = runtime
             .enqueue(ExtractWork {
-                content_hash: "abc".into(),
+                content_hash: db::blob_hash::BlobHash::hash(b"abc"),
                 account_id: "acc".into(),
                 message_id: "msg".into(),
                 attachment_id: "att".into(),
@@ -933,7 +933,7 @@ mod tests {
         // worker to completion - shutdown after the dedupe assertion.
         conn.execute_batch(
             "CREATE TABLE attachment_extracted_text (\
-                content_hash TEXT PRIMARY KEY, mime_type TEXT, \
+                content_hash BLOB PRIMARY KEY, mime_type TEXT, \
                 extracted_text TEXT, status TEXT NOT NULL, \
                 extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
         ).expect("schema");
@@ -953,9 +953,10 @@ mod tests {
         );
 
         // Pre-load the dedupe set so the second enqueue is dedupe'd.
-        runtime.inner.in_flight_hashes.lock().await.insert("abc".into());
+        let hash_abc = db::blob_hash::BlobHash::hash(b"abc");
+        runtime.inner.in_flight_hashes.lock().await.insert(hash_abc);
         let work = ExtractWork {
-            content_hash: "abc".into(),
+            content_hash: hash_abc,
             account_id: "acc".into(),
             message_id: "msg".into(),
             attachment_id: "att".into(),
@@ -983,10 +984,10 @@ mod tests {
                 PRIMARY KEY (account_id, id));\
              CREATE TABLE attachments (\
                 id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
-                filename TEXT, mime_type TEXT, content_hash TEXT);\
+                filename TEXT, mime_type TEXT, content_hash BLOB);\
              CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
              CREATE TABLE attachment_extracted_text (\
-                content_hash TEXT PRIMARY KEY, mime_type TEXT,\
+                content_hash BLOB PRIMARY KEY, mime_type TEXT,\
                 extracted_text TEXT, status TEXT NOT NULL,\
                 extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
         ).expect("schema");
@@ -997,16 +998,17 @@ mod tests {
                      'a@example.com', 'b@example.com', 'snip', 1700000000, 0, 1)",
             [],
         ).expect("insert msg");
+        let hash_a = db::blob_hash::BlobHash::hash(b"A");
         conn.execute(
             "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, content_hash) \
-             VALUES ('att1', 'msg1', 'acc1', 'report.pdf', 'application/pdf', 'hashA')",
-            [],
+             VALUES ('att1', 'msg1', 'acc1', 'report.pdf', 'application/pdf', ?1)",
+            rusqlite::params![hash_a],
         ).expect("insert att");
         conn.execute(
             "INSERT INTO attachment_extracted_text \
              (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
-             VALUES ('hashA', 'application/pdf', 'pdf full text body', 'indexed', 1, 2)",
-            [],
+             VALUES (?1, 'application/pdf', 'pdf full text body', 'indexed', 1, 2)",
+            rusqlite::params![hash_a],
         ).expect("insert ext");
 
         let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
@@ -1042,7 +1044,7 @@ mod tests {
         // receiver that supplies the ack.
         let inner_for_task = Arc::clone(&runtime.inner);
         let extract_task = tokio::spawn(async move {
-            fan_out_reindex(&inner_for_task, "hashA").await;
+            fan_out_reindex(&inner_for_task, &hash_a).await;
         });
 
         let cmd = search_rx.recv().await.expect("writer command");
@@ -1085,10 +1087,10 @@ mod tests {
                 PRIMARY KEY (account_id, id));\
              CREATE TABLE attachments (\
                 id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
-                filename TEXT, mime_type TEXT, content_hash TEXT);\
+                filename TEXT, mime_type TEXT, content_hash BLOB);\
              CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
              CREATE TABLE attachment_extracted_text (\
-                content_hash TEXT PRIMARY KEY, mime_type TEXT,\
+                content_hash BLOB PRIMARY KEY, mime_type TEXT,\
                 extracted_text TEXT, status TEXT NOT NULL,\
                 extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
         ).expect("schema");
@@ -1107,7 +1109,7 @@ mod tests {
             CancellationToken::new(),
         );
 
-        fan_out_reindex(&runtime.inner, "no-such-hash").await;
+        fan_out_reindex(&runtime.inner, &db::blob_hash::BlobHash::hash(b"no-such-hash")).await;
 
         // The worker task holds an Arc<inner> that keeps the
         // SearchWriteHandle alive, so `recv()` never returns None.

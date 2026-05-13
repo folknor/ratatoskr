@@ -117,8 +117,8 @@ impl HarnessOfflineProvider {
 type HarnessAttachmentKey = (String, String, String);
 
 fn harness_attachments(
-) -> &'static Mutex<HashMap<HarnessAttachmentKey, common::types::AttachmentData>> {
-    static MAP: OnceLock<Mutex<HashMap<HarnessAttachmentKey, common::types::AttachmentData>>> =
+) -> &'static Mutex<HashMap<HarnessAttachmentKey, common::types::FetchedAttachment>> {
+    static MAP: OnceLock<Mutex<HashMap<HarnessAttachmentKey, common::types::FetchedAttachment>>> =
         OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -127,18 +127,18 @@ pub(crate) fn register_harness_attachment(
     account_id: &str,
     message_id: &str,
     attachment_id: &str,
-    data: String,
-    size: usize,
+    bytes: Vec<u8>,
 ) {
     let key = (
         account_id.to_string(),
         message_id.to_string(),
         attachment_id.to_string(),
     );
+    let size = bytes.len() as u64;
     let mut guard = harness_attachments()
         .lock()
         .expect("harness attachment map poisoned");
-    guard.insert(key, common::types::AttachmentData { data, size });
+    guard.insert(key, common::types::FetchedAttachment { bytes, size });
 }
 
 #[async_trait::async_trait]
@@ -262,7 +262,7 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         ctx: &common::types::ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<common::types::AttachmentData, common::error::ProviderError> {
+    ) -> Result<common::types::FetchedAttachment, common::error::ProviderError> {
         let key = (
             ctx.account_id.to_string(),
             message_id.to_string(),

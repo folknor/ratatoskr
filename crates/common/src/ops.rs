@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use super::error::ProviderError;
 use super::typed_ids::{FolderId, TagId};
 use super::types::{
-    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedMessage, ProviderProfile, ProviderTestResult,
 };
 
@@ -111,7 +111,7 @@ pub trait ProviderOps: Send + Sync {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, ProviderError>;
+    ) -> Result<FetchedAttachment, ProviderError>;
 
     async fn fetch_message(
         &self,

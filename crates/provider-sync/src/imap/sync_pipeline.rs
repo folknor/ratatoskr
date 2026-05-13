@@ -71,7 +71,7 @@ struct DbAttachment {
     part_id: String,
     content_id: Option<String>,
     is_inline: bool,
-    content_hash: Option<String>,
+    content_hash: Option<db::blob_hash::BlobHash>,
 }
 
 impl DbInsertData {
@@ -117,7 +117,7 @@ impl DbInsertData {
                     part_id: att.part_id.clone(),
                     content_id: att.content_id.clone(),
                     is_inline: att.is_inline,
-                    content_hash: att.content_hash.clone(),
+                    content_hash: att.content_hash,
                 })
                 .collect(),
         }
@@ -208,7 +208,7 @@ impl DbInsertData {
                 mime_type: Some(att.mime_type.clone()),
                 size: Some(i64::from(att.size)),
                 remote_attachment_id: Some(att.part_id.clone()),
-                content_hash: att.content_hash.clone(),
+                content_hash: att.content_hash,
                 content_id: att.content_id.clone(),
                 is_inline: att.is_inline,
             })
@@ -382,7 +382,7 @@ pub async fn store_inline_images(
             let data = att.inline_data.as_ref()?;
             let hash = att.content_hash.as_ref()?;
             Some(InlineImage {
-                content_hash: hash.clone(),
+                content_hash: hash.to_hex(),
                 data: data.clone(),
                 mime_type: att.mime_type.clone(),
             })

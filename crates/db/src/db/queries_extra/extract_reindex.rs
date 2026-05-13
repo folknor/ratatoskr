@@ -54,7 +54,7 @@ pub struct UnindexedCachedAttachmentRow {
     pub attachment_id: String,
     pub message_id:    String,
     pub account_id:    String,
-    pub content_hash:  Option<String>,
+    pub content_hash:  Option<crate::blob_hash::BlobHash>,
 }
 
 /// Phase 7-9: enumerate every message identity for the index-rebuild
@@ -99,7 +99,7 @@ pub fn select_all_message_ids_for_rebuild(
 /// without explicit cleanup.
 pub fn select_extracted_text_status(
     conn: &Connection,
-    content_hash: &str,
+    content_hash: &crate::blob_hash::BlobHash,
     schema_version: i64,
 ) -> Result<Option<String>, String> {
     let mut stmt = conn
@@ -128,7 +128,7 @@ pub fn select_extracted_text_status(
 /// path (so backfill stops re-emitting newly-resolved rows).
 pub fn mark_attachment_text_indexed(
     conn: &Connection,
-    content_hash: &str,
+    content_hash: &crate::blob_hash::BlobHash,
     at: i64,
 ) -> Result<(), String> {
     conn.execute(
@@ -146,7 +146,7 @@ pub fn mark_attachment_text_indexed(
 /// hash overwrites in place.
 pub fn upsert_extracted_text_row(
     conn: &Connection,
-    content_hash: &str,
+    content_hash: &crate::blob_hash::BlobHash,
     mime_type: &str,
     extracted_text: Option<&str>,
     status: &str,
@@ -214,7 +214,7 @@ pub fn find_unindexed_cached_attachments(
                 attachment_id: row.get::<_, String>(0)?,
                 message_id:    row.get::<_, String>(1)?,
                 account_id:    row.get::<_, String>(2)?,
-                content_hash:  row.get::<_, Option<String>>(3)?,
+                content_hash:  row.get::<_, Option<crate::blob_hash::BlobHash>>(3)?,
             })
         })
         .map_err(|e| format!("query find_unindexed_cached_attachments: {e}"))?;
@@ -229,7 +229,7 @@ pub fn find_unindexed_cached_attachments(
 /// reference the given `content_hash`. Uses `idx_attachments_content_hash`.
 pub fn find_message_ids_referencing_content_hash(
     conn: &Connection,
-    content_hash: &str,
+    content_hash: &crate::blob_hash::BlobHash,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
         .prepare(
@@ -417,7 +417,12 @@ pub fn select_attachment_fragments_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blob_hash::BlobHash;
     use rusqlite::Connection;
+
+    fn h(label: &[u8]) -> BlobHash {
+        BlobHash::hash(label)
+    }
 
     fn open_test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open_in_memory");
@@ -430,13 +435,13 @@ mod tests {
                 PRIMARY KEY (account_id, id));\
              CREATE TABLE attachments (\
                 id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
-                filename TEXT, mime_type TEXT, content_hash TEXT,\
+                filename TEXT, mime_type TEXT, content_hash BLOB,\
                 cached_at INTEGER, text_indexed_at INTEGER);\
              CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
              CREATE INDEX idx_attachments_text_indexed_at ON attachments(text_indexed_at)\
                 WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL;\
              CREATE TABLE attachment_extracted_text (\
-                content_hash TEXT PRIMARY KEY, mime_type TEXT,\
+                content_hash BLOB PRIMARY KEY, mime_type TEXT,\
                 extracted_text TEXT, status TEXT NOT NULL,\
                 extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
         )
@@ -447,16 +452,18 @@ mod tests {
     #[test]
     fn find_pairs_returns_distinct() {
         let conn = open_test_db();
+        let hash_a = h(b"A");
+        let hash_b = h(b"B");
         conn.execute(
             "INSERT INTO attachments (id, message_id, account_id, content_hash) \
-             VALUES ('att1', 'msg1', 'acc1', 'hashA'),\
-                    ('att2', 'msg1', 'acc1', 'hashA'),\
-                    ('att3', 'msg2', 'acc1', 'hashA'),\
-                    ('att4', 'msg3', 'acc2', 'hashB')",
-            [],
+             VALUES ('att1', 'msg1', 'acc1', ?1),\
+                    ('att2', 'msg1', 'acc1', ?1),\
+                    ('att3', 'msg2', 'acc1', ?1),\
+                    ('att4', 'msg3', 'acc2', ?2)",
+            rusqlite::params![hash_a, hash_b],
         )
         .expect("seed");
-        let mut pairs = find_message_ids_referencing_content_hash(&conn, "hashA").expect("query");
+        let mut pairs = find_message_ids_referencing_content_hash(&conn, &hash_a).expect("query");
         pairs.sort();
         assert_eq!(
             pairs,
@@ -470,7 +477,8 @@ mod tests {
     #[test]
     fn empty_hash_returns_empty() {
         let conn = open_test_db();
-        let pairs = find_message_ids_referencing_content_hash(&conn, "nope").expect("query");
+        let pairs =
+            find_message_ids_referencing_content_hash(&conn, &h(b"nope")).expect("query");
         assert!(pairs.is_empty());
     }
 
@@ -498,19 +506,21 @@ mod tests {
     #[test]
     fn fragments_batch_carries_text_only_when_indexed() {
         let conn = open_test_db();
+        let hash_a = h(b"A");
+        let hash_b = h(b"B");
         conn.execute(
             "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, content_hash) \
-             VALUES ('att1', 'msg1', 'acc1', 'a.pdf', 'application/pdf', 'hashA'),\
-                    ('att2', 'msg1', 'acc1', 'b.txt', 'text/plain', 'hashB')",
-            [],
+             VALUES ('att1', 'msg1', 'acc1', 'a.pdf', 'application/pdf', ?1),\
+                    ('att2', 'msg1', 'acc1', 'b.txt', 'text/plain', ?2)",
+            rusqlite::params![hash_a, hash_b],
         )
         .expect("seed atts");
         conn.execute(
             "INSERT INTO attachment_extracted_text \
              (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
-             VALUES ('hashA', 'application/pdf', 'pdf body', 'indexed', 1, 2),\
-                    ('hashB', 'text/plain', NULL, 'skipped:opaque', 1, 2)",
-            [],
+             VALUES (?1, 'application/pdf', 'pdf body', 'indexed', 1, 2),\
+                    (?2, 'text/plain', NULL, 'skipped:opaque', 1, 2)",
+            rusqlite::params![hash_a, hash_b],
         )
         .expect("seed extracted");
         let pairs = vec![("acc1".into(), "msg1".into())];
@@ -527,15 +537,18 @@ mod tests {
     #[test]
     fn unindexed_cached_attachments_filters_correctly() {
         let conn = open_test_db();
+        let hash_a = h(b"A");
+        let hash_b = h(b"B");
+        let hash_c = h(b"C");
         conn.execute(
             "INSERT INTO attachments \
              (id, message_id, account_id, content_hash, cached_at, text_indexed_at) \
              VALUES \
-             ('cached_unindexed', 'msg1', 'acc1', 'hashA', 100, NULL),\
-             ('cached_indexed',   'msg2', 'acc1', 'hashB', 100, 200),\
-             ('evicted_unindexed','msg3', 'acc1', 'hashC', NULL, NULL),\
+             ('cached_unindexed', 'msg1', 'acc1', ?1, 100, NULL),\
+             ('cached_indexed',   'msg2', 'acc1', ?2, 100, 200),\
+             ('evicted_unindexed','msg3', 'acc1', ?3, NULL, NULL),\
              ('cached_no_hash',   'msg4', 'acc1', NULL,    100, NULL)",
-            [],
+            rusqlite::params![hash_a, hash_b, hash_c],
         )
         .expect("seed");
 
@@ -546,22 +559,19 @@ mod tests {
         assert_eq!(rows[0].attachment_id, "cached_no_hash");
         assert!(rows[0].content_hash.is_none());
         assert_eq!(rows[1].attachment_id, "cached_unindexed");
-        assert_eq!(rows[1].content_hash.as_deref(), Some("hashA"));
+        assert_eq!(rows[1].content_hash, Some(hash_a));
     }
 
     #[test]
     fn unindexed_cached_attachments_respects_limit() {
         let conn = open_test_db();
         for i in 0..5 {
+            let hash = h(format!("hash{i}").as_bytes());
             conn.execute(
                 "INSERT INTO attachments \
                  (id, message_id, account_id, content_hash, cached_at, text_indexed_at) \
                  VALUES (?1, ?2, 'acc1', ?3, 100, NULL)",
-                rusqlite::params![
-                    format!("att{i}"),
-                    format!("msg{i}"),
-                    format!("hash{i}"),
-                ],
+                rusqlite::params![format!("att{i}"), format!("msg{i}"), hash],
             )
             .expect("seed");
         }
@@ -576,23 +586,30 @@ mod tests {
     #[test]
     fn delete_extracted_text_orphans_since_respects_cursor_and_live_hashes() {
         let conn = open_test_db();
-        // One live attachment referencing hash 'live'.
+        let hash_live = h(b"live");
+        let hash_orphan_old = h(b"orphan-old");
+        let hash_orphan_new = h(b"orphan-new");
+        // One live attachment referencing the live hash.
         conn.execute(
             "INSERT INTO attachments (id, message_id, account_id, content_hash) \
-             VALUES ('att-live', 'm1', 'a1', 'live')",
-            [],
+             VALUES ('att-live', 'm1', 'a1', ?1)",
+            rusqlite::params![hash_live],
         )
         .expect("seed attachment");
         // Three extracted_text rows:
-        //  - 'live' at extracted_at=200 (referenced, must NOT delete)
-        //  - 'orphan-old' at extracted_at=100 (orphan but pre-cursor, must NOT delete)
-        //  - 'orphan-new' at extracted_at=300 (orphan and post-cursor, MUST delete)
-        for (h, t) in &[("live", 200), ("orphan-old", 100), ("orphan-new", 300)] {
+        //  - live at extracted_at=200 (referenced, must NOT delete)
+        //  - orphan-old at extracted_at=100 (orphan but pre-cursor, must NOT delete)
+        //  - orphan-new at extracted_at=300 (orphan and post-cursor, MUST delete)
+        for (hash, t) in &[
+            (hash_live, 200),
+            (hash_orphan_old, 100),
+            (hash_orphan_new, 300),
+        ] {
             conn.execute(
                 "INSERT INTO attachment_extracted_text \
                  (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
                  VALUES (?1, 'text/plain', '', 'indexed', ?2, 2)",
-                rusqlite::params![h, t],
+                rusqlite::params![hash, t],
             )
             .expect("seed extracted_text");
         }
@@ -601,14 +618,16 @@ mod tests {
         assert_eq!(dropped, 1, "exactly the post-cursor orphan dropped");
 
         // Verify which rows remain.
-        let mut remaining: Vec<String> = conn
-            .prepare("SELECT content_hash FROM attachment_extracted_text ORDER BY content_hash")
+        let mut remaining: Vec<BlobHash> = conn
+            .prepare("SELECT content_hash FROM attachment_extracted_text")
             .expect("prepare")
-            .query_map([], |r| r.get::<_, String>(0))
+            .query_map([], |r| r.get::<_, BlobHash>(0))
             .expect("query")
             .collect::<Result<Vec<_>, _>>()
             .expect("collect");
-        remaining.sort();
-        assert_eq!(remaining, vec!["live".to_string(), "orphan-old".to_string()]);
+        remaining.sort_by_key(|h| *h.as_bytes());
+        let mut want = vec![hash_live, hash_orphan_old];
+        want.sort_by_key(|h| *h.as_bytes());
+        assert_eq!(remaining, want);
     }
 }

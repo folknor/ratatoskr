@@ -470,11 +470,11 @@ pub struct DbAttachment {
     pub filename: Option<String>,
     pub mime_type: Option<String>,
     pub size: Option<i64>,
-    pub gmail_attachment_id: Option<String>,
+    pub remote_attachment_id: Option<String>,
     pub content_id: Option<String>,
     pub is_inline: bool,
     pub local_path: Option<String>,
-    pub content_hash: Option<String>,
+    pub content_hash: Option<crate::blob_hash::BlobHash>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -483,7 +483,7 @@ pub struct UncachedAttachment {
     pub message_id: String,
     pub account_id: String,
     pub size: i64,
-    pub gmail_attachment_id: Option<String>,
+    pub remote_attachment_id: Option<String>,
     pub imap_part_id: Option<String>,
 }
 
@@ -652,11 +652,11 @@ pub struct AttachmentWithContext {
     pub filename: Option<String>,
     pub mime_type: Option<String>,
     pub size: Option<i64>,
-    pub gmail_attachment_id: Option<String>,
+    pub remote_attachment_id: Option<String>,
     pub content_id: Option<String>,
     pub is_inline: i64,
     pub local_path: Option<String>,
-    pub content_hash: Option<String>,
+    pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub from_address: Option<String>,
     pub from_name: Option<String>,
     pub date: Option<i64>,
@@ -775,7 +775,7 @@ pub struct CachedAttachmentRow {
     pub id: String,
     pub local_path: String,
     pub cache_size: i64,
-    pub content_hash: Option<String>,
+    pub content_hash: Option<crate::blob_hash::BlobHash>,
 }
 
 // ── Backfill row (smart label backfill) ────────────────────

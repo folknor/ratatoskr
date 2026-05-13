@@ -11,7 +11,7 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderProfile, ProviderTestResult,
 };
 
@@ -506,7 +506,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, ProviderError> {
+    ) -> Result<FetchedAttachment, ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let data = client
@@ -514,10 +514,9 @@ impl ProviderOps for JmapOps {
             .await
             .map_err(|e| ProviderError::Server(format!("Blob download: {e}")))?;
 
-        Ok(AttachmentData {
-            data: common::encoding::encode_base64_standard(&data),
-            size: data.len(),
-        })
+        let bytes = data.to_vec();
+        let size = bytes.len() as u64;
+        Ok(FetchedAttachment { bytes, size })
     }
 
     async fn list_folders(

@@ -128,7 +128,7 @@ impl_from_row!(DbAttachment {
     filename,
     mime_type,
     size,
-    gmail_attachment_id,
+    remote_attachment_id,
     content_id,
     bool is_inline,
     local_path,
@@ -636,6 +636,6 @@ impl_from_row!(UncachedAttachment {
     message_id,
     account_id,
     size,
-    gmail_attachment_id,
+    remote_attachment_id,
     imap_part_id,
 });

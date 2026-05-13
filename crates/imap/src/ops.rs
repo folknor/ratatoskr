@@ -8,7 +8,7 @@ use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_i
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
 };
 use smtp;
@@ -817,7 +817,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, ProviderError> {
+    ) -> Result<FetchedAttachment, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let part_id = attachment_id.to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
@@ -826,17 +826,8 @@ impl ProviderOps for ImapOps {
             imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await
         })?;
 
-        // data is base64-encoded; compute actual byte size
-        let padding = if data.ends_with("==") {
-            2
-        } else if data.ends_with('=') {
-            1
-        } else {
-            0
-        };
-        let size = (data.len() * 3 / 4).saturating_sub(padding);
-
-        Ok(AttachmentData { data, size })
+        let size = data.len() as u64;
+        Ok(FetchedAttachment { bytes: data, size })
     }
 
     async fn fetch_message(

@@ -28,8 +28,8 @@ pub struct ParsedAttachment {
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
-    pub gmail_attachment_id: String,
-    pub content_hash: Option<String>,
+    pub remote_attachment_id: String,
+    pub content_hash: Option<db::blob_hash::BlobHash>,
     #[serde(skip_serializing)]
     pub inline_data: Option<Vec<u8>>,
     pub content_id: Option<String>,
@@ -155,12 +155,12 @@ fn extract_attachments(part: &GmailPayload) -> Vec<ParsedAttachment> {
     dedup_by_attachment_id(results)
 }
 
-/// Collapse attachments that share the same `gmail_attachment_id`.
+/// Collapse attachments that share the same `remote_attachment_id`.
 /// Prefers the entry with a real filename and preserves `content_id`.
 fn dedup_by_attachment_id(attachments: Vec<ParsedAttachment>) -> Vec<ParsedAttachment> {
     dedup_by_key(
         attachments,
-        |att| att.gmail_attachment_id.clone(),
+        |att| att.remote_attachment_id.clone(),
         |existing, att| {
             let existing_is_placeholder =
                 existing.filename == existing.content_id.as_deref().unwrap_or("inline");
@@ -216,7 +216,7 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
             };
             let content_hash = inline_data
                 .as_deref()
-                .map(store::attachment_cache::hash_bytes);
+                .map(db::blob_hash::BlobHash::hash);
 
             let filename = if has_filename {
                 part.filename.clone()
@@ -228,7 +228,7 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
                 filename,
                 mime_type: part.mime_type.clone(),
                 size: body.size,
-                gmail_attachment_id: attachment_id.clone(),
+                remote_attachment_id: attachment_id.clone(),
                 content_hash,
                 inline_data,
                 content_id: cid,

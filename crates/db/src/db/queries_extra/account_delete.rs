@@ -1,16 +1,18 @@
 use rusqlite::Connection;
 use std::collections::HashSet;
 
+use crate::blob_hash::BlobHash;
+
 pub struct DbAccountDeletionData {
     pub message_ids: Vec<String>,
-    pub cached_files: Vec<(String, String)>,
-    pub inline_hashes: Vec<String>,
+    pub cached_files: Vec<(String, BlobHash)>,
+    pub inline_hashes: Vec<BlobHash>,
 }
 
 pub struct DbAccountDeletionPlan {
     pub data: DbAccountDeletionData,
-    pub shared_cache_hashes: HashSet<String>,
-    pub shared_inline_hashes: HashSet<String>,
+    pub shared_cache_hashes: HashSet<BlobHash>,
+    pub shared_inline_hashes: HashSet<BlobHash>,
 }
 
 /// Gather all data needed for account deletion cleanup (message IDs, cached
@@ -45,7 +47,7 @@ pub fn gather_account_deletion_data_sync(
         stmt.query_map(rusqlite::params![account_id], |row| {
             Ok((
                 row.get::<_, String>("local_path")?,
-                row.get::<_, String>("content_hash")?,
+                row.get::<_, BlobHash>("content_hash")?,
             ))
         })
         .map_err(|e| format!("query account cached attachments: {e}"))?
@@ -64,7 +66,7 @@ pub fn gather_account_deletion_data_sync(
             )
             .map_err(|e| format!("prepare account inline hash query: {e}"))?;
         stmt.query_map(rusqlite::params![account_id], |row| {
-            row.get::<_, String>("content_hash")
+            row.get::<_, BlobHash>("content_hash")
         })
         .map_err(|e| format!("query account inline hashes: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -83,15 +85,15 @@ pub fn gather_account_deletion_data_sync(
 /// still have at least one reference from another account.
 pub fn referenced_hashes_excluding_account_sync(
     conn: &Connection,
-    content_hashes: &[(String, String)],
+    content_hashes: &[(String, BlobHash)],
     account_id: &str,
-) -> Result<HashSet<String>, String> {
+) -> Result<HashSet<BlobHash>, String> {
     if content_hashes.is_empty() {
         return Ok(HashSet::new());
     }
 
-    let unique: HashSet<&str> = content_hashes.iter().map(|(_, h)| h.as_str()).collect();
-    let hashes: Vec<&str> = unique.into_iter().collect();
+    let unique: HashSet<BlobHash> = content_hashes.iter().map(|(_, h)| *h).collect();
+    let hashes: Vec<BlobHash> = unique.into_iter().collect();
 
     let mut referenced = HashSet::new();
     for chunk in hashes.chunks(500) {
@@ -108,13 +110,13 @@ pub fn referenced_hashes_excluding_account_sync(
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
             vec![Box::new(account_id.to_string())];
         for hash in chunk {
-            params.push(Box::new((*hash).to_string()));
+            params.push(Box::new(*hash));
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(std::convert::AsRef::as_ref).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
-                row.get::<_, String>("content_hash")
+                row.get::<_, BlobHash>("content_hash")
             })
             .map_err(|e| format!("query batch ref count: {e}"))?;
         for row in rows {
@@ -130,9 +132,9 @@ pub fn referenced_hashes_excluding_account_sync(
 /// reference from a different account (regardless of cache state).
 pub fn inline_hashes_referenced_by_other_accounts_sync(
     conn: &Connection,
-    inline_hashes: &[String],
+    inline_hashes: &[BlobHash],
     account_id: &str,
-) -> Result<HashSet<String>, String> {
+) -> Result<HashSet<BlobHash>, String> {
     if inline_hashes.is_empty() {
         return Ok(HashSet::new());
     }
@@ -152,13 +154,13 @@ pub fn inline_hashes_referenced_by_other_accounts_sync(
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
             vec![Box::new(account_id.to_string())];
         for hash in chunk {
-            params.push(Box::new(hash.clone()));
+            params.push(Box::new(*hash));
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(std::convert::AsRef::as_ref).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
-                row.get::<_, String>("content_hash")
+                row.get::<_, BlobHash>("content_hash")
             })
             .map_err(|e| format!("query inline ref check: {e}"))?;
         for row in rows {
@@ -241,7 +243,7 @@ mod tests {
         id: &str,
         account_id: &str,
         message_id: &str,
-        content_hash: Option<&str>,
+        content_hash: Option<&BlobHash>,
         is_inline: bool,
         cached_path: Option<&str>,
     ) {
@@ -262,6 +264,10 @@ mod tests {
         .expect("insert attachment");
     }
 
+    fn h(label: &[u8]) -> BlobHash {
+        BlobHash::hash(label)
+    }
+
     #[test]
     fn orchestrate_gathers_before_cascade() {
         let conn = test_db();
@@ -269,13 +275,15 @@ mod tests {
         insert_thread(&conn, "acct-a", "t1");
         insert_message(&conn, "acct-a", "t1", "m1");
         insert_message(&conn, "acct-a", "t1", "m2");
-        insert_attachment(&conn, "att1", "acct-a", "m1", Some("hash1"), true, None);
+        let hash1 = h(b"hash1");
+        let hash2 = h(b"hash2");
+        insert_attachment(&conn, "att1", "acct-a", "m1", Some(&hash1), true, None);
         insert_attachment(
             &conn,
             "att2",
             "acct-a",
             "m2",
-            Some("hash2"),
+            Some(&hash2),
             false,
             Some("attachment_cache/hash2"),
         );
@@ -285,9 +293,9 @@ mod tests {
         assert_eq!(plan.data.message_ids.len(), 2);
         assert!(plan.data.message_ids.contains(&"m1".to_string()));
         assert!(plan.data.message_ids.contains(&"m2".to_string()));
-        assert_eq!(plan.data.inline_hashes, vec!["hash1".to_string()]);
+        assert_eq!(plan.data.inline_hashes, vec![hash1]);
         assert_eq!(plan.data.cached_files.len(), 1);
-        assert_eq!(plan.data.cached_files[0].1, "hash2");
+        assert_eq!(plan.data.cached_files[0].1, hash2);
 
         let count: i64 = conn
             .query_row(
@@ -318,16 +326,18 @@ mod tests {
         insert_message(&conn, "acct-a", "ta1", "ma1");
         insert_message(&conn, "acct-b", "tb1", "mb1");
 
-        insert_attachment(&conn, "a1", "acct-a", "ma1", Some("shared"), true, None);
-        insert_attachment(&conn, "b1", "acct-b", "mb1", Some("shared"), true, None);
-        insert_attachment(&conn, "a2", "acct-a", "ma1", Some("only-a"), true, None);
+        let shared = h(b"shared");
+        let only_a = h(b"only-a");
+        insert_attachment(&conn, "a1", "acct-a", "ma1", Some(&shared), true, None);
+        insert_attachment(&conn, "b1", "acct-b", "mb1", Some(&shared), true, None);
+        insert_attachment(&conn, "a2", "acct-a", "ma1", Some(&only_a), true, None);
 
         let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
 
-        assert!(plan.shared_inline_hashes.contains("shared"));
-        assert!(!plan.shared_inline_hashes.contains("only-a"));
-        assert!(plan.data.inline_hashes.contains(&"shared".to_string()));
-        assert!(plan.data.inline_hashes.contains(&"only-a".to_string()));
+        assert!(plan.shared_inline_hashes.contains(&shared));
+        assert!(!plan.shared_inline_hashes.contains(&only_a));
+        assert!(plan.data.inline_hashes.contains(&shared));
+        assert!(plan.data.inline_hashes.contains(&only_a));
     }
 
     #[test]
@@ -341,12 +351,14 @@ mod tests {
         insert_message(&conn, "acct-b", "tb1", "mb1");
 
         let cache = "attachment_cache/shared-cache";
+        let shared_cache = h(b"shared-cache");
+        let only_a = h(b"only-a");
         insert_attachment(
             &conn,
             "a1",
             "acct-a",
             "ma1",
-            Some("shared-cache"),
+            Some(&shared_cache),
             false,
             Some(cache),
         );
@@ -355,7 +367,7 @@ mod tests {
             "b1",
             "acct-b",
             "mb1",
-            Some("shared-cache"),
+            Some(&shared_cache),
             false,
             Some(cache),
         );
@@ -364,15 +376,15 @@ mod tests {
             "a2",
             "acct-a",
             "ma1",
-            Some("only-a"),
+            Some(&only_a),
             false,
             Some("attachment_cache/only-a"),
         );
 
         let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
 
-        assert!(plan.shared_cache_hashes.contains("shared-cache"));
-        assert!(!plan.shared_cache_hashes.contains("only-a"));
+        assert!(plan.shared_cache_hashes.contains(&shared_cache));
+        assert!(!plan.shared_cache_hashes.contains(&only_a));
     }
 
     #[test]
@@ -385,20 +397,21 @@ mod tests {
         insert_message(&conn, "acct-a", "ta1", "ma1");
         insert_message(&conn, "acct-b", "tb1", "mb1");
 
-        insert_attachment(&conn, "a1", "acct-a", "ma1", Some("cross"), true, None);
+        let cross = h(b"cross");
+        insert_attachment(&conn, "a1", "acct-a", "ma1", Some(&cross), true, None);
         insert_attachment(
             &conn,
             "b1",
             "acct-b",
             "mb1",
-            Some("cross"),
+            Some(&cross),
             false,
             Some("attachment_cache/cross"),
         );
 
         let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
 
-        assert!(!plan.shared_inline_hashes.contains("cross"));
+        assert!(!plan.shared_inline_hashes.contains(&cross));
     }
 
     #[test]
@@ -464,11 +477,12 @@ mod tests {
             [],
         )
         .expect("insert null-hash cached attachment");
-        insert_attachment(&conn, "att3", "acct-a", "m1", Some("real"), true, None);
+        let real = h(b"real");
+        insert_attachment(&conn, "att3", "acct-a", "m1", Some(&real), true, None);
 
         let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
 
-        assert_eq!(plan.data.inline_hashes, vec!["real".to_string()]);
+        assert_eq!(plan.data.inline_hashes, vec![real]);
         assert!(
             plan.data.cached_files.is_empty(),
             "null-hash cached file should be excluded"

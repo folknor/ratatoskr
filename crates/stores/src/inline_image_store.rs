@@ -368,19 +368,23 @@ impl InlineImageStoreReadState {
     }
 }
 
-/// Given a set of content hashes, return only those that have zero remaining
-/// references in the main database's `attachments` table.
+/// Given a set of content hashes (hex form, as stored in the inline image
+/// store), return only those that have zero remaining references in the
+/// main database's `attachments` table. The main DB's content_hash column
+/// holds BLAKE3 bytes via `BlobHash`; we parse the hex form to bind it.
 pub fn find_unreferenced_hashes(
     main_db: &Connection,
     content_hashes: &[String],
 ) -> Result<Vec<String>, String> {
     let mut orphaned = Vec::new();
     for content_hash in content_hashes {
+        let parsed = db::blob_hash::BlobHash::from_hex(content_hash)
+            .map_err(|e| format!("inline hash not BlobHash hex {content_hash}: {e}"))?;
         let remaining_refs: i64 = main_db
             .query_row(
                 "SELECT COUNT(*) AS cnt FROM attachments
                  WHERE is_inline = 1 AND content_hash = ?1",
-                params![content_hash],
+                params![parsed],
                 |row| row.get("cnt"),
             )
             .map_err(|e| format!("count inline image refs: {e}"))?;
@@ -410,11 +414,14 @@ pub fn collect_inline_hashes_for_account(
         .map_err(|e| format!("prepare inline hash query: {e}"))?;
     let hashes = stmt
         .query_map(params![account_id], |row| {
-            row.get::<_, String>("content_hash")
+            row.get::<_, db::blob_hash::BlobHash>("content_hash")
         })
         .map_err(|e| format!("query inline hashes: {e}"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("collect inline hashes: {e}"))?;
+        .map_err(|e| format!("collect inline hashes: {e}"))?
+        .into_iter()
+        .map(|h| h.to_hex())
+        .collect();
     Ok(hashes)
 }
 

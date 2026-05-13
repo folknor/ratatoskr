@@ -302,7 +302,10 @@ pub async fn db_clear_all_attachment_cache(db: &ReadDbState) -> Result<(), Strin
     .await
 }
 
-pub async fn db_count_cached_by_hash(db: &ReadDbState, content_hash: String) -> Result<i64, String> {
+pub async fn db_count_cached_by_hash(
+    db: &ReadDbState,
+    content_hash: crate::blob_hash::BlobHash,
+) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
             "SELECT COUNT(*) AS cnt FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",

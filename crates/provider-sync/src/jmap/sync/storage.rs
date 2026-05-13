@@ -6,7 +6,6 @@ use db::db::queries_extra::{
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
-use store::attachment_cache::hash_bytes;
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 
 use super::super::parse::ParsedJmapMessage;
@@ -398,7 +397,7 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
             let inner = ctx.client.inner();
             match inner.download(&blob_id).await {
                 Ok(data) if data.len() <= MAX_INLINE_SIZE => {
-                    let content_hash = hash_bytes(&data);
+                    let content_hash = db::blob_hash::BlobHash::hash(&data).to_hex();
                     Some((blob_id, (content_hash, data.to_vec(), mime_type)))
                 }
                 Ok(_) => None,

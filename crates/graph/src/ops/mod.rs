@@ -11,7 +11,7 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderProfile, ProviderTestResult,
 };
 use db::db::ReadDbState;
@@ -245,13 +245,12 @@ impl ProviderOps for GraphOps {
         Ok(())
     }
 
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     async fn fetch_attachment(
         &self,
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, ProviderError> {
+    ) -> Result<FetchedAttachment, ProviderError> {
         let enc_msg_id = urlencoding::encode(message_id);
         let enc_att_id = urlencoding::encode(attachment_id);
         let me = self.me();
@@ -282,11 +281,8 @@ impl ProviderOps for GraphOps {
             raw
         };
 
-        let size = data.len();
-        Ok(AttachmentData {
-            data: common::encoding::encode_base64_standard(&data),
-            size,
-        })
+        let size = data.len() as u64;
+        Ok(FetchedAttachment { bytes: data, size })
     }
 
     async fn list_folders(

@@ -87,7 +87,7 @@ pub struct ImapAttachment {
     pub size: u32,
     pub content_id: Option<String>,
     pub is_inline: bool,
-    pub content_hash: Option<String>,
+    pub content_hash: Option<db::blob_hash::BlobHash>,
     /// Raw bytes for small inline images (≤ MAX_INLINE_SIZE).
     /// Only populated at IMAP parse time; `None` for non-inline or large parts.
     #[serde(skip)]

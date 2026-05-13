@@ -1,5 +1,6 @@
 pub mod attachment_dedup;
 pub mod crypto;
+pub use db::blob_hash;
 pub mod email_parsing;
 pub mod encoding;
 pub mod error;

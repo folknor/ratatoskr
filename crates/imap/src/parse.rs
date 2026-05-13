@@ -175,7 +175,7 @@ pub fn parse_message(
 
                 let contents = att.contents();
                 let raw_hash = xxh3_64(contents);
-                let content_hash = format!("{raw_hash:016x}");
+                let content_hash = db::blob_hash::BlobHash::hash(contents);
 
                 #[allow(clippy::cast_possible_truncation)]
                 let size = att.len() as u32;

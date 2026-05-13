@@ -4,7 +4,6 @@ mod sync;
 use std::time::Duration;
 
 use async_imap::types::Flag;
-use base64::Engine;
 use futures::StreamExt;
 use mail_parser::MessageParser;
 
@@ -365,7 +364,7 @@ pub async fn fetch_message_body(
 }
 
 /// Fetch a specific MIME part (attachment) by UID and part ID.
-/// Returns the decoded binary data as standard base64.
+/// Returns the decoded binary bytes.
 ///
 /// Fetches the full message via `BODY.PEEK[]`, parses it with `mail-parser`
 /// (which handles all content-transfer-encoding decoding), and extracts
@@ -375,7 +374,7 @@ pub async fn fetch_attachment(
     folder: &str,
     uid: u32,
     part_id: &str,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
@@ -440,7 +439,7 @@ pub async fn fetch_attachment(
         }
     };
 
-    Ok(base64::engine::general_purpose::STANDARD.encode(&data))
+    Ok(data)
 }
 
 /// Fetch the raw RFC822 source of a single message by UID.

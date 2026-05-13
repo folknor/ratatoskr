@@ -73,8 +73,8 @@ pub struct ThreadAttachment {
     pub content_id: Option<String>,
     pub is_inline: bool,
     pub local_path: Option<String>,
-    pub content_hash: Option<String>,
-    pub gmail_attachment_id: Option<String>,
+    pub content_hash: Option<crate::blob_hash::BlobHash>,
+    pub remote_attachment_id: Option<String>,
     // Context from parent message
     pub from_name: Option<String>,
     pub from_address: Option<String>,
@@ -458,7 +458,7 @@ fn query_thread_attachments(
         .prepare(
             "SELECT a.id, a.message_id, a.filename, a.mime_type, a.size, \
                     a.content_id, a.is_inline, a.local_path, a.content_hash, \
-                    a.gmail_attachment_id, \
+                    a.remote_attachment_id, \
                     m.from_name, m.from_address, m.date \
              FROM attachments a \
              JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id \
@@ -481,7 +481,7 @@ fn query_thread_attachments(
                 is_inline: row.get::<_, i64>("is_inline")? != 0,
                 local_path: row.get("local_path")?,
                 content_hash: row.get("content_hash")?,
-                gmail_attachment_id: row.get("gmail_attachment_id")?,
+                remote_attachment_id: row.get("remote_attachment_id")?,
                 from_name: row.get("from_name")?,
                 from_address: row.get("from_address")?,
                 date: row.get("date")?,

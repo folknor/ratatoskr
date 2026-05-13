@@ -64,10 +64,10 @@ pub(crate) struct AccountDeletionMarker {
     pub message_ids: Vec<String>,
     /// `(local_path, content_hash)` per cached attachment. Mirrors
     /// `DbAccountDeletionData::cached_files`.
-    pub cached_files: Vec<(String, String)>,
-    pub inline_hashes: Vec<String>,
-    pub shared_cache_hashes: Vec<String>,
-    pub shared_inline_hashes: Vec<String>,
+    pub cached_files: Vec<(String, db::blob_hash::BlobHash)>,
+    pub inline_hashes: Vec<db::blob_hash::BlobHash>,
+    pub shared_cache_hashes: Vec<db::blob_hash::BlobHash>,
+    pub shared_inline_hashes: Vec<db::blob_hash::BlobHash>,
     pub completed_steps: Vec<AccountDeletionStep>,
 }
 
@@ -195,13 +195,13 @@ async fn drive_steps(
                 }
             }
             AccountDeletionStep::InlineImages => {
-                let shared: HashSet<&str> =
-                    marker.shared_inline_hashes.iter().map(String::as_str).collect();
+                let shared: HashSet<db::blob_hash::BlobHash> =
+                    marker.shared_inline_hashes.iter().copied().collect();
                 let to_delete: Vec<String> = marker
                     .inline_hashes
                     .iter()
-                    .filter(|h| !shared.contains(h.as_str()))
-                    .cloned()
+                    .filter(|h| !shared.contains(h))
+                    .map(db::blob_hash::BlobHash::to_hex)
                     .collect();
                 if to_delete.is_empty() {
                     true
@@ -227,10 +227,10 @@ async fn drive_steps(
                 // resume will skip this step. Distinct from the body /
                 // inline / search steps where a single Err means the
                 // batch operation failed wholesale.
-                let shared: HashSet<&str> =
-                    marker.shared_cache_hashes.iter().map(String::as_str).collect();
+                let shared: HashSet<db::blob_hash::BlobHash> =
+                    marker.shared_cache_hashes.iter().copied().collect();
                 for (path, hash) in &marker.cached_files {
-                    if shared.contains(hash.as_str()) {
+                    if shared.contains(hash) {
                         continue;
                     }
                     match store::attachment_cache::remove_cached_relative(app_data, path) {

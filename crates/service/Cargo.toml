@@ -55,6 +55,7 @@ log = "0.4"
 dirs = "6"
 lettre = { version = "0.11.21", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 sha2 = "0.11"
+blake3 = "1"
 thiserror.workspace = true
 # Phase 7: text extraction from cached attachments. All extractors run
 # inside `tokio::task::spawn_blocking`; dispatch / skip-list / truncation

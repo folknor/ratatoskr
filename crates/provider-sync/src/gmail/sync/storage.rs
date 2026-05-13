@@ -200,14 +200,14 @@ fn upsert_attachments(
         .iter()
         .flat_map(|msg| {
             msg.attachments.iter().map(move |att| AttachmentInsertRow {
-                id: format!("{}_{}", msg.base.id, att.gmail_attachment_id),
+                id: format!("{}_{}", msg.base.id, att.remote_attachment_id),
                 message_id: msg.base.id.clone(),
                 account_id: account_id.to_string(),
                 filename: Some(att.filename.clone()),
                 mime_type: Some(att.mime_type.clone()),
                 size: Some(att.size),
-                remote_attachment_id: Some(att.gmail_attachment_id.clone()),
-                content_hash: att.content_hash.clone(),
+                remote_attachment_id: Some(att.remote_attachment_id.clone()),
+                content_hash: att.content_hash,
                 content_id: att.content_id.clone(),
                 is_inline: att.is_inline,
             })
@@ -296,7 +296,7 @@ async fn store_inline_images(
             let data = att.inline_data.as_ref()?;
             let hash = att.content_hash.as_ref()?;
             Some(InlineImage {
-                content_hash: hash.clone(),
+                content_hash: hash.to_hex(),
                 data: data.clone(),
                 mime_type: att.mime_type.clone(),
             })

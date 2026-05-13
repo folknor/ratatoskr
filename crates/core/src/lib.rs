@@ -29,6 +29,7 @@ pub use store::inline_image_store;
 pub use sync::filters;
 pub mod mdn;
 pub mod oauth;
+pub use ::db::blob_hash;
 pub use ::db::progress;
 pub mod provider;
 pub mod scheduled_send;

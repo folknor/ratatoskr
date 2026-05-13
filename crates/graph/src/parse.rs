@@ -13,7 +13,7 @@ pub struct ParsedGraphAttachment {
     pub mime_type: Option<String>,
     pub size: Option<i64>,
     pub is_inline: bool,
-    pub content_hash: Option<String>,
+    pub content_hash: Option<db::blob_hash::BlobHash>,
     pub inline_data: Option<Vec<u8>>,
     pub content_id: Option<String>,
 }
@@ -144,7 +144,7 @@ pub fn parse_graph_message(
             ParsedGraphAttachment {
                 content_hash: inline_data
                     .as_deref()
-                    .map(store::attachment_cache::hash_bytes),
+                    .map(db::blob_hash::BlobHash::hash),
                 inline_data,
                 id: a.id.clone(),
                 filename: a.name.clone(),

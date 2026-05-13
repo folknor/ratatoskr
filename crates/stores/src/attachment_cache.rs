@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
-use xxhash_rust::xxh3::xxh3_64;
 
+use db::blob_hash::BlobHash;
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentCacheInfo, clear_attachment_cache_fields_batch, count_cached_attachment_refs,
@@ -24,8 +24,11 @@ pub struct AttachmentData {
 const CACHE_DIR: &str = "attachment_cache";
 
 /// Compute an xxh3 content hash from raw bytes, formatted as 16-char hex.
+///
+/// Phase 1 retired this for the attachments cache + provider sync paths
+/// (now `BlobHash::hash`, BLAKE3). Contact photos still use xxh3.
 pub fn hash_bytes(data: &[u8]) -> String {
-    format!("{:016x}", xxh3_64(data))
+    format!("{:016x}", xxhash_rust::xxh3::xxh3_64(data))
 }
 
 /// Resolve the attachment cache directory, creating it if needed.
@@ -162,7 +165,7 @@ pub fn update_cache_fields(
     attachment_id: &str,
     local_path: &str,
     cache_size: i64,
-    content_hash: &str,
+    content_hash: &BlobHash,
 ) -> Result<(), String> {
     update_attachment_cache_fields(conn, attachment_id, local_path, cache_size, content_hash)
 }
@@ -267,7 +270,7 @@ pub async fn try_inline_image_hit(
 
     let Some(hash) = hash else { return Ok(None) };
 
-    let result = inline_images.get(hash).await?;
+    let result = inline_images.get(hash.to_hex()).await?;
     Ok(result.map(|(bytes, _mime)| {
         let size = bytes.len();
         let data = encode_base64(&bytes);
@@ -298,7 +301,7 @@ pub async fn try_cache_hit(
             return Ok(None);
         };
 
-        if let Some(bytes) = read_cached(&dir, hash) {
+        if let Some(bytes) = read_cached(&dir, &hash.to_hex()) {
             let size = bytes.len();
             let data = encode_base64(&bytes);
             return Ok(Some(AttachmentData { data, size }));
@@ -334,7 +337,8 @@ pub fn cache_after_fetch(
     tokio::task::spawn(async move {
         let result: Result<(), String> = async {
             let bytes = decode_base64(&data)?;
-            let content_hash = hash_bytes(&bytes);
+            let content_hash = BlobHash::hash(&bytes);
+            let hash_hex = content_hash.to_hex();
 
             // Small inline images -> SQLite blob store
             if bytes.len() <= crate::inline_image_store::MAX_INLINE_SIZE {
@@ -350,13 +354,13 @@ pub fn cache_after_fetch(
                     && mime.starts_with("image/")
                 {
                     inline_store
-                        .put(content_hash.clone(), bytes.clone(), mime.clone())
+                        .put(hash_hex.clone(), bytes.clone(), mime.clone())
                         .await?;
                 }
             }
 
             // File-based cache for all sizes
-            let local_path = write_cached(&dir, &content_hash, &bytes)?;
+            let local_path = write_cached(&dir, &hash_hex, &bytes)?;
 
             #[allow(clippy::cast_possible_wrap)]
             let cache_size = bytes.len() as i64;

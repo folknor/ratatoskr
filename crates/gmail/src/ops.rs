@@ -4,7 +4,7 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderProfile, ProviderTestResult,
 };
 use db::db::ReadDbState;
@@ -211,19 +211,15 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, ProviderError> {
+    ) -> Result<FetchedAttachment, ProviderError> {
         let att = self
             .client
             .get_attachment(message_id, attachment_id, ctx.db)
             .await?;
-        Ok(AttachmentData {
-            data: att.data,
-            size: att.size.map_or(0, |s| {
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                let sz = s as usize;
-                sz
-            }),
-        })
+        let bytes = common::encoding::decode_base64url_nopad(&att.data)
+            .map_err(ProviderError::Client)?;
+        let size = bytes.len() as u64;
+        Ok(FetchedAttachment { bytes, size })
     }
 
     async fn list_folders(

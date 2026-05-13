@@ -144,14 +144,14 @@ CREATE TABLE IF NOT EXISTS attachments (
     filename TEXT,
     mime_type TEXT,
     size INTEGER,
-    gmail_attachment_id TEXT,
+    remote_attachment_id TEXT,
     content_id TEXT,
     is_inline INTEGER DEFAULT 0,
     local_path TEXT,
     imap_part_id TEXT,
     cached_at INTEGER,
     cache_size INTEGER,
-    content_hash TEXT,
+    content_hash BLOB,
     -- Phase 7: pointer to attachment_extracted_text.extracted_at for the
     -- row keyed by content_hash. NULL means "not yet extracted." Backfill
     -- scan filters cached_at IS NOT NULL AND text_indexed_at IS NULL so
@@ -181,7 +181,7 @@ CREATE INDEX IF NOT EXISTS idx_attachments_text_indexed_at
 -- Worker pre-flight skips only on permanent statuses; retry-eligible rows
 -- re-extract on next enqueue.
 CREATE TABLE IF NOT EXISTS attachment_extracted_text (
-    content_hash    TEXT PRIMARY KEY,
+    content_hash    BLOB PRIMARY KEY,
     mime_type       TEXT,
     extracted_text  TEXT,
     status          TEXT NOT NULL,

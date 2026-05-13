@@ -35,7 +35,7 @@ pub(super) async fn store_inline_images(
             let hash = att.content_hash.as_ref()?;
             let mime = att.mime_type.as_ref()?;
             Some(InlineImage {
-                content_hash: hash.clone(),
+                content_hash: hash.to_hex(),
                 data: data.clone(),
                 mime_type: mime.clone(),
             })
