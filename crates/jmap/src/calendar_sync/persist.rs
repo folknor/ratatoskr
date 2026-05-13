@@ -165,10 +165,23 @@ fn jmap_recurrence_rules_to_rrule(rules: &serde_json::Value) -> Option<String> {
         }
     }
     if let Some(months) = rule.get("byMonth").and_then(serde_json::Value::as_array) {
+        // RFC 8984 byMonth is an array of strings ("1".."12", optionally
+        // suffixed with "L" for leap months on non-Gregorian calendars).
+        // Real JMAP servers and the saehrimnir mock both emit the string
+        // form; the numeric branch is a tolerance for older mocks.
         let by_month: Vec<String> = months
             .iter()
-            .filter_map(serde_json::Value::as_u64)
-            .map(|month| month.to_string())
+            .filter_map(|value| {
+                value
+                    .as_u64()
+                    .map(|month| month.to_string())
+                    .or_else(|| {
+                        value
+                            .as_str()
+                            .and_then(|s| s.trim_end_matches('L').parse::<u32>().ok())
+                            .map(|month| month.to_string())
+                    })
+            })
             .collect();
         if !by_month.is_empty() {
             parts.push(format!("BYMONTH={}", by_month.join(",")));
