@@ -7,6 +7,7 @@
 // Import types with `use crate::` paths.
 
 mod accounts;
+pub(crate) mod attachments;
 mod calendar;
 mod chat;
 pub(crate) mod commands;

@@ -150,6 +150,10 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
+    /// Attachments roadmap Phase 5: a Save / Save All dialog returned
+    /// a chosen folder; remember it for the next Save inside the same
+    /// thread. The tuple key is `(account_id, thread_id)`.
+    AttachmentSaveFolderRemembered((String, String), std::path::PathBuf),
     /// Phase 1 of the two-phase spawn (commit 11). Subprocess is up, the
     /// version-check ping succeeded, and the App can now hold the
     /// ServiceClient so it can subscribe to notifications (esp.

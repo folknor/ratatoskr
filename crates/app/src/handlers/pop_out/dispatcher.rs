@@ -3,7 +3,10 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::pop_out::compose::{ComposeAttachment, ComposeMessage};
-use crate::pop_out::message_view::{MessageViewMessage, RenderingMode};
+use crate::handlers::attachments::{
+    AttachmentRef, OpenAttachmentParams, SaveAllAttachmentsParams, SaveAttachmentParams,
+};
+use crate::pop_out::message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
 use crate::{Message, ReadyApp};
 
@@ -74,6 +77,38 @@ impl ReadyApp {
                 window_id,
                 crate::action_resolve::MailActionIntent::Trash,
             ),
+            // Attachments roadmap Phase 5: Open / Save / Save All
+            // wire through the App-level shared handler so the
+            // reading-pane and pop-out surfaces produce identical
+            // behaviour (last-folder cache, sanitization, OS open).
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::OpenAttachment(att_id)),
+            ) => {
+                let Some(params) = build_open_params(state, att_id.as_str()) else {
+                    return Task::none();
+                };
+                self.handle_open_attachment(params)
+            }
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::SaveAttachment(att_id)),
+            ) => {
+                let Some(params) = build_save_params(state, att_id.as_str()) else {
+                    return Task::none();
+                };
+                self.handle_save_attachment(params)
+            }
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::SaveAllAttachments),
+            ) => {
+                let params = build_save_all_params(state);
+                if params.items.is_empty() {
+                    return Task::none();
+                }
+                self.handle_save_all_attachments(params)
+            }
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
                 let PopOutMessage::MessageView(msg) = pop_out_msg else {
@@ -411,4 +446,59 @@ fn handle_compose_attach_files(window_id: iced::window::Id) -> Task<Message> {
             }
         },
     )
+}
+
+/// Attachments roadmap Phase 5: bridge from pop-out attachment id to
+/// `OpenAttachmentParams`. Returns `None` if the row isn't in the
+/// pop-out's loaded attachment list (defensive - the UI emits ids
+/// from that same list).
+fn build_open_params(
+    state: &MessageViewState,
+    attachment_id: &str,
+) -> Option<OpenAttachmentParams> {
+    let row = state.attachments.iter().find(|a| a.id == attachment_id)?;
+    Some(OpenAttachmentParams {
+        item: AttachmentRef {
+            account_id:    state.account_id.clone(),
+            message_id:    state.message_id.clone(),
+            attachment_id: row.id.clone(),
+            filename:      row.filename.clone(),
+            mime_type:     row.mime_type.clone(),
+        },
+    })
+}
+
+fn build_save_params(
+    state: &MessageViewState,
+    attachment_id: &str,
+) -> Option<SaveAttachmentParams> {
+    let row = state.attachments.iter().find(|a| a.id == attachment_id)?;
+    Some(SaveAttachmentParams {
+        thread_id: state.thread_id.clone(),
+        item:      AttachmentRef {
+            account_id:    state.account_id.clone(),
+            message_id:    state.message_id.clone(),
+            attachment_id: row.id.clone(),
+            filename:      row.filename.clone(),
+            mime_type:     row.mime_type.clone(),
+        },
+    })
+}
+
+fn build_save_all_params(state: &MessageViewState) -> SaveAllAttachmentsParams {
+    let items = state
+        .attachments
+        .iter()
+        .map(|a| AttachmentRef {
+            account_id:    state.account_id.clone(),
+            message_id:    state.message_id.clone(),
+            attachment_id: a.id.clone(),
+            filename:      a.filename.clone(),
+            mime_type:     a.mime_type.clone(),
+        })
+        .collect();
+    SaveAllAttachmentsParams {
+        thread_id: state.thread_id.clone(),
+        items,
+    }
 }

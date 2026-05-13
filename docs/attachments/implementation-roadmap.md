@@ -247,49 +247,61 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ## Phase 5 - UI: Open, Save, Save All
 
-**Goal.** The three buttons in the reading pane and pop-out viewer actually work, online or offline.
+**Status: landed.** The reading-pane and pop-out attachment chips drive real Open / Save / Save All flows. All three route through `attachment.fetch` IPC; the UI re-opens `relative_path` positionally and bytes never cross JSON.
 
-**Entry criteria.**
-- Phase 3 landed. `attachment.fetch` works end-to-end through PackStore.
-- Phase 4 *helpful but not required* - this phase works in fetch-on-click mode if no pre-fetch has happened.
+**What shipped.**
 
-**In scope.**
+*Shared handler module* (`crates/app/src/handlers/attachments.rs`):
+- `AttachmentRef { account_id, message_id, attachment_id, filename, mime_type }` is the common payload.
+- `OpenAttachmentParams { item }`, `SaveAttachmentParams { thread_id, item }`, `SaveAllAttachmentsParams { thread_id, items }` are the three input types.
+- `impl ReadyApp { handle_open_attachment, handle_save_attachment, handle_save_all_attachments }` are the call sites. Each wraps a private `async fn ..._worker` in `Task::perform`.
+- A new `sanitize_attachment_filename` lives in the module rather than reusing `save_as.rs::sanitize_filename` (that one strips dots and would mangle extensions). Preserves alphanumerics + dots + spaces + parens; strips path separators, Windows-reserved chars, and control bytes; fallback to `"attachment"` if the result is empty.
+- `mime_to_ext` covers the common types (PDF, OOXML, images, text, zip, json); `save_dialog_filter` prefers the filename's own extension and falls back to mime.
+- `pick_collision_free_path` does the `(N)` suffix preserving the extension - `report.pdf` -> `report (1).pdf`.
+- `open_file_with_os_default` is the cross-platform `xdg-open` / `open` / `cmd /c start "" <path>` shell-out.
+- Unit tests cover sanitizer edge cases (path separators, Windows-reserved chars, empty input, all-dots), the stem/ext split (`report.pdf`, `README`, `.hidden`), and the mime mapping with `text/plain; charset=utf-8` style suffixes.
 
-*Event hoist (reading pane):*
-- The stubs at `crates/app/src/ui/reading_pane.rs:368-376` live inside the component's `update` fn, which has no `ServiceClient` or `rfd` context. Add `ReadingPaneEvent::{OpenAttachment, SaveAttachment, SaveAllAttachments}` variants and emit them from the component; handle them in `crates/app/src/handlers/core.rs:186 handle_reading_pane_event` where the dispatch surface lives.
-- Pop-out (`crates/app/src/handlers/pop_out/message_view.rs:69/73/77`) is structurally easier - its dispatcher already has the handles. Wire directly.
+*Reading-pane event hoist* (`crates/app/src/ui/reading_pane.rs`):
+- New `ReadingPaneEvent::{OpenAttachment, SaveAttachment, SaveAllAttachments}` variants carrying the param types from the shared module.
+- The three stub arms in `ReadingPane::update` build the events from `current_thread` and `thread_attachments` and emit them.
+- `crates/app/src/handlers/core.rs::handle_reading_pane_event` dispatches each into the matching `ReadyApp` method.
 
-*Shared handler module:*
-- New `crates/app/src/handlers/attachments.rs` with `handle_open_attachment`, `handle_save_attachment`, `handle_save_all_attachments`. Both surfaces dispatch into it.
+*Pop-out direct wiring* (`crates/app/src/handlers/pop_out/dispatcher.rs`):
+- The dispatcher intercepts `MessageViewMessage::{OpenAttachment, SaveAttachment, SaveAllAttachments}` BEFORE they reach `handle_message_view_update`, builds the params from `MessageViewState` via three private `build_*_params` helpers, and calls the matching `self.handle_*_attachment` method directly. No new events; the dispatcher has `&mut self` access.
+- The leftover arms in `handle_message_view_update` log a "dispatcher routing regression" warning if they're ever reached.
 
-*Behavior:*
-- All reads go through `attachment.fetch`. Ack `AttachmentFetchAck { content_hash, size_bytes, relative_path }` is reopened positionally; bytes never cross JSON.
-- Open: read bytes from `relative_path`, write to `<app_data>/opened_attachments/<safe_filename>` (not `/tmp`), shell out to OS handler via the platform Command pattern at `reading_pane.rs:917`.
-- Save: `rfd::AsyncFileDialog::save_file()` with original filename pre-filled, write via `std::fs::write`.
-- Save All: `rfd::AsyncFileDialog::pick_folder()`, write each attachment with `(N)` collision suffix.
-- Filename sanitization reuses `crates/app/src/handlers/pop_out/save_as.rs::sanitize_filename`.
-- Last-folder-per-thread persisted in a new `attachment_save_paths(thread_id, last_path, updated_at)` table.
+*Last-folder cache:*
+- `ReadyApp::attachment_last_folders: HashMap<(account_id, thread_id), PathBuf>`, populated when a Save / Save All dialog returns a chosen path. Used to `set_directory` the next dialog inside the same thread. In-memory only.
 
-**Out of scope.**
-- Periodic cleanup of `opened_attachments/` (Phase 8).
-- Toast-based error reporting (blocked on the toast system in TODO.md). Errors logged for v1.
+*Boilerplate:*
+- New `Message::AttachmentSaveFolderRemembered((account_id, thread_id), PathBuf)` variant + dispatch arm in `update.rs` that just inserts into the cache.
+
+**Deferred.**
+
+- **Cross-session save-path persistence.** The plan called for an `attachment_save_paths` table cascading off `threads`. The write side would require a new IPC (the app is read-only on DB by architecture), which is ~100 LOC across schema + service-api + service handler + service_client wrapper for a modest UX gain. Phase 5 ships the in-memory cache; durable persistence is a small follow-up if real users want it.
+- **Toast-based error reporting.** Still blocked on the toast surface in `TODO.md`. Phase 5 logs at `warn!` on all user-facing failures; the user sees nothing beyond the action having no effect.
+- **`opened_attachments/` periodic cleanup.** Owned by Phase 8.
 
 **Touchpoints.**
-- New: `crates/app/src/handlers/attachments.rs`, `attachment_save_paths` table in `crates/db/src/db/schema/02_mail.sql`, related queries in `crates/db/src/db/queries_extra/...`.
-- `crates/app/src/ui/reading_pane.rs` - replace stub branches with `ReadingPaneEvent` emissions.
-- `crates/app/src/handlers/core.rs` - new `handle_reading_pane_event` arms dispatching into the shared handler module.
-- `crates/app/src/handlers/pop_out/message_view.rs` - dispatch into the shared handler module.
+- New: `crates/app/src/handlers/attachments.rs`.
+- `crates/app/src/handlers/mod.rs` - re-export.
+- `crates/app/src/ui/reading_pane.rs` - new event variants, replaced stub arms, `AttachmentAction` enum and `build_attachment_event` helper.
+- `crates/app/src/handlers/core.rs` - three new dispatch arms.
+- `crates/app/src/handlers/pop_out/dispatcher.rs` - three new intercepting arms + three `build_*_params` helpers.
+- `crates/app/src/handlers/pop_out/message_view.rs` - leftover stubs degraded to routing-regression warnings.
+- `crates/app/src/app.rs` - `attachment_last_folders` field + initializer.
+- `crates/app/src/message.rs` - `Message::AttachmentSaveFolderRemembered` variant.
+- `crates/app/src/update.rs` - dispatch arm for the new Message.
 
-**Exit criteria.**
-- Click Open -> file opens in the OS default handler.
-- Click Save -> file dialog -> file written, byte-equivalent at the application level (signed content stays byte-identical via the squeeze bypass).
-- Click Save All -> folder picker -> all files written; collisions get `(N)` suffix.
-- After Save, the next Save on the same thread pre-fills the previous folder.
-- All three work with network disabled if the cache is populated.
+**Exit criteria (manual verification).**
+- Click Open in either surface -> file lands in `<app_data>/opened_attachments/<safe_filename>` and the OS default handler launches.
+- Click Save -> dialog opens (pre-filled with sanitized filename, mime-derived extension filter), chosen file written, second Save inside the same thread opens the dialog at the previously-chosen folder.
+- Click Save All -> folder picker, every attachment written, name collisions get `(N)` suffix preserving the extension.
+- All three work with network disabled if the cache is populated (Phase 4 prefetch covers this).
 
-**Risks / open questions.**
-- Save All on a multi-attachment offline message with mixed cached/uncached state. Probably: report which ones failed, write the ones that succeeded.
-- Windows / macOS OS-default-open quirks (UAC, quarantine attribute, GateKeeper).
+**Risks / open questions** (carry-over to follow-up work, not Phase 5-blocking).
+- Save All on a multi-attachment message with mixed cached / uncached state surfaces only as a summary log line; per-attachment failure UI waits for the toast surface.
+- Windows / macOS OS-default-open quirks (UAC, quarantine attribute, GateKeeper). Untested on those platforms in this phase.
 
 ---
 

@@ -163,6 +163,13 @@ pub struct ReadyApp {
     /// Inline image store for CID image resolution.
     pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState>,
 
+    /// Attachments roadmap Phase 5: per-thread "last folder used" for
+    /// Save / Save All dialogs. In-memory only; cross-session
+    /// persistence is deferred until the IPC payoff is worth the
+    /// plumbing. Keyed by `(account_id, thread_id)`.
+    pub(crate) attachment_last_folders:
+        std::collections::HashMap<(String, String), std::path::PathBuf>,
+
     // Service process scaffold
     pub(crate) service_client: Option<Arc<ServiceClient>>,
     pub(crate) service_notifications: ServiceNotificationReceiver,
@@ -420,6 +427,7 @@ impl ReadyApp {
             sync_reporter,
             body_store,
             inline_image_store,
+            attachment_last_folders: std::collections::HashMap::new(),
             service_client: Some(service_client),
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),
@@ -786,6 +794,7 @@ impl BootingApp {
             Message::WindowResized(_, _)
             | Message::WindowMoved(_, _)
             | Message::Noop
+            | Message::AttachmentSaveFolderRemembered(_, _)
             | Message::ModifiersChanged(_) => BootingUpdate::Stay(Task::none()),
             other => {
                 // Take the variant name from the start of the Debug

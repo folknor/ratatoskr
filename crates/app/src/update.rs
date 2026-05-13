@@ -170,6 +170,10 @@ impl ReadyApp {
             // Compose
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
+            Message::AttachmentSaveFolderRemembered(key, folder) => {
+                self.attachment_last_folders.insert(key, folder);
+                Task::none()
+            }
             // ServiceChildSpawned re-fires post-handshake on every
             // respawn cycle. The notification subscription is bound to
             // the same Arc<NotificationQueue> across respawns, so this

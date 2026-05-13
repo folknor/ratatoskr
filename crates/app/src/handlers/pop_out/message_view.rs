@@ -65,16 +65,24 @@ pub(super) fn handle_message_view_update(
             state.hovered_attachment_id = id;
             Task::none()
         }
-        MessageViewMessage::OpenAttachment(att_id) => {
-            log::info!("OpenAttachment({att_id}): not yet implemented");
-            Task::none()
-        }
-        MessageViewMessage::SaveAttachment(att_id) => {
-            log::info!("SaveAttachment({att_id}): not yet implemented");
+        // Attachments roadmap Phase 5: OpenAttachment / SaveAttachment
+        // / SaveAllAttachments are intercepted by
+        // `dispatcher.rs::handle_pop_out_message` so they can reach
+        // the App-level shared handler. If they arrive here it's a
+        // routing regression - log and drop.
+        MessageViewMessage::OpenAttachment(att_id)
+        | MessageViewMessage::SaveAttachment(att_id) => {
+            log::warn!(
+                "MessageViewMessage::{{Open,Save}}Attachment({att_id}) reached \
+                 message_view.rs - dispatcher routing regression",
+            );
             Task::none()
         }
         MessageViewMessage::SaveAllAttachments => {
-            log::info!("SaveAllAttachments: not yet implemented");
+            log::warn!(
+                "MessageViewMessage::SaveAllAttachments reached message_view.rs \
+                 - dispatcher routing regression",
+            );
             Task::none()
         }
         MessageViewMessage::Reply

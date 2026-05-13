@@ -91,6 +91,15 @@ pub enum ReadingPaneEvent {
     },
     /// User toggled the star on the thread.
     ToggleStar,
+    /// Attachments roadmap Phase 5: user clicked Open on an
+    /// attachment chip.
+    OpenAttachment(crate::handlers::attachments::OpenAttachmentParams),
+    /// Attachments roadmap Phase 5: user clicked Save on an
+    /// attachment chip.
+    SaveAttachment(crate::handlers::attachments::SaveAttachmentParams),
+    /// Attachments roadmap Phase 5: user clicked Save All in the
+    /// reading pane header.
+    SaveAllAttachments(crate::handlers::attachments::SaveAllAttachmentsParams),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -133,7 +142,49 @@ struct ThreadRef {
     is_starred: bool,
 }
 
+/// Attachments roadmap Phase 5: which event variant to build inside
+/// `build_attachment_event` for a single attachment chip click.
+#[derive(Debug, Clone, Copy)]
+enum AttachmentAction {
+    Open,
+    Save,
+}
+
 impl ReadingPane {
+    /// Resolve an attachment id to a `ReadingPaneEvent`. Returns
+    /// `None` if there's no current thread (nothing's loaded) or the
+    /// id is unknown (defensive - the UI should only emit ids that
+    /// exist in `thread_attachments`).
+    fn build_attachment_event(
+        &self,
+        attachment_id: &str,
+        action: AttachmentAction,
+    ) -> Option<ReadingPaneEvent> {
+        let thread = self.current_thread.as_ref()?;
+        let row = self
+            .thread_attachments
+            .iter()
+            .find(|a| a.id == attachment_id)?;
+        let item = crate::handlers::attachments::AttachmentRef {
+            account_id:    thread.account_id.clone(),
+            message_id:    row.message_id.clone(),
+            attachment_id: row.id.clone(),
+            filename:      row.filename.clone(),
+            mime_type:     row.mime_type.clone(),
+        };
+        Some(match action {
+            AttachmentAction::Open => ReadingPaneEvent::OpenAttachment(
+                crate::handlers::attachments::OpenAttachmentParams { item },
+            ),
+            AttachmentAction::Save => ReadingPaneEvent::SaveAttachment(
+                crate::handlers::attachments::SaveAttachmentParams {
+                    thread_id: thread.id.clone(),
+                    item,
+                },
+            ),
+        })
+    }
+
     pub fn new() -> Self {
         Self {
             thread_messages: Vec::new(),
@@ -355,9 +406,30 @@ impl Component for ReadingPane {
                 (Task::none(), event)
             }
             ReadingPaneMessage::SaveAllAttachments => {
-                // Save logic not yet wired - see "Attachment saving" TODO.
-                log::info!("SaveAllAttachments: not yet implemented");
-                (Task::none(), None)
+                let Some(thread) = self.current_thread.as_ref() else {
+                    return (Task::none(), None);
+                };
+                let items: Vec<crate::handlers::attachments::AttachmentRef> = self
+                    .thread_attachments
+                    .iter()
+                    .map(|a| crate::handlers::attachments::AttachmentRef {
+                        account_id:    thread.account_id.clone(),
+                        message_id:    a.message_id.clone(),
+                        attachment_id: a.id.clone(),
+                        filename:      a.filename.clone(),
+                        mime_type:     a.mime_type.clone(),
+                    })
+                    .collect();
+                if items.is_empty() {
+                    return (Task::none(), None);
+                }
+                let event = ReadingPaneEvent::SaveAllAttachments(
+                    crate::handlers::attachments::SaveAllAttachmentsParams {
+                        thread_id: thread.id.clone(),
+                        items,
+                    },
+                );
+                (Task::none(), Some(event))
             }
             ReadingPaneMessage::ToggleAttachmentVersions(filename) => {
                 if !self.expanded_attachment_versions.remove(&filename) {
@@ -366,13 +438,18 @@ impl Component for ReadingPane {
                 (Task::none(), None)
             }
             ReadingPaneMessage::OpenAttachment(att_id) => {
-                // Open with system handler not yet wired - see "Attachment saving" TODO.
-                log::info!("OpenAttachment({att_id}): not yet implemented");
-                (Task::none(), None)
+                let Some(event) = self.build_attachment_event(&att_id, AttachmentAction::Open)
+                else {
+                    return (Task::none(), None);
+                };
+                (Task::none(), Some(event))
             }
             ReadingPaneMessage::SaveAttachment(att_id) => {
-                log::info!("SaveAttachment({att_id}): not yet implemented");
-                (Task::none(), None)
+                let Some(event) = self.build_attachment_event(&att_id, AttachmentAction::Save)
+                else {
+                    return (Task::none(), None);
+                };
+                (Task::none(), Some(event))
             }
             ReadingPaneMessage::PopOutMessageById(message_id) => {
                 let event = self
