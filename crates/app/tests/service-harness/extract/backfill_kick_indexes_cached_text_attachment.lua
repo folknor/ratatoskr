@@ -78,11 +78,10 @@ local attachment, attachment_err = client:request("TestSeedCachedAttachment", {
 })
 harness.assert(attachment_err == nil, "TestSeedCachedAttachment failed")
 harness.assert_eq(attachment.size_bytes, string.len(phrase), "cached size")
-harness.assert_eq(
-    attachment.relative_path,
-    "attachment_cache/" .. attachment.content_hash,
-    "cache path"
-)
+-- Bytes live in PackStore after attachments roadmap Phase 3, not on
+-- disk under attachment_cache/<hash>. The seed helper still returns
+-- that string in `relative_path` for wire compat, but the script's
+-- real invariants are the extraction status checks below.
 
 local before, before_err = client:request("TestQueryDbState", {
     account_id = account.account_id,
