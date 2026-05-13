@@ -42,3 +42,91 @@ from = "elsewhere@example.com"
 to = ["secondary@example.com"]
 subject = "Hello secondary"
 body_text = "Secondary account inbox email."
+
+# Google Calendar resources per account. Each calendar belongs to one
+# of the two principals so token-scoped sync (Calendar and People)
+# can assert no cross-account leakage. Only one is_default = true row
+# is allowed per fixture so secondary's calendar leaves the flag unset.
+
+[[calendar]]
+id = "cal-primary-google"
+account_id = "account-primary"
+name = "Primary Google Calendar"
+is_default = true
+
+[[event]]
+id = "ev-google-primary-001"
+calendar_id = "cal-primary-google"
+subject = "Primary planning"
+start = "2026-02-03T15:00:00Z"
+end = "2026-02-03T16:00:00Z"
+location = "Primary HQ"
+
+[[calendar]]
+id = "cal-secondary-google"
+account_id = "account-secondary"
+name = "Secondary Google Calendar"
+
+[[event]]
+id = "ev-google-secondary-001"
+calendar_id = "cal-secondary-google"
+subject = "Secondary review"
+start = "2026-02-05T19:00:00Z"
+end = "2026-02-05T20:00:00Z"
+location = "Secondary office"
+
+# Google People API contact folders + connections per account. Same
+# token-scoped isolation pattern as the calendar rows.
+
+[[contact_folder]]
+id = "cf-primary-google"
+account_id = "account-primary"
+display_name = "My Contacts"
+
+[[contact]]
+id = "contact-primary-google-001"
+folder_id = "cf-primary-google"
+display_name = "Primary Contact"
+emails = ["primary-contact@example.test"]
+
+[[contact_folder]]
+id = "cf-secondary-google"
+account_id = "account-secondary"
+display_name = "My Contacts"
+
+[[contact]]
+id = "contact-secondary-google-001"
+folder_id = "cf-secondary-google"
+display_name = "Secondary Contact"
+emails = ["secondary-contact@example.test"]
+
+# Gmail SendAs identities per account. Each row resolves through the
+# Gmail mock under /gmail/v1/users/me/settings/sendAs after the bearer
+# token routes the request to the right account.
+
+[[send_as]]
+send_as_email = "primary@example.com"
+account_id = "account-primary"
+display_name = "Primary Owner"
+signature = "<p>Primary signature -- send from <b>primary@example.com</b>.</p>"
+is_primary = true
+is_default = true
+treat_as_alias = false
+
+[[send_as]]
+send_as_email = "primary-alias@example.com"
+account_id = "account-primary"
+display_name = "Primary Alias"
+signature = "<p>Primary alias signature.</p>"
+is_primary = false
+is_default = false
+treat_as_alias = true
+
+[[send_as]]
+send_as_email = "secondary@example.com"
+account_id = "account-secondary"
+display_name = "Secondary Owner"
+signature = "<p>Secondary signature -- different account.</p>"
+is_primary = true
+is_default = true
+treat_as_alias = false

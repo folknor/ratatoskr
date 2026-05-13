@@ -1,0 +1,42 @@
+name = "graph-categories-small"
+
+# Single-account Graph fixture seeded with four Outlook master
+# categories. Each row resolves through /v1.0/me/outlook/masterCategories
+# and ratatoskr's graph_label_sync should turn it into a tag-kind label
+# with id "cat:<displayName>" and the Exchange preset colour mapped
+# through label-colors::preset_colors.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+account_id = "account-1"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[category]]
+id = "cat-work"
+display_name = "Work"
+color = "preset0"
+account_id = "account-1"
+
+[[category]]
+id = "cat-personal"
+display_name = "Personal"
+color = "preset2"
+account_id = "account-1"
+
+[[category]]
+id = "cat-urgent"
+display_name = "Urgent"
+color = "preset15"
+account_id = "account-1"
+
+[[category]]
+id = "cat-no-color"
+display_name = "Uncategorised"
+account_id = "account-1"

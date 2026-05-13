@@ -12,7 +12,8 @@ use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
     TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
-    TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
+    TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
+    TestDelayNextWriteAck,
     TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
     TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesAck,
@@ -1062,6 +1063,7 @@ fn read_harness_db_state(
         contact_group_count: count_account_rows(conn, "contact_groups", account_id)?,
         accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
         labels: read_harness_labels(conn, account_id)?,
+        signatures: read_harness_signatures(conn, account_id)?,
         messages: read_harness_messages(conn, params)?,
         local_drafts: read_harness_local_drafts(conn, params)?,
         attachments: read_harness_attachments(conn, params)?,
@@ -1202,7 +1204,8 @@ fn read_harness_labels(
                 .prepare(
                     "SELECT id, account_id, name, type, label_kind,
                             parent_label_id, imap_folder_path, imap_special_use,
-                            sort_order, visible, is_subscribed
+                            sort_order, visible, is_subscribed,
+                            color_bg, color_fg
                      FROM labels
                      WHERE account_id = ?1
                      ORDER BY account_id ASC, id ASC",
@@ -1218,7 +1221,8 @@ fn read_harness_labels(
                 .prepare(
                     "SELECT id, account_id, name, type, label_kind,
                             parent_label_id, imap_folder_path, imap_special_use,
-                            sort_order, visible, is_subscribed
+                            sort_order, visible, is_subscribed,
+                            color_bg, color_fg
                      FROM labels
                      ORDER BY account_id ASC, id ASC",
                 )
@@ -1247,6 +1251,66 @@ fn test_db_label_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbLab
         sort_order,
         visible,
         is_subscribed,
+        color_bg: row.get(11)?,
+        color_fg: row.get(12)?,
+    })
+}
+
+fn read_harness_signatures(
+    conn: &Connection,
+    account_id: Option<&str>,
+) -> Result<Vec<TestDbSignatureRow>, String> {
+    match account_id {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, name, body_html, body_text,
+                            is_default, is_reply_default, sort_order,
+                            source, server_id, server_html_hash
+                     FROM signatures
+                     WHERE account_id = ?1
+                     ORDER BY account_id ASC, sort_order ASC, id ASC",
+                )
+                .map_err(|e| format!("prepare signatures query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id], test_db_signature_from_row)
+                .map_err(|e| format!("query signatures: {e}"))?;
+            collect_rows(mapped, "signatures")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, name, body_html, body_text,
+                            is_default, is_reply_default, sort_order,
+                            source, server_id, server_html_hash
+                     FROM signatures
+                     ORDER BY account_id ASC, sort_order ASC, id ASC",
+                )
+                .map_err(|e| format!("prepare signatures query: {e}"))?;
+            let mapped = stmt
+                .query_map([], test_db_signature_from_row)
+                .map_err(|e| format!("query signatures: {e}"))?;
+            collect_rows(mapped, "signatures")
+        }
+    }
+}
+
+fn test_db_signature_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbSignatureRow> {
+    let is_default = row.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0;
+    let is_reply_default = row.get::<_, Option<i64>>(6)?.unwrap_or(0) != 0;
+    let sort_order = row.get::<_, Option<i64>>(7)?.unwrap_or(0);
+    Ok(TestDbSignatureRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        name: row.get(2)?,
+        body_html: row.get(3)?,
+        body_text: row.get(4)?,
+        is_default,
+        is_reply_default,
+        sort_order,
+        source: row.get(8)?,
+        server_id: row.get(9)?,
+        server_html_hash: row.get(10)?,
     })
 }
 

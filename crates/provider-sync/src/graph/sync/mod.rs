@@ -170,6 +170,14 @@ pub async fn graph_initial_sync(
         log::warn!("Contact initial sync failed (non-fatal): {e}");
     }
 
+    // Bootstrap the master category list as cat:<displayName> tag
+    // labels. Delta-cadence runs again every 20th cycle from
+    // `graph_delta_sync`; without this initial pass, a fresh account
+    // would sit without categories for the first 20 delta cycles.
+    if let Err(e) = super::label_sync::graph_label_sync(client, account_id, &read_db).await {
+        log::warn!("Master category initial sync failed (non-fatal): {e}");
+    }
+
     let aid = account_id.to_string();
     read_db
         .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))

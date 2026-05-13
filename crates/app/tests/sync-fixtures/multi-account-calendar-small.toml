@@ -1,0 +1,45 @@
+name = "multi-account-calendar-small"
+
+# Two CalDAV principals with disjoint calendar homes. The primary owns
+# one Work calendar and one event; the secondary owns one Personal
+# calendar and one event. Tests assert each principal's PROPFIND /
+# REPORT only returns its own resources.
+
+[[account]]
+id = "account-primary"
+name = "primary@example.com"
+is_personal = true
+primary = true
+
+[[account]]
+id = "account-secondary"
+name = "secondary@example.com"
+is_personal = true
+
+[[calendar]]
+id = "cal-primary-work"
+account_id = "account-primary"
+name = "Work"
+
+[[event]]
+id = "ev-primary-001"
+calendar_id = "cal-primary-work"
+subject = "Primary standup"
+start = "2026-01-15T09:00:00Z"
+end = "2026-01-15T09:15:00Z"
+location = "Primary HQ"
+organizer = { name = "Primary Owner", email = "primary@example.com" }
+
+[[calendar]]
+id = "cal-secondary-personal"
+account_id = "account-secondary"
+name = "Personal"
+
+[[event]]
+id = "ev-secondary-001"
+calendar_id = "cal-secondary-personal"
+subject = "Secondary haircut"
+start = "2026-01-20T14:00:00Z"
+end = "2026-01-20T14:30:00Z"
+location = "Secondary salon"
+organizer = { name = "Secondary Owner", email = "secondary@example.com" }

@@ -256,11 +256,14 @@ and mirroring any needed upstream fixtures into
   drive `contact_sync` to use `GraphClient::api_path_prefix()` instead
   of hardcoded `/me` paths, then assert contact folders, contacts, and
   delta links stay scoped to the shared mailbox.
-- [ ] **Graph master category label sync** - Use
-  `graph-categories-small.toml` to exercise
-  `graph_label_sync()`. Assert `cat:<displayName>` tag labels are
-  inserted with the expected account id, `label_kind = 'tag'`, sort
-  order, and Exchange preset colors from the Graph category palette.
+- [x] **Graph master category label sync** - Landed.
+  `graph-categories-small.toml` exercises `graph_label_sync()`
+  through the `graph-master-category-label-sync` script. Sync runs
+  via the new initial-sync invocation; `cat:<displayName>` rows land
+  with `label_kind = 'tag'`, the correct `account_id`, sort order
+  matching the fixture index, and Exchange preset colours mapped
+  through `label-colors::preset_colors` (preset0/2/15 verified, no
+  preset → color_bg/fg null).
 - [ ] **Graph category shared-mailbox path hardening** - Combine
   master categories with a multi-account fixture. This should drive
   `graph_label_sync()` to use `GraphClient::api_path_prefix()` instead
@@ -273,16 +276,19 @@ and mirroring any needed upstream fixtures into
   `/groups/{id}/transitiveMembers/microsoft.graph.user`. Once those
   paths are covered, assert groups and member email rows land in
   contact groups.
-- [ ] **Google OAuth token account binding: Gmail** - Mint two mock
-  OAuth tokens with different `account_id` form fields, seed two
-  Gmail accounts, and sync them against one multi-account fixture.
-  Assert Gmail labels, threads, messages, and attachments are scoped
-  by the bearer token's account, not by the fixture primary.
-- [ ] **Gmail SendAs signature import** - Mirror the new
-  `[[send_as]]` rows from `multi-account-small` and run Gmail
-  signature sync. Assert each `sendAsEmail` becomes the right local
-  signature / alias metadata for its account, including HTML body,
-  display name, primary/default flags, and no cross-account leakage.
+- [x] **Google OAuth token account binding: Gmail** - Landed via
+  `gmail-oauth-multi-account`. Two minted tokens against
+  `multi-account-small` give each Gmail account its own messages
+  and labels; cross-account leakage is asserted on the
+  `labels.account_id` column rather than ID equality since system
+  labels (DRAFT, INBOX, ...) intentionally repeat per principal.
+- [x] **Gmail SendAs signature import** - Landed via
+  `gmail-send-as-multi-account-import`. `multi-account-small` now
+  carries `[[send_as]]` rows per account; the test asserts the
+  Gmail-imported signatures table (server_id IS NOT NULL) holds the
+  expected HTML body, display-name-decorated `name`, `is_default`
+  flag, and source `gmail_sync`. Local "Harness" signatures inserted
+  by TestSeedAccount are filtered out.
 - [ ] **Gmail SendAs signature writeback** - Edit a Gmail-backed
   signature through the Service/settings path and assert saehrimnir
   receives `PATCH /gmail/v1/users/me/settings/sendAs/{email}` with
@@ -298,22 +304,29 @@ and mirroring any needed upstream fixtures into
   primary and secondary accounts, sync signatures for both accounts,
   and assert each account only imports or patches its token-bound
   identity.
-- [ ] **Google OAuth token account binding: Calendar and People** -
-  Repeat the token-scoping shape for Google Calendar and People API.
-  Assert `calendarList`, events, contacts, and otherContacts all
-  scope to the token-bound account and that missing / default tokens
-  keep the old primary-account behavior.
-- [ ] **CalDAV multi-account principal scoping** - Use
-  `multi-account-small` with two CalDAV accounts whose usernames map
-  to `account-primary` and `account-secondary`. Sync both and assert
-  `/principals/{user}/` and `/calendars/{user}/...` only expose that
-  account's calendars and events; primary must never import
-  secondary's calendar rows or vice versa.
-- [ ] **CalDAV secondary-principal write isolation** - Create, update,
-  and delete an event through the secondary CalDAV account. Assert the
-  event is reachable through `/calendars/account-secondary/...`,
-  404s under the primary principal, and Ratatoskr stores/removes it
-  only under the secondary account.
+- [x] **Google OAuth token account binding: Calendar and People** -
+  Landed via `google-oauth-multi-account-calendar-people`.
+  `multi-account-small` now carries per-account `[[calendar]]`,
+  `[[event]]`, `[[contact_folder]]`, and `[[contact]]` rows; with
+  one minted token per account the harness runs both
+  `start_sync` (Gmail+People) and `start_calendar_sync` and
+  asserts each principal's Google calendar, event, and contact
+  rows are scoped to its own `account_id`. Missing-token fallback
+  is not exercised yet.
+- [x] **CalDAV multi-account principal scoping** - Landed via
+  `caldav-multi-account-principal-scoping` against the new
+  `multi-account-calendar-small.toml` fixture. Saehrimnir gained
+  Basic-Auth username resolution on the bootstrap PROPFIND so each
+  principal sees its own `/principals/{user}/` URL instead of the
+  primary's; the harness asserts per-principal calendars and events
+  only.
+- [x] **CalDAV secondary-principal write isolation** - Landed via
+  the new service-harness script
+  `m6/calendar_actions_caldav_multi_account`. Create / Update /
+  Delete through the secondary principal land exclusively under
+  `/calendars/account-secondary/...`; the request log shows zero
+  PUT/DELETE traffic against the primary's home and the primary
+  DB never picks the mutations up after its own sync.
 - [ ] **CalDAV `MKCALENDAR` create-calendar action** - Once the
   Ratatoskr create-calendar path is exposed in the harness, create a
   calendar against a CalDAV account and assert saehrimnir records
@@ -326,20 +339,26 @@ and mirroring any needed upstream fixtures into
   created calendar and Graph `/me/calendars` lists it, proving
   saehrimnir's shared `calendar_created` transition is visible across
   protocol surfaces.
-- [ ] **IMAP LOGIN multi-account binding** - Seed two IMAP accounts
-  with different usernames matching fixture account names. Sync both
-  through the same mock process and assert LIST / STATUS / SELECT /
-  FETCH only expose the authenticated account's mailboxes and
-  messages.
-- [ ] **IMAP XOAUTH2 / OAUTHBEARER account binding** - Mint mock
-  OAuth tokens for different accounts and use them in IMAP auth.
-  Assert the connection binds to the token account, and add a
-  fallback case where an unknown token or user stays on the primary
-  account.
-- [ ] **SMTP AUTH account attribution** - Send via SMTP for two
-  accounts and assert `/test/smtp/submissions` records the resolved
-  `account_id`, auth mechanism, recipients, and parsed MIME summary
-  for each submission.
+- [x] **IMAP LOGIN multi-account binding** - Landed via
+  `imap-login-multi-account` against `multi-account-small`. Each
+  ratatoskr account's email matches a fixture principal so
+  saehrimnir's `account_id_for_username` routes the connection;
+  the harness asserts disjoint per-account inboxes and at least one
+  LOGIN/LIST/SELECT per account in the mock request log.
+- [ ] **IMAP XOAUTH2 / OAUTHBEARER account binding** - Deferred.
+  async_imap hangs against saehrimnir's two-round-trip XOAUTH2 /
+  OAUTHBEARER continuation flow: the saehrimnir test for inline
+  SASL-IR works, but async_imap sends `AUTHENTICATE XOAUTH2`
+  without a SASL-IR token and never recovers from the `+`
+  continuation prompt. Needs deeper saehrimnir-side debugging
+  before this test can land.
+- [x] **SMTP AUTH account attribution** - Landed via
+  `t1/smtp_auth_multi_account_attribution`. Two accounts seeded
+  from `multi-account-small` send through ActionSend; the
+  `/test/smtp/submissions` log records the right `account_id`
+  (resolved by saehrimnir's `account_id_for_username` from SMTP
+  AUTH PLAIN), the `auth_mechanism = "PLAIN"`, the `from`, and
+  the recipient list for each submission.
 - [ ] **SMTP AUTH failure callback** - Use Lua
   `on("smtp", "AUTH", fn)` to force an auth failure. Assert the send
   action reports the right provider failure, does not record a

@@ -297,6 +297,28 @@ pub struct TestDbLabelRow {
     pub visible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_subscribed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_bg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_fg: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbSignatureRow {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub body_html: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_text: Option<String>,
+    pub is_default: bool,
+    pub is_reply_default: bool,
+    pub sort_order: i64,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_html_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -442,6 +464,8 @@ pub struct TestQueryDbStateAck {
     pub accounts: Vec<TestDbAccountRow>,
     #[serde(default)]
     pub labels: Vec<TestDbLabelRow>,
+    #[serde(default)]
+    pub signatures: Vec<TestDbSignatureRow>,
     pub messages: Vec<TestDbMessageRow>,
     pub local_drafts: Vec<TestDbLocalDraftRow>,
     pub attachments: Vec<TestDbAttachmentRow>,
