@@ -86,7 +86,7 @@ fetch_or_load(att_id) --+---- BlobStore::get(content_hash)
 The pipeline operates on a `BlobStore` trait, not a concrete storage type. This deliberately leaves room for platform-specific implementations - notably an EROFS-backed store on Linux as a follow-up phase (see `Considered alternatives`). v1 ships exactly one impl (`PackStore`) on all three platforms; the trait exists so that adding a second backend later is an additive change with no impact on the orchestration layer.
 
 ```rust
-// Sketch; final shape settles in the Phase 1a planning session.
+// Sketch; final shape settles in the Phase 2 planning session.
 pub trait BlobStore: Send + Sync {
     fn put(&self, bytes: &[u8]) -> Result<BlobHash, Error>;
     fn get(&self, hash: &BlobHash) -> Result<Option<Vec<u8>>, Error>;
@@ -97,6 +97,8 @@ pub trait BlobStore: Send + Sync {
 ```
 
 `put` is content-addressed and idempotent - two `put`s of identical bytes return the same hash and the second is a no-op on the blob side; reference accounting is derived from `attachments` rows, not tracked in the store. Selection of *which* blobs to tombstone (date-window predicate, orphan detection) lives in the orchestration layer; `BlobStore::tombstone` is just the primitive. The orchestration layer never sees the storage details.
+
+The `get` shape sketched here returns owned bytes, which works for the small-blob common case but allocates the whole blob into memory for large attachments and means materialization writes those same bytes back to disk. Whether to add a `get_reader` or `extract_to(path)` primitive for streaming pack-to-tmp without buffering is a Phase 2 planning question, settled when the trait's final shape lands.
 
 ### Storage tiers
 
@@ -151,7 +153,9 @@ CREATE INDEX idx_attachment_blobs_tombstoned ON attachment_blobs(tombstoned_at);
 
 **Content hash is BLAKE3, not xxh3.** Email attachments are adversarial input - bytes arrive from the public internet, controlled by senders we don't trust. A non-cryptographic hash like xxh3 is vulnerable to second-preimage attacks: an attacker who knows what's in your cache (e.g. because they planted it via an earlier mail) can craft a different blob with the same hash, mail it to you, and have your `INSERT OR IGNORE` silently serve the cached (malicious) bytes on the new attachment's open. BLAKE3 is collision-resistant against this attack and within a small constant factor of xxh3 on throughput (~1 GB/s vs ~30 GB/s on modern x86) - negligible compared to the network fetch the squeeze pipeline already runs. xxh3_64 stays as the frame-payload checksum *inside* pack files (corruption detection, not identity) - the threat models are different.
 
-**Single hash type across the codebase.** Today the codebase carries three different hash representations: `attachments.content_hash` is `TEXT` xxh3 hex, `attachment_extracted_text.content_hash` is `TEXT` (same algorithm), and `SendAttachmentSource::StagingFile.content_hash` at `crates/service-api/src/action.rs:368` is `[u8; 32]` SHA-256. Phase 1 collapses these onto a single `BlobHash` newtype wrapping `[u8; 32]` BLAKE3 raw bytes, with a hex serde repr for IPC and a `BLOB(32)` SQLite repr. Every callsite (compose's `Sha256` hasher at `compose_send.rs:259`, the cache's `hash_bytes` at `attachment_cache.rs:27`, every row deserialization in `extract_reindex.rs` and friends) moves to `BlobHash` in lockstep so PackStore is born using the canonical type.
+**Single hash type across the attachment subsystem.** Today the attachment-handling code carries three different hash representations: `attachments.content_hash` is `TEXT` xxh3 hex, `attachment_extracted_text.content_hash` is `TEXT` (same algorithm), and `SendAttachmentSource::StagingFile.content_hash` at `crates/service-api/src/action.rs:368` is `[u8; 32]` SHA-256. Phase 1 collapses these onto a single `BlobHash` newtype wrapping `[u8; 32]` BLAKE3 raw bytes, with a hex serde repr for IPC and a `BLOB(32)` SQLite repr. Every attachment-subsystem callsite (compose's `Sha256` hasher at `compose_send.rs:259`, the cache's `hash_bytes` at `attachment_cache.rs:27`, every row deserialization in `extract_reindex.rs` and friends) moves to `BlobHash` in lockstep so PackStore is born using the canonical type. The inline image store keeps its own xxh3 keying as a scoped exception (see "Storage tiers" above for rationale) - "single hash type" is scoped to the attachment subsystem, not the whole codebase.
+
+Compose's existing `Sha256` predates this design; whether anything external (logs, IPC consumers, headers) depends on the SHA-256 value is a Phase 1 planning question. This will probably be settled when Phase 1 enters its planning session.
 
 `attachments.content_hash` becomes the join key, retyped from `TEXT` (xxh3 hex) to `BLOB(32)` (BLAKE3) in Phase 1. `attachments.local_path`, `cached_at`, and `cache_size` are dropped in Phase 3 - that information now lives on `attachment_blobs`. Per the pre-release migration policy at `crates/db/src/db/migrations.rs:65`, both changes are in-place edits to `schema/02_mail.sql`, not new migration entries.
 
@@ -185,7 +189,7 @@ The index is **rebuildable** from pack tails on corruption: walk every pack, rep
 - **OOXML** (`.docx` / `.xlsx` / `.pptx`) and **ODF** - a ZIP entry under `_xmlsignatures/` or `META-INF/documentsignatures.xml`.
 - **S/MIME envelopes** (`.p7s`, `.p7m`, `application/pkcs7-mime` / `application/pkcs7-signature`) - mime-based skip; the wrapper is opaque CMS and squeeze can't improve it.
 
-Detection is intentionally **biased toward false positives**. A false positive skips squeeze on an unsigned doc (harmless: pack stores originals). A false negative re-packs a signed doc and silently invalidates the signature (high-cost, low-frequency, only surfaces during compliance audits or court evidence). Any signature-shaped marker wins the bypass. The detection logic has its own unit-test surface, separate from the squeeze backends, with corpus coverage of real signed PDFs / OOXML / ODF samples.
+Detection is intentionally **biased toward false positives**. A false positive skips squeeze on an unsigned doc (harmless: pack stores originals). A false negative re-packs a signed doc and silently invalidates the signature (high-cost, low-frequency, only surfaces during compliance audits or court evidence). Any signature-shaped marker wins the bypass. The detection logic has its own unit-test surface, separate from the squeeze backends, with corpus coverage of real signed PDFs / OOXML / ODF samples. What corpus, where it comes from, and how it's maintained is a Phase 3 planning concern - false negatives are high-cost so the corpus deserves a concrete answer before Phase 3 wires squeeze into the cache pipeline.
 
 **Known gaps in detection:**
 - XAdES-signed SVG / generic XML - hard to detect cheaply without parsing for the `xmldsig` namespace. SVG squeeze stripping is a small win; revisit if a real signed-SVG-in-email workflow surfaces.
@@ -194,6 +198,8 @@ Detection is intentionally **biased toward false positives**. A false positive s
 The pack stores the post-squeeze bytes. The DB row records `attachment_blobs.length` (post-squeeze) and `attachments.size` (pre-squeeze, from the provider's metadata), so the user-visible size in the UI stays accurate.
 
 If the user later opens or forwards the attachment, the cached bytes are returned as-is. For squeezed content this is application-level equivalent (decodes / renders identically) but not byte-equivalent; the signed-content bypass above is what protects signature-sensitive workflows.
+
+**Risk: inline squeeze may be net-negative on fast disks.** Phase 9 measures per-mime savings on real mailboxes. If squeeze costs more CPU than it saves in storage on the sync hot path, the pipeline shape changes: PackStore stores raw bytes and a background compaction pass rewrites them later. That is not a small refactor of a built PackStore design, so Phase 2 and Phase 3 should plan with this risk in mind before they freeze the orchestration shape. This will probably be revisited when Phase 9 lands, but the structural option needs to stay open through Phases 2 and 3.
 
 ### Content-addressable dedup
 
@@ -218,7 +224,7 @@ Why pack files and not one of these:
 | **Container-registry style (Docker registry)** | Flat files with `sha256/<prefix>/<hash>/data` fanout. Works because Docker layers are MB-to-GB-sized. Doesn't help with our small-blob long tail. |
 | **Single growing SQLite blob DB** | The Outlook PST/OST cautionary tale. Notorious for corruption at >20 GB; "compact" is a dump-and-reload. No. |
 | **Pack files with SQLite index** (chosen for v1, all platforms) | Standard answer used by restic, borg, kopia, bup, Firefox cache2, Chromium disk cache. Solves all of: file-count pressure, backup ergonomics, small-blob locality, online compaction (via tombstones + GC), crash safety (append-only). ~600 LOC. We own the format and can extend it (encryption, restic-compat) when needed. Lives behind the `BlobStore` trait. |
-| **EROFS-backed rolling images** (deferred to a follow-up phase, Linux-only) | Read-only kernel filesystem with built-in zstd compression and intra-image dedup. Rolling-image model (~256 MB EROFS images, baked from a small staging area, never modified after) maps cleanly onto our workload. Wins: free compression (no squeeze on the cache side), free intra-image dedup, well-tested format, less per-blob overhead than pack files. Loses: read-only means a bake step instead of streaming appends, granular eviction is less precise (whole-image delete), kernel mount is Linux-only (userspace readers exist but maturity varies on macOS/Windows). Lands as a second `BlobStore` impl after v1 ships and we have real cache-pressure data; `cfg(target_os = "linux")` gates which impl is selected. |
+| **EROFS-backed rolling images** (deferred to a follow-up phase, Linux-only) | Read-only kernel filesystem with built-in zstd compression and intra-image dedup. Rolling-image model (~256 MB EROFS images, baked from a small staging area, never modified after) maps cleanly onto our workload. Wins: free compression (no squeeze on the cache side), free intra-image dedup, well-tested format, less per-blob overhead than pack files. Loses: read-only means a bake step instead of streaming appends, granular eviction is less precise (whole-image delete), kernel mount is Linux-only (userspace readers exist but maturity varies on macOS/Windows), and a user who copies their data dir to a non-Linux machine loses access to ErofsStore-backed packs (PackStore-backed packs survive). Lands as a second `BlobStore` impl after v1 ships and we have real cache-pressure data; `cfg(target_os = "linux")` gates which impl is selected. Migration and cross-platform constraints settle in Phase 10 planning, if Phase 10 lands at all. |
 
 ## Pre-fetch policy
 
@@ -248,7 +254,7 @@ Pre-fetch runs inside a **`PrefetchRuntime`**, a sibling of `ExtractRuntime` (`c
 - **Bounded concurrency**: per-account semaphore at 4. No separate global cap.
 - **Per-fetch timeout**: 5 min wallclock per work item.
 - **Per-provider circuit breaker.** K consecutive timeouts within window W (K=5, W=60s default) open the circuit for that provider: all queued items for that provider are drained without fetching, the circuit reopens after a backoff (start 30s, exponential to 5 min cap). Prevents one misbehaving provider from parking all four semaphore slots for 20 minutes.
-- **ENOSPC safety backstop.** Before every pack write the runtime checks free disk space via `statvfs` (`GetDiskFreeSpaceExW` on Windows). If free space is below `min_disk_free_gb` (default 5 GB), the fetch is dropped with a logged warning and the attachment row stays `content_hash IS NULL`. This is system-protection, not a cache cap - "no global cache cap" means the cache doesn't impose a ceiling on its own size, but it doesn't mean we knowingly fill the user's disk to ENOSPC mid-sync-write and corrupt SQLite WAL.
+- **ENOSPC safety backstop.** Before every pack write the runtime checks free disk space via `statvfs` (`GetDiskFreeSpaceExW` on Windows). If free space is below `min_disk_free_gb` (default 5 GB), the fetch is dropped with a logged warning and the attachment row stays `content_hash IS NULL`. This is system-protection, not a cache cap - "no global cache cap" means the cache doesn't impose a ceiling on its own size, but it doesn't mean we knowingly fill the user's disk to ENOSPC mid-sync-write and corrupt SQLite WAL. Silent skip means low-disk users get broken offline access with no UI surface telling them why; whether to add a "cache paused, disk low" indicator or stay silent is a UX call for Phase 4 and Phase 6 planning. This will probably be settled when those phases enter their planning sessions.
 - **`CancellationToken` + stored worker `JoinHandle`**, drained on Service shutdown.
 - **Crate-boundary plumbing.** `provider-sync` cannot depend on `service` (cycle). The runtime exposes itself to providers via a `PrefetchSink` trait carried on `SyncProviderCtx` (`crates/provider-sync/src/lib.rs:50`); the Service-side sync dispatch installs the real sink, tests install a no-op. Providers call `ctx.prefetch.enqueue(...)` after persisting attachment metadata. The alternative shape (providers return persisted attachment IDs and the Service-side dispatch enqueues) is discussed in `implementation-roadmap.md` § Phase 4.
 
@@ -257,6 +263,8 @@ Pre-fetch runs inside a **`PrefetchRuntime`**, a sibling of `ExtractRuntime` (`c
 **Crash recovery:** On Service boot, after `attachments.text_indexed_at`-shaped extract backfill kicks, a parallel **prefetch backfill kick** walks `attachments WHERE content_hash IS NULL AND message.date >= window_start` per account and re-enqueues. Idempotent because the row-level `content_hash IS NULL` check rejects already-cached work even if the dedupe `HashSet` was lost across the restart.
 
 **Account deletion.** Synchronous, not "eventually evicted". When an account is deleted, the Service walks `attachments WHERE account_id = ?` in a single transaction, drops the rows, and tombstones every `attachment_blobs` row whose `content_hash` no longer has any surviving `attachments` references (i.e. orphaned by the delete). This is a privacy contract: removing an account must remove its cached attachment bytes from the live store immediately, not at the next eviction sweep. GC reclaims disk space asynchronously, as usual.
+
+A crash mid-delete (after dropping `attachments` rows, before tombstoning the orphaned blobs) leaves orphan blobs visible to GC but not to the synchronous privacy contract. Wrapping both steps in one transaction, adding a boot-time orphan sweep, or accepting the gap until Phase 8 eviction catches them are the three options. This will probably be settled when Phase 4 enters its planning session.
 
 **Failure behavior:** Pre-fetch errors are logged but never fail the sync. The attachment row stays `content_hash IS NULL` and gets re-attempted by the next sync, by the boot-time backfill kick, or by user-initiated fetch-on-click.
 
@@ -301,7 +309,7 @@ Eviction during read is now race-free without lease counters: tombstoning a blob
 
 Two consequences:
 - The same blob fetched twice in quick succession produces two tmp files. Acceptable: the cleanup pass bounds storage, and tmp-stage dedup would re-introduce the lease lifetime problem we just sidestepped.
-- The tmp directory is a real on-disk write per fetch even on cache hit - measurable cost on small frequent fetches. If profiling shows it matters, an in-process zero-copy path (memfd_create on Linux, similar on Windows) can replace the tmp file without changing the UI's contract; that's a Phase-after-1a optimization, not v1.
+- The tmp directory is a real on-disk write per fetch even on cache hit - measurable cost on small frequent fetches. If profiling shows it matters, an in-process zero-copy path (memfd_create on Linux, similar on Windows) can replace the tmp file without changing the UI's contract; that's a post-v1 optimization. Phase 3's ExtractRuntime migration routes every cached-bytes read through this same helper, so the per-fetch tmp cost touches more than just UI reads - the perf budget against pre-PackStore extract is a Phase 3 planning concern.
 
 ### Open
 
@@ -309,6 +317,8 @@ Two consequences:
 2. Read the bytes from the returned `relative_path`, write them to `<app-data>/opened_attachments/<safe_filename>` (NOT `/tmp` - CLAUDE.md forbids `/tmp` use).
 3. OS-default open via `xdg-open` (Linux) / `open` (macOS) / `cmd /c start` (Windows). Pattern is already established at `reading_pane.rs:917-925` for link-click handling.
 4. Files in `opened_attachments/` are not deleted on close (the OS handler may keep the file open or move it). They get reaped by a periodic cleanup (configurable, default: 7 days).
+
+Filename collisions across messages (two `report.pdf` attachments from different threads opened in sequence) need a uniqueness suffix on Open; Save already has the `(N)` suffix pattern. This will probably be settled when Phase 5 enters its planning session.
 
 **Filename safety:** Strip path separators, control chars, and shell metacharacters. Reuse `sanitize_filename` from `crates/app/src/handlers/pop_out/save_as.rs:38`.
 
@@ -382,7 +392,7 @@ The frame format's "encryption hook" (`nonce | ciphertext | tag` payload region)
 
 ## Relationship to text extraction
 
-Attachment text extraction and Tantivy indexing ship as a sibling pipeline owned by `docs/architecture.md` § "Text extraction pipeline" - not a phase of this work. Extraction is content-hash-keyed (persisted in `attachment_extracted_text`), so the indexed text survives attachment-cache eviction and carries over unchanged when Phase 1a swaps the flat-file cache for `PackStore`.
+Attachment text extraction and Tantivy indexing ship as a sibling pipeline owned by `docs/architecture.md` § "Text extraction pipeline" - not a phase of this work. Extraction is content-hash-keyed (persisted in `attachment_extracted_text`), so the indexed text survives attachment-cache eviction and carries over unchanged when Phase 3 swaps the flat-file cache for `PackStore`.
 
 ## Out of scope (v1)
 
