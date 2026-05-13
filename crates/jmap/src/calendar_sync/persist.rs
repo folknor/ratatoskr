@@ -53,6 +53,10 @@ pub(super) async fn persist_jmap_event(
     let ical_data = event
         .recurrence_rules()
         .and_then(|rules| serde_json::to_string(rules).ok());
+    let recurrence_rule = event
+        .recurrence_rules()
+        .and_then(|rules| serde_json::to_value(rules).ok())
+        .and_then(|value| jmap_recurrence_rules_to_rrule(&value));
 
     // Extract attendees and reminders BEFORE the closure (cannot send references)
     let attendees = extract_attendee_rows(event);
@@ -86,7 +90,7 @@ pub(super) async fn persist_jmap_event(
                 uid,
                 title: None,
                 timezone: None,
-                recurrence_rule: None,
+                recurrence_rule,
                 organizer_name: None,
                 rsvp_status: None,
                 availability: None,
@@ -121,6 +125,98 @@ pub(super) async fn persist_jmap_event(
         Ok(())
     })
     .await
+}
+
+fn jmap_recurrence_rules_to_rrule(rules: &serde_json::Value) -> Option<String> {
+    let rule = rules.as_array()?.first()?.as_object()?;
+    let frequency = match rule.get("frequency")?.as_str()?.to_ascii_lowercase().as_str() {
+        "daily" => "DAILY",
+        "weekly" => "WEEKLY",
+        "monthly" => "MONTHLY",
+        "yearly" => "YEARLY",
+        _ => return None,
+    };
+    let mut parts = vec![format!("FREQ={frequency}")];
+
+    if let Some(interval) = rule
+        .get("interval")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|interval| *interval > 1)
+    {
+        parts.push(format!("INTERVAL={interval}"));
+    }
+    if let Some(days) = rule.get("byDay").and_then(serde_json::Value::as_array) {
+        let by_day: Vec<String> = days
+            .iter()
+            .filter_map(jmap_by_day_to_rrule)
+            .collect();
+        if !by_day.is_empty() {
+            parts.push(format!("BYDAY={}", by_day.join(",")));
+        }
+    }
+    if let Some(days) = rule.get("byMonthDay").and_then(serde_json::Value::as_array) {
+        let by_month_day: Vec<String> = days
+            .iter()
+            .filter_map(serde_json::Value::as_i64)
+            .map(|day| day.to_string())
+            .collect();
+        if !by_month_day.is_empty() {
+            parts.push(format!("BYMONTHDAY={}", by_month_day.join(",")));
+        }
+    }
+    if let Some(months) = rule.get("byMonth").and_then(serde_json::Value::as_array) {
+        let by_month: Vec<String> = months
+            .iter()
+            .filter_map(serde_json::Value::as_u64)
+            .map(|month| month.to_string())
+            .collect();
+        if !by_month.is_empty() {
+            parts.push(format!("BYMONTH={}", by_month.join(",")));
+        }
+    }
+    if let Some(count) = rule.get("count").and_then(serde_json::Value::as_u64) {
+        parts.push(format!("COUNT={count}"));
+    } else if let Some(until) = rule
+        .get("until")
+        .and_then(serde_json::Value::as_str)
+        .and_then(jmap_until_to_rrule)
+    {
+        parts.push(format!("UNTIL={until}"));
+    }
+
+    Some(format!("RRULE:{}", parts.join(";")))
+}
+
+fn jmap_by_day_to_rrule(day: &serde_json::Value) -> Option<String> {
+    let obj = day.as_object()?;
+    let weekday = match obj.get("day")?.as_str()?.to_ascii_lowercase().as_str() {
+        "su" => "SU",
+        "mo" => "MO",
+        "tu" => "TU",
+        "we" => "WE",
+        "th" => "TH",
+        "fr" => "FR",
+        "sa" => "SA",
+        _ => return None,
+    };
+    let ordinal = obj
+        .get("nthOfPeriod")
+        .and_then(serde_json::Value::as_i64)
+        .map(|nth| nth.to_string())
+        .unwrap_or_default();
+    Some(format!("{ordinal}{weekday}"))
+}
+
+fn jmap_until_to_rrule(until: &str) -> Option<String> {
+    chrono::NaiveDateTime::parse_from_str(until.trim_end_matches('Z'), "%Y-%m-%dT%H:%M:%S")
+        .ok()
+        .map(|dt| format!("{}Z", dt.format("%Y%m%dT%H%M%S")))
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(until, "%Y-%m-%d")
+                .ok()
+                .and_then(|date| date.and_hms_opt(23, 59, 59))
+                .map(|dt| format!("{}Z", dt.format("%Y%m%dT%H%M%S")))
+        })
 }
 
 /// Delete a calendar event by its JMAP event ID.

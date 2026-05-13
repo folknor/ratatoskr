@@ -117,6 +117,8 @@ fn graph_event_to_dto(
         attendees_json: event.attendees_json,
         html_link: event.html_link,
         ical_data: event.ical_data,
+        timezone: event.timezone,
+        recurrence_rule: event.recurrence_rule,
         ..CalendarEventDto::default()
     })
 }

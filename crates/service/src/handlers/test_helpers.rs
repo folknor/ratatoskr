@@ -12,9 +12,10 @@ use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
     TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
-    TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck, TestDelayNextWriteParams,
-    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDelayNextWriteAck,
+    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
+    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams,
@@ -1060,6 +1061,7 @@ fn read_harness_db_state(
         contact_count: count_account_rows(conn, "contacts", account_id)?,
         contact_group_count: count_account_rows(conn, "contact_groups", account_id)?,
         accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
+        labels: read_harness_labels(conn, account_id)?,
         messages: read_harness_messages(conn, params)?,
         local_drafts: read_harness_local_drafts(conn, params)?,
         attachments: read_harness_attachments(conn, params)?,
@@ -1187,6 +1189,64 @@ fn credential_summary(
         present: true,
         encrypted,
         sha256: Some(hex_bytes(&hasher.finalize())),
+    })
+}
+
+fn read_harness_labels(
+    conn: &Connection,
+    account_id: Option<&str>,
+) -> Result<Vec<TestDbLabelRow>, String> {
+    match account_id {
+        Some(account_id) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, name, type, label_kind,
+                            parent_label_id, imap_folder_path, imap_special_use,
+                            sort_order, visible, is_subscribed
+                     FROM labels
+                     WHERE account_id = ?1
+                     ORDER BY account_id ASC, id ASC",
+                )
+                .map_err(|e| format!("prepare labels query: {e}"))?;
+            let mapped = stmt
+                .query_map(params![account_id], test_db_label_from_row)
+                .map_err(|e| format!("query labels: {e}"))?;
+            collect_rows(mapped, "labels")
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, name, type, label_kind,
+                            parent_label_id, imap_folder_path, imap_special_use,
+                            sort_order, visible, is_subscribed
+                     FROM labels
+                     ORDER BY account_id ASC, id ASC",
+                )
+                .map_err(|e| format!("prepare labels query: {e}"))?;
+            let mapped = stmt
+                .query_map([], test_db_label_from_row)
+                .map_err(|e| format!("query labels: {e}"))?;
+            collect_rows(mapped, "labels")
+        }
+    }
+}
+
+fn test_db_label_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbLabelRow> {
+    let sort_order = row.get::<_, Option<i64>>(8)?.unwrap_or(0);
+    let visible = row.get::<_, Option<i64>>(9)?.unwrap_or(1) != 0;
+    let is_subscribed = row.get::<_, Option<i64>>(10)?.map(|value| value != 0);
+    Ok(TestDbLabelRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        name: row.get(2)?,
+        label_type: row.get(3)?,
+        label_kind: row.get(4)?,
+        parent_label_id: row.get(5)?,
+        imap_folder_path: row.get(6)?,
+        imap_special_use: row.get(7)?,
+        sort_order,
+        visible,
+        is_subscribed,
     })
 }
 
@@ -1447,7 +1507,8 @@ fn read_harness_calendar_events(
                     "SELECT id, account_id, calendar_id, google_event_id,
                             remote_event_id, summary, title, description,
                             location, start_time, end_time, is_all_day, status,
-                            organizer_email, organizer_name, attendees_json
+                            organizer_email, organizer_name, attendees_json,
+                            recurrence_rule
                      FROM calendar_events
                      WHERE account_id = ?1
                      ORDER BY start_time ASC, id ASC
@@ -1465,7 +1526,8 @@ fn read_harness_calendar_events(
                     "SELECT id, account_id, calendar_id, google_event_id,
                             remote_event_id, summary, title, description,
                             location, start_time, end_time, is_all_day, status,
-                            organizer_email, organizer_name, attendees_json
+                            organizer_email, organizer_name, attendees_json,
+                            recurrence_rule
                      FROM calendar_events
                      ORDER BY account_id ASC, start_time ASC, id ASC
                      LIMIT ?1",
@@ -1653,6 +1715,7 @@ fn test_db_calendar_event_from_row(
         organizer_email: row.get(13)?,
         organizer_name: row.get(14)?,
         attendees_json: row.get(15)?,
+        recurrence_rule: row.get(16)?,
     })
 }
 

@@ -281,6 +281,25 @@ pub struct TestDbAccountRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbLabelRow {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub label_type: String,
+    pub label_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_label_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_folder_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_special_use: Option<String>,
+    pub sort_order: i64,
+    pub visible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_subscribed: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbMessageRow {
     pub id: String,
     pub account_id: String,
@@ -364,6 +383,8 @@ pub struct TestDbCalendarEventRow {
     pub organizer_email: Option<String>,
     pub organizer_name: Option<String>,
     pub attendees_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence_rule: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,6 +440,8 @@ pub struct TestQueryDbStateAck {
     #[serde(default)]
     pub contact_group_count: u64,
     pub accounts: Vec<TestDbAccountRow>,
+    #[serde(default)]
+    pub labels: Vec<TestDbLabelRow>,
     pub messages: Vec<TestDbMessageRow>,
     pub local_drafts: Vec<TestDbLocalDraftRow>,
     pub attachments: Vec<TestDbAttachmentRow>,

@@ -1,0 +1,41 @@
+name = "calendar-recurrence-small"
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[calendar]]
+id = "cal-work"
+name = "Work"
+is_default = true
+
+[[event]]
+id = "ev-weekly"
+calendar_id = "cal-work"
+subject = "Team sync"
+start = "2026-01-19T09:00:00Z"
+end = "2026-01-19T09:30:00Z"
+recurrence_rule = "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10"
+
+[[event]]
+id = "ev-monthly"
+calendar_id = "cal-work"
+subject = "Pay-day reminder"
+start = "2026-01-15T17:00:00Z"
+end = "2026-01-15T17:15:00Z"
+recurrence_rule = "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20261215T170000Z"
+recurrence_exdates = ["2026-03-15T17:00:00Z", "2026-07-15T17:00:00Z"]
+
+[[event]]
+id = "ev-single"
+calendar_id = "cal-work"
+subject = "Annual retreat planning"
+start = "2026-02-10T14:00:00Z"
+end = "2026-02-10T15:00:00Z"

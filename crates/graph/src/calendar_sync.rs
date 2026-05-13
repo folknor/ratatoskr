@@ -254,6 +254,7 @@ pub struct GraphCalendarEvent {
     pub attendees_json: Option<String>,
     pub html_link: Option<String>,
     pub ical_data: Option<String>,
+    pub recurrence_rule: Option<String>,
     /// IANA-form name of the zone DTSTART resolved through, when one was
     /// available. `None` for all-day events, UTC, and unrecognized
     /// `timeZone` values - the recurrence expander treats `None` as
@@ -589,6 +590,7 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
         resolve_graph_tz(&start.time_zone)
             .and_then(|tz| tz.name().map(std::borrow::Cow::into_owned))
     };
+    let recurrence_rule = graph_recurrence_to_rrule(event.recurrence.as_ref());
 
     Ok(GraphCalendarEvent {
         remote_event_id: event.id,
@@ -605,8 +607,116 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
         attendees_json,
         html_link: event.web_link,
         ical_data: None,
+        recurrence_rule,
         timezone,
     })
+}
+
+fn graph_recurrence_to_rrule(recurrence: Option<&GraphRecurrence>) -> Option<String> {
+    let recurrence = recurrence?;
+    let pattern = recurrence.pattern.as_ref()?;
+    let mut parts = Vec::new();
+    match pattern.pattern_type.to_ascii_lowercase().as_str() {
+        "daily" => parts.push("FREQ=DAILY".to_string()),
+        "weekly" => {
+            parts.push("FREQ=WEEKLY".to_string());
+            if let Some(days) = pattern.days_of_week.as_ref() {
+                let by_day: Vec<&str> = days
+                    .iter()
+                    .filter_map(|day| graph_weekday_to_rrule(day))
+                    .collect();
+                if !by_day.is_empty() {
+                    parts.push(format!("BYDAY={}", by_day.join(",")));
+                }
+            }
+        }
+        "absolutemonthly" => {
+            parts.push("FREQ=MONTHLY".to_string());
+            if let Some(day) = pattern.day_of_month {
+                parts.push(format!("BYMONTHDAY={day}"));
+            }
+        }
+        "relativemonthly" => {
+            parts.push("FREQ=MONTHLY".to_string());
+            if let Some(days) = pattern.days_of_week.as_ref() {
+                let ordinal = pattern
+                    .index
+                    .as_deref()
+                    .and_then(graph_week_index_to_rrule)
+                    .unwrap_or("");
+                let by_day: Vec<String> = days
+                    .iter()
+                    .filter_map(|day| graph_weekday_to_rrule(day))
+                    .map(|day| format!("{ordinal}{day}"))
+                    .collect();
+                if !by_day.is_empty() {
+                    parts.push(format!("BYDAY={}", by_day.join(",")));
+                }
+            }
+        }
+        "absoluteyearly" => {
+            parts.push("FREQ=YEARLY".to_string());
+            if let Some(month) = pattern.month {
+                parts.push(format!("BYMONTH={month}"));
+            }
+            if let Some(day) = pattern.day_of_month {
+                parts.push(format!("BYMONTHDAY={day}"));
+            }
+        }
+        _ => return None,
+    }
+
+    if let Some(interval) = pattern.interval.filter(|interval| *interval > 1) {
+        parts.push(format!("INTERVAL={interval}"));
+    }
+
+    if let Some(range) = recurrence.range.as_ref() {
+        match range.range_type.to_ascii_lowercase().as_str() {
+            "numbered" => {
+                if let Some(count) = range.number_of_occurrences {
+                    parts.push(format!("COUNT={count}"));
+                }
+            }
+            "enddate" => {
+                if let Some(until) = range.end_date.as_deref().and_then(graph_date_until) {
+                    parts.push(format!("UNTIL={until}"));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Some(format!("RRULE:{}", parts.join(";")))
+}
+
+fn graph_weekday_to_rrule(day: &str) -> Option<&'static str> {
+    match day.to_ascii_lowercase().as_str() {
+        "sunday" => Some("SU"),
+        "monday" => Some("MO"),
+        "tuesday" => Some("TU"),
+        "wednesday" => Some("WE"),
+        "thursday" => Some("TH"),
+        "friday" => Some("FR"),
+        "saturday" => Some("SA"),
+        _ => None,
+    }
+}
+
+fn graph_week_index_to_rrule(index: &str) -> Option<&'static str> {
+    match index.to_ascii_lowercase().as_str() {
+        "first" => Some("1"),
+        "second" => Some("2"),
+        "third" => Some("3"),
+        "fourth" => Some("4"),
+        "last" => Some("-1"),
+        _ => None,
+    }
+}
+
+fn graph_date_until(date: &str) -> Option<String> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .map(|date| format!("{}T235959Z", date.format("%Y%m%d")))
 }
 
 /// Parse a Graph `dateTime` / `timeZone` pair to a Unix timestamp.
