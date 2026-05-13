@@ -321,7 +321,7 @@ Global settings, new "Storage" section:
 
 **Touchpoints.**
 - `crates/app/src/ui/settings/tabs/...` - new section.
-- `crates/app/src/ui/settings/types/...` - new pref keys + bootstrap snapshots.
+- `crates/app/src/ui/settings/types/...` - new pref keys + bootstrap snapshots; **retire the dead `attachment_cache_max_mb` field on `PreferencesState`** (Phase 3 left it in place to keep the wire stable - this phase replaces it with the retention slider).
 - `crates/db/src/db/queries.rs` - getters/setters for the new prefs.
 
 **Exit criteria.**
@@ -393,6 +393,10 @@ Global settings, new "Storage" section:
 *Clear cache button:*
 - "Clear attachment cache now" in Storage settings - tombstones every live blob, then runs GC.
 
+*Deferred from earlier phases:*
+- **Three crash-recovery harness scenarios** the Phase 3 plan deferred: SIGKILL mid-repack (partial new pack at the chain tail, boot discards), boot with deleted SQLite index (walk pack tails, regenerate `attachment_blobs` rows), and boot with sentinel missing (cross-store invariant pass over PackStore). The first scenario only becomes meaningful here because Phase 8 is the first phase that *runs* a GC repack. Phase 3 landed the single SIGKILL-mid-sync smoke script that covers the open-pack recovery path; this phase fills out the matrix.
+- **`--rebuild-attachment-index` tool** the Phase 2 plan stubbed. The recover() entry point handles the open-pack case; a standalone path that walks every sealed pack and regenerates the SQLite index from scratch is the pathological-corruption recovery primitive. Wires up here alongside the deleted-index harness scenario.
+
 **Out of scope.**
 - Heuristics for auto-adjusting the window. The window is user-controlled.
 
@@ -414,12 +418,18 @@ Global settings, new "Storage" section:
 
 ## Phase 9 - Squeeze measurement and tuning
 
-**Goal.** Validate that squeeze is paying its way and tune defaults based on observed savings.
+**Goal.** Wire `squeeze::compress` + signed-content bypass into the PackStore write path, validate that squeeze is paying its way, and tune defaults based on observed savings.
 
 **Entry criteria.**
 - Phases 1-7 landed and have been running on a real mailbox for a week or two.
 
 **In scope.**
+
+*Squeeze integration (deferred from Phase 3):*
+- Wire `squeeze::compress(bytes, mime_type, &Config)` into `attachment.fetch`'s cache-miss path (provider fetch -> squeeze -> `PackStore::put`) and the prefetch path. Phase 3 explicitly deferred this so the signed-content detection corpus and Phase 9 measurement land together.
+- Signed-content bypass: build the corpus of real signed PDFs / OOXML / ODF samples + the unit-test surface for the detector. Phase 3 plan called this out as the gating concern.
+
+*Measurement + tuning:*
 - Instrument the squeeze path to log compression ratios per mime type.
 - Aggregate report (CLI tool or settings panel section) showing `original_bytes -> compressed_bytes` per type, savings percent, time spent.
 - Bypass-rate calibration: log how often the signed-content bypass fires, broken out by mime. Zero hits across a populated mailbox suggests detection is broken; an unexpectedly high rate suggests overly aggressive sniffing.
@@ -427,6 +437,9 @@ Global settings, new "Storage" section:
   - Adjust the default per-mime squeeze policy (e.g. always squeeze PDFs, never bother with already-compressed Office docs).
   - Default-on the lossy-JPEG toggle if the win is large enough.
   - Skip squeeze on the hot path entirely if the savings are marginal.
+
+*Batched fsync (deferred from Phase 2):*
+- Phase 2 ships per-frame fsync. If the measurement here shows fsync is a meaningful chunk of write-path cost, revisit the "every N frames or M ms" batching pattern the original problem-statement sketched.
 
 **Out of scope.**
 - New compressors. Squeeze already covers the formats that matter.
@@ -455,6 +468,7 @@ Global settings, new "Storage" section:
 - A decision has been made that the EROFS win is worth a second backend's maintenance cost. *Optional - if `PackStore` is good enough on Linux, we don't ship it.*
 
 **In scope.**
+- **Extract the `BlobStore` trait first.** Phase 2 deferred trait extraction (design-by-future-use with one impl). This phase is the future use. The trait's `pub` surface already matches the sketch in `problem-statement.md` so `PackStore` slides under it mechanically; the work is renaming `&PackStore` references in `attachment_materialize.rs`, the boot path, and the account-delete tombstone loop to `&dyn BlobStore` (or a generic).
 - New module `crates/stores/src/attachment_erofs.rs` implementing `BlobStore`.
 - Rolling-image storage: `<app_data>/attachment_packs/data-NNNNNN.erofs`, ~256 MB each, never modified after bake.
 - Staging area for in-flight writes (small flat-file directory or in-memory queue with periodic durability sync) until the next bake.
