@@ -162,4 +162,11 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
             log::debug!("settings.set window-extend kick {account_id} failed: {e}");
         }
     }
+    // If every kick found zero historical rows (e.g. all attachments
+    // already cached), the runtime stayed at depth=0 and the natural
+    // drained-to-zero path inside `finalize_item` never fired. Emit
+    // one synthetic completion so a watcher waiting on
+    // `prefetch.completed` after `settings.set` always sees a signal
+    // that the kick ran.
+    prefetch.emit_completed_if_idle().await;
 }

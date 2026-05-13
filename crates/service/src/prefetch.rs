@@ -661,6 +661,31 @@ impl PrefetchRuntime {
         Ok(total)
     }
 
+    /// Emit a `PrefetchCompleted` notification if the runtime is
+    /// currently idle (queue empty AND in-flight set empty). Used by
+    /// the window-extend kick (and any other batch caller) so a kick
+    /// that enqueues zero rows still produces an observable
+    /// "kick done" event. When the runtime is busy, this is a no-op:
+    /// the natural drained-to-zero path inside `finalize_item` will
+    /// fire `PrefetchCompleted` once the work completes.
+    pub async fn emit_completed_if_idle(&self) {
+        let queue_empty = self.inner.queue_depth.load(Ordering::Relaxed) == 0;
+        let in_flight_empty = self.inner.in_flight.lock().await.0.is_empty();
+        if !(queue_empty && in_flight_empty) {
+            return;
+        }
+        let _snap = self.inner.counters_snapshot.lock().await;
+        let completed = Notification::PrefetchCompleted(PrefetchCompleted {
+            service_generation: self.inner.service_generation,
+            fetched: self.inner.fetched_count.load(Ordering::Relaxed),
+            skipped: self.inner.skipped_count.load(Ordering::Relaxed),
+            failed:  self.inner.failed_count.load(Ordering::Relaxed),
+        });
+        if let Err(e) = self.inner.notification_tx.send(completed).await {
+            log::debug!("PrefetchRuntime emit_completed_if_idle send failed: {e}");
+        }
+    }
+
     /// Mark `account_id` as cancelling and drop every queued work
     /// item for it. Subsequent `enqueue` calls short-circuit until
     /// `release_account` clears the marker. Provider fetches already

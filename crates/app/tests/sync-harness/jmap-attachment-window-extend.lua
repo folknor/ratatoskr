@@ -76,7 +76,7 @@ harness.marker("INITIAL_SYNC_END")
 local before_ms = harness.now_ms()
 local _, set_err = client:request("SettingsSet", {
     values = {
-        { kind = "SyncPeriodDays", value = "730" },
+        { type = "SyncPeriodDays", value = "730" },
     },
 })
 local elapsed_ms = harness.now_ms() - before_ms
