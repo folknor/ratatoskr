@@ -64,12 +64,20 @@ local state, state_err = client:request("TestQueryDbState", {
 })
 harness.assert(state_err == nil, "TestQueryDbState failed")
 harness.assert_eq(state.calendar_count, 1, "calendar count")
-harness.assert_eq(state.calendar_event_count, 3, "calendar event count")
+harness.assert_eq(state.calendar_event_count, 5, "calendar event count")
 
 local work = calendar_by_remote_id(state.calendars, "cal-work")
 harness.assert(work ~= nil, "missing Work calendar")
 harness.assert_eq(work.provider, "graph", "Work calendar provider")
 harness.assert_eq(work.display_name, "Work", "Work calendar name")
+
+local daily = event_by_remote_id(state.calendar_events, "ev-daily")
+harness.assert(daily ~= nil, "missing daily event")
+harness.assert_eq(daily.summary, "Morning standup", "daily summary")
+harness.assert_eq(daily.start_time, 1768206600, "daily start_time")
+harness.assert_eq(daily.end_time, 1768207200, "daily end_time")
+assert_rule_contains(daily, "FREQ=DAILY", "daily")
+assert_rule_contains(daily, "COUNT=5", "daily")
 
 local weekly = event_by_remote_id(state.calendar_events, "ev-weekly")
 harness.assert(weekly ~= nil, "missing weekly event")
@@ -85,9 +93,26 @@ harness.assert(monthly ~= nil, "missing monthly event")
 harness.assert_eq(monthly.summary, "Pay-day reminder", "monthly summary")
 harness.assert_eq(monthly.start_time, 1768496400, "monthly start_time")
 harness.assert_eq(monthly.end_time, 1768497300, "monthly end_time")
+harness.assert_eq(
+    monthly.description,
+    "Salary lands and budget envelopes get reset.",
+    "monthly description"
+)
+harness.assert_eq(monthly.location, "Finance bot", "monthly location")
+harness.assert_eq(monthly.organizer_email, "alice@example.com", "monthly organizer_email")
 assert_rule_contains(monthly, "FREQ=MONTHLY", "monthly")
 assert_rule_contains(monthly, "BYMONTHDAY=15", "monthly")
 assert_rule_contains(monthly, "UNTIL=20261215T235959Z", "monthly")
+
+local yearly = event_by_remote_id(state.calendar_events, "ev-yearly")
+harness.assert(yearly ~= nil, "missing yearly event")
+harness.assert_eq(yearly.summary, "Christmas Eve", "yearly summary")
+harness.assert_eq(yearly.start_time, 1798135200, "yearly start_time")
+harness.assert_eq(yearly.end_time, 1798149600, "yearly end_time")
+assert_rule_contains(yearly, "FREQ=YEARLY", "yearly")
+assert_rule_contains(yearly, "BYMONTH=12", "yearly")
+assert_rule_contains(yearly, "BYMONTHDAY=24", "yearly")
+assert_rule_contains(yearly, "COUNT=3", "yearly")
 
 local single = event_by_remote_id(state.calendar_events, "ev-single")
 harness.assert(single ~= nil, "missing single event")

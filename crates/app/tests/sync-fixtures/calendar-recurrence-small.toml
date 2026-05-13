@@ -17,6 +17,14 @@ name = "Work"
 is_default = true
 
 [[event]]
+id = "ev-daily"
+calendar_id = "cal-work"
+subject = "Morning standup"
+start = "2026-01-12T08:30:00Z"
+end = "2026-01-12T08:40:00Z"
+recurrence_rule = "FREQ=DAILY;COUNT=5"
+
+[[event]]
 id = "ev-weekly"
 calendar_id = "cal-work"
 subject = "Team sync"
@@ -28,10 +36,21 @@ recurrence_rule = "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10"
 id = "ev-monthly"
 calendar_id = "cal-work"
 subject = "Pay-day reminder"
+body_text = "Salary lands and budget envelopes get reset."
 start = "2026-01-15T17:00:00Z"
 end = "2026-01-15T17:15:00Z"
+location = "Finance bot"
+organizer = { name = "Alice", email = "alice@example.com" }
 recurrence_rule = "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20261215T170000Z"
 recurrence_exdates = ["2026-03-15T17:00:00Z", "2026-07-15T17:00:00Z"]
+
+[[event]]
+id = "ev-yearly"
+calendar_id = "cal-work"
+subject = "Christmas Eve"
+start = "2026-12-24T18:00:00Z"
+end = "2026-12-24T22:00:00Z"
+recurrence_rule = "FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=24;COUNT=3"
 
 [[event]]
 id = "ev-single"

@@ -345,11 +345,14 @@ and mirroring any needed upstream fixtures into
   action reports the right provider failure, does not record a
   successful submission, and leaves any retry / pending-op state in
   the expected shape.
-- [ ] **Expand recurrence read matrix** - Initial
-  `calendar-recurrence-small.toml` smoke coverage now exists for
-  Graph, Google Calendar, JMAP Calendar, and CalDAV. Broaden it to
-  include daily, yearly, BYMONTH, EXDATE, timezone handling, and
-  expanded calendar-window row assertions.
+- [ ] **Expand recurrence read matrix** - Daily, yearly+BYMONTH,
+  and a wider row-field assertion (description, location,
+  organizer_email) now ride the existing
+  `*-calendar-recurrence-initial` scripts. Still missing: EXDATE
+  round-trip (no harness-visible occurrence/exception column today
+  - fixture's `recurrence_exdates` is parsed but not surfaced) and
+  timezone handling (saehrimnir emits everything as UTC). Both
+  require a harness extension before they're testable.
 - [ ] **Recurrence write matrix** - Create and update recurring
   events through the Service calendar action path for Graph, Google
   Calendar, JMAP Calendar, and CalDAV. Assert the request log carries
