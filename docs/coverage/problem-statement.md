@@ -2,469 +2,194 @@
 
 ## Overview
 
-Ratatoskr's Lua harness has become a real test suite. Between the
-Service subprocess harness, provider sync harness, and Lua-backed mock
-fixtures, coverage now spans boot, dispatch, crash recovery, sync,
-actions, calendar, contacts, attachments, search extraction, provider
-writeback, and multi-account behavior.
+Ratatoskr needs a coverage system that answers one question precisely:
 
-That scale creates a new problem: it is no longer enough to ask "do we
-have a test for this?" by searching filenames or reading `TODO.md`.
-The real question is:
+> Which behavioral contracts do we require, which do we have tests for, and which are missing?
 
-**Which coverage do we require, which coverage do we have, and which
-coverage is missing?**
+The system is modeled on the command palette principle. The command palette problem statement states:
 
-This is a coverage matrix problem. Each test covers one or more
-specific behavior points across dimensions like protocol, resource,
-operation, topology, auth mode, persistence target, and failure mode.
-Those dimensions need to become queryable metadata instead of implicit
-knowledge in test names.
+> Every action the user can perform must be a registered command with a unique identity. There is no way to create an action without it being part of the palette.
+
+The coverage system applies the same shape to behavioral contracts and tests:
+
+> Every behavioral contract in Ratatoskr must be a registered requirement with a stable identity, and every test must claim at least one registered requirement. There is no way to add a contract without registering it, and no way to add a test without claiming what it covers.
+
+This is not currently true. It must become true. Ideally the code architecture enforces it, the way the `CommandId` enum forces every command to be handled in `update()`.
+
+This document describes the contract registry, the claim mechanism, and the staged path from a tool-only check to architectural enforcement. It does not describe a parallel requirements catalog and it does not propose a coverage axis matrix.
+
+## Why Now
+
+The Lua harness has grown into a real test suite. Service subprocess harness, sync harness, action harness, calendar harness, contacts harness, and Lua-backed mock fixtures cover boot, dispatch, crash recovery, sync, actions, calendar, contacts, attachments, search extraction, provider writeback, and multi-account behavior. Rust integration tests cover crate boundaries and lockdown invariants. The architecture doc lists multiple boundary sections, each with an `Enforcement:` paragraph naming the test or compile mechanism that backs it. Subsystem problem-statements like `docs/command-palette/problem-statement.md` enumerate Core Requirements as numbered prose.
+
+There is no link between any of these. The boundary sections name enforcement in prose. The harness scripts have execution metadata in frontmatter but no claim of what behavior they prove. The numbered Core Requirements have no IDs at all. "Adding a new email action" is a 9-site procedural recipe with no checklist that the recipe was followed.
+
+It is no longer enough to search filenames or read `TODO.md` to answer "do we have a test for this." The contracts already exist in the docs. The tests already exist in the tree. The missing piece is a stable identity for each contract and a structured claim from each test.
+
+## The Principle
+
+The catalog must be exhaustive, not aspirational. Every registered contract is something the codebase asserts is true. The missing-coverage report is derived: it lists registered contracts with zero claims.
+
+The catalog must be enforced, not advisory. A test without a `covers` claim is malformed and the loader rejects it. A claim referencing an unknown ID is malformed and the loader rejects it. A registered contract with zero claims fails the build.
+
+The catalog must be expensive to violate, not cheap. Adding a contract requires registering it. Removing a test requires either retiring its contract or finding another test that still claims it. The friction is the point. It is the same friction `CommandId` imposes today: adding a user-facing action is intentional work, because the compiler insists on it.
+
+The catalog must live where engineers already look. Contracts are doc sections in `docs/architecture.md`, in subsystem problem-statements like `docs/command-palette/problem-statement.md`, and in procedural recipes like "Adding a New Email Action". The doc is the registry. There is no parallel TOML or YAML catalog.
 
 ## Current State
 
-### What exists
+What exists today:
 
-- Lua Service harness scripts under `crates/app/tests/service-harness/`.
-- Lua sync harness scripts under `crates/app/tests/sync-harness/`.
-- Lua and TOML sync fixtures under `crates/app/tests/sync-fixtures/`.
-- Brokkr discovery of harness scripts via frontmatter.
-- Per-script frontmatter for basic execution metadata such as
-  description, expected result, fixture, protocol, and ceiling.
-- Request logs, DB state queries, fixture snapshots, and summary output
-  that make the scripts useful as behavioral tests.
+- Architectural boundary sections in `docs/architecture.md` with `Enforcement:` paragraphs naming compile-time mechanisms, Rust integration tests, or harness scripts in prose.
+- Subsystem problem-statements with numbered Core Requirements (e.g. `docs/command-palette/problem-statement.md` sections 1 through 9).
+- Procedural recipes scattered through the architecture doc (the email-action checklist is the canonical example).
+- A growing Lua harness under `crates/app/tests/service-harness/` and `crates/app/tests/sync-harness/` with execution-metadata frontmatter (fixture, ceiling, expected, cohort).
+- Rust integration tests under `crates/*/tests/` including the crate-boundary lockdown tests.
 
-### What is missing
+What does not exist:
 
-- No canonical list of required coverage points.
-- No stable coverage IDs that tests can claim.
-- No tool that answers "which required coverage is uncovered?"
-- No tool that flags tests claiming unknown or retired coverage.
-- No clear distinction between required, deferred, blocked, expected
-  failure, and optional exploratory coverage.
-- No queryable matrix for protocol/resource/operation/topology cells.
-- No way to see fixture coverage, unused fixtures, or missing fixture
-  schema smoke coverage.
-- No durable way to prevent duplicate tests from accumulating around
-  the same behavior while adjacent behavior stays untested.
+- Stable IDs for any of the above contracts.
+- A `covers` claim mechanism on Lua harness scripts.
+- A `covers` claim mechanism on Rust integration tests.
+- A tool that diffs registered contracts against claims.
+- Any compile-time relationship between contracts and tests.
 
-## The Problem
+## Core Requirements
 
-### Test files are not the coverage model
+### 1. Stable Contract Identity
 
-Filenames are useful for humans, but they are not a coverage registry.
+Every behavioral contract has a stable string ID. The ID format is a dotted slug rooted at the doc section it lives in.
 
-For example, a script named
-`jmap-mailbox-secondary-create-import.lua` communicates intent, but it
-does not answer:
+Examples:
 
-- Which required behavior does this satisfy?
-- Is this one test enough for the requirement, or is it one case in a
-  larger matrix?
-- Does it cover account scoping, DB label persistence, request-log
-  routing, or all three?
-- Is the missing negative case intentional?
-- Is the corresponding primary-account case required?
+- `architecture.action_service_as_mutation_gate`
+- `architecture.generation_counters_for_async_safety`
+- `architecture.adding_a_new_email_action`
+- `cmdk.requirements.exhaustive_command_registry`
+- `cmdk.requirements.fuzzy_search_word_boundary_weighting`
+- `cmdk.decisions.enum_for_command_ids`
 
-The coverage model needs to live above individual test files.
+The dots are convention for readability; the tool does not parse them. The ID is a key. Renames are explicit and tracked; the tool reports broken claims when an ID is renamed without updating its claimants.
 
-### TODO prose is not a registry
+### 2. Doc Sections Mark Themselves as Contracts
 
-`TODO.md` is good for work planning. It is not a reliable source of
-truth for coverage.
+A doc section becomes a registered contract when its author explicitly marks it. Not every prose paragraph is a contract. The marker form is open (see Open Questions) but at minimum it must:
 
-As the harness grows, TODO prose becomes too coarse. One item can
-unlock five scripts; one script can satisfy two requirements; one
-blocked provider feature can hold open ten matrix cells. The tooling
-needs structured requirements and structured test claims.
+- Be visible in the rendered markdown without breaking reading flow.
+- Carry the stable ID.
+- Survive doc reorganization without breaking claims.
+- Be greppable from the tool.
 
-### Frontmatter is execution metadata, not coverage metadata yet
+The likely shape is an HTML comment near the section header (`<!-- coverage: architecture.action_service_as_mutation_gate -->`) or a one-line frontmatter-style pin. The decision is deferred to the spec.
 
-Current frontmatter tells brokkr how to run a script. It should also
-tell coverage tooling what the script proves.
+### 3. Every Test Claims at Least One Contract
 
-That does not mean every assertion goes in frontmatter. The script body
-still owns exact behavior. Frontmatter should record stable, searchable
-coverage facts:
+Lua harness scripts gain a required `covers` field in their frontmatter. The field lists one or more contract IDs.
 
-- The script's identity.
-- The fixture and protocol surface.
-- The behavioral requirement IDs it covers.
-- The matrix axes relevant to discovery and reporting.
-- Whether the test is normal, expected-fail, blocked, flaky, expensive,
-  or manual-only.
+```
+-- @covers: architecture.action_service_as_mutation_gate
+-- @covers: cmdk.requirements.exhaustive_command_registry
+```
 
-## Goal
+Rust integration tests claim contracts via a mechanism to be settled in the spec (attribute macro, sidecar manifest, or doc-comment marker). Whatever the mechanism, it must be uniform within Rust and resolvable to the same ID space.
 
-Build a coverage registry and frontmatter contract that can answer:
+A test without any `covers` claim is rejected by the loader. A claim referencing an unknown ID is rejected by the loader. Both are loud failures, not warnings.
 
-- Which required coverage points have no test?
-- Which tests claim coverage IDs that do not exist?
-- Which coverage IDs are required but blocked by external systems?
-- Which tests are expected to fail, and why?
-- Which protocol/resource/operation/topology cells are empty?
-- Which fixtures are unused?
-- Which fixtures have no schema-load smoke coverage?
-- Which tests overlap heavily with existing coverage?
-- Which coverage is fast enough for default checks, and which belongs
-  in longer cohorts?
+### 4. Missing Coverage is a Build Break
 
-The primary output is not a prettier test list. The primary output is a
-missing-coverage report.
+A registered contract with zero claims fails the build. This is the load-bearing requirement. Without it, the registry is documentation, not enforcement.
+
+In the v1 tool-only stage, the build break is mediated by `brokkr coverage` (or whatever subcommand owns this) returning a non-zero exit code on uncovered contracts, and `brokkr check` invoking it. In the end-state, the check is promoted to compile time.
+
+### 5. Architectural Enforcement is the End-State
+
+The end-state of the coverage system is that the Rust compiler enforces the relationship between contracts and tests. The architecture doc states the guiding principle the system follows:
+
+> Correctness should not depend on every developer remembering a multi-step protocol. A single entry point, a type that enforces the invariant, or a compiler error when the protocol is violated - these are how contracts become real.
+
+The end-state shape:
+
+- `ContractId` is a Rust enum or const table. Adding a contract is a code change the compiler tracks.
+- A build script discovers Lua harness scripts, parses their frontmatter, and emits a generated `const LUA_TESTS: &[LuaTest]` table. Each entry carries `covers: &[ContractId]`.
+- Compile-time assertions verify every `ContractId` variant appears in at least one `LuaTest::covers` and every claim resolves to a valid variant.
+- Doc sections marked as contracts must have matching variants; a doc-lint step asserts the two sides agree.
+
+What the architecture cannot enforce: that the Lua body actually exercises the claimed behavior. The compiler can enforce registration, claim, and coverage of the catalog. The author still has to write a real test. This is the same ceiling `CommandId` accepts today: exhaustive match arms in `update()` do not force each arm to do the right thing, but exhaustive registration plus exhaustive handling is most of the value.
+
+### 6. Staged Delivery: Tool First, Codegen Later
+
+The v1 implementation is a tool: a `brokkr` subcommand that reads doc anchors, parses Lua frontmatter, parses Rust test claims, and reports missing, unknown, and uncovered contracts. It fails the build on violations. It has the same data shape and same IDs as the end-state.
+
+The v2 implementation promotes verification into the build system. The Rust enum, the build-script discovery, the compile-time asserts. Same catalog, same claims, stronger enforcement.
+
+The staging is deliberate. The tool stage is the bridge that lets us populate the catalog and backfill claims on the existing test corpus before paying the build-time cost. Once the catalog is stable, codegen is mechanical.
+
+### 7. Rust Integration Tests Are First-Class
+
+Several architectural contracts are enforced by Rust integration tests, not Lua scripts. The crate-boundary lockdown tests in `crates/service-state/tests/` are the canonical example. These tests must claim contracts on the same footing as Lua scripts.
+
+A separate class of contract is enforced by the compiler directly: typed IDs (`FolderId`, `TagId`), the `#[must_use]` discipline on `GenerationCounter::next()`, the `ProviderOps` trait. These contracts still appear in the registry. Their `Enforced-by:` field names the compile mechanism. They do not require a test claim. They appear in reports so the registry is honest about what is and is not test-covered.
+
+### 8. No Grace Mode
+
+There is no "warn only" period. When the system lands, every existing test is backfilled with a `covers` claim, every architectural boundary section is registered, every numbered Core Requirement in subsystem problem-statements is registered, and uncovered contracts that exist on day one are either covered immediately, retired, or marked as known gaps with a tracking issue.
+
+This is the most expensive part of the rollout. It is also the only way the system means anything. A grace mode means tests written during the grace window have no claims, which means the catalog is not exhaustive, which defeats the entire principle.
+
+The backfill is staged by doc area so it does not block on a single giant commit. Each area is brought to exhaustive coverage before the loader is hardened for that area's tests.
 
 ## Non-Goals
 
-- Replacing test assertions with metadata.
-- Making the registry a list of test files.
-- Forcing every test into a rigid one-test-per-requirement shape.
-- Building a general code-coverage tool.
-- Measuring Rust line coverage.
-- Measuring UI pixel coverage.
-- Solving CI scheduling by itself, though the same metadata should help
-  cohort selection later.
+- Replacing test assertions with metadata. The test still has to prove the behavior. Frontmatter only records the claim.
+- Building a parallel TOML or YAML requirements catalog. The docs are the registry.
+- Measuring Rust line coverage or UI pixel coverage.
+- Solving CI scheduling, flake quarantine, or expensive-test gating. Coverage is orthogonal.
+- A coverage axis matrix in v1. Axes are deferred. The doc location is the only axis the v1 tool surfaces.
+- Forcing every test into a one-test-per-contract shape. Many tests claim many contracts. Many contracts have many tests. The relationship is many-to-many.
 
-## Design Direction
+## Decisions
 
-### Registry of required coverage
+1. **Exhaustive catalog.** Every behavioral contract is registered. The missing-coverage report is the derived diff between registered contracts and claimed contracts.
 
-The registry should define coverage requirements independent of test
-files. A requirement is a stable behavior point that Ratatoskr expects
-to keep covered.
+2. **Doc-anchored IDs.** Contract IDs are stable slugs rooted at doc sections. There is no parallel registry file. The docs are the catalog.
 
-Example shape:
+3. **No grace mode.** Backfill on rollout. After rollout, malformed tests are rejected by the loader and uncovered contracts fail the build.
 
-```toml
-[[requirement]]
-id = "jmap.mailbox_set.secondary_create_imports_folder"
-area = "sync"
-protocol = "jmap"
-resource = "mailbox"
-operation = "remote_create"
-topology = "multi_account"
-asserts = ["account_scoping", "db_label_persistence"]
-status = "required"
-```
+4. **Tool-first, codegen-later.** v1 is a `brokkr` subcommand that performs the checks externally. v2 promotes verification to compile time via codegen and build-time assertions. Same data, same IDs.
 
-The exact file format is an implementation decision. TOML is a good
-fit because the repo already uses TOML for fixtures and configuration.
-The important part is that each requirement has a stable ID and a
-structured set of axes.
+5. **Axes deferred.** v1 has no coverage matrix. Doc location is the v1 axis. Cross-cutting matrix views are revisited when the catalog has earned its keep.
 
-### Tests claim coverage
+6. **Many-to-many.** A test may claim multiple contracts. A contract may have multiple claimants. The system does not enforce a particular cardinality.
 
-Lua frontmatter should claim requirement IDs from the registry.
-
-Example:
-
-```lua
--- id: jmap-mailbox-secondary-create-import
--- area: sync
--- protocol: jmap
--- resource: mailbox
--- operation: remote_create
--- topology: multi_account
--- fixture: multi-account-secondary-primary.toml
--- covers:
---   - jmap.mailbox_set.secondary_create_imports_folder
--- expected: pass
--- ceiling: 120s
-```
-
-The test body remains the authority for the exact assertions. The
-coverage claim says this script is intended to satisfy that registry
-requirement.
-
-### Tooling diffs registry against tests
-
-The core tool should:
-
-1. Load the registry.
-2. Discover Lua tests and parse frontmatter.
-3. Validate frontmatter shape.
-4. Validate that every claimed `covers` ID exists.
-5. Report every `status = "required"` requirement with no covering
-   test.
-6. Report every covered requirement whose tests are all expected-fail,
-   blocked, skipped, or manual-only.
-7. Emit matrix summaries by area, protocol, resource, operation, and
-   topology.
-
-The tool should be strict enough to catch drift but not so strict that
-adding a useful test requires designing the entire matrix first.
-
-## Matrix Axes
-
-The initial registry should use a small set of axes that match how the
-project already thinks about coverage.
-
-### Area
-
-High-level subsystem:
-
-- `service`
-- `sync`
-- `actions`
-- `calendar`
-- `contacts`
-- `attachments`
-- `extract`
-- `auth`
-- `search`
-- `settings`
-
-### Protocol
-
-External or internal surface:
-
-- `service`
-- `jmap`
-- `graph`
-- `gmail`
-- `gcal`
-- `caldav`
-- `imap`
-- `smtp`
-- `local`
-
-`local` is for behavior that does not cross a provider protocol.
-
-### Resource
-
-Object under test:
-
-- `message`
-- `thread`
-- `mailbox`
-- `label`
-- `attachment`
-- `calendar`
-- `event`
-- `contact`
-- `contact_group`
-- `signature`
-- `token`
-- `action`
-- `index`
-- `body_store`
-- `inline_image_store`
-
-### Operation
-
-Behavior being exercised:
-
-- `boot`
-- `initial_sync`
-- `delta_sync`
-- `remote_create`
-- `remote_update`
-- `remote_delete`
-- `local_create`
-- `local_update`
-- `local_delete`
-- `writeback`
-- `retry`
-- `recovery`
-- `failure`
-- `shutdown`
-- `crash_replay`
-- `schema_load`
-
-### Topology
-
-Account and ownership shape:
-
-- `single_account`
-- `multi_account`
-- `shared_mailbox`
-- `public_folder`
-- `delegated`
-- `cross_protocol`
-- `offline`
-
-### Auth
-
-Authentication shape when relevant:
-
-- `none`
-- `password`
-- `oauth`
-- `token_bound`
-- `revoked`
-- `expired`
-- `reauth`
-
-### Assertions
-
-Important proof categories:
-
-- `db_persistence`
-- `request_log`
-- `account_scoping`
-- `shared_mailbox_scoping`
-- `no_leakage`
-- `search_index`
-- `body_store`
-- `inline_image_store`
-- `attachment_cache`
-- `pending_ops`
-- `retry_state`
-- `notification`
-- `generation`
-- `crash_safety`
-- `provider_error`
-
-The registry can add axes as needed, but adding axes should be
-deliberate. A sparse, comprehensible matrix is better than a complete
-taxonomy nobody maintains.
-
-## Requirement Status
-
-Requirements need status. Suggested initial values:
-
-- `required` - must have at least one passing automated test.
-- `covered` - optional alias for `required` once tooling can infer
-  covered state. Prefer deriving this rather than storing it.
-- `deferred` - desired coverage, but intentionally not required yet.
-- `blocked` - desired coverage blocked by an external dependency,
-  missing mock support, or missing product surface.
-- `expected_fail` - known product bug or gap; test may exist and fail
-  until fixed.
-- `manual` - cannot be automated yet; document why.
-- `retired` - old requirement retained only so stale test frontmatter
-  can produce a useful warning.
-
-The registry should include a short `reason` for any status other than
-`required`.
-
-## Frontmatter Contract
-
-The minimum frontmatter fields for coverage-aware tests should be:
-
-- `id` - stable test ID, normally matching the filename without `.lua`.
-- `description` - human-readable summary.
-- `expected` - `pass`, `fail`, or a named expected-failure state.
-- `fixture` - fixture file if the script depends on one.
-- `protocol` - primary protocol surface.
-- `area` - high-level subsystem.
-- `resource` - primary resource under test.
-- `operation` - primary operation under test.
-- `topology` - ownership shape.
-- `covers` - list of registry requirement IDs.
-- `ceiling` - existing timeout/backstop.
-
-Optional fields:
-
-- `auth`
-- `asserts`
-- `tags`
-- `cohort`
-- `cost`
-- `blocked_by`
-- `issue`
-- `notes`
-
-Frontmatter should remain readable in plain Lua comments. If structured
-lists become awkward, the parser should support a small YAML-like
-subset only for frontmatter, not arbitrary YAML features.
-
-## Fixture Coverage
-
-Fixtures need coverage too. The tooling should answer:
-
-- Which fixtures are referenced by no test?
-- Which TOML fixtures have no schema-load smoke test?
-- Which Lua fixtures are executable fixtures rather than tests?
-- Which tests depend on fixtures that are missing from the repo?
-- Which fixture uses a protocol/resource shape that has no registry
-  requirement?
-
-This matters because saehrimnir fixture schema changes can break many
-provider tests before Ratatoskr code is even involved. Schema-load
-smoke coverage should catch stale fixture shapes early.
-
-## Reporting
-
-The first useful report should be text-first and suitable for local
-developer use:
-
-```text
-coverage requirements: 184
-required: 141
-covered: 126
-missing: 15
-blocked: 22
-expected-fail: 6
-
-missing required coverage:
-  graph.shared_mailbox.mail_sync.messages_scoped
-  gmail.oauth_token_binding.labels_scoped
-  imap.oauthbearer.account_binding.fetch_scoped
-
-tests with unknown coverage IDs:
-  jmap-old-mailbox-test.lua -> jmap.mailbox.old_id
-
-fixtures without schema smoke:
-  graph-categories-small.toml
-```
-
-Later reporting can include matrix tables, JSON output for CI, and
-HTML summaries, but the first tool should optimize for answering the
-developer's local question quickly.
-
-## CI and Cohorts
-
-Coverage metadata should eventually help CI choose what to run, but
-coverage accounting and scheduling are separate concerns.
-
-Useful cohort metadata:
-
-- `smoke`
-- `provider`
-- `service`
-- `crash`
-- `writeback`
-- `slow`
-- `flaky`
-- `manual`
-- `destructive`
-
-The missing-coverage report should not require running tests. It only
-needs the registry and frontmatter. Runtime pass/fail status can be
-layered on later from brokkr results.
+7. **Rust tests are first-class claimants.** The claim mechanism in Rust is to be settled in the spec, but Rust integration tests sit on the same footing as Lua harness scripts.
 
 ## Open Questions
 
-- Where should the registry live? Candidate:
-  `docs/coverage/requirements.toml`.
-- Should requirement IDs be globally flat strings, or hierarchical
-  sections plus local IDs?
-- Should `brokkr service-list` and `brokkr sync-smoke` parse the new
-  coverage fields, or should a separate `brokkr coverage` command own
-  this?
-- Should coverage validation fail `brokkr check`, or only report
-  warnings until the registry stabilizes?
-- How strict should duplicate coverage warnings be?
-- Should expected-fail tests be runnable by default, or isolated in a
-  separate cohort?
-- How should non-Lua Rust tests claim coverage requirements, if at all?
+1. **What marks a doc section as a contract?** Options include an HTML comment near the section header (`<!-- coverage: id -->`), a one-line pin in a sidecar file, or a slug convention on the section header itself. Decision affects how the tool finds anchors and how stable IDs survive doc edits.
+
+2. **Where does the `ContractId` enum live?** Candidate: a new `coverage` crate in the workspace whose build script discovers harness scripts and generates the enum. Affects how Rust integration tests reference the IDs.
+
+3. **How do Rust integration tests claim contracts?** Attribute macro on test functions, sidecar manifest per crate, or a structured doc comment. Lua frontmatter is settled. The Rust analogue is not.
+
+4. **How are compile-enforced contracts represented?** A contract enforced by typed IDs or `#[must_use]` has no test claim, only a description of the compile mechanism. The schema needs a way to distinguish "no claim because untested" from "no claim because the compiler proves it."
+
+5. **What is the codegen trigger?** A `build.rs` in the coverage crate that re-emits when docs or harness scripts change, or a `brokkr` step that writes a checked-in file. Affects iteration speed and CI determinism.
+
+6. **How are retired contracts handled?** A `retired` marker keeps the ID reserved so old test runs and external references do not break. Equivalent to keeping a `CommandId` variant for persistence compat after the feature is gone.
+
+7. **How does the rollout sequence the backfill?** Per doc area, per crate, per harness directory. The smallest area large enough to validate the model is probably the command palette subsystem, which has clearly enumerated Core Requirements and a contained test surface.
 
 ## Success Criteria
 
-The coverage system is working when a developer can ask:
+The coverage system is working when:
 
-> Which tests are we missing?
+- Every architectural boundary section in `docs/architecture.md` has a stable ContractId.
+- Every numbered Core Requirement in subsystem problem-statements has a stable ContractId.
+- Every Lua harness script claims at least one ContractId.
+- Every Rust integration test that backs a contract claims at least one ContractId.
+- A developer can run one command and get a precise list of registered contracts with no claims.
+- A test added without a `covers` claim fails to load.
+- A claim referencing an unknown ID fails to load.
+- A contract added to the registry without at least one claim fails the build.
 
-and get a precise answer without reading every Lua file or manually
-cross-checking TODO lists.
-
-Concretely:
-
-- Every required coverage point has a stable ID.
-- Lua tests can claim one or more coverage IDs.
-- Unknown coverage claims are reported.
-- Missing required coverage is reported.
-- Blocked and deferred requirements are visible but do not fail normal
-  coverage validation.
-- Fixture schema smoke gaps are visible.
-- The report is useful before tests run.
-- The metadata stays small enough that adding a test remains cheap.
+The end-state is reached when the Rust compiler enforces the four conditions above directly, with no separate tool invocation. The tool stage is the bridge that gets us there.
