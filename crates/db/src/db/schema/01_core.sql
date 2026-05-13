@@ -51,7 +51,15 @@ CREATE TABLE IF NOT EXISTS accounts (
     -- disappearing account. Defense-in-depth: the gate exists at
     -- both the UI SyncTick filter and the Service-side
     -- SyncRuntime::start_account guard.
-    is_deleting INTEGER NOT NULL DEFAULT 0
+    is_deleting INTEGER NOT NULL DEFAULT 0,
+    -- Attachments roadmap Phase 6: when 0, `PrefetchRuntime` skips
+    -- every work item for this account and the post-sync sweep at
+    -- `run_sync` no-ops. Existing rows stay `content_hash IS NULL`
+    -- until either (a) the user clicks an attachment (cache-miss
+    -- via `attachment.fetch`) or (b) the toggle flips back to 1
+    -- and the next sync's post-sync sweep / next boot recovery
+    -- kick picks them up.
+    cache_attachments_enabled INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -74,6 +82,15 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('ai_auto_summarize', 'true'),
     ('contact_sidebar_visible', 'true'),
     ('attachment_cache_max_mb', '500'),
+    -- Attachments roadmap Phase 6 / Phase 9: squeeze pipeline toggles.
+    -- Phase 6 persists the bits; Phase 9 reads them when wiring the
+    -- inline squeeze step into `PackStore::put`.
+    ('compress_attachments', 'true'),
+    ('allow_lossy_compression', 'false'),
+    -- Attachments roadmap Phase 6 / Phase 8: opened-files temp folder
+    -- TTL. Phase 6 persists the value; Phase 8 reads it when wiring
+    -- the periodic reaper for `<app_data>/opened_attachments/`.
+    ('opened_files_cleanup_days', '7'),
     ('calendar_enabled', 'false'),
     ('smart_notifications', 'true'),
     ('notify_categories', 'Primary'),

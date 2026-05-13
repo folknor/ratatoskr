@@ -44,6 +44,10 @@ pub struct UpdateAccountParams {
     pub caldav_url: Option<String>,
     pub caldav_username: Option<String>,
     pub caldav_password: Option<String>,
+    /// Attachments roadmap Phase 6: per-account offline-cache master
+    /// switch. `Some(true)` -> `cache_attachments_enabled = 1`,
+    /// `Some(false)` -> `= 0`. None leaves the column untouched.
+    pub cache_attachments_enabled: Option<bool>,
 }
 
 /// Synchronous account creation - callable from any `&Connection`.
@@ -176,6 +180,9 @@ pub fn update_account_sync(
     }
     if let Some(v) = params.caldav_password {
         sets.push(("caldav_password", Box::new(v)));
+    }
+    if let Some(v) = params.cache_attachments_enabled {
+        sets.push(("cache_attachments_enabled", Box::new(if v { 1i64 } else { 0i64 })));
     }
     dynamic_update(conn, "accounts", "id", id, sets)
 }
@@ -674,6 +681,7 @@ mod sync_account_tests {
                 caldav_url: None,
                 caldav_username: None,
                 caldav_password: None,
+                cache_attachments_enabled: None,
             },
         )
         .expect("update");

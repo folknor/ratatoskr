@@ -129,6 +129,11 @@ impl Settings {
             caldav_url: non_empty(editor.caldav_url.text().trim()),
             caldav_username: non_empty(editor.caldav_username.text().trim()),
             caldav_password: non_empty(editor.caldav_password.text().trim()),
+            // Attachments roadmap Phase 6: the per-account toggle has
+            // no UI widget yet (user is implementing settings UI
+            // separately). Leave None so this editor save doesn't
+            // overwrite whatever the (future) toggle wrote.
+            cache_attachments_enabled: None,
         };
         let account_id = editor.account_id.clone();
 

@@ -75,6 +75,7 @@ pub(crate) async fn handle_update(
                 caldav_url: params.caldav_url,
                 caldav_username: params.caldav_username,
                 caldav_password: params.caldav_password,
+                cache_attachments_enabled: params.cache_attachments_enabled,
             };
             db::db::queries_extra::update_account_sync(conn, &id, update)
         })

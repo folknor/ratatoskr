@@ -62,7 +62,9 @@ pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
-pub use attachment::{AttachmentFetchAck, AttachmentFetchParams};
+pub use attachment::{
+    AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentFetchAck, AttachmentFetchParams,
+};
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
 pub use pinned_search::{
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,

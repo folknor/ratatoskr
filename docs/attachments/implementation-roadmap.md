@@ -231,10 +231,11 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 - **Account-add explicit `kick_backfill_account` call.** The plan called for an explicit kick from `handle_create`. The post-sync sweep already covers the account's first sync (after `sync_for_account` returns), and the boot recovery kick covers subsequent app restarts. A direct kick in `handle_create` adds no coverage that the existing two triggers don't already give; leaving it out keeps `handle_create` simple.
 - **Window-extend trigger.** Belongs to the slider's pref-write site, which lands in Phase 6. Until then, the next boot's recovery kick covers any retention expansion. Phase 6 will add the immediate kick.
-- **Windows ENOSPC backstop.** `statvfs_free_bytes` returns `None` on non-Unix; the cache fills until `PackStore::put` raises an ENOSPC-shaped error. A `GetDiskFreeSpaceExW` implementation is a small follow-up but not Phase 4-blocking.
-- **`SkipReason::ProviderPermanent` vs `Transient` split.** Provider errors are folded into one transient lane for now. Splitting them requires a provider-error taxonomy that Phase 7 (cross-provider parity) is the natural place to add.
-- **Per-provider circuit breaker.** Implemented per-account, which is equivalent for Phase 4 (JMAP only). Phase 7 can promote the keyspace if cross-provider behaviour differs.
-- **Shutdown mid-prefetch + account-delete tombstone harness scripts.** Phase 4 lands one end-to-end script - `crates/app/tests/sync-harness/jmap-attachment-prefetch.lua` - that asserts a JMAP sync against `saehrimnir` produces a populated `content_hash` and a pack file on disk, and that `prefetch.completed` fires with `fetched >= 1`. The shutdown-mid-prefetch script needs a slow-provider hook for JMAP attachment fetch (analogous to `harness-slow-sync`) which doesn't exist yet; it's a worthwhile follow-up but not Phase 4-essential. Account-delete tombstoning is already covered indirectly by the Phase 3 `AccountDeletionStep::AttachmentCache` path; explicit harness coverage for Phase 4's `prefetch.cancel_account` is observability-bound (the synchronous cancel is invisible from the wire) and tracked as a future test capability.
+- **Windows ENOSPC backstop** -> **Phase 7**. `statvfs_free_bytes` returns `None` on non-Unix; the cache fills until `PackStore::put` raises an ENOSPC-shaped error. `GetDiskFreeSpaceExW` lands with the cross-provider / cross-platform polish in Phase 7.
+- **`SkipReason::ProviderPermanent` vs `Transient` split** -> **Phase 7**. Provider errors are folded into one transient lane for now; splitting them requires a provider-error taxonomy that the cross-provider parity phase is the natural place to add.
+- **Per-provider circuit breaker** -> **Phase 7**. Implemented per-account, equivalent for Phase 4 (JMAP only). Phase 7 promotes the keyspace if cross-provider behaviour differs.
+- **Shutdown-mid-prefetch harness script** -> **Phase 7**. Blocked on a slow-provider hook for attachment fetch (analogous to `harness-slow-sync`) which doesn't exist yet; lands with Phase 7's cross-provider harness expansion. Phase 4 lands one end-to-end script - `crates/app/tests/sync-harness/jmap-attachment-prefetch.lua` - that asserts a JMAP sync against `saehrimnir` produces a populated `content_hash` and a pack file on disk, and that `prefetch.completed` fires with `fetched >= 1`.
+- **Account-delete `prefetch.cancel_account` harness coverage** -> **Phase 8**. Account-delete tombstoning is Phase 8's natural test territory since Phase 8 owns the eviction policy. Synchronous orphan-blob tombstoning is already covered indirectly by the Phase 3 `AccountDeletionStep::AttachmentCache` path; explicit harness coverage for the prefetch-cancel side lands once Phase 7's slow-provider hook is available.
 
 **Open questions resolved during implementation.**
 
@@ -305,41 +306,54 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ---
 
-## Phase 6 - Settings UI
+## Phase 6 - Settings (backend slice landed; UI is the user's separate work)
 
-**Goal.** Users can configure caching, retention window, and squeeze policy from settings.
+**Status: backend slice landed.** The plumbing every Phase 6 setting will eventually invoke is in place: schema columns, wire types, service handlers, PrefetchRuntime gating, service_client wrappers, and harness coverage. The widget code lives outside this roadmap - the user is implementing the settings UI separately once the existing settings surface is ready to host the new section.
 
-**Entry criteria.**
-- Phases 1-5 landed. Pre-fetch and Open/Save read their config from prefs - settings UI just wraps the prefs.
+**What shipped (backend).**
 
-**In scope.**
+*Schema* (`crates/db/src/db/schema/01_core.sql`):
+- New column `accounts.cache_attachments_enabled INTEGER NOT NULL DEFAULT 1`. Pre-release policy is edit-in-place; no migration entry.
+- New settings seed rows: `compress_attachments=true`, `allow_lossy_compression=false`, `opened_files_cleanup_days=7`. The existing `sync_period_days` key (already plumbed in Phase 4) is the retention slider's target.
 
-Per-account section ("Storage" tab on the Account editor):
-- `Cache attachments for offline use` (toggle, default true).
-- `Mail to keep offline` (Outlook-style slider: 1 month / 3 months / 6 months / 1 year / 2 years / All; default 1 year). Writes to the `sync_period_days` pref that Phase 4 reads at both `sync_dispatch.rs` (initial sync depth) and the prefetch backfill kick (window-start filter). On write, fire `prefetch.kick_backfill_account` for each JMAP account so a slider extension takes immediate effect instead of waiting for the next boot.
+*Wire types:*
+- `SettingValue` gained `SyncPeriodDays(String)`, `CompressAttachments(bool)`, `AllowLossyCompression(bool)`, `OpenedFilesCleanupDays(String)`. The two string-typed ones match the existing snapshot's `Option<String>` shape; the Service parses to `i64` on read.
+- `AccountUpdateParams` gained `cache_attachments_enabled: Option<bool>` as a patch field (None leaves the column untouched).
+- `SettingsBootstrapSnapshot` (`crates/core/src/db/queries.rs`) gained `compress_attachments: bool`, `allow_lossy_compression: bool`, `opened_files_cleanup_days: Option<String>`. The UI reads these from the bootstrap; no per-pref `settings.get` round-trips needed.
+- New IPC `attachment.cache_size` with `AttachmentCacheSize{Params,Ack}`. The ack is `{ live_bytes, tombstoned_bytes }` from a single SQL aggregate over `attachment_blobs.length`. `tombstoned_bytes` is surfaced separately so a future UI can show both the in-use total and the reclaimable-on-next-cleanup figure.
 
-Global settings, new "Storage" section:
-- `Compress cached attachments` (toggle, default on).
-- `Allow lossy compression (JPEG re-encoding)` (toggle, default off).
-- `Cleanup opened-files temp folder after N days` (slider, default 7).
-- Live "Cache currently using X.Y GB" readout (informational).
+*Service handlers:*
+- `settings.set` (`crates/service/src/handlers/settings.rs::handle_set`) now reads the existing `sync_period_days` before the write transaction and, post-commit, fires `prefetch.kick_backfill_account` for every JMAP account with caching enabled when the new value is strictly larger than the old. Idempotent: re-firing against unchanged rows is a no-op.
+- `account.update` (`crates/service/src/handlers/account.rs::handle_update`) patches `cache_attachments_enabled` via the existing `UpdateAccountParams` flow.
+- `attachment.cache_size` (`crates/service/src/handlers/attachment.rs::handle_cache_size`) backed by a new `PackStore::size_breakdown()` that returns `(live_bytes, tombstoned_bytes)`.
 
-**Out of scope.**
-- A "Clear cache now" button (Phase 8).
+*PrefetchRuntime gating:*
+- `run_pipeline` in `crates/service/src/prefetch.rs` adds a per-account check after the circuit-breaker / disk-headroom checks. Disabled accounts skip with new `SkipReason::AccountDisabled`. The row stays `content_hash IS NULL`; the next re-enable + sync covers it.
+- Boot recovery kick (`dispatch/post_ready.rs`) filters `WHERE cache_attachments_enabled = 1` in its account enumeration.
+- Post-sync sweep (`crates/service/src/sync.rs::run_sync`) reads the same flag and skips the sweep entirely for disabled accounts, avoiding the enqueue-just-to-drop round-trip the worker check would do.
 
-**Touchpoints.**
-- `crates/app/src/ui/settings/tabs/...` - new section.
-- `crates/app/src/ui/settings/types/...` - new pref keys + bootstrap snapshots; **retire the dead `attachment_cache_max_mb` field on `PreferencesState`** (Phase 3 left it in place to keep the wire stable - this phase replaces it with the retention slider).
-- `crates/db/src/db/queries.rs` - getters/setters for the new prefs.
+*App client:*
+- `crates/app/src/service_client.rs::attachment_cache_size` wraps the new IPC.
+- `crates/app/src/ui/settings/types/mod.rs` extends its default snapshot with the three new fields so the UI struct has them in scope when the user wires widgets.
 
-**Exit criteria.**
-- Settings persist across restarts.
-- Shortening the retention window triggers a Phase 8 eviction sweep; extending it triggers a Phase 4 backfill (including the metadata-depth extend if applicable).
-- Disabling caching on an account stops new attachments from being downloaded by sync or backfill (fetch-on-click still works).
+*Harness coverage:*
+- `crates/app/tests/sync-harness/jmap-attachment-cache-disabled.lua` walks the full lifecycle: sync with caching disabled (no prefetch fires, `content_hash IS NULL`), flip the toggle on, sync again (prefetch fires, hash populated), and assert `attachment.cache_size.live_bytes > 0`. Plus an `AccountUpdate` registry arm so the Lua side can drive `account.update` directly.
 
-**Risks / open questions.**
-- Where does the per-account toggle live? On the Account editor sheet, matching how other per-account settings work.
-- "All" on a heavy mailbox is a real metadata-sync expansion. Surface a progress-aware UX or a confirmation step.
+**Out of scope (user-owned).**
+- Where the new section / toggles live in the existing settings surface, what they look like, the per-account toggle's host (account editor sheet or elsewhere).
+- "All" retention bucket UX (the backend accepts any positive `i64`; the slider's bucket-to-days mapping is the UI's call).
+- "Clear cache now" button (Phase 8).
+- Live polling cadence for the cache-size readout (the IPC returns a snapshot; the UI decides when to call).
+
+**Deferrals carried forward.**
+- Phase 9 reads `compress_attachments` / `allow_lossy_compression` when wiring inline squeeze into `PackStore::put`.
+- Phase 8 reads `opened_files_cleanup_days` when the periodic reaper for `<app_data>/opened_attachments/` lands.
+- Cross-session save-path persistence (deferred from Phase 5) stays deferred; no IPC was added for it in this phase either.
+
+**Verification (landed).**
+- `brokkr check` workspace-wide clean.
+- Phase 4 harness (`jmap-attachment-prefetch.lua`) still passes - no regression in the prefetch happy path.
+- New harness (`jmap-attachment-cache-disabled.lua`) passes - per-account toggle gates correctly in both directions, and the cache-size readout reflects post-prefetch state.
 
 ---
 
@@ -355,6 +369,9 @@ Global settings, new "Storage" section:
 - Per-provider rate-limit tuning: revisit the per-account `Semaphore` cap (4) for Gmail/Graph quotas. IMAP probably wants 1 per folder rather than 4 per account.
 - IMAP-specific: respect per-folder session reuse so we don't open a new connection per attachment. Wire `imap_part_id` (already populated by IMAP sync, already preserved by the sweep's COALESCE fallback) into the fetch path.
 - Promote the per-account circuit breaker keyspace to per-provider if observed cross-account behaviour clusters by provider.
+- **Split `SkipReason::ProviderTransient` into `Transient` and `Permanent` lanes** (Phase 4 deferral). The provider trait already classifies errors; surface that classification through `fetch_attachment` so the prefetch worker stops re-emitting permanent failures (404 / invalid blob id) on every backfill kick. Touchpoint: provider-error taxonomy in `crates/common/src/ops.rs` and the `ProviderError` consumers in `crates/service/src/prefetch.rs::run_pipeline`.
+- **Windows ENOSPC backstop** (Phase 4 deferral). Implement `statvfs_free_bytes` for `cfg(target_os = "windows")` via `GetDiskFreeSpaceExW`. Today the function returns `None` on Windows and the cache fills until the OS surfaces ENOSPC as a `PackStore::put` error. Lands here rather than as a standalone follow-up because Phase 7 is the next cross-provider / cross-platform polish phase.
+- **Slow-provider harness hook for attachment fetch** (Phase 4 deferral). Phase 4's shutdown-mid-prefetch test was blocked on a missing slow-provider knob analogous to `harness-slow-sync`. Add a `RATATOSKR_TEST_*_ATTACHMENT_LATENCY_MS` env knob (or per-provider equivalent) to `saehrimnir`, then land a service-harness script that SIGINTs the Service mid-prefetch and asserts the next boot's recovery kick drains the remaining `content_hash IS NULL` rows. The hook is useful for all four providers, not just JMAP, so wiring it once in Phase 7 covers the matrix.
 
 **Out of scope.**
 - IMAP partial-fetch optimization (`BODY[part]<offset.length>`).
@@ -403,6 +420,7 @@ Global settings, new "Storage" section:
 *Deferred from earlier phases:*
 - **Three crash-recovery harness scenarios** the Phase 3 plan deferred: SIGKILL mid-repack (partial new pack at the chain tail, boot discards), boot with deleted SQLite index (walk pack tails, regenerate `attachment_blobs` rows), and boot with sentinel missing (cross-store invariant pass over PackStore). The first scenario only becomes meaningful here because Phase 8 is the first phase that *runs* a GC repack. Phase 3 landed the single SIGKILL-mid-sync smoke script that covers the open-pack recovery path; this phase fills out the matrix.
 - **`--rebuild-attachment-index` tool** the Phase 2 plan stubbed. The recover() entry point handles the open-pack case; a standalone path that walks every sealed pack and regenerates the SQLite index from scratch is the pathological-corruption recovery primitive. Wires up here alongside the deleted-index harness scenario.
+- **Account-delete `prefetch.cancel_account` harness coverage** (Phase 4 deferral). Tombstoning a freshly-deleted account's blobs is Phase 8's natural test territory because Phase 8 owns the eviction policy. Script seeds a JMAP account with cached attachments, kicks an active prefetch (using Phase 7's slow-provider hook), issues `account.delete`, and asserts (a) no further provider fetches fire for the cancelled account, (b) the `AccountDeletionStep::AttachmentCache` step tombstones every unshared `content_hash`, (c) pack bytes are reclaimed on the next GC repack.
 
 **Out of scope.**
 - Heuristics for auto-adjusting the window. The window is user-controlled.

@@ -8,7 +8,8 @@ use service_api::{
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams,
     AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
-    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, AttachmentFetchAck,
+    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams,
+    AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentFetchAck,
     AttachmentFetchParams, ContactDeleteAck, ContactDeleteParams, ContactGroupDeleteAck,
     ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck,
     ContactSaveParams, ContactSaveWithWritebackAck, OauthExchangeCodeAck, OauthExchangeCodeParams,
@@ -1552,6 +1553,21 @@ impl ServiceClient {
                     message_id,
                     attachment_id,
                 },
+            })
+            .await?;
+        Ok(ack)
+    }
+
+    /// Attachments roadmap Phase 6: snapshot the on-disk byte
+    /// breakdown for the settings-UI cache-size readout. Returns
+    /// `(live_bytes, tombstoned_bytes)`. The values are a snapshot of
+    /// the index at request time; concurrent writes move the truth.
+    pub async fn attachment_cache_size(
+        &self,
+    ) -> Result<AttachmentCacheSizeAck, ClientError> {
+        let ack: AttachmentCacheSizeAck = self
+            .request(RequestParams::AttachmentCacheSize {
+                params: AttachmentCacheSizeParams::default(),
             })
             .await?;
         Ok(ack)

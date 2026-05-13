@@ -313,7 +313,8 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                         "SELECT id FROM accounts \
                          WHERE provider = 'jmap' \
                            AND COALESCE(is_active, 1) = 1 \
-                           AND COALESCE(is_deleting, 0) = 0",
+                           AND COALESCE(is_deleting, 0) = 0 \
+                           AND COALESCE(cache_attachments_enabled, 1) = 1",
                     )
                     .map_err(|e| format!("prepare prefetch boot-kick: {e}"))?;
                 let it = stmt

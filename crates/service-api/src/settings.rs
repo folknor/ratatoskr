@@ -33,6 +33,24 @@ pub enum SettingValue {
     Theme(String),
     FontSize(String),
     ReadingPanePosition(String),
+    /// Attachments roadmap Phase 6: retention window in days. Drives
+    /// both `sync_initial`'s walk-back depth (`sync_dispatch.rs`) and
+    /// the prefetch backfill kick's `window_start_unix` filter. String-
+    /// typed to match the snapshot's `sync_period_days: Option<String>`
+    /// shape; the Service parses to `i64` on read.
+    SyncPeriodDays(String),
+    /// Attachments roadmap Phase 6: squeeze pipeline master switch.
+    /// Phase 6 persists; Phase 9 reads when wiring inline squeeze
+    /// into `PackStore::put`.
+    CompressAttachments(bool),
+    /// Attachments roadmap Phase 6: allow lossy re-encoding (JPEG
+    /// quality reduction etc.). Default off so signed / regulated
+    /// content stays byte-equivalent. Phase 9 reads.
+    AllowLossyCompression(bool),
+    /// Attachments roadmap Phase 6 / Phase 8: TTL in days for files
+    /// under `<app_data>/opened_attachments/`. String-typed to match
+    /// the rest of the slider-backed numeric prefs.
+    OpenedFilesCleanupDays(String),
 }
 
 impl SettingValue {
@@ -46,6 +64,10 @@ impl SettingValue {
             Self::Theme(_) => "theme",
             Self::FontSize(_) => "font_size",
             Self::ReadingPanePosition(_) => "reading_pane_position",
+            Self::SyncPeriodDays(_) => "sync_period_days",
+            Self::CompressAttachments(_) => "compress_attachments",
+            Self::AllowLossyCompression(_) => "allow_lossy_compression",
+            Self::OpenedFilesCleanupDays(_) => "opened_files_cleanup_days",
         }
     }
 
@@ -56,7 +78,9 @@ impl SettingValue {
         match self {
             Self::ShowSyncStatus(v)
             | Self::BlockRemoteImages(v)
-            | Self::PhishingDetectionEnabled(v) => {
+            | Self::PhishingDetectionEnabled(v)
+            | Self::CompressAttachments(v)
+            | Self::AllowLossyCompression(v) => {
                 if *v {
                     "true".to_string()
                 } else {
@@ -66,7 +90,9 @@ impl SettingValue {
             Self::PhishingSensitivity(s)
             | Self::Theme(s)
             | Self::FontSize(s)
-            | Self::ReadingPanePosition(s) => s.clone(),
+            | Self::ReadingPanePosition(s)
+            | Self::SyncPeriodDays(s)
+            | Self::OpenedFilesCleanupDays(s) => s.clone(),
         }
     }
 }

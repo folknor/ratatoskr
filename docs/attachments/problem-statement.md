@@ -337,16 +337,20 @@ Currently a separate TODO entry. Subsumed into this work since it's natural to w
 
 ## Settings
 
-One per-account section ("Storage" tab on the Account editor), one global ("Storage"):
+The backend for these settings landed in Phase 6 (schema, IPC, PrefetchRuntime gating, cache-size readout). **The settings UI itself is being implemented separately from this roadmap** - the existing settings surface doesn't have the host structure ("Storage" section / Account editor tabs) the original plan assumed, so the widget code lands as a sibling effort once the user has decided where the new section lives.
 
-**Per account:**
-- `Cache attachments for offline use` (boolean, default true)
-- `Mail to keep offline` (slider, mirrors Outlook: 1 month / 3 months / 6 months / 1 year / 2 years / All; default 1 year)
+Backend persistence keys (already wired):
 
-**Global:**
-- `Compress cached attachments` (toggle, default on - controls squeeze pipeline)
-- `Allow lossy compression (JPEG re-encoding)` (toggle, default off)
-- `Cleanup opened-files temp folder after N days` (slider, default 7 days)
+**Per account** (`accounts.cache_attachments_enabled`, default 1):
+- `Cache attachments for offline use` (boolean). Drives `PrefetchRuntime`'s per-account gate, the boot recovery kick's account enumeration, and the post-sync sweep's short-circuit.
+
+**Global** (rows in `settings`):
+- `sync_period_days` (default 365) - `Mail to keep offline`. Drives both `sync_initial`'s walk-back depth and the prefetch backfill kick's `window_start_unix` filter. On `settings.set` extend, fires `prefetch.kick_backfill_account` for every JMAP account.
+- `compress_attachments` (default true) - squeeze pipeline master switch. Read by Phase 9.
+- `allow_lossy_compression` (default false) - JPEG re-encoding etc. Read by Phase 9.
+- `opened_files_cleanup_days` (default 7) - TTL for `<app_data>/opened_attachments/`. Read by Phase 8's periodic reaper.
+
+Plus a `attachment.cache_size` IPC returning `(live_bytes, tombstoned_bytes)` for the live readout the UI will surface.
 
 ## Calendar attachments
 
@@ -409,7 +413,7 @@ Detailed plan with entry/exit criteria for each phase in `implementation-roadmap
 
 **Phase 5 - UI: Open, Save, Save All.** Reading-pane stubs hoisted from `ReadingPaneMessage` into `ReadingPaneEvent` variants handled in `handlers/core.rs` where the dispatch surface lives. Pop-out wires directly. Shared `crates/app/src/handlers/attachments.rs` module. `rfd` dialogs, OS-default open, last-folder-per-thread persistence.
 
-**Phase 6 - Settings UI.** Per-account cache toggle + retention slider (writes the pref Phase 4 already reads). Global Storage section: squeeze toggles, opened-files cleanup window, cache-size readout.
+**Phase 6 - Settings (backend slice landed; UI is the user's separate work).** Backend plumbing every setting will eventually invoke: `accounts.cache_attachments_enabled` column, `sync_period_days` / `compress_attachments` / `allow_lossy_compression` / `opened_files_cleanup_days` setting keys, `AccountUpdateParams` patch, `attachment.cache_size` IPC, `PrefetchRuntime` per-account gate, `settings.set` window-extend kick. The settings UI lands as a sibling effort once the user has decided where the new section lives in the existing settings surface (the original "Storage tab on Account editor" plan didn't fit the actual UI). See `implementation-roadmap.md` § Phase 6 for the deferral ledger.
 
 **Phase 7 - Provider parity.** Gmail / Graph / IMAP wired into the same enqueue mechanism. IMAP session reuse.
 

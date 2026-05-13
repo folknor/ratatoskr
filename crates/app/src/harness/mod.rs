@@ -2452,6 +2452,33 @@ fn request_params_from_lua(
             };
             Ok(RequestParams::TestPrintln { message })
         }
+"AccountUpdate" | "account.update" => {
+            if state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("AccountUpdate params must be table"));
+            }
+            let id = get_string_field(state, params_idx, "id")?
+                .ok_or_else(|| lua_error_message("AccountUpdate requires params.id"))?;
+            let params = service_api::AccountUpdateParams {
+                id,
+                account_name:              get_string_field(state, params_idx, "account_name")?,
+                display_name:              get_string_field(state, params_idx, "display_name")?,
+                account_color:             get_string_field(state, params_idx, "account_color")?,
+                caldav_url:                get_string_field(state, params_idx, "caldav_url")?,
+                caldav_username:           get_string_field(state, params_idx, "caldav_username")?,
+                caldav_password:           get_string_field(state, params_idx, "caldav_password")?,
+                cache_attachments_enabled: get_bool_field(
+                    state,
+                    params_idx,
+                    "cache_attachments_enabled",
+                )?,
+            };
+            Ok(RequestParams::AccountUpdate { params })
+        }
+        "AttachmentCacheSize" | "attachment.cache_size" => {
+            Ok(RequestParams::AttachmentCacheSize {
+                params: service_api::AttachmentCacheSizeParams::default(),
+            })
+        }
         "TestSeedAccount" | "test.seed_account" => {
             let params = if state.get_top() >= params_idx as usize
                 && state.typ(params_idx) != LuaType::Nil

@@ -597,6 +597,9 @@ mod tests {
             smart_notifications: true,
             notify_categories: None,
             attachment_cache_max_mb: None,
+            compress_attachments: true,
+            allow_lossy_compression: false,
+            opened_files_cleanup_days: None,
         }
     }
 

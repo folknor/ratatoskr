@@ -100,6 +100,12 @@ pub enum SkipReason {
     /// The account-scoped circuit breaker is open. Work is dropped;
     /// the next backfill kick will re-emit.
     CircuitOpen,
+    /// Attachments roadmap Phase 6: the per-account
+    /// `cache_attachments_enabled` flag is `0`. The row stays
+    /// `content_hash IS NULL` until the user re-enables the toggle,
+    /// at which point the next sync's post-sync sweep / next boot's
+    /// recovery kick picks it up.
+    AccountDisabled,
     /// Free disk below `MIN_DISK_FREE_BYTES`.
     DiskLow,
     /// The row's `content_hash` is no longer NULL (another path won
@@ -551,6 +557,9 @@ async fn run_pipeline(
     if !disk_has_headroom(inner) {
         return Err(SkipReason::DiskLow);
     }
+    if !account_caching_enabled(inner, &work.account_id).await {
+        return Err(SkipReason::AccountDisabled);
+    }
 
     // Confirm the row still wants bytes (cache-hit by another path
     // would have populated `content_hash` between enqueue and now).
@@ -710,6 +719,32 @@ async fn note_breaker_success(inner: &Arc<PrefetchRuntimeInner>, account_id: &st
     map.entry(account_id.to_string())
         .or_default()
         .note_success();
+}
+
+/// Attachments roadmap Phase 6: read `accounts.cache_attachments_enabled`
+/// for the given account. Defaults to `true` if the row is missing
+/// (account was just deleted; the dedupe set will be cleared on the
+/// next `cancel_account`).
+async fn account_caching_enabled(
+    inner: &Arc<PrefetchRuntimeInner>,
+    account_id: &str,
+) -> bool {
+    let aid = account_id.to_string();
+    inner
+        .db
+        .with_conn(move |conn| {
+            let v: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(cache_attachments_enabled, 1) \
+                     FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |r| r.get(0),
+                )
+                .unwrap_or(1);
+            Ok(v != 0)
+        })
+        .await
+        .unwrap_or(true)
 }
 
 fn disk_has_headroom(inner: &Arc<PrefetchRuntimeInner>) -> bool {

@@ -78,6 +78,10 @@ pub struct SettingsBootstrapSnapshot {
     pub smart_notifications: bool,
     pub notify_categories: Option<String>,
     pub attachment_cache_max_mb: Option<String>,
+    // Attachments roadmap Phase 6:
+    pub compress_attachments: bool,
+    pub allow_lossy_compression: bool,
+    pub opened_files_cleanup_days: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -243,6 +247,9 @@ pub fn get_settings_bootstrap_snapshot(
         smart_notifications: get_bool("smart_notifications", true),
         notify_categories: get("notify_categories"),
         attachment_cache_max_mb: get("attachment_cache_max_mb"),
+        compress_attachments: get_bool("compress_attachments", true),
+        allow_lossy_compression: get_bool("allow_lossy_compression", false),
+        opened_files_cleanup_days: get("opened_files_cleanup_days"),
     })
 }
 

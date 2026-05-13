@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use service_api::{AttachmentFetchAck, AttachmentFetchParams, ServiceError};
+use service_api::{AttachmentCacheSizeAck, AttachmentFetchAck, AttachmentFetchParams, ServiceError};
 
 use crate::attachment_materialize::{self, MaterializedBlob};
 use crate::boot::BootSharedState;
@@ -259,6 +259,27 @@ fn enqueue_extraction_if_runtime_installed(
 /// `local_path` / `cached_at` / `cache_size` columns. Phase 8 reuses
 /// the same notification variant for date-windowed tombstoning on
 /// PackStore.
+/// `attachment.cache_size` request handler. Single SQL aggregate over
+/// `attachment_blobs.length`, partitioned by tombstone state.
+///
+/// Snapshot semantics: the values reflect the SQLite index at the
+/// instant of the query. Concurrent `PackStore::put` or `tombstone`
+/// calls move the truth out from under the response - acceptable
+/// since the settings-UI readout is informational.
+pub(crate) async fn handle_cache_size(
+    boot_state: &Arc<BootSharedState>,
+) -> Result<Value, ServiceError> {
+    let pack_store = boot_state
+        .pack_store()
+        .ok_or_else(|| ServiceError::Internal("PackStore not installed".into()))?;
+    let (live_bytes, tombstoned_bytes) = pack_store
+        .size_breakdown()
+        .await
+        .map_err(|e| ServiceError::Internal(format!("attachment.cache_size: {e}")))?;
+    let ack = AttachmentCacheSizeAck { live_bytes, tombstoned_bytes };
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
 pub(crate) async fn handle_eviction_kick(
     _boot_state: &Arc<BootSharedState>,
 ) -> Result<(), String> {

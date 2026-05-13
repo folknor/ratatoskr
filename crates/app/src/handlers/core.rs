@@ -758,6 +758,7 @@ impl ReadyApp {
             caldav_url: params.caldav_url,
             caldav_username: params.caldav_username,
             caldav_password: params.caldav_password,
+            cache_attachments_enabled: params.cache_attachments_enabled,
         };
         Task::perform(
             async move {

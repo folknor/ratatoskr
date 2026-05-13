@@ -508,7 +508,31 @@ async fn run_sync(
     // Ok only; cancelled and failed syncs leave NULL-hash rows for the
     // next backfill kick (or for re-sync) to pick up. Errors here are
     // logged but do not affect the sync result the UI sees.
+    //
+    // Phase 6: skip the sweep entirely if `cache_attachments_enabled`
+    // is 0. The PrefetchRuntime's worker would skip the items anyway
+    // via `SkipReason::AccountDisabled`, but bailing here avoids
+    // enqueueing them just to drop them.
+    let account_caching_on = {
+        let aid = account_id.clone();
+        inner
+            .db
+            .with_conn(move |conn| {
+                let v: i64 = conn
+                    .query_row(
+                        "SELECT COALESCE(cache_attachments_enabled, 1) \
+                         FROM accounts WHERE id = ?1",
+                        rusqlite::params![aid],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(1);
+                Ok(v != 0)
+            })
+            .await
+            .unwrap_or(true)
+    };
     if matches!(sync_result, SyncResult::Completed)
+        && account_caching_on
         && let Some(prefetch) = inner.boot_state.prefetch_runtime()
     {
         let window_start_unix = match inner.db.with_conn(|conn| {

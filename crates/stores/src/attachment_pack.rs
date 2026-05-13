@@ -390,6 +390,37 @@ impl PackStore {
         .map_err(|e| PackError::Sql(format!("spawn_blocking get: {e}")))?
     }
 
+    /// Attachments roadmap Phase 6: snapshot the on-disk byte breakdown
+    /// for the settings-UI readout. Returns `(live_bytes,
+    /// tombstoned_bytes)` from a single SQL aggregate. Concurrent
+    /// `put` / `tombstone` move the truth out from under the
+    /// response; the caller treats this as fresh-enough.
+    pub async fn size_breakdown(&self) -> Result<(u64, u64), PackError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || -> Result<(u64, u64), PackError> {
+            let conn = inner
+                .conn
+                .lock()
+                .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+            conn.query_row(
+                "SELECT \
+                    COALESCE(SUM(CASE WHEN tombstoned_at IS NULL THEN length ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN tombstoned_at IS NOT NULL THEN length ELSE 0 END), 0) \
+                 FROM attachment_blobs",
+                [],
+                |r| {
+                    let live: i64 = r.get(0)?;
+                    let tomb: i64 = r.get(1)?;
+                    Ok((u64::try_from(live.max(0)).unwrap_or(0),
+                        u64::try_from(tomb.max(0)).unwrap_or(0)))
+                },
+            )
+            .map_err(|e| PackError::Sql(format!("size_breakdown: {e}")))
+        })
+        .await
+        .map_err(|e| PackError::Sql(format!("spawn_blocking size_breakdown: {e}")))?
+    }
+
     /// Mark `hash` as tombstoned (logically evicted). Idempotent. The
     /// tombstone is also recorded in the per-pack `tombstones-NNNNNN.log`
     /// so the index can be rebuilt if it is lost.

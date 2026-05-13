@@ -39,6 +39,29 @@ pub struct AttachmentFetchAck {
     pub relative_path: String,
 }
 
+/// Attachments roadmap Phase 6: `attachment.cache_size` request body.
+/// Global readout - no parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AttachmentCacheSizeParams {}
+
+/// Attachments roadmap Phase 6: `attachment.cache_size` ack.
+///
+/// `live_bytes` sums `attachment_blobs.length` where `tombstoned_at IS
+/// NULL` - the on-disk size users care about for the settings readout.
+/// `tombstoned_bytes` is the wasted space reclaimable by the next GC
+/// repack; surfaced separately so the UI can show both ("Cache using
+/// X.Y GB, Y.Z MB reclaimable on next cleanup").
+///
+/// Snapshot semantics: the values reflect the SQLite index at the
+/// instant of the query. A racing PackStore write or tombstone moves
+/// the truth out from under the response; UI should treat as
+/// fresh-enough rather than authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentCacheSizeAck {
+    pub live_bytes:        u64,
+    pub tombstoned_bytes:  u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

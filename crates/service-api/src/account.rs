@@ -47,6 +47,12 @@ pub struct AccountUpdateParams {
     pub caldav_username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caldav_password: Option<String>,
+    /// Attachments roadmap Phase 6: per-account offline-cache master
+    /// switch. `Some(false)` disables prefetch + post-sync sweep for
+    /// this account; `Some(true)` re-enables and the next sync /
+    /// boot recovery kick picks up the backlog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_attachments_enabled: Option<bool>,
 }
 
 /// `account.update` ack.
@@ -251,6 +257,7 @@ mod tests {
             caldav_url: Some("https://example.com/dav".into()),
             caldav_username: Some("atle".into()),
             caldav_password: Some("secret".into()),
+            cache_attachments_enabled: Some(false),
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: AccountUpdateParams =
@@ -268,6 +275,7 @@ mod tests {
             caldav_url: None,
             caldav_username: None,
             caldav_password: None,
+            cache_attachments_enabled: None,
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let obj = json.as_object().expect("object");

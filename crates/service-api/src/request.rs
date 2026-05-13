@@ -17,7 +17,7 @@ use crate::contacts::{
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
-use crate::attachment::AttachmentFetchParams;
+use crate::attachment::{AttachmentCacheSizeParams, AttachmentFetchParams};
 use crate::extract::{ExtractStatusParams, IndexRebuildParams};
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
@@ -849,6 +849,10 @@ pub enum RequestParams {
     /// fetch_attachment which can be slow on large attachments
     /// over slow links.
     AttachmentFetch { params: AttachmentFetchParams },
+    /// Attachments roadmap Phase 6: settings-UI cache-size readout.
+    /// Sums live + tombstoned `attachment_blobs.length` for the
+    /// "Cache using X.Y GB" indicator.
+    AttachmentCacheSize { params: AttachmentCacheSizeParams },
     /// Phase 7-4: read the ExtractRuntime's running status counters
     /// (queue depth + indexed/skipped/failed totals) for the
     /// status-bar polling.
@@ -956,6 +960,7 @@ impl RequestParams {
             Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
             Self::OauthExchangeCode { .. } => "oauth.exchange_code",
             Self::AttachmentFetch { .. } => "attachment.fetch",
+            Self::AttachmentCacheSize { .. } => "attachment.cache_size",
             Self::ExtractStatus { .. } => "extract.status",
             Self::IndexRebuild { .. } => "index.rebuild",
             Self::TestPanic => "test.panic",
@@ -1079,6 +1084,11 @@ impl RequestParams {
             Self::AttachmentFetch { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(60))
             }
+            // Single SQL aggregate over `attachment_blobs`; sub-second
+            // on any realistic cache.
+            Self::AttachmentCacheSize { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
             // Phase 7-4: in-memory counter read; cheap.
             Self::ExtractStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Phase 7-4: handler spawns a tracked task and returns
@@ -1136,6 +1146,7 @@ impl RequestParams {
             | Self::EncryptForStorage { .. }
             | Self::DecryptForStorage { .. }
             | Self::AttachmentFetch { .. }
+            | Self::AttachmentCacheSize { .. }
             | Self::ExtractStatus { .. } => Idempotency::Idempotent,
 
             Self::Shutdown
@@ -1277,6 +1288,7 @@ impl RequestParams {
             Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::OauthExchangeCode { params } => serde_json::json!({ "params": params }),
             Self::AttachmentFetch { params } => serde_json::json!({ "params": params }),
+            Self::AttachmentCacheSize { params } => serde_json::json!({ "params": params }),
             Self::ExtractStatus { params } => serde_json::json!({ "params": params }),
             Self::IndexRebuild { params } => serde_json::json!({ "params": params }),
             Self::TestPanic => Value::Null,
@@ -1656,6 +1668,16 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("attachment.fetch params: {e}"))?;
                 Ok(Self::AttachmentFetch { params: p.params })
+            }
+            "attachment.cache_size" => {
+                #[derive(Deserialize, Default)]
+                struct P {
+                    #[serde(default)]
+                    params: AttachmentCacheSizeParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .unwrap_or_default();
+                Ok(Self::AttachmentCacheSize { params: p.params })
             }
             "extract.status" => {
                 #[derive(Deserialize)]
@@ -2657,6 +2679,7 @@ mod tests {
             caldav_url: None,
             caldav_username: None,
             caldav_password: None,
+            cache_attachments_enabled: None,
         }
     }
 
