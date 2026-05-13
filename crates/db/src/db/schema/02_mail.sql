@@ -147,7 +147,6 @@ CREATE TABLE IF NOT EXISTS attachments (
     remote_attachment_id TEXT,
     content_id TEXT,
     is_inline INTEGER DEFAULT 0,
-    imap_part_id TEXT,
     content_hash BLOB,
     -- Phase 7: pointer to attachment_extracted_text.extracted_at for
     -- the row keyed by content_hash. NULL means "not yet extracted."

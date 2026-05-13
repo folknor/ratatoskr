@@ -133,11 +133,7 @@ pub(crate) async fn handle_fetch(
     // attachments row, then materialize.
     let provider_attachment_id = info
         .as_ref()
-        .and_then(|info| {
-            info.remote_attachment_id
-                .as_deref()
-                .or(info.imap_part_id.as_deref())
-        })
+        .and_then(|info| info.remote_attachment_id.as_deref())
         .unwrap_or(&params.attachment_id)
         .to_string();
     let local_attachment_id = info

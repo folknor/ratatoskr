@@ -359,36 +359,49 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ## Phase 7 - Provider parity (Gmail, Graph, IMAP)
 
-**Goal.** Pre-fetch parity across all four mail providers.
+**Status: landed.** Prefetch enqueues for Gmail, Graph, and IMAP accounts alongside JMAP. IMAP-specific folder-batching holds one session across every attachment fetched from the same folder. Error taxonomy splits transient from permanent. Windows gains the disk-headroom backstop. Cross-provider end-to-end harness coverage lands for Gmail and Graph; IMAP and SIGINT-mid-prefetch deferred to Phase 7.5 pending `saehrimnir` knobs.
 
-**Entry criteria.**
-- Phase 4 landed for JMAP. The post-sync sweep + boot recovery kick pattern is proven against `saehrimnir`.
+**What shipped.**
 
-**In scope.**
-- Drop the `WHERE provider = 'jmap'` filter from the boot recovery kick (`spawn_post_ready_prefetch_startup`) and from any provider-gated logic that accumulates. The post-sync sweep in `run_sync` is already provider-agnostic (`create_provider` dispatches by row); enabling other providers is mostly a matter of removing the filter and exercising the path.
-- Per-provider rate-limit tuning: revisit the per-account `Semaphore` cap (4) for Gmail/Graph quotas. IMAP probably wants 1 per folder rather than 4 per account.
-- IMAP-specific: respect per-folder session reuse so we don't open a new connection per attachment. Wire `imap_part_id` (already populated by IMAP sync, already preserved by the sweep's COALESCE fallback) into the fetch path.
-- Promote the per-account circuit breaker keyspace to per-provider if observed cross-account behaviour clusters by provider.
-- **Split `SkipReason::ProviderTransient` into `Transient` and `Permanent` lanes** (Phase 4 deferral). The provider trait already classifies errors; surface that classification through `fetch_attachment` so the prefetch worker stops re-emitting permanent failures (404 / invalid blob id) on every backfill kick. Touchpoint: provider-error taxonomy in `crates/common/src/ops.rs` and the `ProviderError` consumers in `crates/service/src/prefetch.rs::run_pipeline`.
-- **Windows ENOSPC backstop** (Phase 4 deferral). Implement `statvfs_free_bytes` for `cfg(target_os = "windows")` via `GetDiskFreeSpaceExW`. Today the function returns `None` on Windows and the cache fills until the OS surfaces ENOSPC as a `PackStore::put` error. Lands here rather than as a standalone follow-up because Phase 7 is the next cross-provider / cross-platform polish phase.
-- **Slow-provider harness hook for attachment fetch** (Phase 4 deferral). Phase 4's shutdown-mid-prefetch test was blocked on a missing slow-provider knob analogous to `harness-slow-sync`. Add a `RATATOSKR_TEST_*_ATTACHMENT_LATENCY_MS` env knob (or per-provider equivalent) to `saehrimnir`, then land a service-harness script that SIGINTs the Service mid-prefetch and asserts the next boot's recovery kick drains the remaining `content_hash IS NULL` rows. The hook is useful for all four providers, not just JMAP, so wiring it once in Phase 7 covers the matrix.
+*Error taxonomy* (`crates/common/src/error.rs`, `crates/service/src/prefetch.rs`):
+- `ProviderError::kind() -> ProviderErrorKind` classifies `Auth | NotFound | Client` as `Permanent` and `Network | RateLimit | Server | Db` as `Transient`. No new variants, wire shape unchanged.
+- `SkipReason::ProviderTransient` split into `ProviderTransient` and `ProviderPermanent`. Both still count as failures and neither feeds the breaker (which remains timeout-only); the split exists so future skip-attempt logic and logs can distinguish "retry me" from "stop trying."
+
+*Schema cleanup* (`crates/db/src/db/schema/02_mail.sql`):
+- `attachments.imap_part_id` retired. IMAP sync already writes the part path into `remote_attachment_id` (the provider-agnostic Phase 1 name), and the sweep's `COALESCE(remote, imap)` fallback was dead code. `AttachmentInsertRow`, `UncachedAttachment`, the `attachment.fetch` lookup, and the sweep query all simplify accordingly.
+
+*Filter lift* (`crates/service/src/dispatch/post_ready.rs`, `crates/service/src/sync.rs`):
+- `WHERE provider = 'jmap'` dropped from the boot recovery kick and the post-sync sweep gate. Every account with `cache_attachments_enabled = 1` now participates. Provider type is read alongside the account ID so the worker can pick its concurrency cap and breaker key.
+
+*IMAP folder-batching* (`crates/service/src/prefetch.rs`, `crates/imap/src/client/mod.rs`, `crates/imap/src/ops.rs`):
+- `PrefetchWork` is now an enum: `Item(PrefetchItem)` for per-attachment work (the existing JMAP/Gmail/Graph path) and `ImapBatch { account_id, folder_id, items }` for IMAP, grouped by message folder at sweep time.
+- `process_imap_batch` holds the per-account semaphore once, opens one session, issues one `SELECT`, then drains the batch through `imap::client::fetch_attachment_on_selected` (new public entry point that skips the redundant per-fetch SELECT). LOGOUT runs at the end. Cancellation between items is honored.
+- Per-provider semaphore cap (`provider_semaphore_cap`) returns 1 for IMAP (1-per-folder serialization) and the existing 4 for the others.
+- `imap::ops::parse_imap_message_id` is now `pub` so the service crate can extract UID + folder without re-parsing.
+
+*Circuit breaker keyspace* (`crates/service/src/prefetch.rs`):
+- Breakers are keyed by `(provider, account_id)` rather than `account_id`. Today the two-tuple is practically equivalent (each account has one provider) but encodes the dimension explicitly so a future per-provider promotion is a key-derivation tweak rather than a refactor.
+
+*Windows ENOSPC backstop* (`crates/service/src/prefetch.rs`):
+- `statvfs_free_bytes` gained a Windows branch using `GetDiskFreeSpaceExW` against the pack-store directory (walking up to the volume root on failure). The Unix `statvfs` path is unchanged; the `cfg(not(any(unix, windows)))` branch keeps the permissive fallback semantics.
+
+*Harness* (`crates/app/tests/sync-harness/`):
+- New `gmail-attachment-prefetch.lua` and `graph-attachment-prefetch.lua` clones of the JMAP script, parameterized by `provider = "gmail_api" | "graph"`. Both assert `prefetch.completed` fires with `fetched >= 1`, `content_hash` populates, and a pack file lands on disk.
+
+**Exit criteria met.**
+- After a sync on JMAP, Gmail, and Graph accounts, `attachment_blobs` rows with `tombstoned_at IS NULL` appear for that account (harness-verified).
+- IMAP attachment fetches reuse the folder session: the batch worker issues one LOGIN + SELECT per `(account, folder)` and runs `fetch_attachment_on_selected` per item (code-verified; end-to-end harness pending the saehrimnir-side IMAP attachment fixture).
+
+**Deferred to Phase 7.5 (pending external `saehrimnir` work).**
+- **`RATATOSKR_TEST_ATTACHMENT_LATENCY_MS` knob in `saehrimnir`** - needed to reliably reproduce mid-prefetch state for SIGINT scripts. `saehrimnir` lives outside this repo; the knob lands there first.
+- **`imap-attachment-prefetch.lua`** - the JMAP fixture's IMAP mock doesn't surface the attachment through BODYSTRUCTURE, so an end-to-end IMAP prefetch test needs either a new fixture or saehrimnir-side fixture support.
+- **`sigint-mid-prefetch.lua`** - blocked on the latency knob above. The boot recovery kick path is exercised every time the service starts in any harness script that prefetched on the prior run, but a script that explicitly asserts mid-flight resumption needs the latency hook to make the race deterministic.
+- **Gmail batch attachment endpoint** - roadmap-noted, no measured need yet.
 
 **Out of scope.**
 - IMAP partial-fetch optimization (`BODY[part]<offset.length>`).
 - Reference-attachment handling on Graph - URL-only, not bytes; surface as cloud links via the cloud-attachments path.
-
-**Touchpoints.**
-- `crates/service/src/dispatch/post_ready.rs::spawn_post_ready_prefetch_startup` - lift the `provider = 'jmap'` filter.
-- `crates/service/src/prefetch.rs` - per-provider concurrency tuning if needed.
-- Possibly `crates/imap/src/client/sessions.rs` for session reuse on attachment fetches inside the same folder.
-
-**Exit criteria.**
-- After a sync on each provider type, `attachment_blobs` rows with `tombstoned_at IS NULL` appear for that account.
-- IMAP attachment fetches reuse the existing folder session (no extra LOGIN/SELECT round-trips).
-
-**Risks / open questions.**
-- Gmail batch endpoint vs N individual fetches.
-- IMAP servers with strict concurrency limits.
+- Per-message coalescing inside an IMAP folder batch (one full-body fetch yielding N attachments).
 
 ---
 

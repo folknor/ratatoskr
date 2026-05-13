@@ -38,6 +38,35 @@ impl fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
+/// Classification of `ProviderError` for retry / backoff decisions.
+///
+/// Phase 7 of the attachments roadmap introduces this split so the
+/// prefetch pipeline can distinguish errors that will likely succeed on
+/// a later attempt (network blip, 5xx, rate limit) from errors that
+/// will keep failing without external intervention (token expired,
+/// 4xx, blob not on server).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderErrorKind {
+    /// Likely to succeed on a later retry. Network blips, 5xx, rate
+    /// limits, transient DB locks.
+    Transient,
+    /// Will keep failing until external state changes. Expired auth,
+    /// 4xx, missing blob, client-side validation errors.
+    Permanent,
+}
+
+impl ProviderError {
+    /// Classify the error for retry / breaker decisions.
+    pub fn kind(&self) -> ProviderErrorKind {
+        match self {
+            Self::Network(_) | Self::RateLimit(_) | Self::Server(_) | Self::Db(_) => {
+                ProviderErrorKind::Transient
+            }
+            Self::Auth(_) | Self::NotFound(_) | Self::Client(_) => ProviderErrorKind::Permanent,
+        }
+    }
+}
+
 /// Fallback conversion: any bare `String` error maps to `Client`.
 ///
 /// This keeps existing `.map_err(|e| e.to_string())?` and `?` on

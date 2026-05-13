@@ -627,5 +627,4 @@ impl_from_row!(UncachedAttachment {
     account_id,
     size,
     remote_attachment_id,
-    imap_part_id,
 });

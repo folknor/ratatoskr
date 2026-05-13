@@ -483,7 +483,6 @@ pub struct UncachedAttachment {
     pub account_id: String,
     pub size: i64,
     pub remote_attachment_id: Option<String>,
-    pub imap_part_id: Option<String>,
 }
 
 // ── Writing Style Profile ──────────────────────────────────

@@ -146,7 +146,6 @@ fn set_thread_label_presence(
 pub struct AttachmentCacheInfo {
     pub id: String,
     pub remote_attachment_id: Option<String>,
-    pub imap_part_id: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub mime_type: Option<String>,
     pub is_inline: bool,
@@ -166,12 +165,12 @@ pub fn find_attachment_cache_info(
 ) -> Result<Option<AttachmentCacheInfo>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT a.id, a.remote_attachment_id, a.imap_part_id, a.content_hash, \
+            "SELECT a.id, a.remote_attachment_id, a.content_hash, \
                     a.mime_type, a.is_inline, a.text_indexed_at, t.status AS extraction_status \
              FROM attachments a \
              LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash \
              WHERE a.account_id = ?1 AND a.message_id = ?2 \
-               AND (a.id = ?3 OR a.remote_attachment_id = ?3 OR a.imap_part_id = ?3) \
+               AND (a.id = ?3 OR a.remote_attachment_id = ?3) \
              LIMIT 1",
         )
         .map_err(|e| format!("find_attachment_cache_info prepare: {e}"))?;
@@ -183,7 +182,6 @@ pub fn find_attachment_cache_info(
                 Ok(AttachmentCacheInfo {
                     id: row.get("id")?,
                     remote_attachment_id: row.get("remote_attachment_id")?,
-                    imap_part_id: row.get("imap_part_id")?,
                     content_hash: row.get("content_hash")?,
                     mime_type: row.get("mime_type")?,
                     is_inline: row.get::<_, i64>("is_inline")? != 0,

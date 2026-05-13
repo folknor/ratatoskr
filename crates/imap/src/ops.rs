@@ -74,7 +74,7 @@ impl ImapOps {
 // ---------------------------------------------------------------------------
 
 /// Parse an IMAP message ID (`imap-{accountId}-{folder}-{uid}`) into folder + UID.
-fn parse_imap_message_id(message_id: &str, account_id: &str) -> Result<(String, u32), String> {
+pub fn parse_imap_message_id(message_id: &str, account_id: &str) -> Result<(String, u32), String> {
     let prefix = format!("imap-{account_id}-");
     if !message_id.starts_with(&prefix) {
         return Err(format!("Invalid IMAP message ID: {message_id}"));

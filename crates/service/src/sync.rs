@@ -517,9 +517,8 @@ async fn run_sync(
     // enabled for the account AND (b) provider = 'jmap'. The boot
     // recovery kick and the window-extend kick already filter on
     // provider; without the same filter here, a Gmail / Graph / IMAP
-    // sync would drive prefetch through provider paths that Phase 7
-    // hasn't yet rate-tuned, error-classified, or session-reused.
-    let (account_caching_on, account_is_jmap) = {
+    // Phase 7: every provider with caching enabled gets a sweep.
+    let (account_caching_on, account_provider) = {
         let aid = account_id.clone();
         inner
             .db
@@ -532,17 +531,17 @@ async fn run_sync(
                     |r| {
                         let enabled: i64 = r.get(0)?;
                         let provider: String = r.get(1)?;
-                        Ok((enabled != 0, provider == "jmap"))
+                        Ok((enabled != 0, provider))
                     },
                 )
-                .or(Ok((false, false)))
+                .or(Ok((false, String::new())))
             })
             .await
-            .unwrap_or((false, false))
+            .unwrap_or((false, String::new()))
     };
     if matches!(sync_result, SyncResult::Completed)
         && account_caching_on
-        && account_is_jmap
+        && !account_provider.is_empty()
         && let Some(prefetch) = inner.boot_state.prefetch_runtime()
     {
         let window_start_unix = match inner.db.with_conn(|conn| {
@@ -556,6 +555,7 @@ async fn run_sync(
         };
         if let Err(e) = prefetch.enqueue_window_for_account(
             &account_id,
+            &account_provider,
             window_start_unix,
             crate::prefetch::PrefetchPriority::Sync,
             Some(crate::prefetch::SYNC_SWEEP_LIMIT),

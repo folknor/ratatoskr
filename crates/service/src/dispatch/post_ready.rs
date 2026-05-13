@@ -306,19 +306,23 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         };
         let window_start_unix = chrono::Utc::now().timestamp()
             - window_days.saturating_mul(86_400);
-        let accounts: Vec<String> = match db_state
+        // Phase 7: enumerate every provider, not just JMAP. The
+        // per-provider concurrency caps and the IMAP folder-batch
+        // worker handle the differences inside `PrefetchRuntime`.
+        let accounts: Vec<(String, String)> = match db_state
             .with_conn(move |conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT id FROM accounts \
-                         WHERE provider = 'jmap' \
-                           AND COALESCE(is_active, 1) = 1 \
+                        "SELECT id, COALESCE(provider, '') FROM accounts \
+                         WHERE COALESCE(is_active, 1) = 1 \
                            AND COALESCE(is_deleting, 0) = 0 \
                            AND COALESCE(cache_attachments_enabled, 1) = 1",
                     )
                     .map_err(|e| format!("prepare prefetch boot-kick: {e}"))?;
                 let it = stmt
-                    .query_map([], |row| row.get::<_, String>(0))
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
                     .map_err(|e| format!("query prefetch boot-kick: {e}"))?;
                 let mut out = Vec::new();
                 for r in it {
@@ -334,9 +338,12 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 return;
             }
         };
-        for account_id in accounts {
+        for (account_id, provider) in accounts {
+            if provider.is_empty() {
+                continue;
+            }
             if let Err(e) = runtime
-                .kick_backfill_account(&account_id, window_start_unix)
+                .kick_backfill_account(&account_id, &provider, window_start_unix)
                 .await
             {
                 log::debug!(

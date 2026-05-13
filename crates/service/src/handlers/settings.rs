@@ -116,19 +116,24 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
     let Ok(write_db) = boot_state.write_db_state() else {
         return;
     };
-    let accounts: Vec<String> = match write_db
+    // Phase 7: every provider with caching on gets the window-extend
+    // kick. Provider is threaded through so `PrefetchRuntime` can
+    // size the per-account semaphore and pick the IMAP folder-batch
+    // path.
+    let accounts: Vec<(String, String)> = match write_db
         .with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id FROM accounts \
-                     WHERE provider = 'jmap' \
-                       AND COALESCE(is_active, 1) = 1 \
+                    "SELECT id, COALESCE(provider, '') FROM accounts \
+                     WHERE COALESCE(is_active, 1) = 1 \
                        AND COALESCE(is_deleting, 0) = 0 \
                        AND COALESCE(cache_attachments_enabled, 1) = 1",
                 )
                 .map_err(|e| format!("prepare window-extend account enum: {e}"))?;
             let it = stmt
-                .query_map([], |row| row.get::<_, String>(0))
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
                 .map_err(|e| format!("query window-extend account enum: {e}"))?;
             let mut out = Vec::new();
             for r in it {
@@ -146,9 +151,12 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
     };
     let window_start_unix =
         chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
-    for account_id in accounts {
+    for (account_id, provider) in accounts {
+        if provider.is_empty() {
+            continue;
+        }
         if let Err(e) = prefetch
-            .kick_backfill_account(&account_id, window_start_unix)
+            .kick_backfill_account(&account_id, &provider, window_start_unix)
             .await
         {
             log::debug!("settings.set window-extend kick {account_id} failed: {e}");

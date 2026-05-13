@@ -105,17 +105,65 @@ pub(crate) enum EnqueueOutcome {
 
 /// One attachment to fetch.
 #[derive(Debug, Clone)]
-pub struct PrefetchWork {
+pub struct PrefetchItem {
     pub account_id: String,
     pub message_id: String,
     /// Local `attachments.id` (PK).
     pub attachment_id: String,
-    /// Provider-side blob/part identifier. Either
-    /// `attachments.remote_attachment_id` or, for IMAP,
-    /// `attachments.imap_part_id`. Resolved at enqueue time so the
-    /// worker doesn't need to revisit the row before calling
-    /// `fetch_attachment`.
+    /// Provider-side blob/part identifier
+    /// (`attachments.remote_attachment_id`). Resolved at enqueue time
+    /// so the worker doesn't need to revisit the row before calling
+    /// `fetch_attachment`. IMAP sync writes the part path into this
+    /// same column, so a single source of truth covers every provider.
     pub remote_attachment_id: String,
+    /// Provider type for the account (`"jmap"`, `"gmail"`, `"graph"`,
+    /// `"imap"`). Resolved at enqueue time so the worker doesn't have
+    /// to re-query the accounts row. Drives per-provider concurrency
+    /// caps and the breaker keyspace introduced by Phase 7.
+    pub provider: String,
+}
+
+/// Unit of work on the prefetch queues. Most providers produce one
+/// item per attachment. IMAP groups items by folder so the worker can
+/// reuse a single `SELECT` across the batch - Phase 7 of the
+/// attachments roadmap.
+#[derive(Debug, Clone)]
+pub enum PrefetchWork {
+    /// Per-attachment work. Used by every provider on the cache-miss
+    /// `attachment.fetch` path and by JMAP/Gmail/Graph prefetch.
+    Item(PrefetchItem),
+    /// IMAP folder-batch: every item in the vec shares
+    /// `(account_id, folder_id)`. Drained serially with one IMAP
+    /// session held across all items.
+    ImapBatch {
+        account_id: String,
+        folder_id: String,
+        items: Vec<PrefetchItem>,
+    },
+}
+
+impl PrefetchWork {
+    fn account_id(&self) -> &str {
+        match self {
+            Self::Item(it) => &it.account_id,
+            Self::ImapBatch { account_id, .. } => account_id,
+        }
+    }
+    fn item_count(&self) -> usize {
+        match self {
+            Self::Item(_) => 1,
+            Self::ImapBatch { items, .. } => items.len(),
+        }
+    }
+    fn item_keys(&self) -> Vec<InFlightKey> {
+        match self {
+            Self::Item(it) => vec![(it.account_id.clone(), it.attachment_id.clone())],
+            Self::ImapBatch { items, .. } => items
+                .iter()
+                .map(|it| (it.account_id.clone(), it.attachment_id.clone()))
+                .collect(),
+        }
+    }
 }
 
 /// Why a work item finished without writing bytes. Bumps the runtime's
@@ -141,9 +189,16 @@ pub enum SkipReason {
     RowGone,
     /// 5min provider timeout. Feeds the circuit breaker.
     ProviderTimeout,
-    /// Anything else from the provider. Logged, counted, not retried
-    /// in-session; the next backfill kick will re-emit.
+    /// Provider failure expected to recover on its own (network blip,
+    /// 5xx, rate limit). Logged, counted, not retried in-session; the
+    /// next backfill kick will re-emit.
     ProviderTransient,
+    /// Provider failure that will keep failing without external state
+    /// changing (expired token, 404, 4xx). Same in-session handling as
+    /// `ProviderTransient` for now (recorded as a failure, no breaker
+    /// feed) but split out so logs / future skip-attempt logic can
+    /// distinguish "retry me" from "stop trying."
+    ProviderPermanent,
     /// PackStore::put failed. Logged; counted as failed.
     PackStoreError,
     /// DB update failed after a successful fetch. The bytes are in
@@ -158,7 +213,10 @@ impl SkipReason {
     fn is_failure(self) -> bool {
         matches!(
             self,
-            Self::PackStoreError | Self::DbUpdateError | Self::ProviderTransient
+            Self::PackStoreError
+                | Self::DbUpdateError
+                | Self::ProviderTransient
+                | Self::ProviderPermanent
         )
     }
 }
@@ -269,7 +327,12 @@ pub(crate) struct PrefetchRuntimeInner {
     /// Per-account semaphore cache. Populated lazily on first dispatch
     /// for a new account_id. Capped implicitly by total accounts.
     account_semaphores:   Mutex<HashMap<String, Arc<Semaphore>>>,
-    breakers:             Mutex<HashMap<String, BreakerState>>,
+    /// Circuit breakers keyed by `(provider, account_id)`. Today the
+    /// two-tuple is practically equivalent to a per-account map since
+    /// every account has exactly one provider, but threading provider
+    /// through the breaker call sites lets a later promotion to
+    /// per-provider-only land without churning every caller.
+    breakers:             Mutex<HashMap<(String, String), BreakerState>>,
     /// Account ids whose deletion is in flight. `cancel_account`
     /// inserts; `run_pipeline` checks before PackStore::put so a queued
     /// or in-flight prefetch can't land bytes after the
@@ -339,18 +402,45 @@ impl PrefetchRuntime {
             .cancelling_accounts
             .lock()
             .await
-            .contains(&work.account_id)
+            .contains(work.account_id())
         {
             return Ok(EnqueueOutcome::Dedupe);
         }
-        let key = (work.account_id.clone(), work.attachment_id.clone());
-        {
+
+        // Reduce the work unit to the items that aren't already in
+        // flight. For an `Item`, this is at most one survivor; for an
+        // `ImapBatch`, we drop dupes per-item and keep the rest.
+        let work = {
             let mut guard = self.inner.in_flight.lock().await;
             let (set, fifo) = &mut *guard;
-            if !set.insert(key.clone()) {
-                return Ok(EnqueueOutcome::Dedupe);
+            let mut accepted: Vec<InFlightKey> = Vec::new();
+            let surviving = match work {
+                PrefetchWork::Item(it) => {
+                    let key = (it.account_id.clone(), it.attachment_id.clone());
+                    if !set.insert(key.clone()) {
+                        return Ok(EnqueueOutcome::Dedupe);
+                    }
+                    accepted.push(key);
+                    PrefetchWork::Item(it)
+                }
+                PrefetchWork::ImapBatch { account_id, folder_id, items } => {
+                    let mut kept = Vec::with_capacity(items.len());
+                    for it in items {
+                        let key = (it.account_id.clone(), it.attachment_id.clone());
+                        if set.insert(key.clone()) {
+                            accepted.push(key);
+                            kept.push(it);
+                        }
+                    }
+                    if kept.is_empty() {
+                        return Ok(EnqueueOutcome::Dedupe);
+                    }
+                    PrefetchWork::ImapBatch { account_id, folder_id, items: kept }
+                }
+            };
+            for key in &accepted {
+                fifo.push_back(key.clone());
             }
-            fifo.push_back(key);
             // Evict-oldest if we've blown the cap. The evicted pair is
             // no longer dedupe-protected; a re-enqueue will pass. This
             // is fine - PackStore::put is content-hash idempotent.
@@ -361,22 +451,26 @@ impl PrefetchRuntime {
                     break;
                 }
             }
-        }
-        self.inner.queue_depth.fetch_add(1, Ordering::Relaxed);
+            surviving
+        };
+
+        let added = work.item_count() as u64;
+        self.inner.queue_depth.fetch_add(added, Ordering::Relaxed);
         let tx = match priority {
             PrefetchPriority::Sync     => &self.inner.sync_tx,
             PrefetchPriority::Backfill => &self.inner.backfill_tx,
         };
         if let Err(e) = tx.send(work.clone()).await {
-            self.inner.queue_depth.fetch_sub(1, Ordering::Relaxed);
-            // Roll back both halves of the in-flight tracker so a
-            // future re-enqueue isn't dedupe-suppressed and the FIFO
-            // doesn't carry a phantom entry past the next cap eviction.
+            self.inner.queue_depth.fetch_sub(added, Ordering::Relaxed);
+            // Roll back the in-flight tracker so a future re-enqueue
+            // isn't dedupe-suppressed and the FIFO doesn't carry
+            // phantom entries past the next cap eviction.
             let mut guard = self.inner.in_flight.lock().await;
             let (set, fifo) = &mut *guard;
-            let drop_key = (work.account_id.clone(), work.attachment_id.clone());
-            set.remove(&drop_key);
-            fifo.retain(|k| k != &drop_key);
+            for key in work.item_keys() {
+                set.remove(&key);
+                fifo.retain(|k| k != &key);
+            }
             return Err(format!("PrefetchRuntime worker exited: {e}"));
         }
         Ok(EnqueueOutcome::Newly)
@@ -396,19 +490,23 @@ impl PrefetchRuntime {
     pub async fn enqueue_window_for_account(
         &self,
         account_id: &str,
+        provider: &str,
         window_start_unix: i64,
         priority: PrefetchPriority,
         limit: Option<i64>,
     ) -> Result<(u64, u64), String> {
         let aid = account_id.to_string();
         let lim = limit.unwrap_or(i64::MAX);
+        // For IMAP we also pull the message folder so the worker can
+        // group items into per-folder batches and reuse a single
+        // session across them.
         let rows: Vec<(String, String, Option<String>, Option<String>)> = self
             .inner
             .db
             .with_conn(move |conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT a.id, a.message_id, a.remote_attachment_id, a.imap_part_id \
+                        "SELECT a.id, a.message_id, a.remote_attachment_id, m.imap_folder \
                          FROM attachments a \
                          JOIN messages m \
                            ON m.account_id = a.account_id AND m.id = a.message_id \
@@ -443,19 +541,66 @@ impl PrefetchRuntime {
 
         let row_count = rows.len() as u64;
         let mut newly = 0u64;
-        for (attachment_id, message_id, remote, imap) in rows {
-            let remote_attachment_id = match remote.or(imap) {
-                Some(s) if !s.is_empty() => s,
-                _ => continue, // Phase 7 (IMAP/others) will handle this; skip silently.
-            };
-            let work = PrefetchWork {
-                account_id: account_id.to_string(),
-                message_id,
-                attachment_id,
-                remote_attachment_id,
-            };
-            if let Ok(EnqueueOutcome::Newly) = self.enqueue(work, priority).await {
-                newly += 1;
+
+        if provider == "imap" {
+            // Group IMAP rows by folder so the worker can SELECT once
+            // per batch and reuse the session for every UID inside it.
+            // Rows missing imap_folder fall back to per-item dispatch
+            // (this should never happen for IMAP-synced messages but
+            // we keep the safety net rather than dropping rows).
+            let mut by_folder: HashMap<String, Vec<PrefetchItem>> = HashMap::new();
+            let mut orphans: Vec<PrefetchItem> = Vec::new();
+            for (attachment_id, message_id, remote, folder) in rows {
+                let remote_attachment_id = match remote {
+                    Some(s) if !s.is_empty() => s,
+                    _ => continue,
+                };
+                let item = PrefetchItem {
+                    account_id: account_id.to_string(),
+                    message_id,
+                    attachment_id,
+                    remote_attachment_id,
+                    provider: provider.to_string(),
+                };
+                match folder {
+                    Some(f) if !f.is_empty() => by_folder.entry(f).or_default().push(item),
+                    _ => orphans.push(item),
+                }
+            }
+            for (folder_id, items) in by_folder {
+                let work = PrefetchWork::ImapBatch {
+                    account_id: account_id.to_string(),
+                    folder_id,
+                    items,
+                };
+                if let Ok(EnqueueOutcome::Newly) = self.enqueue(work, priority).await {
+                    newly += 1;
+                }
+            }
+            for it in orphans {
+                if let Ok(EnqueueOutcome::Newly) = self
+                    .enqueue(PrefetchWork::Item(it), priority)
+                    .await
+                {
+                    newly += 1;
+                }
+            }
+        } else {
+            for (attachment_id, message_id, remote, _folder) in rows {
+                let remote_attachment_id = match remote {
+                    Some(s) if !s.is_empty() => s,
+                    _ => continue,
+                };
+                let work = PrefetchWork::Item(PrefetchItem {
+                    account_id: account_id.to_string(),
+                    message_id,
+                    attachment_id,
+                    remote_attachment_id,
+                    provider: provider.to_string(),
+                });
+                if let Ok(EnqueueOutcome::Newly) = self.enqueue(work, priority).await {
+                    newly += 1;
+                }
             }
         }
         Ok((row_count, newly))
@@ -475,6 +620,7 @@ impl PrefetchRuntime {
     pub async fn kick_backfill_account(
         &self,
         account_id: &str,
+        provider: &str,
         window_start_unix: i64,
     ) -> Result<u64, String> {
         let mut total = 0u64;
@@ -483,6 +629,7 @@ impl PrefetchRuntime {
             let (rows, newly) = self
                 .enqueue_window_for_account(
                     account_id,
+                    provider,
                     window_start_unix,
                     PrefetchPriority::Backfill,
                     Some(BACKFILL_PAGE_SIZE),
@@ -625,52 +772,186 @@ async fn spawn_one(
 }
 
 async fn process_one(inner: Arc<PrefetchRuntimeInner>, work: PrefetchWork) {
-    let outcome = run_pipeline(&inner, &work).await;
-    match outcome {
-        Ok(()) => {
-            inner.fetched_count.fetch_add(1, Ordering::Relaxed);
-            note_breaker_success(&inner, &work.account_id).await;
-        }
-        Err(reason) => {
-            if reason.is_failure() {
-                inner.failed_count.fetch_add(1, Ordering::Relaxed);
-            } else {
-                inner.skipped_count.fetch_add(1, Ordering::Relaxed);
-            }
-            if reason.is_timeout() {
-                note_breaker_timeout(&inner, &work.account_id).await;
-            }
-            log::debug!(
-                "PrefetchRuntime {acct}/{att}: {reason:?}",
-                acct = work.account_id,
-                att = work.attachment_id,
-            );
+    match work {
+        PrefetchWork::Item(item) => process_item(inner, item).await,
+        PrefetchWork::ImapBatch { account_id, folder_id, items } => {
+            process_imap_batch(inner, account_id, folder_id, items).await;
         }
     }
-    finalize_item(&inner, &work).await;
 }
 
-async fn run_pipeline(
-    inner: &Arc<PrefetchRuntimeInner>,
-    work: &PrefetchWork,
-) -> Result<(), SkipReason> {
+async fn process_item(inner: Arc<PrefetchRuntimeInner>, item: PrefetchItem) {
     // Per-account permit. Acquired first so the circuit-breaker check
     // and disk check are serialized through the same gate that bounds
     // outbound provider load.
-    let semaphore = account_semaphore(inner, &work.account_id).await;
+    let semaphore = account_semaphore(&inner, &item.account_id, &item.provider).await;
     let _permit = match semaphore.acquire_owned().await {
         Ok(p) => p,
-        Err(_) => return Err(SkipReason::ProviderTransient),
+        Err(_) => {
+            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            return;
+        }
+    };
+    let outcome = run_item_pipeline(&inner, &item, ItemFetch::ViaProvider).await;
+    record_item_outcome(&inner, &item, outcome).await;
+}
+
+/// IMAP folder-batch: hold the per-account semaphore once, open one
+/// session, SELECT the folder once, drain every item over the same
+/// connection. Each item still runs through the full pre/post-fetch
+/// invariant set (RowGone, AlreadyCached, account-deletion race), so a
+/// batch can land partial results without compromising correctness.
+async fn process_imap_batch(
+    inner: Arc<PrefetchRuntimeInner>,
+    account_id: String,
+    folder_id: String,
+    items: Vec<PrefetchItem>,
+) {
+    let semaphore = account_semaphore(&inner, &account_id, "imap").await;
+    let _permit = match semaphore.acquire_owned().await {
+        Ok(p) => p,
+        Err(_) => {
+            for item in items {
+                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            }
+            return;
+        }
     };
 
-    if breaker_is_open(inner, &work.account_id).await {
-        return Err(SkipReason::CircuitOpen);
+    // Gate the whole batch on shared invariants before paying for a
+    // session: the breaker, disk headroom, and per-account toggle
+    // apply to every item identically.
+    if breaker_is_open(&inner, "imap", &account_id).await {
+        for item in items {
+            record_item_outcome(&inner, &item, Err(SkipReason::CircuitOpen)).await;
+        }
+        return;
     }
-    if !disk_has_headroom(inner) {
-        return Err(SkipReason::DiskLow);
+    if !disk_has_headroom(&inner) {
+        for item in items {
+            record_item_outcome(&inner, &item, Err(SkipReason::DiskLow)).await;
+        }
+        return;
     }
-    if !account_caching_enabled(inner, &work.account_id).await {
-        return Err(SkipReason::AccountDisabled);
+    if !account_caching_enabled(&inner, &account_id).await {
+        for item in items {
+            record_item_outcome(&inner, &item, Err(SkipReason::AccountDisabled)).await;
+        }
+        return;
+    }
+
+    // Load IMAP config + open session. A connect failure aborts the
+    // batch; every item is recorded as Transient so the next backfill
+    // kick re-emits without tripping the breaker (LOGIN failures land
+    // as `Network` once classified through ProviderError::kind, but
+    // the raw `String` here doesn't carry the kind - treat it as
+    // transient because IMAP servers do drop and recover).
+    let read_db = match inner.boot_state.write_db_state() {
+        Ok(w) => w.to_read_state(),
+        Err(_) => {
+            for item in items {
+                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            }
+            return;
+        }
+    };
+    let key = match inner.boot_state.encryption_key() {
+        Some(k) => k,
+        None => {
+            for item in items {
+                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            }
+            return;
+        }
+    };
+    let config = match imap::account_config::load_imap_config(&read_db, &account_id, &key).await {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!("prefetch imap load_config {account_id}: {e}");
+            for item in items {
+                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            }
+            return;
+        }
+    };
+    let mut session = match imap::connection::connect(&config).await {
+        Ok(s) => s,
+        Err(e) => {
+            log::debug!("prefetch imap connect {account_id}: {e}");
+            for item in items {
+                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            }
+            return;
+        }
+    };
+    if let Err(e) = tokio::time::timeout(
+        Duration::from_secs(30),
+        session.select(&folder_id),
+    )
+    .await
+    .map_err(|_| format!("SELECT {folder_id} timed out"))
+    .and_then(|r| r.map_err(|e| format!("SELECT {folder_id}: {e}")))
+    {
+        log::debug!("prefetch imap SELECT {account_id}/{folder_id}: {e}");
+        let _ = session.logout().await;
+        for item in items {
+            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+        }
+        return;
+    }
+
+    for item in items {
+        if inner.cancellation.is_cancelled() {
+            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            continue;
+        }
+        let outcome = run_item_pipeline(
+            &inner,
+            &item,
+            ItemFetch::ImapSession { session: &mut session },
+        )
+        .await;
+        record_item_outcome(&inner, &item, outcome).await;
+    }
+
+    let _ = session.logout().await;
+}
+
+/// How the fetch step should source the bytes. `ViaProvider` builds a
+/// fresh `ProviderOps` per call (the original Phase 4 path);
+/// `ImapSession` reuses an already-`SELECT`ed IMAP session held by the
+/// caller (Phase 7 batch path).
+enum ItemFetch<'a> {
+    ViaProvider,
+    ImapSession {
+        session: &'a mut imap::connection::ImapSession,
+    },
+}
+
+/// Item-level pipeline: pre-fetch invariants → fetch → post-fetch
+/// invariants → PackStore → DB update → ExtractRuntime enqueue.
+/// Returns Ok(()) on success or the relevant SkipReason. Counter
+/// updates and finalize live in `record_item_outcome`.
+async fn run_item_pipeline(
+    inner: &Arc<PrefetchRuntimeInner>,
+    item: &PrefetchItem,
+    fetch: ItemFetch<'_>,
+) -> Result<(), SkipReason> {
+    // For the per-item (ViaProvider) path these checks are caller
+    // serialized via the semaphore; for the batch path we've already
+    // gated on them in `process_imap_batch`. Re-checking per item in
+    // the batch path is cheap and lets a per-account toggle flip
+    // mid-batch take effect at the next item boundary.
+    if let ItemFetch::ViaProvider = &fetch {
+        if breaker_is_open(inner, &item.provider, &item.account_id).await {
+            return Err(SkipReason::CircuitOpen);
+        }
+        if !disk_has_headroom(inner) {
+            return Err(SkipReason::DiskLow);
+        }
+        if !account_caching_enabled(inner, &item.account_id).await {
+            return Err(SkipReason::AccountDisabled);
+        }
     }
 
     // Confirm the row still wants bytes (cache-hit by another path
@@ -678,9 +959,9 @@ async fn run_pipeline(
     let read_db = inner.boot_state.write_db_state()
         .map_err(|_| SkipReason::RowGone)?
         .to_read_state();
-    let lookup_account = work.account_id.clone();
-    let lookup_message = work.message_id.clone();
-    let lookup_attachment = work.attachment_id.clone();
+    let lookup_account = item.account_id.clone();
+    let lookup_message = item.message_id.clone();
+    let lookup_attachment = item.attachment_id.clone();
     let info = read_db
         .with_conn(move |conn| {
             db::db::queries_extra::find_attachment_cache_info(
@@ -699,42 +980,73 @@ async fn run_pipeline(
         return Err(SkipReason::AlreadyCached);
     }
 
-    let key = inner
-        .boot_state
-        .encryption_key()
-        .ok_or(SkipReason::ProviderTransient)?;
-    let provider =
-        crate::actions::provider::create_provider(&read_db, &work.account_id, key)
+    let bytes = match fetch {
+        ItemFetch::ViaProvider => {
+            let key = inner
+                .boot_state
+                .encryption_key()
+                .ok_or(SkipReason::ProviderTransient)?;
+            let provider =
+                crate::actions::provider::create_provider(&read_db, &item.account_id, key)
+                    .await
+                    .map_err(|e| {
+                        log::debug!("prefetch create_provider {}: {e}", item.account_id);
+                        SkipReason::ProviderTransient
+                    })?;
+            let provider_ctx = common::types::ProviderCtx {
+                account_id: &item.account_id,
+                db:         &read_db,
+                progress:   &db::progress::NoopProgressReporter,
+            };
+            let fetch_fut =
+                provider.fetch_attachment(&provider_ctx, &item.message_id, &item.remote_attachment_id);
+            match tokio::time::timeout(
+                Duration::from_secs(PER_FETCH_TIMEOUT_SECS),
+                fetch_fut,
+            )
             .await
-            .map_err(|e| {
-                log::debug!("prefetch create_provider {}: {e}", work.account_id);
-                SkipReason::ProviderTransient
-            })?;
-    let provider_ctx = common::types::ProviderCtx {
-        account_id: &work.account_id,
-        db:         &read_db,
-        progress:   &db::progress::NoopProgressReporter,
-    };
-    let fetch_fut =
-        provider.fetch_attachment(&provider_ctx, &work.message_id, &work.remote_attachment_id);
-    let attachment = match tokio::time::timeout(
-        Duration::from_secs(PER_FETCH_TIMEOUT_SECS),
-        fetch_fut,
-    )
-    .await
-    {
-        Ok(Ok(a)) => a,
-        Ok(Err(e)) => {
-            // Provider-classified errors would refine the
-            // SkipReason::ProviderPermanent path; Phase 4 keeps both
-            // transient and permanent lanes folded into one log line.
-            log::debug!(
-                "prefetch fetch_attachment {}/{}: {e}",
-                work.account_id, work.attachment_id,
-            );
-            return Err(SkipReason::ProviderTransient);
+            {
+                Ok(Ok(a)) => a.bytes,
+                Ok(Err(e)) => {
+                    let kind = e.kind();
+                    log::debug!(
+                        "prefetch fetch_attachment {}/{} ({:?}): {e}",
+                        item.account_id, item.attachment_id, kind,
+                    );
+                    return Err(match kind {
+                        common::error::ProviderErrorKind::Transient => SkipReason::ProviderTransient,
+                        common::error::ProviderErrorKind::Permanent => SkipReason::ProviderPermanent,
+                    });
+                }
+                Err(_) => return Err(SkipReason::ProviderTimeout),
+            }
         }
-        Err(_) => return Err(SkipReason::ProviderTimeout),
+        ItemFetch::ImapSession { session } => {
+            let (_msg_folder, uid) = imap::ops::parse_imap_message_id(&item.message_id, &item.account_id)
+                .map_err(|e| {
+                    log::debug!(
+                        "prefetch imap parse_message_id {}/{}: {e}",
+                        item.account_id, item.attachment_id,
+                    );
+                    SkipReason::ProviderPermanent
+                })?;
+            let fetch_fut = imap::client::fetch_attachment_on_selected(
+                session,
+                uid,
+                &item.remote_attachment_id,
+            );
+            match tokio::time::timeout(Duration::from_secs(PER_FETCH_TIMEOUT_SECS), fetch_fut).await {
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(e)) => {
+                    log::debug!(
+                        "prefetch imap fetch {}/{}: {e}",
+                        item.account_id, item.attachment_id,
+                    );
+                    return Err(SkipReason::ProviderTransient);
+                }
+                Err(_) => return Err(SkipReason::ProviderTimeout),
+            }
+        }
     };
 
     let pack_store = inner
@@ -742,31 +1054,31 @@ async fn run_pipeline(
         .pack_store()
         .ok_or(SkipReason::PackStoreError)?;
 
-    // Account-delete race close: the provider call above can take
-    // seconds; in that window account.delete may have flipped
-    // `is_deleting` and called `cancel_account`. If we PackStore::put
-    // and UPDATE now, the AttachmentCache step's snapshot of cached
-    // hashes won't include the new blob and the row's CASCADE will
-    // strand it. Drop the bytes instead.
-    if account_is_cancelling_or_deleting(inner, &work.account_id).await {
+    // Account-delete race close: the fetch above can take seconds; in
+    // that window account.delete may have flipped `is_deleting` and
+    // called `cancel_account`. If we PackStore::put and UPDATE now,
+    // the AttachmentCache step's snapshot of cached hashes won't
+    // include the new blob and the row's CASCADE will strand it. Drop
+    // the bytes instead.
+    if account_is_cancelling_or_deleting(inner, &item.account_id).await {
         return Err(SkipReason::RowGone);
     }
 
     let content_hash = pack_store
-        .put(attachment.bytes)
+        .put(bytes)
         .await
         .map_err(|e| {
-            log::warn!("prefetch PackStore::put {}: {e}", work.attachment_id);
+            log::warn!("prefetch PackStore::put {}: {e}", item.attachment_id);
             SkipReason::PackStoreError
         })?;
 
     // Re-check after the write. PackStore::put is content-hash
     // idempotent so the worst case here is a tombstone of a blob the
     // deletion step already accounted for - cheap and safe.
-    if account_is_cancelling_or_deleting(inner, &work.account_id).await {
+    if account_is_cancelling_or_deleting(inner, &item.account_id).await {
         if let Err(e) = pack_store.tombstone(&content_hash).await {
             log::debug!(
-                "prefetch tombstone-after-cancel {}: {e}", work.attachment_id,
+                "prefetch tombstone-after-cancel {}: {e}", item.attachment_id,
             );
         }
         return Err(SkipReason::RowGone);
@@ -780,22 +1092,46 @@ async fn run_pipeline(
         })
         .await
         .map_err(|e| {
-            log::warn!("prefetch update_attachment_cache_fields {}: {e}", work.attachment_id);
+            log::warn!("prefetch update_attachment_cache_fields {}: {e}", item.attachment_id);
             SkipReason::DbUpdateError
         })?;
 
-    // Attachments roadmap Phase 4 follow-up (review): hand the freshly
-    // populated content_hash to ExtractRuntime so the bytes are
-    // searchable promptly. Without this, sync-time prefetch leaves
-    // text indexing to the hourly backfill - the on-demand
-    // attachment.fetch path enqueues, but prefetch did not.
-    enqueue_extraction_after_prefetch(inner, work, content_hash);
+    enqueue_extraction_after_prefetch(inner, item, content_hash);
     Ok(())
+}
+
+async fn record_item_outcome(
+    inner: &Arc<PrefetchRuntimeInner>,
+    item: &PrefetchItem,
+    outcome: Result<(), SkipReason>,
+) {
+    match outcome {
+        Ok(()) => {
+            inner.fetched_count.fetch_add(1, Ordering::Relaxed);
+            note_breaker_success(inner, &item.provider, &item.account_id).await;
+        }
+        Err(reason) => {
+            if reason.is_failure() {
+                inner.failed_count.fetch_add(1, Ordering::Relaxed);
+            } else {
+                inner.skipped_count.fetch_add(1, Ordering::Relaxed);
+            }
+            if reason.is_timeout() {
+                note_breaker_timeout(inner, &item.provider, &item.account_id).await;
+            }
+            log::debug!(
+                "PrefetchRuntime {acct}/{att}: {reason:?}",
+                acct = item.account_id,
+                att = item.attachment_id,
+            );
+        }
+    }
+    finalize_item(inner, item).await;
 }
 
 fn enqueue_extraction_after_prefetch(
     inner: &Arc<PrefetchRuntimeInner>,
-    work: &PrefetchWork,
+    work: &PrefetchItem,
     content_hash: db::blob_hash::BlobHash,
 ) {
     let Some(runtime) = inner.boot_state.extract_runtime() else {
@@ -816,7 +1152,7 @@ fn enqueue_extraction_after_prefetch(
     }
 }
 
-async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchWork) {
+async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchItem) {
     let key = (work.account_id.clone(), work.attachment_id.clone());
     let in_flight_empty = {
         let mut guard = inner.in_flight.lock().await;
@@ -877,34 +1213,67 @@ fn wallclock_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Per-provider concurrency cap. IMAP serializes attachment fetches
+/// inside the per-account semaphore (one folder-batch at a time);
+/// JMAP/Gmail/Graph stay at the Phase 4 default. Phase 7 of the
+/// attachments roadmap.
+fn provider_semaphore_cap(provider: &str) -> usize {
+    match provider {
+        "imap" => 1,
+        _ => PER_ACCOUNT_PERMITS,
+    }
+}
+
 async fn account_semaphore(
     inner: &Arc<PrefetchRuntimeInner>,
     account_id: &str,
+    provider: &str,
 ) -> Arc<Semaphore> {
+    let cap = provider_semaphore_cap(provider);
     let mut map = inner.account_semaphores.lock().await;
     let sem = map
         .entry(account_id.to_string())
-        .or_insert_with(|| Arc::new(Semaphore::new(PER_ACCOUNT_PERMITS)));
+        .or_insert_with(|| Arc::new(Semaphore::new(cap)));
     Arc::clone(sem)
 }
 
-async fn breaker_is_open(inner: &Arc<PrefetchRuntimeInner>, account_id: &str) -> bool {
+/// Phase 7: circuit breaker keyspace is `(provider, account_id)`.
+/// Today each account has one provider so the dimension is implicit,
+/// but encoding it explicitly lets a future "promote to per-provider"
+/// change land as a key-derivation tweak rather than a refactor.
+fn breaker_key(provider: &str, account_id: &str) -> (String, String) {
+    (provider.to_string(), account_id.to_string())
+}
+
+async fn breaker_is_open(
+    inner: &Arc<PrefetchRuntimeInner>,
+    provider: &str,
+    account_id: &str,
+) -> bool {
     let mut map = inner.breakers.lock().await;
-    map.entry(account_id.to_string())
+    map.entry(breaker_key(provider, account_id))
         .or_default()
         .is_open()
 }
 
-async fn note_breaker_timeout(inner: &Arc<PrefetchRuntimeInner>, account_id: &str) {
+async fn note_breaker_timeout(
+    inner: &Arc<PrefetchRuntimeInner>,
+    provider: &str,
+    account_id: &str,
+) {
     let mut map = inner.breakers.lock().await;
-    map.entry(account_id.to_string())
+    map.entry(breaker_key(provider, account_id))
         .or_default()
         .note_timeout();
 }
 
-async fn note_breaker_success(inner: &Arc<PrefetchRuntimeInner>, account_id: &str) {
+async fn note_breaker_success(
+    inner: &Arc<PrefetchRuntimeInner>,
+    provider: &str,
+    account_id: &str,
+) {
     let mut map = inner.breakers.lock().await;
-    map.entry(account_id.to_string())
+    map.entry(breaker_key(provider, account_id))
         .or_default()
         .note_success();
 }
@@ -992,12 +1361,42 @@ fn statvfs_free_bytes(path: &std::path::Path) -> Option<u64> {
     Some(bavail.saturating_mul(frsize))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn statvfs_free_bytes(path: &std::path::Path) -> Option<u64> {
+    // Phase 7 of the attachments roadmap: bring the disk-headroom
+    // backstop to Windows so the prefetch worker stops writing before
+    // it corrupts the SQLite WAL on a near-full volume, matching the
+    // Unix `statvfs` path.
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    // GetDiskFreeSpaceExW accepts a directory path. The pack-store dir
+    // is the canonical caller; if it doesn't exist yet we fall back to
+    // the parent, then to the volume root, returning None if every
+    // step fails (matches the Unix fallback contract).
+    let mut candidate = Some(path.to_path_buf());
+    while let Some(p) = candidate {
+        let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let mut free_to_caller: u64 = 0;
+        let rc = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free_to_caller as *mut u64,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if rc != 0 {
+            return Some(free_to_caller);
+        }
+        candidate = p.parent().map(std::path::Path::to_path_buf);
+    }
+    None
+}
+
+#[cfg(not(any(unix, windows)))]
 fn statvfs_free_bytes(_path: &std::path::Path) -> Option<u64> {
-    // Windows backstop deferred - `GetDiskFreeSpaceExW` would land
-    // here. Returning None means the backstop is permissive on
-    // Windows; the cache fills until the OS raises ENOSPC, which
-    // surfaces as `SkipReason::PackStoreError`.
+    // No backstop on truly exotic targets. Cache fills until the OS
+    // surfaces ENOSPC as `SkipReason::PackStoreError`.
     None
 }
 

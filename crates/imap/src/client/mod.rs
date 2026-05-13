@@ -380,6 +380,19 @@ pub async fn fetch_attachment(
         .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
+    fetch_attachment_on_selected(session, uid, part_id).await
+}
+
+/// Like `fetch_attachment`, but assumes the caller already issued
+/// `SELECT folder` on `session`. Phase 7 of the attachments roadmap
+/// uses this from the prefetch worker's IMAP folder-batch path so a
+/// single `SELECT` covers every attachment fetched from the same
+/// folder, avoiding the per-attachment LOGIN/SELECT round-trip.
+pub async fn fetch_attachment_on_selected(
+    session: &mut ImapSession,
+    uid: u32,
+    part_id: &str,
+) -> Result<Vec<u8>, String> {
     let uid_str = uid.to_string();
     let fetches: Vec<_> = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
         let stream = session
