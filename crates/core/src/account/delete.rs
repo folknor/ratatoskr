@@ -16,7 +16,7 @@ pub fn delete_account_orchestrate(
     delete_account_orchestrate_sync(conn, account_id).map(|plan| AccountDeletionPlan {
         data: AccountDeletionData {
             message_ids: plan.data.message_ids,
-            cached_files: plan.data.cached_files,
+            cached_hashes: plan.data.cached_hashes,
             inline_hashes: plan.data.inline_hashes,
         },
         shared_cache_hashes: plan.shared_cache_hashes,

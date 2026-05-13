@@ -72,7 +72,6 @@ pub struct ThreadAttachment {
     pub size: Option<i64>,
     pub content_id: Option<String>,
     pub is_inline: bool,
-    pub local_path: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub remote_attachment_id: Option<String>,
     // Context from parent message
@@ -457,7 +456,7 @@ fn query_thread_attachments(
     let mut stmt = conn
         .prepare(
             "SELECT a.id, a.message_id, a.filename, a.mime_type, a.size, \
-                    a.content_id, a.is_inline, a.local_path, a.content_hash, \
+                    a.content_id, a.is_inline, a.content_hash, \
                     a.remote_attachment_id, \
                     m.from_name, m.from_address, m.date \
              FROM attachments a \
@@ -479,7 +478,6 @@ fn query_thread_attachments(
                 size: row.get("size")?,
                 content_id: row.get("content_id")?,
                 is_inline: row.get::<_, i64>("is_inline")? != 0,
-                local_path: row.get("local_path")?,
                 content_hash: row.get("content_hash")?,
                 remote_attachment_id: row.get("remote_attachment_id")?,
                 from_name: row.get("from_name")?,

@@ -98,6 +98,18 @@ impl Subsystems {
         {
             log::warn!("search-writer task join error during shutdown: {e}");
         }
+        // Attachments roadmap Phase 3: fsync the open pack before the
+        // clean-shutdown sentinel write. PackStore's `put` already
+        // fsyncs per frame, so this only catches frames that landed in
+        // the open pack between the last put and shutdown - effectively
+        // a no-op on the durability side, but it pairs the sentinel
+        // write with one final flush for symmetry with the body /
+        // search drains above.
+        if let Some(pack_store) = boot_state.take_pack_store()
+            && let Err(e) = pack_store.flush().await
+        {
+            log::warn!("PackStore flush during shutdown failed: {e}");
+        }
     }
 
     /// Abort the long-lived task handles owned by this registry. Runs

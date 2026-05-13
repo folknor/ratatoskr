@@ -112,7 +112,7 @@ pub async fn db_get_attachments_for_account(
         let mut stmt = conn
             .prepare(
                 "SELECT a.id, a.message_id, a.account_id, a.filename, a.mime_type, a.size,
-                            a.remote_attachment_id, a.content_id, a.is_inline, a.local_path,
+                            a.remote_attachment_id, a.content_id, a.is_inline,
                             a.content_hash,
                             m.from_address, m.from_name, m.date, m.subject, m.thread_id
                      FROM attachments a
@@ -133,7 +133,6 @@ pub async fn db_get_attachments_for_account(
                 remote_attachment_id: row.get("remote_attachment_id")?,
                 content_id: row.get("content_id")?,
                 is_inline: row.get("is_inline")?,
-                local_path: row.get("local_path")?,
                 content_hash: row.get("content_hash")?,
                 from_address: row.get("from_address")?,
                 from_name: row.get("from_name")?,

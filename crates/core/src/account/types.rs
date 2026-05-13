@@ -89,7 +89,10 @@ pub struct AccountOAuthCredentials {
 /// Data collected from the DB before account deletion for cleanup purposes.
 pub struct AccountDeletionData {
     pub message_ids: Vec<String>,
-    pub cached_files: Vec<(String, db::blob_hash::BlobHash)>,
+    /// Content hashes of attachments owned by this account. Phase 3
+    /// of the attachments roadmap retired the flat-cache `local_path`;
+    /// the consumer tombstones each hash in `PackStore`.
+    pub cached_hashes: Vec<db::blob_hash::BlobHash>,
     pub inline_hashes: Vec<db::blob_hash::BlobHash>,
 }
 

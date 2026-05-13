@@ -11,7 +11,7 @@ pub async fn prepare_account_resync(
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreReadState,
-    app_data_dir: &Path,
+    _app_data_dir: &Path,
     account_id: &str,
 ) -> Result<(), String> {
     let account_id_owned = account_id.to_string();
@@ -63,9 +63,8 @@ pub async fn prepare_account_resync(
         let _ = inline_images.delete_unreferenced(orphaned).await;
     }
 
-    // Evict file-based attachment cache entries that are now over the limit
-    // (cascade-deleted attachment rows freed their cache_size quota)
-    let _ = crate::attachment_cache::enforce_cache_limit(db, app_data_dir).await;
+    // Phase 3 of the attachments roadmap retired the flat-cache LRU
+    // sweep; PackStore + Phase 8's date-windowed eviction take over.
 
     Ok(())
 }

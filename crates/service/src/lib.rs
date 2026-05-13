@@ -1,6 +1,6 @@
 mod accounts;
 pub mod actions;
-mod attachment_lock;
+mod attachment_materialize;
 mod boot;
 mod boot_progress;
 mod extract;

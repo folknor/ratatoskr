@@ -1,7 +1,6 @@
 use super::super::ReadDbState;
 use super::super::types::{
-    BackfillRow, CachedAttachmentRow, ImapMessageRow, SnoozedThread, SpecialFolderRow,
-    SubscriptionEntry,
+    BackfillRow, ImapMessageRow, SnoozedThread, SpecialFolderRow, SubscriptionEntry,
 };
 use crate::db::from_row::FromRow;
 use rusqlite::params;
@@ -226,96 +225,6 @@ pub async fn db_update_message_imap_folder(
     .await
 }
 
-pub async fn db_update_attachment_cached(
-    db: &ReadDbState,
-    attachment_id: String,
-    local_path: String,
-    cache_size: i64,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE attachments SET local_path = ?1, cached_at = unixepoch(), cache_size = ?2 WHERE id = ?3",
-            params![local_path, cache_size, attachment_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_get_attachment_cache_size(db: &ReadDbState) -> Result<i64, String> {
-    db.with_conn(move |conn| {
-        let total: i64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(cache_size), 0) AS total FROM attachments WHERE cached_at IS NOT NULL",
-                [],
-                |row| row.get("total"),
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(total)
-    })
-    .await
-}
-
-pub async fn db_get_oldest_cached_attachments(
-    db: &ReadDbState,
-    limit: i64,
-) -> Result<Vec<CachedAttachmentRow>, String> {
-    db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, local_path, cache_size, content_hash FROM attachments WHERE cached_at IS NOT NULL ORDER BY cached_at ASC LIMIT ?1",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![limit], CachedAttachmentRow::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-    })
-    .await
-}
-
-pub async fn db_clear_attachment_cache_entry(
-    db: &ReadDbState,
-    attachment_id: String,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE attachments SET local_path = NULL, cached_at = NULL, cache_size = NULL WHERE id = ?1",
-            params![attachment_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_clear_all_attachment_cache(db: &ReadDbState) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE attachments SET local_path = NULL, cached_at = NULL, cache_size = NULL WHERE cached_at IS NOT NULL",
-            [],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_count_cached_by_hash(
-    db: &ReadDbState,
-    content_hash: crate::blob_hash::BlobHash,
-) -> Result<i64, String> {
-    db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT COUNT(*) AS cnt FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
-            params![content_hash],
-            |row| row.get("cnt"),
-        )
-        .map_err(|e| e.to_string())
-    })
-    .await
-}
 
 pub async fn db_get_inbox_threads_for_backfill(
     db: &ReadDbState,

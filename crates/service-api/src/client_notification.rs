@@ -63,6 +63,13 @@ pub enum ClientNotification {
     /// `SyncTick`.
     #[serde(rename = "attachment.eviction_kick")]
     AttachmentEvictionKick,
+    /// Attachments roadmap Phase 3: idle cleanup of
+    /// `<app_data>/attachment_fetch_tmp/`. The Service handler walks
+    /// the directory and unlinks entries whose mtime is older than 10
+    /// minutes. `Drop` class - missed kicks self-heal on the next
+    /// `SyncTick`.
+    #[serde(rename = "attachment.tmp_cleanup_kick")]
+    AttachmentTmpCleanupKick,
     /// Phase 7-6: "The UI's tick fired (or boot.ready just resolved);
     /// please consider scanning cached + unindexed attachments and
     /// enqueuing them into the ExtractRuntime." The Service handler
@@ -85,6 +92,7 @@ impl ClientNotification {
             Self::GalKick => "gal.kick",
             Self::PinnedSearchKick => "pinned_search.kick",
             Self::AttachmentEvictionKick => "attachment.eviction_kick",
+            Self::AttachmentTmpCleanupKick => "attachment.tmp_cleanup_kick",
             Self::ExtractBackfillKick => "extract.backfill_kick",
         }
     }
@@ -96,6 +104,7 @@ impl ClientNotification {
             | Self::GalKick
             | Self::PinnedSearchKick
             | Self::AttachmentEvictionKick
+            | Self::AttachmentTmpCleanupKick
             | Self::ExtractBackfillKick => Value::Null,
         }
     }
@@ -113,6 +122,7 @@ impl ClientNotification {
             | Self::GalKick
             | Self::PinnedSearchKick
             | Self::AttachmentEvictionKick
+            | Self::AttachmentTmpCleanupKick
             | Self::ExtractBackfillKick => NotificationClass::Drop,
         }
     }
@@ -138,6 +148,10 @@ impl ClientNotification {
             "attachment.eviction_kick" => match params {
                 None | Some(Value::Null) => Ok(Self::AttachmentEvictionKick),
                 Some(_) => Err("attachment.eviction_kick must have no params".to_string()),
+            },
+            "attachment.tmp_cleanup_kick" => match params {
+                None | Some(Value::Null) => Ok(Self::AttachmentTmpCleanupKick),
+                Some(_) => Err("attachment.tmp_cleanup_kick must have no params".to_string()),
             },
             "extract.backfill_kick" => match params {
                 None | Some(Value::Null) => Ok(Self::ExtractBackfillKick),

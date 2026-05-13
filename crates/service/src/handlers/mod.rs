@@ -221,6 +221,9 @@ pub(crate) async fn dispatch_notification(
         ClientNotification::AttachmentEvictionKick => {
             attachment::handle_eviction_kick(&boot_state).await
         }
+        ClientNotification::AttachmentTmpCleanupKick => {
+            attachment::handle_tmp_cleanup_kick(&boot_state).await
+        }
         ClientNotification::ExtractBackfillKick => {
             extract::handle_backfill_kick(&boot_state).await
         }

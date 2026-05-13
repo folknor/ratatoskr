@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::markers::MarkerFile;
 
@@ -62,9 +63,9 @@ impl AccountDeletionStep {
 pub(crate) struct AccountDeletionMarker {
     pub account_id: String,
     pub message_ids: Vec<String>,
-    /// `(local_path, content_hash)` per cached attachment. Mirrors
-    /// `DbAccountDeletionData::cached_files`.
-    pub cached_files: Vec<(String, db::blob_hash::BlobHash)>,
+    /// Content hashes of this account's attachments. The `PackStore`
+    /// tombstones each hash that is not shared with another account.
+    pub cached_hashes: Vec<db::blob_hash::BlobHash>,
     pub inline_hashes: Vec<db::blob_hash::BlobHash>,
     pub shared_cache_hashes: Vec<db::blob_hash::BlobHash>,
     pub shared_inline_hashes: Vec<db::blob_hash::BlobHash>,
@@ -95,6 +96,7 @@ pub(crate) async fn delete_with_marker(
     body_write: &BodyStoreWriteState,
     inline_write: &InlineImageStoreWriteState,
     search_write: &SearchWriteHandle,
+    pack_store: Option<Arc<store::PackStore>>,
     app_data: &Path,
     account_id: String,
 ) -> Result<CleanupReport, String> {
@@ -105,7 +107,7 @@ pub(crate) async fn delete_with_marker(
             let shared_cache_hashes =
                 db::db::queries_extra::referenced_hashes_excluding_account_sync(
                     conn,
-                    &data.cached_files,
+                    &data.cached_hashes,
                     &aid,
                 )?;
             let shared_inline_hashes =
@@ -122,7 +124,7 @@ pub(crate) async fn delete_with_marker(
     let marker = AccountDeletionMarker {
         account_id: account_id.clone(),
         message_ids: data.message_ids,
-        cached_files: data.cached_files,
+        cached_hashes: data.cached_hashes,
         inline_hashes: data.inline_hashes,
         shared_cache_hashes: shared_cache_hashes.into_iter().collect(),
         shared_inline_hashes: shared_inline_hashes.into_iter().collect(),
@@ -135,6 +137,7 @@ pub(crate) async fn delete_with_marker(
         body_write,
         inline_write,
         search_write,
+        pack_store,
         app_data,
         marker,
     )
@@ -155,6 +158,7 @@ async fn drive_steps(
     body_write: &BodyStoreWriteState,
     inline_write: &InlineImageStoreWriteState,
     search_write: &SearchWriteHandle,
+    pack_store: Option<Arc<store::PackStore>>,
     app_data: &Path,
     mut marker: AccountDeletionMarker,
 ) -> Result<CleanupReport, String> {
@@ -220,25 +224,41 @@ async fn drive_steps(
                 }
             }
             AccountDeletionStep::AttachmentCache => {
-                // Per-file errors are routine (file already removed, FS
-                // permission flake) and tracked individually in
-                // `report.cache_file_errors`. The step itself succeeds
-                // after attempting every file in the marker; a future
-                // resume will skip this step. Distinct from the body /
-                // inline / search steps where a single Err means the
-                // batch operation failed wholesale.
+                // Attachments roadmap Phase 3: tombstone each
+                // not-shared hash in PackStore. Per-hash errors are
+                // tracked individually; the step still succeeds after
+                // attempting every hash so a future resume skips it.
+                // If PackStore is not installed (boot in flight, drain
+                // already underway), surface that as a step failure
+                // so the marker retains the step for a subsequent
+                // boot.
                 let shared: HashSet<db::blob_hash::BlobHash> =
                     marker.shared_cache_hashes.iter().copied().collect();
-                for (path, hash) in &marker.cached_files {
-                    if shared.contains(hash) {
-                        continue;
+                let mut step_ok = true;
+                if let Some(ref pack_store) = pack_store {
+                    for hash in &marker.cached_hashes {
+                        if shared.contains(hash) {
+                            continue;
+                        }
+                        match pack_store.tombstone(hash).await {
+                            Ok(()) => report.cache_files_deleted += 1,
+                            Err(e) => {
+                                let hex = hash.to_hex();
+                                report
+                                    .cache_file_errors
+                                    .push(format!("{hex}: {e}"));
+                            }
+                        }
                     }
-                    match store::attachment_cache::remove_cached_relative(app_data, path) {
-                        Ok(()) => report.cache_files_deleted += 1,
-                        Err(e) => report.cache_file_errors.push(format!("{path}: {e}")),
-                    }
+                } else {
+                    log::warn!(
+                        "account.delete: PackStore not installed; \
+                         deferring AttachmentCache step to next boot",
+                    );
+                    step_failures.push("pack_store: not installed".into());
+                    step_ok = false;
                 }
-                true
+                step_ok
             }
             AccountDeletionStep::SearchIndex => {
                 match search_write
@@ -325,6 +345,7 @@ pub(crate) async fn drain_pending_deletions(
     body_write: &BodyStoreWriteState,
     inline_write: &InlineImageStoreWriteState,
     search_write: &SearchWriteHandle,
+    pack_store: Option<Arc<store::PackStore>>,
     app_data: &Path,
 ) {
     let markers = match MARKERS.list(app_data).await {
@@ -347,6 +368,7 @@ pub(crate) async fn drain_pending_deletions(
             body_write,
             inline_write,
             search_write,
+            pack_store.clone(),
             app_data,
             marker,
         )

@@ -199,132 +199,24 @@ pub fn find_attachment_cache_info(
     }
 }
 
-/// Update an attachment row's cache fields after the file has been written to
-/// disk: sets `local_path`, `cached_at`, `cache_size`, and `content_hash`.
+/// Record the content hash of an attachment row after its bytes have
+/// been persisted in PackStore. `cache_size` mirrors the persisted
+/// length and stays informational on `attachments.size` only if the
+/// caller chose to pre-fill that column (the wire-side provider sync
+/// already does); this function does not touch `size`. The flat-cache
+/// columns (`local_path`, `cached_at`, `cache_size`) retired with the
+/// attachments roadmap Phase 3 flat-cache retirement.
 pub fn update_attachment_cache_fields(
     conn: &Connection,
     attachment_id: &str,
-    local_path: &str,
-    cache_size: i64,
     content_hash: &crate::blob_hash::BlobHash,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE attachments \
-         SET local_path = ?1, cached_at = unixepoch(), cache_size = ?2, content_hash = ?3 \
-         WHERE id = ?4",
-        params![local_path, cache_size, content_hash, attachment_id],
+        "UPDATE attachments SET content_hash = ?1 WHERE id = ?2",
+        params![content_hash, attachment_id],
     )
     .map_err(|e| format!("update_attachment_cache_fields: {e}"))?;
     Ok(())
-}
-
-/// Bump `cached_at` to the current epoch for a single attachment row that
-/// already has a populated cache. Used by the cache-hit path of
-/// `attachment.fetch` so an actively-opened attachment surfaces as recent
-/// to the LRU eviction sweep instead of staying frozen at its first-fetch
-/// timestamp.
-pub fn bump_attachment_cached_at(
-    conn: &Connection,
-    attachment_id: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE attachments SET cached_at = unixepoch() \
-         WHERE id = ?1 AND cached_at IS NOT NULL",
-        params![attachment_id],
-    )
-    .map_err(|e| format!("bump_attachment_cached_at: {e}"))?;
-    Ok(())
-}
-
-/// Clear the cache fields (`local_path`, `cached_at`, `cache_size`) for a
-/// batch of attachment IDs in one statement (used during cache eviction).
-pub fn clear_attachment_cache_fields_batch(
-    conn: &Connection,
-    attachment_ids: &[String],
-) -> Result<(), String> {
-    if attachment_ids.is_empty() {
-        return Ok(());
-    }
-    let placeholders: String = attachment_ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "UPDATE attachments \
-         SET local_path = NULL, cached_at = NULL, cache_size = NULL \
-         WHERE id IN ({placeholders})"
-    );
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        attachment_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-    conn.execute(&sql, param_refs.as_slice())
-        .map_err(|e| format!("clear_attachment_cache_fields_batch: {e}"))?;
-    Ok(())
-}
-
-/// Return how many attachment rows still reference a given content hash and
-/// have a non-NULL `cached_at` (i.e., are still cached). Used to decide
-/// whether to delete the backing file during eviction.
-pub fn count_cached_attachment_refs(
-    conn: &Connection,
-    content_hash: &crate::blob_hash::BlobHash,
-) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) AS cnt FROM attachments \
-         WHERE content_hash = ?1 AND cached_at IS NOT NULL",
-        params![content_hash],
-        |row| row.get("cnt"),
-    )
-    .map_err(|e| format!("count_cached_attachment_refs: {e}"))
-}
-
-/// Return the total size in bytes of all currently-cached attachments.
-pub fn get_total_cached_attachment_size(conn: &Connection) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COALESCE(SUM(cache_size), 0) AS total \
-         FROM attachments WHERE cached_at IS NOT NULL",
-        [],
-        |row| row.get("total"),
-    )
-    .map_err(|e| format!("get_total_cached_attachment_size: {e}"))
-}
-
-/// One row of `get_cached_attachments_oldest_first` output.
-pub struct CachedAttachmentRow {
-    pub attachment_id: String,
-    pub local_path: String,
-    pub content_hash: Option<crate::blob_hash::BlobHash>,
-    pub cache_size: i64,
-}
-
-/// Return all cached-attachment rows ordered oldest-first (for eviction).
-pub fn get_cached_attachments_oldest_first(
-    conn: &Connection,
-) -> Result<Vec<CachedAttachmentRow>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, local_path, content_hash, cache_size \
-             FROM attachments \
-             WHERE cached_at IS NOT NULL \
-             ORDER BY cached_at ASC",
-        )
-        .map_err(|e| format!("get_cached_attachments_oldest_first prepare: {e}"))?;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(CachedAttachmentRow {
-                attachment_id: row.get("id")?,
-                local_path: row.get("local_path")?,
-                content_hash: row.get("content_hash")?,
-                cache_size: row.get("cache_size")?,
-            })
-        })
-        .map_err(|e| format!("get_cached_attachments_oldest_first query: {e}"))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("get_cached_attachments_oldest_first row: {e}"))?;
-
-    Ok(rows)
 }
 
 // ---------------------------------------------------------------------------

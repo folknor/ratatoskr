@@ -222,11 +222,23 @@ impl ReadyApp {
         };
         Task::perform(
             async move {
+                // Attachments roadmap Phase 3 retired the LRU sweep
+                // body; the Service-side handler is a no-op for now.
+                // The same SyncTick also reaps stale
+                // `attachment_fetch_tmp/` entries.
                 if let Err(error) = client
                     .send_notification(service_api::ClientNotification::AttachmentEvictionKick)
                     .await
                 {
                     log::debug!("attachment.eviction_kick send failed: {error}");
+                }
+                if let Err(error) = client
+                    .send_notification(
+                        service_api::ClientNotification::AttachmentTmpCleanupKick,
+                    )
+                    .await
+                {
+                    log::debug!("attachment.tmp_cleanup_kick send failed: {error}");
                 }
             },
             |()| Message::Noop,

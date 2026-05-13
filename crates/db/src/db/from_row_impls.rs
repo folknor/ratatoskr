@@ -131,7 +131,6 @@ impl_from_row!(DbAttachment {
     remote_attachment_id,
     content_id,
     bool is_inline,
-    local_path,
     content_hash,
 });
 
@@ -588,15 +587,6 @@ impl_from_row!(ContactAttachmentRow {
     mime_type,
     size,
     date,
-});
-
-// ── Cached Attachment Row ──────────────────────────────────
-
-impl_from_row!(CachedAttachmentRow {
-    id,
-    local_path,
-    cache_size,
-    content_hash,
 });
 
 // ── Contact Group ──────────────────────────────────────────

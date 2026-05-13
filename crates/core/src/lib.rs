@@ -1,6 +1,5 @@
 pub mod account;
 pub mod constants;
-pub use store::attachment_cache;
 pub mod auto_responses;
 pub mod bimi;
 pub use store::body_store;

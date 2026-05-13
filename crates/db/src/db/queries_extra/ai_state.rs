@@ -1,43 +1,7 @@
 use super::super::ReadDbState;
-use super::super::types::{DbFolderSyncState, DbWritingStyleProfile, UncachedAttachment};
+use super::super::types::{DbFolderSyncState, DbWritingStyleProfile};
 use crate::db::{query_as, query_one};
 use rusqlite::params;
-
-pub async fn db_attachment_cache_total_size(db: &ReadDbState) -> Result<i64, String> {
-    db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT COALESCE(SUM(cache_size), 0) AS total FROM attachments WHERE cached_at IS NOT NULL",
-            [],
-            |row| row.get("total"),
-        )
-        .map_err(|e| e.to_string())
-    })
-    .await
-}
-
-pub async fn db_uncached_recent_attachments(
-    db: &ReadDbState,
-    max_size: i64,
-    cutoff_epoch: i64,
-    limit: i64,
-) -> Result<Vec<UncachedAttachment>, String> {
-    db.with_conn(move |conn| {
-        query_as::<UncachedAttachment>(
-            conn,
-            "SELECT a.id, a.message_id, a.account_id, a.size, a.remote_attachment_id, a.imap_part_id
-                 FROM attachments a
-                 INNER JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id
-                 WHERE a.cached_at IS NULL
-                   AND a.is_inline = 0
-                   AND a.size IS NOT NULL AND a.size <= ?1
-                   AND m.date >= ?2
-                 ORDER BY m.date DESC
-                 LIMIT ?3",
-            &[&max_size, &cutoff_epoch, &limit],
-        )
-    })
-    .await
-}
 
 pub async fn db_get_ai_cache(
     db: &ReadDbState,

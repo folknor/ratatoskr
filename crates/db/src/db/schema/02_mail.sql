@@ -147,25 +147,24 @@ CREATE TABLE IF NOT EXISTS attachments (
     remote_attachment_id TEXT,
     content_id TEXT,
     is_inline INTEGER DEFAULT 0,
-    local_path TEXT,
     imap_part_id TEXT,
-    cached_at INTEGER,
-    cache_size INTEGER,
     content_hash BLOB,
-    -- Phase 7: pointer to attachment_extracted_text.extracted_at for the
-    -- row keyed by content_hash. NULL means "not yet extracted." Backfill
-    -- scan filters cached_at IS NOT NULL AND text_indexed_at IS NULL so
-    -- evicted-but-still-referenced rows do not churn the queue.
+    -- Phase 7: pointer to attachment_extracted_text.extracted_at for
+    -- the row keyed by content_hash. NULL means "not yet extracted."
+    -- Backfill scan joins attachment_blobs to filter rows whose bytes
+    -- are still live in the pack store.
     text_indexed_at INTEGER,
     FOREIGN KEY (account_id, message_id) REFERENCES messages(account_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(account_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_cid ON attachments(content_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_content_hash ON attachments(content_hash);
--- Phase 7: backfill scan target. Partial index keeps it tiny.
+-- Phase 7 / attachments roadmap Phase 3: backfill scan target. Joined
+-- against attachment_blobs (tombstoned_at IS NULL) to filter rows
+-- whose bytes are still in the pack store.
 CREATE INDEX IF NOT EXISTS idx_attachments_text_indexed_at
     ON attachments(text_indexed_at)
-    WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL;
+    WHERE text_indexed_at IS NULL;
 
 -- Phase 7: attachment text extraction store, keyed by content_hash so two
 -- attachments with identical bytes share one row and so the row survives

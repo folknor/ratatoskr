@@ -199,11 +199,17 @@ pub fn find_unindexed_cached_attachments(
     conn: &Connection,
     limit: usize,
 ) -> Result<Vec<UnindexedCachedAttachmentRow>, String> {
+    // Attachments roadmap Phase 3: join against `attachment_blobs` so
+    // the backfill only enqueues rows whose bytes are still in the
+    // pack store (tombstoned_at IS NULL). The flat-cache `cached_at`
+    // filter retired here.
     let mut stmt = conn
         .prepare(
-            "SELECT id, message_id, account_id, content_hash \
-             FROM attachments \
-             WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL \
+            "SELECT a.id, a.message_id, a.account_id, a.content_hash \
+             FROM attachments a \
+             JOIN attachment_blobs b ON b.content_hash = a.content_hash \
+             WHERE b.tombstoned_at IS NULL \
+               AND a.text_indexed_at IS NULL \
              LIMIT ?1",
         )
         .map_err(|e| format!("prepare find_unindexed_cached_attachments: {e}"))?;
@@ -436,10 +442,15 @@ mod tests {
              CREATE TABLE attachments (\
                 id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
                 filename TEXT, mime_type TEXT, content_hash BLOB,\
-                cached_at INTEGER, text_indexed_at INTEGER);\
+                text_indexed_at INTEGER);\
              CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
              CREATE INDEX idx_attachments_text_indexed_at ON attachments(text_indexed_at)\
-                WHERE cached_at IS NOT NULL AND text_indexed_at IS NULL;\
+                WHERE text_indexed_at IS NULL;\
+             CREATE TABLE attachment_blobs (\
+                content_hash BLOB PRIMARY KEY, pack_file_id INTEGER NOT NULL,\
+                offset INTEGER NOT NULL, length INTEGER NOT NULL,\
+                written_at INTEGER NOT NULL, last_read_at INTEGER,\
+                tombstoned_at INTEGER);\
              CREATE TABLE attachment_extracted_text (\
                 content_hash BLOB PRIMARY KEY, mime_type TEXT,\
                 extracted_text TEXT, status TEXT NOT NULL,\
@@ -534,32 +545,83 @@ mod tests {
         assert_eq!(by_id["att2"].filename, "b.txt");
     }
 
+    /// Helper: seed both an `attachments` row and a matching
+    /// `attachment_blobs` row so the join in
+    /// `find_unindexed_cached_attachments` resolves.
+    fn seed_attachment_with_blob(
+        conn: &Connection,
+        att_id: &str,
+        message_id: &str,
+        account_id: &str,
+        content_hash: Option<&BlobHash>,
+        text_indexed_at: Option<i64>,
+        tombstoned_at: Option<i64>,
+    ) {
+        conn.execute(
+            "INSERT INTO attachments \
+             (id, message_id, account_id, content_hash, text_indexed_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![att_id, message_id, account_id, content_hash, text_indexed_at],
+        )
+        .expect("seed attachment");
+        if let Some(hash) = content_hash {
+            conn.execute(
+                "INSERT OR IGNORE INTO attachment_blobs \
+                 (content_hash, pack_file_id, offset, length, written_at, tombstoned_at) \
+                 VALUES (?1, 0, 0, 0, 1, ?2)",
+                rusqlite::params![hash, tombstoned_at],
+            )
+            .expect("seed blob");
+        }
+    }
+
     #[test]
     fn unindexed_cached_attachments_filters_correctly() {
         let conn = open_test_db();
         let hash_a = h(b"A");
         let hash_b = h(b"B");
         let hash_c = h(b"C");
-        conn.execute(
-            "INSERT INTO attachments \
-             (id, message_id, account_id, content_hash, cached_at, text_indexed_at) \
-             VALUES \
-             ('cached_unindexed', 'msg1', 'acc1', ?1, 100, NULL),\
-             ('cached_indexed',   'msg2', 'acc1', ?2, 100, 200),\
-             ('evicted_unindexed','msg3', 'acc1', ?3, NULL, NULL),\
-             ('cached_no_hash',   'msg4', 'acc1', NULL,    100, NULL)",
-            rusqlite::params![hash_a, hash_b, hash_c],
-        )
-        .expect("seed");
+        seed_attachment_with_blob(
+            &conn,
+            "live_unindexed",
+            "msg1",
+            "acc1",
+            Some(&hash_a),
+            None,
+            None,
+        );
+        seed_attachment_with_blob(
+            &conn,
+            "live_indexed",
+            "msg2",
+            "acc1",
+            Some(&hash_b),
+            Some(200),
+            None,
+        );
+        seed_attachment_with_blob(
+            &conn,
+            "tombstoned_unindexed",
+            "msg3",
+            "acc1",
+            Some(&hash_c),
+            None,
+            Some(150),
+        );
+        seed_attachment_with_blob(
+            &conn,
+            "no_hash",
+            "msg4",
+            "acc1",
+            None,
+            None,
+            None,
+        );
 
-        let mut rows = find_unindexed_cached_attachments(&conn, 1000).expect("query");
-        rows.sort_by(|a, b| a.attachment_id.cmp(&b.attachment_id));
-        assert_eq!(rows.len(), 2, "{rows:?}");
-        // cached + unindexed (with hash) - the canonical backfill row.
-        assert_eq!(rows[0].attachment_id, "cached_no_hash");
-        assert!(rows[0].content_hash.is_none());
-        assert_eq!(rows[1].attachment_id, "cached_unindexed");
-        assert_eq!(rows[1].content_hash, Some(hash_a));
+        let rows = find_unindexed_cached_attachments(&conn, 1000).expect("query");
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].attachment_id, "live_unindexed");
+        assert_eq!(rows[0].content_hash, Some(hash_a));
     }
 
     #[test]
@@ -567,13 +629,15 @@ mod tests {
         let conn = open_test_db();
         for i in 0..5 {
             let hash = h(format!("hash{i}").as_bytes());
-            conn.execute(
-                "INSERT INTO attachments \
-                 (id, message_id, account_id, content_hash, cached_at, text_indexed_at) \
-                 VALUES (?1, ?2, 'acc1', ?3, 100, NULL)",
-                rusqlite::params![format!("att{i}"), format!("msg{i}"), hash],
-            )
-            .expect("seed");
+            seed_attachment_with_blob(
+                &conn,
+                &format!("att{i}"),
+                &format!("msg{i}"),
+                "acc1",
+                Some(&hash),
+                None,
+                None,
+            );
         }
         let rows = find_unindexed_cached_attachments(&conn, 3).expect("query");
         assert_eq!(rows.len(), 3);

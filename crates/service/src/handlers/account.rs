@@ -323,6 +323,7 @@ pub(crate) async fn handle_delete(
         &body_write,
         &inline_write,
         &search_write,
+        boot_state.pack_store(),
         &app_data,
         account_id.clone(),
     )

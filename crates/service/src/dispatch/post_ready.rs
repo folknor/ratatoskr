@@ -225,6 +225,7 @@ pub(crate) fn spawn_post_ready_extract_startup(
         let extract_runtime = crate::extract::ExtractRuntime::new(
             db_state,
             app_data_dir,
+            Arc::clone(&boot_state),
             search_write,
             body_read,
             notification_tx,

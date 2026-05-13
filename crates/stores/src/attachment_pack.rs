@@ -2,7 +2,7 @@
 //!
 //! Phase 2 of the attachments roadmap (see
 //! `docs/attachments/problem-statement.md` and
-//! `docs/attachments/implementation-roadmap.md`). Library only — this
+//! `docs/attachments/implementation-roadmap.md`). Library only - this
 //! module has no consumers yet; Phase 3 wires it into the Service.
 //!
 //! ## Layout
@@ -486,7 +486,7 @@ fn recover_open_pack(
             break;
         }
         if remaining < FRAME_HEADER_LEN as u64 {
-            // Partial header — truncate.
+            // Partial header - truncate.
             file.set_len(offset)?;
             file.sync_all()?;
             log::warn!(
@@ -498,7 +498,7 @@ fn recover_open_pack(
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(&mut header)?;
         if header[..4] != FRAME_MAGIC {
-            // Garbage at this position — truncate.
+            // Garbage at this position - truncate.
             file.set_len(offset)?;
             file.sync_all()?;
             log::warn!(
@@ -510,7 +510,7 @@ fn recover_open_pack(
         let checksum = read_u64_le(&header[8..16]);
         let frame_total = FRAME_HEADER_LEN as u64 + length;
         if remaining < frame_total {
-            // Partial payload — truncate the header too.
+            // Partial payload - truncate the header too.
             file.set_len(offset)?;
             file.sync_all()?;
             log::warn!(
@@ -524,7 +524,7 @@ fn recover_open_pack(
         file.read_exact(&mut payload)?;
         let actual = xxh3_64(&payload);
         if actual != checksum {
-            // Corrupt frame — truncate from here.
+            // Corrupt frame - truncate from here.
             file.set_len(offset)?;
             file.sync_all()?;
             log::warn!(
@@ -843,7 +843,7 @@ fn compact_pack(
         tx.commit()?;
     }
 
-    // Unlink the old source pack (and its tombstone log — entries
+    // Unlink the old source pack (and its tombstone log - entries
     // there only matter when the index is missing; the entries we
     // just deleted from the index are also gone from any live SQL
     // query, so the log copies are dead weight).
@@ -997,7 +997,7 @@ mod tests {
         f.write_all(&[0xaa; 8]).unwrap();
         f.sync_all().unwrap();
         drop(f);
-        // Reopen with a fresh empty index — recover should re-register
+        // Reopen with a fresh empty index - recover should re-register
         // the three frames and truncate the garbage.
         let conn = new_conn();
         let store2 = PackStore::open(dir.path().to_path_buf(), conn, DEFAULT_PACK_TARGET_SIZE)
@@ -1042,7 +1042,7 @@ mod tests {
         let h3 = store.put(b"three".to_vec()).await.unwrap();
         let _h4 = store.put(b"four".to_vec()).await.unwrap();
         // h1, h2, h3 should be in pack 0 (sealed).
-        // Tombstone h1, h2 — 2/3 = 67% dead.
+        // Tombstone h1, h2 - 2/3 = 67% dead.
         store.tombstone(&h1).await.unwrap();
         store.tombstone(&h2).await.unwrap();
         let stats = store.gc(0.5).await.unwrap();
@@ -1062,7 +1062,7 @@ mod tests {
         let _h2 = store.put(b"two".to_vec()).await.unwrap();
         let _h3 = store.put(b"three".to_vec()).await.unwrap();
         let _h4 = store.put(b"four".to_vec()).await.unwrap();
-        // Tombstone just h1 — 1/3 ≈ 33% density.
+        // Tombstone just h1 - 1/3 ≈ 33% density.
         store.tombstone(&h1).await.unwrap();
         let before = fs::metadata(pack_path_sealed(dir.path(), 0)).unwrap().len();
         let stats = store.gc(0.5).await.unwrap();
@@ -1071,7 +1071,7 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// Library-level benchmark. Sanity baseline only — no Criterion.
+    /// Library-level benchmark. Sanity baseline only - no Criterion.
     /// Run with `brokkr check -p store -- --include-ignored
     /// attachment_pack::tests::bench_pack_throughput --nocapture`.
     #[tokio::test]

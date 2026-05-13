@@ -40,7 +40,6 @@ use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::attachment_lock::SWEEP_LOCK;
 use crate::boot_progress::NotificationSender;
 use crate::text_extract::{ExtractionOutcome, MAX_INPUT_BYTES, PER_EXTRACTION_TIMEOUT_SECS,
     SkipReason, extract as run_extractor, truncate_on_char_boundary, MAX_EXTRACTED_TEXT_BYTES};
@@ -71,7 +70,18 @@ pub(crate) struct ExtractRuntimeInner {
     in_flight_hashes: Mutex<HashSet<db::blob_hash::BlobHash>>,
     tx: mpsc::Sender<ExtractWork>,
     db: WriteDbState,
+    /// Service-side root, retained for diagnostic logging only.
+    /// Attachments roadmap Phase 3 routed byte reads through
+    /// `materialize_blob` against `pack_store` below, so the
+    /// runtime no longer reads `attachment_cache/<hash>` directly.
     app_data_dir: PathBuf,
+    /// PackStore handle for byte fetches. Populated at construction;
+    /// `None` is only possible if the boot path's PackStore
+    /// installation failed, which is a hard boot error elsewhere.
+    pack_store: Option<Arc<store::PackStore>>,
+    /// `BootSharedState` handle the materialize helper needs to read
+    /// `app_data_dir` and `pack_store` together. Cheap clone.
+    boot_state: Arc<crate::boot::BootSharedState>,
     notification_tx: NotificationSender,
     service_generation: u32,
     /// Phase 7-7: producer-side enrichment. After a successful
@@ -118,15 +128,18 @@ impl ExtractRuntime {
     /// Spawn the worker task and return a handle. The runtime owns
     /// the worker; dropping the last clone closes the mpsc which
     /// signals the worker to exit on its next `recv()`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: WriteDbState,
         app_data_dir: PathBuf,
+        boot_state: Arc<crate::boot::BootSharedState>,
         search_write: SearchWriteHandle,
         body_read: BodyStoreReadState,
         notification_tx: NotificationSender,
         service_generation: u32,
         cancellation: CancellationToken,
     ) -> Self {
+        let pack_store = boot_state.pack_store();
         let (tx, rx) = mpsc::channel::<ExtractWork>(COMMAND_QUEUE_CAPACITY);
         let inner = Arc::new(ExtractRuntimeInner {
             closed: AtomicBool::new(false),
@@ -134,6 +147,8 @@ impl ExtractRuntime {
             tx,
             db,
             app_data_dir,
+            pack_store,
+            boot_state,
             notification_tx,
             service_generation,
             search_write,
@@ -557,15 +572,33 @@ async fn run_extraction_pipeline(
         .map(|(f, m)| (f.unwrap_or_default(), m.unwrap_or_default()))
         .unwrap_or_default();
 
-    // Acquire SWEEP_LOCK.read() for the bytes-read window so eviction
-    // cannot unlink the cache file mid-read.
-    let _guard = SWEEP_LOCK.read().await;
-
-    let cache_path = inner
-        .app_data_dir
-        .join("attachment_cache")
-        .join(work.content_hash.to_hex());
-    let bytes = match tokio::fs::read(&cache_path).await {
+    // Attachments roadmap Phase 3: route the byte read through
+    // `materialize_blob` against PackStore. Tombstoned blobs return
+    // None from `PackStore::get`, which the helper surfaces as
+    // `ServiceError::Internal`; we translate that to a BytesGone
+    // skip so the worker keeps draining instead of poisoning the
+    // queue.
+    let materialized = match crate::attachment_materialize::materialize_blob(
+        &inner.boot_state,
+        &work.content_hash,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let msg = format!("materialize_blob {}: {e}", work.content_hash);
+            log::debug!("{msg}");
+            persist_outcome_row(
+                inner,
+                &work.content_hash,
+                &mime_type,
+                &ExtractionOutcome::Skipped { reason: SkipReason::BytesGone },
+            )
+            .await;
+            return ExtractionOutcome::Skipped { reason: SkipReason::BytesGone };
+        }
+    };
+    let bytes = match tokio::fs::read(&materialized.path).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             persist_outcome_row(
@@ -578,7 +611,7 @@ async fn run_extraction_pipeline(
             return ExtractionOutcome::Skipped { reason: SkipReason::BytesGone };
         }
         Err(e) => {
-            log::warn!("read {} failed: {e}", cache_path.display());
+            log::warn!("read {} failed: {e}", materialized.path.display());
             persist_outcome_row(
                 inner,
                 &work.content_hash,
@@ -589,7 +622,6 @@ async fn run_extraction_pipeline(
             return ExtractionOutcome::Failed { error: format!("read: {e}") };
         }
     };
-    drop(_guard);
 
     if bytes.len() > MAX_INPUT_BYTES {
         let outcome = ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
@@ -890,6 +922,17 @@ mod tests {
         (SearchWriteHandle::from_sender(tx), rx)
     }
 
+    /// Build a bare `BootSharedState` for tests that exercise the
+    /// worker but don't need a PackStore installed. ExtractRuntime
+    /// reads `boot_state.pack_store()` lazily; missing pack store is
+    /// surfaced to materialize_blob as a `BytesGone`-shaped skip.
+    fn dummy_boot_state() -> Arc<crate::boot::BootSharedState> {
+        crate::boot::BootSharedState::new(
+            std::path::PathBuf::from("."),
+            crate::dispatch::DispatchConfig::default(),
+        )
+    }
+
     #[tokio::test]
     async fn enqueue_after_shutdown_returns_err() {
         // Build a runtime with a dummy DB - we only need the lifecycle
@@ -904,6 +947,7 @@ mod tests {
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),
+            dummy_boot_state(),
             search_write,
             body_read,
             notification_tx,
@@ -945,6 +989,7 @@ mod tests {
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),
+            dummy_boot_state(),
             search_write,
             body_read,
             notification_tx,
@@ -1032,6 +1077,7 @@ mod tests {
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),
+            dummy_boot_state(),
             search_write,
             body_read,
             notification_tx,
@@ -1102,6 +1148,7 @@ mod tests {
         let runtime = ExtractRuntime::new(
             db,
             std::path::PathBuf::from("."),
+            dummy_boot_state(),
             search_write,
             body_read,
             notification_tx,

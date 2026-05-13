@@ -473,7 +473,6 @@ pub struct DbAttachment {
     pub remote_attachment_id: Option<String>,
     pub content_id: Option<String>,
     pub is_inline: bool,
-    pub local_path: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
 }
 
@@ -655,7 +654,6 @@ pub struct AttachmentWithContext {
     pub remote_attachment_id: Option<String>,
     pub content_id: Option<String>,
     pub is_inline: i64,
-    pub local_path: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub from_address: Option<String>,
     pub from_name: Option<String>,
@@ -766,16 +764,6 @@ pub struct ImapMessageRow {
 pub struct SpecialFolderRow {
     pub imap_folder_path: Option<String>,
     pub name: String,
-}
-
-// ── Cached attachment info (for eviction) ──────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CachedAttachmentRow {
-    pub id: String,
-    pub local_path: String,
-    pub cache_size: i64,
-    pub content_hash: Option<crate::blob_hash::BlobHash>,
 }
 
 // ── Backfill row (smart label backfill) ────────────────────

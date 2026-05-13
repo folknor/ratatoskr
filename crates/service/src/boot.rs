@@ -153,6 +153,13 @@ pub(crate) struct BootSharedState {
     /// `Arc<mpsc::Sender>` underneath); this slot installs a single
     /// canonical copy and hands out clones via `search_write()`.
     search_write: Mutex<Option<service_state::SearchWriteHandle>>,
+    /// Attachments roadmap Phase 3: `PackStore` handle. Constructed
+    /// during the `OpeningBodyAndInlineStores` boot phase (the variant
+    /// name is a historical artefact - it now also covers the pack
+    /// store). Consumed by `attachment.fetch` (for `materialize_blob`)
+    /// and the ExtractRuntime worker. Drain flushes the open pack
+    /// before the clean-shutdown sentinel write.
+    pack_store: Mutex<Option<Arc<store::PackStore>>>,
     /// Phase 7-9: in-flight `index.rebuild` task. Holds the
     /// rebuild_id, the `JoinHandle` for the spawned rebuild, and a
     /// `CancellationToken` the dispatch-side drain can cancel.
@@ -238,6 +245,7 @@ impl BootSharedState {
             extract_runtime: Mutex::new(None),
             search_writer_handle: Mutex::new(None),
             search_write: Mutex::new(None),
+            pack_store: Mutex::new(None),
             rebuild_task: Mutex::new(None),
             out_tx: Mutex::new(None),
             pending_schema_rebuild: std::sync::atomic::AtomicBool::new(false),
@@ -396,6 +404,42 @@ impl BootSharedState {
         self.search_write
             .lock()
             .expect("search_write mutex poisoned")
+            .take()
+    }
+
+    /// Install the boot-constructed `PackStore`. Called once during
+    /// `OpeningBodyAndInlineStores`. Subsequent installs are logged
+    /// and ignored to mirror `install_search_write`.
+    pub(crate) fn install_pack_store(&self, store: store::PackStore) {
+        let mut slot = self
+            .pack_store
+            .lock()
+            .expect("pack_store mutex poisoned");
+        if slot.is_some() {
+            log::warn!("install_pack_store called twice; second install ignored");
+            return;
+        }
+        *slot = Some(Arc::new(store));
+    }
+
+    /// Clone the installed `PackStore` handle. Returns `None` if boot
+    /// has not opened the store yet (handlers should treat that as a
+    /// not-ready error).
+    pub(crate) fn pack_store(&self) -> Option<Arc<store::PackStore>> {
+        self.pack_store
+            .lock()
+            .expect("pack_store mutex poisoned")
+            .as_ref()
+            .map(Arc::clone)
+    }
+
+    /// Clear the installed `PackStore` handle. The drain takes this
+    /// just before flushing + sentinel write so no leftover handle
+    /// pins the store past shutdown.
+    pub(crate) fn take_pack_store(&self) -> Option<Arc<store::PackStore>> {
+        self.pack_store
+            .lock()
+            .expect("pack_store mutex poisoned")
             .take()
     }
 
@@ -1141,6 +1185,23 @@ async fn run_boot_sequence_inner(
             BootFailure::MigrationFailure
         })?;
 
+    // Attachments roadmap Phase 3: open the pack store against the
+    // main DB connection. `PackStore::open` runs the in-place open-pack
+    // recovery sweep (torn trailing frames truncated, missing index
+    // entries re-registered). The pack store shares `conn` because its
+    // index (`attachment_blobs`) lives in the main DB schema.
+    let pack_store = store::PackStore::open(
+        app_data_dir.join("attachment_packs"),
+        Arc::clone(&conn),
+        store::DEFAULT_PACK_TARGET_SIZE,
+    )
+    .await
+    .map_err(|e| {
+        log::error!("PackStore open failed: {e}");
+        BootFailure::MigrationFailure
+    })?;
+    state.install_pack_store(pack_store);
+
     boot_progress::emit(&out_tx, BootPhase::OpeningSearchIndex, None);
 
     // Phase 7-1 / Phase 8: schema-version sentinel. Compare the
@@ -1217,15 +1278,14 @@ async fn run_boot_sequence_inner(
         }
     }
 
-    // Phase 6b: attachment-cache reconciliation runs on every boot
-    // (clean or dirty) because orphans accumulate independent of
-    // dirty-marker state - per-account deletions, crashed eviction
-    // sweeps, and external file deletions all leave residue the
-    // reconciliation walks. The cost is bounded (one cache-dir walk
-    // + one row scan + O(stale-row-count) row updates) and runs in
-    // microseconds on small or empty caches.
-    let _attachment_stats =
-        crate::startup_invariants::reconcile_attachment_cache(&db_write, &app_data_dir).await;
+    // Phase 3 of the attachments roadmap retired the flat-cache
+    // reconciliation pass that used to run here. PackStore's
+    // open-time recovery (Phase 2) walks the open pack for torn
+    // frames and re-indexes missing entries. Pack-level orphan
+    // detection (blobs not referenced by any `attachments` row) is
+    // Phase 8's responsibility - it lands with the date-windowed
+    // tombstoner so the orphan walk and the eviction walk share one
+    // pass over the index.
 
     // Phase 6b: resume any in-flight account deletions. Each marker
     // means a deletion that started but did not finish; the drain
@@ -1238,6 +1298,7 @@ async fn run_boot_sequence_inner(
         &body_write,
         &inline_write,
         &search_write,
+        state.pack_store(),
         &app_data_dir,
     )
     .await;

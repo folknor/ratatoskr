@@ -1,26 +1,20 @@
 //! `attachment.fetch` wire types.
 //!
-//! Cache-miss reads are Service-side: the UI ships `(account_id,
-//! message_id, attachment_id)` and gets back the cache-relative path
-//! the Service guarantees is present on disk. Bytes never cross the
-//! IPC; the on-disk file is the contract.
+//! The UI ships `(account_id, message_id, attachment_id)` and the
+//! Service returns the path of a freshly-materialized tmp file under
+//! `<app_data>/attachment_fetch_tmp/<content_hash>-<request_id>`.
+//! Bytes never cross the IPC; the tmp file is the contract.
 //!
-//! On the current flat cache (`attachment_cache/<content_hash>`), the
-//! UI's open fd is the pin against eviction: `unlink` is fd-safe on
-//! Linux, so a UI process holding the file open survives a
-//! concurrent eviction sweep and the kernel reclaims space when the
-//! last fd closes.
-//!
-//! When `PackStore` lands (attachments roadmap Phase 3), blobs live
-//! inside pack files at `(pack_id, offset, length)`; there is no
-//! user-readable file at a relative path. The handler bridges this
-//! with **per-fetch transient extraction**: it copies the requested
-//! blob from its pack to
-//! `<app_data>/attachment_fetch_tmp/<content_hash>-<request_id>`
-//! and returns that path in the ack. The UI opens the tmp file
-//! positionally; the open fd remains the pin, just against the tmp
-//! file rather than the pack. An idle cleanup pass reaps tmp entries
-//! older than 10 minutes. No lease IDs.
+//! The pack store (attachments roadmap Phase 2) is the source of
+//! truth for cached blobs. On a cache hit the Service writes the
+//! blob bytes out to a unique tmp file (`<hash>-<uuid>.part` then
+//! atomic rename) and returns the path. On a cache miss the Service
+//! runs the full pipeline: provider fetch → BLAKE3 →
+//! `PackStore::put` → materialize → ack. The UI re-opens the tmp
+//! file positionally; the open fd is the pin (`unlink` is fd-safe on
+//! Linux so a concurrent reap survives an in-flight read). An idle
+//! cleanup pass (`attachment.tmp_cleanup_kick`) reaps tmp entries
+//! older than 10 minutes.
 
 use serde::{Deserialize, Serialize};
 
@@ -34,10 +28,10 @@ pub struct AttachmentFetchParams {
 
 /// `attachment.fetch` ack.
 ///
-/// `relative_path` is rooted at `<app_data>/`, matching the existing
-/// `attachment_cache::write_cached` return shape
-/// (`attachment_cache/<content_hash>`). UI re-opens the file
-/// positionally; the open fd is the pin against eviction.
+/// `relative_path` is rooted at `<app_data>/` and takes the form
+/// `attachment_fetch_tmp/<content_hash>-<request_id>`. The UI re-opens
+/// the file positionally; the open fd is the pin against the idle
+/// cleanup kick.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentFetchAck {
     pub content_hash: String,
@@ -66,7 +60,7 @@ mod tests {
         let original = AttachmentFetchAck {
             content_hash: "deadbeefcafebabe".into(),
             size_bytes: 12345,
-            relative_path: "attachment_cache/deadbeefcafebabe".into(),
+            relative_path: "attachment_fetch_tmp/deadbeefcafebabe-deadbeef".into(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: AttachmentFetchAck = serde_json::from_value(json).expect("deserialize");

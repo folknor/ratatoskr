@@ -1,9 +1,17 @@
 use std::path::{Path, PathBuf};
 
 use log::{info, warn};
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::db::ReadDbState;
-use store::attachment_cache::hash_bytes;
+
+/// Hash contact-photo bytes into a 16-char hex string. Contact photos
+/// use xxh3 keying (they are their own namespace, distinct from the
+/// attachments roadmap's BLAKE3 keys) so identical bytes dedupe inside
+/// the contact-photo cache directory.
+fn hash_bytes(data: &[u8]) -> String {
+    format!("{:016x}", xxh3_64(data))
+}
 
 // ---------------------------------------------------------------------------
 // Types

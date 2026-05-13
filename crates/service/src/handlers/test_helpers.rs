@@ -247,7 +247,11 @@ pub(super) async fn seed_cached_attachment_handle(
         });
     }
     let write_db = boot_state.write_db_state()?;
-    let app_data_dir = boot_state.app_data_dir().to_path_buf();
+    let pack_store = boot_state.pack_store().ok_or_else(|| {
+        ServiceError::Internal(
+            "pack store not installed; UI must wait for boot.ready".into(),
+        )
+    })?;
     let attachment_id = params
         .attachment_id
         .clone()
@@ -255,23 +259,30 @@ pub(super) async fn seed_cached_attachment_handle(
     let filename = params.filename.unwrap_or_else(|| "harness.txt".into());
     let mime_type = params.mime_type.unwrap_or_else(|| "text/plain".into());
     let bytes = params.content.into_bytes();
-    let content_hash = db::blob_hash::BlobHash::hash(&bytes);
-    let hash_hex = content_hash.to_hex();
-    let relative_path =
-        store::attachment_cache::write_cached(&app_data_dir, &hash_hex, &bytes)
-            .map_err(ServiceError::Internal)?;
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
     let cache_size = i64::try_from(bytes.len())
         .map_err(|e| ServiceError::Internal(format!("attachment cache size conversion: {e}")))?;
+    let content_hash = pack_store
+        .put(bytes)
+        .await
+        .map_err(|e| ServiceError::Internal(format!("PackStore::put: {e}")))?;
+    let hash_hex = content_hash.to_hex();
+    // The harness ack mirrors the historical "attachment_cache/<hash>"
+    // shape so existing scripts that compare against the relative_path
+    // keep working. The path no longer corresponds to a real file on
+    // disk - bytes live in PackStore - but harness callers that need
+    // the bytes go through `attachment.fetch`, which materializes them
+    // into `attachment_fetch_tmp/<hash>-<uuid>`.
+    let relative_path = format!("attachment_cache/{hash_hex}");
     let account_id = params.account_id.clone();
     let message_id = params.message_id.clone();
     let ack = TestSeedCachedAttachmentAck {
         account_id: account_id.clone(),
         message_id: message_id.clone(),
         attachment_id: attachment_id.clone(),
-        content_hash: hash_hex.clone(),
-        relative_path: relative_path.clone(),
+        content_hash: hash_hex,
+        relative_path,
         size_bytes,
     };
     write_db
@@ -284,7 +295,6 @@ pub(super) async fn seed_cached_attachment_handle(
                     attachment_id: &attachment_id,
                     filename: &filename,
                     mime_type: &mime_type,
-                    relative_path: &relative_path,
                     cache_size,
                     content_hash: &content_hash,
                 },
@@ -311,7 +321,7 @@ pub(super) async fn seed_remote_attachment_handle(
             message: "message_id is required".into(),
         });
     }
-    let bytes = store::attachment_cache::decode_base64(&params.content_base64)
+    let bytes = common::encoding::decode_base64_standard(&params.content_base64)
         .map_err(ServiceError::Internal)?;
     let size_bytes = u64::try_from(bytes.len())
         .map_err(|e| ServiceError::Internal(format!("attachment size conversion: {e}")))?;
@@ -373,16 +383,38 @@ pub(super) async fn remove_cached_attachment_bytes_handle(
             message: "relative_path is required".into(),
         });
     }
-    let app_data_dir = boot_state.app_data_dir().to_path_buf();
-    let full_path = app_data_dir.join(&params.relative_path);
-    let removed = full_path.is_file();
-    if removed {
-        store::attachment_cache::remove_cached_relative(&app_data_dir, &params.relative_path)
-            .map_err(ServiceError::Internal)?;
-    }
+    // Attachments roadmap Phase 3: bytes live in PackStore, not on
+    // disk under `attachment_cache/<hash>`. Harness scripts still pass
+    // the path returned by `seed_cached_attachment`; we parse the hex
+    // hash out of it and tombstone the blob in PackStore so subsequent
+    // `attachment.fetch` calls go through the cache-miss path.
+    let pack_store = boot_state.pack_store().ok_or_else(|| {
+        ServiceError::Internal(
+            "pack store not installed; UI must wait for boot.ready".into(),
+        )
+    })?;
+    let hash_hex = params
+        .relative_path
+        .strip_prefix("attachment_cache/")
+        .or_else(|| params.relative_path.strip_prefix("attachment_fetch_tmp/"))
+        .ok_or_else(|| {
+            ServiceError::Internal(format!(
+                "test.remove_cached_attachment_bytes: relative_path must start with \
+                 attachment_cache/ or attachment_fetch_tmp/: {}",
+                params.relative_path
+            ))
+        })?;
+    // Strip any trailing -<uuid> suffix from the tmp-file form.
+    let hash_hex = hash_hex.split('-').next().unwrap_or(hash_hex);
+    let hash = db::blob_hash::BlobHash::from_hex(hash_hex)
+        .map_err(|e| ServiceError::Internal(format!("parse content hash: {e}")))?;
+    pack_store
+        .tombstone(&hash)
+        .await
+        .map_err(|e| ServiceError::Internal(format!("PackStore::tombstone: {e}")))?;
     serde_json::to_value(TestRemoveCachedAttachmentBytesAck {
         relative_path: params.relative_path,
-        removed,
+        removed: true,
     })
     .map_err(|error| ServiceError::Internal(error.to_string()))
 }
@@ -805,7 +837,6 @@ struct CachedAttachmentInsert<'a> {
     attachment_id: &'a str,
     filename: &'a str,
     mime_type: &'a str,
-    relative_path: &'a str,
     cache_size: i64,
     content_hash: &'a db::blob_hash::BlobHash,
 }
@@ -824,22 +855,17 @@ fn insert_harness_cached_attachment(
     insert: &CachedAttachmentInsert<'_>,
 ) -> Result<(), String> {
     let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
-    // Harness fixtures write raw bytes straight into the flat cache,
-    // so size and cache_size intentionally match for seeded rows.
     tx.execute(
         "INSERT INTO attachments (
             id, message_id, account_id, filename, mime_type, size,
-            local_path, cached_at, cache_size, content_hash, text_indexed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch(), ?8, ?9, NULL)
+            content_hash, text_indexed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
         ON CONFLICT(id) DO UPDATE SET
             message_id = excluded.message_id,
             account_id = excluded.account_id,
             filename = excluded.filename,
             mime_type = excluded.mime_type,
             size = excluded.size,
-            local_path = excluded.local_path,
-            cached_at = unixepoch(),
-            cache_size = excluded.cache_size,
             content_hash = excluded.content_hash,
             text_indexed_at = NULL",
         params![
@@ -848,8 +874,6 @@ fn insert_harness_cached_attachment(
             insert.account_id,
             insert.filename,
             insert.mime_type,
-            insert.cache_size,
-            insert.relative_path,
             insert.cache_size,
             insert.content_hash,
         ],
@@ -866,17 +890,14 @@ fn insert_harness_remote_attachment(
     tx.execute(
         "INSERT INTO attachments (
             id, message_id, account_id, filename, mime_type, size,
-            local_path, cached_at, cache_size, content_hash, text_indexed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL, NULL, NULL)
+            content_hash, text_indexed_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)
         ON CONFLICT(id) DO UPDATE SET
             message_id = excluded.message_id,
             account_id = excluded.account_id,
             filename = excluded.filename,
             mime_type = excluded.mime_type,
             size = excluded.size,
-            local_path = NULL,
-            cached_at = NULL,
-            cache_size = NULL,
             content_hash = NULL,
             text_indexed_at = NULL",
         params![

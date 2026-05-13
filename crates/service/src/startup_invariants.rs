@@ -80,18 +80,6 @@ pub struct InvariantPassStats {
     pub extracted_text_scan_ms: u128,
 }
 
-/// Phase 6b: result of `reconcile_attachment_cache`. Runs on every
-/// boot because orphans accumulate from per-account deletions,
-/// crashed eviction sweeps, and external file deletions; the
-/// reconciliation is bounded (one cache-dir walk + one row scan)
-/// and runs in microseconds on a small / empty cache.
-#[derive(Debug, Default)]
-pub struct AttachmentCacheReconciliationStats {
-    pub orphan_files_dropped: u64,
-    pub stale_rows_reconciled: u64,
-    pub elapsed_ms: u128,
-}
-
 fn marker_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("sync_markers")
 }
@@ -437,129 +425,9 @@ async fn drop_search_orphans(
     Ok(n)
 }
 
-/// Phase 6b: walk `attachment_cache/`, drop files whose
-/// `content_hash` does not appear in `attachments.content_hash`,
-/// then walk cached `attachments` rows and clear cache columns for
-/// rows whose `local_path` no longer resolves on disk.
-///
-/// Runs on every boot regardless of clean-shutdown state because:
-/// (a) orphans accumulate from per-account deletions and crashed
-/// eviction sweeps independent of dirty-marker state, and (b)
-/// stale rows can arrive from external file deletions (user
-/// rm-rf'd `attachment_cache/`, OS quarantined a blob, etc.). The
-/// reconciliation is bounded - one cache-dir walk + one row scan +
-/// O(stale-row-count) row updates - and runs in microseconds on a
-/// small / empty cache.
-pub async fn reconcile_attachment_cache(
-    db: &WriteDbState,
-    app_data_dir: &Path,
-) -> AttachmentCacheReconciliationStats {
-    let started = Instant::now();
-    let mut stats = AttachmentCacheReconciliationStats::default();
-
-    // Phase A: orphan-file sweep. Read referenced hashes once, walk
-    // the cache directory, drop files not in the set.
-    let referenced: std::collections::HashSet<String> = match db
-        .with_conn(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT DISTINCT content_hash FROM attachments \
-                     WHERE content_hash IS NOT NULL",
-                )
-                .map_err(|e| format!("reconcile prepare: {e}"))?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(|e| format!("reconcile query: {e}"))?;
-            Ok(rows.filter_map(Result::ok).collect())
-        })
-        .await
-    {
-        Ok(set) => set,
-        Err(e) => {
-            log::warn!(
-                "reconcile_attachment_cache: failed to read referenced hashes: {e}; \
-                 skipping orphan sweep",
-            );
-            std::collections::HashSet::new()
-        }
-    };
-
-    let cache_dir = app_data_dir.join("attachment_cache");
-    match tokio::fs::read_dir(&cache_dir).await {
-        Ok(mut entries) => loop {
-            match entries.next_entry().await {
-                Ok(Some(entry)) => {
-                    let path = entry.path();
-                    let Some(stem) = path.file_name().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    if referenced.contains(stem) {
-                        continue;
-                    }
-                    match tokio::fs::remove_file(&path).await {
-                        Ok(()) => stats.orphan_files_dropped += 1,
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(e) => log::warn!(
-                            "reconcile_attachment_cache: orphan unlink {} failed: {e}",
-                            path.display(),
-                        ),
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    log::warn!("reconcile_attachment_cache: dir iter: {e}");
-                    break;
-                }
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => log::warn!(
-            "reconcile_attachment_cache: read cache dir {}: {e}",
-            cache_dir.display(),
-        ),
-    }
-
-    // Phase B: stale-row reconciliation. Walk cached rows, clear
-    // cache columns for rows whose local_path does not resolve.
-    let cached_rows = db
-        .with_conn(db::db::queries_extra::get_cached_attachments_oldest_first)
-        .await
-        .unwrap_or_default();
-
-    let mut stale_ids: Vec<String> = Vec::new();
-    for row in cached_rows {
-        let path = app_data_dir.join(&row.local_path);
-        if !path.exists() {
-            stale_ids.push(row.attachment_id);
-        }
-    }
-    if !stale_ids.is_empty() {
-        let count = stale_ids.len() as u64;
-        let ids = stale_ids.clone();
-        match db
-            .with_conn(move |conn| {
-                db::db::queries_extra::clear_attachment_cache_fields_batch(conn, &ids)
-            })
-            .await
-        {
-            Ok(()) => stats.stale_rows_reconciled = count,
-            Err(e) => log::warn!(
-                "reconcile_attachment_cache: clear_attachment_cache_fields_batch: {e}",
-            ),
-        }
-    }
-
-    stats.elapsed_ms = started.elapsed().as_millis();
-    if stats.orphan_files_dropped > 0 || stats.stale_rows_reconciled > 0 {
-        log::info!(
-            "reconcile_attachment_cache: dropped {} orphan files, reconciled {} stale rows in {} ms",
-            stats.orphan_files_dropped,
-            stats.stale_rows_reconciled,
-            stats.elapsed_ms,
-        );
-    }
-    stats
-}
+// Phase 3 of the attachments roadmap retired `reconcile_attachment_cache`
+// along with the flat cache. PackStore's open-time recovery walks the
+// open pack; orphan detection at the pack-blob level lands with Phase 8.
 
 async fn unlink_marker_file(app_data_dir: &Path, account_id: &str) -> Result<(), String> {
     let path = marker_dir(app_data_dir).join(format!("{account_id}.json"));

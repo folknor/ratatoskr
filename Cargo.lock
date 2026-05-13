@@ -6090,6 +6090,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+ "xxhash-rust",
 ]
 
 [[package]]
