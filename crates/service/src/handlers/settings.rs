@@ -24,17 +24,18 @@ pub(crate) async fn handle_set(
     boot_state: &Arc<BootSharedState>,
     params: SettingsSetParams,
 ) -> Result<Value, ServiceError> {
-    // Attachments roadmap Phase 6: capture the incoming
-    // `sync_period_days` (if any) before the write so we can compare
-    // it against the existing stored value after commit and fire a
-    // backfill kick on extend.
-    let new_window_days: Option<i64> = params.values.iter().find_map(|v| match v {
-        SettingValue::SyncPeriodDays(s) => s.parse::<i64>().ok(),
-        _ => None,
-    });
+    // Attachments roadmap Phase 6: if `sync_period_days` is in the
+    // patch, remember the pre-write value so the post-commit kick can
+    // detect an extend. We don't trust the parsed wire value for the
+    // post-commit comparison (see below) - this read is purely for
+    // the "was it ever set" snapshot.
+    let touches_sync_period = params
+        .values
+        .iter()
+        .any(|v| matches!(v, SettingValue::SyncPeriodDays(_)));
 
     let write_db = boot_state.write_db_state()?;
-    let old_window_days: Option<i64> = if new_window_days.is_some() {
+    let old_window_days: Option<i64> = if touches_sync_period {
         write_db
             .with_conn(|conn| {
                 Ok(rtsk::db::queries::get_setting(conn, "sync_period_days")
@@ -66,10 +67,33 @@ pub(crate) async fn handle_set(
         .await
         .map_err(ServiceError::Internal)?;
 
-    if let (Some(new_days), Some(old_days)) = (new_window_days, old_window_days)
-        && new_days > old_days
-    {
-        kick_window_extend(boot_state, new_days).await;
+    if old_window_days.is_some() {
+        // Defense in depth: read the freshly-committed value rather
+        // than trusting the parsed wire value. Cheap, and decouples
+        // the kick decision from any future filter in `set_setting`
+        // that could reject or rewrite the wire input.
+        let committed_days: Option<i64> = write_db
+            .with_conn(|conn| {
+                Ok(rtsk::db::queries::get_setting(conn, "sync_period_days")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.parse::<i64>().ok()))
+            })
+            .await
+            .ok()
+            .flatten();
+        if let (Some(new_days), Some(old_days)) = (committed_days, old_window_days)
+            && new_days > old_days
+        {
+            // Detach: the kick walks every active JMAP account and
+            // paginates each one's backfill, which can take seconds.
+            // The IPC ack must not block on it, otherwise the UI sees
+            // the 5s settings.set timeout fire on a slow extend.
+            let boot_state = Arc::clone(boot_state);
+            tokio::spawn(async move {
+                kick_window_extend(&boot_state, new_days).await;
+            });
+        }
     }
 
     serde_json::to_value(SettingsSetAck)
@@ -81,6 +105,9 @@ pub(crate) async fn handle_set(
 /// extended window. Errors are logged but do not surface to the
 /// `settings.set` ack - the write itself succeeded and the next
 /// boot's recovery kick is the backstop.
+///
+/// Detached from `handle_set` via `tokio::spawn` so the ack returns
+/// immediately; the kick may take seconds for large mailboxes.
 async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64) {
     let Some(prefetch) = boot_state.prefetch_runtime() else {
         log::debug!("settings.set: PrefetchRuntime not installed; skipping window-extend kick");

@@ -513,26 +513,36 @@ async fn run_sync(
     // is 0. The PrefetchRuntime's worker would skip the items anyway
     // via `SkipReason::AccountDisabled`, but bailing here avoids
     // enqueueing them just to drop them.
-    let account_caching_on = {
+    // Attachments roadmap review: gate the sweep on (a) caching
+    // enabled for the account AND (b) provider = 'jmap'. The boot
+    // recovery kick and the window-extend kick already filter on
+    // provider; without the same filter here, a Gmail / Graph / IMAP
+    // sync would drive prefetch through provider paths that Phase 7
+    // hasn't yet rate-tuned, error-classified, or session-reused.
+    let (account_caching_on, account_is_jmap) = {
         let aid = account_id.clone();
         inner
             .db
             .with_conn(move |conn| {
-                let v: i64 = conn
-                    .query_row(
-                        "SELECT COALESCE(cache_attachments_enabled, 1) \
-                         FROM accounts WHERE id = ?1",
-                        rusqlite::params![aid],
-                        |r| r.get(0),
-                    )
-                    .unwrap_or(1);
-                Ok(v != 0)
+                conn.query_row(
+                    "SELECT COALESCE(cache_attachments_enabled, 1), \
+                            COALESCE(provider, '') \
+                     FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |r| {
+                        let enabled: i64 = r.get(0)?;
+                        let provider: String = r.get(1)?;
+                        Ok((enabled != 0, provider == "jmap"))
+                    },
+                )
+                .or(Ok((false, false)))
             })
             .await
-            .unwrap_or(true)
+            .unwrap_or((false, false))
     };
     if matches!(sync_result, SyncResult::Completed)
         && account_caching_on
+        && account_is_jmap
         && let Some(prefetch) = inner.boot_state.prefetch_runtime()
     {
         let window_start_unix = match inner.db.with_conn(|conn| {

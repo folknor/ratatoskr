@@ -63,6 +63,19 @@ const MIN_DISK_FREE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// Backfill page size when `kick_backfill_account` walks historical
 /// rows.
 const BACKFILL_PAGE_SIZE: i64 = 256;
+/// Safety ceiling on `kick_backfill_account` page iterations. With a
+/// 256-row page size this caps a single kick at ~32k attachments. Real
+/// mailboxes inside a 1-year window stay well below; the cap exists
+/// to bound pathological "every fetch fails, content_hash stays NULL"
+/// loops that otherwise burn the write-conn mutex.
+const MAX_BACKFILL_PAGES: u32 = 128;
+/// Minimum wallclock spacing between two `PrefetchProgress`
+/// notifications. With a 1000-row backfill the unthrottled path emits
+/// 1000 mpsc sends before the downstream `Coalesce` collapses them;
+/// throttling cuts this to ~10 events even though the underlying
+/// counters still tick per-item. `PrefetchCompleted` drained-to-zero
+/// fires unconditionally regardless of throttle.
+const PROGRESS_THROTTLE_MS: u64 = 100;
 /// Window cap on the post-sync sweep - the most recent N attachments
 /// for the account whose hash is still NULL. Public so `sync.rs`
 /// passes the same bound the runtime documents.
@@ -76,6 +89,18 @@ pub enum PrefetchPriority {
     /// Historical, fired by boot recovery, account-add, and
     /// window-extend.
     Backfill,
+}
+
+/// Outcome of a single `enqueue` call. The `kick_backfill_account`
+/// pagination logic distinguishes "row was actually placed on the
+/// channel" from "row was already in flight." Counting both as a hit
+/// causes the kick loop to spin when workers haven't drained yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnqueueOutcome {
+    /// New (account, attachment) key; placed on the mpsc.
+    Newly,
+    /// Already in the in-flight set; not re-sent.
+    Dedupe,
 }
 
 /// One attachment to fetch.
@@ -232,10 +257,24 @@ pub(crate) struct PrefetchRuntimeInner {
     fetched_count:        AtomicU64,
     skipped_count:        AtomicU64,
     failed_count:         AtomicU64,
+    /// Last wallclock at which `finalize_item` emitted a
+    /// `PrefetchProgress` notification. Throttles the per-item firehose
+    /// down to one event per `PROGRESS_THROTTLE` interval; the
+    /// `PrefetchCompleted` drained-to-zero event still fires unthrottled.
+    last_progress_emit_ms: AtomicU64,
+    /// Counter snapshot mutex used when building `PrefetchCompleted`.
+    /// Without this, fetched/skipped/failed read at different instants
+    /// can disagree by O(in-flight) and the ack totals look impossible.
+    counters_snapshot:    Mutex<()>,
     /// Per-account semaphore cache. Populated lazily on first dispatch
     /// for a new account_id. Capped implicitly by total accounts.
     account_semaphores:   Mutex<HashMap<String, Arc<Semaphore>>>,
     breakers:             Mutex<HashMap<String, BreakerState>>,
+    /// Account ids whose deletion is in flight. `cancel_account`
+    /// inserts; `run_pipeline` checks before PackStore::put so a queued
+    /// or in-flight prefetch can't land bytes after the
+    /// `AttachmentCache` deletion-step snapshotted hashes.
+    cancelling_accounts:  Mutex<HashSet<String>>,
 }
 
 #[derive(Clone)]
@@ -269,8 +308,11 @@ impl PrefetchRuntime {
             fetched_count:      AtomicU64::new(0),
             skipped_count:      AtomicU64::new(0),
             failed_count:       AtomicU64::new(0),
+            last_progress_emit_ms: AtomicU64::new(0),
+            counters_snapshot:  Mutex::new(()),
             account_semaphores: Mutex::new(HashMap::new()),
             breakers:           Mutex::new(HashMap::new()),
+            cancelling_accounts: Mutex::new(HashSet::new()),
         });
         let inner_for_worker = Arc::clone(&inner);
         let handle = tokio::spawn(async move {
@@ -288,16 +330,25 @@ impl PrefetchRuntime {
         &self,
         work: PrefetchWork,
         priority: PrefetchPriority,
-    ) -> Result<(), String> {
+    ) -> Result<EnqueueOutcome, String> {
         if self.inner.closed.load(Ordering::Relaxed) {
             return Err("PrefetchRuntime is shutting down".into());
+        }
+        if self
+            .inner
+            .cancelling_accounts
+            .lock()
+            .await
+            .contains(&work.account_id)
+        {
+            return Ok(EnqueueOutcome::Dedupe);
         }
         let key = (work.account_id.clone(), work.attachment_id.clone());
         {
             let mut guard = self.inner.in_flight.lock().await;
             let (set, fifo) = &mut *guard;
             if !set.insert(key.clone()) {
-                return Ok(());
+                return Ok(EnqueueOutcome::Dedupe);
             }
             fifo.push_back(key);
             // Evict-oldest if we've blown the cap. The evicted pair is
@@ -318,11 +369,17 @@ impl PrefetchRuntime {
         };
         if let Err(e) = tx.send(work.clone()).await {
             self.inner.queue_depth.fetch_sub(1, Ordering::Relaxed);
+            // Roll back both halves of the in-flight tracker so a
+            // future re-enqueue isn't dedupe-suppressed and the FIFO
+            // doesn't carry a phantom entry past the next cap eviction.
             let mut guard = self.inner.in_flight.lock().await;
-            guard.0.remove(&(work.account_id.clone(), work.attachment_id.clone()));
+            let (set, fifo) = &mut *guard;
+            let drop_key = (work.account_id.clone(), work.attachment_id.clone());
+            set.remove(&drop_key);
+            fifo.retain(|k| k != &drop_key);
             return Err(format!("PrefetchRuntime worker exited: {e}"));
         }
-        Ok(())
+        Ok(EnqueueOutcome::Newly)
     }
 
     /// Walk `attachments` for `account_id` joining against `messages`
@@ -331,14 +388,18 @@ impl PrefetchRuntime {
     /// the chosen priority lane. The sweep is bounded by `limit` (None
     /// = unbounded; backfill paginates via repeated calls).
     ///
-    /// Returns the number of rows actually enqueued (after dedupe).
+    /// Returns `(rows_returned_by_query, newly_enqueued)`. The two
+    /// differ when in-flight dedupe suppresses a re-query. Callers
+    /// paginating off this function must use `rows_returned_by_query`
+    /// as the termination signal - using `newly_enqueued` causes a
+    /// spin when workers haven't drained the previous page yet.
     pub async fn enqueue_window_for_account(
         &self,
         account_id: &str,
         window_start_unix: i64,
         priority: PrefetchPriority,
         limit: Option<i64>,
-    ) -> Result<u64, String> {
+    ) -> Result<(u64, u64), String> {
         let aid = account_id.to_string();
         let lim = limit.unwrap_or(i64::MAX);
         let rows: Vec<(String, String, Option<String>, Option<String>)> = self
@@ -380,7 +441,8 @@ impl PrefetchRuntime {
             })
             .await?;
 
-        let mut enqueued = 0u64;
+        let row_count = rows.len() as u64;
+        let mut newly = 0u64;
         for (attachment_id, message_id, remote, imap) in rows {
             let remote_attachment_id = match remote.or(imap) {
                 Some(s) if !s.is_empty() => s,
@@ -392,25 +454,33 @@ impl PrefetchRuntime {
                 attachment_id,
                 remote_attachment_id,
             };
-            if self.enqueue(work, priority).await.is_ok() {
-                enqueued += 1;
+            if let Ok(EnqueueOutcome::Newly) = self.enqueue(work, priority).await {
+                newly += 1;
             }
         }
-        Ok(enqueued)
+        Ok((row_count, newly))
     }
 
     /// Walk every page of `account_id`'s NULL-hash attachments inside
     /// the given window. Paginates via repeated bounded sweeps. Used
     /// by boot recovery, account-add, and window-extend triggers.
     /// Fire-and-forget: the worker drains asynchronously.
+    ///
+    /// Termination: the loop exits when the SQL query returns fewer
+    /// rows than the page limit (genuine drain) OR when an entire page
+    /// is dedupe-suppressed (workers haven't completed the prior page;
+    /// next kick will pick up the rest). A safety ceiling of
+    /// `MAX_BACKFILL_PAGES` caps pathological loops where rows keep
+    /// failing without `content_hash` being populated.
     pub async fn kick_backfill_account(
         &self,
         account_id: &str,
         window_start_unix: i64,
     ) -> Result<u64, String> {
         let mut total = 0u64;
+        let mut pages = 0u32;
         loop {
-            let page = self
+            let (rows, newly) = self
                 .enqueue_window_for_account(
                     account_id,
                     window_start_unix,
@@ -418,22 +488,51 @@ impl PrefetchRuntime {
                     Some(BACKFILL_PAGE_SIZE),
                 )
                 .await?;
-            total += page;
-            // Loop terminates when we enqueue fewer than a page -
-            // either the account is drained or every remaining row was
-            // dedupe-suppressed (already in-flight).
-            if page < BACKFILL_PAGE_SIZE as u64 {
+            total += newly;
+            pages = pages.saturating_add(1);
+            if rows < BACKFILL_PAGE_SIZE as u64 {
+                break;
+            }
+            // Every row was dedupe-suppressed - workers haven't drained
+            // the previous page. Yield; the next kick (or post-sync
+            // sweep) catches the rest.
+            if newly == 0 {
+                log::debug!(
+                    "kick_backfill_account({account_id}): full page dedupe-suppressed; \
+                     yielding after {pages} page(s)",
+                );
+                break;
+            }
+            if pages >= MAX_BACKFILL_PAGES {
+                log::warn!(
+                    "kick_backfill_account({account_id}): hit MAX_BACKFILL_PAGES ({pages}); \
+                     yielding to next kick",
+                );
                 break;
             }
         }
         Ok(total)
     }
 
-    /// Drop every queued work item for `account_id`. In-flight items
-    /// continue (no provider-side abort). Used by account-delete so we
-    /// don't issue a provider fetch against an account that's
-    /// disappearing.
+    /// Mark `account_id` as cancelling and drop every queued work
+    /// item for it. Subsequent `enqueue` calls short-circuit until
+    /// `release_account` clears the marker. Provider fetches already
+    /// in flight cannot be aborted, but `run_pipeline` checks the
+    /// cancelling-set before `PackStore::put` and before the
+    /// `attachments.content_hash` UPDATE so they can no longer leak
+    /// blobs past the `AttachmentCache` deletion-step snapshot.
+    ///
+    /// Used by `account.delete` (cancellation persists for the
+    /// lifetime of the deletion). For Phase 4's "cancel the queue
+    /// but the account isn't really going away" callers there is no
+    /// release path; until those exist, every caller pairs with
+    /// `release_account` or accepts permanent skipping.
     pub async fn cancel_account(&self, account_id: &str) {
+        self.inner
+            .cancelling_accounts
+            .lock()
+            .await
+            .insert(account_id.to_string());
         // The in-flight set still owns the (account, attachment) keys;
         // we evict them so a subsequent backfill against a freshly-
         // recreated account-id wouldn't be silently dedupe-suppressed.
@@ -442,6 +541,19 @@ impl PrefetchRuntime {
         set.retain(|(a, _)| a != account_id);
         fifo.retain(|(a, _)| a != account_id);
     }
+
+    /// Reverse `cancel_account`. Currently unused; reserved for a
+    /// future "abort the queued backfill but keep the account" caller
+    /// that account-delete does not need.
+    #[allow(dead_code)]
+    pub async fn release_account(&self, account_id: &str) {
+        self.inner
+            .cancelling_accounts
+            .lock()
+            .await
+            .remove(account_id);
+    }
+
 
 
     /// Begin shutdown. Idempotent. Mirrors `ExtractRuntime::shutdown`.
@@ -629,6 +741,17 @@ async fn run_pipeline(
         .boot_state
         .pack_store()
         .ok_or(SkipReason::PackStoreError)?;
+
+    // Account-delete race close: the provider call above can take
+    // seconds; in that window account.delete may have flipped
+    // `is_deleting` and called `cancel_account`. If we PackStore::put
+    // and UPDATE now, the AttachmentCache step's snapshot of cached
+    // hashes won't include the new blob and the row's CASCADE will
+    // strand it. Drop the bytes instead.
+    if account_is_cancelling_or_deleting(inner, &work.account_id).await {
+        return Err(SkipReason::RowGone);
+    }
+
     let content_hash = pack_store
         .put(attachment.bytes)
         .await
@@ -636,6 +759,18 @@ async fn run_pipeline(
             log::warn!("prefetch PackStore::put {}: {e}", work.attachment_id);
             SkipReason::PackStoreError
         })?;
+
+    // Re-check after the write. PackStore::put is content-hash
+    // idempotent so the worst case here is a tombstone of a blob the
+    // deletion step already accounted for - cheap and safe.
+    if account_is_cancelling_or_deleting(inner, &work.account_id).await {
+        if let Err(e) = pack_store.tombstone(&content_hash).await {
+            log::debug!(
+                "prefetch tombstone-after-cancel {}: {e}", work.attachment_id,
+            );
+        }
+        return Err(SkipReason::RowGone);
+    }
 
     let id_for_update = info.id.clone();
     inner
@@ -648,8 +783,37 @@ async fn run_pipeline(
             log::warn!("prefetch update_attachment_cache_fields {}: {e}", work.attachment_id);
             SkipReason::DbUpdateError
         })?;
-    let _ = content_hash; // Phase 5 will fan out an Index command; Phase 4 leaves search to ExtractRuntime.
+
+    // Attachments roadmap Phase 4 follow-up (review): hand the freshly
+    // populated content_hash to ExtractRuntime so the bytes are
+    // searchable promptly. Without this, sync-time prefetch leaves
+    // text indexing to the hourly backfill - the on-demand
+    // attachment.fetch path enqueues, but prefetch did not.
+    enqueue_extraction_after_prefetch(inner, work, content_hash);
     Ok(())
+}
+
+fn enqueue_extraction_after_prefetch(
+    inner: &Arc<PrefetchRuntimeInner>,
+    work: &PrefetchWork,
+    content_hash: db::blob_hash::BlobHash,
+) {
+    let Some(runtime) = inner.boot_state.extract_runtime() else {
+        log::debug!(
+            "prefetch: ExtractRuntime not installed; skipping enqueue \
+             for hash {content_hash} (boot in flight or shutting down)",
+        );
+        return;
+    };
+    let extract_work = crate::extract::ExtractWork {
+        content_hash,
+        account_id:    work.account_id.clone(),
+        message_id:    work.message_id.clone(),
+        attachment_id: work.attachment_id.clone(),
+    };
+    if let Err(e) = runtime.try_enqueue(extract_work) {
+        log::debug!("prefetch extract enqueue {content_hash}: {e}");
+    }
 }
 
 async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchWork) {
@@ -668,15 +832,32 @@ async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchWork) {
         .map(|p| p.saturating_sub(1))
         .unwrap_or(0);
 
-    let progress = Notification::PrefetchProgress(PrefetchProgress {
-        service_generation: inner.service_generation,
-        remaining:          new_depth,
-        fetched_in_session: inner.fetched_count.load(Ordering::Relaxed),
-    });
-    if let Err(e) = inner.notification_tx.send(progress).await {
-        log::debug!("PrefetchRuntime progress send failed: {e}");
+    // Throttled progress emission. Always emit when the queue drains
+    // to zero (so the "Caching ..." UI clears promptly) or when the
+    // wallclock has advanced past the throttle window since the last
+    // emission. Skip otherwise; the downstream `Coalesce` would drop
+    // these anyway, and skipping here saves the mpsc send.
+    let now_ms = wallclock_ms();
+    let should_emit = new_depth == 0
+        || now_ms.saturating_sub(inner.last_progress_emit_ms.load(Ordering::Relaxed))
+            >= PROGRESS_THROTTLE_MS;
+    if should_emit {
+        inner.last_progress_emit_ms.store(now_ms, Ordering::Relaxed);
+        let progress = Notification::PrefetchProgress(PrefetchProgress {
+            service_generation: inner.service_generation,
+            remaining:          new_depth,
+            fetched_in_session: inner.fetched_count.load(Ordering::Relaxed),
+        });
+        if let Err(e) = inner.notification_tx.send(progress).await {
+            log::debug!("PrefetchRuntime progress send failed: {e}");
+        }
     }
     if new_depth == 0 && in_flight_empty {
+        // Hold the snapshot mutex across the three loads so a
+        // concurrent `process_one` can't bump one counter between
+        // reads. The mutex is contended only at drained-to-zero
+        // moments, so it's not on the per-item hot path.
+        let _snap = inner.counters_snapshot.lock().await;
         let completed = Notification::PrefetchCompleted(PrefetchCompleted {
             service_generation: inner.service_generation,
             fetched: inner.fetched_count.load(Ordering::Relaxed),
@@ -687,6 +868,13 @@ async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchWork) {
             log::debug!("PrefetchRuntime completed send failed: {e}");
         }
     }
+}
+
+fn wallclock_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 async fn account_semaphore(
@@ -722,9 +910,9 @@ async fn note_breaker_success(inner: &Arc<PrefetchRuntimeInner>, account_id: &st
 }
 
 /// Attachments roadmap Phase 6: read `accounts.cache_attachments_enabled`
-/// for the given account. Defaults to `true` if the row is missing
-/// (account was just deleted; the dedupe set will be cleared on the
-/// next `cancel_account`).
+/// for the given account. Returns `false` if the row is missing - a
+/// missing row means the account was deleted (or never existed) and
+/// we must not attempt a fetch against it.
 async fn account_caching_enabled(
     inner: &Arc<PrefetchRuntimeInner>,
     account_id: &str,
@@ -733,18 +921,51 @@ async fn account_caching_enabled(
     inner
         .db
         .with_conn(move |conn| {
-            let v: i64 = conn
+            let v: Option<i64> = conn
                 .query_row(
                     "SELECT COALESCE(cache_attachments_enabled, 1) \
                      FROM accounts WHERE id = ?1",
                     rusqlite::params![aid],
                     |r| r.get(0),
                 )
-                .unwrap_or(1);
+                .ok();
+            Ok(v.map(|n| n != 0).unwrap_or(false))
+        })
+        .await
+        .unwrap_or(false)
+}
+
+/// True if the account is in the cancelling-set OR carries
+/// `accounts.is_deleting = 1`. Either condition means the account is
+/// disappearing and a freshly-written blob would be orphaned by the
+/// `AttachmentCache` deletion-step snapshot.
+async fn account_is_cancelling_or_deleting(
+    inner: &Arc<PrefetchRuntimeInner>,
+    account_id: &str,
+) -> bool {
+    if inner
+        .cancelling_accounts
+        .lock()
+        .await
+        .contains(account_id)
+    {
+        return true;
+    }
+    let aid = account_id.to_string();
+    inner
+        .db
+        .with_conn(move |conn| {
+            let v: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(is_deleting, 0) FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
             Ok(v != 0)
         })
         .await
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 fn disk_has_headroom(inner: &Arc<PrefetchRuntimeInner>) -> bool {
@@ -819,5 +1040,116 @@ mod tests {
         b.note_success();
         assert!(!b.is_open());
         assert_eq!(b.consecutive_trips, 0);
+    }
+
+    // Standalone in-flight tracker tests. The PrefetchRuntime wires
+    // this pair into `enqueue` / `finalize_item` / `cancel_account`;
+    // these tests verify the data-structure invariants in isolation
+    // so a future refactor can't regress on dedupe or FIFO drift.
+
+    fn insert(
+        set: &mut HashSet<InFlightKey>,
+        fifo: &mut VecDeque<InFlightKey>,
+        k: InFlightKey,
+    ) -> bool {
+        if set.insert(k.clone()) {
+            fifo.push_back(k);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn evict_over_cap(
+        set: &mut HashSet<InFlightKey>,
+        fifo: &mut VecDeque<InFlightKey>,
+        cap: usize,
+    ) {
+        while set.len() > cap {
+            if let Some(old) = fifo.pop_front() {
+                set.remove(&old);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn remove_both(
+        set: &mut HashSet<InFlightKey>,
+        fifo: &mut VecDeque<InFlightKey>,
+        k: &InFlightKey,
+    ) {
+        set.remove(k);
+        fifo.retain(|x| x != k);
+    }
+
+    #[test]
+    fn in_flight_dedupe_suppresses_second_insert() {
+        let mut set = HashSet::new();
+        let mut fifo = VecDeque::new();
+        let k = ("a".into(), "x".into());
+        assert!(insert(&mut set, &mut fifo, k.clone()));
+        assert!(!insert(&mut set, &mut fifo, k.clone()));
+        assert_eq!(set.len(), 1);
+        assert_eq!(fifo.len(), 1);
+    }
+
+    #[test]
+    fn in_flight_cap_evicts_oldest() {
+        let mut set = HashSet::new();
+        let mut fifo = VecDeque::new();
+        for i in 0..5 {
+            insert(&mut set, &mut fifo, ("a".into(), i.to_string()));
+        }
+        evict_over_cap(&mut set, &mut fifo, 3);
+        assert_eq!(set.len(), 3);
+        assert_eq!(fifo.len(), 3);
+        // Oldest two evicted; entries "2", "3", "4" remain.
+        assert!(set.contains(&("a".into(), "2".into())));
+        assert!(set.contains(&("a".into(), "4".into())));
+        assert!(!set.contains(&("a".into(), "0".into())));
+    }
+
+    #[test]
+    fn in_flight_remove_clears_both_set_and_fifo() {
+        // Regression: phase-4 enqueue's tx.send-error cleanup used to
+        // remove only from the HashSet, leaving phantom FIFO entries.
+        let mut set = HashSet::new();
+        let mut fifo = VecDeque::new();
+        let k = ("a".into(), "x".into());
+        insert(&mut set, &mut fifo, k.clone());
+        remove_both(&mut set, &mut fifo, &k);
+        assert!(set.is_empty());
+        assert!(fifo.is_empty(), "FIFO must be drained when key removed");
+    }
+
+    #[test]
+    fn in_flight_remove_then_reinsert_succeeds() {
+        let mut set = HashSet::new();
+        let mut fifo = VecDeque::new();
+        let k = ("a".into(), "x".into());
+        insert(&mut set, &mut fifo, k.clone());
+        remove_both(&mut set, &mut fifo, &k);
+        // Without the fix above, the FIFO would still hold the key,
+        // and a later cap eviction would pop it (no-op on the set),
+        // leaking an entry off the deque. With both halves cleared,
+        // a reinsert behaves like the first.
+        assert!(insert(&mut set, &mut fifo, k.clone()));
+        assert_eq!(set.len(), 1);
+        assert_eq!(fifo.len(), 1);
+    }
+
+    #[test]
+    fn in_flight_cancel_account_drops_all_keys_for_account() {
+        let mut set = HashSet::new();
+        let mut fifo = VecDeque::new();
+        insert(&mut set, &mut fifo, ("a".into(), "x".into()));
+        insert(&mut set, &mut fifo, ("a".into(), "y".into()));
+        insert(&mut set, &mut fifo, ("b".into(), "z".into()));
+        set.retain(|(acct, _)| acct != "a");
+        fifo.retain(|(acct, _)| acct != "a");
+        assert_eq!(set.len(), 1);
+        assert_eq!(fifo.len(), 1);
+        assert!(set.contains(&("b".into(), "z".into())));
     }
 }

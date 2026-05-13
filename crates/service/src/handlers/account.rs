@@ -65,6 +65,34 @@ pub(crate) async fn handle_update(
     params: AccountUpdateParams,
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
+
+    // Attachments roadmap review: if the patch flips
+    // `cache_attachments_enabled` from 0 to 1, fire a backfill kick
+    // so historical attachments inside the retention window populate
+    // promptly. Without this, the only triggers for an enabled
+    // account are the next boot's recovery kick or a window-extend.
+    let toggle_request = params.cache_attachments_enabled;
+    let account_id_for_kick = params.id.clone();
+    let was_enabled_before: Option<bool> = if toggle_request.is_some() {
+        let aid = account_id_for_kick.clone();
+        write_db
+            .with_conn(move |conn| {
+                let v: Option<i64> = conn
+                    .query_row(
+                        "SELECT cache_attachments_enabled FROM accounts WHERE id = ?1",
+                        rusqlite::params![aid],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                Ok(v.map(|n| n != 0))
+            })
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
     write_db
         .with_conn(move |conn| {
             let id = params.id;
@@ -81,8 +109,61 @@ pub(crate) async fn handle_update(
         })
         .await
         .map_err(ServiceError::Internal)?;
+
+    if let (Some(true), Some(false)) = (toggle_request, was_enabled_before) {
+        let boot_state = Arc::clone(boot_state);
+        tokio::spawn(async move {
+            kick_cache_reenable(boot_state, account_id_for_kick).await;
+        });
+    }
+
     serde_json::to_value(AccountUpdateAck)
         .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// Post-commit kick fired when `cache_attachments_enabled` flips
+/// from disabled to enabled. Detached from the IPC ack via
+/// `tokio::spawn` so a long backfill doesn't stall `account.update`.
+/// Provider gate matches the boot-recovery and window-extend kicks:
+/// only JMAP today.
+async fn kick_cache_reenable(boot_state: Arc<BootSharedState>, account_id: String) {
+    let Some(prefetch) = boot_state.prefetch_runtime() else {
+        log::debug!(
+            "account.update reenable-kick: PrefetchRuntime not installed; skipping for {account_id}",
+        );
+        return;
+    };
+    let Ok(write_db) = boot_state.write_db_state() else { return };
+    let aid = account_id.clone();
+    let is_jmap: bool = write_db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT COALESCE(provider, '') FROM accounts WHERE id = ?1",
+                rusqlite::params![aid],
+                |r| r.get::<_, String>(0),
+            )
+            .map(|p| p == "jmap")
+            .or(Ok(false))
+        })
+        .await
+        .unwrap_or(false);
+    if !is_jmap {
+        return;
+    }
+    let window_days = match write_db
+        .with_conn(|conn| Ok(sync::config::get_sync_period_days(conn)))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            log::debug!("account.update reenable-kick: sync_period_days read failed: {e}");
+            return;
+        }
+    };
+    let window_start = chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
+    if let Err(e) = prefetch.kick_backfill_account(&account_id, window_start).await {
+        log::debug!("account.update reenable-kick {account_id}: {e}");
+    }
 }
 
 pub(crate) async fn handle_reorder(
@@ -290,11 +371,14 @@ pub(crate) async fn handle_delete(
             "account.delete: sync cancel-and-await({account_id}) returned error: {e}; proceeding",
         );
     }
-    // Attachments roadmap Phase 4: drop any queued prefetch work for
-    // this account so we don't issue provider fetches against a
-    // disappearing row set. In-flight items continue to completion
-    // (provider calls are uncancellable), but their PackStore writes
-    // are content-hash idempotent so they cause no harm.
+    // Attachments roadmap Phase 4 + review: mark the account
+    // cancelling and drop queued prefetch work. In-flight provider
+    // calls cannot be aborted, but `run_pipeline` rechecks the
+    // cancelling-set immediately before `PackStore::put` and again
+    // before the `attachments.content_hash` UPDATE. A late-arriving
+    // fetch either drops its bytes pre-put or tombstones the blob
+    // post-put, so it can no longer outrun the `AttachmentCache`
+    // step's snapshot of cached hashes.
     if let Some(prefetch) = boot_state.prefetch_runtime() {
         prefetch.cancel_account(&account_id).await;
     }

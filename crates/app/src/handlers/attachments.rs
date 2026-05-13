@@ -25,6 +25,40 @@ use crate::app::ReadyApp;
 use crate::message::Message;
 use crate::service_client::ServiceClient;
 
+/// Bounded last-folder cache. ~64 entries is plenty for a session;
+/// the eviction policy is FIFO by insertion order, which gives
+/// "remember the last N threads I saved into." Cross-session
+/// persistence is the deferred follow-up; this struct owns the
+/// short-lived per-session memory.
+const LAST_FOLDER_CACHE_CAP: usize = 64;
+
+#[derive(Debug, Default)]
+pub struct LastFolderCache {
+    map: std::collections::HashMap<(String, String), PathBuf>,
+    order: std::collections::VecDeque<(String, String)>,
+}
+
+impl LastFolderCache {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn get(&self, key: &(String, String)) -> Option<&PathBuf> {
+        self.map.get(key)
+    }
+
+    pub fn remember(&mut self, key: (String, String), folder: PathBuf) {
+        if self.map.insert(key.clone(), folder).is_none() {
+            self.order.push_back(key);
+        }
+        while self.map.len() > LAST_FOLDER_CACHE_CAP {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 /// A single attachment's identity + display metadata. Shared payload
 /// across the three actions so the handler doesn't have to re-query
 /// the DB for filenames the UI already had in scope.
@@ -116,6 +150,9 @@ impl ReadyApp {
         &mut self,
         params: SaveAllAttachmentsParams,
     ) -> Task<Message> {
+        if params.items.is_empty() {
+            return Task::none();
+        }
         let Some(client) = self.service_client.clone() else {
             log::warn!("save_all_attachments: service_client unavailable");
             return Task::none();
@@ -127,17 +164,9 @@ impl ReadyApp {
                 return Task::none();
             }
         };
-        let initial_dir = self
-            .attachment_last_folders
-            .get(&(
-                params.items.first().map(|i| i.account_id.clone()).unwrap_or_default(),
-                params.thread_id.clone(),
-            ))
-            .cloned();
-        let folder_key = (
-            params.items.first().map(|i| i.account_id.clone()).unwrap_or_default(),
-            params.thread_id.clone(),
-        );
+        // params.items is non-empty (guarded above).
+        let folder_key = (params.items[0].account_id.clone(), params.thread_id.clone());
+        let initial_dir = self.attachment_last_folders.get(&folder_key).cloned();
         Task::perform(
             save_all_attachments_worker(client, app_data_dir, params.items, initial_dir),
             move |chosen| match chosen {
@@ -164,7 +193,7 @@ async fn open_attachment_worker(
         }
     };
     let src = app_data_dir.join(&ack.relative_path);
-    let bytes = match std::fs::read(&src) {
+    let bytes = match tokio::fs::read(&src).await {
         Ok(b) => b,
         Err(e) => {
             log::warn!("open_attachment read tmp ({}): {e}", src.display());
@@ -175,12 +204,14 @@ async fn open_attachment_worker(
         item.filename.as_deref().unwrap_or("attachment"),
     );
     let dest_dir = app_data_dir.join("opened_attachments");
-    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+    if let Err(e) = tokio::fs::create_dir_all(&dest_dir).await {
         log::warn!("open_attachment mkdir ({}): {e}", dest_dir.display());
         return;
     }
-    let dest = dest_dir.join(&safe);
-    if let Err(e) = std::fs::write(&dest, &bytes) {
+    // Two opens of different report.pdf attachments must not clobber
+    // each other. Reuse the Save All collision-suffix logic.
+    let dest = pick_collision_free_path(&dest_dir, &safe);
+    if let Err(e) = atomic_write(&dest, &bytes).await {
         log::warn!("open_attachment write ({}): {e}", dest.display());
         return;
     }
@@ -226,14 +257,14 @@ async fn save_attachment_worker(
         }
     };
     let src = app_data_dir.join(&ack.relative_path);
-    let bytes = match std::fs::read(&src) {
+    let bytes = match tokio::fs::read(&src).await {
         Ok(b) => b,
         Err(e) => {
             log::warn!("save_attachment read tmp ({}): {e}", src.display());
             return None;
         }
     };
-    if let Err(e) = std::fs::write(&chosen, &bytes) {
+    if let Err(e) = atomic_write(&chosen, &bytes).await {
         log::warn!("save_attachment write ({}): {e}", chosen.display());
         return None;
     }
@@ -281,7 +312,7 @@ async fn save_all_attachments_worker(
             }
         };
         let src = app_data_dir.join(&ack.relative_path);
-        let bytes = match std::fs::read(&src) {
+        let bytes = match tokio::fs::read(&src).await {
             Ok(b) => b,
             Err(e) => {
                 log::warn!("save_all read tmp {label}: {e}");
@@ -291,7 +322,7 @@ async fn save_all_attachments_worker(
         };
         let safe = sanitize_attachment_filename(item.filename.as_deref().unwrap_or("attachment"));
         let dest = pick_collision_free_path(&folder, &safe);
-        if let Err(e) = std::fs::write(&dest, &bytes) {
+        if let Err(e) = atomic_write(&dest, &bytes).await {
             log::warn!("save_all write {} ({label}): {e}", dest.display());
             fail_count += 1;
             continue;
@@ -304,7 +335,9 @@ async fn save_all_attachments_worker(
 
 /// Strip path separators, control chars, and Windows-reserved chars
 /// from an attachment filename. Preserves dots so the OS default
-/// handler can dispatch on extension.
+/// handler can dispatch on extension. Also escapes Windows reserved
+/// device names (CON, PRN, NUL, AUX, COM1-9, LPT1-9) by prefixing
+/// `_` so a `CON.pdf` attachment can be written on Windows.
 pub(crate) fn sanitize_attachment_filename(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for ch in name.chars() {
@@ -326,9 +359,56 @@ pub(crate) fn sanitize_attachment_filename(name: &str) -> String {
     }
     let trimmed = out.trim().trim_matches('.').to_string();
     if trimmed.is_empty() {
-        "attachment".to_string()
-    } else {
-        trimmed
+        return "attachment".to_string();
+    }
+    if is_windows_reserved_device(&trimmed) {
+        return format!("_{trimmed}");
+    }
+    trimmed
+}
+
+/// Match against the Windows reserved device names (case-insensitive,
+/// matched on the part before any extension). These names cannot be
+/// used as filenames on NTFS even when accompanied by an extension.
+fn is_windows_reserved_device(name: &str) -> bool {
+    let stem = match name.rfind('.') {
+        Some(0) => name,
+        Some(i) => &name[..i],
+        None => name,
+    };
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "NUL" | "AUX"
+        | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
+        | "COM6" | "COM7" | "COM8" | "COM9"
+        | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5"
+        | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    )
+}
+
+/// Write `bytes` to `dest` via a sibling tempfile + rename so a crash
+/// (or out-of-space) never leaves a partial file at the user's chosen
+/// path. The tempfile lives in `dest`'s parent so the rename is on
+/// the same filesystem.
+async fn atomic_write(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = dest.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no parent")
+    })?;
+    let file_name = dest.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no file name")
+    })?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(file_name);
+    tmp_name.push(format!(".tmp.{}", std::process::id()));
+    let tmp_path = parent.join(tmp_name);
+    tokio::fs::write(&tmp_path, bytes).await?;
+    match tokio::fs::rename(&tmp_path, dest).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            Err(e)
+        }
     }
 }
 

@@ -166,9 +166,10 @@ pub struct ReadyApp {
     /// Attachments roadmap Phase 5: per-thread "last folder used" for
     /// Save / Save All dialogs. In-memory only; cross-session
     /// persistence is deferred until the IPC payoff is worth the
-    /// plumbing. Keyed by `(account_id, thread_id)`.
-    pub(crate) attachment_last_folders:
-        std::collections::HashMap<(String, String), std::path::PathBuf>,
+    /// plumbing. Keyed by `(account_id, thread_id)`. Capped via
+    /// `LastFolderCache` so a long-running session walking many
+    /// threads does not accumulate unbounded entries.
+    pub(crate) attachment_last_folders: crate::handlers::attachments::LastFolderCache,
 
     // Service process scaffold
     pub(crate) service_client: Option<Arc<ServiceClient>>,
@@ -427,7 +428,7 @@ impl ReadyApp {
             sync_reporter,
             body_store,
             inline_image_store,
-            attachment_last_folders: std::collections::HashMap::new(),
+            attachment_last_folders: crate::handlers::attachments::LastFolderCache::new(),
             service_client: Some(service_client),
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),

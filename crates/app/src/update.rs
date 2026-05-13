@@ -171,7 +171,7 @@ impl ReadyApp {
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
             Message::AttachmentSaveFolderRemembered(key, folder) => {
-                self.attachment_last_folders.insert(key, folder);
+                self.attachment_last_folders.remember(key, folder);
                 Task::none()
             }
             // ServiceChildSpawned re-fires post-handshake on every

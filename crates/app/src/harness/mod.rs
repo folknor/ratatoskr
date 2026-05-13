@@ -2826,6 +2826,18 @@ fn parse_setting_value(state: &mut State, value_idx: isize) -> dellingr::Result<
         "readingpaneposition" => Ok(SettingValue::ReadingPanePosition(
             required_setting_string(state, value_idx, &kind)?,
         )),
+        "syncperioddays" => Ok(SettingValue::SyncPeriodDays(
+            required_setting_string(state, value_idx, &kind)?,
+        )),
+        "compressattachments" => Ok(SettingValue::CompressAttachments(
+            required_setting_bool(state, value_idx, &kind)?,
+        )),
+        "allowlossycompression" => Ok(SettingValue::AllowLossyCompression(
+            required_setting_bool(state, value_idx, &kind)?,
+        )),
+        "openedfilescleanupdays" => Ok(SettingValue::OpenedFilesCleanupDays(
+            required_setting_string(state, value_idx, &kind)?,
+        )),
         other => Err(lua_error_message(format!(
             "unsupported setting value {other:?}"
         ))),
