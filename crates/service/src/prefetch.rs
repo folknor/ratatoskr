@@ -1,11 +1,11 @@
-//! Phase 4 (attachments roadmap): `PrefetchRuntime` — Service-side
+//! Phase 4 (attachments roadmap): `PrefetchRuntime` - Service-side
 //! attachment-bytes pre-fetch worker.
 //!
 //! Modeled on `ExtractRuntime`. Differs in:
 //! - Two priority queues: sync-time (capacity 64, drained first) and
 //!   backfill (capacity 256). A biased `tokio::select!` ensures live
 //!   sync-time work never starves under historical backfill.
-//! - Per-account `Semaphore` (4 permits) — caps concurrent in-flight
+//! - Per-account `Semaphore` (4 permits) - caps concurrent in-flight
 //!   provider calls per account so a chatty inbox doesn't monopolise
 //!   the tokio runtime or the provider's rate limit.
 //! - Per-account circuit breaker: K=5 consecutive timeouts inside W=60s
@@ -19,7 +19,7 @@
 //! The runtime is provider-agnostic. Phase 4 only wires JMAP enqueue
 //! sites (post-sync sweep + backfill kick); Phase 7 adds the others
 //! without touching this file. A non-JMAP `PrefetchWork` would still
-//! process correctly — `create_provider` dispatches by account row —
+//! process correctly - `create_provider` dispatches by account row -
 //! but Phase 4 doesn't enqueue any.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -42,7 +42,7 @@ const BACKFILL_QUEUE_CAPACITY: usize = 256;
 /// Per-account concurrent provider-fetch cap.
 const PER_ACCOUNT_PERMITS: usize = 4;
 /// Hard cap on the in-flight dedupe set. When exceeded, oldest entries
-/// are evicted FIFO — a re-enqueue of the same `(account, attachment)`
+/// are evicted FIFO - a re-enqueue of the same `(account, attachment)`
 /// will pass dedupe and be processed twice. Acceptable: PackStore::put
 /// is idempotent on content hash.
 const IN_FLIGHT_CAP: usize = 10_000;
@@ -63,7 +63,7 @@ const MIN_DISK_FREE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// Backfill page size when `kick_backfill_account` walks historical
 /// rows.
 const BACKFILL_PAGE_SIZE: i64 = 256;
-/// Window cap on the post-sync sweep — the most recent N attachments
+/// Window cap on the post-sync sweep - the most recent N attachments
 /// for the account whose hash is still NULL. Public so `sync.rs`
 /// passes the same bound the runtime documents.
 pub(crate) const SYNC_SWEEP_LIMIT: i64 = 64;
@@ -103,7 +103,7 @@ pub enum SkipReason {
     /// Free disk below `MIN_DISK_FREE_BYTES`.
     DiskLow,
     /// The row's `content_hash` is no longer NULL (another path won
-    /// the race — typically a user-initiated `attachment.fetch`).
+    /// the race - typically a user-initiated `attachment.fetch`).
     AlreadyCached,
     /// The attachment row vanished between enqueue and dispatch (cascading
     /// delete from a message or account drop).
@@ -203,7 +203,7 @@ fn backoff_for(trips: u32) -> Duration {
     Duration::from_secs(bounded)
 }
 
-/// `(account_id, attachment_id)` pair — the dedup key on the
+/// `(account_id, attachment_id)` pair - the dedup key on the
 /// in-flight set, also recorded in a FIFO queue for capped eviction.
 type InFlightKey = (String, String);
 /// Membership set + FIFO eviction queue. The two are kept locked
@@ -296,7 +296,7 @@ impl PrefetchRuntime {
             fifo.push_back(key);
             // Evict-oldest if we've blown the cap. The evicted pair is
             // no longer dedupe-protected; a re-enqueue will pass. This
-            // is fine — PackStore::put is content-hash idempotent.
+            // is fine - PackStore::put is content-hash idempotent.
             while set.len() > IN_FLIGHT_CAP {
                 if let Some(old) = fifo.pop_front() {
                     set.remove(&old);
@@ -413,7 +413,7 @@ impl PrefetchRuntime {
                 )
                 .await?;
             total += page;
-            // Loop terminates when we enqueue fewer than a page —
+            // Loop terminates when we enqueue fewer than a page -
             // either the account is drained or every remaining row was
             // dedupe-suppressed (already in-flight).
             if page < BACKFILL_PAGE_SIZE as u64 {
@@ -738,7 +738,7 @@ fn statvfs_free_bytes(path: &std::path::Path) -> Option<u64> {
 
 #[cfg(not(unix))]
 fn statvfs_free_bytes(_path: &std::path::Path) -> Option<u64> {
-    // Windows backstop deferred — `GetDiskFreeSpaceExW` would land
+    // Windows backstop deferred - `GetDiskFreeSpaceExW` would land
     // here. Returning None means the backstop is permissive on
     // Windows; the cache fills until the OS raises ENOSPC, which
     // surfaces as `SkipReason::PackStoreError`.

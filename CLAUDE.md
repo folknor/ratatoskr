@@ -13,6 +13,7 @@ Do not use your Memory functionality. Do not read, write, or update memories. Do
 ### Bash rules
 
 - Never use `sed`, `find`, `awk`, `head`, `tail`, or complex bash commands.
+- Never `find /`.
 - Never run `git` with `-C <path>`
 - One Bash() invocation === one command
 

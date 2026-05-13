@@ -2184,6 +2184,34 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 completed.service_generation as f64,
             )?;
         }
+        Notification::PrefetchProgress(progress) => {
+            set_field_string(state, idx, "type", "PrefetchProgress")?;
+            set_field_number(state, idx, "remaining", progress.remaining as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "fetched_in_session",
+                progress.fetched_in_session as f64,
+            )?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                progress.service_generation as f64,
+            )?;
+        }
+        Notification::PrefetchCompleted(completed) => {
+            set_field_string(state, idx, "type", "PrefetchCompleted")?;
+            set_field_number(state, idx, "fetched", completed.fetched as f64)?;
+            set_field_number(state, idx, "skipped", completed.skipped as f64)?;
+            set_field_number(state, idx, "failed", completed.failed as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                completed.service_generation as f64,
+            )?;
+        }
         other => {
             set_field_string(state, idx, "type", other.method_name())?;
         }
