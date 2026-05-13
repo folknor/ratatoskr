@@ -1,5 +1,75 @@
 project = "ratatoskr"
 
+[[dependency_rule]]
+name = "app-no-rusqlite"
+from = "app"
+forbid = "rusqlite"
+
+[[dependency_rule]]
+name = "core-no-rusqlite"
+from = "rtsk"
+forbid = "rusqlite"
+
+[[dependency_rule]]
+name = "app-no-service-state"
+from = "app"
+forbid = "service-state"
+
+[[dependency_rule]]
+name = "app-no-db"
+from = "app"
+forbid = "db"
+
+[[dependency_rule]]
+name = "service-no-app"
+from = "service"
+forbid = "app"
+
+[[dependency_rule]]
+name = "app-no-providers"
+from = "app"
+forbid = ["gmail", "jmap", "graph", "imap", "provider-sync"]
+
+[[dependency_rule]]
+name = "common-stays-leafward"
+from = "common"
+forbid = ["gmail", "jmap", "graph", "imap", "provider-sync", "sync", "rtsk", "service", "service-state", "cal", "app"]
+
+[[dependency_rule]]
+name = "core-no-upward"
+from = "rtsk"
+forbid = ["service", "service-state", "cal", "app"]
+
+[[dependency_rule]]
+name = "sync-no-upward"
+from = "sync"
+forbid = ["app", "service", "service-state", "cal", "gmail", "jmap", "graph", "imap", "provider-sync"]
+
+[[dependency_rule]]
+name = "gmail-boundaries"
+from = "gmail"
+forbid = ["jmap", "graph", "imap", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
+
+[[dependency_rule]]
+name = "jmap-boundaries"
+from = "jmap"
+forbid = ["gmail", "graph", "imap", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
+
+[[dependency_rule]]
+name = "graph-boundaries"
+from = "graph"
+forbid = ["gmail", "jmap", "imap", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
+
+[[dependency_rule]]
+name = "imap-boundaries"
+from = "imap"
+forbid = ["gmail", "jmap", "graph", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
+
+[[dependency_rule]]
+name = "cal-no-app"
+from = "cal"
+forbid = "app"
+
 [ratatoskr]
 mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
 fixtures_dir = "crates/app/tests/sync-fixtures"

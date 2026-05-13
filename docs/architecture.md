@@ -39,6 +39,27 @@ That includes:
 
 **Enforcement:** `app` no longer depends on `rusqlite`. `core` no longer depends on `rusqlite`. Provider and sync crates now route shared-table writes through `db` APIs instead of embedding their own SQL for those tables.
 
+### Cargo-level boundary rules
+
+A subset of the boundaries above is mechanically enforced by `brokkr check` via `[[dependency_rule]]` entries in `brokkr.toml`. The phase reads `cargo metadata --no-deps` and fails on direct forbidden edges before clippy or tests run.
+
+The dependency graph runs roughly leafward-to-rootward as `types` / `crypto-key` -> `common` -> `db` -> `store`, `search`, `seen` -> `sync` -> providers (`gmail`, `jmap`, `graph`, `imap`) -> `provider-sync`, `cal`, `rtsk` (core) -> `service-state` -> `service` -> `app`. The rules forbid upward edges and sideways edges that would let two peers form a tighter coupling than the layer above mediates.
+
+UI / writer split:
+- `app` may not depend on `rusqlite`, `db`, `service-state`, or any provider crate. UI talks to the writer side only through `service-api` IPC.
+- `service` may not depend on `app`. Writer side never reaches into the UI process crate.
+- `rtsk` (core) may not depend on `rusqlite` (shared-table SQL belongs to `db`) or on any of `service`, `service-state`, `cal`, `app`.
+
+Layer rules:
+- `common` may not depend on `sync`, providers, `provider-sync`, `rtsk`, `service`, `service-state`, `cal`, or `app`. It stays a shared-helper leaf.
+- `sync` may not depend on providers, `provider-sync`, `cal`, `service`, `service-state`, or `app`. Provider crates depend on `sync`, never the reverse.
+- `cal` may not depend on `app`.
+
+Provider isolation:
+- Each provider crate (`gmail`, `jmap`, `graph`, `imap`) may not depend on the other three, nor on `provider-sync`, `rtsk`, `cal`, `service`, `service-state`, or `app`. Provider crates are leaves of the protocol-specific subtree.
+
+Rules are direct-edge only. Transitive boundaries (e.g. "no shared-table SQL anywhere outside `db`", or "`app` cannot transitively reach `service-state` except through `service`") are not expressible at the Cargo level. The transitive lockdown for `app` -> `cal` and `app` -> `service-state` lives in `crates/service-state/tests/lockdown.rs`. Shared-table SQL scoping inside provider/sync crates remains a code-review concern - provider and sync crates legitimately need `rusqlite` for protocol-state tables carved out in *Current Exceptions* below (`jmap_sync_state`, `graph_*_delta_tokens`, `folder_sync_state`, etc.).
+
 ### Action service as mutation gate
 <!-- coverage: architecture.action_service_as_mutation_gate enforcement=rust-test -->
 
