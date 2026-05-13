@@ -236,6 +236,131 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 Architecture and design rationale stay in `docs/glossary/harness.md`. The milestone roadmap is retired - remaining work is captured here.
 
+### Tests unlocked by saehrimnir 45bf850..28017e7
+
+These depend on installing a saehrimnir binary at or after `28017e7`
+and mirroring any needed upstream fixtures into
+`crates/app/tests/sync-fixtures/`.
+
+- [ ] **Graph shared-mailbox `/users/{id}` mail sync** - Drive
+  Graph sync through `GraphClient::for_shared_mailbox` against a
+  secondary account in `multi-account-small`. Assert shared mailbox
+  folders, messages, attachment metadata, and delta tokens are stored
+  under `shared_mailbox_id` instead of the personal account scope.
+- [ ] **Graph `/users/{id}` calendar scoping** - Extend the
+  shared-mailbox sync harness to cover Graph calendar reads through
+  `/v1.0/users/{id}/...`. Assert per-account calendars, events, and
+  delta links stay isolated.
+- [ ] **Graph contacts shared-mailbox path hardening** - Try contact
+  sync against `/v1.0/users/{id}/contactFolders/...`. This should
+  drive `contact_sync` to use `GraphClient::api_path_prefix()` instead
+  of hardcoded `/me` paths, then assert contact folders, contacts, and
+  delta links stay scoped to the shared mailbox.
+- [ ] **Graph master category label sync** - Use
+  `graph-categories-small.toml` to exercise
+  `graph_label_sync()`. Assert `cat:<displayName>` tag labels are
+  inserted with the expected account id, `label_kind = 'tag'`, sort
+  order, and Exchange preset colors from the Graph category palette.
+- [ ] **Graph category shared-mailbox path hardening** - Combine
+  master categories with a multi-account fixture. This should drive
+  `graph_label_sync()` to use `GraphClient::api_path_prefix()` instead
+  of hardcoded `/me`, then assert category labels from one mailbox
+  never appear in another mailbox's label set or sidebar scope.
+- [ ] **Exchange group sync compatibility smoke** - Try
+  `sync_exchange_groups()` against the new Graph group fixture. Track
+  whether saehrimnir needs aliases for Ratatoskr's exact paths:
+  `/me/memberOf/microsoft.graph.group` and
+  `/groups/{id}/transitiveMembers/microsoft.graph.user`. Once those
+  paths are covered, assert groups and member email rows land in
+  contact groups.
+- [ ] **Google OAuth token account binding: Gmail** - Mint two mock
+  OAuth tokens with different `account_id` form fields, seed two
+  Gmail accounts, and sync them against one multi-account fixture.
+  Assert Gmail labels, threads, messages, and attachments are scoped
+  by the bearer token's account, not by the fixture primary.
+- [ ] **Gmail SendAs signature import** - Mirror the new
+  `[[send_as]]` rows from `multi-account-small` and run Gmail
+  signature sync. Assert each `sendAsEmail` becomes the right local
+  signature / alias metadata for its account, including HTML body,
+  display name, primary/default flags, and no cross-account leakage.
+- [ ] **Gmail SendAs signature writeback** - Edit a Gmail-backed
+  signature through the Service/settings path and assert saehrimnir
+  receives `PATCH /gmail/v1/users/me/settings/sendAs/{email}` with
+  the sparse signature fields. Re-read the mock SendAs row and assert
+  the signature changed while read-only `isPrimary` stayed unchanged.
+- [ ] **Gmail SendAs fault injection** - Use Lua
+  `on("gmail", "send_as", fn)` to force list/get/patch failures.
+  Assert signature import reports a provider failure without corrupting
+  local signatures, and writeback leaves the expected pending or retry
+  state.
+- [ ] **Gmail SendAs token account binding** - Extend the Gmail
+  multi-account OAuth tests to cover SendAs identities. Mint tokens for
+  primary and secondary accounts, sync signatures for both accounts,
+  and assert each account only imports or patches its token-bound
+  identity.
+- [ ] **Google OAuth token account binding: Calendar and People** -
+  Repeat the token-scoping shape for Google Calendar and People API.
+  Assert `calendarList`, events, contacts, and otherContacts all
+  scope to the token-bound account and that missing / default tokens
+  keep the old primary-account behavior.
+- [ ] **CalDAV multi-account principal scoping** - Use
+  `multi-account-small` with two CalDAV accounts whose usernames map
+  to `account-primary` and `account-secondary`. Sync both and assert
+  `/principals/{user}/` and `/calendars/{user}/...` only expose that
+  account's calendars and events; primary must never import
+  secondary's calendar rows or vice versa.
+- [ ] **CalDAV secondary-principal write isolation** - Create, update,
+  and delete an event through the secondary CalDAV account. Assert the
+  event is reachable through `/calendars/account-secondary/...`,
+  404s under the primary principal, and Ratatoskr stores/removes it
+  only under the secondary account.
+- [ ] **CalDAV `MKCALENDAR` create-calendar action** - Once the
+  Ratatoskr create-calendar path is exposed in the harness, create a
+  calendar against a CalDAV account and assert saehrimnir records
+  `MKCALENDAR`, preserves display name / calendar color, and the next
+  sync imports the new calendar. Include duplicate-id and unknown
+  principal failure cases.
+- [ ] **Cross-protocol calendar creation visibility** - After a
+  CalDAV `MKCALENDAR`, sync JMAP Calendar and Graph Calendar against
+  the same mock fixture. Assert JMAP `Calendar/changes` reports the
+  created calendar and Graph `/me/calendars` lists it, proving
+  saehrimnir's shared `calendar_created` transition is visible across
+  protocol surfaces.
+- [ ] **IMAP LOGIN multi-account binding** - Seed two IMAP accounts
+  with different usernames matching fixture account names. Sync both
+  through the same mock process and assert LIST / STATUS / SELECT /
+  FETCH only expose the authenticated account's mailboxes and
+  messages.
+- [ ] **IMAP XOAUTH2 / OAUTHBEARER account binding** - Mint mock
+  OAuth tokens for different accounts and use them in IMAP auth.
+  Assert the connection binds to the token account, and add a
+  fallback case where an unknown token or user stays on the primary
+  account.
+- [ ] **SMTP AUTH account attribution** - Send via SMTP for two
+  accounts and assert `/test/smtp/submissions` records the resolved
+  `account_id`, auth mechanism, recipients, and parsed MIME summary
+  for each submission.
+- [ ] **SMTP AUTH failure callback** - Use Lua
+  `on("smtp", "AUTH", fn)` to force an auth failure. Assert the send
+  action reports the right provider failure, does not record a
+  successful submission, and leaves any retry / pending-op state in
+  the expected shape.
+- [ ] **Expand recurrence read matrix** - Initial
+  `calendar-recurrence-small.toml` smoke coverage now exists for
+  Graph, Google Calendar, JMAP Calendar, and CalDAV. Broaden it to
+  include daily, yearly, BYMONTH, EXDATE, timezone handling, and
+  expanded calendar-window row assertions.
+- [ ] **Recurrence write matrix** - Create and update recurring
+  events through the Service calendar action path for Graph, Google
+  Calendar, JMAP Calendar, and CalDAV. Assert the request log carries
+  provider-native recurrence payloads and a follow-up sync imports
+  the same recurrence metadata back into local state.
+- [ ] **Cross-protocol recurring-event mutation deltas** - Mutate a
+  recurring event through one mock protocol, then sync another
+  protocol backed by the same fixture state. Cover at least Graph
+  after CalDAV, Google Calendar after Graph, and JMAP Calendar after
+  Google Calendar so the shared change-log recurrence path is pinned.
+
 ### Environment-blocked (Windows)
 
 The Linux equivalents already automate. The harness scripts are platform-agnostic; the gate is the test environment (cross-platform CI runner, dev box, or paid test service). If any of these become permanent automation, add Windows-capable Lua or libtest coverage and keep the Linux-only SIGTERM script separate.

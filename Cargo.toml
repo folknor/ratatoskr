@@ -95,7 +95,7 @@ thiserror = "2"
 futures-util = "0.3"
 
 # Async runtime
-tokio = { version = "1.52.2" }
+tokio = { version = "1.52.3" }
 
 # Database
 rusqlite = { version = "0.39" }
@@ -110,13 +110,13 @@ reqwest = { version = "0.13", default-features = false, features = ["native-tls"
 base64 = "0.22"
 
 # XML
-quick-xml = "0.39.3"
+quick-xml = "0.39.4"
 
 # Text diffing (for undo/redo)
 dissimilar = "1"
 
 # Profiling
-hotpath = "0.15.0"
+hotpath = "0.16.0"
 
 # Optimized release profile
 [profile.release]

@@ -3,7 +3,7 @@ name = "jmap-calendar-oauth"
 [oauth]
 enforce = true
 
-[account]
+[[account]]
 id = "account-1"
 name = "test@example.com"
 is_personal = true

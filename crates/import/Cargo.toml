@@ -11,7 +11,7 @@ workspace = true
 [dependencies]
 quick-xml.workspace = true
 encoding_rs = "0.8"
-calcard = "0.3"
+calcard = "0.3.3"
 zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
 hotpath = { workspace = true, optional = true }
 

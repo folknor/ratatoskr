@@ -40,7 +40,7 @@ zeroize = "1"
 regex = "1"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 css-inline = { version = "0.20", default-features = false }
-lol_html = "2"
+lol_html = "2.9.0"
 ammonia = "4"
 aes-gcm = "0.10"
 getrandom = { version = "0.4.2", features = ["std"] }

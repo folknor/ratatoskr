@@ -32,7 +32,7 @@ sync = { path = "../sync" }
 tokio-util = "0.7"
 
 # Crate-specific deps
-calcard = "0.3"
+calcard = "0.3.3"
 log = "0.4"
 async-trait = "0.1"
 uuid = { version = "1.23.1", features = ["v4"] }

@@ -1,6 +1,6 @@
 name = "jmap-attach"
 
-[account]
+[[account]]
 id = "account-1"
 name = "test@example.com"
 is_personal = true

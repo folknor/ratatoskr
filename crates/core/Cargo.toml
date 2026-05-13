@@ -59,9 +59,9 @@ unicode-segmentation = "1.12"
 regex = "1"
 url = "2"
 resvg = { version = "0.47", default-features = false }
-lol_html = "2"
+lol_html = "2.9.0"
 ammonia = "4"
-calcard = "0.3"
+calcard = "0.3.3"
 hotpath = { workspace = true, optional = true }
 
 [features]

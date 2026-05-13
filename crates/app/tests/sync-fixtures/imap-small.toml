@@ -16,7 +16,7 @@ name = "imap-small"
 # email-001 is UID 1 and email-002 is UID 2. UIDVALIDITY is pinned
 # to 1 by the IMAP layer.
 
-[account]
+[[account]]
 id = "account-1"
 name = "test@example.com"
 is_personal = true
