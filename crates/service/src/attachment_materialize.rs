@@ -150,6 +150,19 @@ pub(crate) async fn reap_stale_tmp_files(
 /// `attachment.open` flow writes here when the OS opens a file with
 /// its default handler; without this reaper those files would
 /// accumulate indefinitely.
+///
+/// Age is computed against `MAX(mtime, atime)` so a file the user
+/// actively re-opens within the window survives past
+/// `max_age_secs`-since-creation. Falls back to mtime alone when the
+/// filesystem reports no access time (some `noatime` mounts).
+///
+/// On Windows a file the user currently has open via its associated
+/// app will fail `remove_file` with `ERROR_SHARING_VIOLATION` (the
+/// shell-open path doesn't set `FILE_SHARE_DELETE`). That's the
+/// safest outcome - the file stays for the next reaper pass once
+/// the user closes it. Suppress that error class so the log isn't
+/// noisy. On Linux the unlink succeeds even with an open fd
+/// (inode survives until close), which is also safe.
 pub(crate) async fn reap_stale_opened_files(
     boot_state: &Arc<BootSharedState>,
     max_age_secs: u64,
@@ -169,13 +182,24 @@ pub(crate) async fn reap_stale_opened_files(
             if !meta.is_file() {
                 continue;
             }
-            let Ok(modified) = meta.modified() else { continue };
-            let Ok(age) = now.duration_since(modified) else { continue };
+            let modified = meta.modified().ok();
+            let accessed = meta.accessed().ok();
+            let last_touch = match (modified, accessed) {
+                (Some(m), Some(a)) => Some(if a > m { a } else { m }),
+                (Some(t), None) | (None, Some(t)) => Some(t),
+                (None, None) => None,
+            };
+            let Some(last_touch) = last_touch else { continue };
+            let Ok(age) = now.duration_since(last_touch) else { continue };
             if age.as_secs() < max_age_secs {
                 continue;
             }
             if let Err(e) = std::fs::remove_file(entry.path()) {
-                if e.kind() != std::io::ErrorKind::NotFound {
+                let suppress = matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied,
+                ) || is_sharing_violation(&e);
+                if !suppress {
                     log::warn!(
                         "opened_attachments reap: unlink {} failed: {e}",
                         entry.path().display(),
@@ -189,4 +213,17 @@ pub(crate) async fn reap_stale_opened_files(
     })
     .await
     .map_err(|e| format!("spawn_blocking reap_opened: {e}"))?
+}
+
+/// Windows reports `ERROR_SHARING_VIOLATION` (32) when a process has
+/// the file open without `FILE_SHARE_DELETE`. Treat as "leave for
+/// next sweep" rather than warn.
+#[cfg(windows)]
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    e.raw_os_error() == Some(32)
+}
+
+#[cfg(not(windows))]
+fn is_sharing_violation(_e: &std::io::Error) -> bool {
+    false
 }

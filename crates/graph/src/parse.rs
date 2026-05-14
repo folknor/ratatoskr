@@ -122,12 +122,38 @@ pub fn parse_graph_message(
     // Exchange reaction extended properties
     let (owner_reaction_type, reactions_count) = extract_reaction_properties(msg);
 
-    // Attachments
+    // Attachments. Graph returns three @odata.type kinds:
+    //   - `#microsoft.graph.fileAttachment` (raw bytes; supports `$value`)
+    //   - `#microsoft.graph.itemAttachment` (nested item; the $value
+    //     endpoint returns the nested message, not the kind of bytes
+    //     the attachment store knows what to do with)
+    //   - `#microsoft.graph.referenceAttachment` (URL to a cloud-hosted
+    //     file; no bytes at all)
+    //
+    // Only fileAttachment has bytes the cache can store. Skip the
+    // rest at parse time so PrefetchRuntime never tries `$value`
+    // against a referenceAttachment (which Graph rejects) and the
+    // attachments table doesn't accumulate rows no provider fetch
+    // can satisfy. Cloud-link surfacing for reference attachments
+    // lives in the cloud-attachments path (docs/cloud-attachments.md)
+    // and is independent of this byte cache.
     let attachments: Vec<ParsedGraphAttachment> = msg
         .attachments
         .as_deref()
         .unwrap_or(&[])
         .iter()
+        .filter(|a| {
+            let kind = a.odata_type.as_deref().unwrap_or("");
+            // Treat missing/unknown discriminator as fileAttachment
+            // for back-compat with any fixture or older payload that
+            // didn't include @odata.type. Only known non-file kinds
+            // are skipped.
+            !matches!(
+                kind,
+                "#microsoft.graph.referenceAttachment"
+                    | "#microsoft.graph.itemAttachment"
+            )
+        })
         .map(|a| {
             let is_inline = a.is_inline.unwrap_or(false);
             let mime_type = a.content_type.clone();

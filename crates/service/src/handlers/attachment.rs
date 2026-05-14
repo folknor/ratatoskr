@@ -66,6 +66,33 @@ pub(crate) async fn handle_fetch(
     let write_db = boot_state.write_db_state()?;
     let read_db = write_db.to_read_state();
 
+    // Short-circuit if the account is being deleted. The prefetch
+    // worker has this gate (see `account_is_cancelling_or_deleting`)
+    // but the user-initiated cache-miss path lacked it: a click
+    // landing between `is_deleting = 1` and the row cascade would
+    // provider-fetch, write the blob into PackStore, then have the
+    // UPDATE no-op against the deleted row. The orphaned blob would
+    // need eviction + GC to clean up.
+    let aid_for_deleting = params.account_id.clone();
+    let account_is_deleting: bool = read_db
+        .with_conn(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT COALESCE(is_deleting, 0) FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid_for_deleting],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                != 0)
+        })
+        .await
+        .unwrap_or(false);
+    if account_is_deleting {
+        return Err(ServiceError::Internal(
+            "account is being deleted; attachment fetch rejected".into(),
+        ));
+    }
+
     // 1. Look up the attachment row to find out whether we already
     // have a content_hash for it (cache hit) or need to fetch from
     // the provider (cache miss).
@@ -84,8 +111,18 @@ pub(crate) async fn handle_fetch(
         .await
         .map_err(ServiceError::Internal)?;
 
+    // Cache hit only if a content_hash is set AND the corresponding
+    // `attachment_blobs` row exists AND is NOT tombstoned. The two
+    // miss subcases (tombstoned, absent) collapse to "no live bytes
+    // in PackStore"; either way `PackStore::get` would return None
+    // and surface as an internal error. Falling through to the
+    // cache-miss branch re-fetches from the provider and
+    // `PackStore::put` re-creates the row (or revives the
+    // tombstoned one).
     if let Some(ref info) = info
         && let Some(content_hash) = info.content_hash
+        && info.blob_present
+        && info.blob_tombstoned_at.is_none()
     {
         // Cache hit: bytes already live either in PackStore (the
         // common case) or in `inline_images.db` (small CID images;
@@ -133,7 +170,9 @@ pub(crate) async fn handle_fetch(
     }
 
     // 2. Cache miss: provider fetch, hash, PackStore::put, update the
-    // attachments row, then materialize.
+    // attachments row, then materialize. Also reached on a
+    // tombstoned-cache-hit fallthrough so the same path revives the
+    // blob via `PackStore::put`'s tombstone-revive branch.
     let provider_attachment_id = info
         .as_ref()
         .and_then(|info| info.remote_attachment_id.as_deref())
@@ -160,10 +199,19 @@ pub(crate) async fn handle_fetch(
 
     // Phase 9: optionally compress before put. Settings-gated and
     // non-fatal: a squeeze hiccup passes bytes through unchanged.
+    //
+    // Use the resolved local row id so the mime-type probe in
+    // `maybe_compress` (which queries `WHERE id = ?1`) actually
+    // resolves. The wire param may carry either the local id or the
+    // remote attachment id (see `find_attachment_cache_info`'s OR
+    // clause); passing the remote id would have caused the probe to
+    // miss and squeeze to use the application/octet-stream fallback.
     let bytes = crate::attachment_compress::maybe_compress(
         &write_db,
-        params.attachment_id.clone(),
+        local_attachment_id.clone(),
         attachment.bytes,
+        boot_state.compress_attachments_enabled(),
+        boot_state.allow_lossy_compression_enabled(),
     ).await;
 
     let pack_store = boot_state.pack_store().ok_or_else(|| {
@@ -300,20 +348,30 @@ pub(crate) async fn handle_clear_cache(
         .tombstone_all_live()
         .await
         .map_err(|e| ServiceError::Internal(format!("attachment.clear_cache tombstone: {e}")))?;
-    // Snapshot tombstoned bytes pre-GC; gc_stats.bytes_reclaimed
-    // tells us how many of those bytes the compaction physically
-    // dropped. Both are reported to the UI; consumers can choose
-    // which one to surface.
+
+    // Force-rotate the open pack so the bytes the user just
+    // tombstoned in it become eligible for GC compaction. Without
+    // this, `run_gc` skips the open pack (line ~990) and the most
+    // recently-written bytes survive the clear. Failure is non-fatal
+    // (logged); the bytes simply stay tombstoned until next normal
+    // rotation reaches them.
+    if let Err(e) = pack_store.rotate_open_pack().await {
+        log::warn!("attachment.clear_cache: rotate_open_pack failed: {e}");
+    }
+
     let notification_tx = boot_state
         .notification_sender()
         .ok_or_else(|| {
             ServiceError::Internal("notification sender not installed".into())
         })?;
+    // service_generation is wire-reserved for the UI: the Service emits
+    // 0 here and the UI's reader stamps the real value at enqueue time.
+    // See `boot_progress.rs` module docs.
     let gc_stats = crate::gc::run_gc_pass(
         pack_store,
         notification_tx,
         0,
-        crate::gc::GcTrigger::PostEviction,
+        crate::gc::GcTrigger::ClearCache,
         crate::gc::DEFAULT_DENSITY_THRESHOLD,
     ).await;
     let ack = AttachmentClearCacheAck {

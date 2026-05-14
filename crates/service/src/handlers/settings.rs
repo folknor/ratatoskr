@@ -34,6 +34,21 @@ pub(crate) async fn handle_set(
         .iter()
         .any(|v| matches!(v, SettingValue::SyncPeriodDays(_)));
 
+    // Phase 9 observability: flipping either compression pref breaks
+    // PackStore's content-hash dedup for any blob fetched on either
+    // side of the flip (the same source bytes now compress to a
+    // different output and hash differently). Emit a warn-level log
+    // marker so operators investigating "why is my cache growing"
+    // have a signal to correlate with. The flip itself is allowed -
+    // the user owns the policy - but the cost is non-obvious from
+    // the toggle UI alone.
+    let touches_compress_pref = params.values.iter().any(|v| {
+        matches!(
+            v,
+            SettingValue::CompressAttachments(_) | SettingValue::AllowLossyCompression(_)
+        )
+    });
+
     let write_db = boot_state.write_db_state()?;
     let old_window_days: Option<i64> = if touches_sync_period {
         write_db
@@ -66,6 +81,25 @@ pub(crate) async fn handle_set(
         })
         .await
         .map_err(ServiceError::Internal)?;
+
+    if touches_compress_pref {
+        log::warn!(
+            "settings.set: compression pref changed; pre-existing PackStore blobs \
+             cached under the previous setting will no longer dedup against fresh \
+             puts of the same source bytes (one source -> two BLAKE3 hashes). \
+             Cache size will grow until eviction + GC drop the old form."
+        );
+        // Refresh the cached atomics so the next prefetch/fetch sees
+        // the new value without each call paying for a settings-table
+        // read.
+        let boot_state_for_refresh = Arc::clone(boot_state);
+        let _ = write_db
+            .with_conn(move |conn| {
+                boot_state_for_refresh.refresh_compression_prefs(conn);
+                Ok(())
+            })
+            .await;
+    }
 
     if touches_sync_period {
         // Defense in depth: read the freshly-committed value rather

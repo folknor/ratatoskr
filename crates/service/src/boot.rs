@@ -242,6 +242,16 @@ pub(crate) struct BootSharedState {
     /// post-sync triggers do not bump but still snapshot, so a
     /// window-shrink fired mid-pass interrupts them too.
     eviction_epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// Phase 9 compression-pref cache. `compress_attachments` defaults
+    /// to true and `allow_lossy_compression` defaults to false; both
+    /// are repopulated from the `settings` table on every successful
+    /// `settings.set` that touches either key. Cached atomically here
+    /// so `maybe_compress` doesn't hit the DB writer-mutex for two
+    /// reads on every attachment fetch (and every prefetch enqueue),
+    /// which serialized against unrelated writes during backfill
+    /// bursts.
+    compress_attachments: std::sync::atomic::AtomicBool,
+    allow_lossy_compression: std::sync::atomic::AtomicBool,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -279,6 +289,12 @@ impl BootSharedState {
             config,
             shutdown_token: CancellationToken::new(),
             eviction_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            // Match the documented Phase 6 defaults: compress on,
+            // lossy off. The boot path repopulates from the
+            // `settings` table once the DB is open; this constructor
+            // runs before then.
+            compress_attachments: std::sync::atomic::AtomicBool::new(true),
+            allow_lossy_compression: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -287,6 +303,37 @@ impl BootSharedState {
     /// so a fresh shrink supersedes an in-flight startup/post-sync.
     pub(crate) fn eviction_epoch(&self) -> Arc<std::sync::atomic::AtomicU64> {
         Arc::clone(&self.eviction_epoch)
+    }
+
+    /// Phase 9: cached compress_attachments setting (default true).
+    pub(crate) fn compress_attachments_enabled(&self) -> bool {
+        self.compress_attachments
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Phase 9: cached allow_lossy_compression setting (default false).
+    pub(crate) fn allow_lossy_compression_enabled(&self) -> bool {
+        self.allow_lossy_compression
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Phase 9: refresh both compression-pref atomics from the
+    /// `settings` table. Called once during boot (after the DB opens)
+    /// and again on every successful `settings.set` that touches
+    /// either key.
+    pub(crate) fn refresh_compression_prefs(&self, conn: &rusqlite::Connection) {
+        let compress = match rtsk::db::queries::get_setting(conn, "compress_attachments") {
+            Ok(Some(s)) => s == "true",
+            _ => true,
+        };
+        let lossy = match rtsk::db::queries::get_setting(conn, "allow_lossy_compression") {
+            Ok(Some(s)) => s == "true",
+            _ => false,
+        };
+        self.compress_attachments
+            .store(compress, std::sync::atomic::Ordering::Relaxed);
+        self.allow_lossy_compression
+            .store(lossy, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Test-only Service knobs parsed once at launch. Read by the
@@ -1320,6 +1367,15 @@ async fn run_boot_sequence_inner(
     })?;
     state.install_pack_store(pack_store);
 
+    // Phase 9: prime the compression-pref cache so the very first
+    // post-ready attachment fetch reads the user's actual setting
+    // rather than the constructor defaults. Re-read on every
+    // `settings.set` that touches either key.
+    {
+        let conn_guard = conn.lock().expect("conn mutex poisoned for compression-pref load");
+        state.refresh_compression_prefs(&conn_guard);
+    }
+
     // Attachments roadmap Phase 8b: if `--rebuild-attachment-index`
     // was passed on the command line, walk every sealed pack's frames
     // and replay every tombstone log to repopulate `attachment_blobs`
@@ -1336,6 +1392,24 @@ async fn run_boot_sequence_inner(
                 stats.tombstones_replayed,
             ),
             Err(e) => log::warn!("rebuild-attachment-index failed: {e}"),
+        }
+    }
+
+    // Attachments roadmap Phase 8b followup: unlink sealed packs with
+    // zero `attachment_blobs` rows. Catches two crash modes:
+    //   1. Crash mid-`compact_pack` (destination sealed before the
+    //      index swap commit) leaves an orphan `.pack` that no
+    //      subsequent GC can rediscover.
+    //   2. Post-`tombstone_all_live` + GC leaves an empty destination
+    //      pack whose rows were DELETEd inside the swap txn.
+    // Runs AFTER `rebuild_index` above so a corruption-recovery boot
+    // doesn't unlink legitimate packs whose rows the rebuild was
+    // about to repopulate.
+    if let Some(pack_store) = state.pack_store() {
+        match pack_store.sweep_orphan_sealed_packs().await {
+            Ok(n) if n > 0 => log::info!("PackStore orphan sweep: unlinked {n} sealed pack(s)"),
+            Ok(_) => {}
+            Err(e) => log::warn!("PackStore orphan sweep failed: {e}"),
         }
     }
 

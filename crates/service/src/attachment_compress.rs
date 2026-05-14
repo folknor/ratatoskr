@@ -27,19 +27,25 @@ use squeeze::config::Config;
 /// Returns the bytes to hand to `PackStore::put`. May be the
 /// compressed form, may be the original.
 ///
-/// Looks up `mime_type` from the `attachments` row and reads the
-/// Phase 6 prefs `compress_attachments` (default true) and
-/// `allow_lossy_compression` (default false). When
-/// `compress_attachments=false`, returns the original bytes without
-/// touching squeeze. Otherwise calls `squeeze::compress` with
-/// `Config::lossless()` (allow_lossy=false) or `Config::email_default()`
-/// (allow_lossy=true) and logs the per-mime savings.
+/// Looks up `mime_type` from the `attachments` row. The
+/// `compress_attachments` / `allow_lossy_compression` prefs are read
+/// by the caller via `BootSharedState::compress_attachments_enabled`
+/// / `allow_lossy_compression_enabled` (cached atomics, refreshed on
+/// every `settings.set` touching those keys) rather than by this
+/// function. The previous design hit the DB writer-mutex twice per
+/// call for the prefs alone, which serialized against unrelated
+/// writes during prefetch backfill bursts of thousands of items.
 pub(crate) async fn maybe_compress(
     db: &WriteDbState,
     attachment_id: String,
     bytes: Vec<u8>,
+    compress_pref: bool,
+    allow_lossy: bool,
 ) -> Vec<u8> {
-    let probe = match db
+    if !compress_pref {
+        return bytes;
+    }
+    let mime = match db
         .with_conn(move |conn| {
             let mime: Option<String> = conn
                 .query_row(
@@ -49,22 +55,16 @@ pub(crate) async fn maybe_compress(
                 )
                 .ok()
                 .flatten();
-            let compress_pref = read_bool(conn, "compress_attachments", true);
-            let allow_lossy = read_bool(conn, "allow_lossy_compression", false);
-            Ok((mime, compress_pref, allow_lossy))
+            Ok(mime)
         })
         .await
     {
-        Ok(t) => t,
+        Ok(m) => m,
         Err(e) => {
-            log::debug!("maybe_compress: settings probe failed, passing through: {e}");
+            log::debug!("maybe_compress: mime probe failed, passing through: {e}");
             return bytes;
         }
     };
-    let (mime, compress_pref, allow_lossy) = probe;
-    if !compress_pref {
-        return bytes;
-    }
     let mime_for_squeeze = mime.as_deref().unwrap_or("application/octet-stream");
     let cfg = if allow_lossy { Config::email_default() } else { Config::lossless() };
 
@@ -91,37 +91,5 @@ pub(crate) async fn maybe_compress(
             );
             bytes
         }
-    }
-}
-
-fn read_bool(conn: &rusqlite::Connection, key: &str, default: bool) -> bool {
-    match rtsk::db::queries::get_setting(conn, key) {
-        Ok(Some(s)) => s == "true",
-        _ => default,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn read_bool_parses_settings_table() {
-        let conn = rusqlite::Connection::open_in_memory().expect("open");
-        conn.execute(
-            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-            [],
-        )
-        .expect("create");
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('on_key', 'true'), ('off_key', 'false')",
-            [],
-        )
-        .expect("insert");
-        assert!(read_bool(&conn, "on_key", false));
-        assert!(!read_bool(&conn, "off_key", true));
-        // Missing key falls back to the default.
-        assert!(read_bool(&conn, "absent_key", true));
-        assert!(!read_bool(&conn, "absent_key", false));
     }
 }

@@ -1185,17 +1185,17 @@ impl RequestParams {
             | Self::DecryptForStorage { .. }
             | Self::AttachmentFetch { .. }
             | Self::AttachmentCacheSize { .. }
+            // Phase 8c: clear-cache is idempotent. A second call
+            // returning (blobs_tombstoned=0, bytes_reclaimed=0) is
+            // the correct honest answer to "did the wipe finish?"
+            // when the first call's IPC ack was lost mid-flight; a
+            // non-idempotent classification would block the
+            // dispatcher's retry and leave the UI without a signal
+            // that the work succeeded.
+            | Self::AttachmentClearCache { .. }
             | Self::ExtractStatus { .. } => Idempotency::Idempotent,
 
-            // Phase 8c: clear-cache is idempotent in effect (calling
-            // it twice in a row leaves the second call with nothing
-            // to tombstone) but the ack carries the per-call count,
-            // so a replay would surface different numbers. Treat as
-            // non-idempotent so the dispatcher doesn't retry it on
-            // its own.
-            Self::AttachmentClearCache { .. }
-
-            | Self::Shutdown
+            Self::Shutdown
             | Self::ActionExecutePlan { .. }
             | Self::CalActionExecutePlan { .. }
             | Self::ActionSend { .. }

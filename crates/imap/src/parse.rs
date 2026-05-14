@@ -59,11 +59,21 @@ pub fn parse_message(
 
     let message_id = message.message_id().map(ToString::to_string);
     let subject = message.subject().map(ToString::to_string);
-    let date = message
+    // `messages.date` is Unix milliseconds across every provider so
+    // the retention/eviction queries can compare against a single
+    // unit. `mail_parser::DateTime::to_timestamp` and async-imap's
+    // INTERNALDATE both return seconds; multiply to ms here. Without
+    // this normalization an IMAP-only mailbox produces seconds-scale
+    // dates, the eviction sweep's `m.date >= window_start * 1000`
+    // never matches, and every IMAP attachment is tombstone-
+    // eligible on the next sweep regardless of the configured
+    // retention window.
+    let date_secs = message
         .date()
         .map(mail_parser::DateTime::to_timestamp)
         .or(internal_date)
         .unwrap_or(0);
+    let date = date_secs.saturating_mul(1000);
 
     // In-Reply-To
     let in_reply_to = match message.in_reply_to() {

@@ -429,7 +429,15 @@ Supersession: `BootSharedState::eviction_epoch: Arc<AtomicU64>` is bumped on eve
 
 Harness: `jmap-eviction-post-sync.lua` (sweep fires after every sync, even when nothing's tombstonable) + `jmap-eviction-window-shrink.lua` (asserts the shrink path actually tombstones the now-out-of-window blob).
 
-**Gotcha noted during implementation, kept for the eventual Phase 7 follow-up review:** `messages.date` is stored in **milliseconds** (JMAP wire format flows straight through to the DB). The existing prefetch-sweep window comparison (`crates/service/src/prefetch.rs`) compares against a seconds-valued `window_start_unix` and so accepts every modern message regardless of window - effectively a no-op. The eviction sweep multiplies its window_start_unix by 1000 inside the SQL to get the comparison right; the prefetch path is a real pre-existing bug worth a Phase 7 follow-up fix.
+**Phase 7/8 followup batch (landed).** A post-Phase-9 outside review surfaced six high-severity correctness bugs around the cache-hit-vs-tombstoned interaction, the seconds-vs-ms units mismatch, rebuild-tool fidelity, and crash-recovery primitives. All landed under the consolidated review batch documented at the end of this file:
+
+- Prefetch sweep `m.date >= ?2 * 1000` now matches the eviction-side multiplication; `messages.date` is documented in the `02_mail.sql` schema as ms across every provider (IMAP `parse_message` normalizes from seconds at the boundary).
+- `attachment.fetch` cache-hit branch falls through to provider re-fetch when the blob is tombstoned OR physically absent post-GC; `PackStore::put`'s tombstone-revive branch repopulates. Prefetch sweep predicate widened to catch the same "no live blob" condition so backfill can self-heal on the next kick.
+- `PackStore::put` revive now writes a `Revive` record to the tombstone log, and `rebuild_index` replays records in file order so the post-revive live state survives index reconstruction.
+- `rebuild_index_walk_sealed_pack` uses `INSERT OR REPLACE` with a `tombstoned_at`-preserving subquery, so corrupted `(pack_file_id, offset, length)` rows get the authoritative frame coordinates written back.
+- `PackStore::sweep_orphan_sealed_packs` runs at boot after any rebuild-index pass and unlinks sealed packs with zero referencing rows (crashed compact_pack destinations, post clear-cache + GC empty packs).
+- `PackStore::get` retries on `NotFound` after re-looking up the row, so a reader that snapshotted `(pack_id, offset)` just before GC unlinked the source pack still resolves via the new pack location.
+- Tombstone DB UPDATE and tombstone-log append are reordered to log-first, so a crash between the two converges on tombstoned at rebuild instead of silently resurrecting an evicted blob.
 
 ### Phase 8b - Physical GC + rebuild-index tool (Status: landed)
 
@@ -628,3 +636,64 @@ These are real follow-ups, but each is a separate problem statement, not a phase
 - **Search inside attachment text** (PDF / OOXML extraction, FTS index). Owned by `docs/architecture.md` § "Text extraction pipeline" - the cache being populated is a precondition but not the bulk of it.
 - **Attachment encryption at rest**. Tracked under "Mail content stores not encrypted at rest" in TODO.md. Applies to body store, inline image store, and attachment cache uniformly - solve once across all three.
 - **Backfill UI**. "Cache all attachments for this account now" button. Lazy fill + eager pre-fetch covers the steady-state need; a one-shot backfill is nice-to-have.
+
+---
+
+## Phase 7/8/9 review batch (landed)
+
+After Phase 9 shipped, an outside review plus a critical re-read surfaced a clustered set of correctness and operational bugs across the Phase 7-9 surface. They landed as one consolidated batch.
+
+### Critical
+
+- **Tombstoned-with-content_hash rows used to fail `attachment.fetch`.** The cache-hit branch returned early on `content_hash IS NOT NULL`, but `materialize_blob` errored when the blob was tombstoned or its `attachment_blobs` row had been GC'd. The prefetch sweep filtered on `content_hash IS NULL` only, so the row never re-fetched. `AttachmentCacheInfo` now carries `blob_tombstoned_at` and `blob_present`; the handler's cache-hit branch checks both and falls through to the provider re-fetch path on either miss. The prefetch sweep query widens to `NOT(live blob exists)` to self-heal via the next backfill kick.
+- **Prefetch retention filter compared seconds to milliseconds.** `messages.date` is ms across every provider; the cutoff was passed in seconds. Eviction had the `* 1000` in its SQL; prefetch did not. Net effect: every modern message looked in-window, retention had no practical meaning for prefetch enqueue. Prefetch SQL now mirrors eviction's normalization.
+- **IMAP normalized `messages.date` to seconds, not milliseconds.** `imap::parse::parse_message` was the only sync path writing seconds-scale dates; the eviction `m.date >= window_start * 1000` predicate never matched for IMAP rows, marking every IMAP attachment immediately tombstone-eligible. Parse now multiplies the seconds-scale value by 1000 at the provider boundary; the schema documents the ms invariant on `messages.date`.
+- **`rebuild_index` re-tombstoned revived blobs.** `PackStore::put` revived a tombstoned row by clearing `tombstoned_at` without logging the operation; `rebuild_index` then replayed the old tombstone log and silently re-tombstoned. The 48-byte log record now carries a kind discriminator (`Tombstone = 0`, `Revive = 1`); existing logs replay unchanged (their zero byte maps to `Tombstone`). `put`-revive appends a `Revive` record; replay applies operations in file order so the final state matches the user's last action.
+- **`rebuild_index` did not repair corrupted index rows.** The walk used `INSERT OR IGNORE`, so any row with the right `content_hash` but wrong `(pack_file_id, offset, length)` was preserved. Now `INSERT OR REPLACE` with a `tombstoned_at`-preserving subquery writes the authoritative frame coordinates while keeping the live/tombstoned state intact for the subsequent log replay.
+- **Crash-mid-GC left orphan sealed packs forever.** `compact_pack` renamed the destination to `.pack` before committing the index swap. A crash in that window produced a sealed pack with zero referencing rows; subsequent GCs filtered it out via `pack_density` returning total=0. `PackStore::sweep_orphan_sealed_packs` runs at boot (after any rebuild-index pass) and unlinks every sealed pack with zero rows in `attachment_blobs`. Also catches the post-clear-cache empty packs the destination compaction produces.
+
+### High
+
+- **Post-sync sweeps tainted `SyncCompleted` on panic.** The prefetch + eviction sweeps awaited inline in `run_sync` before `emit_completed`. A panic inside either would be caught by `run_sync_supervised` and re-emerge as a `SyncCompleted { Failed(...) }` even though the actual sync succeeded. Both sweeps now run in a detached `tokio::spawn` after the result match.
+- **GC could unlink a pack while a reader was materializing.** `PackStore::get` released the DB mutex before opening the pack file; GC could commit the index swap and unlink the source pack in that gap. `get` now retries on `NotFound`: re-look up the row, and if `(pack_id, offset)` differs read the relocated frame; if unchanged, surface `Io(NotFound)`. Capped at four attempts.
+- **IMAP session reuse after timeout was unsound.** `process_imap_batch` reused `&mut session` across items; a `tokio::time::timeout` firing mid-FETCH could leave the async-imap session with un-drained response bytes. The next FETCH could read those bytes as the new command's reply. On any inner `Err`/timeout the session is now dropped (`logout`) and the rest of the batch records as `Transient`; the next backfill kick gets a fresh session.
+- **Cache-miss `attachment.fetch` lacked the account-cancellation gate.** Prefetch had the gate; the user-initiated handler did not. A click landing between `is_deleting = 1` and the row cascade-delete would provider-fetch and PackStore-put bytes the deletion step had already snapshotted past. `handle_fetch` now short-circuits on `is_deleting` at the top.
+- **Clear-cache left open-pack bytes unreclaimed.** GC skips open packs; bytes the user tombstoned in the currently-open pack stayed on disk until the next natural rotation. `handle_clear_cache` now calls `PackStore::rotate_open_pack` before chaining GC so the newly-tombstoned bytes are eligible.
+- **Tombstone DB UPDATE + log append were not atomic.** A crash between them left DB tombstoned and log silent; rebuild then walked the pack frame and inserted the blob as live (silent revival). Order reversed to log-first: a crash now leaves the log saying tombstoned, runtime authority says live (acceptable - blob still on disk), and any subsequent rebuild converges on tombstoned.
+
+### Medium
+
+- **Graph reference attachments persisted/fetched as byte attachments.** `GraphAttachment` now deserializes `@odata.type`; the parser skips `#microsoft.graph.referenceAttachment` and `#microsoft.graph.itemAttachment` so prefetch never tries `$value` against a URL-only or nested-item attachment.
+- **`SkipReason::ProviderTransient` used for internal-state failures.** Added `SkipReason::InternalError` for the encryption-key-missing, write_db_state-failure, and config-load-failed branches in the IMAP batch path and the per-item pipeline. Counts as a failure but separates the user-facing metric from provider issues.
+- **GC held the writer mutex for the entire pass.** `run_gc` now releases the mutex between packs; `compact_pack` acquires it only for id allocation and destination-file creation. Eliminates the multi-pack tail-latency window for concurrent `put`s.
+- **Squeeze pref flip had no operational visibility.** `settings.set` now logs a `warn`-level marker on every `compress_attachments` or `allow_lossy_compression` flip, with an explanation of the dedup-degradation cost.
+- **`AttachmentClearCache` was classified non-idempotent.** The dispatcher refused to retry on IPC failure even though a second call's `(0, 0)` ack is the honest "already done" response. Reclassified as idempotent.
+- **`opened_attachments` reaper unlinked under open fds.** Now uses `MAX(mtime, atime)` so actively-touched files survive past the window, and suppresses `ERROR_SHARING_VIOLATION` on Windows (file held by the app handler) without logging noise.
+
+### Low
+
+- **`maybe_compress` looked up the mime by request id, not local row id.** `params.attachment_id` may be a remote id (`find_attachment_cache_info` accepts either); the mime probe used `WHERE id = ?1` exclusively. Pass the resolved `local_attachment_id` so the mime probe always lands.
+- **`handle_clear_cache` emitted `GcTrigger::PostEviction`.** Added `GcTrigger::ClearCache` so notification consumers can distinguish a user-initiated wipe from a routine window-shrink chain.
+- **`service_generation` hardcoded to 0 is the documented contract**, not a bug. Reverted the speculative `boot_state.service_generation()` plumbing and noted the contract in code comments.
+- **`provider_semaphore_cap` was keyed by `account_id` alone**, but the cap depended on the first caller's provider. Re-keyed to `(account_id, provider)`.
+- **Per-call compression-pref probe on the hot path.** Cached as `Arc<AtomicBool>` on `BootSharedState`, primed at boot from `settings`, refreshed in `settings.set` post-commit when either key is touched. `maybe_compress` reads atomically.
+- **Provider date-units audit.** Verified Gmail (`internal_date` from API is ms), JMAP (the parser already multiplied by 1000), and Graph all write ms. IMAP was the divergent provider and is fixed above. The invariant is captured in `02_mail.sql` for future provider additions.
+
+### Test additions
+
+- **PackStore unit tests** (in `crates/stores/src/attachment_pack.rs`):
+  - `rebuild_index_does_not_resurrect_tombstone_after_revive` (CRIT-3)
+  - `rebuild_index_repairs_corrupted_row_pointer` (CRIT-4)
+  - `get_retries_after_gc_relocation` (HIGH-7)
+  - `get_survives_concurrent_gc_passes` (HIGH-7 concurrency)
+  - `sweep_orphan_sealed_packs_unlinks_zero_row_pack` (CRIT-5)
+  - `sweep_orphan_sealed_packs_unlinks_post_clear_cache_empty` (CRIT-5)
+- **Prefetch SQL unit test** (`sweep_query_filters_by_ms_window_and_picks_up_tombstoned_rows` in `prefetch.rs`): exercises the exact runtime SQL against a synthetic schema, asserting both the ms-window cutoff and the tombstone-aware predicate land the right rows.
+- **Harness scripts** under `crates/app/tests/sync-harness/`:
+  - `jmap-attachment-fetch-after-clear-cache.lua` (CRIT-1 end-to-end)
+  - `jmap-rebuild-attachment-index-flag.lua` (strengthened: round-trips over real packs)
+
+### Test gaps deferred
+
+- **IMAP folder-batch "one LOGIN + one SELECT per folder" assertion.** Requires saehrimnir-side per-session tagging or a fixture with enough attachments that the count gap becomes a hard signal. The behavior is an efficiency optimization, not a correctness invariant.
+- **Cross-account shared-blob deletion harness.** Requires multi-account fixture machinery (saehrimnir currently serves a fixture's email entries under a single account_id). Phase 4's `AccountDeletionStep::AttachmentCache` shared-blob behavior remains verified by code review only.

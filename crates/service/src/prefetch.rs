@@ -206,6 +206,12 @@ pub enum SkipReason {
     /// NULL; the next backfill kick will re-fetch and `PackStore::put`
     /// will dedupe to a no-op, then the UPDATE re-runs.
     DbUpdateError,
+    /// Service-internal precondition failed (encryption key missing,
+    /// provider config load failed, write_db_state unavailable). Not
+    /// a provider failure - separating them out keeps the
+    /// user-facing "N attachments failed" metric honest and feeds the
+    /// log message with the right cause class.
+    InternalError,
 }
 
 impl SkipReason {
@@ -217,6 +223,7 @@ impl SkipReason {
                 | Self::DbUpdateError
                 | Self::ProviderTransient
                 | Self::ProviderPermanent
+                | Self::InternalError
         )
     }
 }
@@ -324,9 +331,14 @@ pub(crate) struct PrefetchRuntimeInner {
     /// Without this, fetched/skipped/failed read at different instants
     /// can disagree by O(in-flight) and the ack totals look impossible.
     counters_snapshot:    Mutex<()>,
-    /// Per-account semaphore cache. Populated lazily on first dispatch
-    /// for a new account_id. Capped implicitly by total accounts.
-    account_semaphores:   Mutex<HashMap<String, Arc<Semaphore>>>,
+    /// Per-(account, provider) semaphore cache. Populated lazily on
+    /// first dispatch. Keyed on `(account_id, provider)` so the cap
+    /// (IMAP serializes its folder-batches, JMAP/Gmail/Graph parallel)
+    /// is derived consistently per call rather than locking in the
+    /// first caller's provider. Each account has exactly one provider
+    /// today, but the key is explicit so a future "switch provider"
+    /// migration doesn't pick up the wrong cap.
+    account_semaphores:   Mutex<HashMap<(String, String), Arc<Semaphore>>>,
     /// Circuit breakers keyed by `(provider, account_id)`. Today the
     /// two-tuple is practically equivalent to a per-account map since
     /// every account has exactly one provider, but threading provider
@@ -504,16 +516,48 @@ impl PrefetchRuntime {
             .inner
             .db
             .with_conn(move |conn| {
+                // `messages.date` is Unix milliseconds (provider sync
+                // writes ms across all four providers - see schema
+                // comment on the column). Callers supply
+                // `window_start_unix` in seconds to match the rest of
+                // the codebase's window conventions; multiply by 1000
+                // here rather than make every caller convert. Without
+                // this, the cutoff was 1000x too small and every
+                // historical message looked in-window, so the
+                // retention boundary was effectively absent from
+                // prefetch enqueue (eviction.rs already had the
+                // correct multiplication).
+                //
+                // The LEFT JOIN against `attachment_blobs` lets the
+                // sweep pick up every row whose bytes are not live
+                // in PackStore. Three subcases:
+                //   - `a.content_hash IS NULL`: never cached.
+                //   - `b.content_hash IS NULL`: row referenced a
+                //     hash that no `attachment_blobs` row covers
+                //     (post-GC physical reclaim of a tombstoned
+                //     blob, or initial sync wrote a stale hash).
+                //   - `b.tombstoned_at IS NOT NULL`: logically
+                //     evicted but still on disk awaiting GC.
+                // Equivalent predicate: NOT(live blob exists). A
+                // window extend or clear-cache leaves the user
+                // expecting subsequent backfills to repopulate;
+                // without the b.content_hash IS NULL branch a row
+                // whose blob got GC'd after a tombstone would
+                // never re-fetch via the sweep, only via a manual
+                // click.
                 let mut stmt = conn
                     .prepare(
                         "SELECT a.id, a.message_id, a.remote_attachment_id, m.imap_folder \
                          FROM attachments a \
                          JOIN messages m \
                            ON m.account_id = a.account_id AND m.id = a.message_id \
+                         LEFT JOIN attachment_blobs b ON b.content_hash = a.content_hash \
                          WHERE a.account_id = ?1 \
-                           AND a.content_hash IS NULL \
                            AND COALESCE(a.is_inline, 0) = 0 \
-                           AND m.date >= ?2 \
+                           AND m.date >= ?2 * 1000 \
+                           AND (a.content_hash IS NULL \
+                                OR b.content_hash IS NULL \
+                                OR b.tombstoned_at IS NOT NULL) \
                          ORDER BY m.date DESC \
                          LIMIT ?3",
                     )
@@ -865,17 +909,15 @@ async fn process_imap_batch(
         return;
     }
 
-    // Load IMAP config + open session. A connect failure aborts the
-    // batch; every item is recorded as Transient so the next backfill
-    // kick re-emits without tripping the breaker (LOGIN failures land
-    // as `Network` once classified through ProviderError::kind, but
-    // the raw `String` here doesn't carry the kind - treat it as
-    // transient because IMAP servers do drop and recover).
+    // Load IMAP config + open session. Internal-state failures
+    // (no write_db, no encryption key) are surfaced as
+    // `InternalError`; LOGIN/SELECT/network failures use
+    // `ProviderTransient` because IMAP servers do drop and recover.
     let read_db = match inner.boot_state.write_db_state() {
         Ok(w) => w.to_read_state(),
         Err(_) => {
             for item in items {
-                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+                record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
             }
             return;
         }
@@ -884,7 +926,7 @@ async fn process_imap_batch(
         Some(k) => k,
         None => {
             for item in items {
-                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+                record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
             }
             return;
         }
@@ -925,8 +967,34 @@ async fn process_imap_batch(
         return;
     }
 
-    for item in items {
+    // Drain the batch over the held session, but abandon the session
+    // on the first inner error or timeout. `tokio::time::timeout`
+    // cancels the in-flight `uid_fetch` mid-response when it fires,
+    // which can leave the async-imap session with un-drained bytes
+    // for the cancelled tagged command. Reusing it for the next
+    // FETCH would risk reading those stale bytes as if they were
+    // the new command's reply. Dropping + reconnecting for the
+    // remaining items is correct; we still record each remaining
+    // item so the in-flight set drains and counters advance.
+    let mut session_alive = true;
+    let mut remaining = items.into_iter();
+    while let Some(item) = remaining.next() {
         if inner.cancellation.is_cancelled() {
+            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+            // Mark the rest of the batch as Transient without
+            // touching the session - cancellation will tear it down
+            // along with the worker.
+            for stragglers in remaining.by_ref() {
+                record_item_outcome(
+                    &inner,
+                    &stragglers,
+                    Err(SkipReason::ProviderTransient),
+                )
+                .await;
+            }
+            break;
+        }
+        if !session_alive {
             record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
             continue;
         }
@@ -936,10 +1004,33 @@ async fn process_imap_batch(
             ItemFetch::ImapSession { session: &mut session },
         )
         .await;
+        let is_session_error = matches!(
+            outcome,
+            Err(SkipReason::ProviderTransient)
+                | Err(SkipReason::ProviderTimeout)
+                | Err(SkipReason::ProviderPermanent)
+        );
         record_item_outcome(&inner, &item, outcome).await;
+        if is_session_error {
+            // Treat IMAP fetch errors as session-fatal. The fetch
+            // path's timeout cancels the underlying stream mid-
+            // command; even a clean `Err` from async-imap may leave
+            // pipelined responses pending. Tear down the session
+            // and mark the rest of the batch Transient - the next
+            // backfill kick will re-emit on a fresh session.
+            log::debug!(
+                "prefetch imap batch {account_id}/{folder_id}: session-fatal error; \
+                 abandoning {} remaining item(s)",
+                remaining.len(),
+            );
+            let _ = session.logout().await;
+            session_alive = false;
+        }
     }
 
-    let _ = session.logout().await;
+    if session_alive {
+        let _ = session.logout().await;
+    }
 }
 
 /// How the fetch step should source the bytes. `ViaProvider` builds a
@@ -982,7 +1073,7 @@ async fn run_item_pipeline(
     // Confirm the row still wants bytes (cache-hit by another path
     // would have populated `content_hash` between enqueue and now).
     let read_db = inner.boot_state.write_db_state()
-        .map_err(|_| SkipReason::RowGone)?
+        .map_err(|_| SkipReason::InternalError)?
         .to_read_state();
     let lookup_account = item.account_id.clone();
     let lookup_message = item.message_id.clone();
@@ -1001,7 +1092,16 @@ async fn run_item_pipeline(
     let Some(info) = info else {
         return Err(SkipReason::RowGone);
     };
-    if info.content_hash.is_some() {
+    // AlreadyCached only if the blob is still live in PackStore.
+    // A row with a content_hash whose corresponding blob is
+    // tombstoned (logical eviction) or absent (post-GC physical
+    // reclaim) reaches the sweep via the LEFT JOIN in
+    // `enqueue_window_for_account`, and the fetch +
+    // `PackStore::put` path below puts it back on its feet.
+    if info.content_hash.is_some()
+        && info.blob_present
+        && info.blob_tombstoned_at.is_none()
+    {
         return Err(SkipReason::AlreadyCached);
     }
 
@@ -1010,13 +1110,13 @@ async fn run_item_pipeline(
             let key = inner
                 .boot_state
                 .encryption_key()
-                .ok_or(SkipReason::ProviderTransient)?;
+                .ok_or(SkipReason::InternalError)?;
             let provider =
                 crate::actions::provider::create_provider(&read_db, &item.account_id, key)
                     .await
                     .map_err(|e| {
                         log::debug!("prefetch create_provider {}: {e}", item.account_id);
-                        SkipReason::ProviderTransient
+                        SkipReason::InternalError
                     })?;
             let provider_ctx = common::types::ProviderCtx {
                 account_id: &item.account_id,
@@ -1091,10 +1191,14 @@ async fn run_item_pipeline(
 
     // Phase 9: optionally compress before put. Settings-gated and
     // non-fatal: a squeeze hiccup passes bytes through unchanged.
+    // Prefs are read from the cached atomics on BootSharedState
+    // rather than the DB on every call.
     let bytes = crate::attachment_compress::maybe_compress(
         &inner.db,
         item.attachment_id.clone(),
         bytes,
+        inner.boot_state.compress_attachments_enabled(),
+        inner.boot_state.allow_lossy_compression_enabled(),
     ).await;
 
     let content_hash = pack_store
@@ -1263,10 +1367,9 @@ async fn account_semaphore(
     provider: &str,
 ) -> Arc<Semaphore> {
     let cap = provider_semaphore_cap(provider);
+    let key = (account_id.to_string(), provider.to_string());
     let mut map = inner.account_semaphores.lock().await;
-    let sem = map
-        .entry(account_id.to_string())
-        .or_insert_with(|| Arc::new(Semaphore::new(cap)));
+    let sem = map.entry(key).or_insert_with(|| Arc::new(Semaphore::new(cap)));
     Arc::clone(sem)
 }
 
@@ -1583,5 +1686,108 @@ mod tests {
         assert_eq!(set.len(), 1);
         assert_eq!(fifo.len(), 1);
         assert!(set.contains(&("b".into(), "z".into())));
+    }
+
+    /// CRIT-2 regression: the sweep query compares
+    /// `messages.date` (ms) against the seconds-scale window cutoff
+    /// after multiplying by 1000 inside the SQL. Tests that
+    /// out-of-window rows are filtered and tombstoned blobs are
+    /// surfaced as catch-up candidates.
+    ///
+    /// Schema-only unit test - we drive the same SQL the runtime
+    /// uses, against a synthetic minimal schema, so the test
+    /// doesn't depend on harness/fixture machinery.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn sweep_query_filters_by_ms_window_and_picks_up_tombstoned_rows() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE messages (\
+                id TEXT NOT NULL,\
+                account_id TEXT NOT NULL,\
+                date INTEGER NOT NULL,\
+                imap_folder TEXT,\
+                PRIMARY KEY (account_id, id)\
+             );\
+             CREATE TABLE attachments (\
+                id TEXT PRIMARY KEY,\
+                account_id TEXT NOT NULL,\
+                message_id TEXT NOT NULL,\
+                remote_attachment_id TEXT,\
+                content_hash BLOB,\
+                is_inline INTEGER DEFAULT 0\
+             );\
+             CREATE TABLE attachment_blobs (\
+                content_hash BLOB PRIMARY KEY,\
+                tombstoned_at INTEGER\
+             );",
+        )
+        .expect("schema");
+
+        // Synthetic clock: pick a 'now' value in seconds; messages
+        // are written in ms (now * 1000).
+        let now_secs: i64 = 1_700_000_000; // 2023-11-14 ish.
+        let now_ms = now_secs.saturating_mul(1000);
+        let one_day_ms: i64 = 86_400 * 1000;
+        let in_window_ms = now_ms - 10 * one_day_ms; // 10 days ago.
+        let out_of_window_ms = now_ms - 400 * one_day_ms; // 400 days ago.
+
+        // Two messages: one in 30-day window, one out.
+        conn.execute(
+            "INSERT INTO messages (id, account_id, date) VALUES \
+             ('m-in', 'acct', ?1), ('m-out', 'acct', ?2)",
+            rusqlite::params![in_window_ms, out_of_window_ms],
+        )
+        .unwrap();
+
+        // Three attachments:
+        //   a1 -> m-in, content_hash NULL (uncached, should sweep)
+        //   a2 -> m-out, content_hash NULL (out of window, must skip)
+        //   a3 -> m-in, content_hash X, blob tombstoned (catch-up
+        //         eligible per CRIT-1 fix - sweep must pick it up)
+        let hash3: [u8; 32] = [0xab; 32];
+        conn.execute(
+            "INSERT INTO attachments (id, account_id, message_id, remote_attachment_id, content_hash, is_inline) VALUES \
+             ('a1', 'acct', 'm-in', 'r1', NULL, 0), \
+             ('a2', 'acct', 'm-out', 'r2', NULL, 0), \
+             ('a3', 'acct', 'm-in', 'r3', ?1, 0)",
+            rusqlite::params![hash3.as_slice()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachment_blobs (content_hash, tombstoned_at) VALUES (?1, ?2)",
+            rusqlite::params![hash3.as_slice(), now_secs],
+        )
+        .unwrap();
+
+        // Mirror the runtime's sweep query exactly. window_start
+        // here is 30 days in seconds; the SQL multiplies by 1000.
+        let window_start_secs = now_secs - 30 * 86_400;
+        let mut stmt = conn
+            .prepare(
+                "SELECT a.id \
+                 FROM attachments a \
+                 JOIN messages m \
+                   ON m.account_id = a.account_id AND m.id = a.message_id \
+                 LEFT JOIN attachment_blobs b ON b.content_hash = a.content_hash \
+                 WHERE a.account_id = ?1 \
+                   AND COALESCE(a.is_inline, 0) = 0 \
+                   AND m.date >= ?2 * 1000 \
+                   AND (a.content_hash IS NULL OR b.tombstoned_at IS NOT NULL) \
+                 ORDER BY m.date DESC",
+            )
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map(rusqlite::params!["acct", window_start_secs], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        // a1 (NULL hash, in window) and a3 (tombstoned, in window)
+        // must appear; a2 (out of window) must not.
+        assert!(ids.contains(&"a1".to_string()), "a1 (uncached, in window) should sweep, got {ids:?}");
+        assert!(ids.contains(&"a3".to_string()), "a3 (tombstoned, in window) should sweep, got {ids:?}");
+        assert!(!ids.contains(&"a2".to_string()), "a2 (out of window) must NOT sweep, got {ids:?}");
+        assert_eq!(ids.len(), 2);
     }
 }

@@ -151,6 +151,25 @@ pub struct AttachmentCacheInfo {
     pub is_inline: bool,
     pub text_indexed_at: Option<i64>,
     pub extraction_status: Option<String>,
+    /// `attachment_blobs.tombstoned_at` for the joined `content_hash`.
+    /// Distinguishes a logically-evicted blob (row exists, marker
+    /// set) from a live one. `attachment.fetch`'s cache-hit branch
+    /// treats `Some` as a miss and falls through to the provider
+    /// re-fetch path, which revives the blob via `PackStore::put`.
+    /// Without this signal, a fetch after retention eviction or
+    /// clear-cache erred with "blob indexed in attachments but
+    /// absent from pack store" - the prefetch sweep selects only
+    /// `content_hash IS NULL` rows and would never refetch.
+    pub blob_tombstoned_at: Option<i64>,
+    /// `true` if the `attachment_blobs` row for the joined
+    /// `content_hash` exists at all. `false` when the row was
+    /// physically reclaimed by GC after a tombstone (post
+    /// clear-cache + GC, post window-shrink + GC). Distinguishes
+    /// "no row" from "row with tombstoned_at IS NULL", which the
+    /// `blob_tombstoned_at` field alone collapses. The cache-hit
+    /// branch treats either condition - tombstoned OR absent - as
+    /// a miss and falls through to re-fetch.
+    pub blob_present: bool,
 }
 
 /// Look up an attachment's cache info by message + attachment ID.
@@ -166,9 +185,13 @@ pub fn find_attachment_cache_info(
     let mut stmt = conn
         .prepare(
             "SELECT a.id, a.remote_attachment_id, a.content_hash, \
-                    a.mime_type, a.is_inline, a.text_indexed_at, t.status AS extraction_status \
+                    a.mime_type, a.is_inline, a.text_indexed_at, \
+                    t.status AS extraction_status, \
+                    b.tombstoned_at AS blob_tombstoned_at, \
+                    CASE WHEN b.content_hash IS NOT NULL THEN 1 ELSE 0 END AS blob_present \
              FROM attachments a \
              LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash \
+             LEFT JOIN attachment_blobs b ON b.content_hash = a.content_hash \
              WHERE a.account_id = ?1 AND a.message_id = ?2 \
                AND (a.id = ?3 OR a.remote_attachment_id = ?3) \
              LIMIT 1",
@@ -187,6 +210,8 @@ pub fn find_attachment_cache_info(
                     is_inline: row.get::<_, i64>("is_inline")? != 0,
                     text_indexed_at: row.get("text_indexed_at")?,
                     extraction_status: row.get("extraction_status")?,
+                    blob_tombstoned_at: row.get("blob_tombstoned_at")?,
+                    blob_present: row.get::<_, i64>("blob_present")? != 0,
                 })
             },
         )

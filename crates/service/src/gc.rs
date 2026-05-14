@@ -33,6 +33,12 @@ pub const DEFAULT_DENSITY_THRESHOLD: f32 = 0.25;
 pub enum GcTrigger {
     Startup,
     PostEviction,
+    /// Phase 8c "Clear cache now" chained-GC pass: the user just
+    /// bulk-tombstoned every blob, this GC pass physically reclaims
+    /// them. Distinct from `PostEviction` so UI consumers and logs
+    /// can tell apart a user-initiated wipe from a routine
+    /// window-shrink eviction.
+    ClearCache,
 }
 
 impl GcTrigger {
@@ -40,6 +46,7 @@ impl GcTrigger {
         match self {
             Self::Startup => "startup",
             Self::PostEviction => "post_eviction",
+            Self::ClearCache => "clear_cache",
         }
     }
 }

@@ -553,37 +553,52 @@ async fn run_sync(
                 0
             }
         };
-        if let Err(e) = prefetch.enqueue_window_for_account(
-            &account_id,
-            &account_provider,
-            window_start_unix,
-            crate::prefetch::PrefetchPriority::Sync,
-            Some(crate::prefetch::SYNC_SWEEP_LIMIT),
-        ).await {
-            log::debug!("post-sync prefetch sweep {account_id}: {e}");
-        }
 
-        // Attachments roadmap Phase 8a: drop blobs whose every
-        // referencing message is older than the window. Prefetch
-        // sweep ran first (fresh bytes incoming); eviction sweep
-        // second (aged-out bytes outgoing). max_pages=4 caps post-
-        // sync latency; the startup pass and window-shrink trigger
-        // own the bulk drain.
-        if let Some(pack_store) = inner.boot_state.pack_store() {
-            let epoch_arc = inner.boot_state.eviction_epoch();
-            let epoch_at_start = epoch_arc.load(std::sync::atomic::Ordering::Relaxed);
-            let _ = crate::eviction::run_eviction_sweep(
-                inner.db.clone(),
-                pack_store,
-                inner.notification_tx.clone(),
-                inner.service_generation,
-                crate::eviction::EvictionTrigger::PostSync,
+        // Detach the post-sync prefetch + eviction work onto a
+        // separate task. Awaiting them inline meant a panic inside
+        // either sweep would be caught by the runner's supervisor
+        // and surfaced as `SyncCompleted { result: Failed(...) }`
+        // even though the actual sync had succeeded - the marker is
+        // already on the `Completed` track at this point. The sweeps
+        // have no value the sync result depends on; let them run in
+        // the background so a sweep panic doesn't taint the visible
+        // outcome.
+        let inner_for_sweeps = Arc::clone(&inner);
+        let account_id_for_sweeps = account_id.clone();
+        let account_provider_for_sweeps = account_provider.clone();
+        tokio::spawn(async move {
+            if let Err(e) = prefetch.enqueue_window_for_account(
+                &account_id_for_sweeps,
+                &account_provider_for_sweeps,
                 window_start_unix,
-                4,
-                epoch_arc,
-                epoch_at_start,
-            ).await;
-        }
+                crate::prefetch::PrefetchPriority::Sync,
+                Some(crate::prefetch::SYNC_SWEEP_LIMIT),
+            ).await {
+                log::debug!("post-sync prefetch sweep {account_id_for_sweeps}: {e}");
+            }
+
+            // Attachments roadmap Phase 8a: drop blobs whose every
+            // referencing message is older than the window. Prefetch
+            // sweep ran first (fresh bytes incoming); eviction sweep
+            // second (aged-out bytes outgoing). max_pages=4 caps
+            // post-sync latency; the startup pass and window-shrink
+            // trigger own the bulk drain.
+            if let Some(pack_store) = inner_for_sweeps.boot_state.pack_store() {
+                let epoch_arc = inner_for_sweeps.boot_state.eviction_epoch();
+                let epoch_at_start = epoch_arc.load(std::sync::atomic::Ordering::Relaxed);
+                let _ = crate::eviction::run_eviction_sweep(
+                    inner_for_sweeps.db.clone(),
+                    pack_store,
+                    inner_for_sweeps.notification_tx.clone(),
+                    inner_for_sweeps.service_generation,
+                    crate::eviction::EvictionTrigger::PostSync,
+                    window_start_unix,
+                    4,
+                    epoch_arc,
+                    epoch_at_start,
+                ).await;
+            }
+        });
     }
 
     update_marker_status(&inner.app_data_dir, &account_id, marker_status).await;

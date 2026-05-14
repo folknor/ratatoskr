@@ -2432,6 +2432,13 @@ fn request_params_from_lua(
                 },
             })
         }
+        "AttachmentClearCache" | "attachment.clear_cache" => {
+            // No params. The wire shape carries an empty struct so
+            // a future field add doesn't break callers.
+            Ok(RequestParams::AttachmentClearCache {
+                params: service_api::AttachmentClearCacheParams {},
+            })
+        }
         "IndexRebuild" | "index.rebuild" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("IndexRebuild requires params table"));

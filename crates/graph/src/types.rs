@@ -102,6 +102,17 @@ pub struct GraphAttachment {
     pub content_id: Option<String>,
     /// base64-encoded, only populated for small attachments.
     pub content_bytes: Option<String>,
+    /// Graph attachment kind discriminator. One of:
+    ///   `#microsoft.graph.fileAttachment` (raw bytes via `$value`),
+    ///   `#microsoft.graph.itemAttachment` (a nested Outlook item),
+    ///   `#microsoft.graph.referenceAttachment` (a URL to a cloud-
+    ///       hosted file - OneDrive/SharePoint - with no bytes).
+    /// Skipping non-fileAttachment kinds at parse time prevents
+    /// PrefetchRuntime from trying `$value` against a reference
+    /// attachment, which Graph rejects, and avoids persisting rows
+    /// that no provider fetch can satisfy.
+    #[serde(rename = "@odata.type", default)]
+    pub odata_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

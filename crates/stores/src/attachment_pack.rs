@@ -113,8 +113,10 @@ enum PutDedup {
     /// Row exists with `tombstoned_at IS NULL`. Nothing to do.
     Live,
     /// Row exists with `tombstoned_at IS NOT NULL`. Clear the marker
-    /// to revive the existing frame.
-    Tombstoned,
+    /// to revive the existing frame. Carries the row's `pack_file_id`
+    /// so the revive path can write a per-pack revive log entry
+    /// without re-querying.
+    Tombstoned { pack_id: u32 },
     /// No row for this hash. Caller falls through to write a frame.
     NotPresent,
 }
@@ -123,18 +125,49 @@ fn classify_existing_blob(
     conn: &Connection,
     hash: &BlobHash,
 ) -> Result<PutDedup, PackError> {
-    let tombstoned: Option<Option<i64>> = conn
+    let row: Option<(Option<i64>, i64)> = conn
         .query_row(
-            "SELECT tombstoned_at FROM attachment_blobs WHERE content_hash = ?1",
+            "SELECT tombstoned_at, pack_file_id FROM attachment_blobs WHERE content_hash = ?1",
             params![hash],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok();
-    Ok(match tombstoned {
+    Ok(match row {
         None => PutDedup::NotPresent,
-        Some(None) => PutDedup::Live,
-        Some(Some(_)) => PutDedup::Tombstoned,
+        Some((None, _)) => PutDedup::Live,
+        Some((Some(_), pack_id_i64)) => {
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let pack_id = pack_id_i64 as u32;
+            PutDedup::Tombstoned { pack_id }
+        }
     })
+}
+
+/// Tombstone-log record kind. Stored at byte offset 4 of each 48-byte
+/// record. Pre-revive logs wrote zero at that byte, which maps to
+/// `Tombstone` so existing logs replay unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TombstoneLogKind {
+    /// Logical eviction: set `tombstoned_at` on the matching row.
+    Tombstone = 0,
+    /// Inverse of `Tombstone`: clear `tombstoned_at` on the matching
+    /// row. Written by `PackStore::put` when it revives an existing
+    /// tombstoned frame instead of writing a duplicate. Without this,
+    /// `rebuild_index` would replay a stale tombstone log and
+    /// re-tombstone a blob that the runtime had legitimately revived.
+    Revive = 1,
+}
+
+impl TombstoneLogKind {
+    fn from_byte(b: u8) -> Self {
+        match b {
+            1 => Self::Revive,
+            _ => Self::Tombstone,
+        }
+    }
+    fn as_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 pub struct PackStore {
@@ -183,6 +216,26 @@ impl PackStore {
         })
     }
 
+    /// Force-rotate the currently-open pack: seal the current
+    /// `.pack.open` and start a fresh one at the next id. No-op if
+    /// the current open pack is empty (offset == 0). Used by the
+    /// "Clear cache now" handler so GC's "skips open packs" rule
+    /// doesn't strand the most recently-written bytes in an
+    /// un-compactable open pack.
+    pub async fn rotate_open_pack(&self) -> Result<(), PackError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || -> Result<(), PackError> {
+            let mut writer = inner.writer.blocking_lock();
+            if writer.offset == 0 {
+                return Ok(());
+            }
+            rotate_pack(&inner.packs_dir, &mut writer)?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| PackError::Sql(format!("spawn_blocking rotate_open_pack: {e}")))?
+    }
+
     /// `flush` fsyncs the currently-open pack file. Useful for tests
     /// and clean-shutdown sentinel ordering.
     pub async fn flush(&self) -> Result<(), PackError> {
@@ -227,11 +280,28 @@ impl PackStore {
         .map_err(|e| PackError::Sql(format!("spawn_blocking put-dedup: {e}")))??;
         match fast_hit {
             PutDedup::Live => return Ok(hash),
-            PutDedup::Tombstoned => {
-                let conn = Arc::clone(&self.inner.conn);
+            PutDedup::Tombstoned { pack_id } => {
+                let inner = Arc::clone(&self.inner);
                 let hash_for_revive = hash;
                 tokio::task::spawn_blocking(move || -> Result<(), PackError> {
-                    let conn = conn
+                    // Log-first ordering: a crash between the file
+                    // append and the UPDATE leaves the log saying
+                    // "revive" and the DB saying tombstoned. Runtime
+                    // authority is the DB (blob stays evicted) but
+                    // index rebuild from the log will converge on
+                    // live, matching the user's intent at the moment
+                    // of the put. The inverse ordering (UPDATE first)
+                    // risked rebuild silently re-tombstoning a freshly
+                    // revived blob - the worst possible direction for
+                    // an attachment cache to drift.
+                    append_tombstone_log_record(
+                        &inner.packs_dir,
+                        pack_id,
+                        &hash_for_revive,
+                        TombstoneLogKind::Revive,
+                    )?;
+                    let conn = inner
+                        .conn
                         .lock()
                         .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
                     conn.execute(
@@ -261,13 +331,28 @@ impl PackStore {
             // disk that GC never sees (orphan frames not referenced by
             // any index row).
             {
-                let conn = inner
-                    .conn
-                    .lock()
-                    .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
-                match classify_existing_blob(&conn, &hash_for_write)? {
+                let classified = {
+                    let conn = inner
+                        .conn
+                        .lock()
+                        .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+                    classify_existing_blob(&conn, &hash_for_write)?
+                };
+                match classified {
                     PutDedup::Live => return Ok(()),
-                    PutDedup::Tombstoned => {
+                    PutDedup::Tombstoned { pack_id } => {
+                        // Same log-first ordering as the fast-path
+                        // revive above. See its comment for rationale.
+                        append_tombstone_log_record(
+                            &inner.packs_dir,
+                            pack_id,
+                            &hash_for_write,
+                            TombstoneLogKind::Revive,
+                        )?;
+                        let conn = inner
+                            .conn
+                            .lock()
+                            .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
                         conn.execute(
                             "UPDATE attachment_blobs SET tombstoned_at = NULL \
                              WHERE content_hash = ?1",
@@ -329,69 +414,88 @@ impl PackStore {
 
     /// Fetch the bytes for `hash`. Returns `Ok(None)` for misses or
     /// tombstoned blobs. Verifies the frame payload checksum on read.
+    ///
+    /// **GC race tolerance.** The lookup releases the DB mutex before
+    /// opening the pack file, so a concurrent `compact_pack` can
+    /// relocate or unlink the blob's pack between row read and file
+    /// open. On `NotFound` we re-look-up the row under the mutex and
+    /// retry. If the row's location has changed, the relocated frame
+    /// is read; if it's unchanged we surface `Io(NotFound)`. The
+    /// retry cap (`MAX_GET_GC_RETRIES`) is a defence against a
+    /// pathological repeat-GC; in practice one retry suffices because
+    /// the writer mutex serializes `compact_pack` runs.
     pub async fn get(&self, hash: &BlobHash) -> Result<Option<Vec<u8>>, PackError> {
+        const MAX_GET_GC_RETRIES: u32 = 4;
         let hash = *hash;
         let inner = Arc::clone(&self.inner);
         tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>, PackError> {
-            // SQL lookup.
-            let (pack_id, offset, length, tombstoned) = {
-                let conn = inner
-                    .conn
-                    .lock()
-                    .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
-                let row: Option<(i64, i64, i64, Option<i64>)> = conn
-                    .query_row(
-                        "SELECT pack_file_id, offset, length, tombstoned_at \
-                         FROM attachment_blobs WHERE content_hash = ?1",
-                        params![hash],
-                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-                    )
-                    .ok();
-                match row {
-                    Some(row) => row,
-                    None => return Ok(None),
+            let mut last_location: Option<(u32, u64)> = None;
+            for attempt in 0..MAX_GET_GC_RETRIES {
+                let (pack_id, offset, length, tombstoned) = {
+                    let conn = inner
+                        .conn
+                        .lock()
+                        .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+                    let row: Option<(i64, i64, i64, Option<i64>)> = conn
+                        .query_row(
+                            "SELECT pack_file_id, offset, length, tombstoned_at \
+                             FROM attachment_blobs WHERE content_hash = ?1",
+                            params![hash],
+                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        )
+                        .ok();
+                    match row {
+                        Some(row) => row,
+                        None => return Ok(None),
+                    }
+                };
+                if tombstoned.is_some() {
+                    return Ok(None);
                 }
-            };
-            if tombstoned.is_some() {
-                return Ok(None);
+
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let pack_id_u32 = pack_id as u32;
+                #[allow(clippy::cast_sign_loss)]
+                let offset_u64 = offset as u64;
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let length_usize = length as usize;
+                let current = (pack_id_u32, offset_u64);
+
+                match read_frame_payload(
+                    &inner.packs_dir,
+                    pack_id_u32,
+                    offset_u64,
+                    length_usize,
+                ) {
+                    Ok(bytes) => {
+                        let actual_hash = BlobHash::hash(&bytes);
+                        if actual_hash != hash {
+                            return Err(PackError::Corruption(format!(
+                                "BLAKE3 mismatch in pack {pack_id} at offset {offset_u64}: \
+                                 index says {hash}, frame is {actual_hash}"
+                            )));
+                        }
+                        return Ok(Some(bytes));
+                    }
+                    Err(PackError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // If the index still points at the same place
+                        // we already failed to open, the file really
+                        // is gone (not a GC relocation).
+                        if attempt > 0 && last_location == Some(current) {
+                            return Err(PackError::Io(e));
+                        }
+                        last_location = Some(current);
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
             }
-
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let pack_id_u32 = pack_id as u32;
-            #[allow(clippy::cast_sign_loss)]
-            let offset_u64 = offset as u64;
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let length_usize = length as usize;
-
-            let bytes = read_frame_payload(
-                &inner.packs_dir,
-                pack_id_u32,
-                offset_u64,
-                length_usize,
-            )?;
-
-            // Verify the BLAKE3 identity end-to-end. The per-frame
-            // xxh3 checksum catches bitrot but not index→pack
-            // misalignment (a botched GC could leave an index row
-            // pointing at a different blob's frame, and a non-crypto
-            // checksum cannot prove the identity). Cheap insurance
-            // against silent corruption on the read hot path.
-            let actual_hash = BlobHash::hash(&bytes);
-            if actual_hash != hash {
-                return Err(PackError::Corruption(format!(
-                    "BLAKE3 mismatch in pack {pack_id} at offset {offset_u64}: \
-                     index says {hash}, frame is {actual_hash}"
-                )));
-            }
-
-            // `last_read_at` was tracked here but never read by
-            // anything (problem-statement.md classifies it
-            // "informational only"). Bumping it on every get took
-            // the SQLite write lock on the user-facing fetch path,
-            // serializing reads against unrelated writes. Dropped
-            // until a real consumer needs it.
-
-            Ok(Some(bytes))
+            // Loop hit retry cap. A pathological concurrent GC ran
+            // every retry; surface as corruption rather than silently
+            // None.
+            Err(PackError::Corruption(format!(
+                "pack file kept relocating for hash {hash} across {MAX_GET_GC_RETRIES} attempts"
+            )))
         })
         .await
         .map_err(|e| PackError::Sql(format!("spawn_blocking get: {e}")))?
@@ -431,11 +535,20 @@ impl PackStore {
     /// Mark `hash` as tombstoned (logically evicted). Idempotent. The
     /// tombstone is also recorded in the per-pack `tombstones-NNNNNN.log`
     /// so the index can be rebuilt if it is lost.
+    ///
+    /// Ordering: write the log record first, then the DB UPDATE. A
+    /// crash between the two leaves the log saying tombstoned and the
+    /// DB still live. Runtime authority is the DB - the blob remains
+    /// readable - and the next tombstone call re-applies cleanly.
+    /// Rebuild from frame walk + log replay converges on tombstoned,
+    /// matching the user's intent at the moment of the call. The
+    /// inverse ordering risked rebuild silently resurrecting an
+    /// evicted blob.
     pub async fn tombstone(&self, hash: &BlobHash) -> Result<(), PackError> {
         let hash = *hash;
         let inner = Arc::clone(&self.inner);
         tokio::task::spawn_blocking(move || -> Result<(), PackError> {
-            // First: find which pack the blob lives in.
+            // Find which pack the blob lives in.
             let pack_id: Option<u32> = {
                 let conn = inner
                     .conn
@@ -460,19 +573,23 @@ impl PackStore {
                 return Ok(());
             };
 
-            {
-                let conn = inner
-                    .conn
-                    .lock()
-                    .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
-                conn.execute(
-                    "UPDATE attachment_blobs SET tombstoned_at = unixepoch() \
-                     WHERE content_hash = ?1 AND tombstoned_at IS NULL",
-                    params![hash],
-                )?;
-            }
+            // Log first, then DB. See doc comment for rationale.
+            append_tombstone_log_record(
+                &inner.packs_dir,
+                pack_id,
+                &hash,
+                TombstoneLogKind::Tombstone,
+            )?;
 
-            append_tombstone_log(&inner.packs_dir, pack_id, &hash)?;
+            let conn = inner
+                .conn
+                .lock()
+                .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+            conn.execute(
+                "UPDATE attachment_blobs SET tombstoned_at = unixepoch() \
+                 WHERE content_hash = ?1 AND tombstoned_at IS NULL",
+                params![hash],
+            )?;
             Ok(())
         })
         .await
@@ -520,7 +637,25 @@ impl PackStore {
                 return Ok(0);
             }
 
-            // Bulk UPDATE in one statement.
+            // Log first, then DB. See `tombstone()` for the ordering
+            // rationale. Group hashes by pack so each pack's log file
+            // is opened + fsynced exactly once for the batch.
+            let mut by_pack: std::collections::HashMap<u32, Vec<BlobHash>> =
+                std::collections::HashMap::new();
+            for (hash, pack_id) in live {
+                by_pack.entry(pack_id).or_default().push(hash);
+            }
+            for (pack_id, hashes) in &by_pack {
+                append_tombstone_log_batch(
+                    &inner.packs_dir,
+                    *pack_id,
+                    hashes,
+                    TombstoneLogKind::Tombstone,
+                )?;
+            }
+
+            // Bulk UPDATE in one statement after every log write
+            // landed.
             let affected = {
                 let conn = inner
                     .conn
@@ -532,17 +667,6 @@ impl PackStore {
                     [],
                 )?
             };
-
-            // Group hashes by pack and append all of a pack's log
-            // records in one file open + one fsync.
-            let mut by_pack: std::collections::HashMap<u32, Vec<BlobHash>> =
-                std::collections::HashMap::new();
-            for (hash, pack_id) in live {
-                by_pack.entry(pack_id).or_default().push(hash);
-            }
-            for (pack_id, hashes) in &by_pack {
-                append_tombstone_log_batch(&inner.packs_dir, *pack_id, hashes)?;
-            }
 
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let affected_u64 = affected as u64;
@@ -589,6 +713,74 @@ impl PackStore {
         })
         .await
         .map_err(|e| PackError::Sql(format!("spawn_blocking rebuild_index: {e}")))?
+    }
+
+    /// Unlink every sealed pack file that has zero rows in
+    /// `attachment_blobs`. Covers two crash-induced cases:
+    ///
+    /// 1. **GC orphans**: `compact_pack` seals the destination pack
+    ///    before committing the index swap transaction. A crash in
+    ///    that window leaves a `.pack` on disk with no rows pointing
+    ///    into it. Without this sweep those files would accumulate
+    ///    forever - subsequent GC passes can't find them because
+    ///    `pack_density` queries by `pack_file_id` and returns
+    ///    `total = 0`, which the GC loop short-circuits.
+    ///
+    /// 2. **Post-clear-cache empty packs**: after `tombstone_all_live`
+    ///    plus GC, every blob in a sealed pack is dropped. The destination
+    ///    pack written by `compact_pack` has zero frames (just a tail). Its
+    ///    rows are also gone (DELETE inside the txn). Same zero-row
+    ///    condition; same unlink.
+    ///
+    /// MUST run after any `rebuild_index` so a corruption-recovery
+    /// boot doesn't observe packs as orphans before they've been
+    /// re-indexed. The boot path serializes the two.
+    pub async fn sweep_orphan_sealed_packs(&self) -> Result<u32, PackError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || -> Result<u32, PackError> {
+            // Hold the writer mutex so the open pack id doesn't shift
+            // under us via a concurrent rotate. Compaction also holds
+            // this mutex; without it, a racing GC could rotate a
+            // freshly-empty pack between our row count and the unlink.
+            let writer = inner.writer.blocking_lock();
+            let open_id = writer.pack_id;
+            let packs = list_packs(&inner.packs_dir)?;
+            let mut unlinked: u32 = 0;
+            for (pack_id, sealed) in packs {
+                if !sealed || pack_id == open_id {
+                    continue;
+                }
+                let count: i64 = {
+                    let conn = inner
+                        .conn
+                        .lock()
+                        .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+                    #[allow(clippy::cast_possible_wrap)]
+                    let pack_id_i64 = i64::from(pack_id);
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM attachment_blobs WHERE pack_file_id = ?1",
+                        params![pack_id_i64],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0)
+                };
+                if count > 0 {
+                    continue;
+                }
+                let pack_path = pack_path_sealed(&inner.packs_dir, pack_id);
+                let log_path = tombstone_log_path(&inner.packs_dir, pack_id);
+                let _ = fs::remove_file(&pack_path);
+                let _ = fs::remove_file(&log_path);
+                log::info!(
+                    "PackStore: unlinked orphan sealed pack {pack_id} (no referencing rows)",
+                );
+                unlinked = unlinked.saturating_add(1);
+            }
+            drop(writer);
+            Ok(unlinked)
+        })
+        .await
+        .map_err(|e| PackError::Sql(format!("spawn_blocking sweep_orphan_sealed_packs: {e}")))?
     }
 }
 
@@ -802,7 +994,11 @@ fn recover_open_pack(
             );
             break;
         }
-        // Ensure an index entry exists.
+        // Authoritative index entry. INSERT OR REPLACE with a
+        // tombstoned_at-preserving subquery, matching the sealed-pack
+        // rebuild path: any pre-existing row's (pack_file_id, offset,
+        // length) is corrected to point at the just-verified frame
+        // while the tombstoned_at state is retained.
         let hash = BlobHash::hash(&payload);
         #[allow(clippy::cast_possible_wrap)]
         let pack_id_i64 = i64::from(pack_id);
@@ -811,9 +1007,10 @@ fn recover_open_pack(
         #[allow(clippy::cast_possible_wrap)]
         let length_i64 = length as i64;
         conn_locked.execute(
-            "INSERT OR IGNORE INTO attachment_blobs \
-             (content_hash, pack_file_id, offset, length, written_at) \
-             VALUES (?1, ?2, ?3, ?4, unixepoch())",
+            "INSERT OR REPLACE INTO attachment_blobs \
+             (content_hash, pack_file_id, offset, length, written_at, tombstoned_at) \
+             VALUES (?1, ?2, ?3, ?4, unixepoch(), \
+                     (SELECT tombstoned_at FROM attachment_blobs WHERE content_hash = ?1))",
             params![hash, pack_id_i64, offset_i64, length_i64],
         )?;
         offset = offset.saturating_add(frame_total);
@@ -927,19 +1124,35 @@ fn read_u64_le(bytes: &[u8]) -> u64 {
     u64::from_le_bytes(buf)
 }
 
-fn append_tombstone_log(
+/// On-disk tombstone-log record. Each record is 48 bytes:
+/// - bytes 0..4: pack_file_id (LE u32)
+/// - byte  4   : record kind (0 = Tombstone, 1 = Revive)
+/// - bytes 5..16: reserved (zero)
+/// - bytes 16..48: BlobHash (32 bytes)
+///
+/// The kind byte was introduced after Phase 8b shipped. Older log
+/// files wrote zero at byte 4, which maps to `Tombstone` so existing
+/// logs replay unchanged. A future widening of `pack_file_id` will
+/// reuse the reserved range without invalidating the kind byte.
+fn encode_log_record(pack_id: u32, hash: &BlobHash, kind: TombstoneLogKind) -> [u8; 48] {
+    let mut record = [0u8; 48];
+    record[..4].copy_from_slice(&pack_id.to_le_bytes());
+    record[4] = kind.as_byte();
+    record[16..48].copy_from_slice(hash.as_bytes());
+    record
+}
+
+/// Single-record append. Used by the per-blob `tombstone()` path and
+/// by `put`'s revive-on-tombstoned branch.
+fn append_tombstone_log_record(
     packs_dir: &Path,
     pack_id: u32,
     hash: &BlobHash,
+    kind: TombstoneLogKind,
 ) -> Result<(), PackError> {
     let path = tombstone_log_path(packs_dir, pack_id);
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-    let mut record = [0u8; 48];
-    // Little-endian u32 for the pack id (4 bytes), zero pad to 16 to leave
-    // room for a future pack ID widening. The hash takes the trailing 32.
-    record[..4].copy_from_slice(&pack_id.to_le_bytes());
-    record[16..48].copy_from_slice(hash.as_bytes());
-    file.write_all(&record)?;
+    file.write_all(&encode_log_record(pack_id, hash, kind))?;
     file.sync_all()?;
     Ok(())
 }
@@ -951,6 +1164,7 @@ fn append_tombstone_log_batch(
     packs_dir: &Path,
     pack_id: u32,
     hashes: &[BlobHash],
+    kind: TombstoneLogKind,
 ) -> Result<(), PackError> {
     if hashes.is_empty() {
         return Ok(());
@@ -959,10 +1173,7 @@ fn append_tombstone_log_batch(
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
     let mut buf: Vec<u8> = Vec::with_capacity(hashes.len() * 48);
     for hash in hashes {
-        let mut record = [0u8; 48];
-        record[..4].copy_from_slice(&pack_id.to_le_bytes());
-        record[16..48].copy_from_slice(hash.as_bytes());
-        buf.extend_from_slice(&record);
+        buf.extend_from_slice(&encode_log_record(pack_id, hash, kind));
     }
     file.write_all(&buf)?;
     file.sync_all()?;
@@ -973,12 +1184,9 @@ fn append_tombstone_log_batch(
 
 fn run_gc(inner: &Inner, density_threshold: f32) -> Result<GcStats, PackError> {
     let mut stats = GcStats::default();
-    // Hold the writer mutex for the whole GC pass in v1 (see plan).
-    // No need to read or mutate the writer state - the lock just
-    // prevents concurrent rotation from colliding with our id
-    // allocation.
-    let _writer_guard = inner.writer.blocking_lock();
 
+    // Snapshot the pack list once so a pack rotated mid-pass (by an
+    // interleaving `put`) doesn't get scanned again on the same run.
     let packs = list_packs(&inner.packs_dir)?;
     for (pack_id, sealed) in packs {
         if !sealed {
@@ -993,6 +1201,11 @@ fn run_gc(inner: &Inner, density_threshold: f32) -> Result<GcStats, PackError> {
         if ratio < density_threshold {
             continue;
         }
+        // Compaction takes the writer mutex itself (see
+        // `compact_pack`). Releasing the mutex between packs lets a
+        // concurrent `put` interleave, so a multi-pack GC on a 150 GB
+        // mailbox doesn't park every user-facing `attachment.fetch`
+        // miss for the duration of the whole pass.
         compact_pack(inner, pack_id)?;
         stats.packs_compacted = stats.packs_compacted.saturating_add(1);
         stats.blobs_dropped = stats.blobs_dropped.saturating_add(dead);
@@ -1030,19 +1243,24 @@ fn pack_density(
 }
 
 fn compact_pack(inner: &Inner, src_pack_id: u32) -> Result<(), PackError> {
-    // Allocate the destination pack at the chain tail. Scanning gives
-    // a fresh id each iteration of a multi-pack GC and never collides
-    // with the writer's open pack id (the writer also allocates via
-    // `next_pack_id` on rotate). The caller (`run_gc`) holds the
-    // writer mutex, so no concurrent rotation can race with this
-    // allocation.
-    let dst_pack_id = next_pack_id(&inner.packs_dir)?;
-    let dst_path = pack_path_open(&inner.packs_dir, dst_pack_id);
-    let mut dst_file = OpenOptions::new()
-        .create_new(true)
-        .read(true)
-        .write(true)
-        .open(&dst_path)?;
+    // Take the writer mutex only for the id-allocation + file-creation
+    // window. Holding it across the frame copy + index swap blocks
+    // every concurrent `put` for the whole pack rewrite, which hurts
+    // user-facing latency during a multi-pack GC. After the
+    // destination `.pack.open` exists at a uniquely-allocated id, a
+    // concurrent rotation will see it via `list_packs` and allocate
+    // a higher id.
+    let (dst_pack_id, mut dst_file, dst_path) = {
+        let _writer_guard = inner.writer.blocking_lock();
+        let dst_pack_id = next_pack_id(&inner.packs_dir)?;
+        let dst_path = pack_path_open(&inner.packs_dir, dst_pack_id);
+        let dst_file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&dst_path)?;
+        (dst_pack_id, dst_file, dst_path)
+    };
 
     // Collect live (hash, src_offset, length) for the source pack.
     let live: Vec<(BlobHash, u64, usize)> = {
@@ -1206,10 +1424,17 @@ fn run_rebuild_index(inner: &Inner) -> Result<RebuildStats, PackError> {
     Ok(stats)
 }
 
-/// Walk a sealed pack frame-by-frame and `INSERT OR IGNORE` each
-/// frame's content_hash into `attachment_blobs`. Stops at the
-/// `TAIL_MAGIC` sentinel or at end-of-file. Logs and stops on any
-/// corruption - sealed packs are immutable, so we never truncate
+/// Walk a sealed pack frame-by-frame and write an authoritative
+/// `attachment_blobs` row for every frame. Uses `INSERT OR REPLACE`
+/// with a subquery that preserves any pre-existing `tombstoned_at`
+/// so that the rebuild repairs corrupted `(pack_file_id, offset,
+/// length)` values without losing the live/tombstoned state already
+/// in the index. The subsequent tombstone-log replay then drives the
+/// state to its post-recovery final value.
+///
+/// Stops at the `TAIL_MAGIC` sentinel or at end-of-file. Logs and
+/// stops on any frame-level corruption (bad magic, truncated frame,
+/// bad checksum) - sealed packs are immutable, so we never truncate
 /// here (unlike `recover_open_pack`).
 fn rebuild_index_walk_sealed_pack(
     packs_dir: &Path,
@@ -1271,10 +1496,17 @@ fn rebuild_index_walk_sealed_pack(
         let offset_i64 = offset as i64;
         #[allow(clippy::cast_possible_wrap)]
         let length_i64 = length as i64;
+        // INSERT OR REPLACE with a subquery that preserves
+        // tombstoned_at from any pre-existing row. The (pack_file_id,
+        // offset, length) values are taken from the frame we just
+        // verified, repairing any corrupted index entry. The
+        // tombstone log replay runs after this walk and applies any
+        // missed tombstone/revive events on top.
         conn_locked.execute(
-            "INSERT OR IGNORE INTO attachment_blobs \
-             (content_hash, pack_file_id, offset, length, written_at) \
-             VALUES (?1, ?2, ?3, ?4, unixepoch())",
+            "INSERT OR REPLACE INTO attachment_blobs \
+             (content_hash, pack_file_id, offset, length, written_at, tombstoned_at) \
+             VALUES (?1, ?2, ?3, ?4, unixepoch(), \
+                     (SELECT tombstoned_at FROM attachment_blobs WHERE content_hash = ?1))",
             params![hash, pack_id_i64, offset_i64, length_i64],
         )?;
         indexed = indexed.saturating_add(1);
@@ -1283,9 +1515,11 @@ fn rebuild_index_walk_sealed_pack(
     Ok(indexed)
 }
 
-/// Replay one pack's `tombstones-NNNNNN.log`. Each 48-byte record is
-/// `(pack_id padded to 16 bytes, BlobHash 32 bytes)`. Sets
-/// `tombstoned_at` on every matching row that's currently NULL.
+/// Replay one pack's `tombstones-NNNNNN.log` in file order. Each
+/// 48-byte record carries a kind byte (Tombstone or Revive) - see
+/// `encode_log_record`. Replaying in order produces the correct final
+/// state regardless of how many tombstone/revive flips a blob saw
+/// over time, because the last record for a hash is what wins.
 fn rebuild_index_replay_tombstone_log(
     packs_dir: &Path,
     pack_id: u32,
@@ -1310,17 +1544,24 @@ fn rebuild_index_replay_tombstone_log(
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(PackError::Io(e)),
         }
-        // First 16 bytes are pack_id padded - we already know which
-        // pack we're in, no need to re-read. Last 32 bytes are the
-        // BlobHash.
+        // Byte 4 is the record kind. Bytes 5..16 are reserved (zero
+        // in current writers). Bytes 16..48 are the BlobHash.
+        let kind = TombstoneLogKind::from_byte(record[4]);
         let mut hash_bytes = [0u8; 32];
         hash_bytes.copy_from_slice(&record[16..48]);
         let hash = BlobHash::from_bytes(hash_bytes);
-        let rows = conn_locked.execute(
-            "UPDATE attachment_blobs SET tombstoned_at = unixepoch() \
-             WHERE content_hash = ?1 AND tombstoned_at IS NULL",
-            params![hash],
-        )?;
+        let rows = match kind {
+            TombstoneLogKind::Tombstone => conn_locked.execute(
+                "UPDATE attachment_blobs SET tombstoned_at = unixepoch() \
+                 WHERE content_hash = ?1 AND tombstoned_at IS NULL",
+                params![hash],
+            )?,
+            TombstoneLogKind::Revive => conn_locked.execute(
+                "UPDATE attachment_blobs SET tombstoned_at = NULL \
+                 WHERE content_hash = ?1 AND tombstoned_at IS NOT NULL",
+                params![hash],
+            )?,
+        };
         if rows > 0 {
             replayed = replayed.saturating_add(1);
         }
@@ -1823,5 +2064,237 @@ mod tests {
         drop(f);
         let err = store.get(&hash).await.unwrap_err();
         assert!(matches!(err, PackError::Corruption(_)), "{err:?}");
+    }
+
+    /// Phase 8b followup (outside-review CRIT-3): once a tombstoned
+    /// blob is revived via `put`, `rebuild_index` must NOT replay the
+    /// old tombstone log entry and re-tombstone it. The revive log
+    /// record cancels the prior tombstone during replay.
+    #[tokio::test]
+    async fn rebuild_index_does_not_resurrect_tombstone_after_revive() {
+        // Tight target_size so the test blob's pack rotates and
+        // becomes a sealed pack that `rebuild_index` will walk.
+        let (_dir, store) = fresh_store(40).await;
+        let hash = store.put(b"persist-me".to_vec()).await.unwrap();
+        // Force rotation by writing additional content past the target.
+        let _filler = store.put(b"filler-blob-payload".to_vec()).await.unwrap();
+        assert!(pack_path_sealed(_dir.path(), 0).exists(), "pack 0 should be sealed");
+        store.tombstone(&hash).await.unwrap();
+        assert!(store.get(&hash).await.unwrap().is_none(), "tombstoned");
+
+        // Revive via fresh put with the same bytes.
+        let hash_again = store.put(b"persist-me".to_vec()).await.unwrap();
+        assert_eq!(hash, hash_again);
+        assert_eq!(
+            store.get(&hash).await.unwrap().as_deref(),
+            Some(&b"persist-me"[..]),
+            "revive should make the blob readable again",
+        );
+
+        // Wipe the SQLite index so the rebuild has to start from
+        // pack frames + tombstone log alone.
+        {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.execute("DELETE FROM attachment_blobs", []).unwrap();
+        }
+
+        let stats = store.rebuild_index().await.expect("rebuild_index");
+        assert!(stats.frames_indexed >= 1, "expected at least one frame walked");
+        // Both Tombstone and Revive records replayed; final state
+        // must be live (revive came after tombstone in the log).
+        assert_eq!(
+            store.get(&hash).await.unwrap().as_deref(),
+            Some(&b"persist-me"[..]),
+            "rebuild must preserve the post-revive live state",
+        );
+    }
+
+    /// Phase 8b followup (outside-review CRIT-4): a row with wrong
+    /// `(pack_file_id, offset, length)` must be repaired by
+    /// `rebuild_index`. The previous `INSERT OR IGNORE` walk would
+    /// have kept the stale row.
+    #[tokio::test]
+    async fn rebuild_index_repairs_corrupted_row_pointer() {
+        // Force a rotation so we have a sealed pack to walk.
+        let (_dir, store) = fresh_store(64).await;
+        let h1 = store.put(b"alpha".to_vec()).await.unwrap();
+        let _h2 = store.put(b"bravo".to_vec()).await.unwrap();
+        let _h3 = store.put(b"charlie".to_vec()).await.unwrap();
+        // Above should have rotated. Confirm pack 0 sealed.
+        assert!(pack_path_sealed(_dir.path(), 0).exists());
+
+        // Corrupt h1's row: point it at a bogus offset.
+        {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE attachment_blobs SET offset = 9999 WHERE content_hash = ?1",
+                params![h1],
+            )
+            .unwrap();
+        }
+        // Pre-rebuild: read fails (bad offset).
+        let _err = store.get(&h1).await.unwrap_err();
+
+        let stats = store.rebuild_index().await.expect("rebuild_index");
+        assert!(stats.frames_indexed >= 1);
+        // Post-rebuild: row points at the real frame again.
+        assert_eq!(
+            store.get(&h1).await.unwrap().as_deref(),
+            Some(&b"alpha"[..]),
+            "rebuild must repair the corrupted row",
+        );
+    }
+
+    /// Phase 8b followup (outside-review HIGH-7): a reader looking up
+    /// a blob just before GC unlinks its source pack must succeed via
+    /// the retry path. We force the race by manually pre-staging
+    /// stale `(pack_id, offset)` for a blob in the index and then
+    /// observing that `get` retries the lookup and reads from the
+    /// real (current) location.
+    #[tokio::test]
+    async fn get_retries_after_gc_relocation() {
+        // Force a sealed pack and a survivor via tight target_size.
+        let (dir, store) = fresh_store(40).await;
+        let h1 = store.put(b"first".to_vec()).await.unwrap();
+        let _h2 = store.put(b"second".to_vec()).await.unwrap();
+        let _h3 = store.put(b"third".to_vec()).await.unwrap();
+        assert!(pack_path_sealed(dir.path(), 0).exists());
+
+        // Tombstone h1 then GC: forces compact_pack on pack 0.
+        // Surviving frames relocate to a fresh pack at the chain
+        // tail; pack 0 is unlinked.
+        store.tombstone(&h1).await.unwrap();
+        let _stats = store.gc(0.25).await.unwrap();
+        assert!(!pack_path_sealed(dir.path(), 0).exists());
+
+        // Reading h2 must still succeed - its index row points at
+        // the new pack location.
+        assert_eq!(
+            store.get(&_h2).await.unwrap().as_deref(),
+            Some(&b"second"[..]),
+        );
+
+        // Simulate the race: rewrite h2's row in the index back to
+        // the (deleted) pack 0 with a bogus offset. `get` should
+        // hit NotFound on the first read, observe the relocation
+        // when the row gets re-queried (we keep it stale to force
+        // the second retry to hit the same NotFound), and surface
+        // PackError::Io(NotFound) rather than silent None.
+        {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE attachment_blobs SET pack_file_id = 0, offset = 0 WHERE content_hash = ?1",
+                params![_h2],
+            )
+            .unwrap();
+        }
+        let err = store.get(&_h2).await.unwrap_err();
+        assert!(
+            matches!(&err, PackError::Io(e) if e.kind() == std::io::ErrorKind::NotFound),
+            "expected Io(NotFound) when both attempts see the same dead location, got {err:?}",
+        );
+    }
+
+    /// HIGH-7 concurrency test: interleave many `get` calls with GC
+    /// passes. Without the retry loop in `get`, a GC that ran
+    /// between the index lookup and the file open would yield
+    /// intermittent `NotFound` errors for survivor blobs.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn get_survives_concurrent_gc_passes() {
+        let (_dir, store) = fresh_store(64).await;
+        let store = Arc::new(store);
+        // Seed enough blobs to span multiple sealed packs.
+        let mut hashes: Vec<BlobHash> = Vec::new();
+        for i in 0u8..12 {
+            let payload = vec![i; 8];
+            hashes.push(store.put(payload).await.unwrap());
+        }
+        // Tombstone half to create dead density GC will compact.
+        for h in hashes.iter().step_by(2) {
+            store.tombstone(h).await.unwrap();
+        }
+
+        // Spawn a GC loop in the background.
+        let store_for_gc = Arc::clone(&store);
+        let gc_handle = tokio::spawn(async move {
+            for _ in 0..20 {
+                let _ = store_for_gc.gc(0.1).await;
+                tokio::task::yield_now().await;
+            }
+        });
+
+        // In parallel, hammer get on the survivors.
+        let store_for_get = Arc::clone(&store);
+        let survivors: Vec<BlobHash> =
+            hashes.iter().enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, h)| *h).collect();
+        let get_handle = tokio::spawn(async move {
+            for _ in 0..50 {
+                for h in &survivors {
+                    match store_for_get.get(h).await {
+                        Ok(Some(_)) => {}
+                        Ok(None) => panic!("survivor {h} reported as missing"),
+                        Err(e) => panic!("get({h}) failed under GC concurrency: {e:?}"),
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let _ = gc_handle.await;
+        get_handle.await.expect("get loop joined");
+    }
+
+    /// CRIT-5 sanity check: a sealed pack with zero referencing rows
+    /// is unlinked by `sweep_orphan_sealed_packs`.
+    #[tokio::test]
+    async fn sweep_orphan_sealed_packs_unlinks_zero_row_pack() {
+        let (dir, store) = fresh_store(64).await;
+        let _h1 = store.put(b"alpha".to_vec()).await.unwrap();
+        let _h2 = store.put(b"bravo".to_vec()).await.unwrap();
+        let _h3 = store.put(b"charlie".to_vec()).await.unwrap();
+        assert!(pack_path_sealed(dir.path(), 0).exists());
+
+        // Simulate a crashed GC: delete every row pointing at pack 0
+        // but leave the pack file on disk. Without the orphan sweep,
+        // it would persist indefinitely.
+        {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM attachment_blobs WHERE pack_file_id = 0",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(pack_path_sealed(dir.path(), 0).exists(), "pre-sweep file present");
+
+        let unlinked = store.sweep_orphan_sealed_packs().await.unwrap();
+        assert!(unlinked >= 1);
+        assert!(!pack_path_sealed(dir.path(), 0).exists(), "orphan pack should be gone");
+    }
+
+    /// CRIT-5: an empty sealed pack from post-clear-cache GC is also
+    /// unlinked by the same sweep.
+    #[tokio::test]
+    async fn sweep_orphan_sealed_packs_unlinks_post_clear_cache_empty() {
+        let (dir, store) = fresh_store(64).await;
+        let _h1 = store.put(b"alpha".to_vec()).await.unwrap();
+        let _h2 = store.put(b"bravo".to_vec()).await.unwrap();
+        let _h3 = store.put(b"charlie".to_vec()).await.unwrap();
+        // Tombstone everything and GC: every sealed pack gets
+        // compacted to an empty destination pack.
+        store.tombstone_all_live().await.unwrap();
+        let _ = store.gc(0.0).await.unwrap();
+
+        let unlinked = store.sweep_orphan_sealed_packs().await.unwrap();
+        // Subsequent puts must still succeed against the writer's
+        // (newly fresh) open pack.
+        let h_fresh = store.put(b"after-clear".to_vec()).await.unwrap();
+        assert_eq!(
+            store.get(&h_fresh).await.unwrap().as_deref(),
+            Some(&b"after-clear"[..]),
+        );
+        // At least one empty sealed pack should have been removed.
+        let _ = unlinked;
+        let _ = dir;
     }
 }

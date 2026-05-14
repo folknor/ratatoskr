@@ -95,6 +95,12 @@ CREATE TABLE IF NOT EXISTS messages (
     reply_to TEXT,
     subject TEXT,
     snippet TEXT,
+    -- Unix milliseconds since epoch. Invariant across providers:
+    -- JMAP/Gmail/Graph write ms natively; IMAP normalizes its
+    -- seconds-scale INTERNALDATE/header `Date` value to ms in
+    -- `imap::parse::parse_message`. Eviction and prefetch retention
+    -- queries assume ms and multiply seconds-scale window cutoffs by
+    -- 1000 to match.
     date INTEGER NOT NULL,
     is_read INTEGER DEFAULT 0,
     is_starred INTEGER DEFAULT 0,
