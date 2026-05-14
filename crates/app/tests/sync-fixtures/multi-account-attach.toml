@@ -1,0 +1,89 @@
+name = "multi-account-attach"
+
+# Two JMAP accounts whose inboxes both contain a message with the
+# same attachment bytes. The shared data_path makes saehrimnir serve
+# byte-identical blobs to both accounts, so ratatoskr's BLAKE3
+# content-addressing collapses them into a single attachment_blobs
+# row. Alice also has an unshared attachment to exercise the
+# orphan-tombstoning branch on her own deletion.
+
+[[account]]
+id = "account-alice"
+name = "alice@example.com"
+is_personal = true
+primary = true
+
+[[account]]
+id = "account-bob"
+name = "bob@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-alice-inbox"
+account_id = "account-alice"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mbx-bob-inbox"
+account_id = "account-bob"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+# Shared blob: same data_path under both accounts.
+
+[[email]]
+id = "email-alice-shared"
+mailbox_ids = ["mbx-alice-inbox"]
+from = "sender@example.com"
+to = ["alice@example.com"]
+subject = "Shared attachment - Alice"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-alice-shared@example.com>"]
+body_text = "Same bytes as Bob's copy."
+
+[[email.attachment]]
+blob_id = "blob-alice-shared"
+name = "shared.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"
+
+[[email]]
+id = "email-bob-shared"
+mailbox_ids = ["mbx-bob-inbox"]
+from = "sender@example.com"
+to = ["bob@example.com"]
+subject = "Shared attachment - Bob"
+received_at = "2026-01-16T10:00:00Z"
+message_id = ["<email-bob-shared@example.com>"]
+body_text = "Same bytes as Alice's copy."
+
+[[email.attachment]]
+blob_id = "blob-bob-shared"
+name = "shared.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"
+
+# Unshared blob: only Alice. After Alice is deleted this content_hash
+# has no remaining attachments row and must tombstone.
+
+[[email]]
+id = "email-alice-unshared"
+mailbox_ids = ["mbx-alice-inbox"]
+from = "other@example.com"
+to = ["alice@example.com"]
+subject = "Unshared attachment - Alice only"
+received_at = "2026-01-17T10:00:00Z"
+message_id = ["<email-alice-unshared@example.com>"]
+body_text = "Bob never received this."
+
+[[email.attachment]]
+blob_id = "blob-alice-unshared"
+name = "unshared.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample-unshared.txt"
