@@ -131,7 +131,7 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 - Idle cleanup pass removes `attachment_fetch_tmp/*` older than 10 minutes. UI's open fd is the lifetime pin: `unlink` is fd-safe on Linux; the Service opens with `FILE_SHARE_DELETE` on Windows.
 
 *`attachment.fetch` rewrite:*
-- Handler routes through `materialize_blob` for both hit and miss paths. On miss, the full pipeline runs: provider `fetch_attachment` -> squeeze (with signed-content bypass) -> `PackStore::put` -> `materialize_blob` -> ack.
+- Handler routes through `materialize_blob` for both hit and miss paths. On miss, the full pipeline runs: provider `fetch_attachment` -> squeeze -> `PackStore::put` -> `materialize_blob` -> ack.
 - Wire shape: `AttachmentFetchAck { content_hash, size_bytes, relative_path }` unchanged.
 - The lease-design forward references in `crates/service-api/src/attachment.rs` and `docs/architecture.md` § "Forward reference: pack-aware attachment reads" are retracted: per-fetch transient extraction replaces leases entirely.
 
@@ -534,18 +534,18 @@ Determinism contract: PackStore is content-addressed via BLAKE3, so two fetches 
 
 Failure mode: compression errors are logged and pass-through; cache correctness must not depend on squeeze succeeding.
 
-Signed-content bypass lives inside `squeeze` per its README (signed PDFs / OOXML / ODF detected by content sniffing, returned as `Unchanged`); the rtsk side trusts the crate.
+Signed-content bypass lives inside `squeeze` per its README (signed PDFs / OOXML / ODF detected by content sniffing, returned as `Unchanged`); the rtsk side trusts the crate. S/MIME envelopes already pass through as unsupported.
 
 **Deferred to a measurement-driven follow-up** (entry criterion: a real mailbox has run on this build long enough to know what we're optimizing):
 
 - Aggregate per-mime measurement table + CLI report. The `log::info` line emitted per successful compress is the substrate; an aggregate report waits for data.
-- Bypass-rate calibration logging (how often the signed-content bypass fires, broken out by mime).
+- `Unchanged`-rate logging, broken out by mime and reason (already-small / non-compressible / signed-content). Calibrates whether squeeze's heuristics match the mailbox and how often the signature bypass fires.
 - Default tuning decisions: should `allow_lossy_compression` default-on, should some mimes be skipped entirely, should squeeze move off the hot path entirely on fast disks.
 - Batched fsync (Phase 2 deferral). Re-evaluate if measurements show fsync is a meaningful chunk of write-path cost.
 
 **Original Phase 9 scope (retained for context).**
 
-**Goal.** Wire `squeeze::compress` + signed-content bypass into the PackStore write path, validate that squeeze is paying its way, and tune defaults based on observed savings.
+**Goal.** Wire `squeeze::compress` into the PackStore write path, validate that squeeze is paying its way, and tune defaults based on observed savings.
 
 **Entry criteria.**
 - Phases 1-7 landed and have been running on a real mailbox for a week or two.
@@ -553,13 +553,12 @@ Signed-content bypass lives inside `squeeze` per its README (signed PDFs / OOXML
 **In scope.**
 
 *Squeeze integration (deferred from Phase 3):*
-- Wire `squeeze::compress(bytes, mime_type, &Config)` into `attachment.fetch`'s cache-miss path (provider fetch -> squeeze -> `PackStore::put`) and the prefetch path. Phase 3 explicitly deferred this so the signed-content detection corpus and Phase 9 measurement land together.
-- Signed-content bypass: build the corpus of real signed PDFs / OOXML / ODF samples + the unit-test surface for the detector. Phase 3 plan called this out as the gating concern.
+- Wire `squeeze::compress(bytes, mime_type, &Config)` into `attachment.fetch`'s cache-miss path (provider fetch -> squeeze -> `PackStore::put`) and the prefetch path. Phase 3 explicitly deferred this so it could land with Phase 9 measurement.
 
 *Measurement + tuning:*
 - Instrument the squeeze path to log compression ratios per mime type.
 - Aggregate report (CLI tool or settings panel section) showing `original_bytes -> compressed_bytes` per type, savings percent, time spent.
-- Bypass-rate calibration: log how often the signed-content bypass fires, broken out by mime. Zero hits across a populated mailbox suggests detection is broken; an unexpectedly high rate suggests overly aggressive sniffing.
+- `Unchanged`-rate logging, broken out by mime. Calibrates whether squeeze's "already small / not worth compressing" heuristic matches the actual mailbox; a wildly skewed distribution suggests the heuristic should be tuned.
 - Decide whether to:
   - Adjust the default per-mime squeeze policy (e.g. always squeeze PDFs, never bother with already-compressed Office docs).
   - Default-on the lossy-JPEG toggle if the win is large enough.

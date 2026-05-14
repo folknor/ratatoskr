@@ -5,6 +5,7 @@ pub mod error;
 pub mod estimate;
 pub mod image;
 pub mod pdf;
+pub mod signed;
 pub mod svg;
 
 use archive::ArchiveKind;
@@ -100,6 +101,14 @@ pub fn compress(
             new_mime_type: None,
         })
     };
+
+    if let Some(marker) = signed::detect_signature(format, input) {
+        log::info!(
+            "Signed-content bypass: mime={mime_type} marker={marker:?} original_size={} bytes",
+            input.len()
+        );
+        return unchanged();
+    }
 
     let result = match format {
         Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff => {

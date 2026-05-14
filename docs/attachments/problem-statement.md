@@ -32,7 +32,7 @@ What's on disk today (the state the cleanup phases migrate *away from*, not the 
 - **Schema.** `attachments` (in `crates/db/src/db/schema/02_mail.sql`) has `content_hash BLOB` (BLAKE3 raw bytes via `BlobHash`, landed Phase 1) and joins to `attachment_blobs (content_hash BLOB PK, pack_file_id, offset, length, written_at, last_read_at, tombstoned_at)` (landed Phase 2). The legacy `local_path` / `cached_at` / `cache_size` columns retired with Phase 3.
 - **`PackStore` is the live backing store.** `crates/stores/src/attachment_pack.rs` owns content-addressed pack files under `<app_data>/attachment_packs/data-NNNNNN.pack[.open]` + a tombstone log. The Service constructs it during `OpeningBodyAndInlineStores` and stashes it on `BootSharedState`. `crates/service/src/attachment_materialize.rs::materialize_blob` materializes pack frames to `<app_data>/attachment_fetch_tmp/<hash>-<uuid>` per fetch; an idle cleanup kick reaps tmp entries older than 10 minutes. The flat hash-keyed file cache (`crates/stores/src/attachment_cache.rs`) and the LRU `attachment.eviction_kick` retired with Phase 3; the notification variant is retained for Phase 8's date-windowed eviction kick.
 - **Provider fetch is ready.** All four providers implement `ProviderOps::fetch_attachment(message_id, attachment_id) -> FetchedAttachment` (raw bytes since Phase 1). Cache miss in `attachment.fetch` runs provider fetch → `BlobHash::hash` → `PackStore::put` → `materialize_blob` → ack. Sync-time pre-fetch is still missing - Phase 4 lands `PrefetchRuntime`.
-- **Squeeze is ready.** `squeeze::compress(bytes, mime_type, &Config)` returns a `CompressResult` (or `Unchanged` if not worthwhile). Currently used as a CLI and in inline-image storage. **Not yet wired into the pack-store write path** - Phase 3 deferred the integration so the signed-content detection corpus can be built out alongside Phase 9 measurement.
+- **Squeeze is ready.** `squeeze::compress(bytes, mime_type, &Config)` returns a `CompressResult` (or `Unchanged` if not worthwhile - files already small or without compressible content pass through as-is per `crates/squeeze/README.md`). Currently used as a CLI and in inline-image storage. **Not yet wired into the pack-store write path** - Phase 3 deferred the integration to Phase 9 so it lands alongside measurement.
 
 What's missing:
 
@@ -181,21 +181,11 @@ The index is **rebuildable** from pack tails on corruption: walk every pack, rep
 - **Lossy gains**: JPEG (mozjpeg). **Off by default** for cached attachments - we don't want to silently re-encode user bytes. Optional setting if users want it.
 - **Skip**: zip / 7z / mp4 / already-compressed binaries - `squeeze` returns `Unchanged`. Pack stores the original bytes.
 
-**Signed-content bypass (runs first):** Before any lossless work, the candidate bytes are sniffed for embedded digital signatures. On detect, `squeeze` returns `Unchanged` and the pack stores the originals. Lossless-at-the-application-level (a re-encoded PNG decodes to the same pixels, a re-packed PDF renders identically) is *not* byte-equivalent, and digital signatures live at the byte level - re-packing an e-signed contract or a regulated-industry OOXML doc invalidates the signature. The bypass covers:
-
-- **PDF** - presence of a `/Type /Sig` or `/ByteRange` entry in the cross-reference table.
-- **OOXML** (`.docx` / `.xlsx` / `.pptx`) and **ODF** - a ZIP entry under `_xmlsignatures/` or `META-INF/documentsignatures.xml`.
-- **S/MIME envelopes** (`.p7s`, `.p7m`, `application/pkcs7-mime` / `application/pkcs7-signature`) - mime-based skip; the wrapper is opaque CMS and squeeze can't improve it.
-
-Detection is intentionally **biased toward false positives**. A false positive skips squeeze on an unsigned doc (harmless: pack stores originals). A false negative re-packs a signed doc and silently invalidates the signature (high-cost, low-frequency, only surfaces during compliance audits or court evidence). Any signature-shaped marker wins the bypass. The detection logic has its own unit-test surface, separate from the squeeze backends, with corpus coverage of real signed PDFs / OOXML / ODF samples. What corpus, where it comes from, and how it's maintained is a Phase 3 planning concern - false negatives are high-cost so the corpus deserves a concrete answer before Phase 3 wires squeeze into the cache pipeline.
-
-**Known gaps in detection:**
-- XAdES-signed SVG / generic XML - hard to detect cheaply without parsing for the `xmldsig` namespace. SVG squeeze stripping is a small win; revisit if a real signed-SVG-in-email workflow surfaces.
-- Detached signatures (`.asc`, GPG `.sig`) referring to a separate cached attachment - the referenced file would be skipped by the bypass *only* if it carries its own embedded signature. A detached-sig workflow that hashes an attachment we then re-pack will fail verification. Documented limitation; mitigation is the same as for XAdES-SVG (await a real workflow).
-
 The pack stores the post-squeeze bytes. The DB row records `attachment_blobs.length` (post-squeeze) and `attachments.size` (pre-squeeze, from the provider's metadata), so the user-visible size in the UI stays accurate.
 
-If the user later opens or forwards the attachment, the cached bytes are returned as-is. For squeezed content this is application-level equivalent (decodes / renders identically) but not byte-equivalent; the signed-content bypass above is what protects signature-sensitive workflows.
+If the user later opens or forwards the attachment, the cached bytes are returned as-is. For squeezed content this is application-level equivalent (decodes / renders identically) but not byte-equivalent.
+
+**Signed-content bypass.** Squeeze's PDF and OOXML/ODF paths are byte-changing (lopdf rewrites object streams; ZIP re-pack changes deflate output), so re-packing an e-signed contract or a regulated-industry document would invalidate the signature. `squeeze::compress` sniffs for signature markers before dispatching to a backend and returns `Unchanged` on match. See `crates/squeeze/README.md` § "Signed-content bypass" for the marker list. Detection is biased toward false positives. S/MIME envelopes already pass through as unsupported. Detached signatures (`.asc`, GPG `.sig`) and XAdES-signed SVG / XML are documented limitations.
 
 **Risk: inline squeeze may be net-negative on fast disks.** Phase 9 measures per-mime savings on real mailboxes. If squeeze costs more CPU than it saves in storage on the sync hot path, the pipeline shape changes: PackStore stores raw bytes and a background compaction pass rewrites them later. That is not a small refactor of a built PackStore design, so Phase 2 and Phase 3 should plan with this risk in mind before they freeze the orchestration shape. This will probably be revisited when Phase 9 lands, but the structural option needs to stay open through Phases 2 and 3.
 
@@ -432,7 +422,7 @@ End-to-end behavior to test once Phases 1-5 land (retention shrink in scenario 8
 1. Add a JMAP account with a mailbox containing attachments. Sync.
 2. After sync settles, `<app-data>/attachment_packs/` should contain at least one `data-NNNNNN.pack` file. `SELECT COUNT(*) FROM attachment_blobs WHERE tombstoned_at IS NULL` should be > 0; `SELECT COUNT(*) FROM attachments WHERE content_hash IS NOT NULL` should match.
 3. Disable the network. Open a thread with an attachment. Click Open: file opens in the OS default handler.
-4. Click Save: file dialog opens, save, file on disk matches the original bytes (modulo squeeze for compressible formats - decoded content is byte-equivalent; signed PDFs / OOXML / S/MIME envelopes are byte-identical thanks to the signed-content bypass).
+4. Click Save: file dialog opens, save, file on disk matches the original bytes (modulo squeeze for compressible formats - decoded content is byte-equivalent; signed PDFs / OOXML / ODF are byte-identical thanks to the signed-content bypass in squeeze).
 5. Click Save All on a multi-attachment message: folder picker, all files written.
 6. Re-enable the network. Send a copy of the message to a different account. Sync that account. Both accounts share one `attachment_blobs` row: `SELECT COUNT(*) FROM attachments WHERE content_hash = ?` returns >1 and the pack file size hasn't grown.
 7. Delete the account. The corresponding `attachments` rows are removed; `attachment_blobs` rows that no longer have any matching `attachments` row become orphans and are tombstoned by the next eviction sweep. Pack file sizes unchanged (until next GC).

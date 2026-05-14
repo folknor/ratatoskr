@@ -29,7 +29,7 @@ Real-world test fixtures, `Config::email_default()` (JPEG q80, max 2048px, PDF i
 | Small icon | JPEG | 82 KB | 65 KB | **20.5%** |
 | Small PNG | PNG | 780 KB | 667 KB | **14.4%** |
 
-Files already small or without compressible content pass through unchanged.
+Files already small or without compressible content pass through unchanged. Digitally signed PDFs / OOXML / ODF documents also pass through unchanged - see "Signed-content bypass" below.
 
 ## Supported formats
 
@@ -38,6 +38,20 @@ Files already small or without compressible content pass through unchanged.
 - **SVGs**: Strip editor metadata (Inkscape/Sodipodi), optimize embedded base64 PNG/JPEG images.
 - **OOXML**: .docx, .xlsx, .pptx, .docm, .xlsm, .pptm -- compresses images in `word/media/`, `xl/media/`, `ppt/media/`.
 - **ODF**: .odt, .ods, .odp -- compresses images in `Pictures/`.
+
+## Signed-content bypass
+
+PDF and OOXML/ODF compression is byte-changing (lopdf rewrites object streams; ZIP re-pack changes deflate output), so re-packing an e-signed document invalidates the signature. `compress()` sniffs for signature markers before dispatching to a backend and returns `Unchanged` on match. Markers checked:
+
+- **PDF**: `/Type /Sig`, `/Type/Sig`, `/Type /DocTimeStamp`, or `/ByteRange[` tokens in the byte stream.
+- **OOXML** (`.docx` / `.xlsx` / `.pptx`): a ZIP entry under `_xmlsignatures/`.
+- **ODF** (`.odt` / `.ods` / `.odp`): a ZIP entry named `META-INF/documentsignatures.xml` or `META-INF/macrosignatures.xml`.
+
+S/MIME envelopes (`application/pkcs7-mime`, `application/pkcs7-signature`) aren't explicitly checked - they fall through as an unsupported format and pass through unchanged via the normal dispatch.
+
+Detection is intentionally biased toward false positives. A false positive skips compression on an unsigned doc (harmless). A false negative re-packs a signed doc and silently breaks verification (high-cost, low-frequency, only surfaces during compliance audits). Any signature-shaped marker wins the bypass.
+
+Detached signatures (`.asc`, GPG `.sig`) referring to a separate attachment are not handled - the referenced file would need to carry its own embedded signature for the bypass to fire. XAdES-signed SVG / generic XML is also not handled; SVG compression is byte-changing in a way that would invalidate such signatures.
 
 ## CLI
 
