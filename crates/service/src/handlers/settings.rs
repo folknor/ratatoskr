@@ -210,10 +210,10 @@ async fn kick_window_shrink(boot_state: &Arc<BootSharedState>, window_days: i64)
     let epoch_at_start = epoch_arc
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         .saturating_add(1);
-    let _ = crate::eviction::run_eviction_sweep(
+    let stats = crate::eviction::run_eviction_sweep(
         write_db,
-        pack_store,
-        notification_tx,
+        Arc::clone(&pack_store),
+        notification_tx.clone(),
         0,
         crate::eviction::EvictionTrigger::WindowShrink,
         window_start_unix,
@@ -221,4 +221,17 @@ async fn kick_window_shrink(boot_state: &Arc<BootSharedState>, window_days: i64)
         epoch_arc,
         epoch_at_start,
     ).await;
+
+    // Attachments roadmap Phase 8b: chain GC after a window-shrink
+    // that actually tombstoned something. Without this, the
+    // reclaimed-bytes UI would lag a session behind every shrink.
+    if stats.blobs_tombstoned > 0 && !stats.superseded {
+        let _ = crate::gc::run_gc_pass(
+            pack_store,
+            notification_tx,
+            0,
+            crate::gc::GcTrigger::PostEviction,
+            crate::gc::DEFAULT_DENSITY_THRESHOLD,
+        ).await;
+    }
 }

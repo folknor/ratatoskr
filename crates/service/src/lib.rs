@@ -5,6 +5,7 @@ mod boot;
 mod boot_progress;
 mod eviction;
 mod extract;
+mod gc;
 mod prefetch;
 pub(crate) mod cal_actions;
 pub(crate) mod calendar;
@@ -169,6 +170,15 @@ fn app_data_dir_from_args() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Attachments roadmap Phase 8b: `--rebuild-attachment-index` flag.
+/// Triggers a one-shot pass after `PackStore::open` finishes that
+/// walks every sealed pack's frames and replays every tombstone
+/// log, rebuilding `attachment_blobs` rows for a corrupted-or-deleted
+/// index. Service continues normal boot after the rebuild.
+pub(crate) fn rebuild_attachment_index_requested() -> bool {
+    std::env::args_os().any(|arg| arg == "--rebuild-attachment-index")
 }
 
 fn default_app_data_dir() -> PathBuf {

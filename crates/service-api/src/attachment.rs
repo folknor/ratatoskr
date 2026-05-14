@@ -88,6 +88,25 @@ impl crate::notification::WithGeneration for EvictionCompleted {
     }
 }
 
+/// Attachments roadmap Phase 8b: physical GC pack-repack completion.
+/// `MustDeliver`: harness scripts and the future cache-size UI await
+/// this. Fires once per GC pass (startup or post-eviction chain).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GcCompleted {
+    pub service_generation: u32,
+    pub trigger:            String,
+    pub packs_compacted:    u32,
+    pub blobs_dropped:      u64,
+    pub bytes_reclaimed:    u64,
+}
+
+impl crate::notification::WithGeneration for GcCompleted {
+    fn generation(&self) -> u32 { self.service_generation }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

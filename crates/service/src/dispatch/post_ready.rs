@@ -316,7 +316,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
             let epoch_at_start = epoch_arc.load(std::sync::atomic::Ordering::Relaxed);
             let _ = crate::eviction::run_eviction_sweep(
                 db_state.clone(),
-                pack_store,
+                Arc::clone(&pack_store),
                 notification_tx.clone(),
                 0,
                 crate::eviction::EvictionTrigger::Startup,
@@ -324,6 +324,20 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 128,
                 epoch_arc,
                 epoch_at_start,
+            ).await;
+
+            // Attachments roadmap Phase 8b: reclaim bytes from packs
+            // that were tombstoned in a previous session (or by the
+            // eviction sweep that just finished). The pack store's
+            // `gc(threshold)` primitive is a no-op when no pack
+            // exceeds the threshold, so this is cheap on healthy
+            // mailboxes.
+            let _ = crate::gc::run_gc_pass(
+                pack_store,
+                notification_tx.clone(),
+                0,
+                crate::gc::GcTrigger::Startup,
+                crate::gc::DEFAULT_DENSITY_THRESHOLD,
             ).await;
         }
 

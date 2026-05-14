@@ -64,7 +64,7 @@ pub use internal::{
 };
 pub use attachment::{
     AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentFetchAck, AttachmentFetchParams,
-    EvictionCompleted,
+    EvictionCompleted, GcCompleted,
 };
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
 pub use pinned_search::{

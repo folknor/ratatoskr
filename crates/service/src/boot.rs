@@ -1320,6 +1320,25 @@ async fn run_boot_sequence_inner(
     })?;
     state.install_pack_store(pack_store);
 
+    // Attachments roadmap Phase 8b: if `--rebuild-attachment-index`
+    // was passed on the command line, walk every sealed pack's frames
+    // and replay every tombstone log to repopulate `attachment_blobs`
+    // from the on-disk truth. One-shot recovery primitive; service
+    // continues normal boot afterwards.
+    if crate::rebuild_attachment_index_requested()
+        && let Some(pack_store) = state.pack_store()
+    {
+        match pack_store.rebuild_index().await {
+            Ok(stats) => log::info!(
+                "rebuild-attachment-index: packs_walked={} frames_indexed={} tombstones_replayed={}",
+                stats.packs_walked,
+                stats.frames_indexed,
+                stats.tombstones_replayed,
+            ),
+            Err(e) => log::warn!("rebuild-attachment-index failed: {e}"),
+        }
+    }
+
     boot_progress::emit(&out_tx, BootPhase::OpeningSearchIndex, None);
 
     // Phase 7-1 / Phase 8: schema-version sentinel. Compare the

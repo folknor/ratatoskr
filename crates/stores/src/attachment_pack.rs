@@ -99,6 +99,13 @@ pub struct GcStats {
     pub bytes_reclaimed: u64,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct RebuildStats {
+    pub packs_walked:        u32,
+    pub frames_indexed:      u64,
+    pub tombstones_replayed: u64,
+}
+
 /// Existing-blob classification used by `PackStore::put` to decide
 /// between fast-path return, revival, and a fresh frame write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -484,6 +491,32 @@ impl PackStore {
         })
         .await
         .map_err(|e| PackError::Sql(format!("spawn_blocking gc: {e}")))?
+    }
+
+    /// Attachments roadmap Phase 8b: rebuild the SQLite
+    /// `attachment_blobs` index from the on-disk pack frames + the
+    /// per-pack tombstone logs. Used as a pathological-corruption
+    /// recovery primitive (`--rebuild-attachment-index` Service flag).
+    ///
+    /// Sealed packs are walked frame-by-frame; every frame's
+    /// content_hash gets an `INSERT OR IGNORE` so calling this on a
+    /// healthy DB is a no-op other than the walk cost. After every
+    /// pack is indexed, each `tombstones-NNNNNN.log` file is replayed
+    /// and matching rows have `tombstoned_at` set to `unixepoch()`
+    /// (the log doesn't store a per-record timestamp, which is fine -
+    /// these blobs were already logically evicted, the exact when
+    /// doesn't matter).
+    ///
+    /// The currently-open pack is NOT walked - its frames are already
+    /// in the index courtesy of `recover_open_pack` running on every
+    /// `PackStore::open`.
+    pub async fn rebuild_index(&self) -> Result<RebuildStats, PackError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || -> Result<RebuildStats, PackError> {
+            run_rebuild_index(&inner)
+        })
+        .await
+        .map_err(|e| PackError::Sql(format!("spawn_blocking rebuild_index: {e}")))?
     }
 }
 
@@ -1026,6 +1059,178 @@ fn compact_pack(inner: &Inner, src_pack_id: u32) -> Result<(), PackError> {
     Ok(())
 }
 
+/// Attachments roadmap Phase 8b. Walk every sealed pack's frames and
+/// re-INSERT OR IGNORE into `attachment_blobs`, then replay every
+/// `tombstones-NNNNNN.log` and stamp matching rows with
+/// `tombstoned_at = unixepoch()`.
+///
+/// Skips the currently-open pack: `recover_open_pack` already covers
+/// it on every `PackStore::open`, and walking it concurrently with
+/// the writer would race. The writer mutex is held for the duration
+/// to keep `put`s from racing with index INSERTs.
+fn run_rebuild_index(inner: &Inner) -> Result<RebuildStats, PackError> {
+    let mut stats = RebuildStats::default();
+
+    let _writer_guard = inner.writer.blocking_lock();
+    let open_pack_id = _writer_guard.pack_id;
+
+    let packs = list_packs(&inner.packs_dir)?;
+
+    for (pack_id, is_sealed) in &packs {
+        if !is_sealed || *pack_id == open_pack_id {
+            continue;
+        }
+        let walked = rebuild_index_walk_sealed_pack(&inner.packs_dir, *pack_id, &inner.conn)?;
+        stats.packs_walked = stats.packs_walked.saturating_add(1);
+        stats.frames_indexed = stats.frames_indexed.saturating_add(walked);
+    }
+
+    // Tombstone-log replay. Sealed pack ids only - the open pack's
+    // log is appended to by live `tombstone()` calls and its frame
+    // index is owned by `recover_open_pack`. The current logical
+    // tombstone state already lives on the `attachment_blobs` row;
+    // an open-pack log replay would re-stamp it with `now()` instead
+    // of the original moment, which is misleading.
+    for (pack_id, is_sealed) in &packs {
+        if !is_sealed || *pack_id == open_pack_id {
+            continue;
+        }
+        let replayed = rebuild_index_replay_tombstone_log(&inner.packs_dir, *pack_id, &inner.conn)?;
+        stats.tombstones_replayed = stats.tombstones_replayed.saturating_add(replayed);
+    }
+
+    log::info!(
+        "PackStore::rebuild_index: packs_walked={} frames_indexed={} tombstones_replayed={}",
+        stats.packs_walked,
+        stats.frames_indexed,
+        stats.tombstones_replayed,
+    );
+
+    Ok(stats)
+}
+
+/// Walk a sealed pack frame-by-frame and `INSERT OR IGNORE` each
+/// frame's content_hash into `attachment_blobs`. Stops at the
+/// `TAIL_MAGIC` sentinel or at end-of-file. Logs and stops on any
+/// corruption - sealed packs are immutable, so we never truncate
+/// here (unlike `recover_open_pack`).
+fn rebuild_index_walk_sealed_pack(
+    packs_dir: &Path,
+    pack_id: u32,
+    conn: &Arc<Mutex<Connection>>,
+) -> Result<u64, PackError> {
+    let path = pack_path_sealed(packs_dir, pack_id);
+    let mut file = OpenOptions::new().read(true).open(&path)?;
+    let file_len = file.seek(SeekFrom::End(0))?;
+    file.seek(SeekFrom::Start(0))?;
+
+    let mut offset: u64 = 0;
+    let mut indexed: u64 = 0;
+    let conn_locked = conn
+        .lock()
+        .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+
+    loop {
+        let remaining = file_len.saturating_sub(offset);
+        if remaining < FRAME_HEADER_LEN as u64 {
+            break;
+        }
+        let mut header = [0u8; FRAME_HEADER_LEN];
+        file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(&mut header)?;
+        if header[..4] == TAIL_MAGIC {
+            // Reached the tail marker - clean end of the sealed body.
+            break;
+        }
+        if header[..4] != FRAME_MAGIC {
+            log::warn!(
+                "PackStore::rebuild_index: bad magic in sealed pack {pack_id} at offset {offset}; stopping walk",
+            );
+            break;
+        }
+        let length = u64::from(read_u32_le(&header[4..8]));
+        let checksum = read_u64_le(&header[8..16]);
+        let frame_total = FRAME_HEADER_LEN as u64 + length;
+        if remaining < frame_total {
+            log::warn!(
+                "PackStore::rebuild_index: truncated frame in sealed pack {pack_id} at offset {offset}",
+            );
+            break;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let mut payload = vec![0u8; length as usize];
+        file.read_exact(&mut payload)?;
+        let actual = xxh3_64(&payload);
+        if actual != checksum {
+            log::warn!(
+                "PackStore::rebuild_index: bad checksum in sealed pack {pack_id} at offset {offset}",
+            );
+            break;
+        }
+        let hash = BlobHash::hash(&payload);
+        #[allow(clippy::cast_possible_wrap)]
+        let pack_id_i64 = i64::from(pack_id);
+        #[allow(clippy::cast_possible_wrap)]
+        let offset_i64 = offset as i64;
+        #[allow(clippy::cast_possible_wrap)]
+        let length_i64 = length as i64;
+        conn_locked.execute(
+            "INSERT OR IGNORE INTO attachment_blobs \
+             (content_hash, pack_file_id, offset, length, written_at) \
+             VALUES (?1, ?2, ?3, ?4, unixepoch())",
+            params![hash, pack_id_i64, offset_i64, length_i64],
+        )?;
+        indexed = indexed.saturating_add(1);
+        offset = offset.saturating_add(frame_total);
+    }
+    Ok(indexed)
+}
+
+/// Replay one pack's `tombstones-NNNNNN.log`. Each 48-byte record is
+/// `(pack_id padded to 16 bytes, BlobHash 32 bytes)`. Sets
+/// `tombstoned_at` on every matching row that's currently NULL.
+fn rebuild_index_replay_tombstone_log(
+    packs_dir: &Path,
+    pack_id: u32,
+    conn: &Arc<Mutex<Connection>>,
+) -> Result<u64, PackError> {
+    let path = tombstone_log_path(packs_dir, pack_id);
+    let mut file = match OpenOptions::new().read(true).open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(PackError::Io(e)),
+    };
+    let mut replayed: u64 = 0;
+    let conn_locked = conn
+        .lock()
+        .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+
+    const RECORD_LEN: usize = 48;
+    loop {
+        let mut record = [0u8; RECORD_LEN];
+        match file.read_exact(&mut record) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(PackError::Io(e)),
+        }
+        // First 16 bytes are pack_id padded - we already know which
+        // pack we're in, no need to re-read. Last 32 bytes are the
+        // BlobHash.
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes.copy_from_slice(&record[16..48]);
+        let hash = BlobHash::from_bytes(hash_bytes);
+        let rows = conn_locked.execute(
+            "UPDATE attachment_blobs SET tombstoned_at = unixepoch() \
+             WHERE content_hash = ?1 AND tombstoned_at IS NULL",
+            params![hash],
+        )?;
+        if rows > 0 {
+            replayed = replayed.saturating_add(1);
+        }
+    }
+    Ok(replayed)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1325,6 +1530,60 @@ mod tests {
         assert_eq!(stats.packs_compacted, 0);
         let after = fs::metadata(pack_path_sealed(dir.path(), 0)).unwrap().len();
         assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn rebuild_index_repopulates_from_sealed_packs() {
+        // Phase 8b: drop attachment_blobs to simulate a corrupted
+        // index, call rebuild_index, assert the on-disk truth
+        // (sealed pack frames + tombstone logs) regenerates a
+        // correct index.
+        let (_dir, store) = fresh_store(60).await;
+        let h1 = store.put(b"alpha".to_vec()).await.unwrap();
+        let h2 = store.put(b"bravo".to_vec()).await.unwrap();
+        let _h3 = store.put(b"gamma".to_vec()).await.unwrap();
+        // Tombstone h1 - log entry will need replay after rebuild.
+        store.tombstone(&h1).await.unwrap();
+
+        // Force an index wipe.
+        {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.execute("DELETE FROM attachment_blobs", []).unwrap();
+        }
+
+        // Sanity: get(h2) misses with no index.
+        assert!(store.get(&h2).await.unwrap().is_none(), "h2 should miss pre-rebuild");
+
+        let stats = store.rebuild_index().await.expect("rebuild_index");
+        assert!(stats.packs_walked >= 1, "expected sealed packs to walk, got {}", stats.packs_walked);
+        assert!(stats.frames_indexed >= 2, "expected at least 2 frames re-indexed, got {}", stats.frames_indexed);
+        assert!(stats.tombstones_replayed >= 1, "tombstone log should replay h1");
+
+        // h2 retrievable, h1 still tombstoned.
+        assert_eq!(store.get(&h2).await.unwrap().as_deref(), Some(&b"bravo"[..]));
+        assert!(store.get(&h1).await.unwrap().is_none(), "h1 should remain tombstoned after rebuild");
+    }
+
+    #[tokio::test]
+    async fn rebuild_index_is_idempotent() {
+        // Calling rebuild on a healthy DB is a no-op other than the
+        // walk cost. INSERT OR IGNORE guarantees no duplicate rows.
+        let (_dir, store) = fresh_store(60).await;
+        let _h1 = store.put(b"x".to_vec()).await.unwrap();
+        let _h2 = store.put(b"y".to_vec()).await.unwrap();
+        let _h3 = store.put(b"z".to_vec()).await.unwrap();
+        let count_before: i64 = {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.query_row("SELECT COUNT(*) FROM attachment_blobs", [], |r| r.get(0))
+                .unwrap()
+        };
+        let _ = store.rebuild_index().await.expect("rebuild_index");
+        let count_after: i64 = {
+            let conn = store.inner.conn.lock().unwrap();
+            conn.query_row("SELECT COUNT(*) FROM attachment_blobs", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(count_before, count_after, "rebuild on healthy DB must not change row count");
     }
 
     /// Library-level benchmark. Sanity baseline only - no Criterion.

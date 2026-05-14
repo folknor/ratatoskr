@@ -1,5 +1,5 @@
 use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
-use crate::attachment::EvictionCompleted;
+use crate::attachment::{EvictionCompleted, GcCompleted};
 use crate::boot::{BootPhaseKind, BootProgress};
 use crate::cal_action::{CalendarActionCompleted, CalendarOperationOutcome};
 use crate::calendar::{CalendarChanged, CalendarRunCompleted};
@@ -203,6 +203,10 @@ pub enum Notification {
     /// eviction completion. `MustDeliver`.
     #[serde(rename = "eviction.completed")]
     EvictionCompleted(EvictionCompleted),
+    /// Phase 8b (attachments roadmap): per-pass physical GC pack-
+    /// repack completion. `MustDeliver`.
+    #[serde(rename = "gc.completed")]
+    GcCompleted(GcCompleted),
     /// Phase 7-4: per-rebuild progress, `Coalesce` keyed by
     /// `rebuild_id` so concurrent rebuilds don't collapse together.
     #[serde(rename = "index.rebuild_progress")]
@@ -260,6 +264,7 @@ impl Notification {
             },
             Self::PrefetchCompleted(_) => NotificationClass::MustDeliver,
             Self::EvictionCompleted(_) => NotificationClass::MustDeliver,
+            Self::GcCompleted(_) => NotificationClass::MustDeliver,
             Self::IndexRebuildProgress(p) => NotificationClass::Coalesce {
                 key: CoalesceKey::IndexRebuildProgress(p.rebuild_id.clone()),
             },
@@ -289,6 +294,7 @@ impl Notification {
             Self::PrefetchProgress(_) => "prefetch.progress",
             Self::PrefetchCompleted(_) => "prefetch.completed",
             Self::EvictionCompleted(_) => "eviction.completed",
+            Self::GcCompleted(_) => "gc.completed",
             Self::IndexRebuildProgress(_) => "index.rebuild_progress",
             Self::IndexRebuildCompleted(_) => "index.rebuild_completed",
             #[cfg(test)]
@@ -341,6 +347,7 @@ impl Notification {
             Self::PrefetchProgress(progress) => Some(progress.generation()),
             Self::PrefetchCompleted(completed) => Some(completed.generation()),
             Self::EvictionCompleted(completed) => Some(completed.generation()),
+            Self::GcCompleted(completed) => Some(completed.generation()),
             Self::IndexRebuildProgress(progress) => Some(progress.generation()),
             Self::IndexRebuildCompleted(completed) => Some(completed.generation()),
             #[cfg(test)]
@@ -375,6 +382,7 @@ impl Notification {
             Self::PrefetchProgress(progress) => progress.set_generation(generation),
             Self::PrefetchCompleted(completed) => completed.set_generation(generation),
             Self::EvictionCompleted(completed) => completed.set_generation(generation),
+            Self::GcCompleted(completed) => completed.set_generation(generation),
             Self::IndexRebuildProgress(progress) => progress.set_generation(generation),
             Self::IndexRebuildCompleted(completed) => completed.set_generation(generation),
             #[cfg(test)]

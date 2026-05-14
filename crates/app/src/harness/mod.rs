@@ -2225,6 +2225,19 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 completed.service_generation as f64,
             )?;
         }
+        Notification::GcCompleted(completed) => {
+            set_field_string(state, idx, "type", "GcCompleted")?;
+            set_field_string(state, idx, "trigger", &completed.trigger)?;
+            set_field_number(state, idx, "packs_compacted", completed.packs_compacted as f64)?;
+            set_field_number(state, idx, "blobs_dropped", completed.blobs_dropped as f64)?;
+            set_field_number(state, idx, "bytes_reclaimed", completed.bytes_reclaimed as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                completed.service_generation as f64,
+            )?;
+        }
         other => {
             set_field_string(state, idx, "type", other.method_name())?;
         }

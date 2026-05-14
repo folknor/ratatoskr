@@ -390,6 +390,13 @@ impl ReadyApp {
                         );
                         Task::none()
                     }
+                    service_api::Notification::GcCompleted(c) => {
+                        log::info!(
+                            "gc completed: trigger={}, packs_compacted={}, blobs_dropped={}, bytes_reclaimed={}",
+                            c.trigger, c.packs_compacted, c.blobs_dropped, c.bytes_reclaimed,
+                        );
+                        Task::none()
+                    }
                     service_api::Notification::IndexRebuildProgress(p) => {
                         log::debug!(
                             "index rebuild {}: {}/{}",
