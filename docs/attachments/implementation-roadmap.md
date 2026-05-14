@@ -392,10 +392,14 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 - After a sync on JMAP, Gmail, and Graph accounts, `attachment_blobs` rows with `tombstoned_at IS NULL` appear for that account (harness-verified).
 - IMAP attachment fetches reuse the folder session: the batch worker issues one LOGIN + SELECT per `(account, folder)` and runs `fetch_attachment_on_selected` per item (code-verified; end-to-end harness pending the saehrimnir-side IMAP attachment fixture).
 
-**Deferred to Phase 7.5 (pending external `saehrimnir` work).**
-- **`RATATOSKR_TEST_ATTACHMENT_LATENCY_MS` knob in `saehrimnir`** - needed to reliably reproduce mid-prefetch state for SIGINT scripts. `saehrimnir` lives outside this repo; the knob lands there first.
-- **`imap-attachment-prefetch.lua`** - the JMAP fixture's IMAP mock doesn't surface the attachment through BODYSTRUCTURE, so an end-to-end IMAP prefetch test needs either a new fixture or saehrimnir-side fixture support.
-- **`sigint-mid-prefetch.lua`** - blocked on the latency knob above. The boot recovery kick path is exercised every time the service starts in any harness script that prefetched on the prior run, but a script that explicitly asserts mid-flight resumption needs the latency hook to make the race deterministic.
+**Phase 7.5 follow-up (landed).** Items originally deferred for `saehrimnir`-side work:
+
+- **`POST /test/latency` per-protocol attachment knob** - saehrimnir-side; landed. Settable from Lua via `harness.set_latency(endpoint, { per_protocol = { attachment = N } })`.
+- **`imap-attachment-prefetch.lua`** (`crates/app/tests/sync-harness/`) + `imap-attach.toml` fixture (`crates/app/tests/sync-fixtures/`) - landed. Exercises the IMAP folder-batched BODY[part] fetch path end-to-end.
+- **`sigint-mid-prefetch.lua`** - landed. Arms the saehrimnir latency knob, lets the prefetch worker park inside a slow response, SIGTERMs the service, respawns on the same data dir, and asserts boot recovery succeeded and the backfill kick re-fetched the killed attachment.
+- **Phase 7 IMAP ingestion bug** caught by the harness write-up: IMAP sync was populating `attachments.content_hash` from the BODY.PEEK[] bytes but never writing those bytes to PackStore, leaving the row indistinguishable from a cached blob. Fixed by leaving content_hash NULL for non-inline parts so the prefetch sweep picks them up via the folder-batched fetch path (`crates/imap/src/parse.rs`).
+
+**Still deferred.**
 - **Gmail batch attachment endpoint** - roadmap-noted, no measured need yet.
 
 **Out of scope.**
@@ -406,6 +410,56 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 ---
 
 ## Phase 8 - Eviction, GC, opened-files cleanup
+
+Implemented as three sub-phases (8a/8b/8c). The original monolithic Phase 8 description below is retained for context; the "Status" subsections record what actually landed.
+
+### Phase 8a - Retention-window logical eviction (Status: landed)
+
+`crates/service/src/eviction.rs::run_eviction_sweep`. Paginated cursor walk over `attachment_blobs` using a `NOT EXISTS` correlated subquery against `attachments JOIN messages` so cross-account dedup is preserved (a shared blob retains until every account's referencing message is out of window; orphans tombstone unconditionally). Per-page batch size 256, anchored by `content_hash` cursor for stable index-range scans.
+
+Three trigger sites:
+
+- **Startup** (`dispatch/post_ready.rs`): detached after PrefetchRuntime installs and before the existing backfill kick. max_pages = 128.
+- **Post-sync** (`service/sync.rs`): awaited inline after the existing post-sync prefetch sweep enqueue. max_pages = 4 (bounded for sync latency).
+- **Window-shrink** (`handlers/settings.rs::kick_window_shrink`, mirror of the existing extend hook): detached `tokio::spawn`. max_pages = 128.
+
+Supersession: `BootSharedState::eviction_epoch: Arc<AtomicU64>` is bumped on every window-shrink trigger; the sweep loop checks the epoch between pages and exits with `superseded = true` if a later trigger took ownership. Lets the most-recent shrink drive the up-to-date window.
+
+`Notification::EvictionCompleted { service_generation, trigger, blobs_tombstoned, pages_walked, superseded }` (MustDeliver) fires at the end of every sweep so harness scripts (and a future UI hook) await deterministically.
+
+Harness: `jmap-eviction-post-sync.lua` (sweep fires after every sync, even when nothing's tombstonable) + `jmap-eviction-window-shrink.lua` (asserts the shrink path actually tombstones the now-out-of-window blob).
+
+**Gotcha noted during implementation, kept for the eventual Phase 7 follow-up review:** `messages.date` is stored in **milliseconds** (JMAP wire format flows straight through to the DB). The existing prefetch-sweep window comparison (`crates/service/src/prefetch.rs`) compares against a seconds-valued `window_start_unix` and so accepts every modern message regardless of window - effectively a no-op. The eviction sweep multiplies its window_start_unix by 1000 inside the SQL to get the comparison right; the prefetch path is a real pre-existing bug worth a Phase 7 follow-up fix.
+
+### Phase 8b - Physical GC + rebuild-index tool (Status: landed)
+
+Most primitives already lived in `PackStore`:
+- `PackStore::gc(density_threshold)` already public, already iterates sealed packs and calls `compact_pack` for each whose `dead/total >= threshold` (single-tx index swap; crash-mid-compact leaves the source pack sealed and an orphan `.pack.open` at a high pack id that `recover_and_open_current_pack` cleans up on next boot).
+- `PackStore::get` already refuses tombstoned blobs (Phase 8a's eviction immediately stops new materializations even before bytes are reclaimed).
+
+8b is the orchestration layer:
+
+- `crate::service::gc::run_gc_pass` calls `PackStore::gc(0.25)` and emits `Notification::GcCompleted { trigger, packs_compacted, blobs_dropped, bytes_reclaimed }`.
+- **Startup trigger**: detached after the Phase 8a startup eviction sweep finishes. Cheap no-op when no pack exceeds the threshold.
+- **Post-eviction trigger**: chained inside `kick_window_shrink` after the eviction sweep returns with `blobs_tombstoned > 0 && !superseded`. Same detached task so eviction and GC serialize naturally. Post-sync eviction does NOT chain to GC (steady-state drip; the startup pass and shrink chain catch bulk work).
+- New `PackStore::rebuild_index()` walks every sealed pack's frames with `INSERT OR IGNORE` and replays every `tombstones-NNNNNN.log` to restamp `tombstoned_at`. Pathological-corruption recovery primitive.
+- New Service CLI flag `--rebuild-attachment-index`: parsed in `service::lib::run_service_blocking`, awaited after `PackStore::open` in the boot sequence. One-shot recovery hint; service continues normal boot.
+
+Harness: `jmap-gc-after-eviction.lua` asserts the eviction → GC chain fires with `trigger = "post_eviction"` after a window-shrink tombstones a blob. `jmap-rebuild-attachment-index-flag.lua` is a smoke test that the CLI flag parses and reaches `PackStore::rebuild_index` without crashing boot. Per-pack reclaim correctness covered by Rust unit tests in `stores/` (`gc_drops_tombstoned`, `gc_skips_low_density`, `rebuild_index_repopulates_from_sealed_packs`, `rebuild_index_is_idempotent`).
+
+Mid-repack SIGKILL recovery is covered by the existing `recover_and_open_current_pack` cleanup of orphan `.pack.open` at high pack ids (already exercised when the SIGINT-mid-prefetch script crashes the process during a put).
+
+### Phase 8c - Opened-files reaper + clear-cache backend + account-delete harness (Status: landed; UI is the user's separate work)
+
+- **Opened-files reaper**: `attachment_materialize::reap_stale_opened_files` mirrors the existing `reap_stale_tmp_files` shape but targets `<app_data>/opened_attachments/`. Reads the Phase 6 `opened_files_cleanup_days` pref (default 7), clamps `>= 1`, runs detached at boot from `post_ready.rs` after the startup GC pass.
+
+- **Clear-cache-now IPC**: new `attachment.clear_cache` method (`AttachmentClearCacheParams`/`AttachmentClearCacheAck { blobs_tombstoned, bytes_reclaimed }`). New `PackStore::tombstone_all_live` primitive does the bulk `UPDATE attachment_blobs SET tombstoned_at = unixepoch() WHERE tombstoned_at IS NULL` in one statement and batches tombstone-log writes per pack (one file open + fsync per pack rather than per blob); on a 150 GB / 1M-blob mailbox this is the difference between seconds and minutes vs. looping `tombstone()`. Handler blocks on the chained GC pass so the ack carries accurate `bytes_reclaimed`. IPC timeout 300s to absorb large caches.
+
+- **Account-delete tombstoning harness** (Phase 4 deferral): `jmap-account-delete-tombstones.lua`. Phase 4's `AccountDeletionStep::AttachmentCache` is unchanged; the harness verifies it end-to-end via a new minimal `test.query_blob_tombstone_state` probe that reads `attachment_blobs.tombstoned_at` by content_hash (the row outlives the cascade-deleted `attachments` row). Two-account shared-blob coverage waits for cross-account fixture machinery.
+
+---
+
+### Phase 8 - Original monolithic scope (retained for context)
 
 **Goal.** Cache stays within the configured retention window. Logical eviction (tombstones) and physical GC (pack repack) are wired. The opened-files temp folder gets reaped.
 
@@ -454,7 +508,34 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ---
 
-## Phase 9 - Squeeze measurement and tuning
+## Phase 9 - Squeeze integration (measurement and tuning deferred)
+
+**Status: integration landed; measurement + data-driven tuning deferred until real-mailbox data exists.**
+
+**What shipped.**
+
+`crate::service::attachment_compress::maybe_compress` runs `squeeze::compress` at both PackStore-write call sites (the prefetch worker in `prefetch.rs` and the `attachment.fetch` cache-miss path in `handlers/attachment.rs`). Gated at runtime on the Phase 6 prefs:
+
+- `compress_attachments = false` -> pass-through unchanged.
+- `allow_lossy_compression = false` (default) -> `Config::lossless()` (PNG lossless recompress, PDF stream dedup, OOXML/ODF media rewrap; no JPEG re-encode, no resize).
+- `allow_lossy_compression = true` -> `Config::email_default()` (JPEG q80, max 2048 px, lossy PDF image re-encode).
+
+Mime is looked up from the `attachments` row at compress time (FetchedAttachment doesn't carry it). `service` crate now depends on `squeeze` unconditionally; the runtime gate is the source of truth.
+
+Determinism contract: PackStore is content-addressed via BLAKE3, so two fetches of the same provider bytes must yield byte-identical compressed output for dedup to hold. Squeeze's underlying tools (mozjpeg, oxipng, lopdf, zip) are deterministic given a fixed Config. A Config flip mid-cache-lifetime (e.g. user toggles lossy on) breaks dedup for blobs fetched on either side of the flip - acceptable trade. Documented in the module header.
+
+Failure mode: compression errors are logged and pass-through; cache correctness must not depend on squeeze succeeding.
+
+Signed-content bypass lives inside `squeeze` per its README (signed PDFs / OOXML / ODF detected by content sniffing, returned as `Unchanged`); the rtsk side trusts the crate.
+
+**Deferred to a measurement-driven follow-up** (entry criterion: a real mailbox has run on this build long enough to know what we're optimizing):
+
+- Aggregate per-mime measurement table + CLI report. The `log::info` line emitted per successful compress is the substrate; an aggregate report waits for data.
+- Bypass-rate calibration logging (how often the signed-content bypass fires, broken out by mime).
+- Default tuning decisions: should `allow_lossy_compression` default-on, should some mimes be skipped entirely, should squeeze move off the hot path entirely on fast disks.
+- Batched fsync (Phase 2 deferral). Re-evaluate if measurements show fsync is a meaningful chunk of write-path cost.
+
+**Original Phase 9 scope (retained for context).**
 
 **Goal.** Wire `squeeze::compress` + signed-content bypass into the PackStore write path, validate that squeeze is paying its way, and tune defaults based on observed savings.
 
