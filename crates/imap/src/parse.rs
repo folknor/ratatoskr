@@ -175,14 +175,19 @@ pub fn parse_message(
 
                 let contents = att.contents();
                 let raw_hash = xxh3_64(contents);
-                let content_hash = db::blob_hash::BlobHash::hash(contents);
 
                 #[allow(clippy::cast_possible_truncation)]
                 let size = att.len() as u32;
                 let is_inline = att.content_disposition().is_some_and(mail_parser::ContentType::is_inline);
 
-                // Carry raw bytes for small inline images so we can store them
-                // in the inline image SQLite cache during sync.
+                // Only inline parts get a content_hash populated at sync
+                // time, because we keep their bytes in the inline-image
+                // store right here. Non-inline attachments leave
+                // content_hash NULL so the post-sync prefetch sweep
+                // picks them up and the folder-batched BODY[part] fetch
+                // path writes them to PackStore.
+                let content_hash = is_inline.then(|| db::blob_hash::BlobHash::hash(contents));
+
                 let inline_data = if is_inline
                     && (size as usize) <= store::inline_image_store::MAX_INLINE_SIZE
                     && mime_type.starts_with("image/")
@@ -202,7 +207,7 @@ pub fn parse_message(
                     size,
                     content_id: att.content_id().map(ToString::to_string),
                     is_inline,
-                    content_hash: Some(content_hash),
+                    content_hash,
                     inline_data,
                 };
                 Some((raw_hash, attachment))

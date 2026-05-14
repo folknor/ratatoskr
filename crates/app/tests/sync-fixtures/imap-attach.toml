@@ -1,0 +1,41 @@
+name = "imap-attach"
+
+# IMAP counterpart to sync-fixtures/jmap-attach.toml. Single message in
+# INBOX carrying a single text/plain attachment, so the Phase 7.5
+# imap-attachment-prefetch.lua harness can exercise the IMAP fetch path
+# end-to-end (LOGIN + SELECT + UID FETCH BODYSTRUCTURE + UID FETCH
+# BODY[<part>]).
+#
+# Depends on saehrimnir honoring [[email.attachment]] blocks for the
+# IMAP protocol (request forwarded; pending at fixture-write time).
+# UIDs deterministic: email-001 is UID 1, UIDVALIDITY pinned by
+# saehrimnir.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "With attachment"
+sent_at = "2026-01-15T09:59:50Z"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "See attached."
+
+[[email.attachment]]
+blob_id = "blob-att-001"
+name = "sample.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"
