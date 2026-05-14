@@ -3,6 +3,7 @@ pub mod actions;
 mod attachment_materialize;
 mod boot;
 mod boot_progress;
+mod eviction;
 mod extract;
 mod prefetch;
 pub(crate) mod cal_actions;

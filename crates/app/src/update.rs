@@ -383,6 +383,13 @@ impl ReadyApp {
                         );
                         Task::none()
                     }
+                    service_api::Notification::EvictionCompleted(c) => {
+                        log::info!(
+                            "eviction completed: trigger={}, tombstoned={}, pages={}, superseded={}",
+                            c.trigger, c.blobs_tombstoned, c.pages_walked, c.superseded,
+                        );
+                        Task::none()
+                    }
                     service_api::Notification::IndexRebuildProgress(p) => {
                         log::debug!(
                             "index rebuild {}: {}/{}",

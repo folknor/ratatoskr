@@ -1,0 +1,37 @@
+name = "jmap-attach-ancient"
+
+# Same shape as jmap-attach.toml but the message is dated 2020-01-01,
+# well outside any reasonable retention window. Used by Phase 8a's
+# post-sync eviction sweep harness: the message is out-of-window from
+# the moment it lands, so prefetch skips it (no cached blob), and the
+# eviction sweep emits eviction.completed { trigger = "post_sync",
+# blobs_tombstoned = 0 } as proof the sweep ran on the post-sync
+# hook.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "With ancient attachment"
+received_at = "2020-01-01T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "See attached."
+
+[[email.attachment]]
+blob_id = "blob-att-001"
+name = "sample.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"

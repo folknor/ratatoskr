@@ -62,6 +62,32 @@ pub struct AttachmentCacheSizeAck {
     pub tombstoned_bytes:  u64,
 }
 
+/// Attachments roadmap Phase 8a: emitted at the end of every
+/// retention-window eviction sweep (startup, post-sync, window-shrink).
+/// `MustDeliver`: harness scripts and future UI hooks await this for a
+/// deterministic completion signal. The `trigger` field lets observers
+/// distinguish which pass fired.
+///
+/// `superseded = true` means a later trigger (typically a follow-up
+/// window-shrink) bumped the eviction epoch mid-sweep, so this pass
+/// bailed before draining its window. The next pass's
+/// `EvictionCompleted` will reflect the up-to-date window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvictionCompleted {
+    pub service_generation: u32,
+    pub trigger:            String,
+    pub blobs_tombstoned:   u64,
+    pub pages_walked:       u64,
+    pub superseded:         bool,
+}
+
+impl crate::notification::WithGeneration for EvictionCompleted {
+    fn generation(&self) -> u32 { self.service_generation }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

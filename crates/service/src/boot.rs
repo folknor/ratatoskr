@@ -234,6 +234,14 @@ pub(crate) struct BootSharedState {
     /// `spawn_blocking` calls or multi-account loops should retrofit
     /// when added.
     shutdown_token: CancellationToken,
+    /// Attachments roadmap Phase 8a: monotonic counter bumped on every
+    /// window-shrink trigger. Each eviction sweep snapshots the value
+    /// at start and re-checks between pages; a divergence means a
+    /// later shrink superseded this sweep, and the loop bails so the
+    /// fresh trigger can drive the up-to-date window. Startup and
+    /// post-sync triggers do not bump but still snapshot, so a
+    /// window-shrink fired mid-pass interrupts them too.
+    eviction_epoch: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// Phase 7-9: tracking state for an in-flight `index.rebuild` task.
@@ -270,7 +278,15 @@ impl BootSharedState {
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             config,
             shutdown_token: CancellationToken::new(),
+            eviction_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
+    }
+
+    /// Attachments roadmap Phase 8a: bumped on each window-shrink
+    /// trigger; eviction sweep snapshots and re-checks between pages
+    /// so a fresh shrink supersedes an in-flight startup/post-sync.
+    pub(crate) fn eviction_epoch(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        Arc::clone(&self.eviction_epoch)
     }
 
     /// Test-only Service knobs parsed once at launch. Read by the

@@ -275,7 +275,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         let runtime = crate::prefetch::PrefetchRuntime::new(
             db_state.clone(),
             Arc::clone(&boot_state),
-            notification_tx,
+            notification_tx.clone(),
             0,
             cancellation,
         );
@@ -306,6 +306,27 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         };
         let window_start_unix = chrono::Utc::now().timestamp()
             - window_days.saturating_mul(86_400);
+
+        // Attachments roadmap Phase 8a: eviction sweep BEFORE the
+        // backfill kick, so we don't pre-fetch bytes only to tombstone
+        // them moments later. max_pages=128 mirrors MAX_BACKFILL_PAGES
+        // for the bulk-work startup pass.
+        if let Some(pack_store) = boot_state.pack_store() {
+            let epoch_arc = boot_state.eviction_epoch();
+            let epoch_at_start = epoch_arc.load(std::sync::atomic::Ordering::Relaxed);
+            let _ = crate::eviction::run_eviction_sweep(
+                db_state.clone(),
+                pack_store,
+                notification_tx.clone(),
+                0,
+                crate::eviction::EvictionTrigger::Startup,
+                window_start_unix,
+                128,
+                epoch_arc,
+                epoch_at_start,
+            ).await;
+        }
+
         // Phase 7: enumerate every provider, not just JMAP. The
         // per-provider concurrency caps and the IMAP folder-batch
         // worker handle the differences inside `PrefetchRuntime`.

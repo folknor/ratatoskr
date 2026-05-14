@@ -2212,6 +2212,19 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 completed.service_generation as f64,
             )?;
         }
+        Notification::EvictionCompleted(completed) => {
+            set_field_string(state, idx, "type", "EvictionCompleted")?;
+            set_field_string(state, idx, "trigger", &completed.trigger)?;
+            set_field_number(state, idx, "blobs_tombstoned", completed.blobs_tombstoned as f64)?;
+            set_field_number(state, idx, "pages_walked", completed.pages_walked as f64)?;
+            set_field_bool(state, idx, "superseded", completed.superseded)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                completed.service_generation as f64,
+            )?;
+        }
         other => {
             set_field_string(state, idx, "type", other.method_name())?;
         }
@@ -3621,6 +3634,17 @@ fn set_field_number(
 ) -> dellingr::Result<()> {
     state.push_string(key);
     state.push_number(value);
+    state.set_table_raw(table_idx)
+}
+
+fn set_field_bool(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+    value: bool,
+) -> dellingr::Result<()> {
+    state.push_string(key);
+    state.push_boolean(value);
     state.set_table_raw(table_idx)
 }
 

@@ -67,7 +67,7 @@ pub(crate) async fn handle_set(
         .await
         .map_err(ServiceError::Internal)?;
 
-    if old_window_days.is_some() {
+    if touches_sync_period {
         // Defense in depth: read the freshly-committed value rather
         // than trusting the parsed wire value. Cheap, and decouples
         // the kick decision from any future filter in `set_setting`
@@ -92,6 +92,21 @@ pub(crate) async fn handle_set(
             let boot_state = Arc::clone(boot_state);
             tokio::spawn(async move {
                 kick_window_extend(&boot_state, new_days).await;
+            });
+        }
+
+        // Attachments roadmap Phase 8a: a window-shrink fires an
+        // eviction sweep with the freshly-narrowed window. Bumping the
+        // epoch supersedes any in-flight startup/post-sync sweep so it
+        // bails to let this trigger drive the up-to-date window. Same
+        // detach reasoning as the extend branch: paginating tombstones
+        // on a multi-GB cache can take seconds.
+        if let (Some(new_days), Some(old_days)) = (committed_days, old_window_days)
+            && new_days < old_days
+        {
+            let boot_state_for_shrink = Arc::clone(boot_state);
+            tokio::spawn(async move {
+                kick_window_shrink(&boot_state_for_shrink, new_days).await;
             });
         }
     }
@@ -169,4 +184,41 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
     // `prefetch.completed` after `settings.set` always sees a signal
     // that the kick ran.
     prefetch.emit_completed_if_idle().await;
+}
+
+/// Attachments roadmap Phase 8a: detached worker that bumps the
+/// eviction epoch (superseding any in-flight startup/post-sync sweep)
+/// and runs a fresh sweep with the newly-narrowed window.
+async fn kick_window_shrink(boot_state: &Arc<BootSharedState>, window_days: i64) {
+    let Some(pack_store) = boot_state.pack_store() else {
+        log::debug!("settings.set: PackStore not installed; skipping window-shrink kick");
+        return;
+    };
+    let Ok(write_db) = boot_state.write_db_state() else {
+        return;
+    };
+    let Some(notification_tx) = boot_state.notification_sender() else {
+        log::debug!("settings.set: notification sender not installed; skipping window-shrink kick");
+        return;
+    };
+    let window_start_unix = crate::eviction::window_start_unix(window_days.max(1));
+    let epoch_arc = boot_state.eviction_epoch();
+    // Bump the epoch BEFORE snapshotting our start value so any
+    // already-running sweep observes the bump and bails. We then own
+    // the post-bump value as our own start, which the next shrink
+    // (if any) will likewise supersede.
+    let epoch_at_start = epoch_arc
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        .saturating_add(1);
+    let _ = crate::eviction::run_eviction_sweep(
+        write_db,
+        pack_store,
+        notification_tx,
+        0,
+        crate::eviction::EvictionTrigger::WindowShrink,
+        window_start_unix,
+        128,
+        epoch_arc,
+        epoch_at_start,
+    ).await;
 }

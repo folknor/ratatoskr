@@ -762,6 +762,7 @@ impl BootingApp {
                     | service_api::Notification::ExtractCompleted(_)
                     | service_api::Notification::PrefetchProgress(_)
                     | service_api::Notification::PrefetchCompleted(_)
+                    | service_api::Notification::EvictionCompleted(_)
                     | service_api::Notification::IndexRebuildProgress(_)
                     | service_api::Notification::IndexRebuildCompleted(_) => {
                         log::debug!(
