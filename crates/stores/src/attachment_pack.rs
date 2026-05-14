@@ -480,6 +480,78 @@ impl PackStore {
         Ok(())
     }
 
+    /// Attachments roadmap Phase 8c: bulk-tombstone every live blob.
+    /// Surface for the "Clear cache now" settings action. Returns the
+    /// number of newly-tombstoned rows; already-tombstoned blobs are
+    /// not double-counted. A subsequent GC pass reclaims the bytes.
+    ///
+    /// Implementation: single SQL UPDATE for the column flip (one
+    /// mutex acquisition rather than N), then batched tombstone-log
+    /// writes (one file open + fsync per pack rather than per blob).
+    /// On a 150 GB / 1M-blob mailbox this is the difference between
+    /// seconds and minutes vs. looping `tombstone()`.
+    pub async fn tombstone_all_live(&self) -> Result<u64, PackError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || -> Result<u64, PackError> {
+            // Snapshot the (content_hash, pack_file_id) pairs we're
+            // about to tombstone, so we can append per-pack log
+            // records grouped by pack.
+            let live: Vec<(BlobHash, u32)> = {
+                let conn = inner
+                    .conn
+                    .lock()
+                    .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+                let mut stmt = conn.prepare(
+                    "SELECT content_hash, pack_file_id FROM attachment_blobs \
+                     WHERE tombstoned_at IS NULL",
+                )?;
+                stmt
+                    .query_map([], |row| {
+                        let hash: BlobHash = row.get(0)?;
+                        let pack_id: i64 = row.get(1)?;
+                        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                        let pack_id_u32 = pack_id as u32;
+                        Ok((hash, pack_id_u32))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+
+            if live.is_empty() {
+                return Ok(0);
+            }
+
+            // Bulk UPDATE in one statement.
+            let affected = {
+                let conn = inner
+                    .conn
+                    .lock()
+                    .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
+                conn.execute(
+                    "UPDATE attachment_blobs SET tombstoned_at = unixepoch() \
+                     WHERE tombstoned_at IS NULL",
+                    [],
+                )?
+            };
+
+            // Group hashes by pack and append all of a pack's log
+            // records in one file open + one fsync.
+            let mut by_pack: std::collections::HashMap<u32, Vec<BlobHash>> =
+                std::collections::HashMap::new();
+            for (hash, pack_id) in live {
+                by_pack.entry(pack_id).or_default().push(hash);
+            }
+            for (pack_id, hashes) in &by_pack {
+                append_tombstone_log_batch(&inner.packs_dir, *pack_id, hashes)?;
+            }
+
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let affected_u64 = affected as u64;
+            Ok(affected_u64)
+        })
+        .await
+        .map_err(|e| PackError::Sql(format!("spawn_blocking tombstone_all_live: {e}")))?
+    }
+
     /// Compact every sealed pack whose `dead / total` ratio is at or
     /// above `density_threshold`. Live frames are copied to a fresh
     /// pack at the chain tail; the old pack is unlinked after the
@@ -868,6 +940,31 @@ fn append_tombstone_log(
     record[..4].copy_from_slice(&pack_id.to_le_bytes());
     record[16..48].copy_from_slice(hash.as_bytes());
     file.write_all(&record)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Append many records to one pack's tombstone log in one file open
+/// and one fsync. Phase 8c `tombstone_all_live` calls this once per
+/// pack with all that pack's hashes batched.
+fn append_tombstone_log_batch(
+    packs_dir: &Path,
+    pack_id: u32,
+    hashes: &[BlobHash],
+) -> Result<(), PackError> {
+    if hashes.is_empty() {
+        return Ok(());
+    }
+    let path = tombstone_log_path(packs_dir, pack_id);
+    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+    let mut buf: Vec<u8> = Vec::with_capacity(hashes.len() * 48);
+    for hash in hashes {
+        let mut record = [0u8; 48];
+        record[..4].copy_from_slice(&pack_id.to_le_bytes());
+        record[16..48].copy_from_slice(hash.as_bytes());
+        buf.extend_from_slice(&record);
+    }
+    file.write_all(&buf)?;
     file.sync_all()?;
     Ok(())
 }
@@ -1530,6 +1627,33 @@ mod tests {
         assert_eq!(stats.packs_compacted, 0);
         let after = fs::metadata(pack_path_sealed(dir.path(), 0)).unwrap().len();
         assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn tombstone_all_live_marks_everything_and_is_idempotent() {
+        let (_dir, store) = fresh_store(64 * 1024).await;
+        let h1 = store.put(b"alpha".to_vec()).await.unwrap();
+        let h2 = store.put(b"bravo".to_vec()).await.unwrap();
+        let h3 = store.put(b"charlie".to_vec()).await.unwrap();
+
+        let first = store.tombstone_all_live().await.unwrap();
+        assert_eq!(first, 3, "all three blobs should be newly tombstoned");
+
+        // All reads now refuse.
+        assert!(store.get(&h1).await.unwrap().is_none());
+        assert!(store.get(&h2).await.unwrap().is_none());
+        assert!(store.get(&h3).await.unwrap().is_none());
+
+        // Idempotent: second call finds nothing left to tombstone.
+        let second = store.tombstone_all_live().await.unwrap();
+        assert_eq!(second, 0, "second call has nothing to do");
+    }
+
+    #[tokio::test]
+    async fn tombstone_all_live_on_empty_cache_is_noop() {
+        let (_dir, store) = fresh_store(64 * 1024).await;
+        let n = store.tombstone_all_live().await.unwrap();
+        assert_eq!(n, 0);
     }
 
     #[tokio::test]

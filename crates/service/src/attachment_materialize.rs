@@ -142,3 +142,51 @@ pub(crate) async fn reap_stale_tmp_files(
     .await
     .map_err(|e| format!("spawn_blocking reap: {e}"))?
 }
+
+/// Attachments roadmap Phase 8c: walk `<app_data>/opened_attachments/`
+/// and unlink user-opened attachment copies older than
+/// `max_age_secs`. Surface for the `opened_files_cleanup_days`
+/// setting (default 7 days, defined in `01_core.sql`). Phase 5's
+/// `attachment.open` flow writes here when the OS opens a file with
+/// its default handler; without this reaper those files would
+/// accumulate indefinitely.
+pub(crate) async fn reap_stale_opened_files(
+    boot_state: &Arc<BootSharedState>,
+    max_age_secs: u64,
+) -> Result<u32, String> {
+    let app_data = boot_state.app_data_dir().to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<u32, String> {
+        let dir = app_data.join("opened_attachments");
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(format!("read opened dir {}: {e}", dir.display())),
+        };
+        let now = std::time::SystemTime::now();
+        let mut count = 0u32;
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let Ok(modified) = meta.modified() else { continue };
+            let Ok(age) = now.duration_since(modified) else { continue };
+            if age.as_secs() < max_age_secs {
+                continue;
+            }
+            if let Err(e) = std::fs::remove_file(entry.path()) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    log::warn!(
+                        "opened_attachments reap: unlink {} failed: {e}",
+                        entry.path().display(),
+                    );
+                }
+                continue;
+            }
+            count = count.saturating_add(1);
+        }
+        Ok(count)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking reap_opened: {e}"))?
+}

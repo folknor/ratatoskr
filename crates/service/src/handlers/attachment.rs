@@ -17,7 +17,10 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use service_api::{AttachmentCacheSizeAck, AttachmentFetchAck, AttachmentFetchParams, ServiceError};
+use service_api::{
+    AttachmentCacheSizeAck, AttachmentClearCacheAck, AttachmentFetchAck, AttachmentFetchParams,
+    ServiceError,
+};
 
 use crate::attachment_materialize::{self, MaterializedBlob};
 use crate::boot::BootSharedState;
@@ -273,6 +276,43 @@ pub(crate) async fn handle_cache_size(
         .await
         .map_err(|e| ServiceError::Internal(format!("attachment.cache_size: {e}")))?;
     let ack = AttachmentCacheSizeAck { live_bytes, tombstoned_bytes };
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// Attachments roadmap Phase 8c: bulk-tombstone every live blob and
+/// chain a GC pass to physically reclaim the bytes. Surface for the
+/// settings-UI "Clear cache now" button. Blocks on completion so the
+/// ack carries accurate post-action numbers.
+pub(crate) async fn handle_clear_cache(
+    boot_state: &Arc<BootSharedState>,
+) -> Result<Value, ServiceError> {
+    let pack_store = boot_state
+        .pack_store()
+        .ok_or_else(|| ServiceError::Internal("PackStore not installed".into()))?;
+    let blobs_tombstoned = pack_store
+        .tombstone_all_live()
+        .await
+        .map_err(|e| ServiceError::Internal(format!("attachment.clear_cache tombstone: {e}")))?;
+    // Snapshot tombstoned bytes pre-GC; gc_stats.bytes_reclaimed
+    // tells us how many of those bytes the compaction physically
+    // dropped. Both are reported to the UI; consumers can choose
+    // which one to surface.
+    let notification_tx = boot_state
+        .notification_sender()
+        .ok_or_else(|| {
+            ServiceError::Internal("notification sender not installed".into())
+        })?;
+    let gc_stats = crate::gc::run_gc_pass(
+        pack_store,
+        notification_tx,
+        0,
+        crate::gc::GcTrigger::PostEviction,
+        crate::gc::DEFAULT_DENSITY_THRESHOLD,
+    ).await;
+    let ack = AttachmentClearCacheAck {
+        blobs_tombstoned,
+        bytes_reclaimed: gc_stats.bytes_reclaimed,
+    };
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 

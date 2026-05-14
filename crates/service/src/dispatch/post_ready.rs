@@ -341,6 +341,32 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
             ).await;
         }
 
+        // Attachments roadmap Phase 8c: opened-files reaper. Walks
+        // `<app_data>/opened_attachments/` and unlinks files older
+        // than the `opened_files_cleanup_days` setting. Cheap
+        // filesystem scan, runs once per boot.
+        let cleanup_days: i64 = match db_state
+            .with_conn(|conn| rtsk::db::queries::get_setting(conn, "opened_files_cleanup_days"))
+            .await
+        {
+            Ok(Some(s)) => s.parse::<i64>().unwrap_or(7).max(1),
+            _ => 7,
+        };
+        let max_age_secs: u64 = u64::try_from(cleanup_days).unwrap_or(7).saturating_mul(86_400);
+        let boot_state_for_reap = Arc::clone(&boot_state);
+        tokio::spawn(async move {
+            match crate::attachment_materialize::reap_stale_opened_files(
+                &boot_state_for_reap,
+                max_age_secs,
+            )
+            .await
+            {
+                Ok(n) if n > 0 => log::info!("opened_attachments reap: removed {n}"),
+                Ok(_) => {}
+                Err(e) => log::warn!("opened_attachments reap failed: {e}"),
+            }
+        });
+
         // Phase 7: enumerate every provider, not just JMAP. The
         // per-provider concurrency caps and the IMAP folder-batch
         // worker handle the differences inside `PrefetchRuntime`.

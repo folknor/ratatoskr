@@ -63,7 +63,8 @@ pub use internal::{
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
 pub use attachment::{
-    AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentFetchAck, AttachmentFetchParams,
+    AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentClearCacheAck,
+    AttachmentClearCacheParams, AttachmentFetchAck, AttachmentFetchParams,
     EvictionCompleted, GcCompleted,
 };
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
@@ -98,7 +99,8 @@ pub use request::{
     TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow,
     TestDbContactGroupRow, TestDbContactRow, TestDbLabelRow, TestDbLocalDraftRow,
     TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
     TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
     TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,

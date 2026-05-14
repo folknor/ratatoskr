@@ -15,7 +15,8 @@ use service_api::{
     TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
     TestDelayNextWriteAck,
     TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
-    TestPendingOpsReadParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
     TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
@@ -641,6 +642,48 @@ pub(super) async fn delay_next_write_handle(
     })?;
     serde_json::to_value(TestDelayNextWriteAck)
         .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+/// Phase 8c: read `attachment_blobs.tombstoned_at` for a single
+/// content_hash. Harness scripts use this after account-delete or
+/// clear-cache flows once the referencing `attachments` row has
+/// cascade-deleted; the blob's tombstone state survives.
+pub(super) async fn query_blob_tombstone_state_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestQueryBlobTombstoneStateParams,
+) -> Result<Value, ServiceError> {
+    let hex = params.content_hash;
+    let hash = db::blob_hash::BlobHash::from_hex(&hex)
+        .map_err(|e| ServiceError::InvalidParams {
+            method: "test.query_blob_tombstone_state".into(),
+            message: format!("content_hash: {e}"),
+        })?;
+    let db_state = boot_state.write_db_state().map_err(|_| {
+        ServiceError::Internal("write_db_state unavailable".into())
+    })?;
+    let ack: TestQueryBlobTombstoneStateAck = db_state
+        .with_conn(move |conn| {
+            let row: Option<Option<i64>> = conn
+                .query_row(
+                    "SELECT tombstoned_at FROM attachment_blobs WHERE content_hash = ?1",
+                    rusqlite::params![hash],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .ok();
+            Ok(match row {
+                Some(ts) => TestQueryBlobTombstoneStateAck {
+                    present:       true,
+                    tombstoned_at: ts,
+                },
+                None => TestQueryBlobTombstoneStateAck {
+                    present:       false,
+                    tombstoned_at: None,
+                },
+            })
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 fn insert_harness_account_rows(

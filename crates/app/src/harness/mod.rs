@@ -20,7 +20,8 @@ use service_api::{
     ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
-    TestPendingOpsReadParams, TestQueryDbStateParams, TestSeedAccountParams,
+    TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
+    TestSeedAccountParams,
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
     TestSeedRemoteAttachmentParams, TestSearchIndexParams, TestSeedThreadParams,
     TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
@@ -2730,6 +2731,20 @@ fn request_params_from_lua(
                 TestQueryDbStateParams::default()
             };
             Ok(RequestParams::TestQueryDbState { params })
+        }
+        "TestQueryBlobTombstoneState" | "test.query_blob_tombstone_state" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestQueryBlobTombstoneState requires params table",
+                ));
+            }
+            let content_hash = get_string_field(state, params_idx, "content_hash")?
+                .ok_or_else(|| {
+                    lua_error_message("TestQueryBlobTombstoneState requires params.content_hash")
+                })?;
+            Ok(RequestParams::TestQueryBlobTombstoneState {
+                params: TestQueryBlobTombstoneStateParams { content_hash },
+            })
         }
         "TestSearchIndex" | "test.search_index" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {

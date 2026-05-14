@@ -88,6 +88,25 @@ impl crate::notification::WithGeneration for EvictionCompleted {
     }
 }
 
+/// Attachments roadmap Phase 8c: `attachment.clear_cache` request
+/// body. No parameters; the action is global "tombstone every live
+/// blob and reclaim the bytes".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AttachmentClearCacheParams {}
+
+/// Attachments roadmap Phase 8c: `attachment.clear_cache` ack.
+///
+/// `blobs_tombstoned` is the count of attachment_blobs rows the
+/// bulk-tombstone UPDATE flipped from `tombstoned_at IS NULL` to a
+/// timestamp. `bytes_reclaimed` is the post-tombstone GC pass's
+/// physical-bytes-freed count - what `size_breakdown().tombstoned`
+/// dropped by. Both can be zero (already-cleared cache).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentClearCacheAck {
+    pub blobs_tombstoned: u64,
+    pub bytes_reclaimed:  u64,
+}
+
 /// Attachments roadmap Phase 8b: physical GC pack-repack completion.
 /// `MustDeliver`: harness scripts and the future cache-size UI await
 /// this. Fires once per GC pass (startup or post-eviction chain).

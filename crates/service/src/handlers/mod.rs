@@ -142,6 +142,9 @@ pub(crate) async fn dispatch(
         RequestParams::AttachmentCacheSize { params: _ } => {
             attachment::handle_cache_size(&boot_state).await
         }
+        RequestParams::AttachmentClearCache { params: _ } => {
+            attachment::handle_clear_cache(&boot_state).await
+        }
         RequestParams::ExtractStatus { params } => {
             extract::handle_status(&boot_state, params).await
         }
@@ -202,6 +205,9 @@ pub(crate) async fn dispatch(
         }
         RequestParams::TestDelayNextWrite { params } => {
             test_helpers::delay_next_write_handle(params).await
+        }
+        RequestParams::TestQueryBlobTombstoneState { params } => {
+            test_helpers::query_blob_tombstone_state_handle(&boot_state, params).await
         }
     }
 }

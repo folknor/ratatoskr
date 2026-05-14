@@ -17,7 +17,9 @@ use crate::contacts::{
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
-use crate::attachment::{AttachmentCacheSizeParams, AttachmentFetchParams};
+use crate::attachment::{
+    AttachmentCacheSizeParams, AttachmentClearCacheParams, AttachmentFetchParams,
+};
 use crate::extract::{ExtractStatusParams, IndexRebuildParams};
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
@@ -199,6 +201,23 @@ pub struct TestThreadReadAck {
     pub is_chat_thread: bool,
     pub label_ids: Vec<String>,
     pub unread_messages: u64,
+}
+
+/// Phase 8c harness probe params: a single hex-encoded BLAKE3 hash
+/// to look up in `attachment_blobs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestQueryBlobTombstoneStateParams {
+    pub content_hash: String,
+}
+
+/// Phase 8c harness probe ack. `tombstoned_at` is `None` when the
+/// row is live or absent. `present` distinguishes "absent from
+/// attachment_blobs" from "live in attachment_blobs", since both
+/// produce `tombstoned_at = None`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestQueryBlobTombstoneStateAck {
+    pub present:        bool,
+    pub tombstoned_at:  Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -853,6 +872,10 @@ pub enum RequestParams {
     /// Sums live + tombstoned `attachment_blobs.length` for the
     /// "Cache using X.Y GB" indicator.
     AttachmentCacheSize { params: AttachmentCacheSizeParams },
+    /// Attachments roadmap Phase 8c: settings-UI "Clear cache now"
+    /// action. Tombstones every live blob in bulk and chains a GC
+    /// pass to physically reclaim the bytes. Returns counts.
+    AttachmentClearCache { params: AttachmentClearCacheParams },
     /// Phase 7-4: read the ExtractRuntime's running status counters
     /// (queue depth + indexed/skipped/failed totals) for the
     /// status-bar polling.
@@ -899,6 +922,11 @@ pub enum RequestParams {
     TestSearchIndex { params: TestSearchIndexParams },
     /// Arms a one-shot delay at a named write/crash hook.
     TestDelayNextWrite { params: TestDelayNextWriteParams },
+    /// Phase 8c harness probe: reads `attachment_blobs.tombstoned_at`
+    /// for a single content_hash. Used to verify account-delete /
+    /// clear-cache flows from sync-harness scripts after the
+    /// referencing `attachments` rows have cascade-deleted away.
+    TestQueryBlobTombstoneState { params: TestQueryBlobTombstoneStateParams },
 }
 
 /// Phase 8-1: idempotency classification for `RequestParams::idempotency()`.
@@ -961,6 +989,7 @@ impl RequestParams {
             Self::OauthExchangeCode { .. } => "oauth.exchange_code",
             Self::AttachmentFetch { .. } => "attachment.fetch",
             Self::AttachmentCacheSize { .. } => "attachment.cache_size",
+            Self::AttachmentClearCache { .. } => "attachment.clear_cache",
             Self::ExtractStatus { .. } => "extract.status",
             Self::IndexRebuild { .. } => "index.rebuild",
             Self::TestPanic => "test.panic",
@@ -982,6 +1011,7 @@ impl RequestParams {
             Self::TestQueryDbState { .. } => "test.query_db_state",
             Self::TestSearchIndex { .. } => "test.search_index",
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
+            Self::TestQueryBlobTombstoneState { .. } => "test.query_blob_tombstone_state",
         }
     }
 
@@ -1089,6 +1119,13 @@ impl RequestParams {
             Self::AttachmentCacheSize { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
+            // Phase 8c: bulk tombstone + GC pass. Both are typically
+            // sub-second on a small mailbox but can grow with cache
+            // size; allow plenty of headroom so an honest IPC ack
+            // doesn't get timed out on a 150 GB cache.
+            Self::AttachmentClearCache { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(300))
+            }
             // Phase 7-4: in-memory counter read; cheap.
             Self::ExtractStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Phase 7-4: handler spawns a tracked task and returns
@@ -1110,7 +1147,8 @@ impl RequestParams {
             | Self::TestStartSync { .. }
             | Self::TestQueryDbState { .. }
             | Self::TestSearchIndex { .. }
-            | Self::TestDelayNextWrite { .. } => {
+            | Self::TestDelayNextWrite { .. }
+            | Self::TestQueryBlobTombstoneState { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
@@ -1149,7 +1187,15 @@ impl RequestParams {
             | Self::AttachmentCacheSize { .. }
             | Self::ExtractStatus { .. } => Idempotency::Idempotent,
 
-            Self::Shutdown
+            // Phase 8c: clear-cache is idempotent in effect (calling
+            // it twice in a row leaves the second call with nothing
+            // to tombstone) but the ack carries the per-call count,
+            // so a replay would surface different numbers. Treat as
+            // non-idempotent so the dispatcher doesn't retry it on
+            // its own.
+            Self::AttachmentClearCache { .. }
+
+            | Self::Shutdown
             | Self::ActionExecutePlan { .. }
             | Self::CalActionExecutePlan { .. }
             | Self::ActionSend { .. }
@@ -1192,7 +1238,8 @@ impl RequestParams {
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestQueryDbState { .. }
-            | Self::TestSearchIndex { .. } => Idempotency::Idempotent,
+            | Self::TestSearchIndex { .. }
+            | Self::TestQueryBlobTombstoneState { .. } => Idempotency::Idempotent,
 
             Self::TestSeedAccount { .. }
             | Self::TestCrashAfterNWrites { .. }
@@ -1289,6 +1336,7 @@ impl RequestParams {
             Self::OauthExchangeCode { params } => serde_json::json!({ "params": params }),
             Self::AttachmentFetch { params } => serde_json::json!({ "params": params }),
             Self::AttachmentCacheSize { params } => serde_json::json!({ "params": params }),
+            Self::AttachmentClearCache { params } => serde_json::json!({ "params": params }),
             Self::ExtractStatus { params } => serde_json::json!({ "params": params }),
             Self::IndexRebuild { params } => serde_json::json!({ "params": params }),
             Self::TestPanic => Value::Null,
@@ -1316,6 +1364,9 @@ impl RequestParams {
             Self::TestQueryDbState { params } => serde_json::json!({ "params": params }),
             Self::TestSearchIndex { params } => serde_json::json!({ "params": params }),
             Self::TestDelayNextWrite { params } => {
+                serde_json::json!({ "params": params })
+            }
+            Self::TestQueryBlobTombstoneState { params } => {
                 serde_json::json!({ "params": params })
             }
         }
@@ -1679,6 +1730,16 @@ impl RequestParams {
                     .unwrap_or_default();
                 Ok(Self::AttachmentCacheSize { params: p.params })
             }
+            "attachment.clear_cache" => {
+                #[derive(Deserialize, Default)]
+                struct P {
+                    #[serde(default)]
+                    params: AttachmentClearCacheParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .unwrap_or_default();
+                Ok(Self::AttachmentClearCache { params: p.params })
+            }
             "extract.status" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -1844,6 +1905,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.delay_next_write params: {e}"))?;
                 Ok(Self::TestDelayNextWrite { params: p.params })
+            }
+            "test.query_blob_tombstone_state" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestQueryBlobTombstoneStateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.query_blob_tombstone_state params: {e}"))?;
+                Ok(Self::TestQueryBlobTombstoneState { params: p.params })
             }
             _ => Err(format!("unknown method: {method}")),
         }
