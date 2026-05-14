@@ -1,0 +1,74 @@
+name = "imap-attach-multi"
+
+# Three emails in one INBOX, each carrying a distinct attachment.
+# Drives the Phase 7 IMAP folder-batching invariant: prefetch
+# enumerates all three NULL-hash rows, builds one (account, folder)
+# batch, opens one IMAP session, runs one SELECT INBOX, and issues
+# three FETCH BODY[part] under that shared session. The harness
+# script asserts those counts using saehrimnir's connection_id
+# tagging.
+
+[[account]]
+id = "account-1"
+name = "imap-multi@example.test"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Attachment 1"
+sent_at = "2026-01-15T09:59:50Z"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "See attached (1)."
+
+[[email.attachment]]
+blob_id = "blob-att-001"
+name = "first.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"
+
+[[email]]
+id = "email-002"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Attachment 2"
+sent_at = "2026-01-16T09:59:50Z"
+received_at = "2026-01-16T10:00:00Z"
+message_id = ["<email-002@example.com>"]
+body_text = "See attached (2)."
+
+[[email.attachment]]
+blob_id = "blob-att-002"
+name = "second.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample-second.txt"
+
+[[email]]
+id = "email-003"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Attachment 3"
+sent_at = "2026-01-17T09:59:50Z"
+received_at = "2026-01-17T10:00:00Z"
+message_id = ["<email-003@example.com>"]
+body_text = "See attached (3)."
+
+[[email.attachment]]
+blob_id = "blob-att-003"
+name = "third.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample-third.txt"
