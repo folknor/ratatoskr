@@ -157,7 +157,14 @@ pub(crate) async fn handle_fetch(
         .fetch_attachment(&provider_ctx, &params.message_id, &provider_attachment_id)
         .await
         .map_err(|e| ServiceError::Internal(format!("provider fetch_attachment: {e}")))?;
-    let bytes = attachment.bytes;
+
+    // Phase 9: optionally compress before put. Settings-gated and
+    // non-fatal: a squeeze hiccup passes bytes through unchanged.
+    let bytes = crate::attachment_compress::maybe_compress(
+        &write_db,
+        params.attachment_id.clone(),
+        attachment.bytes,
+    ).await;
 
     let pack_store = boot_state.pack_store().ok_or_else(|| {
         ServiceError::Internal(

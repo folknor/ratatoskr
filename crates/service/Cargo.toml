@@ -23,6 +23,11 @@ process-lifetime = { path = "../process-lifetime" }
 common = { path = "../common" }
 service-state = { path = "../service-state" }
 store = { path = "../stores" }
+# Phase 9 attachments roadmap: inline transparent compression at the
+# cache-write boundary (prefetch worker + attachment.fetch cache-miss
+# path). Squeeze is gated at runtime on the `compress_attachments`
+# pref so this dep is unconditional.
+squeeze = { path = "../squeeze" }
 search = { path = "../search" }
 sync = { path = "../sync" }
 rusqlite.workspace = true

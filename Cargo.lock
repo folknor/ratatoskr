@@ -6473,6 +6473,7 @@ dependencies = [
  "service-api",
  "service-state",
  "sha2 0.11.0",
+ "squeeze",
  "store",
  "sync",
  "tantivy",

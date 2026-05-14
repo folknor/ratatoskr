@@ -1089,6 +1089,14 @@ async fn run_item_pipeline(
         return Err(SkipReason::RowGone);
     }
 
+    // Phase 9: optionally compress before put. Settings-gated and
+    // non-fatal: a squeeze hiccup passes bytes through unchanged.
+    let bytes = crate::attachment_compress::maybe_compress(
+        &inner.db,
+        item.attachment_id.clone(),
+        bytes,
+    ).await;
+
     let content_hash = pack_store
         .put(bytes)
         .await
