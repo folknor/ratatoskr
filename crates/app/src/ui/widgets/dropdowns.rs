@@ -212,3 +212,138 @@ pub fn select<'a, M: Clone + 'a>(
         .on_dismiss(on_toggle.clone())
         .into()
 }
+
+/// Icon kinds supported in `select_with_icons`. Kept narrow on purpose -
+/// add variants as call sites demand them.
+#[derive(Debug, Clone, Copy)]
+pub enum SelectIcon {
+    ColorDot(Color),
+}
+
+impl SelectIcon {
+    fn into_element<'a, M: 'a>(self) -> Element<'a, M> {
+        match self {
+            SelectIcon::ColorDot(color) => super::avatars::color_dot(color),
+        }
+    }
+}
+
+/// One row in a `select_with_icons` menu.
+pub struct SelectOption<'a> {
+    /// The value passed back through `on_select`. Trigger picks the matching
+    /// option by exact equality against `selected_value`.
+    pub value: String,
+    pub label: &'a str,
+    pub icon: Option<SelectIcon>,
+}
+
+/// A select widget with the same trigger/menu shape as `select`, plus optional
+/// left-side icons on the trigger and each menu item. When `enabled` is false,
+/// the chevron is suppressed, the label dims to `Tertiary`, and the trigger
+/// becomes non-interactive (the menu never opens).
+pub fn select_with_icons<'a, M: Clone + 'a>(
+    options: Vec<SelectOption<'a>>,
+    selected_value: Option<&'a str>,
+    open: bool,
+    enabled: bool,
+    placeholder: &'a str,
+    on_toggle: M,
+    on_select: impl Fn(String) -> M + 'a,
+) -> Element<'a, M> {
+    let selected_idx = selected_value
+        .and_then(|v| options.iter().position(|o| o.value == v));
+
+    let (trigger_icon, trigger_label) = match selected_idx {
+        Some(i) => (options[i].icon, options[i].label),
+        None => (None, placeholder),
+    };
+
+    let mut trigger_row = row![Space::new().width(Length::Fill)]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+
+    if let Some(kind) = trigger_icon {
+        trigger_row =
+            trigger_row.push(container(kind.into_element::<M>()).align_y(Alignment::Center));
+    }
+
+    let label_style: fn(&iced::Theme) -> iced::widget::text::Style = if enabled {
+        text::base
+    } else {
+        theme::TextClass::Tertiary.style()
+    };
+    trigger_row = trigger_row.push(
+        container(text(trigger_label).size(TEXT_MD).style(label_style)).align_y(Alignment::Center),
+    );
+
+    if enabled {
+        trigger_row = trigger_row.push(
+            container(
+                icon::chevron_down()
+                    .size(ICON_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .align_y(Alignment::Center),
+        );
+    }
+
+    let mut trigger = button(trigger_row)
+        .padding(PAD_SELECT_TRIGGER)
+        .style(theme::ButtonClass::BareTransparent.style())
+        .width(SELECT_MIN_WIDTH);
+    if enabled {
+        trigger = trigger.on_press(on_toggle.clone());
+    }
+
+    if !enabled || !open {
+        return trigger.into();
+    }
+
+    let menu_items: Vec<Element<'a, M>> = options
+        .into_iter()
+        .map(|opt| {
+            let is_selected = selected_value == Some(opt.value.as_str());
+            let mut item_row = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+            if let Some(kind) = opt.icon {
+                item_row = item_row
+                    .push(container(kind.into_element::<M>()).align_y(Alignment::Center));
+            }
+            item_row = item_row.push(
+                container(text(opt.label).size(TEXT_MD).style(text::base))
+                    .width(Length::Fill)
+                    .align_y(Alignment::Center),
+            );
+            if is_selected {
+                item_row = item_row.push(
+                    container(icon::check().size(ICON_MD).style(text::base))
+                        .align_y(Alignment::Center),
+                );
+            }
+            button(
+                container(item_row)
+                    .width(Length::Fill)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(on_select(opt.value.clone()))
+            .padding(PAD_NAV_ITEM)
+            .height(DROPDOWN_ITEM_HEIGHT)
+            .style(
+                theme::ButtonClass::Dropdown {
+                    selected: is_selected,
+                }
+                .style(),
+            )
+            .width(Length::Fill)
+            .into()
+        })
+        .collect();
+
+    let menu = container(column(menu_items).spacing(SPACE_XXS).width(Length::Fill))
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style());
+
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
+        .popup(menu)
+        .on_dismiss(on_toggle.clone())
+        .into()
+}

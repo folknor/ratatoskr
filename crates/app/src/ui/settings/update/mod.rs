@@ -118,7 +118,7 @@ impl Component for Settings {
                     });
                     self.active_sheet = Some(SettingsSheetPage::EditSignature {
                         signature_id: Some(sig.id.clone()),
-                        account_id: sig.account_id.clone(),
+                        account_id: Some(sig.account_id.clone()),
                     });
                     self.sheet_anim.go_mut(true, Instant::now());
                 }
@@ -462,13 +462,8 @@ impl Settings {
                     prefs.phishing_sensitivity = v;
                 }
             }
-            SettingsMessage::ToggleSendAndArchive(v) => self.send_and_archive = v,
             SettingsMessage::UndoDelayChanged(v) => {
                 self.undo_delay = v;
-                self.open_select = None;
-            }
-            SettingsMessage::DefaultReplyChanged(v) => {
-                self.default_reply_mode = v;
                 self.open_select = None;
             }
             SettingsMessage::MarkAsReadChanged(v) => {
@@ -615,15 +610,15 @@ impl Settings {
                     });
                     self.active_sheet = Some(SettingsSheetPage::EditSignature {
                         signature_id: Some(sig.id.clone()),
-                        account_id: sig.account_id.clone(),
+                        account_id: Some(sig.account_id.clone()),
                     });
                     self.sheet_anim.go_mut(true, Instant::now());
                 }
             }
-            SettingsMessage::SignatureCreate(account_id) => {
+            SettingsMessage::SignatureCreate => {
                 self.signature_editor = Some(SignatureEditorState {
                     signature_id: None,
-                    account_id: account_id.clone(),
+                    account_id: String::new(),
                     name: UndoableText::new(),
                     body_editor: RteEditorState::new(),
                     is_default: false,
@@ -632,9 +627,15 @@ impl Settings {
                 });
                 self.active_sheet = Some(SettingsSheetPage::EditSignature {
                     signature_id: None,
-                    account_id,
+                    account_id: None,
                 });
                 self.sheet_anim.go_mut(true, Instant::now());
+            }
+            SettingsMessage::SignatureEditorAccountChanged(account_id) => {
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.account_id = account_id;
+                    editor.dirty = true;
+                }
             }
             SettingsMessage::SignatureEditorNameChanged(v) => {
                 if let Some(ref mut editor) = self.signature_editor {

@@ -160,8 +160,6 @@ pub struct Settings {
     pub email_body_background: EmailBodyBackground,
     // Composing
     pub undo_delay: String,
-    pub send_and_archive: bool,
-    pub default_reply_mode: String,
     pub mark_as_read: String,
     // Notifications
     pub notifications_enabled: bool,
@@ -205,9 +203,6 @@ pub struct Settings {
     pub signature_editor: Option<SignatureEditorState>,
     /// Signature ID pending delete confirmation.
     pub confirm_delete_signature: Option<String>,
-    /// Active signature drag-reorder state.
-    #[allow(dead_code)] // see SignatureDragState above
-    pub signature_drag: Option<SignatureDragState>,
     // Contacts management
     pub contact_filter: String,
     pub contacts: Vec<crate::db::ContactEntry>,
@@ -393,8 +388,6 @@ impl Default for Settings {
             default_rendering_mode: RenderingMode::default(),
             email_body_background: EmailBodyBackground::default(),
             undo_delay: "5 seconds".into(),
-            send_and_archive: false,
-            default_reply_mode: "Reply".into(),
             mark_as_read: "After 2 Seconds".into(),
             notifications_enabled: true,
             smart_notifications: true,
@@ -456,7 +449,6 @@ impl Default for Settings {
             signatures: Vec::new(),
             signature_editor: None,
             confirm_delete_signature: None,
-            signature_drag: None,
             contact_filter: String::new(),
             contacts: Vec::new(),
             contact_editor: None,
@@ -561,9 +553,7 @@ mod tests {
             read_filter: None,
             email_list_width: None,
             email_density: None,
-            default_reply_mode: None,
             mark_as_read_behavior: None,
-            send_and_archive: false,
             font_size: None,
             color_theme: None,
             inbox_view_mode: None,

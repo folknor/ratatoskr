@@ -41,16 +41,3 @@ pub struct SignatureEditorState {
     pub dirty: bool,
 }
 
-/// State for signature drag-reorder within a single account section.
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // populated for the unfinished signature drag-reorder feature
-pub struct SignatureDragState {
-    /// Account ID of the group being dragged within.
-    pub account_id: String,
-    /// Index of the signature being dragged within the account's list.
-    pub dragging_index: usize,
-    /// Y coordinate when the grip was pressed (list-relative).
-    pub start_y: f32,
-    /// Whether the mouse has moved far enough to count as a real drag.
-    pub is_dragging: bool,
-}

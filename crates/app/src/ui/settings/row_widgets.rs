@@ -332,44 +332,55 @@ pub(super) fn toggle_row<'a>(
         // The toggler captures its own click events, so the button only fires when the
         // user clicks outside the knob (e.g. on the label). No double-firing.
         let on_press_msg = on_toggle(!value);
-        button(
+        // Top line: bold label + toggler on a fixed-height baseline. The
+        // toggler's Y is anchored here regardless of how many lines the
+        // optional description below wraps to, so it never moves when
+        // content grows or the window narrows.
+        let top = row![
             container(
-                column![
-                    // Top line: bold label + toggler on a fixed-height
-                    // baseline. The toggler's Y is anchored here regardless
-                    // of how many lines the description below wraps to,
-                    // so it never moves when content grows or the window
-                    // narrows.
-                    row![
-                        container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
-                            .align_y(Alignment::Center)
-                            .width(Length::Fill),
-                        animated_toggler(value)
-                            .size(TEXT_HEADING)
-                            .on_toggle(on_toggle)
-                            .style(theme::TogglerClass::Settings.style()),
-                    ]
-                    .align_y(Alignment::Center)
-                    .height(SETTINGS_LABEL_LINE_HEIGHT)
-                    .width(Length::Fill),
-                    // Description capped at 80% of the row width via
-                    // FillPortion(4)/(1) so it can't grow horizontally
-                    // into the toggler column. Wraps freely.
-                    row![
-                        container(
-                            text(description)
-                                .size(TEXT_SM)
-                                .style(theme::TextClass::Tertiary.style()),
-                        )
-                        .width(Length::FillPortion(4)),
-                        Space::new().width(Length::FillPortion(1)),
-                    ]
-                    .width(Length::Fill),
+                text(label)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .wrapping(text::Wrapping::None)
+            )
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+            animated_toggler(value)
+                .size(TEXT_HEADING)
+                .on_toggle(on_toggle)
+                .style(theme::TogglerClass::Settings.style()),
+        ]
+        .align_y(Alignment::Center)
+        .height(SETTINGS_LABEL_LINE_HEIGHT)
+        .width(Length::Fill);
+
+        let inner: Element<'a, SettingsMessage> = if description.is_empty() {
+            top.into()
+        } else {
+            // Description capped at 80% of the row width via
+            // FillPortion(4)/(1) so it can't grow horizontally into the
+            // toggler column. Wraps freely.
+            column![
+                top,
+                row![
+                    container(
+                        text(description)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
                 ]
                 .width(Length::Fill),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .into()
+        };
+
+        button(
+            container(inner)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
         )
         .on_press(on_press_msg)
         .padding(0)

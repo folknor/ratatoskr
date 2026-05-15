@@ -96,6 +96,34 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
     ));
 
     col = col.push(section(
+        "Behavior",
+        vec![
+            setting_row(
+                "Undo Send Delay",
+                widgets::select(
+                    &["None", "5 seconds", "10 seconds", "30 seconds"],
+                    &state.undo_delay,
+                    state.open_select == Some(SelectField::UndoDelay),
+                    SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+                    SettingsMessage::UndoDelayChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+            ),
+            setting_row(
+                "Mark as Read",
+                widgets::select(
+                    &["Instantly", "After 2 Seconds", "Manually"],
+                    &state.mark_as_read,
+                    state.open_select == Some(SelectField::MarkAsRead),
+                    SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
+                    SettingsMessage::MarkAsReadChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
+            ),
+        ],
+    ));
+
+    col = col.push(section(
         "Reading Pane",
         radio_group(
             &[

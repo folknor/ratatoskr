@@ -1,4 +1,4 @@
-use iced::widget::{Space, button, column, container, mouse_area, row, text};
+use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
 
 use rte::{Action as RteAction, BlockKind, EditAction, InlineStyle, rich_text_editor};
@@ -8,174 +8,141 @@ use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
-use crate::ui::undoable_text_input::undoable_text_input;
+use crate::ui::theme::RowPosition;
 use crate::ui::widgets;
 
 pub(super) fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
-    if state.signatures.is_empty() && state.managed_accounts.is_empty() {
+    if state.managed_accounts.is_empty() {
         return section(
             "Signatures",
             vec![coming_soon_row("No accounts configured")],
         );
     }
 
-    let mut items: Vec<RowBuilder<'_>> = Vec::new();
-
-    for account in &state.managed_accounts {
-        let account_sigs: Vec<&SignatureEntry> = state
-            .signatures
-            .iter()
-            .filter(|s| s.account_id == account.id)
-            .collect();
-
-        let account_name = account
-            .account_name
-            .as_deref()
-            .or(account.display_name.as_deref())
-            .unwrap_or(&account.email);
-
-        let mut header_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
-        if let Some(ref hex) = account.account_color {
-            let color = crate::ui::theme::hex_to_color(hex);
-            header_row = header_row.push(widgets::color_dot::<SettingsMessage>(color));
-        }
-        header_row = header_row.push(
-            text(account_name)
-                .size(TEXT_SM)
-                .style(text::secondary)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..crate::font::text()
-                }),
-        );
-
-        items.push(static_row(
-            container(header_row)
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill),
-        ));
-
-        for sig in &account_sigs {
-            let global_idx = state
-                .signatures
-                .iter()
-                .position(|s| s.id == sig.id)
-                .unwrap_or(0);
-            items.push(signature_row(sig, global_idx));
-        }
-
-        let aid = account.id.clone();
-        items.push(Box::new(move |position| {
-            button(
-                container(
-                    row![
-                        icon::plus().size(ICON_MD).style(text::base),
-                        text("Add Signature")
-                            .size(TEXT_LG)
-                            .style(text::base)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..crate::font::text()
-                            }),
-                    ]
-                    .spacing(SPACE_XS)
-                    .align_y(Alignment::Center),
-                )
-                .center_x(Length::Fill)
-                .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::SignatureCreate(aid))
-            .padding(PAD_SETTINGS_ROW)
-            .style(move |t, s| theme::style_settings_row_button(t, s, position))
-            .width(Length::Fill)
-            .height(SETTINGS_ROW_HEIGHT)
-            .into()
-        }));
-    }
-
-    let sig_section = section("Signatures", items);
-
-    mouse_area(sig_section)
-        .on_move(SettingsMessage::SignatureDragMove)
-        .on_release(SettingsMessage::SignatureDragEnd)
-        .into()
+    section("Signatures", vec![signatures_section_body(state)])
 }
 
-fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> RowBuilder<'a> {
-    Box::new(move |position| {
-        let sig_id = sig.id.clone();
+/// Section body that merges the signature rows and the trailing
+/// "Add Signature" button into a single block with shared corners,
+/// mirroring the Accounts tab's `accounts_section_body`.
+fn signatures_section_body<'a>(state: &'a Settings) -> RowBuilder<'a> {
+    Box::new(move |outer_position| {
+        let n_sigs = state.signatures.len();
+        let internal_n = n_sigs + 1;
 
-        let mut label_parts =
-            column![text(&sig.name).size(TEXT_LG).style(text::base),].spacing(SPACE_XXXS);
+        let mut col = column![].width(Length::Fill);
 
-        let preview = sig.body_text.as_deref().unwrap_or(&sig.body_html);
-        let snippet: String = preview.chars().take(60).collect();
-        if !snippet.is_empty() {
-            label_parts = label_parts.push(
-                text(snippet)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-            );
+        for (i, sig) in state.signatures.iter().enumerate() {
+            if i > 0 {
+                col = col.push(
+                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
+                );
+            }
+            let internal_pos = position_for(i, internal_n);
+            let effective = compose_positions(outer_position, internal_pos);
+            col = col.push(signature_card(sig, &state.managed_accounts, effective));
         }
 
-        let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
-
-        content = content.push(
-            mouse_area(
-                container(icon::grip_vertical().size(ICON_MD).style(text::secondary))
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::SignatureDragGripPress(global_index))
-            .interaction(iced::mouse::Interaction::Grab),
-        );
-
-        content = content.push(
-            container(label_parts)
-                .align_y(Alignment::Center)
-                .width(Length::Fill),
-        );
-
-        if sig.is_default {
-            content = content.push(
-                container(text("Default").size(TEXT_XS).style(text::secondary))
-                    .padding(PAD_BADGE)
-                    .style(theme::ContainerClass::KeyBadge.style()),
-            );
-        }
-        if sig.is_reply_default {
-            content = content.push(
-                container(text("Reply default").size(TEXT_XS).style(text::secondary))
-                    .padding(PAD_BADGE)
-                    .style(theme::ContainerClass::KeyBadge.style()),
-            );
+        if n_sigs > 0 {
+            col = col
+                .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
-        let del_id = sig.id.clone();
-        content = content.push(
-            button(
-                container(icon::x().size(ICON_MD).style(text::secondary))
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::SignatureDelete(del_id))
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::BareIcon.style()),
-        );
+        let add_internal_pos = position_for(internal_n.saturating_sub(1), internal_n);
+        let add_effective = compose_positions(outer_position, add_internal_pos);
+        col = col.push(add_signature_button(add_effective));
 
-        button(
-            container(content)
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .height(SETTINGS_TOGGLE_ROW_HEIGHT)
-                .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::SignatureEdit(sig_id))
-        .padding(0)
-        .style(move |t, s| theme::style_settings_row_button(t, s, position))
-        .width(Length::Fill)
-        .into()
+        col.into()
     })
+}
+
+fn add_signature_button<'a>(position: RowPosition) -> Element<'a, SettingsMessage> {
+    button(
+        container(
+            row![
+                icon::plus().size(ICON_MD).style(text::base),
+                text("Add Signature")
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..crate::font::text()
+                    }),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::SignatureCreate)
+    .padding(PAD_SETTINGS_ROW)
+    .style(settings_row_style(position))
+    .width(Length::Fill)
+    .height(SETTINGS_ROW_HEIGHT)
+    .into()
+}
+
+fn signature_card<'a>(
+    sig: &'a SignatureEntry,
+    accounts: &'a [ManagedAccount],
+    position: RowPosition,
+) -> Element<'a, SettingsMessage> {
+    let mut left = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if let Some(account) = accounts.iter().find(|a| a.id == sig.account_id)
+        && let Some(ref hex) = account.account_color
+    {
+        let color = crate::ui::theme::hex_to_color(hex);
+        left = left.push(widgets::color_dot::<SettingsMessage>(color));
+    }
+
+    left = left.push(
+        text(&sig.name)
+            .size(TEXT_LG)
+            .style(text::base)
+            .width(Length::Fill),
+    );
+
+    let mut content = row![left].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if sig.is_default {
+        content = content.push(
+            container(text("New messages").size(TEXT_XS).style(text::secondary))
+                .padding(PAD_BADGE)
+                .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
+    if sig.is_reply_default {
+        content = content.push(
+            container(text("Replies").size(TEXT_XS).style(text::secondary))
+                .padding(PAD_BADGE)
+                .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
+
+    content = content.push(
+        container(
+            icon::chevron_right()
+                .size(ICON_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
+    );
+
+    let sig_id = sig.id.clone();
+    button(
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::SignatureEdit(sig_id))
+    .padding(0)
+    .style(settings_row_style(position))
+    .width(Length::Fill)
+    .into()
 }
 
 pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
@@ -196,46 +163,50 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(
-        text(title)
-            .size(TEXT_HEADING)
-            .style(text::base)
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..crate::font::text()
-            }),
+        column![
+            text(title)
+                .size(TEXT_HEADING)
+                .style(text::base)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..crate::font::text()
+                }),
+            text("Signature changes are not saved automatically. Use the Save button at the bottom.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_XXS),
     );
 
-    col = col.push(section(
-        "Name",
-        vec![static_row(
-            container(
-                undoable_text_input("Signature name", editor.name.text())
-                    .id("sig-name")
-                    .on_input(SettingsMessage::SignatureEditorNameChanged)
-                    .on_undo(SettingsMessage::UndoInput(InputField::SignatureName))
-                    .on_redo(SettingsMessage::RedoInput(InputField::SignatureName))
-                    .size(TEXT_LG)
-                    .padding(PAD_INPUT)
-                    .style(theme::TextInputClass::Settings.style())
-                    .width(Length::Fill),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill),
-        )],
-    ));
+    col = col.push(section_untitled(vec![
+        signature_account_row(
+            editor,
+            &state.managed_accounts,
+            state.open_select == Some(SelectField::SignatureAccount),
+        ),
+        input_row(
+            "sig-name",
+            "Name",
+            "Signature name",
+            editor.name.text(),
+            SettingsMessage::SignatureEditorNameChanged,
+            InputField::SignatureName,
+        ),
+    ]));
 
-    col = col.push(section(
+    col = col.push(section_with_subtitle(
         "Defaults",
+        "Each account has one default for new messages and one for replies. Setting these here clears them on the account's other signatures, if any.",
         vec![
             toggle_row(
-                "Default for new messages",
-                "Use this signature when composing new emails",
+                "New messages",
+                "",
                 editor.is_default,
                 SettingsMessage::SignatureEditorToggleDefault,
             ),
             toggle_row(
-                "Default for replies & forwards",
-                "Use this signature when replying or forwarding",
+                "Replies & forwards",
+                "",
                 editor.is_reply_default,
                 SettingsMessage::SignatureEditorToggleReplyDefault,
             ),
@@ -243,13 +214,9 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     ));
 
     col = col.push(section(
-        "Content",
+        "Signature",
         vec![static_row(
             container(column![
-                text("Signature body")
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-                Space::new().height(SPACE_XXS),
                 signature_formatting_toolbar(editor),
                 Space::new().height(SPACE_XXS),
                 container(
@@ -257,10 +224,10 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
                         .on_action(SettingsMessage::SignatureEditorAction)
                         .font(crate::font::text())
                         .height(Length::Fixed(200.0))
-                        .width(Length::Fill)
-                        .padding(PAD_INPUT),
+                        .width(Length::Fill),
                 )
-                .style(theme::ContainerClass::Surface.style())
+                .padding(PAD_CONTENT)
+                .style(theme::ContainerClass::EmailBody.style())
                 .width(Length::Fill),
             ])
             .padding(PAD_SETTINGS_ROW)
@@ -304,7 +271,7 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
-    let can_save = !editor.name.text().trim().is_empty();
+    let can_save = !editor.name.text().trim().is_empty() && !editor.account_id.is_empty();
     let mut save_btn = button(container(text("Save").size(TEXT_LG)).center_x(Length::Fill))
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Primary.style())
@@ -317,6 +284,56 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     col = col.push(btn_row);
 
     col.into()
+}
+
+fn signature_account_row<'a>(
+    editor: &'a SignatureEditorState,
+    accounts: &'a [ManagedAccount],
+    open: bool,
+) -> RowBuilder<'a> {
+    let enabled = editor.signature_id.is_none();
+    let selected = if editor.account_id.is_empty() {
+        None
+    } else {
+        Some(editor.account_id.as_str())
+    };
+
+    let options: Vec<widgets::SelectOption<'a>> = accounts
+        .iter()
+        .map(|account| {
+            let label = account
+                .account_name
+                .as_deref()
+                .or(account.display_name.as_deref())
+                .unwrap_or(&account.email);
+            let icon = account
+                .account_color
+                .as_deref()
+                .map(|hex| widgets::SelectIcon::ColorDot(crate::ui::theme::hex_to_color(hex)));
+            widgets::SelectOption {
+                value: account.id.clone(),
+                label,
+                icon,
+            }
+        })
+        .collect();
+
+    let dropdown = widgets::select_with_icons(
+        options,
+        selected,
+        open,
+        enabled,
+        "Choose account",
+        SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
+        SettingsMessage::SignatureEditorAccountChanged,
+    );
+
+    setting_row_with_description(
+        "Account",
+        Some("When supported, signatures are stored with your cloud provider, and each signature is exclusive to its selected account."),
+        dropdown,
+        SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
+    )
 }
 
 fn signature_formatting_toolbar<'a>(

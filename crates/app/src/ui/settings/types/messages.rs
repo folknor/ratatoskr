@@ -30,9 +30,7 @@ pub enum SettingsMessage {
     CheckForUpdates,
     OpenGithub,
     // Composing
-    ToggleSendAndArchive(bool),
     UndoDelayChanged(String),
-    DefaultReplyChanged(String),
     MarkAsReadChanged(String),
     // Notifications
     ToggleNotifications(bool),
@@ -108,19 +106,17 @@ pub enum SettingsMessage {
     DeleteAccountCancelled,
     // Signatures
     SignatureEdit(String),            // signature_id - open editor sheet
-    SignatureCreate(String),          // account_id - open editor for new sig
+    SignatureCreate,                  // open editor for a new signature (no account preselected)
     SignatureDelete(String),          // signature_id - request delete (shows confirm)
     SignatureDeleteConfirmed(String), // signature_id - confirmed delete
     SignatureDeleteCancelled,         // cancel pending delete
+    SignatureEditorAccountChanged(String), // account_id selected in the editor's account picker
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),
     SignatureEditorAction(rte::Action),
     SignatureEditorToggleDefault(bool),
     SignatureEditorToggleReplyDefault(bool),
     SignatureEditorSave,
-    SignatureDragGripPress(usize),
-    SignatureDragMove(Point),
-    SignatureDragEnd,
     // Filter inputs (People tab + group editor)
     FilterFocused(FilterId),
     FilterCleared(FilterId),
@@ -225,12 +221,12 @@ pub enum SettingsEvent {
 /// One level deep - no stacking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsSheetPage {
-    CreateFilter,
     AccountEditor,
     EditSignature {
         /// None for new signature, Some for editing existing.
         signature_id: Option<String>,
-        account_id: String,
+        /// None until the user picks an account in the editor (for new sigs).
+        account_id: Option<String>,
     },
     EditContact {
         /// None for new contact, Some for editing existing.
@@ -250,8 +246,8 @@ pub enum SelectField {
     Density,
     FontSize,
     UndoDelay,
-    DefaultReply,
     MarkAsRead,
+    SignatureAccount,
     AiProvider,
     AiModel,
     DateDisplay,

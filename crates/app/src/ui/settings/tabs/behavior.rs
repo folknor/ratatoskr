@@ -6,7 +6,6 @@ use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
 use crate::ui::undoable_text_input::undoable_text_input;
-use crate::ui::widgets;
 
 pub(super) fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
@@ -14,63 +13,7 @@ pub(super) fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .width(Length::Fill)
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
-    col = col.push(section(
-        "Sending",
-        vec![
-            setting_row(
-                "Undo Send Delay",
-                widgets::select(
-                    &["None", "5 seconds", "10 seconds", "30 seconds"],
-                    &state.undo_delay,
-                    state.open_select == Some(SelectField::UndoDelay),
-                    SettingsMessage::ToggleSelect(SelectField::UndoDelay),
-                    SettingsMessage::UndoDelayChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::UndoDelay),
-            ),
-            toggle_row(
-                "Send & Archive",
-                "Archive a thread immediately after sending a reply",
-                state.send_and_archive,
-                SettingsMessage::ToggleSendAndArchive,
-            ),
-        ],
-    ));
-
-    col = col.push(section(
-        "Behavior",
-        vec![
-            setting_row(
-                "Default Reply Action",
-                widgets::select(
-                    &["Reply", "Reply All"],
-                    &state.default_reply_mode,
-                    state.open_select == Some(SelectField::DefaultReply),
-                    SettingsMessage::ToggleSelect(SelectField::DefaultReply),
-                    SettingsMessage::DefaultReplyChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::DefaultReply),
-            ),
-            setting_row(
-                "Mark as Read",
-                widgets::select(
-                    &["Instantly", "After 2 Seconds", "Manually"],
-                    &state.mark_as_read,
-                    state.open_select == Some(SelectField::MarkAsRead),
-                    SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
-                    SettingsMessage::MarkAsReadChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
-            ),
-        ],
-    ));
-
     col = col.push(super::signatures::signature_list_section(state));
-
-    col = col.push(section(
-        "Templates",
-        vec![coming_soon_row("Template management")],
-    ));
 
     col.into()
 }

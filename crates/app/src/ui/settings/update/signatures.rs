@@ -9,7 +9,7 @@ impl Settings {
             return (Task::none(), None);
         };
         let name = editor.name.text().trim().to_string();
-        if name.is_empty() {
+        if name.is_empty() || editor.account_id.is_empty() {
             return (Task::none(), None);
         }
         let request = SignatureSaveRequest {

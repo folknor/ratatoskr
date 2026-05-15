@@ -63,7 +63,6 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
 
     let main_content: Element<'_, SettingsMessage> = if show_sheet {
         let sheet_content = match state.active_sheet {
-            Some(SettingsSheetPage::CreateFilter) => mail_rules::create_filter_sheet(),
             Some(SettingsSheetPage::AccountEditor) => accounts::account_editor_sheet(state),
             Some(SettingsSheetPage::EditSignature { .. }) => {
                 signatures::signature_editor_sheet(state)

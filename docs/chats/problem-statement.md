@@ -222,9 +222,8 @@ should reflect the chat context:
   localized string). If the user has configured an LLM, it generates the
   subject from the message body instead.
 - Normal signature insertion - the recipient sees a standard email, so the
-  user's configured signature is appended as usual (see
-  `docs/signatures/implementation-spec.md`). The signature is hidden in
-  the sender's own chat view via the same stripping logic.
+  user's configured signature is appended as usual. The signature is hidden
+  in the sender's own chat view via the same stripping logic.
 - Enter to send, Shift+Enter for newline by default. A setting inverts
   this (Shift+Enter to send, Enter for newline) for users who prefer it.
   The input box expands upward as the user adds lines (overlaying the
