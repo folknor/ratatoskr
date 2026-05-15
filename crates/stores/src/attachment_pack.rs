@@ -1,10 +1,5 @@
 //! `PackStore`: content-addressed pack-file blob store.
 //!
-//! Phase 2 of the attachments roadmap (see
-//! `docs/attachments/problem-statement.md` and
-//! `docs/attachments/implementation-roadmap.md`). Library only - this
-//! module has no consumers yet; Phase 3 wires it into the Service.
-//!
 //! ## Layout
 //!
 //! Each pack file is an append-only segment under

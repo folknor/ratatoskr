@@ -179,7 +179,7 @@ fn process_attrs(e: &quick_xml::events::BytesStart<'_>) -> quick_xml::events::By
 
         // Unescape XML entities in the value for inspection/optimization.
         let value = attr
-            .unescape_value()
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .unwrap_or(std::borrow::Cow::Borrowed(""));
 
         // Try to optimize embedded PNG images.

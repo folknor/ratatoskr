@@ -1,26 +1,15 @@
 -- description: account.delete preserves shared blobs and tombstones unshared blobs (Phase 4 cross-account coverage)
 -- expected: pass
 -- fixture: multi-account-attach.toml
--- protocol: imap
+-- protocol: jmap
 -- ceiling: 90s
 
 -- AccountDeletionStep::AttachmentCache (Phase 4) tombstones a blob
 -- only when the deleted account is its sole referencer; blobs still
--- referenced by surviving accounts must stay live. Before this script
--- the behaviour was verified by code review only because the harness
--- lacked multi-account attachment fixture machinery. With
--- multi-account-attach.toml two accounts (alice, bob) share one
--- attachment via byte-identical data_path, and alice also has an
+-- referenced by surviving accounts must stay live.
+-- multi-account-attach.toml seeds two accounts (alice, bob) sharing
+-- one attachment via byte-identical data_path; alice also has an
 -- unshared attachment. After deleting alice we assert:
---
--- IMAP rather than JMAP because saehrimnir's JMAP session response
--- pins `primaryAccounts` to the fixture's `primary = true` account
--- regardless of bearer, so two ratatoskr accounts both end up
--- syncing the same JMAP scope. IMAP LOGIN routes correctly per
--- credential (see imap-login-multi-account.lua); the
--- AccountDeletionStep::AttachmentCache behavior under test is
--- protocol-agnostic so the choice of provider does not weaken the
--- assertion.
 --
 --   shared content_hash:    present, tombstoned_at IS NULL    (bob still references)
 --   unshared content_hash:  present, tombstoned_at NOT NULL   (no remaining referencer)
@@ -77,7 +66,33 @@ end
 
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
+local token_url = harness.join_url(admin_endpoint, "oauth/token")
 harness.clear_mock_requests(admin_endpoint)
+
+-- Two ratatoskr-side JMAP accounts both syncing against saehrimnir
+-- requires per-bearer routing through `oauth::account_from_bearer` -
+-- basic-auth pins every connection to the fixture's `primary = true`
+-- account regardless of credentials.
+local function mint_token(account_id, label)
+    local response = harness.http_json({
+        method = "POST",
+        url = token_url,
+        body = {
+            grant_type = "authorization_code",
+            account_id = account_id,
+            code = "harness-jmap-shared-blob-" .. account_id,
+            client_id = "ratatoskr-jmap-shared-blob-harness",
+            redirect_uri = "http://127.0.0.1/oauth-callback",
+        },
+    })
+    harness.assert(response.access_token ~= nil,
+        label .. " /oauth/token did not return access_token")
+    return response.access_token
+end
+
+local alice_token = mint_token("account-alice", "alice")
+local bob_token = mint_token("account-bob", "bob")
+harness.assert(alice_token ~= bob_token, "token store returned duplicate strings")
 
 local dir = harness.data_dir("sync_jmap_account_delete_shared_blob")
 local client, err = harness.spawn(dir)
@@ -89,19 +104,35 @@ harness.assert(ready.ready, "boot.ready returned ready=false")
 
 local queue = client:notifications()
 
+local future_expiry = 2000000000
+
 local alice, alice_err = client:request("TestSeedAccount", {
     email = "alice@example.com",
-    display_name = "Alice JMAP",
-    account_name = "Alice JMAP",
-    provider = "imap",
+    display_name = "Alice",
+    account_name = "Alice",
+    provider = "jmap",
+    auth_method = "oauth2",
+    access_token = alice_token,
+    refresh_token = "alice-refresh-unused",
+    token_expires_at = future_expiry,
+    oauth_provider = "google",
+    oauth_client_id = "ratatoskr-jmap-shared-blob-harness",
+    oauth_token_url = token_url,
 })
 harness.assert(alice_err == nil, "alice TestSeedAccount failed")
 
 local bob, bob_err = client:request("TestSeedAccount", {
     email = "bob@example.com",
-    display_name = "Bob JMAP",
-    account_name = "Bob JMAP",
-    provider = "imap",
+    display_name = "Bob",
+    account_name = "Bob",
+    provider = "jmap",
+    auth_method = "oauth2",
+    access_token = bob_token,
+    refresh_token = "bob-refresh-unused",
+    token_expires_at = future_expiry,
+    oauth_provider = "google",
+    oauth_client_id = "ratatoskr-jmap-shared-blob-harness",
+    oauth_token_url = token_url,
 })
 harness.assert(bob_err == nil, "bob TestSeedAccount failed")
 

@@ -783,7 +783,7 @@ dependencies = [
  "hotpath 0.16.0",
  "jmap",
  "log",
- "quick-xml 0.39.4",
+ "quick-xml 0.40.0",
  "reqwest",
  "rtsk",
  "rusqlite",
@@ -2476,7 +2476,7 @@ dependencies = [
  "label-colors",
  "log",
  "mail-parser",
- "quick-xml 0.39.4",
+ "quick-xml 0.40.0",
  "reqwest",
  "rusqlite",
  "search",
@@ -3318,7 +3318,7 @@ dependencies = [
  "calcard",
  "encoding_rs",
  "hotpath 0.16.0",
- "quick-xml 0.39.4",
+ "quick-xml 0.40.0",
  "zip",
 ]
 
@@ -3627,12 +3627,13 @@ dependencies = [
 
 [[package]]
 name = "kurbo"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7564e90fe3c0d5771e1f0bc95322b21baaeaa0d9213fa6a0b61c99f8b17b3bfb"
+checksum = "4b60dfc32f652b926df6192e55525b16d186c69d47876c3ead4da5cc9f8450e2"
 dependencies = [
  "arrayvec",
  "euclid 0.22.14",
+ "polycool",
  "smallvec",
 ]
 
@@ -3664,9 +3665,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "lettre"
-version = "0.11.21"
+version = "0.11.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dabda5859ee7c06b995b9d1165aa52c39110e079ef609db97178d86aeb051fa7"
+checksum = "0da65617f6cb926332d039cb578aad56178da86e128db6a1b09f4c94fa5b3349"
 dependencies = [
  "async-trait",
  "base64",
@@ -5246,18 +5247,18 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "pin-project"
-version = "1.1.12"
+version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf0d9e68100b3a7989b4901972f265cd542e560a3a8a724e1e20322f4d06ce9"
+checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.12"
+version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a990e22f43e84855daf260dded30524ef4a9021cc7541c26540500a50b624389"
+checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5333,6 +5334,15 @@ name = "pollster"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
+name = "polycool"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50596ddc09eb5ad5f75cacd40209568e66df71baf86e1499a0e99c4cff12a5a6"
+dependencies = [
+ "arrayvec",
+]
 
 [[package]]
 name = "polyval"
@@ -5582,6 +5592,15 @@ name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b7315c86b26aaef0321fba33c9dcc160da659c6a9d278f0f6a5656d6561c03b"
 dependencies = [
  "memchr",
 ]
@@ -6067,7 +6086,7 @@ dependencies = [
  "lol_html",
  "mail-parser",
  "native-tls",
- "quick-xml 0.39.4",
+ "quick-xml 0.40.0",
  "regex",
  "reqwest",
  "resvg 0.47.0",
@@ -6464,7 +6483,7 @@ dependencies = [
  "pdf-extract",
  "process-lifetime",
  "provider-sync",
- "quick-xml 0.39.4",
+ "quick-xml 0.40.0",
  "rtsk",
  "rusqlite",
  "search",
@@ -6847,7 +6866,7 @@ dependencies = [
  "lopdf 0.40.0",
  "mozjpeg-rs",
  "oxipng",
- "quick-xml 0.39.4",
+ "quick-xml 0.40.0",
  "thiserror 2.0.18",
  "zip",
 ]
@@ -6997,7 +7016,7 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "695b5790b3131dafa99b3bbfd25a216edb3d216dad9ca208d4657bfb8f2abc3d"
 dependencies = [
- "kurbo 0.13.0",
+ "kurbo 0.13.1",
  "siphasher",
 ]
 
@@ -7959,7 +7978,7 @@ dependencies = [
  "data-url",
  "flate2",
  "imagesize 0.14.0",
- "kurbo 0.13.0",
+ "kurbo 0.13.1",
  "log",
  "pico-args",
  "roxmltree 0.21.1",
@@ -8856,9 +8875,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ee1708bef14716a11bae175f579062d4554d95be2c6829f518df847b7b3fdd0"
+checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
 dependencies = [
  "memchr",
 ]
