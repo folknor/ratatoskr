@@ -464,10 +464,19 @@ pub async fn fetch_changed_flags(
                 let flags: Vec<_> = fetch.flags().collect();
                 let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
                 let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
+                let is_replied = flags.iter().any(|f| matches!(f, Flag::Answered));
+                let is_forwarded = flags.iter().any(|f| match f {
+                    Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
+                    _ => false,
+                });
                 let keywords: Vec<String> = flags
                     .iter()
                     .filter_map(|f| match f {
-                        Flag::Custom(cow) => Some(cow.to_string()),
+                        Flag::Custom(cow)
+                            if common::label_flags::is_user_visible_keyword(cow) =>
+                        {
+                            Some(cow.to_string())
+                        }
                         _ => None,
                     })
                     .collect();
@@ -475,6 +484,8 @@ pub async fn fetch_changed_flags(
                     uid,
                     is_read,
                     is_starred,
+                    is_replied,
+                    is_forwarded,
                     keywords,
                 });
             }
@@ -528,10 +539,19 @@ pub async fn fetch_all_flags(
                 let flag_list: Vec<_> = fetch.flags().collect();
                 let is_read = flag_list.iter().any(|f| matches!(f, Flag::Seen));
                 let is_starred = flag_list.iter().any(|f| matches!(f, Flag::Flagged));
+                let is_replied = flag_list.iter().any(|f| matches!(f, Flag::Answered));
+                let is_forwarded = flag_list.iter().any(|f| match f {
+                    Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
+                    _ => false,
+                });
                 let keywords: Vec<String> = flag_list
                     .iter()
                     .filter_map(|f| match f {
-                        Flag::Custom(cow) => Some(cow.to_string()),
+                        Flag::Custom(cow)
+                            if common::label_flags::is_user_visible_keyword(cow) =>
+                        {
+                            Some(cow.to_string())
+                        }
                         _ => None,
                     })
                     .collect();
@@ -539,6 +559,8 @@ pub async fn fetch_all_flags(
                     uid,
                     is_read,
                     is_starred,
+                    is_replied,
+                    is_forwarded,
                     keywords,
                 });
             }

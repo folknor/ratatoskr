@@ -101,6 +101,8 @@ pub struct DbMessage {
     pub date: i64,
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
     pub body_html: Option<String>,
     pub body_text: Option<String>,
     pub body_cached: Option<bool>,

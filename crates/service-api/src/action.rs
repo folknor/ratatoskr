@@ -71,9 +71,9 @@ pub struct OperationId(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WireFolderId(pub String);
 
-/// Wire-side tag/label identifier. Mirrors `common::typed_ids::TagId`.
+/// Wire-side label identifier. Mirrors `common::typed_ids::LabelId`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct WireTagId(pub String);
+pub struct WireLabelId(pub String);
 
 // ---------------------------------------------------------------------------
 // MailOperation wire mirror
@@ -99,8 +99,8 @@ pub enum WireMailOperation {
         dest: WireFolderId,
         source: Option<WireFolderId>,
     },
-    AddLabel { label_id: WireTagId },
-    RemoveLabel { label_id: WireTagId },
+    AddLabel { label_id: WireLabelId },
+    RemoveLabel { label_id: WireLabelId },
     Snooze { until: i64 },
     Unsnooze,
 }
@@ -514,10 +514,10 @@ mod tests {
                 source: None,
             },
             WireMailOperation::AddLabel {
-                label_id: WireTagId("work".into()),
+                label_id: WireLabelId("work".into()),
             },
             WireMailOperation::RemoveLabel {
-                label_id: WireTagId("personal".into()),
+                label_id: WireLabelId("personal".into()),
             },
             WireMailOperation::Snooze { until: 1_700_000_000 },
         ];

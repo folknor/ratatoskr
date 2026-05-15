@@ -20,8 +20,8 @@ pub struct CrossAccountLabelRow {
     pub label_kind: String,
 }
 
-/// User-visible labels for an account, excluding system labels.
-pub fn get_user_labels_for_account_sync(
+/// User-visible folders for an account, excluding system folders.
+pub fn get_user_folders_for_account_sync(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<LabelRow>, String> {
@@ -29,6 +29,33 @@ pub fn get_user_labels_for_account_sync(
         .prepare(
             "SELECT id, name FROM labels
              WHERE account_id = ?1 AND type != 'system' AND visible = 1
+               AND label_kind = 'container'
+             ORDER BY sort_order ASC, name ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![account_id], |row| {
+        Ok(LabelRow {
+            id: row.get("id")?,
+            name: row.get("name")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+/// User-visible labels for an account, excluding folders.
+pub fn get_user_labels_for_account_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Vec<LabelRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name FROM labels
+             WHERE account_id = ?1 AND visible = 1
+               AND label_kind = 'tag'
+               AND id NOT IN ('UNREAD', 'STARRED')
              ORDER BY sort_order ASC, name ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -56,7 +83,8 @@ pub fn get_thread_labels_sync(
              INNER JOIN thread_labels tl
                ON tl.account_id = l.account_id AND tl.label_id = l.id
              WHERE tl.account_id = ?1 AND tl.thread_id = ?2
-               AND l.type != 'system' AND l.visible = 1
+               AND l.label_kind = 'tag' AND l.visible = 1
+               AND l.id NOT IN ('UNREAD', 'STARRED')
              ORDER BY l.sort_order ASC, l.name ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -86,6 +114,7 @@ pub fn get_all_labels_cross_account_sync(
              FROM labels l
              INNER JOIN accounts a ON a.id = l.account_id
              WHERE l.type != 'system' AND l.visible = 1 AND a.is_active = 1
+               AND l.id NOT IN ('UNREAD', 'STARRED')
              ORDER BY a.email ASC, l.sort_order ASC, l.name ASC",
         )
         .map_err(|e| e.to_string())?;

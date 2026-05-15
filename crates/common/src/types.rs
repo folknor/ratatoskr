@@ -42,7 +42,7 @@ pub struct ProviderCtx<'a> {
 /// Narrower context for `ProviderOps` action methods (Phase 2 task 7).
 ///
 /// Action methods (`archive`, `trash`, `mark_read`, `star`, `spam`,
-/// `move_to_folder`, `add_tag`, `remove_tag`, `permanent_delete`) issue
+/// `move_to_folder`, `add_label`, `remove_label`, `permanent_delete`) issue
 /// HTTP requests to the provider; the local DB write happens UI-side
 /// (now Service-side after task 9) BEFORE the provider call. They
 /// don't need `body_store` / `inline_images` / `search` - those exist

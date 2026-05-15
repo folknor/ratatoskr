@@ -1,4 +1,4 @@
-use crate::{FolderId, TagId};
+use crate::{FolderId, LabelId};
 
 /// What the sidebar is currently showing / the user has selected.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -15,8 +15,8 @@ pub enum SidebarSelection {
     SmartFolder { id: String },
     /// A provider-specific container folder (Exchange folder, IMAP mailbox, etc.).
     ProviderFolder(FolderId),
-    /// A tag-type label (Gmail user label, Exchange category, IMAP keyword, etc.).
-    Tag(TagId),
+    /// A user-visible label (Gmail user label, Exchange category, IMAP keyword, etc.).
+    Label(LabelId),
 }
 
 /// System folders that exist on every email account.
@@ -87,18 +87,18 @@ impl FeatureView {
 }
 
 impl SidebarSelection {
-    /// The folder/label ID for generic thread-loading DB queries.
+    /// The folder or label ID for generic thread-loading DB queries.
     ///
     /// Returns `None` for Inbox (no filter convention), bundles, and feature
     /// views, which have dedicated loaders.
-    /// Returns `Some(id)` for normal folder/tag selections.
+    /// Returns `Some(id)` for normal folder or label selections.
     pub fn folder_id_for_thread_query(&self) -> Option<String> {
         match self {
             Self::Inbox | Self::Bundle(_) | Self::FeatureView(_) => None,
             Self::Folder(f) => Some(f.as_folder_id_str().to_string()),
             Self::SmartFolder { id } => Some(id.clone()),
             Self::ProviderFolder(fid) => Some(fid.0.clone()),
-            Self::Tag(tid) => Some(tid.0.clone()),
+            Self::Label(lid) => Some(lid.0.clone()),
         }
     }
 
@@ -111,19 +111,19 @@ impl SidebarSelection {
             Self::Inbox => Some("INBOX".to_string()),
             Self::Folder(f) => Some(f.as_folder_id_str().to_string()),
             Self::ProviderFolder(fid) => Some(fid.0.clone()),
-            Self::Tag(tid) => Some(tid.0.clone()),
+            Self::Label(lid) => Some(lid.0.clone()),
             Self::SmartFolder { .. } | Self::Bundle(_) | Self::FeatureView(_) => None,
         }
     }
 
     /// Source folder for trash/move undo. Only meaningful for folder-type
-    /// selections - returns `None` for smart folders, tags, bundles, feature views.
+    /// selections - returns `None` for smart folders, labels, bundles, feature views.
     pub fn source_folder_for_undo(&self) -> Option<FolderId> {
         match self {
             Self::Inbox => Some(FolderId::from("INBOX")),
             Self::Folder(f) => Some(FolderId::from(f.as_folder_id_str())),
             Self::ProviderFolder(fid) => Some(fid.clone()),
-            Self::SmartFolder { .. } | Self::Bundle(_) | Self::FeatureView(_) | Self::Tag(_) => {
+            Self::SmartFolder { .. } | Self::Bundle(_) | Self::FeatureView(_) | Self::Label(_) => {
                 None
             }
         }

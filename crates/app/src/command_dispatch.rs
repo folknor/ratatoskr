@@ -53,8 +53,8 @@ pub fn selection_to_view_type(sel: &SidebarSelection) -> (ViewType, Option<Strin
             }
         }
         SidebarSelection::SmartFolder { id } => (ViewType::SmartFolder, Some(id.clone())),
-        SidebarSelection::ProviderFolder(fid) => (ViewType::Label, Some(fid.0.clone())),
-        SidebarSelection::Tag(tid) => (ViewType::Label, Some(tid.0.clone())),
+        SidebarSelection::ProviderFolder(fid) => (ViewType::SidebarItem, Some(fid.0.clone())),
+        SidebarSelection::Label(lid) => (ViewType::SidebarItem, Some(lid.0.clone())),
     }
 }
 
@@ -102,7 +102,7 @@ pub enum KeyEventMessage {
 pub fn build_context(app: &ReadyApp) -> CommandContext {
     let selected_thread_ids = selected_thread_ids(app);
     let active_message_id = None; // Reading pane doesn't expose this yet
-    let (current_view, current_label_id) = current_view_and_label(app);
+    let (current_view, current_item_id) = current_view_and_item(app);
     let (active_account_id, provider_kind) = active_account_info(app);
     let thread_state = selected_thread_state(app);
 
@@ -119,7 +119,7 @@ pub fn build_context(app: &ReadyApp) -> CommandContext {
         selected_thread_ids,
         active_message_id,
         current_view,
-        current_label_id,
+        current_item_id,
         active_account_id,
         provider_kind,
         thread_is_read: thread_state.is_read,
@@ -188,7 +188,7 @@ fn selected_thread_ids(app: &ReadyApp) -> Vec<String> {
 ///
 /// Checks non-sidebar state first (settings, calendar, search, chat),
 /// then derives from `sidebar.selection`.
-fn current_view_and_label(app: &ReadyApp) -> (ViewType, Option<String>) {
+fn current_view_and_item(app: &ReadyApp) -> (ViewType, Option<String>) {
     if app.show_settings {
         return (ViewType::Settings, None);
     }
@@ -556,9 +556,9 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
             selection: SidebarSelection::ProviderFolder(folder_id),
             account_id: Some(account_id),
         })),
-        (CommandId::NavigateToLabel, CommandArgs::NavigateToTag { tag_id, account_id }) => {
+        (CommandId::NavigateToLabel, CommandArgs::NavigateToLabel { label_id, account_id }) => {
             Some(Message::NavigateTo(NavigationTarget::Sidebar {
-                selection: SidebarSelection::Tag(tag_id),
+                selection: SidebarSelection::Label(label_id),
                 account_id: Some(account_id),
             }))
         }

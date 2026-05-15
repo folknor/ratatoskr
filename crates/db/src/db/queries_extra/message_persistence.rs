@@ -16,6 +16,8 @@ pub struct MessageInsertRow {
     pub date: i64,
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
     pub raw_size: Option<i64>,
     pub internal_date: Option<i64>,
     pub list_unsubscribe: Option<String>,
@@ -54,14 +56,14 @@ pub fn insert_messages(tx: &Transaction, rows: &[MessageInsertRow]) -> Result<()
             "INSERT OR REPLACE INTO messages \
              (id, account_id, thread_id, from_address, from_name, to_addresses, \
               cc_addresses, bcc_addresses, reply_to, subject, snippet, date, \
-              is_read, is_starred, raw_size, internal_date, \
+              is_read, is_starred, is_replied, is_forwarded, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, body_cached, \
               mdn_requested, is_reaction, imap_uid, imap_folder, \
               has_meeting_invite, meeting_invite_method, meeting_invite_uid) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
                      ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, \
-                     ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                     ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
             params![
                 row.id,
                 row.account_id,
@@ -77,6 +79,8 @@ pub fn insert_messages(tx: &Transaction, rows: &[MessageInsertRow]) -> Result<()
                 row.date,
                 row.is_read,
                 row.is_starred,
+                row.is_replied,
+                row.is_forwarded,
                 row.raw_size,
                 row.internal_date,
                 row.list_unsubscribe,

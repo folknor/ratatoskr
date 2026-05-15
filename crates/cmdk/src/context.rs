@@ -31,7 +31,7 @@ pub enum ViewType {
     Trash,
     Spam,
     AllMail,
-    Label,
+    SidebarItem,
     SmartFolder,
     Bundle,
     Tasks,
@@ -52,7 +52,7 @@ pub struct CommandContext {
     pub active_message_id: Option<String>,
 
     pub current_view: ViewType,
-    pub current_label_id: Option<String>,
+    pub current_item_id: Option<String>,
 
     pub active_account_id: Option<String>,
     pub provider_kind: Option<ProviderKind>,
@@ -134,7 +134,7 @@ mod tests {
             selected_thread_ids: vec![],
             active_message_id: None,
             current_view: ViewType::Inbox,
-            current_label_id: None,
+            current_item_id: None,
             active_account_id: None,
             provider_kind: None,
             thread_is_read: None,

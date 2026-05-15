@@ -19,7 +19,7 @@ Files: `crates/cmdk/src/{id,context,descriptor}.rs`, `crates/cmdk/src/registry/{
 
 - Input model: `EnumOption`, `ParamDef`, `InputSchema`, `InputMode`, `OptionItem`, `OptionMatch`, `search_options()`.
 - `CommandInputResolver` trait with sequence-aware `prior_selections`.
-- `CommandArgs` enum (7 variants): `MoveToFolder`, `AddLabel`, `RemoveLabel`, `Snooze`, `NavigateToFolder`, `NavigateToTag`, `SmartFolderSave`. The original spec's single `NavigateToLabel` split into `NavigateToFolder` (typed `FolderId`) + `NavigateToTag` (typed `TagId`) to match the typed-IDs convention; `CommandId::NavigateToLabel` dispatches to whichever the resolver produces.
+- `CommandArgs` enum (7 variants): `MoveToFolder`, `AddLabel`, `RemoveLabel`, `Snooze`, `NavigateToFolder`, `NavigateToLabel`, `SmartFolderSave`. Folder navigation carries `FolderId`; label navigation carries `LabelId`; `CommandId::NavigateToLabel` dispatches to whichever the resolver produces.
 - Concrete `AppInputResolver` in `crates/app/src/command_resolver.rs` queries DB for folders, labels, and cross-account options.
 
 Files: `crates/cmdk/src/{input,resolver,args}.rs`, `crates/app/src/command_resolver.rs`, `crates/app/src/db/palette.rs`.

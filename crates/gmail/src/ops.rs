@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use common::encoding::encode_base64url_nopad;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, TagId};
+use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderProfile, ProviderTestResult,
@@ -121,26 +121,26 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn add_tag(
+    async fn add_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
-        let add = vec![tag_id.as_str().to_string()];
+        let add = vec![label_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &add, &[], ctx.db)
             .await?;
         Ok(())
     }
 
-    async fn remove_tag(
+    async fn remove_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
-        let remove = vec![tag_id.as_str().to_string()];
+        let remove = vec![label_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
             .await?;

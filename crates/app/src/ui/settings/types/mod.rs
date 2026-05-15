@@ -130,7 +130,7 @@ pub(super) const DRAG_START_THRESHOLD: f32 = 4.0;
 /// An item in an editable list.
 #[derive(Debug, Clone)]
 pub struct EditableItem {
-    pub label: String,
+    pub display_text: String,
     pub enabled: Option<bool>,
 }
 
@@ -417,29 +417,29 @@ impl Default for Settings {
             drag_state: None,
             demo_labels: vec![
                 EditableItem {
-                    label: "Important".into(),
+                    display_text: "Important".into(),
                     enabled: Some(true),
                 },
                 EditableItem {
-                    label: "Personal".into(),
+                    display_text: "Personal".into(),
                     enabled: Some(true),
                 },
                 EditableItem {
-                    label: "Receipts".into(),
+                    display_text: "Receipts".into(),
                     enabled: Some(false),
                 },
                 EditableItem {
-                    label: "Travel".into(),
+                    display_text: "Travel".into(),
                     enabled: None,
                 },
             ],
             demo_filters: vec![
                 EditableItem {
-                    label: "Auto-archive promotions".into(),
+                    display_text: "Auto-archive promotions".into(),
                     enabled: Some(true),
                 },
                 EditableItem {
-                    label: "Star from VIPs".into(),
+                    display_text: "Star from VIPs".into(),
                     enabled: Some(true),
                 },
             ],

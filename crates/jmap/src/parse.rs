@@ -103,11 +103,13 @@ pub fn parse_jmap_email(
     let keywords = email.keywords();
     let is_read = keywords.contains(&"$seen");
     let is_starred = keywords.contains(&"$flagged");
+    let is_replied = keywords.contains(&"$answered");
+    let is_forwarded = keywords.contains(&"$forwarded");
 
-    // Non-system keywords are user-defined categories (system keywords start with '$')
+    // Non-system keywords are user-defined labels.
     let keyword_categories: Vec<String> = keywords
         .iter()
-        .filter(|kw| !kw.starts_with('$'))
+        .filter(|kw| common::label_flags::is_user_visible_keyword(kw))
         .map(|kw| (*kw).to_string())
         .collect();
 
@@ -177,6 +179,8 @@ pub fn parse_jmap_email(
             date,
             is_read,
             is_starred,
+            is_replied,
+            is_forwarded,
             body_html,
             body_text,
             raw_size,

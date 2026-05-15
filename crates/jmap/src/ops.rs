@@ -9,7 +9,7 @@ use bifrost_jmap::mailbox::Role;
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, TagId};
+use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderProfile, ProviderTestResult,
@@ -19,7 +19,7 @@ use super::client::JmapClient;
 use super::helpers::{
     get_first_identity_id, get_mailbox_list, query_thread_email_ids, resolve_mailbox_id,
 };
-use super::mailbox_mapper::{find_mailbox_id_by_role, map_mailbox_to_label};
+use super::mailbox_mapper::{find_mailbox_id_by_role, map_mailbox_to_folder};
 
 /// JMAP implementation of the provider operations trait.
 pub struct JmapOps {
@@ -283,16 +283,16 @@ impl ProviderOps for JmapOps {
         Ok(())
     }
 
-    async fn add_tag(
+    async fn add_label(
         &self,
         _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
 
         // Keywords use kw: prefix - set the keyword flag on all thread messages
-        if let Some(keyword) = tag_id.as_str().strip_prefix("kw:") {
+        if let Some(keyword) = label_id.as_str().strip_prefix("kw:") {
             let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
             let client = self.client.inner();
             let mut request = client.build();
@@ -314,8 +314,8 @@ impl ProviderOps for JmapOps {
             return Ok(());
         }
 
-        // Non-keyword tags are mailbox operations
-        let mailbox_id = resolve_mailbox_id(&self.client, tag_id.as_str()).await?;
+        // Non-keyword labels are mailbox operations.
+        let mailbox_id = resolve_mailbox_id(&self.client, label_id.as_str()).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -326,27 +326,27 @@ impl ProviderOps for JmapOps {
         }
         let handle = request
             .call(email_set)
-            .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
+            .map_err(|e| ProviderError::Server(format!("add label: {e}")))?;
         let mut response = request
             .send()
             .await
-            .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
+            .map_err(|e| ProviderError::Server(format!("add label: {e}")))?;
         response
             .get(&handle)
-            .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
+            .map_err(|e| ProviderError::Server(format!("add label: {e}")))?;
         Ok(())
     }
 
-    async fn remove_tag(
+    async fn remove_label(
         &self,
         _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
 
         // Keywords use kw: prefix - remove the keyword flag from all thread messages
-        if let Some(keyword) = tag_id.as_str().strip_prefix("kw:") {
+        if let Some(keyword) = label_id.as_str().strip_prefix("kw:") {
             let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
             let client = self.client.inner();
             let mut request = client.build();
@@ -368,8 +368,8 @@ impl ProviderOps for JmapOps {
             return Ok(());
         }
 
-        // Non-keyword tags are mailbox operations
-        let mailbox_id = resolve_mailbox_id(&self.client, tag_id.as_str()).await?;
+        // Non-keyword labels are mailbox operations.
+        let mailbox_id = resolve_mailbox_id(&self.client, label_id.as_str()).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -380,14 +380,14 @@ impl ProviderOps for JmapOps {
         }
         let handle = request
             .call(email_set)
-            .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
+            .map_err(|e| ProviderError::Server(format!("remove label: {e}")))?;
         let mut response = request
             .send()
             .await
-            .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
+            .map_err(|e| ProviderError::Server(format!("remove label: {e}")))?;
         response
             .get(&handle)
-            .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
+            .map_err(|e| ProviderError::Server(format!("remove label: {e}")))?;
         Ok(())
     }
 
@@ -560,13 +560,13 @@ impl ProviderOps for JmapOps {
             } else {
                 Some(super::sync::role_to_str(&role))
             };
-            let mapping = map_mailbox_to_label(role_str, id, name);
+            let mapping = map_mailbox_to_folder(role_str, id, name);
 
             folders.push(ProviderFolderEntry {
-                id: mapping.label_id,
-                name: mapping.label_name,
+                id: mapping.folder_id,
+                name: mapping.folder_name,
                 path: name.to_string(),
-                folder_type: mapping.label_type.to_string(),
+                folder_type: mapping.folder_type.to_string(),
                 special_use: role_str.map(String::from),
                 delimiter: Some("/".to_string()),
                 message_count: None,

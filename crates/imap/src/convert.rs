@@ -2,7 +2,7 @@ use common::text::truncate_graphemes;
 use sync::threading::ThreadableMessage;
 use sync::types::MessageMeta;
 
-use super::folder_mapper::get_labels_for_message;
+use super::folder_mapper::get_folder_ids_for_message;
 use super::types::ImapMessage;
 
 /// Converted message data ready for DB insertion.
@@ -13,7 +13,7 @@ pub struct ConvertedMessage {
     pub threadable: ThreadableMessage,
     /// The original IMAP message (for DB fields like body, attachments, headers).
     pub imap_msg: ImapMessage,
-    /// Label IDs for this message in this folder.
+    /// Folder or label IDs for this message in this folder.
     pub label_ids: Vec<String>,
 }
 
@@ -30,7 +30,7 @@ fn synthetic_message_id(account_id: &str, folder: &str, uid: u32) -> String {
 pub fn convert_imap_message(
     msg: ImapMessage,
     account_id: &str,
-    folder_label_id: &str,
+    folder_id: &str,
 ) -> ConvertedMessage {
     let local_id = format!("imap-{}-{}-{}", account_id, msg.folder, msg.uid);
     let rfc_message_id = msg
@@ -38,8 +38,7 @@ pub fn convert_imap_message(
         .clone()
         .unwrap_or_else(|| synthetic_message_id(account_id, &msg.folder, msg.uid));
 
-    let label_ids =
-        get_labels_for_message(folder_label_id, msg.is_read, msg.is_starred, msg.is_draft);
+    let label_ids = get_folder_ids_for_message(folder_id, msg.is_read, msg.is_starred, msg.is_draft);
 
     let snippet = msg.snippet.clone().unwrap_or_else(|| {
         msg.body_text
@@ -103,6 +102,8 @@ mod tests {
             date: 1700000000,
             is_read: false,
             is_starred: true,
+            is_replied: false,
+            is_forwarded: false,
             is_draft: false,
             body_html: Some("<p>Hello</p>".to_string()),
             body_text: Some("Hello".to_string()),
@@ -124,8 +125,8 @@ mod tests {
         assert_eq!(result.id, "imap-acc-1-INBOX-42");
         assert_eq!(result.meta.date, 1700000000 * 1000);
         assert!(result.meta.label_ids.contains(&"INBOX".to_string()));
-        assert!(result.meta.label_ids.contains(&"UNREAD".to_string()));
-        assert!(result.meta.label_ids.contains(&"STARRED".to_string()));
+        assert!(!result.meta.label_ids.contains(&"UNREAD".to_string()));
+        assert!(!result.meta.label_ids.contains(&"STARRED".to_string()));
         assert_eq!(result.threadable.message_id, "<test-42@example.com>");
     }
 

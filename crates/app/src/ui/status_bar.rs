@@ -312,7 +312,7 @@ impl StatusBar {
     /// `account_label` is the display string surfaced to the user
     /// (typically the account email); the caller resolves it from
     /// the sidebar account list.
-    pub fn record_push_event(&mut self, account_id: String, account_label: &str) {
+    pub fn record_push_event(&mut self, account_id: String, account_display_text: &str) {
         let now = std::time::Instant::now();
         let should_confirm = self
             .last_push_at
@@ -320,7 +320,7 @@ impl StatusBar {
             .is_none_or(|prev| now.duration_since(*prev) >= PUSH_CONFIRMATION_INTERVAL);
         self.last_push_at.insert(account_id, now);
         if should_confirm {
-            self.show_confirmation(format!("New mail in {account_label}"));
+            self.show_confirmation(format!("New mail in {account_display_text}"));
         }
     }
 
@@ -666,11 +666,13 @@ impl Component for StatusBar {
 
 fn build_status_row<'a>(
     icon_el: iced::widget::Text<'a>,
-    label: &str,
+    display_text: &str,
     class: TextClass,
 ) -> Element<'a, StatusBarMessage> {
     let icon_styled = icon_el.size(ICON_MD).style(class.style());
-    let text_styled = text(label.to_string()).size(TEXT_SM).style(class.style());
+    let text_styled = text(display_text.to_string())
+        .size(TEXT_SM)
+        .style(class.style());
 
     let content_row = row![
         container(icon_styled).align_y(Alignment::Center),

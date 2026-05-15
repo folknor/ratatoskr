@@ -93,8 +93,8 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
         label_name: "Starred",
         jmap_role: None,
         graph_alias: None,
-        imap_special_use: Some("\\Flagged"),
-        imap_name_aliases: &["flagged", "starred", "[gmail]/starred"],
+        imap_special_use: None,
+        imap_name_aliases: &[],
     },
     SystemFolderRole {
         label_id: "all-mail",

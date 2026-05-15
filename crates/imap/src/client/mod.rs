@@ -288,6 +288,11 @@ pub async fn fetch_messages(
         let flags: Vec<_> = fetch.flags().collect();
         let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
         let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
+        let is_replied = flags.iter().any(|f| matches!(f, Flag::Answered));
+        let is_forwarded = flags.iter().any(|f| match f {
+            Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
+            _ => false,
+        });
         let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
         // Extract INTERNALDATE as fallback for messages with unparseable Date headers
@@ -301,6 +306,8 @@ pub async fn fetch_messages(
             raw_size,
             is_read,
             is_starred,
+            is_replied,
+            is_forwarded,
             is_draft,
             internal_date,
         ) {
@@ -355,11 +362,26 @@ pub async fn fetch_message_body(
     let flags: Vec<_> = fetch.flags().collect();
     let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
     let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
+    let is_replied = flags.iter().any(|f| matches!(f, Flag::Answered));
+    let is_forwarded = flags.iter().any(|f| match f {
+        Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
+        _ => false,
+    });
     let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
     let parser = MessageParser::default();
     parse_message(
-        &parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, None,
+        &parser,
+        raw,
+        uid,
+        folder,
+        raw_size,
+        is_read,
+        is_starred,
+        is_replied,
+        is_forwarded,
+        is_draft,
+        None,
     )
 }
 

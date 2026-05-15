@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use super::client;
 use super::connection::connect;
 use super::convert::convert_imap_message;
-use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
+use super::folder_mapper::{get_syncable_folders, map_folder_to_folder};
 use super::sync_pipeline;
 use super::sync_pipeline::{CHUNK_SIZE, store_chunk};
 use super::types::ImapConfig;
@@ -176,7 +176,7 @@ pub async fn imap_initial_sync(
             tokio::time::sleep(std::time::Duration::from_millis(INTER_FOLDER_DELAY_MS)).await;
         }
 
-        let folder_mapping = map_folder_to_label(folder);
+        let folder_mapping = map_folder_to_folder(folder);
 
         match sync_single_folder(
             progress,
@@ -188,7 +188,7 @@ pub async fn imap_initial_sync(
             config,
             account_id,
             folder,
-            &folder_mapping.label_id,
+            &folder_mapping.folder_id,
             &since_date,
             cutoff_seconds,
             now_seconds,
@@ -368,7 +368,7 @@ async fn sync_single_folder(
     config: &ImapConfig,
     account_id: &str,
     folder: &super::types::ImapFolder,
-    folder_label_id: &str,
+    folder_id: &str,
     since_date: &str,
     cutoff_seconds: i64,
     now_seconds: i64,
@@ -458,7 +458,7 @@ async fn sync_single_folder(
                 continue;
             }
 
-            chunk_converted.push(convert_imap_message(msg, account_id, folder_label_id));
+            chunk_converted.push(convert_imap_message(msg, account_id, folder_id));
         }
 
         if !chunk_converted.is_empty() {

@@ -91,6 +91,20 @@ pub fn thread_card<'a, M: Clone + 'a>(
     for &(color,) in label_colors {
         indicators = indicators.push(label_dot(color));
     }
+    if thread.is_replied {
+        indicators = indicators.push(
+            icon::reply()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+    if thread.is_forwarded {
+        indicators = indicators.push(
+            icon::forward()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
     if thread.has_attachments {
         indicators = indicators.push(
             icon::paperclip()
@@ -291,11 +305,28 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
+    let mut state_indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+    if msg.is_replied {
+        state_indicators = state_indicators.push(
+            icon::reply()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+    if msg.is_forwarded {
+        state_indicators = state_indicators.push(
+            icon::forward()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+
     let avatar_rows = row![
         avatar,
         column![
             row![
                 container(sender_element).align_y(Alignment::Center),
+                state_indicators,
                 Space::new().width(Length::Fill),
                 container(
                     text(date_str)
@@ -433,6 +464,22 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
 
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
 
+    let mut state_indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+    if msg.is_replied {
+        state_indicators = state_indicators.push(
+            icon::reply()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+    if msg.is_forwarded {
+        state_indicators = state_indicators.push(
+            icon::forward()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+
     let content = row![
         container(
             icon::chevron_right()
@@ -459,6 +506,7 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
                 .style(theme::TextClass::Tertiary.style())
         )
         .align_y(Alignment::Center),
+        state_indicators,
         container(
             text("\u{00B7}")
                 .size(TEXT_SM)

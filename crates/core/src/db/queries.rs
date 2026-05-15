@@ -35,6 +35,8 @@ pub(crate) fn row_to_message(row: &Row<'_>) -> std::result::Result<DbMessage, su
         date: row.get("date")?,
         is_read: row.get::<_, i64>("is_read")? != 0,
         is_starred: row.get::<_, i64>("is_starred")? != 0,
+        is_replied: row.get::<_, i64>("is_replied")? != 0,
+        is_forwarded: row.get::<_, i64>("is_forwarded")? != 0,
         body_html: None,
         body_text: None,
         body_cached: row

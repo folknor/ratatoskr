@@ -86,8 +86,8 @@ pub(super) async fn index_messages(
 
 /// Folder sync priority for initial sync ordering.
 /// Lower number = higher priority (synced first).
-pub(super) fn folder_priority(label_id: &str) -> u8 {
-    match label_id {
+pub(super) fn folder_priority(folder_id: &str) -> u8 {
+    match folder_id {
         "INBOX" | "SENT" | "DRAFT" => 0,
         "archive" | "TRASH" | "SPAM" => 1,
         _ => 2,

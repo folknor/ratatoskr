@@ -54,7 +54,7 @@ pub(super) fn handle_recipient_token_input(
                 target.tokens.push(token_input::Token {
                     id,
                     email: match_entry.email,
-                    label,
+                    display_text: label,
                     is_group,
                     group_id: match_entry.group_id,
                     member_count: match_entry.member_count,
@@ -91,12 +91,12 @@ pub(super) fn handle_recipient_token_input(
             .tokens
             .iter()
             .find(|t| t.id == tid)
-            .map(|t| t.label.clone())
+            .map(|t| t.display_text.clone())
             .unwrap_or_default();
             state.drag = Some(ComposeTokenDrag {
                 token_id: tid,
                 source_field: field,
-                label,
+                display_text: label,
                 current_position: Point::ORIGIN,
             });
             return;
@@ -272,7 +272,7 @@ fn push_parsed_recipients(
         value.tokens.push(token_input::Token {
             id,
             email: addr.email,
-            label,
+            display_text: label,
             is_group: false,
             group_id: None,
             member_count: None,

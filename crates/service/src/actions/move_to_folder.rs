@@ -16,13 +16,13 @@ pub(crate) async fn move_local(
     account_id: &str,
     thread_id: &str,
     folder_id: &FolderId,
-    source_label_id: Option<&FolderId>,
+    source_folder_id: Option<&FolderId>,
 ) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let fid = folder_id.as_str().to_string();
-    let source = source_label_id.map(|s| s.as_str().to_string());
+    let source = source_folder_id.map(|s| s.as_str().to_string());
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -43,12 +43,12 @@ async fn move_dispatch(
     account_id: &str,
     thread_id: &str,
     folder_id: &FolderId,
-    source_label_id: Option<&FolderId>,
+    source_folder_id: Option<&FolderId>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
     let params_json = serde_json::json!({
         "folderId": folder_id.as_str(),
-        "sourceLabelId": source_label_id.map(FolderId::as_str),
+        "sourceFolderId": source_folder_id.map(FolderId::as_str),
     })
     .to_string();
 
@@ -90,16 +90,16 @@ pub async fn move_to_folder(
     account_id: &str,
     thread_id: &str,
     folder_id: &FolderId,
-    source_label_id: Option<&FolderId>,
+    source_folder_id: Option<&FolderId>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
     let params_json = serde_json::json!({
         "folderId": folder_id.as_str(),
-        "sourceLabelId": source_label_id.map(FolderId::as_str),
+        "sourceFolderId": source_folder_id.map(FolderId::as_str),
     })
     .to_string();
 
-    if let Err(e) = move_local(ctx, account_id, thread_id, folder_id, source_label_id).await {
+    if let Err(e) = move_local(ctx, account_id, thread_id, folder_id, source_folder_id).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;
@@ -113,7 +113,7 @@ pub async fn move_to_folder(
                 account_id,
                 thread_id,
                 folder_id,
-                source_label_id,
+                source_folder_id,
             )
             .await
         }
@@ -145,11 +145,11 @@ pub(crate) async fn move_to_folder_with_provider(
     account_id: &str,
     thread_id: &str,
     folder_id: &FolderId,
-    source_label_id: Option<&FolderId>,
+    source_folder_id: Option<&FolderId>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
 
-    if let Err(e) = move_local(ctx, account_id, thread_id, folder_id, source_label_id).await {
+    if let Err(e) = move_local(ctx, account_id, thread_id, folder_id, source_folder_id).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;
@@ -161,7 +161,7 @@ pub(crate) async fn move_to_folder_with_provider(
         account_id,
         thread_id,
         folder_id,
-        source_label_id,
+        source_folder_id,
     )
     .await
 }

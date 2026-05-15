@@ -320,6 +320,11 @@ pub async fn sync_folder(
                     let flags: Vec<_> = f.flags().collect();
                     let is_read = flags.iter().any(|fl| matches!(fl, Flag::Seen));
                     let is_starred = flags.iter().any(|fl| matches!(fl, Flag::Flagged));
+                    let is_replied = flags.iter().any(|fl| matches!(fl, Flag::Answered));
+                    let is_forwarded = flags.iter().any(|fl| match fl {
+                        Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
+                        _ => false,
+                    });
                     let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
                     let internal_date = f.internal_date().map(|dt| dt.timestamp());
 
@@ -331,6 +336,8 @@ pub async fn sync_folder(
                         raw_size,
                         is_read,
                         is_starred,
+                        is_replied,
+                        is_forwarded,
                         is_draft,
                         internal_date,
                     ) {

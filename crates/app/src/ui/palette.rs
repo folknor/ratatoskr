@@ -92,7 +92,7 @@ pub struct Palette {
     /// The command ID that entered stage 2.
     stage2_command_id: Option<CommandId>,
     /// The param label to display in the placeholder (e.g., "Folder", "Label").
-    stage2_label: String,
+    stage2_display_text: String,
     /// Generation counter to discard stale resolver results.
     option_load_generation: rtsk::generation::GenerationCounter<rtsk::generation::PaletteOptions>,
     /// Whether the resolver is currently loading options.
@@ -112,7 +112,7 @@ impl Palette {
             option_items: Vec::new(),
             option_matches: Vec::new(),
             stage2_command_id: None,
-            stage2_label: String::new(),
+            stage2_display_text: String::new(),
             option_load_generation: rtsk::generation::GenerationCounter::new(),
             options_loading: false,
         }
@@ -132,7 +132,7 @@ impl Palette {
         self.option_items.clear();
         self.option_matches.clear();
         self.stage2_command_id = None;
-        self.stage2_label.clear();
+        self.stage2_display_text.clear();
         self.options_loading = false;
     }
 
@@ -143,7 +143,7 @@ impl Palette {
         self.option_items.clear();
         self.option_matches.clear();
         self.stage2_command_id = None;
-        self.stage2_label.clear();
+        self.stage2_display_text.clear();
         self.options_loading = false;
     }
 
@@ -192,14 +192,14 @@ impl Palette {
     fn enter_option_stage2(
         &mut self,
         id: CommandId,
-        param_label: &str,
+        param_display_text: &str,
         ctx: &CommandContext,
     ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
         self.stage = PaletteStage::OptionPick;
         self.query.clear();
         self.selected_index = 0;
         self.stage2_command_id = Some(id);
-        self.stage2_label = param_label.to_string();
+        self.stage2_display_text = param_display_text.to_string();
         self.option_items.clear();
         self.option_matches.clear();
         self.options_loading = true;
@@ -220,12 +220,16 @@ impl Palette {
         (Task::batch([focus_task, load_task]), None)
     }
 
-    fn enter_snooze_stage2(&mut self, id: CommandId, param_label: &str) -> Task<PaletteMessage> {
+    fn enter_snooze_stage2(
+        &mut self,
+        id: CommandId,
+        param_display_text: &str,
+    ) -> Task<PaletteMessage> {
         self.stage = PaletteStage::OptionPick;
         self.query.clear();
         self.selected_index = 0;
         self.stage2_command_id = Some(id);
-        self.stage2_label = param_label.to_string();
+        self.stage2_display_text = param_display_text.to_string();
         self.options_loading = false;
 
         let items = snooze_preset_options();
@@ -428,7 +432,7 @@ fn build_option_pick_card(state: &Palette) -> Element<'_, PaletteMessage> {
     let placeholder = if state.options_loading {
         "Loading...".to_string()
     } else {
-        format!("Search {}...", state.stage2_label)
+        format!("Search {}...", state.stage2_display_text)
     };
 
     let input = text_input(&placeholder, &state.query)
@@ -497,14 +501,14 @@ fn option_result_row<'a>(
     is_selected: bool,
     on_click: PaletteMessage,
 ) -> Element<'a, PaletteMessage> {
-    let label_style: fn(&iced::Theme) -> iced::widget::text::Style = if option.item.disabled {
+    let display_style: fn(&iced::Theme) -> iced::widget::text::Style = if option.item.disabled {
         TextClass::Tertiary.style()
     } else {
         TextClass::Default.style()
     };
 
-    // Option label (fills remaining space)
-    let label = container(text(&option.item.label).size(TEXT_MD).style(label_style))
+    // Option display name (fills remaining space)
+    let display_name = container(text(&option.item.label).size(TEXT_MD).style(display_style))
         .width(Length::Fill)
         .align_y(iced::Alignment::Center);
 
@@ -522,7 +526,7 @@ fn option_result_row<'a>(
         .into()
     };
 
-    let row_content = row![label, path_element].align_y(iced::Alignment::Center);
+    let row_content = row![display_name, path_element].align_y(iced::Alignment::Center);
 
     let row_container = if is_selected {
         container(row_content)
@@ -548,7 +552,7 @@ fn format_option_path(path: &Option<Vec<String>>) -> String {
 
 fn palette_result_row<'a>(
     category_str: &'a str,
-    label_str: &'a str,
+    display_str: &'a str,
     keybinding_str: Option<String>,
     available: bool,
     input_mode: InputMode,
@@ -561,7 +565,7 @@ fn palette_result_row<'a>(
         TextClass::Tertiary.style()
     };
 
-    let label_style: fn(&iced::Theme) -> iced::widget::text::Style = if available {
+    let display_style: fn(&iced::Theme) -> iced::widget::text::Style = if available {
         TextClass::Default.style()
     } else {
         TextClass::Tertiary.style()
@@ -572,13 +576,13 @@ fn palette_result_row<'a>(
         .width(PALETTE_CATEGORY_WIDTH)
         .align_y(iced::Alignment::Center);
 
-    // Command label (center, fills)
-    let label_text = if matches!(input_mode, InputMode::Parameterized { .. }) {
-        format!("{label_str}...")
+    // Command display name (center, fills)
+    let display_text = if matches!(input_mode, InputMode::Parameterized { .. }) {
+        format!("{display_str}...")
     } else {
-        label_str.to_string()
+        display_str.to_string()
     };
-    let label = container(text(label_text).size(TEXT_MD).style(label_style))
+    let display_name = container(text(display_text).size(TEXT_MD).style(display_style))
         .width(Length::Fill)
         .align_y(iced::Alignment::Center);
 
@@ -596,7 +600,7 @@ fn palette_result_row<'a>(
         None => container("").width(PALETTE_KEYBINDING_WIDTH).into(),
     };
 
-    let row_content = row![category, label, keybinding].align_y(iced::Alignment::Center);
+    let row_content = row![category, display_name, keybinding].align_y(iced::Alignment::Center);
 
     let row_container = if is_selected {
         container(row_content)
@@ -663,10 +667,10 @@ fn snooze_preset_options() -> Vec<OptionItem> {
     ]
 }
 
-fn snooze_option(label: &str, until: i64) -> OptionItem {
+fn snooze_option(display_text: &str, until: i64) -> OptionItem {
     OptionItem {
         id: until.to_string(),
-        label: label.to_string(),
+        label: display_text.to_string(),
         path: None,
         keywords: None,
         disabled: false,

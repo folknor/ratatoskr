@@ -231,7 +231,7 @@ fn execution_scope_to_account_scope(scope: &SearchScope) -> AccountScope {
 
 impl ReadyApp {
     fn record_search_restore_origin(&mut self) {
-        if self.thread_list.mode == ThreadListMode::Folder {
+        if self.thread_list.mode == ThreadListMode::Scope {
             self.was_in_folder_view = true;
         }
     }
@@ -240,7 +240,7 @@ impl ReadyApp {
         UiSearchContext {
             current_scope: self.current_scope().clone(),
             editing_pinned_search: self.editing_pinned_search,
-            entered_from_folder_view: self.thread_list.mode == ThreadListMode::Folder,
+            entered_from_folder_view: self.thread_list.mode == ThreadListMode::Scope,
             pinned_searches: self.pinned_searches.clone(),
         }
     }
@@ -631,7 +631,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|s| s.starts_with(&partial.to_lowercase()))
                 .map(|s| TypeaheadItem {
-                    label: s.to_string(),
+                    display_text: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
                 })
@@ -644,7 +644,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|s| s.starts_with(&partial.to_lowercase()))
                 .map(|s| TypeaheadItem {
-                    label: s.to_string(),
+                    display_text: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
                 })
@@ -669,7 +669,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|s| s.starts_with(&partial.to_lowercase()))
                 .map(|s| TypeaheadItem {
-                    label: s.to_string(),
+                    display_text: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
                 })
@@ -687,7 +687,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
                 .map(|(label, value)| TypeaheadItem {
-                    label: label.to_string(),
+                    display_text: label.to_string(),
                     detail: Some(format!("{operator}:{value}")),
                     insert_value: value.to_string(),
                 })
@@ -862,7 +862,7 @@ impl ReadyApp {
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
         let _ = self.search_generation.next();
-        self.thread_list.mode = ThreadListMode::Folder;
+        self.thread_list.mode = ThreadListMode::Scope;
         self.was_in_folder_view = false;
     }
 
@@ -873,7 +873,7 @@ impl ReadyApp {
     /// This avoids the O(n) clone on every search entry and ensures the
     /// thread list reflects any changes that happened during the search.
     pub(crate) fn restore_folder_view(&mut self) -> Task<Message> {
-        self.thread_list.mode = ThreadListMode::Folder;
+        self.thread_list.mode = ThreadListMode::Scope;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.clear_pinned_search_context();
@@ -932,9 +932,12 @@ fn unified_result_to_thread(r: rtsk::search_pipeline::UnifiedSearchResult) -> Th
         message_count: r.message_count.unwrap_or(1),
         is_read: r.is_read,
         is_starred: r.is_starred,
+        is_replied: false,
+        is_forwarded: false,
         is_pinned: false,
         is_muted: false,
         has_attachments: false,
+        label_color_bgs: Vec::new(),
         from_name: r.from_name,
         from_address: r.from_address,
         is_local_draft: false,

@@ -64,7 +64,7 @@ fn email_view_relevance(ctx: &CommandContext) -> u32 {
         | ViewType::Trash
         | ViewType::Spam
         | ViewType::AllMail
-        | ViewType::Label
+        | ViewType::SidebarItem
         | ViewType::SmartFolder
         | ViewType::Bundle
         | ViewType::Attachments

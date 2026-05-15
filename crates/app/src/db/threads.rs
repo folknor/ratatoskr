@@ -95,6 +95,8 @@ fn convert_message(msg: thread_detail::ThreadDetailMessage) -> ThreadMessage {
         body_text: msg.body_text,
         is_read: msg.is_read,
         is_starred: msg.is_starred,
+        is_replied: msg.is_replied,
+        is_forwarded: msg.is_forwarded,
         is_own_message: msg.is_own_message,
     }
 }

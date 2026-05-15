@@ -44,7 +44,10 @@ pub fn persist_refreshed_token(
 pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
     query_as::<DbLabel>(
         conn,
-        "SELECT * FROM labels WHERE account_id = ?1 ORDER BY sort_order ASC, name ASC",
+        "SELECT * FROM labels
+         WHERE account_id = ?1
+           AND id NOT IN ('UNREAD', 'STARRED', '$Forwarded', '$MDNSent', '$Junk', '$NotJunk', '$Phishing')
+         ORDER BY sort_order ASC, name ASC",
         &[&account_id],
     )
 }
@@ -268,11 +271,12 @@ pub fn remove_thread_label(
 
 pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO labels (account_id, id, name, type, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "INSERT INTO labels (account_id, id, name, type, label_kind, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(account_id, id) DO UPDATE SET
            name = excluded.name,
            type = excluded.type,
+           label_kind = excluded.label_kind,
            color_bg = excluded.color_bg,
            color_fg = excluded.color_fg,
            visible = excluded.visible,
@@ -284,6 +288,7 @@ pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
             label.id,
             label.name,
             label.label_type,
+            label.label_kind,
             label.color_bg,
             label.color_fg,
             label.visible,

@@ -23,9 +23,9 @@ pub enum FolderKind {
     /// A user-created provider folder specific to one account
     /// (container semantics - `label_kind = 'container'` in the DB).
     AccountFolder,
-    /// A tag-type label - Exchange category, IMAP keyword, JMAP keyword,
+    /// A user-visible label - Exchange category, IMAP keyword, JMAP keyword,
     /// or Gmail user label (`label_kind = 'tag'` in the DB).
-    AccountTag,
+    AccountLabel,
 }
 
 /// Mailbox rights for permission gating in the UI.
@@ -112,12 +112,12 @@ pub fn get_navigation_state(
     })?);
 
     if let AccountScope::Single(account_id) = scope {
-        folders.extend(build_account_labels(conn, account_id).map_err(|e| {
-            log::error!("Failed to build account labels for {account_id}: {e}");
+        folders.extend(build_account_folders(conn, account_id).map_err(|e| {
+            log::error!("Failed to build account folders for {account_id}: {e}");
             e
         })?);
-        folders.extend(build_account_tags(conn, account_id).map_err(|e| {
-            log::error!("Failed to build account tags for {account_id}: {e}");
+        folders.extend(build_account_labels(conn, account_id).map_err(|e| {
+            log::error!("Failed to build account labels for {account_id}: {e}");
             e
         })?);
     }
@@ -242,8 +242,8 @@ fn query_all_smart_folders_sync(conn: &Connection) -> Result<Vec<DbSmartFolder>,
         .map_err(|e| e.to_string())
 }
 
-/// Account-specific labels, filtering out system labels.
-fn build_account_labels(
+/// Account-specific folders, filtering out system folders.
+fn build_account_folders(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<NavigationFolder>, String> {
@@ -255,8 +255,8 @@ fn build_account_labels(
         .into_iter()
         .filter(|label| !system_ids.contains(&label.id.as_str()))
         .filter(|label| label.visible)
-        // Only container-type labels here - tags come from
-        // build_all_account_tags() to avoid duplication.
+        // Only container-type rows here. Labels come from
+        // build_account_labels() to avoid duplication.
         .filter(|label| label.label_kind != "tag")
         .map(|label| {
             let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
@@ -287,8 +287,8 @@ fn build_account_labels(
         .collect())
 }
 
-/// Account-specific tag labels.
-fn build_account_tags(conn: &Connection, account_id: &str) -> Result<Vec<NavigationFolder>, String> {
+/// Account-specific labels.
+fn build_account_labels(conn: &Connection, account_id: &str) -> Result<Vec<NavigationFolder>, String> {
     let all_labels = get_labels(conn, account_id)?;
     let unread_by_label = get_label_unread_counts(conn, account_id)?;
 
@@ -304,7 +304,7 @@ fn build_account_tags(conn: &Connection, account_id: &str) -> Result<Vec<Navigat
                 is_subscribed: label.is_subscribed,
                 id: label.id,
                 name: label.name,
-                folder_kind: FolderKind::AccountTag,
+                folder_kind: FolderKind::AccountLabel,
                 unread_count,
                 account_id: Some(label.account_id),
                 parent_id: None,
@@ -411,7 +411,7 @@ pub fn get_shared_mailbox_navigation(
                 .parent_label_id
                 .filter(|pid| !system_ids.contains(&pid.as_str()));
             let kind = if label.label_kind == "tag" {
-                FolderKind::AccountTag
+                FolderKind::AccountLabel
             } else {
                 FolderKind::AccountFolder
             };

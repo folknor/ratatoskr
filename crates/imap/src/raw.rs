@@ -15,6 +15,8 @@ struct RawFetchedMessage {
     uid: u32,
     is_read: bool,
     is_starred: bool,
+    is_replied: bool,
+    is_forwarded: bool,
     is_draft: bool,
     internal_date: Option<i64>,
     body: Vec<u8>,
@@ -154,6 +156,8 @@ pub async fn raw_fetch_messages(
             body_size,
             raw_msg.is_read,
             raw_msg.is_starred,
+            raw_msg.is_replied,
+            raw_msg.is_forwarded,
             raw_msg.is_draft,
             raw_msg.internal_date,
         ) {
@@ -443,6 +447,10 @@ async fn raw_parse_fetch_responses(
                 let flags_str = extract_flags_from_fetch(&line);
                 let is_read = flags_str.contains("\\Seen");
                 let is_starred = flags_str.contains("\\Flagged");
+                let is_replied = flags_str.contains("\\Answered");
+                let is_forwarded = flags_str
+                    .to_ascii_lowercase()
+                    .contains("$forwarded");
                 let is_draft = flags_str.contains("\\Draft");
 
                 // Parse INTERNALDATE
@@ -465,6 +473,8 @@ async fn raw_parse_fetch_responses(
                         uid,
                         is_read,
                         is_starred,
+                        is_replied,
+                        is_forwarded,
                         is_draft,
                         internal_date,
                         body,

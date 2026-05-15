@@ -18,13 +18,13 @@ Tier 3 drives the registry/resolver split: the static command list is a `Command
 
 Ratatoskr is multi-account across four providers. The unified ("All Accounts") sidebar deliberately omits per-account labels - they're provider-specific noise in a cross-account context. **The palette becomes the primary way to navigate to a label or folder when in unified view.** The unified sidebar's removability of per-account labels is contingent on the palette doing this well.
 
-The mechanism is `OptionItem`: a flat list (no trees) with `id`, `label`, optional `path: Vec<String>`, optional `keywords`, and `disabled`. In a single-account scope `path` carries hierarchy. In All Accounts the resolver prefixes `path` with the account display name. Fuzzy search runs over `label`, joined `path` segments, and `keywords`, so "work clients" finds "Clients" under "Work Exchange" without the user knowing the exact hierarchy. The UI reconstructs hierarchical display from `path`. Execution uses `id`. System labels (`INBOX`, `SENT`, etc.) are excluded - those have universal sidebar destinations and dedicated palette commands.
+The mechanism is `OptionItem`: a flat list (no trees) with `id`, `label`, optional `path: Vec<String>`, optional `keywords`, and `disabled`. In a single-account scope `path` carries hierarchy. In All Accounts the resolver prefixes `path` with the account display name. Fuzzy search runs over `label`, joined `path` segments, and `keywords`, so "work clients" finds "Clients" under "Work Exchange" without the user knowing the exact hierarchy. The UI reconstructs hierarchical display from `path`. Execution uses `id`. System folders (`INBOX`, `SENT`, etc.) are excluded - those have universal sidebar destinations and dedicated palette commands.
 
 ## Stage separation in the execution contract
 
 `CommandRegistry::query()` is stage-1 only - it returns top-level commands, never second-stage options. Parameterized commands appear in query results with `input_mode: InputMode::Parameterized { schema }`; stage 2 is driven separately via the resolver. This keeps the search APIs cleanly typed and lets non-palette surfaces (context menus, toolbars) execute commands without going through stage 2 themselves.
 
-The execution payload is a typed `CommandArgs` enum (one variant per parameterized command), not `serde_json::Value`. Each variant carries exactly the typed fields that command needs (`FolderId`, `TagId`, `i64` timestamp, `String`). The compiler enforces exhaustive matching in the dispatch function.
+The execution payload is a typed `CommandArgs` enum (one variant per parameterized command), not `serde_json::Value`. Each variant carries exactly the typed fields that command needs (`FolderId`, `LabelId`, `i64` timestamp, `String`). The compiler enforces exhaustive matching in the dispatch function.
 
 ## Identity vs descriptor
 
@@ -93,7 +93,7 @@ The flow inside `handle_key_pressed`: if the palette is open, route to the palet
 
 The natural place would be `crates/app/` - it's used by the app's dispatch. It lives in `crates/cmdk/` instead because it's part of the parameterized command contract: the registry says "this command takes these parameters," the resolver provides options, the app builds typed `CommandArgs`, and dispatch consumes them. Putting `CommandArgs` in `cmdk` lets the type system enforce that the variants match the parameterized command IDs at the contract layer, not just inside the app.
 
-Trade-off: `cmdk` ends up depending on `crates/types/` for `FolderId` and `TagId`. Accepted - `types` is the lightweight shared-IDs crate (serde only) precisely so other crates can use typed IDs without pulling in heavy deps.
+Trade-off: `cmdk` ends up depending on `crates/types/` for `FolderId` and `LabelId`. Accepted - `types` is the lightweight shared-IDs crate (serde only) precisely so other crates can use typed IDs without pulling in heavy deps.
 
 ### Why `PaletteStage` is a flat enum with state on the parent
 

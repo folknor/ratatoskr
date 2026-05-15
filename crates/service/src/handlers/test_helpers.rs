@@ -1308,7 +1308,7 @@ fn test_db_label_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbLab
         name: row.get(2)?,
         label_type: row.get(3)?,
         label_kind: row.get(4)?,
-        parent_label_id: row.get(5)?,
+        parent_folder_id: row.get(5)?,
         imap_folder_path: row.get(6)?,
         imap_special_use: row.get(7)?,
         sort_order,

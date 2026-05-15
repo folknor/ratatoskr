@@ -503,7 +503,11 @@ pub fn replace_thread_labels<'a>(
     thread_id: &str,
     labels: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    let unique_labels: HashSet<&str> = labels.into_iter().collect();
+    let unique_labels: HashSet<&str> = labels
+        .into_iter()
+        .filter(|label_id| !is_message_state_label_id(label_id))
+        .filter(|label_id| !is_reserved_imap_system_keyword(label_id))
+        .collect();
 
     tx.execute(
         "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
@@ -521,6 +525,17 @@ pub fn replace_thread_labels<'a>(
     }
 
     Ok(())
+}
+
+fn is_message_state_label_id(label_id: &str) -> bool {
+    matches!(label_id, "UNREAD" | "STARRED")
+}
+
+fn is_reserved_imap_system_keyword(keyword: &str) -> bool {
+    matches!(
+        keyword.to_ascii_lowercase().as_str(),
+        "$forwarded" | "$mdnsent" | "$junk" | "$notjunk" | "$phishing"
+    )
 }
 
 pub fn reassign_messages_and_repair_threads(

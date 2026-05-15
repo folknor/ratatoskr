@@ -8,7 +8,7 @@ use rtsk::db::queries_extra::navigation::{
 };
 use rtsk::db::queries_extra::{
     get_active_account_ids_sync, get_public_folder_items, get_threads_for_shared_mailbox,
-    get_threads_scoped,
+    get_threads_scoped, query_thread_list_decorations,
 };
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{ChatList, GenerationToken, Nav};
@@ -167,6 +167,7 @@ async fn load_threads_scoped(
             threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
         }
 
+        apply_thread_decorations(conn, &mut threads)?;
         Ok(threads)
     })
     .await
@@ -201,6 +202,7 @@ async fn load_threads_for_bundle_view(
         }
 
         threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
+        apply_thread_decorations(conn, &mut threads)?;
         Ok(threads)
     })
     .await
@@ -239,12 +241,43 @@ async fn load_shared_mailbox_threads(
             label_id.as_deref(),
             Some(1000),
         )?;
-        Ok(db_threads
+        let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
-            .collect())
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
     })
     .await
+}
+
+fn apply_thread_decorations(
+    conn: &rtsk::db::Connection,
+    threads: &mut [Thread],
+) -> Result<(), String> {
+    let keys: Vec<(String, String)> = threads
+        .iter()
+        .map(|thread| (thread.account_id.clone(), thread.id.clone()))
+        .collect();
+    let decorations = query_thread_list_decorations(conn, &keys)?;
+    let by_key: std::collections::HashMap<(String, String), _> = decorations
+        .into_iter()
+        .map(|decoration| {
+            (
+                (decoration.account_id.clone(), decoration.thread_id.clone()),
+                decoration,
+            )
+        })
+        .collect();
+
+    for thread in threads {
+        if let Some(decoration) = by_key.get(&(thread.account_id.clone(), thread.id.clone())) {
+            thread.is_replied = decoration.is_replied;
+            thread.is_forwarded = decoration.is_forwarded;
+            thread.label_color_bgs = decoration.label_color_bgs.clone();
+        }
+    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -266,9 +299,12 @@ async fn load_public_folder_items_async(
                 message_count: 1,
                 is_read: item.is_read,
                 is_starred: false,
+                is_replied: false,
+                is_forwarded: false,
                 is_pinned: false,
                 is_muted: false,
                 has_attachments: false,
+                label_color_bgs: Vec::new(),
                 from_name: item.sender_name,
                 from_address: item.sender_email,
                 is_local_draft: false,
@@ -290,9 +326,12 @@ pub(crate) fn db_thread_to_app_thread(t: DbThread) -> Thread {
         message_count: t.message_count,
         is_read: t.is_read,
         is_starred: t.is_starred,
+        is_replied: false,
+        is_forwarded: false,
         is_pinned: t.is_pinned,
         is_muted: t.is_muted,
         has_attachments: t.has_attachments,
+        label_color_bgs: Vec::new(),
         from_name: t.from_name,
         from_address: t.from_address,
         is_local_draft: false,
@@ -311,9 +350,12 @@ pub(crate) fn local_draft_to_app_thread(d: rtsk::db::queries_extra::LocalDraftSu
         message_count: 1,
         is_read: true,
         is_starred: false,
+        is_replied: false,
+        is_forwarded: false,
         is_pinned: false,
         is_muted: false,
         has_attachments: false,
+        label_color_bgs: Vec::new(),
         from_name: None,
         from_address: d.from_email,
         is_local_draft: true,

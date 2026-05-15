@@ -52,6 +52,8 @@ pub fn parse_message(
     raw_size: u32,
     is_read: bool,
     is_starred: bool,
+    is_replied: bool,
+    is_forwarded: bool,
     is_draft: bool,
     internal_date: Option<i64>,
 ) -> Result<ImapMessage, String> {
@@ -243,6 +245,8 @@ pub fn parse_message(
         date,
         is_read,
         is_starred,
+        is_replied,
+        is_forwarded,
         is_draft,
         body_html,
         body_text,

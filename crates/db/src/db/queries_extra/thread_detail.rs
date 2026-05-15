@@ -42,6 +42,8 @@ pub struct ThreadDetailMessage {
     // Flags
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
 
     // Computed fields
     pub is_own_message: bool,
@@ -61,6 +63,15 @@ pub struct ThreadLabel {
     pub label_kind: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ThreadListDecoration {
+    pub account_id: String,
+    pub thread_id: String,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
+    pub label_color_bgs: Vec<String>,
+}
+
 /// Attachments grouped for the conversation view's attachment panel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +89,154 @@ pub struct ThreadAttachment {
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     pub date: i64,
+}
+
+pub fn query_thread_list_decorations(
+    conn: &Connection,
+    thread_keys: &[(String, String)],
+) -> Result<Vec<ThreadListDecoration>, String> {
+    let mut by_key: HashMap<(String, String), ThreadListDecoration> = HashMap::new();
+    for (account_id, thread_id) in thread_keys {
+        by_key
+            .entry((account_id.clone(), thread_id.clone()))
+            .or_insert_with(|| ThreadListDecoration {
+                account_id: account_id.clone(),
+                thread_id: thread_id.clone(),
+                is_replied: false,
+                is_forwarded: false,
+                label_color_bgs: Vec::new(),
+            });
+    }
+
+    for (account_id, thread_ids) in group_thread_ids_by_account(thread_keys) {
+        for chunk in thread_ids.chunks(100) {
+            query_thread_state_decorations(conn, &account_id, chunk, &mut by_key)?;
+            query_thread_label_decorations(conn, &account_id, chunk, &mut by_key)?;
+        }
+    }
+
+    Ok(by_key.into_values().collect())
+}
+
+fn group_thread_ids_by_account(thread_keys: &[(String, String)]) -> HashMap<String, Vec<String>> {
+    let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+    for (account_id, thread_id) in thread_keys {
+        grouped
+            .entry(account_id.clone())
+            .or_default()
+            .push(thread_id.clone());
+    }
+    grouped
+}
+
+fn query_thread_state_decorations(
+    conn: &Connection,
+    account_id: &str,
+    thread_ids: &[String],
+    by_key: &mut HashMap<(String, String), ThreadListDecoration>,
+) -> Result<(), String> {
+    if thread_ids.is_empty() {
+        return Ok(());
+    }
+    let placeholders = placeholders(thread_ids.len(), 2);
+    let sql = format!(
+        "SELECT thread_id,
+                COALESCE(MAX(is_replied), 0) AS is_replied,
+                COALESCE(MAX(is_forwarded), 0) AS is_forwarded
+         FROM messages
+         WHERE account_id = ?1 AND thread_id IN ({placeholders})
+         GROUP BY thread_id"
+    );
+    let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(thread_ids.len() + 1);
+    params.push(&account_id);
+    for thread_id in thread_ids {
+        params.push(thread_id);
+    }
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("prepare thread state decorations: {e}"))?;
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>("thread_id")?,
+                row.get::<_, i64>("is_replied")? != 0,
+                row.get::<_, i64>("is_forwarded")? != 0,
+            ))
+        })
+        .map_err(|e| format!("query thread state decorations: {e}"))?;
+
+    for row in rows {
+        let (thread_id, is_replied, is_forwarded) =
+            row.map_err(|e| format!("map thread state decorations: {e}"))?;
+        if let Some(decoration) = by_key.get_mut(&(account_id.to_string(), thread_id)) {
+            decoration.is_replied = is_replied;
+            decoration.is_forwarded = is_forwarded;
+        }
+    }
+    Ok(())
+}
+
+fn query_thread_label_decorations(
+    conn: &Connection,
+    account_id: &str,
+    thread_ids: &[String],
+    by_key: &mut HashMap<(String, String), ThreadListDecoration>,
+) -> Result<(), String> {
+    if thread_ids.is_empty() {
+        return Ok(());
+    }
+    let placeholders = placeholders(thread_ids.len(), 2);
+    let sql = format!(
+        "SELECT tl.thread_id, l.name, l.color_bg, l.color_fg, l.account_id
+         FROM thread_labels tl
+         INNER JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id
+         WHERE tl.account_id = ?1
+           AND tl.thread_id IN ({placeholders})
+           AND l.label_kind = 'tag'
+           AND l.id NOT IN ('UNREAD', 'STARRED')
+         ORDER BY l.sort_order ASC, l.name ASC"
+    );
+    let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(thread_ids.len() + 1);
+    params.push(&account_id);
+    for thread_id in thread_ids {
+        params.push(thread_id);
+    }
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("prepare thread label decorations: {e}"))?;
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            let name: String = row.get("name")?;
+            let color_bg: Option<String> = row.get("color_bg")?;
+            let color_fg: Option<String> = row.get("color_fg")?;
+            let label_account_id: String = row.get("account_id")?;
+            let (resolved_bg, _) = resolve_label_color(
+                &name,
+                &label_account_id,
+                color_bg.as_deref(),
+                color_fg.as_deref(),
+            );
+            Ok((row.get::<_, String>("thread_id")?, resolved_bg.to_string()))
+        })
+        .map_err(|e| format!("query thread label decorations: {e}"))?;
+
+    for row in rows {
+        let (thread_id, color_bg) =
+            row.map_err(|e| format!("map thread label decorations: {e}"))?;
+        if let Some(decoration) = by_key.get_mut(&(account_id.to_string(), thread_id)) {
+            decoration.label_color_bgs.push(color_bg);
+        }
+    }
+    Ok(())
+}
+
+fn placeholders(count: usize, start_index: usize) -> String {
+    (0..count)
+        .map(|index| format!("?{}", start_index + index))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Complete thread detail response.
@@ -148,7 +307,7 @@ fn query_messages(
         .prepare(
             "SELECT id, thread_id, account_id, from_address, from_name, \
                     to_addresses, cc_addresses, bcc_addresses, \
-                    subject, date, is_read, is_starred \
+                    subject, date, is_read, is_starred, is_replied, is_forwarded \
              FROM messages \
              WHERE account_id = ?1 AND thread_id = ?2 \
              ORDER BY date DESC",
@@ -170,6 +329,8 @@ fn query_messages(
                 subject: row.get("subject")?,
                 is_read: row.get::<_, i64>("is_read")? != 0,
                 is_starred: row.get::<_, i64>("is_starred")? != 0,
+                is_replied: row.get::<_, i64>("is_replied")? != 0,
+                is_forwarded: row.get::<_, i64>("is_forwarded")? != 0,
                 // Populated later
                 body_html: None,
                 body_text: None,

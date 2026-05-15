@@ -236,7 +236,8 @@ async fn dispatch_pending_op(
                     .unwrap_or(""),
             );
             let source = params
-                .get("sourceLabelId")
+                .get("sourceFolderId")
+                .or_else(|| params.get("sourceLabelId"))
                 .and_then(serde_json::Value::as_str)
                 .map(common::typed_ids::FolderId::from);
             super::move_to_folder::move_to_folder(
@@ -266,7 +267,7 @@ async fn dispatch_pending_op(
             super::permanent_delete::permanent_delete(ctx, account_id, resource_id).await
         }
         "addLabel" => {
-            let label_id = common::typed_ids::TagId::from(
+            let label_id = common::typed_ids::LabelId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -275,7 +276,7 @@ async fn dispatch_pending_op(
             super::label::add_label(ctx, account_id, resource_id, &label_id).await
         }
         "removeLabel" => {
-            let label_id = common::typed_ids::TagId::from(
+            let label_id = common::typed_ids::LabelId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -323,7 +324,8 @@ async fn dispatch_pending_op_with_provider(
                     .unwrap_or(""),
             );
             let source = params
-                .get("sourceLabelId")
+                .get("sourceFolderId")
+                .or_else(|| params.get("sourceLabelId"))
                 .and_then(serde_json::Value::as_str)
                 .map(common::typed_ids::FolderId::from);
             super::move_to_folder::move_to_folder_with_provider(
@@ -361,7 +363,7 @@ async fn dispatch_pending_op_with_provider(
             .await
         }
         "addLabel" => {
-            let label_id = common::typed_ids::TagId::from(
+            let label_id = common::typed_ids::LabelId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -371,7 +373,7 @@ async fn dispatch_pending_op_with_provider(
                 .await
         }
         "removeLabel" => {
-            let label_id = common::typed_ids::TagId::from(
+            let label_id = common::typed_ids::LabelId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -432,4 +434,3 @@ pub async fn recover_on_boot(ctx: &ActionContext) {
         _ => {}
     }
 }
-

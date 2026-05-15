@@ -270,7 +270,7 @@ impl ComposeState {
             state.to.tokens.push(token_input::Token {
                 id,
                 email: email.to_string(),
-                label: label.to_string(),
+                display_text: label.to_string(),
                 is_group: false,
                 group_id: None,
                 member_count: None,
@@ -285,7 +285,7 @@ impl ComposeState {
                 state.cc.tokens.push(token_input::Token {
                     id,
                     email: addr.to_string(),
-                    label: addr.to_string(),
+                    display_text: addr.to_string(),
                     is_group: false,
                     group_id: None,
                     member_count: None,

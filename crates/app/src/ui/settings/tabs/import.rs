@@ -456,11 +456,11 @@ fn import_step_summary(wizard: &ImportWizardState) -> Element<'_, SettingsMessag
     col.into()
 }
 
-fn import_stat_row(label: &str, count: usize) -> RowBuilder<'_> {
+fn import_stat_row(display_text: &str, count: usize) -> RowBuilder<'_> {
     settings_row_container(
         SETTINGS_ROW_HEIGHT,
         row![
-            text(label)
+            text(display_text)
                 .size(TEXT_LG)
                 .style(text::base)
                 .width(Length::Fill),

@@ -25,7 +25,7 @@ pub enum NavSize {
 /// Generic over message type so settings can use it with SettingsMessage.
 pub fn nav_button<'a, M: Clone + 'a>(
     ico: Option<iced::widget::Text<'a>>,
-    label: &'a str,
+    display_text: &'a str,
     active: bool,
     size: NavSize,
     badge: Option<i64>,
@@ -61,8 +61,10 @@ pub fn nav_button<'a, M: Clone + 'a>(
             .push(container(ico.size(icon_size).style(icon_style)).align_y(Alignment::Center));
     }
 
-    content = content
-        .push(container(text(label).size(text_size).style(label_style)).align_y(Alignment::Center));
+    content = content.push(
+        container(text(display_text).size(text_size).style(label_style))
+            .align_y(Alignment::Center),
+    );
 
     if let Some(count) = badge
         && count > 0
@@ -81,7 +83,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
 }
 
 pub struct NavItem<'a> {
-    pub label: &'a str,
+    pub display_text: &'a str,
     pub id: &'a str,
     pub unread: i64,
 }
@@ -98,7 +100,7 @@ pub fn nav_group<'a, M: Clone + 'a>(
         let on_press = on_select(item_sel);
         col = col.push(nav_button(
             None,
-            item.label,
+            item.display_text,
             is_active,
             NavSize::Compact,
             Some(item.unread),

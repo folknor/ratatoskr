@@ -306,8 +306,12 @@ pub struct TestDbLabelRow {
     pub name: String,
     pub label_type: String,
     pub label_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_label_id: Option<String>,
+    #[serde(
+        default,
+        alias = "parent_label_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parent_folder_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imap_folder_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

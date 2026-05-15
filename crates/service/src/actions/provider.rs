@@ -203,20 +203,20 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         Err(Self::offline())
     }
 
-    async fn add_tag(
+    async fn add_label(
         &self,
         _ctx: &common::types::ActionProviderCtx<'_>,
         _thread_id: &str,
-        _tag_id: &common::typed_ids::TagId,
+        _label_id: &common::typed_ids::LabelId,
     ) -> Result<(), common::error::ProviderError> {
         Err(Self::offline())
     }
 
-    async fn remove_tag(
+    async fn remove_label(
         &self,
         _ctx: &common::types::ActionProviderCtx<'_>,
         _thread_id: &str,
-        _tag_id: &common::typed_ids::TagId,
+        _label_id: &common::typed_ids::LabelId,
     ) -> Result<(), common::error::ProviderError> {
         Err(Self::offline())
     }

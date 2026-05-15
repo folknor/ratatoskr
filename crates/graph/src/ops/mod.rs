@@ -9,7 +9,7 @@ const FOLDER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60)
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, TagId};
+use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderProfile, ProviderTestResult,
@@ -23,7 +23,7 @@ use super::types::{
 };
 
 use self::helpers::{
-    batch_get_categories, batch_set_categories, delete_folder_delta_token,
+    batch_get_categories, batch_set_categories, batch_set_importance, delete_folder_delta_token,
     graph_folder_to_mutation, move_messages, patch_messages, query_thread_message_ids,
     refresh_folder_map, require_folder_map, resolve_graph_folder_id,
 };
@@ -64,7 +64,7 @@ impl ProviderOps for GraphOps {
     async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let archive_id = folder_map
-            .resolve_folder_id("archive")
+            .resolve_graph_folder_id("archive")
             .ok_or_else(|| ProviderError::NotFound("No archive folder found".to_string()))?
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
@@ -74,7 +74,7 @@ impl ProviderOps for GraphOps {
     async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let trash_id = folder_map
-            .resolve_folder_id("TRASH")
+            .resolve_graph_folder_id("TRASH")
             .ok_or_else(|| ProviderError::NotFound("No trash folder found".to_string()))?
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
@@ -130,7 +130,7 @@ impl ProviderOps for GraphOps {
         let folder_map = require_folder_map(&self.client).await?;
         let target = if is_spam { "SPAM" } else { "INBOX" };
         let folder_id = folder_map
-            .resolve_folder_id(target)
+            .resolve_graph_folder_id(target)
             .ok_or_else(|| ProviderError::NotFound(format!("No {target} folder found")))?
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
@@ -143,25 +143,30 @@ impl ProviderOps for GraphOps {
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
-        // folder_id could be a label_id - resolve to opaque Graph folder ID
+        // Resolve Ratatoskr folder IDs to opaque Graph folder IDs.
         let folder_id_str = folder_id.as_str();
         let folder_map = require_folder_map(&self.client).await?;
         let target = folder_map
-            .resolve_folder_id(folder_id_str)
+            .resolve_graph_folder_id(folder_id_str)
             .unwrap_or(folder_id_str)
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         Ok(move_messages(&self.client, ctx, &msg_ids, &target).await?)
     }
 
-    async fn add_tag(
+    async fn add_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
-        let tag_id_str = tag_id.as_str();
-        let category = tag_id_str.strip_prefix("cat:").unwrap_or(tag_id_str);
+        let label_id_str = label_id.as_str();
+        if let Some(importance) = graph_importance_for_label(label_id_str) {
+            let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
+            return Ok(batch_set_importance(&self.client, ctx, &msg_ids, importance).await?);
+        }
+
+        let category = label_id_str.strip_prefix("cat:").unwrap_or(label_id_str);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         // Hold category lock for the entire read-modify-write to prevent clobber
         let _guard = self.client.lock_categories().await;
@@ -176,14 +181,19 @@ impl ProviderOps for GraphOps {
         Ok(batch_set_categories(&self.client, ctx, &patches).await?)
     }
 
-    async fn remove_tag(
+    async fn remove_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
-        let tag_id_str = tag_id.as_str();
-        let category = tag_id_str.strip_prefix("cat:").unwrap_or(tag_id_str);
+        let label_id_str = label_id.as_str();
+        if graph_importance_for_label(label_id_str).is_some() {
+            let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
+            return Ok(batch_set_importance(&self.client, ctx, &msg_ids, "normal").await?);
+        }
+
+        let category = label_id_str.strip_prefix("cat:").unwrap_or(label_id_str);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         let _guard = self.client.lock_categories().await;
         let current = batch_get_categories(&self.client, ctx, &msg_ids).await?;
@@ -311,12 +321,12 @@ impl ProviderOps for GraphOps {
         let folders = folder_map
             .all_mappings()
             .map(|m| ProviderFolderEntry {
-                id: m.label_id.clone(),
-                name: m.label_name.clone(),
-                path: m.label_name.clone(),
-                folder_type: m.label_type.to_string(),
-                special_use: if m.label_type == "system" {
-                    Some(m.label_id.clone())
+                id: m.folder_id.clone(),
+                name: m.folder_name.clone(),
+                path: m.folder_name.clone(),
+                folder_type: m.folder_type.to_string(),
+                special_use: if m.folder_type == "system" {
+                    Some(m.folder_id.clone())
                 } else {
                     None
                 },
@@ -457,6 +467,14 @@ impl ProviderOps for GraphOps {
                 .unwrap_or_default(),
             name: profile.display_name,
         })
+    }
+}
+
+fn graph_importance_for_label(label_id: &str) -> Option<&'static str> {
+    match label_id {
+        "importance:high" => Some("high"),
+        "importance:low" => Some("low"),
+        _ => None,
     }
 }
 

@@ -45,13 +45,13 @@ pub(super) async fn resolve_graph_folder_id(
 ) -> Result<String, String> {
     let folder_map = get_folder_map(client, ctx).await?;
     let graph_folder_id = folder_map
-        .resolve_folder_id(folder_id)
+        .resolve_graph_folder_id(folder_id)
         .unwrap_or(folder_id)
         .to_string();
 
     if require_user_folder
-        && let Some(mapping) = folder_map.get_by_folder_id(&graph_folder_id)
-        && mapping.label_type == "system"
+        && let Some(mapping) = folder_map.get_by_graph_folder_id(&graph_folder_id)
+        && mapping.folder_type == "system"
     {
         return Err("System folders cannot be renamed or deleted for Graph accounts.".to_string());
     }
@@ -327,6 +327,39 @@ pub(super) async fn batch_set_categories(
             let enc_id = urlencoding::encode(msg_id);
             let patch = GraphMessagePatch {
                 categories: Some(cats.clone()),
+                ..Default::default()
+            };
+            BatchRequestItem {
+                id: i.to_string(),
+                method: "PATCH".to_string(),
+                url: format!("{me}/messages/{enc_id}"),
+                body: serde_json::to_value(&patch).ok(),
+                headers: Some(content_type_json()),
+            }
+        })
+        .collect();
+
+    execute_batch(client, ctx, &items).await
+}
+
+pub(super) async fn batch_set_importance(
+    client: &GraphClient,
+    ctx: &ActionProviderCtx<'_>,
+    msg_ids: &[String],
+    importance: &str,
+) -> Result<(), String> {
+    if msg_ids.is_empty() {
+        return Ok(());
+    }
+
+    let me = client.api_path_prefix();
+    let items: Vec<BatchRequestItem> = msg_ids
+        .iter()
+        .enumerate()
+        .map(|(i, msg_id)| {
+            let enc_id = urlencoding::encode(msg_id);
+            let patch = GraphMessagePatch {
+                importance: Some(importance.to_string()),
                 ..Default::default()
             };
             BatchRequestItem {

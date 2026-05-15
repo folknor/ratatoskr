@@ -448,13 +448,13 @@ fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
         .into()
 }
 
-fn people_add_button(label: &str, on_press: SettingsMessage) -> RowBuilder<'_> {
+fn people_add_button(display_text: &str, on_press: SettingsMessage) -> RowBuilder<'_> {
     Box::new(move |position| {
         button(
             container(
                 row![
                     icon::plus().size(ICON_MD).style(text::base),
-                    text(label)
+                    text(display_text)
                         .size(TEXT_LG)
                         .style(text::base)
                         .font(iced::Font {

@@ -92,14 +92,14 @@ local label = label_by_id(after, "jmap-" .. remote_id)
 harness.assert(label ~= nil, "created child mailbox label missing")
 harness.assert_eq(label.name, "Secondary Child", "created child label name")
 harness.assert_eq(label.account_id, account.account_id, "created child label account")
-harness.assert_eq(label.parent_label_id, "INBOX", "created child parent label")
+harness.assert_eq(label.parent_folder_id, "INBOX", "created child parent folder")
 harness.assert_eq(label.label_kind, "container", "created child label kind")
 
 harness.write_summary({
     correct = 1,
     target_account = "account-secondary",
     remote_mailbox_id = remote_id,
-    parent_label_id = label.parent_label_id,
+    parent_folder_id = label.parent_folder_id,
 })
 
 local ok, shutdown_err = client:shutdown()

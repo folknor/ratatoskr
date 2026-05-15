@@ -169,6 +169,8 @@ fn upsert_messages(
                 date: b.date,
                 is_read: b.is_read,
                 is_starred: b.is_starred,
+                is_replied: b.is_replied,
+                is_forwarded: b.is_forwarded,
                 raw_size: Some(b.raw_size),
                 internal_date: Some(b.internal_date),
                 list_unsubscribe: b.list_unsubscribe.clone(),

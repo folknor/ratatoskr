@@ -33,7 +33,7 @@ The `labels` table is a storage-layer term that predates the Ratatoskr glossary.
 
 Examples:
 - `FolderKind::AccountFolder` - correct (a user-created provider folder).
-- `FolderKind::AccountTag` - correct (a user-created tag).
+- `FolderKind::AccountLabel` - correct (a user-created label).
 - `FolderKind::AccountLabel` meaning a folder - wrong. Rename.
 - `account_label_id: String` holding a folder ID - wrong. Rename.
 
@@ -138,7 +138,7 @@ For **system folders**, Ratatoskr defines its own canonical label IDs that are p
 | `"SNOOZED"` | Snoozed |
 | `"all-mail"` | All Mail (single-account only) |
 
-`remove_label(conn, account_id, thread_id, "INBOX")` works for any provider - the canonical ID is provider-agnostic. The normalisation mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`).
+`remove_label(conn, account_id, thread_id, "INBOX")` works for any provider - the canonical ID is provider-agnostic. The normalisation mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/db/src/db/folder_roles.rs`, re-exported through `common::folder_roles`).
 
 For **non-system folders and labels**, IDs are provider-specific with a crate prefix where required:
 

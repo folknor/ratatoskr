@@ -42,7 +42,7 @@ pub async fn graph_label_sync(
             .unchecked_transaction()
             .map_err(|e| format!("label sync tx: {e}"))?;
 
-        let rows: Vec<LabelWriteRow> = categories
+        let mut rows: Vec<LabelWriteRow> = categories
             .iter()
             .enumerate()
             .map(|(i, cat)| {
@@ -81,6 +81,7 @@ pub async fn graph_label_sync(
                 }
             })
             .collect();
+        rows.extend(importance_label_rows(&aid));
 
         upsert_labels(&tx, &rows)?;
 
@@ -89,4 +90,36 @@ pub async fn graph_label_sync(
         Ok(count)
     })
     .await
+}
+
+fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
+    [
+        ("importance:high", "High importance", 10_000),
+        ("importance:low", "Low importance", 10_001),
+    ]
+    .into_iter()
+    .map(|(id, name, sort_order)| LabelWriteRow {
+        id: id.to_string(),
+        account_id: account_id.to_string(),
+        name: name.to_string(),
+        label_type: "system".to_string(),
+        label_kind: "tag".to_string(),
+        color_bg: None,
+        color_fg: None,
+        sort_order: Some(sort_order),
+        imap_folder_path: None,
+        imap_special_use: None,
+        parent_label_id: None,
+        right_read: None,
+        right_add: None,
+        right_remove: None,
+        right_set_seen: None,
+        right_set_keywords: None,
+        right_create_child: None,
+        right_rename: None,
+        right_delete: None,
+        right_submit: None,
+        is_subscribed: None,
+    })
+    .collect()
 }

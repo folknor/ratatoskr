@@ -148,12 +148,12 @@ fn token_clipboard_string(t: &crate::ui::token_input::Token) -> Option<String> {
         return None;
     }
     if t.email.is_empty() {
-        return Some(t.label.clone());
+        return Some(t.display_text.clone());
     }
-    Some(if t.label.is_empty() || t.label == t.email {
+    Some(if t.display_text.is_empty() || t.display_text == t.email {
         t.email.clone()
     } else {
-        format!("{} <{}>", t.label, t.email)
+        format!("{} <{}>", t.display_text, t.email)
     })
 }
 

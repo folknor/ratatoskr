@@ -92,7 +92,7 @@ impl Db {
             Ok(rtsk::db::queries_extra::search_labels_for_typeahead_sync(conn, &partial)?
                 .into_iter()
                 .map(|row| TypeaheadItem {
-                    label: row.name.clone(),
+                    display_text: row.name.clone(),
                     detail: Some(row.account_email),
                     insert_value: row.name,
                 })
@@ -117,7 +117,7 @@ impl Db {
                             .unwrap_or(&row.email)
                             .to_string();
                         TypeaheadItem {
-                            label,
+                            display_text: label,
                             detail: Some(row.email.clone()),
                             insert_value: row.email,
                         }
@@ -145,7 +145,7 @@ impl Db {
                             .unwrap_or(&row.email)
                             .to_string();
                         TypeaheadItem {
-                            label: label.clone(),
+                            display_text: label.clone(),
                             detail: Some(row.email),
                             insert_value: label,
                         }

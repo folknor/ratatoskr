@@ -8,18 +8,21 @@ pub fn get_user_folders_for_palette(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<OptionItem>, String> {
-    Ok(command_palette::get_user_labels_for_account_sync(conn, account_id)?
+    Ok(command_palette::get_user_folders_for_account_sync(conn, account_id)?
         .into_iter()
         .map(|r| label_name_to_option_item(r.id, &r.name))
         .collect())
 }
 
-/// All user labels for an account (same as folders for now).
+/// All user labels for an account.
 pub fn get_user_labels_for_palette(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<OptionItem>, String> {
-    get_user_folders_for_palette(conn, account_id)
+    Ok(command_palette::get_user_labels_for_account_sync(conn, account_id)?
+        .into_iter()
+        .map(|r| label_name_to_option_item(r.id, &r.name))
+        .collect())
 }
 
 /// Labels currently applied to a specific thread.
@@ -45,7 +48,7 @@ pub fn get_all_labels_cross_account(conn: &Connection) -> Result<Vec<OptionItem>
                 new_path.extend(existing);
             }
             item.path = Some(new_path);
-            let kind = if r.label_kind == "tag" { "t" } else { "f" };
+            let kind = if r.label_kind == "tag" { "l" } else { "f" };
             item.id = format!("{}:{kind}:{}", r.account_id, r.label_id);
             Ok(item)
         })

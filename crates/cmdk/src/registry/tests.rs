@@ -11,7 +11,7 @@ fn empty_context() -> CommandContext {
         selected_thread_ids: vec![],
         active_message_id: None,
         current_view: ViewType::Inbox,
-        current_label_id: None,
+        current_item_id: None,
         active_account_id: None,
         provider_kind: None,
         thread_is_read: None,

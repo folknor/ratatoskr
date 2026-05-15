@@ -81,6 +81,16 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
         .as_deref()
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(0);
+    let sent_membership = msg.label_ids.iter().any(|label| label == "SENT");
+    let subject = get_header(headers, "Subject");
+    let in_reply_to_header = get_header(headers, "In-Reply-To");
+    let references_header = get_header(headers, "References");
+    let is_replied =
+        sent_membership && (in_reply_to_header.is_some() || references_header.is_some());
+    let is_forwarded = sent_membership
+        && subject
+            .as_deref()
+            .is_some_and(is_forwarded_subject);
 
     ParsedGmailMessage {
         base: ParsedMessageBase {
@@ -92,11 +102,13 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
             cc_addresses: get_header(headers, "Cc"),
             bcc_addresses: get_header(headers, "Bcc"),
             reply_to: get_header(headers, "Reply-To"),
-            subject: get_header(headers, "Subject"),
+            subject,
             snippet: msg.snippet.clone(),
             date: internal_date,
             is_read: !msg.label_ids.contains(&"UNREAD".to_string()),
             is_starred: msg.label_ids.contains(&"STARRED".to_string()),
+            is_replied,
+            is_forwarded,
             body_html,
             body_text,
             raw_size: msg.size_estimate.unwrap_or(0),
@@ -109,13 +121,23 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
             mdn_requested: get_header(headers, "Disposition-Notification-To").is_some(),
             message_id_header: get_header(headers, "Message-ID")
                 .or_else(|| get_header(headers, "Message-Id")),
-            references_header: get_header(headers, "References"),
-            in_reply_to_header: get_header(headers, "In-Reply-To"),
+            references_header,
+            in_reply_to_header,
         },
         attachments,
         is_reaction,
         reaction_emoji,
     }
+}
+
+fn is_forwarded_subject(subject: &str) -> bool {
+    let trimmed = subject.trim_start();
+    trimmed
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("fwd:"))
+        || trimmed
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("fw:"))
 }
 
 fn get_header(headers: &[GmailHeader], name: &str) -> Option<String> {

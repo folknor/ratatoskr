@@ -40,7 +40,7 @@ pub async fn create_folder(
     ctx: &ActionContext,
     account_id: &str,
     name: &str,
-    parent_id: Option<&str>,
+    parent_id: Option<&FolderId>,
     text_color: Option<&str>,
     bg_color: Option<&str>,
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
@@ -64,7 +64,7 @@ pub async fn create_folder(
         .create_folder(
             &provider_ctx,
             name,
-            parent_id.map(FolderId::from).as_ref(),
+            parent_id,
             text_color,
             bg_color,
         )
@@ -88,7 +88,7 @@ pub async fn create_folder(
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let m = mutation.clone();
-    let parent_id_for_db = parent_id.map(str::to_string);
+    let parent_id_for_db = parent_id.map(|id| id.as_str().to_string());
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn
@@ -132,12 +132,12 @@ pub async fn create_folder(
 pub async fn rename_folder(
     ctx: &ActionContext,
     account_id: &str,
-    folder_id: &str,
+    folder_id: &FolderId,
     new_name: &str,
     text_color: Option<&str>,
     bg_color: Option<&str>,
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
-    let mlog = MutationLog::begin("rename_folder", account_id, folder_id);
+    let mlog = MutationLog::begin("rename_folder", account_id, folder_id.as_str());
 
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
@@ -155,7 +155,7 @@ pub async fn rename_folder(
     let mutation = match provider
         .rename_folder(
             &provider_ctx,
-            &FolderId::from(folder_id),
+            folder_id,
             new_name,
             text_color,
             bg_color,
@@ -176,7 +176,7 @@ pub async fn rename_folder(
     // Local DB update (best-effort)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
-    let fid = folder_id.to_string();
+    let fid = folder_id.as_str().to_string();
     let m = mutation.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
@@ -193,7 +193,7 @@ pub async fn rename_folder(
             m.color_fg.as_deref(),
             Some(m.path.as_str()),
             m.special_use.as_deref(),
-            None, // parent_label_id not changed in rename
+            None, // parent folder is not changed in rename
         )
         .map_err(ActionError::db)?;
         Ok(())
@@ -220,9 +220,9 @@ pub async fn rename_folder(
 pub async fn delete_folder(
     ctx: &ActionContext,
     account_id: &str,
-    folder_id: &str,
+    folder_id: &FolderId,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("delete_folder", account_id, folder_id);
+    let mlog = MutationLog::begin("delete_folder", account_id, folder_id.as_str());
 
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
@@ -237,10 +237,7 @@ pub async fn delete_folder(
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
-    if let Err(e) = provider
-        .delete_folder(&provider_ctx, &FolderId::from(folder_id))
-        .await
-    {
+    if let Err(e) = provider.delete_folder(&provider_ctx, folder_id).await {
         let msg = e.to_string();
         let outcome = ActionOutcome::Failed {
             error: ActionError::remote(msg),
@@ -252,7 +249,7 @@ pub async fn delete_folder(
     // Provider succeeded - remove local rows (best-effort)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
-    let fid = folder_id.to_string();
+    let fid = folder_id.as_str().to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn

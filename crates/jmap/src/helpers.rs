@@ -1,7 +1,7 @@
 use bifrost_jmap::identity::IdentityGet;
 
 use super::client::JmapClient;
-use super::mailbox_mapper::label_id_to_mailbox_id;
+use super::mailbox_mapper::folder_id_to_mailbox_id;
 
 pub async fn query_thread_email_ids(
     client: &JmapClient,
@@ -80,10 +80,10 @@ pub async fn get_first_identity_id(client: &bifrost_jmap::client::Client) -> Res
         .ok_or_else(|| "No identity found for email submission".to_string())
 }
 
-/// Resolve a Gmail-style label ID to a JMAP mailbox ID.
-pub async fn resolve_mailbox_id(client: &JmapClient, label_id: &str) -> Result<String, String> {
-    log::debug!("[JMAP] Resolving mailbox for label '{label_id}'");
+/// Resolve a Ratatoskr folder ID to a JMAP mailbox ID.
+pub async fn resolve_mailbox_id(client: &JmapClient, folder_id: &str) -> Result<String, String> {
+    log::debug!("[JMAP] Resolving mailbox for folder '{folder_id}'");
     let mailboxes = get_mailbox_list(client).await?;
-    label_id_to_mailbox_id(label_id, &mailboxes)
-        .ok_or_else(|| format!("Cannot resolve label \"{label_id}\" to JMAP mailbox"))
+    folder_id_to_mailbox_id(folder_id, &mailboxes)
+        .ok_or_else(|| format!("Cannot resolve folder \"{folder_id}\" to JMAP mailbox"))
 }

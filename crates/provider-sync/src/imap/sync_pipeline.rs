@@ -16,7 +16,7 @@ use store::inline_image_store::InlineImage;
 use crate::persistence;
 
 use super::convert::ConvertedMessage;
-use super::folder_mapper::map_folder_to_label;
+use super::folder_mapper::map_folder_to_folder;
 use super::types::{FlagChange, ImapFolder};
 
 // ---------------------------------------------------------------------------
@@ -46,6 +46,8 @@ pub(crate) struct DbInsertData {
     date: i64,
     is_read: bool,
     is_starred: bool,
+    is_replied: bool,
+    is_forwarded: bool,
     has_attachments: bool,
     raw_size: u32,
     list_unsubscribe: Option<String>,
@@ -92,6 +94,8 @@ impl DbInsertData {
             date: c.meta.date,
             is_read: imap.is_read,
             is_starred: imap.is_starred,
+            is_replied: imap.is_replied,
+            is_forwarded: imap.is_forwarded,
             has_attachments: c.meta.has_attachments,
             raw_size: imap.raw_size,
             list_unsubscribe: imap.list_unsubscribe.clone(),
@@ -175,6 +179,8 @@ impl DbInsertData {
             date: self.date,
             is_read: self.is_read,
             is_starred: self.is_starred,
+            is_replied: self.is_replied,
+            is_forwarded: self.is_forwarded,
             raw_size: Some(i64::from(self.raw_size)),
             internal_date: Some(self.date),
             list_unsubscribe: self.list_unsubscribe.clone(),
@@ -452,27 +458,27 @@ pub fn sync_folders_to_labels(
         .unchecked_transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
-    // Build path → label_id map for parent resolution
-    let path_to_label_id: std::collections::HashMap<&str, String> = folders
+    // Build path → folder_id map for parent resolution
+    let path_to_folder_id: std::collections::HashMap<&str, String> = folders
         .iter()
         .map(|f| {
-            let mapping = map_folder_to_label(f);
-            (f.path.as_str(), mapping.label_id)
+            let mapping = map_folder_to_folder(f);
+            (f.path.as_str(), mapping.folder_id)
         })
         .collect();
 
-    let mut rows: Vec<LabelWriteRow> = folders
+    let rows: Vec<LabelWriteRow> = folders
         .iter()
         .map(|folder| {
-            let mapping = map_folder_to_label(folder);
+            let mapping = map_folder_to_folder(folder);
             let parent_label_id =
-                derive_imap_parent_label_id(&folder.path, &folder.delimiter, &path_to_label_id);
+                derive_imap_parent_label_id(&folder.path, &folder.delimiter, &path_to_folder_id);
 
             LabelWriteRow {
-                id: mapping.label_id,
+                id: mapping.folder_id,
                 account_id: account_id.to_string(),
-                name: mapping.label_name,
-                label_type: mapping.label_type,
+                name: mapping.folder_name,
+                label_type: mapping.folder_type,
                 label_kind: "container".to_string(),
                 color_bg: None,
                 color_fg: None,
@@ -494,30 +500,6 @@ pub fn sync_folders_to_labels(
         })
         .collect();
 
-    rows.push(LabelWriteRow {
-        id: "UNREAD".to_string(),
-        account_id: account_id.to_string(),
-        name: "Unread".to_string(),
-        label_type: "system".to_string(),
-        label_kind: "tag".to_string(),
-        color_bg: None,
-        color_fg: None,
-        sort_order: None,
-        imap_folder_path: None,
-        imap_special_use: None,
-        parent_label_id: None,
-        right_read: None,
-        right_add: None,
-        right_remove: None,
-        right_set_seen: None,
-        right_set_keywords: None,
-        right_create_child: None,
-        right_rename: None,
-        right_delete: None,
-        right_submit: None,
-        is_subscribed: None,
-    });
-
     upsert_labels(&tx, &rows)?;
     tx.commit().map_err(|e| format!("commit labels: {e}"))?;
     Ok(())
@@ -532,7 +514,7 @@ pub fn sync_folders_to_labels(
 fn derive_imap_parent_label_id(
     path: &str,
     delimiter: &str,
-    path_to_label_id: &std::collections::HashMap<&str, String>,
+    path_to_folder_id: &std::collections::HashMap<&str, String>,
 ) -> Option<String> {
     if delimiter.is_empty() {
         return None;
@@ -542,7 +524,7 @@ fn derive_imap_parent_label_id(
         return None;
     }
     let parent_path = &path[..last_delim];
-    path_to_label_id.get(parent_path).cloned()
+    path_to_folder_id.get(parent_path).cloned()
 }
 
 /// Update folder sync state in DB.
@@ -667,7 +649,16 @@ pub fn apply_flag_changes(
     for change in changes {
         // Update message flags via shared db helper
         let count =
-            set_message_imap_flags(&tx, account_id, folder, i64::from(change.uid), change.is_read, change.is_starred)?;
+            set_message_imap_flags(
+                &tx,
+                account_id,
+                folder,
+                i64::from(change.uid),
+                change.is_read,
+                change.is_starred,
+                change.is_replied,
+                change.is_forwarded,
+            )?;
         updated += count as u64;
 
         // Collect affected thread IDs for reaggregation
@@ -696,6 +687,9 @@ pub fn apply_flag_changes(
         let Some(ref tid) = thread_id else { continue };
 
         for kw in &change.keywords {
+            if !common::label_flags::is_user_visible_keyword(kw) {
+                continue;
+            }
             let label_id = format!("kw:{kw}");
             upsert_labels(
                 &tx,

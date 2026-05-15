@@ -1,5 +1,5 @@
 use super::folder_mapper::FolderMap;
-use super::types::{GraphMessage, GraphRecipient, REACTIONS_GUID};
+use super::types::{GraphMessage, GraphRecipient, LAST_VERB_EXECUTED_PROPERTY_ID, REACTIONS_GUID};
 use common::email_parsing::format_address_list;
 use common::encoding::decode_base64_standard;
 use common::headers::find_header_value_case_insensitive;
@@ -43,7 +43,7 @@ common::impl_message_addresses!(ParsedGraphMessage);
 /// - Body comes as a string (`body.content`), not MIME parts
 /// - Threading uses `conversationId` (provisional - see plan Open Question 3)
 /// - Headers must be explicitly requested via `$select=internetMessageHeaders`
-/// - Labels derived from folder + categories + read/starred flags
+/// - Membership IDs derived from folder, categories, and importance
 pub fn parse_graph_message(
     msg: &GraphMessage,
     folder_map: &FolderMap,
@@ -82,28 +82,17 @@ pub fn parse_graph_message(
         .as_ref()
         .is_some_and(|f| f.flag_status == "flagged");
     let has_attachments = msg.has_attachments.unwrap_or(false);
+    let (is_replied, is_forwarded) = extract_last_verb_state(msg);
 
     // Body: Graph provides body as a single content string (html or text)
     let (body_html, body_text) = extract_body(msg);
 
-    // Labels from folder + categories + flags
+    // Membership IDs from folder, categories, and synthesized importance labels.
     let parent_folder = msg.parent_folder_id.as_deref().unwrap_or("");
     let categories = msg.categories.as_deref().unwrap_or(&[]);
-    let flag_status = msg
-        .flag
-        .as_ref()
-        .map(|f| f.flag_status.as_str())
-        .unwrap_or("notFlagged");
-    let mut label_ids =
-        folder_map.get_labels_for_message(parent_folder, categories, is_read, flag_status);
-
-    // Wire up Focused Inbox classification as a pseudo-label
-    if msg
-        .inference_classification
-        .as_deref()
-        .is_some_and(|v| v == "focused")
-    {
-        label_ids.push("FOCUSED".to_string());
+    let mut label_ids = folder_map.get_folder_and_label_ids_for_message(parent_folder, categories);
+    if let Some(label_id) = importance_label_id(msg.importance.as_deref()) {
+        label_ids.push(label_id.to_string());
     }
 
     // Internet headers (must be explicitly requested via $select)
@@ -197,6 +186,8 @@ pub fn parse_graph_message(
             date,
             is_read,
             is_starred,
+            is_replied,
+            is_forwarded,
             body_html,
             body_text,
             raw_size: 0, // Graph doesn't expose message size directly
@@ -216,6 +207,33 @@ pub fn parse_graph_message(
         owner_reaction_type,
         reactions_count,
     })
+}
+
+fn importance_label_id(importance: Option<&str>) -> Option<&'static str> {
+    match importance {
+        Some(value) if value.eq_ignore_ascii_case("high") => Some("importance:high"),
+        Some(value) if value.eq_ignore_ascii_case("low") => Some("importance:low"),
+        _ => None,
+    }
+}
+
+fn extract_last_verb_state(msg: &GraphMessage) -> (bool, bool) {
+    let props = match &msg.single_value_extended_properties {
+        Some(p) if !p.is_empty() => p,
+        _ => return (false, false),
+    };
+
+    let mut is_replied = false;
+    let mut is_forwarded = false;
+    for prop in props {
+        if prop.id.eq_ignore_ascii_case(LAST_VERB_EXECUTED_PROPERTY_ID)
+            && let Ok(value) = prop.value.trim().parse::<i64>()
+        {
+            is_replied = matches!(value, 102 | 103);
+            is_forwarded = value == 104;
+        }
+    }
+    (is_replied, is_forwarded)
 }
 
 /// Extract Exchange reaction extended properties from a Graph message.

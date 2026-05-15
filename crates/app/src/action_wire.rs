@@ -19,9 +19,9 @@
 use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
 use service_api::{
     ActionWireOperation, ActionWirePlan, OperationId, OperationResult, PlanId, RemoteFailure,
-    WireFolderId, WireMailOperation, WireTagId,
+    WireFolderId, WireMailOperation, WireLabelId,
 };
-use types::{FolderId, TagId};
+use types::{FolderId, LabelId};
 
 use crate::action_resolve::ActionExecutionPlan;
 
@@ -70,10 +70,10 @@ pub fn to_wire_op(op: &MailOperation) -> WireMailOperation {
             source: source.as_ref().map(folder_to_wire),
         },
         MailOperation::AddLabel { label_id } => WireMailOperation::AddLabel {
-            label_id: tag_to_wire(label_id),
+            label_id: label_to_wire(label_id),
         },
         MailOperation::RemoveLabel { label_id } => WireMailOperation::RemoveLabel {
-            label_id: tag_to_wire(label_id),
+            label_id: label_to_wire(label_id),
         },
         MailOperation::Snooze { until } => WireMailOperation::Snooze { until: *until },
         MailOperation::Unsnooze => WireMailOperation::Unsnooze,
@@ -84,8 +84,8 @@ fn folder_to_wire(f: &FolderId) -> WireFolderId {
     WireFolderId(f.0.clone())
 }
 
-fn tag_to_wire(t: &TagId) -> WireTagId {
-    WireTagId(t.0.clone())
+fn label_to_wire(t: &LabelId) -> WireLabelId {
+    WireLabelId(t.0.clone())
 }
 
 /// Reverse direction: turn a wire `OperationResult` into the
@@ -156,10 +156,10 @@ mod tests {
                 source: Some(FolderId("archive".into())),
             },
             MailOperation::AddLabel {
-                label_id: TagId("work".into()),
+                label_id: LabelId("work".into()),
             },
             MailOperation::RemoveLabel {
-                label_id: TagId("personal".into()),
+                label_id: LabelId("personal".into()),
             },
             MailOperation::Snooze { until: 1_700_000_000 },
             MailOperation::Unsnooze,

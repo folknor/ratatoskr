@@ -109,7 +109,7 @@ pub async fn graph_initial_sync(
 
     let mut folder_list: Vec<(&str, &str)> = folder_map
         .folder_entries()
-        .map(|(fid, m)| (fid, m.label_id.as_str()))
+        .map(|(fid, m)| (fid, m.folder_id.as_str()))
         .collect();
     folder_list.sort_by_key(|(_, label)| stores::folder_priority(label));
 
@@ -117,10 +117,10 @@ pub async fn graph_initial_sync(
     let total_folders = folder_list.len() as u64;
     let mut total_messages: u64 = 0;
 
-    for (i, &(folder_id, _label_id)) in folder_list.iter().enumerate() {
+    for (i, &(graph_folder_id, _folder_id)) in folder_list.iter().enumerate() {
         let folder_name = folder_map
-            .get_by_folder_id(folder_id)
-            .map(|m| m.label_name.as_str())
+            .get_by_graph_folder_id(graph_folder_id)
+            .map(|m| m.folder_name.as_str())
             .unwrap_or("Unknown");
 
         #[allow(clippy::cast_possible_truncation)]
@@ -134,8 +134,14 @@ pub async fn graph_initial_sync(
             total_messages,
         );
 
-        let messages =
-            fetch_folder_messages(client, &read_db, folder_id, &since_iso, &folder_map).await?;
+        let messages = fetch_folder_messages(
+            client,
+            &read_db,
+            graph_folder_id,
+            &since_iso,
+            &folder_map,
+        )
+        .await?;
 
         #[allow(clippy::cast_possible_truncation)]
         let count = messages.len() as u64;
@@ -318,18 +324,18 @@ pub async fn graph_delta_sync(
     let mut affected_thread_ids = HashSet::new();
 
     // Process each folder with a stored delta token, filtered by priority tier
-    for (folder_id, delta_link) in &tokens {
-        let label_id = folder_map
-            .get_by_folder_id(folder_id)
-            .map(|m| m.label_id.as_str())
+    for (graph_folder_id, delta_link) in &tokens {
+        let folder_id = folder_map
+            .get_by_graph_folder_id(graph_folder_id)
+            .map(|m| m.folder_id.as_str())
             .unwrap_or("");
 
-        if !should_sync_folder(label_id, cycle) {
+        if !should_sync_folder(folder_id, cycle) {
             continue;
         }
 
         let (folder_new, folder_affected) =
-            sync_folder_delta(&sctx, folder_id, delta_link, &folder_map).await?;
+            sync_folder_delta(&sctx, graph_folder_id, delta_link, &folder_map).await?;
         new_inbox_ids.extend(folder_new);
         affected_thread_ids.extend(folder_affected);
     }
@@ -386,8 +392,8 @@ pub async fn graph_delta_sync(
 }
 
 /// Decide whether a folder should be synced this cycle based on its priority tier.
-fn should_sync_folder(label_id: &str, cycle: u32) -> bool {
-    match stores::folder_priority(label_id) {
+fn should_sync_folder(folder_id: &str, cycle: u32) -> bool {
+    match stores::folder_priority(folder_id) {
         0 => true,                     // Tier 0: every cycle
         1 => cycle.is_multiple_of(5),  // Tier 1: every 5th cycle
         _ => cycle.is_multiple_of(20), // Tier 2: every 20th cycle

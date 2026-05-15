@@ -426,7 +426,7 @@ fn enqueue_params(op: &MailOperation) -> (&'static str, String) {
         MailOperation::SetSpam { to } => ("spam", format!(r#"{{"isSpam":{to}}}"#)),
         MailOperation::MoveToFolder { dest, source } => (
             "moveToFolder",
-            serde_json::json!({"folderId": dest, "sourceLabelId": source}).to_string(),
+            serde_json::json!({"folderId": dest, "sourceFolderId": source}).to_string(),
         ),
         MailOperation::SetStarred { to } => ("star", format!(r#"{{"starred":{to}}}"#)),
         MailOperation::SetRead { to } => ("markRead", format!(r#"{{"read":{to}}}"#)),

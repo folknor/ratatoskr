@@ -25,7 +25,7 @@ use service_api::{
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
     TestSeedRemoteAttachmentParams, TestSearchIndexParams, TestSeedThreadParams,
     TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
-    WireFolderId, WireMailOperation, WireTagId,
+    WireFolderId, WireMailOperation, WireLabelId,
 };
 use std::collections::HashMap;
 use std::io::{BufWriter, Write as _};
@@ -1199,16 +1199,16 @@ fn get_u64_field(
     state: &mut State,
     table_idx: isize,
     key: &str,
-    label: &str,
+    display_text: &str,
 ) -> dellingr::Result<Option<u64>> {
     let top = state.get_top();
     state.push_string(key);
     state.get_table(table_idx)?;
     let result = match state.typ(-1) {
         LuaType::Nil => Ok(None),
-        LuaType::Number => latency_u64(state.to_number(-1)?, label).map(Some),
+        LuaType::Number => latency_u64(state.to_number(-1)?, display_text).map(Some),
         other => Err(lua_error_message(format!(
-            "{label} must be a non-negative integer, got {}",
+            "{display_text} must be a non-negative integer, got {}",
             other.as_str()
         ))),
     };
@@ -1216,12 +1216,12 @@ fn get_u64_field(
     result
 }
 
-fn latency_u64(value: f64, label: &str) -> dellingr::Result<u64> {
+fn latency_u64(value: f64, display_text: &str) -> dellingr::Result<u64> {
     if value.is_finite() && value >= 0.0 && value.fract() == 0.0 {
         Ok(value as u64)
     } else {
         Err(lua_error_message(format!(
-            "{label} must be a non-negative integer, got {value}"
+            "{display_text} must be a non-negative integer, got {value}"
         )))
     }
 }
@@ -3418,14 +3418,14 @@ fn parse_wire_mail_operation(
             let label_id = get_string_field(state, op_idx, "label_id")?
                 .ok_or_else(|| lua_error_message("AddLabel requires label_id"))?;
             Ok(WireMailOperation::AddLabel {
-                label_id: WireTagId(label_id),
+                label_id: WireLabelId(label_id),
             })
         }
         "removelabel" => {
             let label_id = get_string_field(state, op_idx, "label_id")?
                 .ok_or_else(|| lua_error_message("RemoveLabel requires label_id"))?;
             Ok(WireMailOperation::RemoveLabel {
-                label_id: WireTagId(label_id),
+                label_id: WireLabelId(label_id),
             })
         }
         "snooze" => {

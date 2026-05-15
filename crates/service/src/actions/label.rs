@@ -1,5 +1,5 @@
 use common::ops::ProviderOps;
-use common::typed_ids::TagId;
+use common::typed_ids::LabelId;
 use common::types::ActionProviderCtx;
 
 use super::context::ActionContext;
@@ -9,15 +9,15 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use db::progress::NoopProgressReporter;
 
-/// Local DB mutation for add-label: validate label exists and is a tag, then
+/// Local DB mutation for add-label: validate label exists and is a label row, then
 /// insert into `thread_labels` (idempotent).
 ///
-/// Container labels (folders) are rejected - they use move operations, not add/remove.
+/// Folder rows are rejected - they use move operations, not add/remove.
 pub(crate) async fn add_label_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -37,10 +37,14 @@ pub(crate) async fn add_label_local(
 
         if label_kind != "tag" {
             return Err(ActionError::invalid_state(
-                "container labels use move operations, not add/remove",
+                "folder rows use move operations, not add/remove",
             ));
         }
 
+        if let Some(opposite) = opposite_importance_label(&lid) {
+            db::db::queries_extra::remove_label(&conn, &aid, &tid, opposite)
+                .map_err(ActionError::db)?;
+        }
         db::db::queries_extra::insert_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
 
         Ok(())
@@ -56,7 +60,7 @@ async fn add_label_dispatch(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
@@ -67,7 +71,7 @@ async fn add_label_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let result = provider.add_tag(&provider_ctx, thread_id, label_id).await;
+    let result = provider.add_label(&provider_ctx, thread_id, label_id).await;
 
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
@@ -97,7 +101,7 @@ pub async fn add_label(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
@@ -136,7 +140,7 @@ pub(crate) async fn add_label_with_provider(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
 
@@ -149,7 +153,7 @@ pub(crate) async fn add_label_with_provider(
     add_label_dispatch(ctx, provider, account_id, thread_id, label_id).await
 }
 
-/// Local DB mutation for remove-label: validate label exists and is a tag, then
+/// Local DB mutation for remove-label: validate label exists and is a label row, then
 /// delete from `thread_labels` (idempotent).
 ///
 /// Container labels (folders) are rejected - they use move operations, not add/remove.
@@ -157,7 +161,7 @@ pub(crate) async fn remove_label_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -177,7 +181,7 @@ pub(crate) async fn remove_label_local(
 
         if label_kind != "tag" {
             return Err(ActionError::invalid_state(
-                "container labels use move operations, not add/remove",
+                "folder rows use move operations, not add/remove",
             ));
         }
 
@@ -196,7 +200,7 @@ async fn remove_label_dispatch(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
@@ -208,7 +212,7 @@ async fn remove_label_dispatch(
     };
 
     let result = provider
-        .remove_tag(&provider_ctx, thread_id, label_id)
+        .remove_label(&provider_ctx, thread_id, label_id)
         .await;
 
     let outcome = match result {
@@ -239,7 +243,7 @@ pub async fn remove_label(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
@@ -280,7 +284,7 @@ pub(crate) async fn remove_label_with_provider(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &TagId,
+    label_id: &LabelId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
 
@@ -291,4 +295,12 @@ pub(crate) async fn remove_label_with_provider(
     }
 
     remove_label_dispatch(ctx, provider, account_id, thread_id, label_id).await
+}
+
+fn opposite_importance_label(label_id: &str) -> Option<&'static str> {
+    match label_id {
+        "importance:high" => Some("importance:low"),
+        "importance:low" => Some("importance:high"),
+        _ => None,
+    }
 }

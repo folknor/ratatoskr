@@ -250,11 +250,11 @@ pub(super) fn settings_row_container<'a>(
 }
 
 pub(super) fn setting_row<'a>(
-    label: &'a str,
+    display_text: &'a str,
     control: Element<'a, SettingsMessage>,
     on_press: SettingsMessage,
 ) -> RowBuilder<'a> {
-    setting_row_with_description(label, None, control, on_press)
+    setting_row_with_description(display_text, None, control, on_press)
 }
 
 /// `setting_row` with an optional secondary line beneath the label, matching
@@ -263,7 +263,7 @@ pub(super) fn setting_row<'a>(
 /// grow the row downward without moving the control). Without a description,
 /// the row stays at `SETTINGS_ROW_HEIGHT` and the control centres in it.
 pub(super) fn setting_row_with_description<'a>(
-    label: &'a str,
+    display_text: &'a str,
     description: Option<&'a str>,
     control: Element<'a, SettingsMessage>,
     on_press: SettingsMessage,
@@ -272,7 +272,7 @@ pub(super) fn setting_row_with_description<'a>(
         let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
             column![
                 row![
-                    container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                    container(text(display_text).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
                         .align_y(Alignment::Center)
                         .width(Length::Fill),
                     control,
@@ -295,7 +295,7 @@ pub(super) fn setting_row_with_description<'a>(
             .into()
         } else {
             row![
-                container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                container(text(display_text).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
                     .align_y(Alignment::Center)
                     .width(Length::Fill),
                 control,
@@ -322,7 +322,7 @@ pub(super) fn setting_row_with_description<'a>(
 }
 
 pub(super) fn toggle_row<'a>(
-    label: &'a str,
+    display_text: &'a str,
     description: &'a str,
     value: bool,
     on_toggle: impl Fn(bool) -> SettingsMessage + 'a,
@@ -338,7 +338,7 @@ pub(super) fn toggle_row<'a>(
         // content grows or the window narrows.
         let top = row![
             container(
-                text(label)
+                text(display_text)
                     .size(TEXT_LG)
                     .style(text::base)
                     .wrapping(text::Wrapping::None)
@@ -390,8 +390,8 @@ pub(super) fn toggle_row<'a>(
     })
 }
 
-pub(super) fn info_row(label: &str, value: &str) -> RowBuilder<'static> {
-    let label_owned = label.to_string();
+pub(super) fn info_row(display_text: &str, value: &str) -> RowBuilder<'static> {
+    let label_owned = display_text.to_string();
     let value_owned = value.to_string();
     Box::new(move |_pos| {
         let value_for_clipboard = value_owned.clone();
@@ -429,31 +429,31 @@ pub(super) fn info_row(label: &str, value: &str) -> RowBuilder<'static> {
 
 pub(super) fn input_row<'a>(
     id: &str,
-    label: &str,
+    display_text: &str,
     placeholder: &str,
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
 ) -> RowBuilder<'a> {
-    input_row_inner(id, label, placeholder, value, on_input, field, false)
+    input_row_inner(id, display_text, placeholder, value, on_input, field, false)
 }
 
 /// `input_row` with `secure(true)` on the underlying text input - for
 /// password-like fields.
 pub(super) fn input_row_secure<'a>(
     id: &str,
-    label: &str,
+    display_text: &str,
     placeholder: &str,
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
 ) -> RowBuilder<'a> {
-    input_row_inner(id, label, placeholder, value, on_input, field, true)
+    input_row_inner(id, display_text, placeholder, value, on_input, field, true)
 }
 
 fn input_row_inner<'a>(
     id: &str,
-    label: &str,
+    display_text: &str,
     placeholder: &str,
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
@@ -461,7 +461,7 @@ fn input_row_inner<'a>(
     secure: bool,
 ) -> RowBuilder<'a> {
     let id_owned = id.to_string();
-    let label_owned = label.to_string();
+    let label_owned = display_text.to_string();
     let placeholder_owned = placeholder.to_string();
     let value_owned = value.to_string();
     Box::new(move |position| {
@@ -526,7 +526,7 @@ pub(super) fn coming_soon_row<'a>(feature: &'a str) -> RowBuilder<'a> {
 // TODO(refactor): introduce a `SliderRow` builder struct - 9 args.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn slider_row<'a>(
-    label: &'a str,
+    display_text: &'a str,
     description: Option<&'a str>,
     icon: Option<iced::widget::Text<'a>>,
     range: std::ops::RangeInclusive<f32>,
@@ -565,7 +565,7 @@ pub(super) fn slider_row<'a>(
         // wraps to. Without a description the row stays at
         // `SETTINGS_ROW_HEIGHT`.
         let label_line = row![
-            container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+            container(text(display_text).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
                 .align_y(Alignment::Center)
                 .width(Length::FillPortion(1)),
             container(right_content)
@@ -702,7 +702,7 @@ where
 pub(super) fn editable_list<'a>(
     list_id: &'a str,
     items: &'a [EditableItem],
-    add_label: &'a str,
+    add_display_text: &'a str,
     drag_state: &'a Option<DragState>,
 ) -> RowBuilder<'a> {
     Box::new(move |outer_position| {
@@ -739,7 +739,7 @@ pub(super) fn editable_list<'a>(
             .on_press(SettingsMessage::ListGripPress(lid_grip, i))
             .interaction(iced::mouse::Interaction::Grab);
 
-            let label_slot = container(text(&item.label).size(TEXT_LG).style(text::base))
+            let label_slot = container(text(&item.display_text).size(TEXT_LG).style(text::base))
                 .align_y(Alignment::Center)
                 .width(Length::Fill);
 
@@ -838,7 +838,7 @@ pub(super) fn editable_list<'a>(
             container(
                 row![
                     icon::plus().size(ICON_MD).style(text::base),
-                    text(add_label)
+                    text(add_display_text)
                         .size(TEXT_LG)
                         .style(text::base)
                         .font(iced::Font {
@@ -908,7 +908,7 @@ pub(super) enum ActionKind {
 /// and a trailing icon indicating the action type. The entire row is the click
 /// target - no nested buttons. Follows the rule that section rows never contain buttons.
 pub(super) fn action_row<'a>(
-    label: &'a str,
+    display_text: &'a str,
     description: Option<&'a str>,
     icon: Option<iced::widget::Text<'a>>,
     kind: ActionKind,
@@ -937,7 +937,7 @@ pub(super) fn action_row<'a>(
         let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
             column![
                 row![
-                    container(text(label).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
+                    container(text(display_text).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
                         .align_y(Alignment::Center)
                         .width(Length::Fill),
                     container(trailing.size(ICON_XL).style(trailing_style))
@@ -962,7 +962,7 @@ pub(super) fn action_row<'a>(
             .into()
         } else {
             row![
-                container(text(label).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
+                container(text(display_text).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
                     .align_y(Alignment::Center)
                     .width(Length::Fill),
                 container(trailing.size(ICON_XL).style(trailing_style))

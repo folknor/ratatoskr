@@ -5,20 +5,20 @@ use bifrost_jmap::email::EmailGet;
 use bifrost_jmap::mailbox::{MailboxGet, MailboxRights, Role};
 
 use super::super::client::JmapClient;
-use super::super::mailbox_mapper::{MailboxInfo, map_mailbox_to_label};
+use super::super::mailbox_mapper::{MailboxInfo, map_mailbox_to_folder};
 use super::SyncCtx;
 
 // ---------------------------------------------------------------------------
 // Mailbox sync helpers
 // ---------------------------------------------------------------------------
 
-/// A row to be persisted into the `labels` table, including optional rights.
-struct MailboxLabelRow {
+/// A mailbox row to be persisted into the `labels` table, including optional rights.
+struct MailboxFolderRow {
     id: String,
     account_id: String,
     name: String,
-    label_type: String,
-    parent_label_id: Option<String>,
+    folder_type: String,
+    parent_folder_id: Option<String>,
     rights: Option<MailboxRights>,
     is_subscribed: Option<bool>,
 }
@@ -40,8 +40,8 @@ pub(crate) async fn sync_mailboxes(
 
     let aid = ctx.account_id.to_string();
 
-    // First pass: build raw JMAP mailbox ID → label ID map for parent resolution
-    let mut jmap_id_to_label_id: HashMap<String, String> = HashMap::new();
+    // First pass: build raw JMAP mailbox ID -> Ratatoskr folder ID map for parent resolution.
+    let mut jmap_id_to_folder_id: HashMap<String, String> = HashMap::new();
     for mb in &mailboxes {
         let Some(id) = mb.id() else { continue };
         let name = mb.name().unwrap_or("(unnamed)");
@@ -51,12 +51,12 @@ pub(crate) async fn sync_mailboxes(
         } else {
             Some(role_to_str(&role))
         };
-        let mapping = map_mailbox_to_label(role_str, id, name);
-        jmap_id_to_label_id.insert(id.to_string(), mapping.label_id);
+        let mapping = map_mailbox_to_folder(role_str, id, name);
+        jmap_id_to_folder_id.insert(id.to_string(), mapping.folder_id);
     }
 
-    // Second pass: build label rows with parent_label_id resolved + rights
-    let mut label_rows: Vec<MailboxLabelRow> = Vec::new();
+    // Second pass: build folder rows with parent folder IDs resolved + rights.
+    let mut folder_rows: Vec<MailboxFolderRow> = Vec::new();
 
     for mb in &mailboxes {
         let Some(id) = mb.id() else { continue };
@@ -78,32 +78,21 @@ pub(crate) async fn sync_mailboxes(
 
         mailbox_data.push((id.to_string(), role_str.map(String::from), name.to_string()));
 
-        let mapping = map_mailbox_to_label(role_str, id, name);
-        let parent_label_id = mb
+        let mapping = map_mailbox_to_folder(role_str, id, name);
+        let parent_folder_id = mb
             .parent_id()
-            .and_then(|pid| jmap_id_to_label_id.get(pid))
+            .and_then(|pid| jmap_id_to_folder_id.get(pid))
             .cloned();
-        label_rows.push(MailboxLabelRow {
-            id: mapping.label_id,
+        folder_rows.push(MailboxFolderRow {
+            id: mapping.folder_id,
             account_id: aid.clone(),
-            name: mapping.label_name,
-            label_type: mapping.label_type.to_string(),
-            parent_label_id,
+            name: mapping.folder_name,
+            folder_type: mapping.folder_type.to_string(),
+            parent_folder_id,
             rights: mb.my_rights().cloned(),
             is_subscribed: Some(mb.is_subscribed()),
         });
     }
-
-    // Also add pseudo-labels
-    label_rows.push(MailboxLabelRow {
-        id: "UNREAD".to_string(),
-        account_id: aid.clone(),
-        name: "Unread".to_string(),
-        label_type: "system".to_string(),
-        parent_label_id: None,
-        rights: None,
-        is_subscribed: None,
-    });
 
     // Persist labels to DB
     ctx.db
@@ -111,7 +100,7 @@ pub(crate) async fn sync_mailboxes(
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            let rows: Vec<LabelWriteRow> = label_rows
+            let rows: Vec<LabelWriteRow> = folder_rows
                 .iter()
                 .map(|row| {
                     let (
@@ -129,18 +118,14 @@ pub(crate) async fn sync_mailboxes(
                         id: row.id.clone(),
                         account_id: row.account_id.clone(),
                         name: row.name.clone(),
-                        label_type: row.label_type.clone(),
-                        label_kind: if row.id == "UNREAD" {
-                            "tag".to_string()
-                        } else {
-                            "container".to_string()
-                        },
+                        label_type: row.folder_type.clone(),
+                        label_kind: "container".to_string(),
                         color_bg: None,
                         color_fg: None,
                         sort_order: None,
                         imap_folder_path: None,
                         imap_special_use: None,
-                        parent_label_id: row.parent_label_id.clone(),
+                        parent_label_id: row.parent_folder_id.clone(),
                         right_read: r_read,
                         right_add: r_add,
                         right_remove: r_remove,

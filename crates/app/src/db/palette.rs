@@ -14,12 +14,12 @@ impl Db {
         self.with_conn_sync(|conn| rtsk::command_palette_queries::get_user_folders_for_palette(conn, account_id))
     }
 
-    /// All user labels for an account (same as folders for now).
+    /// All user labels for an account.
     pub fn get_user_labels_for_palette(
         &self,
         account_id: &str,
     ) -> Result<Vec<cmdk::OptionItem>, String> {
-        self.get_user_folders_for_palette(account_id)
+        self.with_conn_sync(|conn| rtsk::command_palette_queries::get_user_labels_for_palette(conn, account_id))
     }
 
     /// Labels currently applied to a specific thread.

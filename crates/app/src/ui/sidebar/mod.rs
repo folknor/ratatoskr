@@ -369,12 +369,12 @@ impl Component for Sidebar {
         scroll_content = scroll_content.push(widgets::section_break());
         scroll_content = scroll_content.push(smart_folders(self));
 
-        let has_account_tags = self.nav_state.as_ref().is_some_and(|ns| {
+        let has_account_labels = self.nav_state.as_ref().is_some_and(|ns| {
             ns.folders
                 .iter()
-                .any(|f| matches!(f.folder_kind, FolderKind::AccountTag))
+                .any(|f| matches!(f.folder_kind, FolderKind::AccountLabel))
         });
-        if show_labels && has_account_tags {
+        if show_labels && has_account_labels {
             scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
             scroll_content = scroll_content.push(labels_section(self));
         }

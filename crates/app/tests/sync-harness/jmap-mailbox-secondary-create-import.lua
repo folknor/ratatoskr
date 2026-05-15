@@ -115,7 +115,7 @@ harness.assert(label ~= nil, "created mailbox label missing")
 harness.assert_eq(label.account_id, account.account_id, "created mailbox label account")
 harness.assert_eq(label.name, "Secondary Scratch", "created mailbox label name")
 harness.assert_eq(label.label_kind, "container", "created mailbox label kind")
-harness.assert_eq(label.parent_label_id, nil, "created mailbox parent")
+harness.assert_eq(label.parent_folder_id, nil, "created mailbox parent")
 harness.assert_eq(label.is_subscribed, true, "created mailbox subscription flag")
 harness.assert_eq(after.label_count, before.label_count + 1, "label count after mailbox create")
 

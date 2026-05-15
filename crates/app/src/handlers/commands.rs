@@ -5,7 +5,7 @@ use iced::Task;
 use crate::command_dispatch;
 use crate::{APP_DATA_DIR, Message, ReadyApp};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use service::actions::{ActionOutcome, TagId};
+use service::actions::{ActionOutcome, LabelId};
 use rtsk::scope::ViewScope;
 
 #[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
@@ -991,7 +991,7 @@ fn undo_payload_to_ops(
     use service::actions::MailOperation;
     match payload {
         MailUndoPayload::Archive { account_id, thread_ids } => {
-            let inbox = TagId::from("INBOX");
+            let inbox = LabelId::from("INBOX");
             thread_ids
                 .iter()
                 .map(|tid| {
@@ -1013,7 +1013,7 @@ fn undo_payload_to_ops(
                     }
                 } else {
                     MailOperation::AddLabel {
-                        label_id: TagId::from("INBOX"),
+                        label_id: LabelId::from("INBOX"),
                     }
                 };
                 (account_id.clone(), tid.clone(), op)
@@ -1236,10 +1236,10 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
             .ok()
             .map(|ts| CommandArgs::Snooze { until: ts }),
         CommandId::NavigateToLabel => {
-            let (account_id, is_tag, label_id) = split_cross_account_id(&item.id)?;
-            if is_tag {
-                Some(CommandArgs::NavigateToTag {
-                    tag_id: label_id.into(),
+            let (account_id, is_label, label_id) = split_cross_account_id(&item.id)?;
+            if is_label {
+                Some(CommandArgs::NavigateToLabel {
+                    label_id: label_id.into(),
                     account_id,
                 })
             } else {
@@ -1267,8 +1267,8 @@ pub(crate) fn build_command_args_from_text(
     }
 }
 
-/// Split a cross-account encoded ID ("account_id:kind:label_id") into its parts.
-/// `kind` is "t" for tag, "f" for folder.
+/// Split a cross-account encoded ID ("account_id:kind:item_id") into its parts.
+/// `kind` is "l" for label, "f" for folder.
 fn split_cross_account_id(encoded: &str) -> Option<(String, bool, String)> {
     let mut parts = encoded.splitn(3, ':');
     let account_id = parts.next()?.to_string();
@@ -1277,5 +1277,5 @@ fn split_cross_account_id(encoded: &str) -> Option<(String, bool, String)> {
     if account_id.is_empty() || label_id.is_empty() {
         return None;
     }
-    Some((account_id, kind == "t", label_id))
+    Some((account_id, kind == "l" || kind == "t", label_id))
 }

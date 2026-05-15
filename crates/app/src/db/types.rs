@@ -67,9 +67,12 @@ pub struct Thread {
     pub message_count: i64,
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
     pub is_pinned: bool,
     pub is_muted: bool,
     pub has_attachments: bool,
+    pub label_color_bgs: Vec<String>,
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     /// Whether this is a local-only draft (not yet synced to server).
@@ -105,6 +108,8 @@ pub struct ThreadMessage {
     pub body_text: Option<String>,
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
     /// Whether this message was sent by the account owner.
     pub is_own_message: bool,
 }

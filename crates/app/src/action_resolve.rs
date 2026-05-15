@@ -8,7 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
-use service::actions::{ActionOutcome, FolderId, MailOperation, TagId};
+use service::actions::{ActionOutcome, FolderId, MailOperation, LabelId};
 
 // ── Intent ──────────────────────────────────────────────
 
@@ -24,8 +24,8 @@ pub enum MailActionIntent {
     TogglePin,
     ToggleMute,
     MoveToFolder { folder_id: FolderId },
-    AddLabel { label_id: TagId },
-    RemoveLabel { label_id: TagId },
+    AddLabel { label_id: LabelId },
+    RemoveLabel { label_id: LabelId },
     Snooze { until: i64 },
     Unsubscribe,
 }
@@ -307,12 +307,12 @@ pub enum MailUndoPayload {
     AddLabel {
         account_id: String,
         thread_ids: Vec<String>,
-        label_id: TagId,
+        label_id: LabelId,
     },
     RemoveLabel {
         account_id: String,
         thread_ids: Vec<String>,
-        label_id: TagId,
+        label_id: LabelId,
     },
     Snooze {
         account_id: String,

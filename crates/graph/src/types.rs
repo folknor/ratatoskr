@@ -29,6 +29,7 @@ pub struct GraphMessage {
     pub has_attachments: Option<bool>,
     pub parent_folder_id: Option<String>,
     pub categories: Option<Vec<String>>,
+    pub importance: Option<String>,
     pub flag: Option<GraphFlag>,
     pub inference_classification: Option<String>,
     pub is_read_receipt_requested: Option<bool>,
@@ -182,6 +183,8 @@ pub struct GraphMessagePatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub importance: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
 }
 
@@ -224,6 +227,8 @@ inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMe
 /// GUID for Exchange reaction extended properties.
 pub const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}";
 
+pub const LAST_VERB_EXECUTED_PROPERTY_ID: &str = "Integer 0x1081";
+
 /// `$expand` clause to fetch Exchange reaction extended properties alongside messages.
 ///
 /// - `OwnerReactionType` - the authenticated user's reaction emoji (string)
@@ -231,7 +236,8 @@ pub const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}";
 pub const REACTIONS_EXPAND: &str = "\
 singleValueExtendedProperties(\
 $filter=id eq 'String {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name OwnerReactionType' \
-or id eq 'Integer {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name ReactionsCount'\
+or id eq 'Integer {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name ReactionsCount' \
+or id eq 'Integer 0x1081'\
 )";
 
 // ── Large attachment upload session types ─────────────────

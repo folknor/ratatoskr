@@ -27,7 +27,7 @@ pub enum AutoAdvanceDirection {
 /// A single typeahead suggestion item.
 #[derive(Debug, Clone)]
 pub struct TypeaheadItem {
-    pub label: String,
+    pub display_text: String,
     pub detail: Option<String>,
     pub insert_value: String,
 }
@@ -148,8 +148,8 @@ pub enum ThreadListEvent {
 /// What the thread list is currently displaying.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadListMode {
-    /// Browsing a folder or label - threads loaded from scoped DB query.
-    Folder,
+    /// Browsing a sidebar scope - threads loaded from scoped DB query.
+    Scope,
     /// Displaying search results - threads came from the unified search pipeline.
     Search,
 }
@@ -186,7 +186,7 @@ impl ThreadList {
             last_selected_anchor: None,
             folder_name: "Inbox".to_string(),
             scope_name: "All".to_string(),
-            mode: ThreadListMode::Folder,
+            mode: ThreadListMode::Scope,
             search_query: String::new(),
             auto_advance_direction: AutoAdvanceDirection::Next,
             typeahead: TypeaheadState::default(),
@@ -521,7 +521,7 @@ impl Component for ThreadList {
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
             let (title, subtitle) = match self.mode {
-                ThreadListMode::Folder => ("No conversations", "This folder is empty"),
+                ThreadListMode::Scope => ("No conversations", "This view is empty"),
                 ThreadListMode::Search => ("No results", "Try a different search"),
             };
             widgets::empty_placeholder(title, subtitle)
@@ -575,7 +575,7 @@ fn thread_list_header<'a>(
             .into()
     } else {
         match mode {
-            ThreadListMode::Folder => row![
+            ThreadListMode::Scope => row![
                 text(folder_name)
                     .size(TEXT_SM)
                     .style(theme::TextClass::Tertiary.style()),
@@ -619,7 +619,7 @@ fn thread_list_header<'a>(
             } else {
                 theme::ButtonClass::Action
             };
-            let mut item_row = row![text(&item.label).size(TEXT_SM),]
+            let mut item_row = row![text(&item.display_text).size(TEXT_SM),]
                 .spacing(SPACE_XS)
                 .align_y(iced::Alignment::Center);
             if let Some(ref detail) = item.detail {
@@ -655,7 +655,11 @@ fn thread_list_header<'a>(
 fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {
-        let label_colors: &[(Color,)] = &[];
+        let label_colors: Vec<(Color,)> = thread
+            .label_color_bgs
+            .iter()
+            .map(|color| (theme::hex_to_color(color),))
+            .collect();
         // Look up BIMI logo for the sender's domain.
         let bimi_logo = thread
             .from_address
@@ -673,7 +677,7 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             thread,
             i,
             state.is_selected(i),
-            label_colors,
+            &label_colors,
             bimi_logo.as_deref(),
             ThreadListMessage::SelectThread,
         ));

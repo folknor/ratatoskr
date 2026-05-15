@@ -30,6 +30,7 @@ fn persist_labels(
 
     let rows: Vec<LabelWriteRow> = labels
         .iter()
+        .filter(|label| !common::label_flags::is_message_state_label_id(&label.id))
         .map(|label| {
             let color_bg = label.color.as_ref().map(|c| c.background_color.clone());
             let color_fg = label.color.as_ref().map(|c| c.text_color.clone());

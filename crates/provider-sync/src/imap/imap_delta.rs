@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use super::client;
 use super::connection::connect;
 use super::convert::{ConvertedMessage, convert_imap_message};
-use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
+use super::folder_mapper::{get_syncable_folders, map_folder_to_folder};
 use super::sync_pipeline;
 use super::sync_pipeline::{CHUNK_SIZE, store_chunk};
 use super::types::{DeltaCheckRequest, DeltaCheckResult, ImapConfig};
@@ -125,13 +125,13 @@ pub async fn imap_delta_sync(
             tokio::time::sleep(std::time::Duration::from_millis(CIRCUIT_BREAKER_DELAY_MS)).await;
         }
 
-        let mapping = map_folder_to_label(folder);
+        let mapping = map_folder_to_folder(folder);
         match fetch_folder_uids(
             config,
             cancellation_token,
             account_id,
             folder,
-            &mapping.label_id,
+            &mapping.folder_id,
             &since_date,
             &read_db,
             body_store,
@@ -186,7 +186,7 @@ pub async fn imap_delta_sync(
             if cancellation_token.is_cancelled() {
                 return Err("sync cancelled".to_string());
             }
-            let mapping = map_folder_to_label(folder);
+            let mapping = map_folder_to_folder(folder);
             let saved = match state_map.get(&folder.raw_path) {
                 Some(s) => s,
                 None => continue,
@@ -208,7 +208,7 @@ pub async fn imap_delta_sync(
                 cancellation_token,
                 account_id,
                 folder,
-                &mapping.label_id,
+                &mapping.folder_id,
                 saved,
                 delta,
                 days_back,
@@ -521,7 +521,7 @@ async fn fetch_folder_uids(
     cancellation_token: &CancellationToken,
     account_id: &str,
     folder: &super::types::ImapFolder,
-    folder_label_id: &str,
+    folder_id: &str,
     since_date: &str,
     db: &ReadDbState,
     body_store: &BodyStoreWriteState,
@@ -559,7 +559,7 @@ async fn fetch_folder_uids(
         cancellation_token,
         account_id,
         folder,
-        folder_label_id,
+        folder_id,
         &sr.uids,
         db,
         body_store,
@@ -592,7 +592,7 @@ async fn fetch_uids_on_session(
     cancellation_token: &CancellationToken,
     account_id: &str,
     folder: &super::types::ImapFolder,
-    folder_label_id: &str,
+    folder_id: &str,
     uids: &[u32],
     db: &ReadDbState,
     body_store: &BodyStoreWriteState,
@@ -625,7 +625,7 @@ async fn fetch_uids_on_session(
             if msg.uid > last_uid {
                 last_uid = msg.uid;
             }
-            converted.push(convert_imap_message(msg, account_id, folder_label_id));
+            converted.push(convert_imap_message(msg, account_id, folder_id));
         }
 
         if !converted.is_empty() {
@@ -662,7 +662,7 @@ async fn process_folder_delta(
     cancellation_token: &CancellationToken,
     account_id: &str,
     folder: &super::types::ImapFolder,
-    folder_label_id: &str,
+    folder_id: &str,
     saved: &sync_pipeline::FolderSyncState,
     delta: &DeltaCheckResult,
     days_back: i64,
@@ -793,7 +793,7 @@ async fn process_folder_delta(
             cancellation_token,
             account_id,
             folder,
-            folder_label_id,
+            folder_id,
             &sr.uids,
             db,
             body_store,
@@ -935,7 +935,7 @@ async fn process_folder_delta(
         cancellation_token,
         account_id,
         folder,
-        folder_label_id,
+        folder_id,
         &delta.new_uids,
         db,
         body_store,

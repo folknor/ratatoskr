@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use super::error::ProviderError;
-use super::typed_ids::{FolderId, TagId};
+use super::typed_ids::{FolderId, LabelId};
 use super::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedMessage, ProviderProfile, ProviderTestResult,
@@ -58,17 +58,17 @@ pub trait ProviderOps: Send + Sync {
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError>;
-    async fn add_tag(
+    async fn add_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError>;
-    async fn remove_tag(
+    async fn remove_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError>;
 
     /// Set the server-side "MDN already sent" marker for a single

@@ -21,13 +21,13 @@ pub async fn sync_folders_public(
 async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
     let mut resolved = HashMap::new();
     let me = client.api_path_prefix();
-    for (alias, label_id, label_name) in FolderMap::well_known_aliases() {
+    for (alias, folder_id, folder_name) in FolderMap::well_known_aliases() {
         match client
             .get_json::<GraphMailFolder>(&format!("{me}/mailFolders/{alias}"), ctx.db)
             .await
         {
             Ok(folder) => {
-                resolved.insert(folder.id, (label_id, label_name));
+                resolved.insert(folder.id, (folder_id, folder_name));
             }
             Err(_) => {
                 log::debug!("Well-known folder '{alias}' not found, skipping");
@@ -44,21 +44,21 @@ async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<Fol
 async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
 
-    let label_rows: Vec<LabelWriteRow> = folder_map
+    let mut label_rows: Vec<LabelWriteRow> = folder_map
         .all_mappings()
         .map(|m| {
             LabelWriteRow {
-                id: m.label_id.clone(),
+                id: m.folder_id.clone(),
                 account_id: aid.clone(),
-                name: m.label_name.clone(),
-                label_type: m.label_type.to_string(),
+                name: m.folder_name.clone(),
+                label_type: m.folder_type.to_string(),
                 label_kind: "container".to_string(),
                 color_bg: None,
                 color_fg: None,
                 sort_order: None,
                 imap_folder_path: None,
                 imap_special_use: None,
-                parent_label_id: m.parent_label_id.clone(),
+                parent_label_id: m.parent_folder_id.clone(),
                 right_read: None,
                 right_add: None,
                 right_remove: None,
@@ -71,30 +71,8 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
                 is_subscribed: None,
             }
         })
-        .chain(std::iter::once(LabelWriteRow {
-            id: "UNREAD".to_string(),
-            account_id: aid.clone(),
-            name: "Unread".to_string(),
-            label_type: "system".to_string(),
-            label_kind: "tag".to_string(),
-            color_bg: None,
-            color_fg: None,
-            sort_order: None,
-            imap_folder_path: None,
-            imap_special_use: None,
-            parent_label_id: None,
-            right_read: None,
-            right_add: None,
-            right_remove: None,
-            right_set_seen: None,
-            right_set_keywords: None,
-            right_create_child: None,
-            right_rename: None,
-            right_delete: None,
-            right_submit: None,
-            is_subscribed: None,
-        }))
         .collect();
+    label_rows.extend(importance_label_rows(&aid));
 
     ctx.db
         .with_conn(move |conn| {
@@ -106,6 +84,38 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
             Ok(())
         })
         .await
+}
+
+fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
+    [
+        ("importance:high", "High importance", 10_000),
+        ("importance:low", "Low importance", 10_001),
+    ]
+    .into_iter()
+    .map(|(id, name, sort_order)| LabelWriteRow {
+        id: id.to_string(),
+        account_id: account_id.to_string(),
+        name: name.to_string(),
+        label_type: "system".to_string(),
+        label_kind: "tag".to_string(),
+        color_bg: None,
+        color_fg: None,
+        sort_order: Some(sort_order),
+        imap_folder_path: None,
+        imap_special_use: None,
+        parent_label_id: None,
+        right_read: None,
+        right_add: None,
+        right_remove: None,
+        right_set_seen: None,
+        right_set_keywords: None,
+        right_create_child: None,
+        right_rename: None,
+        right_delete: None,
+        right_submit: None,
+        is_subscribed: None,
+    })
+    .collect()
 }
 
 async fn fetch_all_folders(

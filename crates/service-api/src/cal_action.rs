@@ -29,7 +29,7 @@
 //! event id where applicable (`UpdateEvent` / `DeleteEvent`).
 //!
 //! `account_id` is `String`s; the mail-side typed-newtype mirrors
-//! (`WireFolderId`, `WireTagId`) have no analogue here because
+//! (`WireFolderId`, `WireLabelId`) have no analogue here because
 //! calendar refs are opaque provider strings rather than enum-able
 //! ids.
 

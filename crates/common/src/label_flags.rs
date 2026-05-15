@@ -1,8 +1,8 @@
 pub fn assemble_labels<I, J>(
     primary_labels: I,
     supplemental_labels: J,
-    is_read: bool,
-    is_starred: bool,
+    _is_read: bool,
+    _is_starred: bool,
     is_draft: bool,
 ) -> Vec<String>
 where
@@ -12,12 +12,6 @@ where
     let mut labels: Vec<String> = primary_labels.into_iter().collect();
     labels.extend(supplemental_labels);
 
-    if !is_read {
-        labels.push("UNREAD".to_string());
-    }
-    if is_starred {
-        labels.push("STARRED".to_string());
-    }
     if is_draft && !labels.iter().any(|label| label == "DRAFT") {
         labels.push("DRAFT".to_string());
     }
@@ -35,12 +29,27 @@ where
         .collect()
 }
 
+pub fn is_message_state_label_id(label_id: &str) -> bool {
+    matches!(label_id, "UNREAD" | "STARRED")
+}
+
+pub fn is_reserved_imap_system_keyword(keyword: &str) -> bool {
+    matches!(
+        keyword.to_ascii_lowercase().as_str(),
+        "$forwarded" | "$mdnsent" | "$junk" | "$notjunk" | "$phishing"
+    )
+}
+
+pub fn is_user_visible_keyword(keyword: &str) -> bool {
+    !keyword.starts_with('$') && !is_reserved_imap_system_keyword(keyword)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{assemble_labels, prefixed_labels};
 
     #[test]
-    fn assembles_base_and_status_labels() {
+    fn assembles_base_labels_without_message_state() {
         let labels = assemble_labels(
             vec!["INBOX".to_string()],
             vec!["cat:Work".to_string()],
@@ -50,12 +59,7 @@ mod tests {
         );
         assert_eq!(
             labels,
-            vec![
-                "INBOX".to_string(),
-                "cat:Work".to_string(),
-                "UNREAD".to_string(),
-                "STARRED".to_string(),
-            ]
+            vec!["INBOX".to_string(), "cat:Work".to_string()]
         );
     }
 

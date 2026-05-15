@@ -306,8 +306,8 @@ fn execute_count_query(
         .map_err(|e| e.to_string())
 }
 
-/// Label-based folder IDs whose unread count comes from `thread_labels`.
-const LABEL_FOLDER_IDS: &[&str] = &[
+/// System folder IDs whose unread count comes from `thread_labels`.
+const SYSTEM_FOLDER_IDS: &[&str] = &[
     "INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "archive", "all-mail",
 ];
 
@@ -320,7 +320,7 @@ pub fn get_unread_counts_by_folder(
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<Vec<FolderUnreadCount>, String> {
-    let mut results = get_label_folder_unread_counts(conn, scope)?;
+    let mut results = get_system_folder_unread_counts(conn, scope)?;
     results.push(get_flag_folder_unread_count(conn, scope, "STARRED")?);
     results.push(get_flag_folder_unread_count(conn, scope, "SNOOZED")?);
 
@@ -348,7 +348,7 @@ pub fn get_unread_counts_by_folder_and_account(
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<Vec<FolderAccountUnreadCount>, String> {
-    let mut results = get_label_folder_unread_counts_by_account(conn, scope)?;
+    let mut results = get_system_folder_unread_counts_by_account(conn, scope)?;
     let starred = get_flag_folder_unread_by_account(conn, scope, "STARRED")?;
     let snoozed = get_flag_folder_unread_by_account(conn, scope, "SNOOZED")?;
     results.extend(starred);
@@ -356,13 +356,13 @@ pub fn get_unread_counts_by_folder_and_account(
     Ok(results)
 }
 
-/// Unread counts for label-based folders (INBOX, SENT, DRAFT, TRASH, SPAM).
-fn get_label_folder_unread_counts(
+/// Unread counts for system folders (INBOX, SENT, DRAFT, TRASH, SPAM).
+fn get_system_folder_unread_counts(
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<Vec<FolderUnreadCount>, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
-    let placeholders: Vec<String> = LABEL_FOLDER_IDS
+    let placeholders: Vec<String> = SYSTEM_FOLDER_IDS
         .iter()
         .enumerate()
         .map(|(i, _)| format!("?{}", scope_params.len() + 1 + i))
@@ -379,7 +379,7 @@ fn get_label_folder_unread_counts(
     );
 
     let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
-    for id in LABEL_FOLDER_IDS {
+    for id in SYSTEM_FOLDER_IDS {
         all_params.push(Box::new((*id).to_owned()));
     }
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -420,13 +420,13 @@ fn get_flag_folder_unread_count(
     })
 }
 
-/// Label-based folder unread counts grouped by account.
-fn get_label_folder_unread_counts_by_account(
+/// System folder unread counts grouped by account.
+fn get_system_folder_unread_counts_by_account(
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<Vec<FolderAccountUnreadCount>, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
-    let placeholders: Vec<String> = LABEL_FOLDER_IDS
+    let placeholders: Vec<String> = SYSTEM_FOLDER_IDS
         .iter()
         .enumerate()
         .map(|(i, _)| format!("?{}", scope_params.len() + 1 + i))
@@ -443,7 +443,7 @@ fn get_label_folder_unread_counts_by_account(
     );
 
     let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
-    for id in LABEL_FOLDER_IDS {
+    for id in SYSTEM_FOLDER_IDS {
         all_params.push(Box::new((*id).to_owned()));
     }
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =

@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension};
 use common::error::ProviderError;
 use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, TagId};
+use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
@@ -198,7 +198,7 @@ fn uid_set(uids: &[u32]) -> String {
 
 fn imap_message_to_provider_message(
     account_id: &str,
-    folder_label_id: &str,
+    folder_id: &str,
     msg: &super::types::ImapMessage,
 ) -> ProviderParsedMessage {
     let attachments = msg
@@ -213,13 +213,7 @@ fn imap_message_to_provider_message(
             is_inline: att.is_inline,
         })
         .collect::<Vec<_>>();
-    let mut label_ids = vec![folder_label_id.to_string()];
-    if !msg.is_read {
-        label_ids.push("UNREAD".to_string());
-    }
-    if msg.is_starred {
-        label_ids.push("STARRED".to_string());
-    }
+    let mut label_ids = vec![folder_id.to_string()];
     if msg.is_draft {
         label_ids.push("DRAFT".to_string());
     }
@@ -353,11 +347,11 @@ async fn set_keyword_batched(
     config: &super::types::ImapConfig,
     ctx: &ActionProviderCtx<'_>,
     thread_id: &str,
-    tag_id: &str,
+    label_id: &str,
     flag_op: &str,
 ) -> Result<(), ProviderError> {
-    let Some(keyword) = tag_id.strip_prefix("kw:") else {
-        log::debug!("IMAP: keyword op is a no-op for non-keyword tag {tag_id}");
+    let Some(keyword) = label_id.strip_prefix("kw:") else {
+        log::debug!("IMAP: keyword op is a no-op for non-keyword label {label_id}");
         return Ok(());
     };
 
@@ -701,24 +695,24 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
-    async fn add_tag(
+    async fn add_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
         let config = self.load_config(ctx.db, ctx.account_id).await?;
-        set_keyword_batched(&config, ctx, thread_id, tag_id.as_str(), "+FLAGS").await
+        set_keyword_batched(&config, ctx, thread_id, label_id.as_str(), "+FLAGS").await
     }
 
-    async fn remove_tag(
+    async fn remove_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &TagId,
+        label_id: &LabelId,
     ) -> Result<(), ProviderError> {
         let config = self.load_config(ctx.db, ctx.account_id).await?;
-        set_keyword_batched(&config, ctx, thread_id, tag_id.as_str(), "-FLAGS").await
+        set_keyword_batched(&config, ctx, thread_id, label_id.as_str(), "-FLAGS").await
     }
 
     // ── Send + Drafts ───────────────────────────────────────────────────

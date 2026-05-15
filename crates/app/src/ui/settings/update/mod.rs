@@ -551,7 +551,7 @@ impl Settings {
             SettingsMessage::ListAdd(list_id) => {
                 let items = self.list_items_mut(&list_id);
                 items.push(EditableItem {
-                    label: format!("New item {}", items.len() + 1),
+                    display_text: format!("New item {}", items.len() + 1),
                     enabled: None,
                 });
             }

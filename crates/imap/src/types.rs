@@ -67,6 +67,8 @@ pub struct ImapMessage {
     pub date: i64,
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
     pub is_draft: bool,
     pub body_html: Option<String>,
     pub body_text: Option<String>,
@@ -165,6 +167,8 @@ pub struct FlagChange {
     pub uid: u32,
     pub is_read: bool,
     pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
     /// Custom keywords (non-standard flags like `$label1`, `project-alpha`).
     /// Empty when the server doesn't support custom keywords or none are set.
     #[serde(default)]
