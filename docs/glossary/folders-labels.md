@@ -115,6 +115,17 @@ Some provider primitives are per-message booleans. They drive inline glyphs or f
 
 `is_replied` and `is_forwarded` are independent: both can be true on the same message (you replied, then later forwarded). Thread-level rendering ORs across messages.
 
+### Thread-aggregate semantics
+
+Thread-level state has two sources of truth, depending on what is being aggregated:
+
+- **Per-message booleans** (`is_read`, `is_starred`, `is_replied`, `is_forwarded`) aggregate via `MAX()` across the thread's messages. The `query_thread_state_decorations` helper (`crates/db/src/db/queries_extra/thread_detail.rs`) computes this on read; the `recompute_thread_read_starred` helper writes it back to the `threads` table. Adding a per-message boolean means: schema column + parser extraction + aggregation in both helpers.
+- **Folder / label memberships** live in `thread_labels` and are written differently per provider:
+    - **Gmail and IMAP** sync the entire thread's message metadata before writing the aggregate. `crates/sync/src/pipeline.rs::store_thread_groups_to_db` computes the union of all `label_ids` across the thread's messages and calls `replace_thread_labels`. Safe destructive replace because the input is the full union.
+    - **Graph and JMAP** receive partial delta pages (only changed messages, not the full thread). They call `merge_thread_labels` instead, which inserts new labels but never removes. This preserves sibling-message memberships that the delta page does not mention. Trade-off: when another client moves the thread (so the source folder is gone from every message but the delta only tells us what folder the message is in *now*), the stale source-folder row is not cleaned up. Tracked in `TODO.md` as the "cross-client folder/label moves" item.
+
+Same-client moves are correct under both schemes because the action service updates `thread_labels` locally (removing the source folder, adding the target) before dispatching to the provider.
+
 ---
 
 ## Identity
@@ -162,6 +173,15 @@ The Sent / Drafts / Archive / Trash / Spam aggregates are straightforward unions
 
 The "All Mail" universal item is single-account only - it shows literally every thread for one account (including drafts, sent, trash, spam) and has no meaningful cross-account aggregate.
 
+**Query routing.** Most universal folders are queried via `get_threads_scoped` with the canonical label_id (`INBOX`, `SENT`, `DRAFT`, `TRASH`, `SPAM`, `archive`), which joins `thread_labels`. Three are routed differently because their underlying signal is a boolean column on `threads`, not a `thread_labels` row:
+
+- **Starred** dispatches to `get_starred_threads` (queries `threads.is_starred = 1`).
+- **Snoozed** dispatches to `get_snoozed_threads` (queries `threads.is_snoozed = 1`).
+- **All Mail** intercepts to a `None` label_id so the no-filter scoped query runs and returns every thread for the account.
+- **Inbox** uses the strict `INBOX` label_id in single-account scope and applies `BROAD_INBOX_EXCLUSIONS` in All-Accounts scope.
+
+The dispatch happens in `crates/app/src/helpers.rs::load_threads_scoped` and `thread_query_label_for_selection`. Shared-mailbox views apply the same boolean-column routing for Starred and Snoozed via `get_threads_for_shared_mailbox`. The `STARRED`, `SNOOZED`, and `all-mail` IDs in `SYSTEM_FOLDER_ROLES` are virtual navigation handles only - no `labels` row exists for them and no `thread_labels` row ever references them.
+
 ---
 
 ## Operations
@@ -179,6 +199,17 @@ Adding or removing a label. Local DB: insert or delete a row in `thread_labels`.
 ### Message-state toggles (read, starred, replied, forwarded)
 
 Not folder or label operations. Read and starred have UI controls. Replied and forwarded are derived from outgoing sends, not toggled directly. The action service routes the change to the appropriate provider primitive per the per-provider mapping above.
+
+**Replied / forwarded write semantics on send.** When the user sends a Reply or Forward from Ratatoskr, two writes happen, in order:
+
+1. **Local mark.** The action service flips `messages.is_replied` (or `is_forwarded`) on the source message immediately via `service::send::mark_send_intent_local`. This is authoritative: the glyph appears in the UI on the next thread-list decoration, no sync round-trip required.
+2. **Provider write-back, best-effort.** The provider's `mark_send_intent` is then called with the source message's local DB ID and the `SendIntent`. Per provider:
+    - **IMAP**: `STORE +FLAGS (\Answered)` for Reply, `STORE +FLAGS ($Forwarded)` for Forward.
+    - **JMAP**: `EmailSet` keyword `$answered` (Reply) or `$forwarded` (Forward).
+    - **Graph**: PATCH `singleValueExtendedProperties` for `PR_LAST_VERB_EXECUTED` (`102` reply, `104` forward).
+    - **Gmail**: no explicit write; the next sync ingests the SENT message, the parser derives `is_replied` from `SENT` membership + `In-Reply-To` / `References`, and the thread aggregate picks it up.
+
+If the provider write fails (e.g. Graph rejecting the extended-property PATCH on certain message states), the failure is logged at warn level and the local state remains the source of truth. Other clients viewing the same mailbox will not see the bit until either the user replies/forwards again from a different client, or a future reconciliation pass syncs the local state out.
 
 ### Provider dispatch
 
@@ -202,7 +233,11 @@ All folders and labels for all accounts. Key columns:
 
 ### `thread_labels` table
 
-Junction: `(account_id, thread_id, label_id)`. For folders: "this thread is in this folder." For labels: "this thread has this label."
+Junction: `(account_id, thread_id, label_id)`. For folders: "this thread is in this folder." For labels: "this thread has this label." This is a thread-level aggregate: a row exists when at least one message in the thread carries the membership.
+
+### `message_keywords` table
+
+Per-message keyword membership for IMAP. Columns: `(account_id, message_id, keyword, label_id)` with PK `(account_id, message_id, label_id)`. The thread-level `kw:%` rows in `thread_labels` are derived from the union of `message_keywords` rows for messages in the thread - this is what makes IMAP keyword removal observable (the previous design had no per-message store, so removing a keyword on the server could not subtract from the thread aggregate). Other providers do not currently have an equivalent per-message membership table; folder/category aggregates on Graph and JMAP are reconciled by partial-delta merge instead.
 
 ### `threads` table - message-state columns
 
