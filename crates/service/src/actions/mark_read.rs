@@ -59,7 +59,12 @@ async fn mark_read_dispatch(
     };
 
     let outcome = match provider.mark_read(&provider_ctx, thread_id, read).await {
-        Ok(()) => ActionOutcome::Success,
+        Ok(()) => {
+            if read {
+                super::mdn_send::send_mdn_responses(ctx, provider, account_id, thread_id).await;
+            }
+            ActionOutcome::Success
+        }
         Err(e) => {
             let msg = e.to_string();
             ActionOutcome::LocalOnly {

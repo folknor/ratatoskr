@@ -13,6 +13,7 @@ mod folder;
 mod label;
 mod log;
 mod mark_read;
+mod mdn_send;
 mod move_to_folder;
 mod mute;
 mod operation;
