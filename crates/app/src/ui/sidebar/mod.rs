@@ -14,6 +14,7 @@ use rtsk::scope::ViewScope;
 use types::{FolderId, SidebarSelection};
 
 mod chats;
+mod folders;
 mod labels;
 mod nav;
 mod pinned_searches;
@@ -368,12 +369,12 @@ impl Component for Sidebar {
         scroll_content = scroll_content.push(widgets::section_break());
         scroll_content = scroll_content.push(smart_folders(self));
 
-        let has_account_destinations = self.nav_state.as_ref().is_some_and(|ns| {
+        let has_account_tags = self.nav_state.as_ref().is_some_and(|ns| {
             ns.folders
                 .iter()
-                .any(|f| matches!(f.folder_kind, FolderKind::AccountLabel | FolderKind::AccountTag))
+                .any(|f| matches!(f.folder_kind, FolderKind::AccountTag))
         });
-        if show_labels && has_account_destinations {
+        if show_labels && has_account_tags {
             scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
             scroll_content = scroll_content.push(labels_section(self));
         }

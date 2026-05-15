@@ -40,6 +40,44 @@ fn account_scope_clause(
     }
 }
 
+/// Label IDs that, when present on a thread, exclude it from the broad
+/// All-Accounts Inbox view. Drafts, trashed mail, sent mail, archived
+/// mail, and spam are intentionally hidden from the unified Inbox; user
+/// folders, starred-but-archived, and any unfoldered mail stay in.
+const BROAD_INBOX_EXCLUSIONS: &[&str] = &["DRAFT", "TRASH", "SENT", "archive", "SPAM"];
+
+/// In All-Accounts scope, "Inbox" means "everything that isn't a draft,
+/// trashed, sent, archived, or spam" - not just rows tagged with the
+/// `INBOX` label. Single- and multi-account scopes keep the strict
+/// label match.
+fn is_all_accounts_inbox(scope: &AccountScope, label_id: Option<&str>) -> bool {
+    matches!(scope, AccountScope::All) && label_id == Some("INBOX")
+}
+
+/// SQL clause that excludes threads with any of the broad-inbox exclusion
+/// labels. Placeholders start at `base_idx`. Returns `(clause, params)`.
+fn broad_inbox_exclusion_clause(
+    base_idx: usize,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let placeholders: Vec<String> = BROAD_INBOX_EXCLUSIONS
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", base_idx + i))
+        .collect();
+    let clause = format!(
+        "NOT EXISTS (SELECT 1 FROM thread_labels tl_excl
+                     WHERE tl_excl.account_id = t.account_id
+                       AND tl_excl.thread_id = t.id
+                       AND tl_excl.label_id IN ({}))",
+        placeholders.join(", ")
+    );
+    let params: Vec<Box<dyn rusqlite::types::ToSql>> = BROAD_INBOX_EXCLUSIONS
+        .iter()
+        .map(|id| Box::new((*id).to_owned()) as _)
+        .collect();
+    (clause, params)
+}
+
 /// Like `get_threads` but accepts an `AccountScope` to query across accounts.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_scoped(
@@ -57,6 +95,33 @@ pub fn get_threads_scoped(
 
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     let next_idx = scope_params.len() + 1;
+
+    if is_all_accounts_inbox(scope, label_id) {
+        let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
+        let limit_idx = next_idx + excl_params.len();
+        let sql = format!(
+            "SELECT t.*, m.from_name, m.from_address FROM threads t
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+               AND {excl_clause}
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
+            offset_idx = limit_idx + 1,
+        );
+        let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
+        all_params.extend(excl_params);
+        all_params.push(Box::new(lim));
+        all_params.push(Box::new(off));
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            all_params.iter().map(AsRef::as_ref).collect();
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        return stmt
+            .query_map(param_refs.as_slice(), DbThread::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string());
+    }
 
     let result = if let Some(lid) = label_id {
         let sql = format!(
@@ -146,6 +211,22 @@ pub fn get_thread_count_scoped(
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     let next_idx = scope_params.len() + 1;
 
+    if is_all_accounts_inbox(scope, label_id) {
+        let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
+        let sql = format!(
+            "SELECT COUNT(*) AS cnt FROM threads t
+             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+               AND {excl_clause}"
+        );
+        let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
+        all_params.extend(excl_params);
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            all_params.iter().map(AsRef::as_ref).collect();
+        return conn
+            .query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
+            .map_err(|e| e.to_string());
+    }
+
     if let Some(lid) = label_id {
         let sql = format!(
             "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) AS cnt FROM threads t
@@ -163,9 +244,16 @@ pub fn get_thread_count_scoped(
     }
 }
 
-/// Like `get_unread_count` but accepts an `AccountScope`.
+/// Like `get_unread_count` but accepts an `AccountScope`. Returns the
+/// unread count for the scope's Inbox view - the narrow `INBOX`-labelled
+/// thread count in Single/Multiple scopes, the broad "everything except
+/// drafts/trash/sent/archive/spam" count in All.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_count_scoped(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
+    if matches!(scope, AccountScope::All) {
+        return broad_inbox_unread_count(conn, scope);
+    }
+
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
 
     let sql = format!(
@@ -176,6 +264,28 @@ pub fn get_unread_count_scoped(conn: &Connection, scope: &AccountScope) -> Resul
     );
 
     execute_count_query(conn, &sql, scope_params, None)
+}
+
+/// Unread count for the broad All-Accounts Inbox view: everything except
+/// `BROAD_INBOX_EXCLUSIONS`.
+fn broad_inbox_unread_count(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
+    let (scope_clause, scope_params) = account_scope_clause(scope, 1);
+    let next_idx = scope_params.len() + 1;
+    let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
+
+    let sql = format!(
+        "SELECT COUNT(*) AS cnt FROM threads t
+         WHERE {scope_clause} AND t.is_read = 0
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND {excl_clause}"
+    );
+
+    let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
+    all_params.extend(excl_params);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        all_params.iter().map(AsRef::as_ref).collect();
+    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
+        .map_err(|e| e.to_string())
 }
 
 fn execute_count_query(
@@ -197,7 +307,9 @@ fn execute_count_query(
 }
 
 /// Label-based folder IDs whose unread count comes from `thread_labels`.
-const LABEL_FOLDER_IDS: &[&str] = &["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "all-mail"];
+const LABEL_FOLDER_IDS: &[&str] = &[
+    "INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "archive", "all-mail",
+];
 
 /// Return unread counts for each universal folder, aggregated across `scope`.
 ///
@@ -211,6 +323,22 @@ pub fn get_unread_counts_by_folder(
     let mut results = get_label_folder_unread_counts(conn, scope)?;
     results.push(get_flag_folder_unread_count(conn, scope, "STARRED")?);
     results.push(get_flag_folder_unread_count(conn, scope, "SNOOZED")?);
+
+    // All-Accounts Inbox is the broad "everything except drafts/trash/
+    // sent/archive/spam" view; the INBOX-label-based row that's currently
+    // in `results` undercounts it.
+    if matches!(scope, AccountScope::All) {
+        let broad = broad_inbox_unread_count(conn, scope)?;
+        if let Some(row) = results.iter_mut().find(|r| r.folder_id == "INBOX") {
+            row.unread_count = broad;
+        } else {
+            results.push(FolderUnreadCount {
+                folder_id: "INBOX".to_string(),
+                unread_count: broad,
+            });
+        }
+    }
+
     Ok(results)
 }
 

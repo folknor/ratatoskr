@@ -20,20 +20,12 @@ pub enum FolderKind {
     Universal,
     /// A user-defined smart folder backed by a saved query.
     SmartFolder,
-    /// A provider label/folder specific to one account (container semantics).
-    AccountLabel,
+    /// A user-created provider folder specific to one account
+    /// (container semantics - `label_kind = 'container'` in the DB).
+    AccountFolder,
     /// A tag-type label - Exchange category, IMAP keyword, JMAP keyword,
-    /// or Gmail user label (tag semantics, shown in section 4).
+    /// or Gmail user label (`label_kind = 'tag'` in the DB).
     AccountTag,
-}
-
-/// Whether a navigation item is a non-exclusive tag or an exclusive folder.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum LabelSemantics {
-    /// Non-exclusive tag (Gmail labels). A message can have multiple.
-    Tag,
-    /// Exclusive folder (Exchange, IMAP, JMAP). A message lives in exactly one.
-    Folder,
 }
 
 /// Mailbox rights for permission gating in the UI.
@@ -72,8 +64,6 @@ pub struct NavigationFolder {
     pub account_id: Option<String>,
     /// Parent folder ID for tree rendering. `None` means top-level.
     pub parent_id: Option<String>,
-    /// Tag vs Folder semantics. Only meaningful for `AccountLabel` items.
-    pub label_semantics: Option<LabelSemantics>,
     /// Query string for smart folders. `None` for regular labels/folders.
     pub query: Option<String>,
     /// Mailbox rights from JMAP/IMAP ACL. `None` for non-shared or unknown.
@@ -156,6 +146,7 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
     ("SNOOZED", "Snoozed"),
     ("SENT", "Sent"),
     ("DRAFT", "Drafts"),
+    ("archive", "Archive"),
     ("TRASH", "Trash"),
     ("SPAM", "Spam"),
     ("all-mail", "All Mail"),
@@ -192,7 +183,6 @@ fn build_universal_folders(
                 unread_count: unread,
                 account_id: None,
                 parent_id: None,
-                label_semantics: None,
                 query: None,
                 rights: None,
                 is_subscribed: None,
@@ -229,7 +219,6 @@ fn build_smart_folders(
                 unread_count,
                 account_id: sf.account_id,
                 parent_id: None,
-                label_semantics: None,
                 query: Some(sf.query),
                 rights: None,
                 is_subscribed: None,
@@ -258,8 +247,6 @@ fn build_account_labels(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<NavigationFolder>, String> {
-    let provider = get_account_provider(conn, account_id)?;
-    let semantics = label_semantics_for_provider(&provider);
     let all_labels = get_labels(conn, account_id)?;
     let system_ids = system_label_ids();
     let unread_by_label = get_label_unread_counts(conn, account_id)?;
@@ -289,11 +276,10 @@ fn build_account_labels(
                 is_subscribed: label.is_subscribed,
                 id: label.id,
                 name: label.name,
-                folder_kind: FolderKind::AccountLabel,
+                folder_kind: FolderKind::AccountFolder,
                 unread_count,
                 account_id: Some(label.account_id),
                 parent_id,
-                label_semantics: Some(semantics.clone()),
                 query: None,
                 rights,
             }
@@ -322,30 +308,11 @@ fn build_account_tags(conn: &Connection, account_id: &str) -> Result<Vec<Navigat
                 unread_count,
                 account_id: Some(label.account_id),
                 parent_id: None,
-                label_semantics: Some(LabelSemantics::Tag),
                 query: None,
                 rights,
             }
         })
         .collect())
-}
-
-/// Determine label semantics based on the email provider.
-fn label_semantics_for_provider(provider: &str) -> LabelSemantics {
-    match provider {
-        "gmail_api" => LabelSemantics::Tag,
-        _ => LabelSemantics::Folder,
-    }
-}
-
-/// Look up the provider string for an account.
-fn get_account_provider(conn: &Connection, account_id: &str) -> Result<String, String> {
-    conn.query_row(
-        "SELECT provider FROM accounts WHERE id = ?1",
-        params![account_id],
-        |row| row.get::<_, String>(0),
-    )
-    .map_err(|e| format!("get_account_provider: {e}"))
 }
 
 /// Batch-fetch unread thread counts for all labels belonging to an account.
@@ -393,8 +360,6 @@ pub fn get_shared_mailbox_navigation(
 ) -> Result<NavigationState, String> {
     let all_labels = get_labels(conn, account_id)?;
     let system_ids = system_label_ids();
-    let provider = get_account_provider(conn, account_id)?;
-    let semantics = label_semantics_for_provider(&provider);
 
     // Unread counts for labels, scoped to this shared mailbox
     let mut unread_stmt = conn
@@ -428,7 +393,6 @@ pub fn get_shared_mailbox_navigation(
                 unread_count: unread,
                 account_id: None,
                 parent_id: None,
-                label_semantics: None,
                 query: None,
                 rights: None,
                 is_subscribed: None,
@@ -449,7 +413,7 @@ pub fn get_shared_mailbox_navigation(
             let kind = if label.label_kind == "tag" {
                 FolderKind::AccountTag
             } else {
-                FolderKind::AccountLabel
+                FolderKind::AccountFolder
             };
             NavigationFolder {
                 is_subscribed: label.is_subscribed,
@@ -459,7 +423,6 @@ pub fn get_shared_mailbox_navigation(
                 unread_count: unread,
                 account_id: Some(label.account_id),
                 parent_id,
-                label_semantics: Some(semantics.clone()),
                 query: None,
                 rights,
             }

@@ -1,119 +1,166 @@
 # Folders and Labels Glossary
 
-Canonical definitions for Ratatoskr's folders-and-labels terminology. When a term here conflicts with its provider-native meaning (Gmail, IMAP, Exchange, JMAP), the Ratatoskr definition wins.
+This document is the single source of truth for everything Ratatoskr classifies as a folder, a label, or neither. If code disagrees with this document, the code is wrong.
 
-Other documents that discuss folders or labels should reference this glossary entry rather than redefining these terms.
+The whole job of this glossary is to answer one question: **for any primitive coming out of any provider, what is it in Ratatoskr?** Each rule below is binding on both user-facing copy and code identifiers.
 
 ---
 
-## The Two Things
+## The Rule
 
-Ratatoskr has two kinds of email organization objects: **folders** and **labels**. That's it.
+Ratatoskr has exactly two organisation primitives: **folders** and **labels**. Everything else is either message state (a per-message boolean like read / starred) or transient (expunge markers, deprecated flags).
 
 ### Folder
 <!-- coverage: glossary.folders_labels.folder_rows_are_containers enforcement=lua-harness -->
 
-A container. A message can be in one or more folders. The UI presents folder operations as **moves** - when a user drags a thread from Inbox to Archive, it leaves Inbox and appears in Archive. The action service translates this intent to whatever the provider requires (Gmail: remove one label, add another. IMAP: COPY + DELETE. Graph: move API. JMAP: update mailbox memberships).
+A container. A thread is in one or more folders. Operations are **moves** - when the user drags a thread from Inbox to Archive, the thread leaves Inbox and appears in Archive. The action service translates the move to whatever each provider needs (Gmail: add/remove labels. Graph: move API. IMAP: COPY + EXPUNGE. JMAP: mailbox membership update).
 
-Stored in the `labels` table with `label_kind = 'container'`.
-
-Displayed in sidebar section 2 (provider folders).
-
-**What providers call their folders:**
-
-| Provider | Provider term | Ratatoskr term |
-|----------|--------------|----------------|
-| Gmail | "Label" (system type) | Folder |
-| Exchange/Graph | Folder | Folder |
-| IMAP | Mailbox | Folder |
-| JMAP | Mailbox | Folder |
-
-Gmail calls its folders "labels." Ratatoskr does not.
+Stored in the `labels` table with `label_kind = 'container'`. Rendered inline in the sidebar's universal section: system folders (Inbox, Starred, Snoozed, Sent, Drafts, Archive, Trash, Spam, All Mail) in a fixed order, with the active account's user-created folders directly below Inbox when one account is scoped. There is no separate folders-section header; all containers share one navigation surface. **Folders never carry a coloured dot in the sidebar.**
 
 ### Label
 <!-- coverage: glossary.folders_labels.label_rows_are_tags enforcement=lua-harness -->
 
-An annotation you stick on a message. A message can have any number of labels. Applying a label does not affect which folder the message is in. Operations on labels are **additive**.
-
-Stored in the `labels` table with `label_kind = 'tag'`.
-
-Displayed in sidebar section 4 (labels).
-
-**What providers call their labels:**
-
-| Provider | Provider term | Ratatoskr term |
-|----------|--------------|----------------|
-| Gmail | "Label" (user type) | Label |
-| Exchange/Graph | Category | Label |
-| IMAP | Keyword | Label |
-| JMAP | Keyword | Label |
+An additive annotation. A thread carries any number of labels independently of which folder(s) it lives in. Operations are **apply** and **remove**, never "move". Stored in the `labels` table with `label_kind = 'tag'`. Rendered in the sidebar's collapsible LABELS section, **always with a coloured dot**. The coloured dot is the visual contract: dot = label, no dot = folder.
 
 ### Why both are in the `labels` table
 <!-- coverage: glossary.folders_labels.labels_table_discriminates_folders_and_labels enforcement=lua-harness -->
 
-The `labels` table stores both folders and labels. The `label_kind` column distinguishes them: `'container'` for folders, `'tag'` for labels. This is a storage-level discriminant, not a separate concept. There is one table, two kinds of rows.
+The `labels` table is a storage-layer term that predates the Ratatoskr glossary. It stores both folders and labels, discriminated by `label_kind`: `'container'` for folders, `'tag'` for labels. The `thread_labels` junction table records associations between threads and both. For a folder row it means "this thread is in this folder"; for a label row it means "this thread has this label." This is the **only** place in the code where the word `label` is allowed to refer to anything except a tag.
 
-The `thread_labels` junction table records associations between threads and both folders and labels. For a folder row, it means "this thread is in this folder." For a label row, it means "this thread has this label."
+### Code identifier rule
+
+`folder` in a code identifier always refers to a container. `label` only ever refers to a tag, with the single storage-layer exception above (`labels` table, `label_kind` column, `thread_labels` junction). A type, function, enum variant, column, or message that names a folder with `label` is wrong and must be renamed.
+
+Examples:
+- `FolderKind::AccountFolder` - correct (a user-created provider folder).
+- `FolderKind::AccountTag` - correct (a user-created tag).
+- `FolderKind::AccountLabel` meaning a folder - wrong. Rename.
+- `account_label_id: String` holding a folder ID - wrong. Rename.
+
+If you're reading code and the name says "label" but the value is a folder, treat that as a bug to fix, not as a permission to mix terms in new code.
+
+---
+
+## Per-Provider Mapping
+<!-- coverage: glossary.folders_labels.provider_terms_translate_to_folder_label_semantics enforcement=lua-harness -->
+
+For each provider, exhaustively: what counts as a folder, what counts as a label, and what counts as message state. Anything not listed here is either not surfaced or is transient and ignored.
+
+### Gmail
+
+| Provider primitive | Ratatoskr classification |
+|---|---|
+| System labels (`INBOX`, `SENT`, `DRAFT`, `TRASH`, `SPAM`, `STARRED`, `IMPORTANT`, `CHAT`, `CATEGORY_*`) | **Folder** |
+| User-created labels | **Label** |
+| `UNREAD` system label absence | Message state - read |
+| `STARRED` system label | Message state - starred (also rendered as the universal Starred folder for navigation; the underlying signal is the `is_starred` boolean) |
+| Replied / forwarded | Message state - derived from `SENT` thread membership (see "Message state" below) |
+
+Gmail's API permits system labels and user labels to coexist on a single message. Ratatoskr models the system ones as containers anyway because their UI semantics are move-style (archive removes `INBOX`, trash moves to `TRASH`, etc.).
+
+### Microsoft Graph (Exchange)
+
+| Provider primitive | Ratatoskr classification |
+|---|---|
+| Mail folders (`inbox`, `sentItems`, `drafts`, `deletedItems`, `junkEmail`, `archive`, user-created) | **Folder** |
+| `categories[]` | **Label** |
+| `importance` enum (`low` / `high`) | **Label** - synthesised `"Low importance"` / `"High importance"`. `normal` synthesises nothing. Mutually exclusive at write time: the action service clears the opposite slot when one is set. |
+| `isRead` | Message state - read |
+| `flag.flagStatus` | Message state - starred. Outlook's follow-up flag is the closest native analog; Ratatoskr loses the optional `startDateTime` / `dueDateTime` metadata. |
+| `PR_LAST_VERB_EXECUTED` (extended MAPI property 0x1081) | Message state - replied / forwarded (see "Message state" below) |
+
+Graph has no native starring primitive; the follow-up flag is the only option. This is an explicit, accepted trade-off - across providers a Ratatoskr "star" maps to whatever each provider's closest single-bit favourite-marker is.
+
+### IMAP
+
+| Provider primitive | Ratatoskr classification |
+|---|---|
+| Mailboxes - special-use (`\Inbox`, `\Sent`, `\Drafts`, `\Trash`, `\Junk`, `\Archive`) and user-created | **Folder** |
+| Custom keywords (anything not in the system-flag list below) | **Label** |
+| `\Seen` | Message state - read |
+| `\Flagged` | Message state - starred |
+| `\Answered` | Message state - replied |
+| `$Forwarded` (RFC 5788 system keyword) | Message state - forwarded |
+| `\Draft` | Folded into Drafts-folder membership; not a separate primitive |
+| `\Deleted`, `\Recent` | Transient / deprecated; ignored |
+
+`$Forwarded` lives in the IMAP keyword namespace technically, but Ratatoskr treats it as message state, not a user-visible label. The RFC 5788 system keywords (`$Forwarded`, `$MDNSent`, `$Junk`, `$NotJunk`, `$Phishing`) are all reserved and never appear in the LABELS section.
+
+### JMAP
+
+| Provider primitive | Ratatoskr classification |
+|---|---|
+| Mailboxes (system-role and user-created) | **Folder** |
+| Custom keywords (anything outside the RFC system set) | **Label** |
+| `$seen` | Message state - read |
+| `$flagged` | Message state - starred |
+| `$answered` | Message state - replied |
+| `$forwarded` | Message state - forwarded |
+| `$draft` | Folded into Drafts-folder membership; not a separate primitive |
+
+JMAP technically allows a message to belong to multiple mailboxes (Gmail-influenced). Ratatoskr models system mailboxes as containers anyway, mirroring the Gmail treatment, because the UI semantics are move-style.
+
+---
+
+## Message State (Neither Folder Nor Label)
+
+Some provider primitives are per-message booleans. They drive inline glyphs or filter behaviour and never appear in the sidebar.
+
+| State | Column / source | Glyph | Provider sources |
+|---|---|---|---|
+| Read | `threads.is_read` (boolean) | - | Gmail: `UNREAD` absent · Graph: `isRead` · IMAP: `\Seen` · JMAP: `$seen` |
+| Starred | `threads.is_starred` (boolean) | ★ | Gmail: `STARRED` system label · Graph: `flag.flagStatus == flagged` · IMAP: `\Flagged` · JMAP: `$flagged` |
+| Replied | `messages.is_replied` (boolean) | ↩ | Gmail: derive from `SENT` thread membership + `In-Reply-To` / `References` headers · Graph: `PR_LAST_VERB_EXECUTED` ∈ {102 reply, 103 reply-all} · IMAP: `\Answered` · JMAP: `$answered` |
+| Forwarded | `messages.is_forwarded` (boolean) | ↪ | Gmail: derive from `SENT` thread membership + `Subject` `Fwd:` / `FW:` prefix · Graph: `PR_LAST_VERB_EXECUTED == 104` · IMAP: `$Forwarded` system keyword · JMAP: `$forwarded` |
+
+`is_replied` and `is_forwarded` are independent: both can be true on the same message (you replied, then later forwarded). Thread-level rendering ORs across messages.
 
 ---
 
 ## Identity
-
-### Label ID
 <!-- coverage: glossary.folders_labels.label_identity_is_account_scoped enforcement=lua-harness -->
 <!-- coverage: glossary.folders_labels.system_folder_ids_are_canonical enforcement=lua-harness -->
 <!-- coverage: glossary.folders_labels.non_system_ids_keep_provider_prefixes enforcement=lua-harness -->
 
-The identifier for a folder or label, scoped to an account: `(account_id, label_id)`.
+The identifier for a folder or label is `(account_id, label_id)`. Names are presentational only; two labels with the same display name on different accounts are distinct objects.
 
-For **system folders** (Inbox, Trash, Spam, etc.), Ratatoskr defines its own canonical label IDs that are provider-independent. The sync pipeline normalizes provider-native IDs to these on ingest:
+For **system folders**, Ratatoskr defines its own canonical label IDs that are provider-independent. The sync pipeline normalises provider-native IDs to these on ingest.
 
 | Ratatoskr label ID | What it represents |
-|---------------------|--------------------|
+|---|---|
 | `"INBOX"` | Inbox |
-| `"TRASH"` | Trash / Deleted Items |
-| `"SPAM"` | Spam / Junk |
 | `"SENT"` | Sent |
 | `"DRAFT"` | Drafts |
+| `"TRASH"` | Trash / Deleted Items |
+| `"SPAM"` | Spam / Junk |
 | `"archive"` | Archive |
 | `"STARRED"` | Starred / Flagged |
+| `"SNOOZED"` | Snoozed |
+| `"all-mail"` | All Mail (single-account only) |
 
-Every provider's inbox is stored with label ID `"INBOX"`, regardless of what the provider calls it natively. A Graph account's inbox (which has an opaque GUID on the server) is stored as `"INBOX"` in the local DB. This means `remove_label(conn, account_id, thread_id, "INBOX")` works for any provider.
+`remove_label(conn, account_id, thread_id, "INBOX")` works for any provider - the canonical ID is provider-agnostic. The normalisation mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`).
 
-The normalization mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`).
+For **non-system folders and labels**, IDs are provider-specific with a crate prefix where required:
 
-**Verified:** All four provider sync pipelines write canonical IDs for system folders:
-- **Gmail** - native IDs happen to match canonical (`"INBOX"`, `"TRASH"`, etc.). Written directly.
-- **Graph** - well-known folder aliases resolved to canonical IDs via `graph_well_known_aliases()` in `crates/graph/src/folder_mapper.rs`. User folders stored as `graph-{guid}`.
-- **JMAP** - server-assigned mailbox IDs resolved to canonical IDs via `system_folder_by_jmap_role()` in `crates/jmap/src/mailbox_mapper.rs`. User mailboxes stored as `jmap-{id}`.
-- **IMAP** - special-use attributes resolved to canonical IDs via `imap_special_use_to_label_id()` in `crates/imap/src/folder_mapper.rs`. Name-based fallback for servers without special-use. User folders stored as `folder-{path}`.
-
-This means `remove_label(conn, account_id, thread_id, "INBOX")` works for any provider. The action service can use canonical label IDs directly for system folder operations without per-account resolution.
-
-For **non-system folders and labels**, the label ID is provider-specific with a crate prefix:
-- Gmail user labels: native Gmail label ID (no prefix - Gmail IDs are already unique strings)
-- Exchange categories: prefixed `cat:{name}`
-- IMAP keywords: prefixed `kw:{keyword}`
-- JMAP keywords: prefixed as keywords in the labels table
-- Graph user folders: prefixed `graph-{guid}`
-- JMAP user mailboxes: prefixed `jmap-{id}`
-- IMAP user folders: prefixed `folder-{path}`
-
-### Name is not identity
-
-Two labels with the same display name on different accounts are distinct objects. Identity is `(account_id, label_id)`. The normalized display name is used only for cross-account presentation grouping in the sidebar's labels section.
+- Gmail user labels - native Gmail label ID, no prefix.
+- Exchange categories - `cat:{name}`.
+- IMAP keywords - `kw:{keyword}`.
+- JMAP keywords - keyword string with the JMAP keyword prefix conventions.
+- Graph user folders - `graph-{guid}`.
+- JMAP user mailboxes - `jmap-{id}`.
+- IMAP user folders - `folder-{path}`.
 
 ---
 
-## System Folders
+## Universal Folders
 
-### System folder
+UI term for the aggregate view of a system folder across accounts. The universal section shows: Inbox, Starred, Snoozed, Sent, Drafts, Archive, Trash, Spam, and (in single-account scope) All Mail.
 
-One of the well-known folders that every email account has: Inbox, Sent, Drafts, Trash, Spam, Archive, Starred. Stored in the `labels` table with canonical Ratatoskr label IDs (see above). Discovered during sync and mapped via `SYSTEM_FOLDER_ROLES`.
+The Sent / Drafts / Archive / Trash / Spam aggregates are straightforward unions of the per-account canonical label IDs.
 
-### Universal folder
+**Inbox is the exception.** In the All-Accounts scope, Inbox means "every thread that isn't a draft, sent, archived, trashed, or spam" - not just rows tagged with `INBOX`. This catches archived-but-relabelled mail, threads sitting only in user folders, and any orphan thread that lost its `INBOX` tag in some sync corner case. The single-account Inbox view keeps the strict `INBOX`-label semantics. Implementation: `BROAD_INBOX_EXCLUSIONS` in `crates/db/src/db/queries_extra/scoped_queries.rs`.
 
-UI term for the aggregate view of a system folder across all accounts. When no specific account is selected, the sidebar shows "Inbox" (all accounts' inboxes combined), "Trash" (all accounts' trash combined), etc. These are virtual - they query across accounts using the canonical label ID.
+The "All Mail" universal item is single-account only - it shows literally every thread for one account (including drafts, sent, trash, spam) and has no meaningful cross-account aggregate.
 
 ---
 
@@ -121,15 +168,17 @@ UI term for the aggregate view of a system folder across all accounts. When no s
 
 ### Move (folder operation)
 
-A user-facing operation: "put this thread in that folder." At the local DB level: add the target folder's label ID to `thread_labels`, and remove the source folder's label ID if the operation implies removal (e.g., archive removes from inbox). At the provider level: whatever the provider needs (Gmail: modify labels. IMAP: COPY + DELETE. Graph: move API. JMAP: update mailbox memberships).
+"Put this thread in that folder." Local DB: add the target folder's label ID to `thread_labels`, and remove the source folder's label ID if the operation implies removal (archive removes from Inbox; trash moves to Trash). Provider dispatch: Gmail modifies labels; IMAP does COPY + EXPUNGE; Graph uses the move API; JMAP updates mailbox memberships.
 
-Archive, trash, spam, and move-to-folder are all moves. Not all moves remove from a source - a thread can be in multiple folders simultaneously.
+Archive, trash, spam, and move-to-folder are all moves. Not all moves remove from a source - a thread can be in multiple folders simultaneously when the provider permits.
 
 ### Apply / Remove (label operation)
 
-Adding or removing a label from a thread. Local DB: insert or delete a row in `thread_labels`. Provider: flag/property set operations (IMAP STORE +FLAGS, Exchange PATCH categories, JMAP keyword set, Gmail label modify).
+Adding or removing a label. Local DB: insert or delete a row in `thread_labels`. Provider dispatch: IMAP STORE +FLAGS, Graph PATCH `categories`, JMAP keyword set, Gmail label modify. Does not affect folder membership.
 
-Does not affect folder membership.
+### Message-state toggles (read, starred, replied, forwarded)
+
+Not folder or label operations. Read and starred have UI controls. Replied and forwarded are derived from outgoing sends, not toggled directly. The action service routes the change to the appropriate provider primitive per the per-provider mapping above.
 
 ### Provider dispatch
 
@@ -141,65 +190,44 @@ An action that intentionally has no provider dispatch. Pin and mute are local-on
 
 ---
 
-## Provider Translation
-<!-- coverage: glossary.folders_labels.provider_terms_translate_to_folder_label_semantics enforcement=lua-harness -->
-
-When reading provider documentation or provider crate code, use this table to translate back to Ratatoskr terms:
-
-| Provider says | Ratatoskr means |
-|---------------|-----------------|
-| Gmail "label" (system) | Folder |
-| Gmail "label" (user) | Label |
-| Gmail "modify labels" | Move (if system labels) or Apply/Remove (if user labels) |
-| Exchange "folder" | Folder |
-| Exchange "category" | Label |
-| IMAP "mailbox" | Folder |
-| IMAP "keyword" | Label |
-| IMAP "flag" | Depends - `\Seen`, `\Flagged` etc. are boolean fields, not labels |
-| JMAP "mailbox" | Folder |
-| JMAP "keyword" | Label |
-
----
-
 ## Database Quick Reference
 
 ### `labels` table
 
 All folders and labels for all accounts. Key columns:
-- `id` - label ID (Ratatoskr canonical for system folders, provider-native for others)
-- `account_id` - which account
-- `name` - display name
-- `label_kind` - `'container'` (folder) or `'tag'` (label)
+- `id` - label ID (Ratatoskr canonical for system folders, provider-native with prefix for others).
+- `account_id` - which account.
+- `name` - display name.
+- `label_kind` - `'container'` (folder) or `'tag'` (label).
 
 ### `thread_labels` table
 
-Junction table: `(account_id, thread_id, label_id)`. For folders: "this thread is in this folder." For labels: "this thread has this label."
+Junction: `(account_id, thread_id, label_id)`. For folders: "this thread is in this folder." For labels: "this thread has this label."
 
-### `label_kind` values
+### `threads` table - message-state columns
 
-- `'container'` - this row is a folder
-- `'tag'` - this row is a label
+- `is_read`, `is_starred`, `is_snoozed`, `is_pinned`, `is_muted` - booleans driving sidebar filters and inline glyphs.
 
-These are storage discriminants. The user-facing concepts are "folder" and "label."
+### `messages` table - message-state columns
+
+- `is_replied`, `is_forwarded` - booleans driving thread-list glyphs. Thread-level renderings OR across messages.
 
 ---
 
 ## Terms NOT Used in Ratatoskr
 
-These terms appear in provider documentation but are **not** Ratatoskr concepts:
+These terms appear in provider documentation but are not Ratatoskr concepts. They never appear in user-facing copy and never appear in code identifiers except inside transport-layer or sync-layer code that's literally talking to a provider.
 
-- **Tag** - not a Ratatoskr term. What providers call tags, categories, or keywords are **labels** in Ratatoskr. The `'tag'` value in `label_kind` is a database discriminant, not a concept.
-- **Mailbox** - not a Ratatoskr term. What IMAP/JMAP call mailboxes are **folders** in Ratatoskr.
-- **Category** - not a Ratatoskr term. What Exchange calls categories are **labels** in Ratatoskr.
+- **Tag** - not used. What providers call tags, categories, or keywords are *labels* in Ratatoskr. The `'tag'` value in `label_kind` is a storage-layer discriminant, not a user-facing concept.
+- **Mailbox** - not used. What IMAP and JMAP call mailboxes are *folders* in Ratatoskr.
+- **Category** - not used. What Exchange calls categories are *labels* in Ratatoskr.
+- **Flag** (Outlook) - not used. The follow-up flag is mapped to the *starred* message state.
+- **Verb** (Outlook) - not used. `PR_LAST_VERB_EXECUTED` is mapped to the *replied* and *forwarded* message states.
+- **Importance** - not used as a top-level Ratatoskr concept. The `high` / `low` values become the synthesised labels `"High importance"` / `"Low importance"`; `normal` is no label.
 
-Provider-native names still appear in code and docs where Ratatoskr is
-translating provider behavior rather than defining user-facing concepts. For
-example:
+Provider-native names still appear in code and docs where Ratatoskr is translating provider behaviour rather than defining user-facing concepts. For example:
 
-- Exchange still has a `masterCategories` API, even though Ratatoskr treats
-  those objects as labels.
-- Gmail still exposes provider-native `CATEGORY_*` bundle labels, even though
-  Ratatoskr treats inbox bundling as a separate bundles/classification system.
+- Exchange still has a `masterCategories` API even though Ratatoskr treats those objects as labels.
+- Gmail still exposes provider-native `CATEGORY_*` bundle labels even though Ratatoskr treats inbox bundling as a separate bundles/classification system.
 
-When those provider-native names appear, they should be read as transport-layer
-or sync-layer terminology, not as Ratatoskr concepts.
+When those provider-native names appear, they are transport-layer or sync-layer terminology, not Ratatoskr concepts. They must not leak into core types, UI code, or user-facing strings.

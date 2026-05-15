@@ -22,14 +22,22 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::Universal))
         .filter(|f| {
-            // Spam and All Mail only when scoped to a single account
+            // All Mail is the per-account "literally everything" view -
+            // doesn't aggregate meaningfully, so single-account only.
+            // Inbox, Spam, Archive all stay visible in both scopes.
             if sidebar.is_all_accounts() {
-                !matches!(f.id.as_str(), "SPAM" | "all-mail")
+                f.id.as_str() != "all-mail"
             } else {
                 true
             }
         })
         .collect();
+
+    // User-created folders for the scoped account sit directly below
+    // Inbox in the universal section, per glossary - all folders, system
+    // or user, are containers and share one section. `Option::take()` on
+    // the first INBOX iteration drains them in once.
+    let mut account_folder_rows = Some(super::folders::render_account_folders(sidebar));
 
     let mut col = column![].spacing(SPACE_XXS);
     for f in &universal {
@@ -46,6 +54,14 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         let query_prefix = build_search_here_folder_prefix(&f.name, sidebar);
         col =
             col.push(mouse_area(nav_btn).on_right_press(SidebarMessage::SearchHere(query_prefix)));
+
+        if f.id == "INBOX"
+            && let Some(rows) = account_folder_rows.take()
+        {
+            for row_el in rows {
+                col = col.push(row_el);
+            }
+        }
     }
     col.into()
 }
