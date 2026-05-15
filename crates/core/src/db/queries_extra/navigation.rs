@@ -72,6 +72,14 @@ pub struct NavigationFolder {
     /// JMAP subscription state. `None` for non-JMAP providers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_subscribed: Option<bool>,
+    /// Resolved background color for the label dot/chip. `None` for non-label rows.
+    /// Always set for `AccountLabel`: either the synced `color_bg` or a deterministic
+    /// fallback from the preset palette via `label_colors::resolve_label_color`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_bg: Option<String>,
+    /// Resolved foreground color, paired with `color_bg`. `None` for non-label rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_fg: Option<String>,
 }
 
 /// The complete navigation state returned to the frontend.
@@ -186,6 +194,8 @@ fn build_universal_folders(
                 query: None,
                 rights: None,
                 is_subscribed: None,
+                color_bg: None,
+                color_fg: None,
             }
         })
         .collect();
@@ -222,6 +232,8 @@ fn build_smart_folders(
                 query: Some(sf.query),
                 rights: None,
                 is_subscribed: None,
+                color_bg: None,
+                color_fg: None,
             }
         })
         .collect())
@@ -282,6 +294,8 @@ fn build_account_folders(
                 parent_id,
                 query: None,
                 rights,
+                color_bg: None,
+                color_fg: None,
             }
         })
         .collect())
@@ -299,6 +313,14 @@ fn build_account_labels(conn: &Connection, account_id: &str) -> Result<Vec<Navig
         .map(|label| {
             let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
             let rights = rights_from_label(&label);
+            let (bg, fg) = label_colors::resolve_label_color(
+                &label.name,
+                &label.account_id,
+                label.color_bg.as_deref(),
+                label.color_fg.as_deref(),
+            );
+            let bg = bg.to_owned();
+            let fg = fg.to_owned();
 
             NavigationFolder {
                 is_subscribed: label.is_subscribed,
@@ -310,6 +332,8 @@ fn build_account_labels(conn: &Connection, account_id: &str) -> Result<Vec<Navig
                 parent_id: None,
                 query: None,
                 rights,
+                color_bg: Some(bg),
+                color_fg: Some(fg),
             }
         })
         .collect())
@@ -396,6 +420,8 @@ pub fn get_shared_mailbox_navigation(
                 query: None,
                 rights: None,
                 is_subscribed: None,
+                color_bg: None,
+                color_fg: None,
             }
         })
         .collect();
@@ -415,6 +441,17 @@ pub fn get_shared_mailbox_navigation(
             } else {
                 FolderKind::AccountFolder
             };
+            let (color_bg, color_fg) = if matches!(kind, FolderKind::AccountLabel) {
+                let (bg, fg) = label_colors::resolve_label_color(
+                    &label.name,
+                    &label.account_id,
+                    label.color_bg.as_deref(),
+                    label.color_fg.as_deref(),
+                );
+                (Some(bg.to_owned()), Some(fg.to_owned()))
+            } else {
+                (None, None)
+            };
             NavigationFolder {
                 is_subscribed: label.is_subscribed,
                 id: label.id,
@@ -425,6 +462,8 @@ pub fn get_shared_mailbox_navigation(
                 parent_id,
                 query: None,
                 rights,
+                color_bg,
+                color_fg,
             }
         })
         .collect();

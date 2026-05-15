@@ -115,6 +115,7 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
     _id: &'a str,
     color: Color,
     active: bool,
+    unread: i64,
     on_press: M,
 ) -> Element<'a, M> {
     let lbl_style: fn(&Theme) -> text::Style = if active {
@@ -123,17 +124,23 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
         text::secondary
     };
 
-    button(
-        row![
-            color_dot(color),
-            container(text(name).size(TEXT_MD).style(lbl_style)).align_y(Alignment::Center),
-        ]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_press)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Nav { active }.style())
-    .width(Length::Fill)
-    .into()
+    let mut content = row![
+        color_dot(color),
+        container(text(name).size(TEXT_MD).style(lbl_style)).align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    if unread > 0 {
+        content = content
+            .push(Space::new().width(Length::Fill))
+            .push(count_badge(unread));
+    }
+
+    button(content)
+        .on_press(on_press)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Nav { active }.style())
+        .width(Length::Fill)
+        .into()
 }

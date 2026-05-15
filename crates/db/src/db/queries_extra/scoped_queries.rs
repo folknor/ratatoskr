@@ -516,6 +516,16 @@ pub fn get_snoozed_threads(
 /// drafts (in the `local_drafts` table) are not included because they have a
 /// different schema and no `DbThread` representation. Use
 /// `get_draft_count_with_local()` for a count that includes both.
+///
+/// **Caller responsibility - sidebar Drafts list is a mix.** The sidebar's
+/// Drafts view must show server-synced *and* local-only drafts together.
+/// The merge happens in `crates/app/src/helpers.rs` (the app layer): it
+/// calls this function for the synced subset, then `get_local_draft_summaries`
+/// for the local subset, promotes each `LocalDraftSummary` into the app's
+/// `Thread` shape, concatenates, and sorts by `last_message_at`. Any consumer
+/// that calls `get_draft_threads` directly will silently disagree with
+/// `get_draft_count_with_local()` and with what the sidebar shows. See
+/// `docs/glossary/discrepancies.md` for the broader pattern this fits into.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_draft_threads(
     conn: &Connection,

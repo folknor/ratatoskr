@@ -32,11 +32,17 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     &sidebar.selection,
                     SidebarSelection::Label(lid) if lid.as_str() == f.id
                 );
+            let dot_color = f
+                .color_bg
+                .as_deref()
+                .map(theme::hex_to_color)
+                .unwrap_or_else(|| theme::avatar_color(&f.name));
             let item = widgets::label_nav_item(
                 &f.name,
                 &f.id,
-                theme::avatar_color(&f.name),
+                dot_color,
                 is_active,
+                f.unread_count,
                 SidebarMessage::Select(SidebarSelection::Label(LabelId::from(f.id.clone()))),
             );
             let query_prefix = build_search_here_prefix(&f.name, sidebar);

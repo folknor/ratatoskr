@@ -4,6 +4,10 @@ As a general rule, TODO.md items are **removed** when completed.
 
 ## Remaining Work
 
+- [ ] **Sidebar scope persistence** - `selected_account` is in-memory state on the iced app model and resets to `None` (All Accounts) on every launch. The previous sidebar problem statement listed two options: persist to SQLite `settings`, or treat "All Accounts" as the launch default. Caution flagged in the original write-up: if persisted, the user needs strong visual context (account name/color in the sidebar header) so they don't fall into a "hidden mode trap" where they're scoped without realizing it and wonder where their email went. Decision deferred.
+
+- [ ] **Sidebar pill semantics: Drafts (and other non-unread folders)** - Every universal-folder pill in the sidebar shows `is_read = 0` count (via `get_unread_counts_by_folder` in `crates/db/src/db/queries_extra/scoped_queries.rs`), except Drafts, which is special-cased in `build_universal_folders` (`crates/core/src/db/queries_extra/navigation.rs:170`) to show *total* drafts via `get_draft_count_with_local` (synced drafts + local drafts, no `is_read` filter). Result: with dev-seed, Personal/Drafts pill says (6) but only 2 of those drafts are unread. Unread is a weak concept for Drafts (and arguably Sent/Trash/Spam/Archive too) so the count contract probably needs to differ per folder - but right now the contract is inconsistent and unsignalled. Two directions to choose between: (a) collapse to one rule, all pills = unread, accept that Drafts will rarely show a pill; (b) per-folder semantics (Inbox/Starred/Snoozed = unread; Drafts/Sent/Trash/Spam/Archive = total) with a visual distinction (different pill style) so users can tell which count they're looking at. Decision deferred.
+
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
 
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
