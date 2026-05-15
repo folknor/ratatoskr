@@ -84,7 +84,7 @@ Graph has no native starring primitive; the follow-up flag is the only option. T
 | `\Draft` | Folded into Drafts-folder membership; not a separate primitive |
 | `\Deleted`, `\Recent` | Transient / deprecated; ignored |
 
-`$Forwarded` lives in the IMAP keyword namespace technically, but Ratatoskr treats it as message state, not a user-visible label. The RFC 5788 system keywords (`$Forwarded`, `$MDNSent`, `$Junk`, `$NotJunk`, `$Phishing`) are all reserved and never appear in the LABELS section.
+`$Forwarded` lives in the IMAP keyword namespace technically, but Ratatoskr treats it as message state, not a user-visible label. The RFC 5788 system keywords (`$Forwarded`, `$MDNSent`, `$Junk`, `$NotJunk`, `$Phishing`) are all reserved and never appear in the LABELS section. Per RFC 5788 §2.1 the `$` prefix is reserved for IETF-defined system keywords, so Ratatoskr filters every `$`-prefixed keyword from the LABELS section, not just the named five - this is intentionally stricter than the named-set rule, on the principle that a server's future-defined `$Whatever` should never silently appear as a user label.
 
 ### JMAP
 
@@ -145,7 +145,7 @@ For **non-system folders and labels**, IDs are provider-specific with a crate pr
 - Gmail user labels - native Gmail label ID, no prefix.
 - Exchange categories - `cat:{name}`.
 - IMAP keywords - `kw:{keyword}`.
-- JMAP keywords - keyword string with the JMAP keyword prefix conventions.
+- JMAP keywords - `kw:{keyword}` (same convention as IMAP).
 - Graph user folders - `graph-{guid}`.
 - JMAP user mailboxes - `jmap-{id}`.
 - IMAP user folders - `folder-{path}`.

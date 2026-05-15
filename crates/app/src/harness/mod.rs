@@ -3044,10 +3044,25 @@ fn parse_send_message(
         references: get_string_field(state, message_idx, "references")?,
         thread_id: get_string_field(state, message_idx, "thread_id")?,
         source_message_id: get_string_field(state, message_idx, "source_message_id")?,
-        intent: SendIntent::New,
+        intent: parse_send_intent(state, message_idx)?,
     };
     state.set_top(top as isize);
     Ok(message)
+}
+
+fn parse_send_intent(state: &mut State, message_idx: isize) -> dellingr::Result<SendIntent> {
+    let raw = match get_string_field(state, message_idx, "intent")? {
+        Some(value) => value,
+        None => return Ok(SendIntent::New),
+    };
+    match raw.to_ascii_lowercase().as_str() {
+        "new" => Ok(SendIntent::New),
+        "reply" => Ok(SendIntent::Reply),
+        "forward" => Ok(SendIntent::Forward),
+        other => Err(lua_error_message(format!(
+            "ActionSend intent must be 'new', 'reply', or 'forward' (got '{other}')"
+        ))),
+    }
 }
 
 fn parse_send_attachments(

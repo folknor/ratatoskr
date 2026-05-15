@@ -585,14 +585,18 @@ mod tests {
              VALUES ('INBOX', 'acc1', 'Inbox', 'system');
              INSERT INTO labels (id, account_id, name, type)
              VALUES ('SENT', 'acc1', 'Sent', 'system');
-             INSERT INTO labels (id, account_id, name, type)
-             VALUES ('custom1', 'acc1', 'Projects', 'user');
+             INSERT INTO labels (id, account_id, name, type, label_kind)
+             VALUES ('custom1', 'acc1', 'Projects', 'user', 'tag');
+             INSERT INTO labels (id, account_id, name, type, label_kind)
+             VALUES ('folder1', 'acc1', 'Receipts', 'user', 'container');
              INSERT INTO labels (id, account_id, name, type, imap_folder_path)
              VALUES ('INBOX', 'acc2', 'Inbox', 'system', 'INBOX');
              INSERT INTO thread_labels (thread_id, account_id, label_id)
              VALUES ('t1', 'acc1', 'INBOX');
              INSERT INTO thread_labels (thread_id, account_id, label_id)
              VALUES ('t1', 'acc1', 'custom1');
+             INSERT INTO thread_labels (thread_id, account_id, label_id)
+             VALUES ('t1', 'acc1', 'folder1');
              INSERT INTO thread_labels (thread_id, account_id, label_id)
              VALUES ('t2', 'acc2', 'INBOX');",
         )
@@ -654,12 +658,20 @@ mod tests {
     // -- folder: operator --
 
     #[test]
-    fn folder_filters_by_label_name() {
+    fn folder_filters_by_folder_name() {
         let conn = setup_test_db();
-        let parsed = parse_query("folder:Projects");
+        // "Receipts" is a container-kind label on acc1; "Projects" (custom1) is
+        // a tag-kind label and must NOT match `folder:` per the
+        // folders-labels glossary.
+        let parsed = parse_query("folder:Receipts");
         let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
+
+        let projects = parse_query("folder:Projects");
+        let no_threads =
+            query_threads(&conn, &projects, &AccountScope::All, None, None).expect("query");
+        assert!(no_threads.is_empty(), "tag-kind labels must not match folder:");
     }
 
     // -- in: operator --
@@ -688,8 +700,11 @@ mod tests {
         let conn = setup_test_db();
         let parsed = parse_query("is:tagged");
         let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
-        // Both threads have labels (INBOX at minimum).
-        assert_eq!(threads.len(), 2);
+        // Only t1 carries a tag-kind label (custom1 / "Projects"); t2's only
+        // membership is INBOX, which is a container row and does not count
+        // as "tagged" per the folders-labels glossary.
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "t1");
     }
 
     // -- has:contact --

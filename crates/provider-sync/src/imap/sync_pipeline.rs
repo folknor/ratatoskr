@@ -243,23 +243,6 @@ fn existing_imap_message_identity(
     .map_err(|e| format!("lookup existing IMAP message: {e}"))
 }
 
-fn imap_message_identity_in_tx(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    folder: &str,
-    uid: u32,
-) -> Result<Option<(String, String)>, String> {
-    tx.query_row(
-        "SELECT id, thread_id FROM messages \
-         WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
-         LIMIT 1",
-        rusqlite::params![account_id, folder, i64::from(uid)],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )
-    .optional()
-    .map_err(|e| format!("lookup IMAP message identity: {e}"))
-}
-
 fn imap_keyword_label_id(keyword: &str) -> String {
     format!("kw:{keyword}")
 }
@@ -788,7 +771,7 @@ pub fn apply_flag_changes(
         updated += count as u64;
 
         if let Some((message_id, tid)) =
-            imap_message_identity_in_tx(&tx, account_id, folder, change.uid)?
+            existing_imap_message_identity(&tx, account_id, folder, change.uid)?
         {
             replace_message_keywords(&tx, account_id, &message_id, &change.keywords)?;
             affected_threads.insert(tid);

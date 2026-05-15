@@ -78,6 +78,8 @@ As a general rule, TODO.md items are **removed** when completed.
 
 - [ ] **Reconsider sidebar layout** *(Deferred until right before 1.0)* - Currently the spec says: (1) sidebar should not show any Labels section when "All Accounts" is selected, (2) when a single account is selected, only labels belonging to that account should be shown, and (3) that for providers that have a "folder" concept, the users folders should show in the Labels section. We might need to re-think all 3.
 
+- [ ] **Cross-client folder/label moves don't propagate removals** - Graph and JMAP delta-sync persistence (`crates/provider-sync/src/graph/sync/persistence.rs::set_thread_labels`, `crates/provider-sync/src/jmap/sync/storage.rs::set_thread_labels`) call `merge_thread_labels` so partial delta pages no longer wipe sibling-message labels. The trade-off is asymmetric: when another client moves a thread (e.g. Inbox → Archive) the new folder gets added but the old folder's `thread_labels` row is never removed, because the delta only tells us what the changed message IS in, not what it's no longer in. Same-client moves are fine - the action service updates `thread_labels` locally before dispatching. Fix shape: either a periodic full-thread reconciler that compares the union of message-level membership against `thread_labels` and prunes, or a per-message folder/category table (analogous to the new `message_keywords` table) that the thread aggregate is recomputed from on every persist. Until then, stale folder rows are an accepted artifact of the cross-client move case.
+
 ## Roadmap Features - Remaining Work
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
