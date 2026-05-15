@@ -12,9 +12,9 @@ The command palette backend is implemented in the `cmdk` crate (`crates/cmdk/`).
 
 ### What Exists (Slices 1-4 Complete)
 
-1. **`CommandId` enum** (`crates/cmdk/src/id.rs`) - 55 commands across 6 categories (Navigation, Email, Compose, Tasks, View, App). Each variant has a stable `as_str()` / `parse()` round-trip for persistence.
+1. **`CommandId` enum** (`crates/cmdk/src/id.rs`) - 70 commands across 9 categories (Navigation, Email, Compose, Tasks, View, Calendar, App, Undo, Smart Folders). Each variant has a stable `as_str()` / `parse()` round-trip for persistence.
 
-2. **`CommandRegistry`** (`crates/cmdk/src/registry.rs`) - All 55 commands registered with labels, categories, default keybindings, context predicates (`is_available`), toggle labels (`is_active`), input schemas for parameterized commands, and keyword aliases. Fuzzy search via `nucleo-matcher` with context boost and availability bonus scoring.
+2. **`CommandRegistry`** (`crates/cmdk/src/registry.rs`) - All 70 commands registered with labels, categories, default keybindings, context predicates (`is_available`), toggle labels (`is_active`), input schemas for parameterized commands, and keyword aliases. Fuzzy search via `nucleo-matcher` with context boost and availability bonus scoring.
 
 3. **`CommandContext`** (`crates/cmdk/src/context.rs`) - Context snapshot struct with selection state, view type, account/provider info, entity state (read/starred/muted/pinned/draft/trash/spam), app state (online, composer open), and focused UI region.
 
@@ -46,7 +46,7 @@ Every action the user can perform must be a registered command with a unique ide
 - Contact, task, and calendar operations
 - Settings and preferences
 
-The current registry has 55 commands. As the app grows (compound variants, view-local operations, future features), the palette surface will expand to ~80-100 user-facing actions.
+The current registry has 70 commands. As the app grows (compound variants, view-local operations, future features), the palette surface will expand to ~80-100 user-facing actions.
 
 ### 2. Hierarchical Command Organization
 

@@ -2,7 +2,9 @@
 
 Implementation specification for wiring the command palette into the iced app's Elm architecture. This covers everything from the roadmap's Slice 6: palette overlay UI, keyboard dispatch, command-backed UI surfaces, and the supporting infrastructure that makes them work.
 
-**Preconditions:** Slices 1-3 are complete. The `cmdk` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 55 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is primarily `crates/app/` work, with one required addition to the command palette crate: `CommandArgs` (placed there for type-level guarantees and compile-time exhaustive matching in the dispatch layer). It also adds `AppOpenPalette` to the `CommandId` enum.
+**Status (2026-05-15):** Slices 6a, 6b, 6c, 6e are shipped; 6d is partial (reading-pane toolbar uses `command_icon_button`; thread list, sidebar, context menus pending); 6f is deferred. See `roadmap.md` for the live status table and `discrepancies.md` for the remaining gaps. Sections below describe the design as built; treat this doc as reference material rather than an active plan.
+
+**Preconditions:** Slices 1-3 are complete. The `cmdk` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 70 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is primarily `crates/app/` work, with one required addition to the command palette crate: `CommandArgs` (placed there for type-level guarantees and compile-time exhaustive matching in the dispatch layer). It also adds `AppOpenPalette` to the `CommandId` enum.
 
 **App architecture prerequisites:** Several parts of this spec reference app-state accessors and component boundaries (`reading_pane.focused_message_id()`, `thread_list.selected_thread`, per-panel `Component` implementations) that may not exist in their final form yet. Where this spec references these, it is defining the target interface the app should expose - not assuming it already exists. Some of this work is app-state normalization that must happen alongside or slightly ahead of command integration.
 
@@ -27,32 +29,29 @@ Four pieces of infrastructure that all three integration paths depend on. These 
 
 The typed execution payload for parameterized commands. One variant per command or command family. Non-parameterized commands execute with `CommandId` alone - no `CommandArgs` needed.
 
+As built (`crates/cmdk/src/args.rs`):
+
 ```rust
-/// Typed execution payload for parameterized commands.
-///
-/// Each variant carries exactly the fields that command needs.
-/// The app layer matches on the variant and dispatches to the
-/// appropriate handler in `update()`.
+use types::{FolderId, TagId};
+
 #[derive(Debug, Clone)]
 pub enum CommandArgs {
-    /// EmailMoveToFolder - folder_id from ListPicker selection
-    MoveToFolder { folder_id: String },
-    /// EmailAddLabel - label_id from ListPicker selection
-    AddLabel { label_id: String },
-    /// EmailRemoveLabel - label_id from ListPicker selection
-    RemoveLabel { label_id: String },
-    /// EmailSnooze - unix timestamp from DateTime picker
+    MoveToFolder { folder_id: FolderId },
+    AddLabel { label_id: TagId },
+    RemoveLabel { label_id: TagId },
     Snooze { until: i64 },
-    /// NavigateToLabel - label_id from ListPicker selection.
-    /// Includes account_id because cross-account navigation needs
-    /// to know which account the label belongs to.
-    NavigateToLabel { label_id: String, account_id: String },
+    NavigateToFolder { folder_id: FolderId, account_id: String },
+    NavigateToTag { tag_id: TagId, account_id: String },
+    SmartFolderSave { name: String },
 }
 ```
 
 **Design notes:**
 - No `serde_json::Value`. No "one giant struct with every field optional." Each variant carries exactly what's needed.
-- `NavigateToLabel` includes `account_id` because when navigating from an "All Accounts" context, the palette needs to know which account owns the selected label. The `OptionItem.id` for labels in cross-account context encodes both (e.g., `"gmail-abc:Label_42"`), and the resolver splits this into the two fields when building args.
+- Folder and label/tag IDs use the typed-IDs from `crates/types/src/typed_ids.rs` (`FolderId`, `TagId`) rather than raw strings, matching the rest of the action pipeline.
+- The spec originally proposed a single `NavigateToLabel { label_id, account_id }`. Reality split it into `NavigateToFolder` and `NavigateToTag` so the typed ID survives all the way to the navigation handler. `CommandId::NavigateToLabel` is still the single user-visible command; the resolver picks the variant from the option's underlying type.
+- `SmartFolderSave { name }` was added when smart folders shipped — uses a `Text` `ParamDef` rather than `ListPicker`.
+- Cross-account `OptionItem.id` encodes `account_id` so the dispatch can split it back out when building args.
 - New parameterized commands add new variants here. The compiler enforces exhaustive matching in the dispatch function.
 
 ### 1.2 `CommandContext` Assembly
@@ -1300,7 +1299,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 
 **Does not depend on:** Palette UI, resolver implementation, UI surface integration.
 
-**Acceptance criteria:** Pressing `e` on a selected thread triggers archive. `g then i` navigates to inbox. `Ctrl+Shift+E` toggles sidebar. All 55 commands' keybindings work. Pending chord indicator shows `"g..."` after pressing `g`. Timeout clears it after 1 second.
+**Acceptance criteria:** Pressing `e` on a selected thread triggers archive. `g then i` navigates to inbox. `Ctrl+Shift+E` toggles sidebar. All 70 commands' keybindings work. Pending chord indicator shows `"g..."` after pressing `g`. Timeout clears it after 1 second.
 
 ### Slice 6b: Palette Overlay UI (Stage 1 - Command Search)
 
@@ -1451,7 +1450,7 @@ How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) and [
 ### Gaps (Original to This Spec)
 
 - **Two-chord pending indicator with timeout**: No surveyed project handles this. The pending chord state machine, `iced::time::every` timeout subscription, and transient `"g..."` indicator are entirely custom.
-- **`CommandId` → `Message` dispatch map**: The central function mapping 55+ command IDs to iced Message variants has no analogue in surveyed projects. It's the bridge between the framework-agnostic registry and iced's Elm architecture.
+- **`CommandId` → `Message` dispatch map**: The central function mapping 70+ command IDs to iced Message variants has no analogue in surveyed projects. It's the bridge between the framework-agnostic registry and iced's Elm architecture.
 - **Stage 2 typed execution payload (`CommandArgs`)**: The transition from `OptionItem.id` to a typed `CommandArgs` variant, matched exhaustively in dispatch, is original.
 - **Widget-aware keyboard routing**: The interaction between `iced::event::Status::Captured` (widget already handled the event), palette-open state, and `BindingTable` resolution requires careful precedence logic not found in surveyed projects.
 

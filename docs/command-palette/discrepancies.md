@@ -1,67 +1,55 @@
 # Command Palette: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-22
+Audit date: 2026-05-15 (supersedes 2026-03-22).
+
+The backend and most app integration is shipped. This is a fresh sweep of the remaining spec/code mismatches.
 
 ---
 
-## Divergences
+## Outstanding gaps
 
-### PaletteStage carries no inline data
+### Recency not folded into fuzzy ranking
 
-**Spec**: `PaletteStage::CommandSearch` and `OptionPick` carry query/results/selected_index inline.
+`crates/cmdk/src/registry/core.rs::query_fuzzy` reads `recency_score` into each `CommandMatch` but sorts only by the combined `raw_fuzzy + context_boost + availability_bonus`. `query_empty` does use recency. Spec calls for recency in both paths. Folding `usage_count` (probably log-scaled) into the fuzzy score is the remaining work.
 
-**Code** (`ui/palette.rs`): `PaletteStage` is a bare enum with unit variants. All state is flat fields on `PaletteState`. Functionally equivalent.
+### `scroll_to_selected()` is a no-op
 
-### Escape in palette: stage 2 goes back instead of closing
+`crates/app/src/ui/palette.rs:620` returns `Task::none()`. Blocked on the iced fork not exposing `scrollable::scroll_to()`. Arrow keys change `selected_index` correctly but the scrollable doesn't follow when the highlight goes off-screen.
 
-**Spec** (section 2.3): `Close` always closes.
+### Slice 6d — UI surface migration is partial
 
-**Code**: In stage 2, `PaletteMessage::Close` calls `back_to_stage1()` instead of closing. Better UX.
+`command_button` / `command_icon_button` (`crates/app/src/ui/widgets/buttons.rs`) are used in the reading-pane toolbar (5 places, `crates/app/src/ui/reading_pane.rs`). Not yet adopted by the thread list, sidebar, or any context-menu surface. Context menus don't exist as a primitive yet.
 
-### scroll_to_selected is a no-op
+### Slice 6f — keybinding management UI
 
-`scroll_to_selected()` returns `Task::none()`. Blocked by iced fork lacking `scroll_to()` API. Arrow keys change selection index but do not scroll the results scrollable.
+No settings panel for view/search/rebind. Deferred past V1 by the original spec; default bindings work out of the box.
 
----
+### `AppAskAi` returns `None` from `dispatch_command`
 
-## Not implemented
-
-### Keybinding management UI (Slice 6f)
-No settings panel for viewing/rebinding shortcuts. Lower priority - default bindings work out of the box. Deferred past V1.
+Genuine stub — the Ask AI feature isn't built. The `None` return is correct for now; rip the variant when Ask AI lands or wire it.
 
 ---
 
-## Dead code
+## Intentional divergences (kept)
 
-None remaining. `PendingChord.started` field removed (2026-03-22).
+### `PaletteStage` is a flat unit enum
+
+Spec describes `CommandSearch { query, results, selected_index }` and `OptionPick { ... }` as data-carrying. Code (`crates/app/src/ui/palette.rs:65`) has bare unit variants and stores the fields on the parent `Palette` struct. Functionally equivalent; doesn't warrant a refactor.
+
+### Escape in stage 2 returns to stage 1
+
+Spec says `Close` always closes. Code (`crates/app/src/ui/palette.rs:311`) returns to stage 1 from `OptionPick` and only closes from `CommandSearch`. Better UX — kept.
+
+### `CommandArgs::NavigateToLabel` split into `NavigateToFolder` + `NavigateToTag`
+
+Spec showed a single `NavigateToLabel { label_id, account_id }`. Code has two variants (`crates/cmdk/src/args.rs`) using the typed-IDs convention from `crates/types/src/typed_ids.rs` (`FolderId` vs `TagId`). `CommandId::NavigateToLabel` is the single user-visible command; the resolver picks the variant.
+
+### Command count: 70, not 55
+
+Problem-statement.md was written when there were 55 commands. The current 70 add 7 calendar commands (`CalendarToggle`, view modes, today, create, pop-out, switch-to-mail/calendar), plus `Undo`, `SmartFolderSave`, `AppRebuildSearchIndex`, `EmailSelectAll`, `EmailSelectFromHere`, and `AppOpenPalette`. The architecture handles the growth without strain.
 
 ---
 
-## Resolved
+## Cross-account undo wart
 
-### NavMsgNext / NavMsgPrev ✅ (2026-03-22)
-Now dispatch to `ReadingPaneMessage::NextMessage` / `PrevMessage`. ReadingPane tracks `focused_message` index, expands the target message on navigation.
-
-### EmailSelectAll ✅
-Dispatches to `ThreadListMessage::SelectAll`.
-
-### EmailSelectFromHere ✅ (2026-03-22)
-Now dispatches to `ThreadListMessage::SelectFromHere`. Selects from current thread to end of list.
-
-### PaletteState is a Component ✅
-Implements `Component` trait with `PaletteEvent::ExecuteCommand` / `ExecuteParameterized` / `Dismissed` / `Error`.
-
-### is_muted and is_pinned populated ✅
-`command_dispatch.rs` reads from `Thread.is_muted` / `Thread.is_pinned`.
-
-### Keybinding override persistence (Slice 6e) ✅
-Overrides loaded at boot from `keybindings.json`, saved on mutations.
-
-### UsageTracker persistence ✅ (2026-03-22)
-Usage counts saved to `command_usage.json` after each command execution. Loaded at boot via `registry.usage.load_from_map()`.
-
-### PendingChord.started removed ✅ (2026-03-22)
-Dead field removed from `PendingChord` struct.
-
-### Undo tokens (Slice 5) ✅ (2026-03-22)
-`UndoToken` enum with 12 variants (Archive, Trash, MoveToFolder, ToggleRead/Star/Pin/Mute/Spam, AddLabel, RemoveLabel, Snooze). `UndoStack` bounded FIFO queue (capacity 20). `CommandId::Undo` registered with `Ctrl+Z`. `is_undoable` flag on `CommandDescriptor`. 13 email commands marked undoable. App holds `undo_stack: UndoStack`, Undo handler pops and logs compensation (actual provider API calls deferred until email actions are wired).
+`dispatch_plan_with_undo` (`crates/app/src/handlers/commands.rs`) splits cross-account plans into one plan per account; each split pushes its own undo-stack entry. An N-account bulk undo therefore takes N `Ctrl+Z` presses. Documented in code comments; not currently planned for fix.
