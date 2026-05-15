@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use super::scoring::category_relevance;
+use super::scoring::{category_relevance, recency_bonus};
 use super::{CommandRegistry, UsageTracker};
 use crate::context::{CommandContext, FocusedRegion, ViewType};
 use crate::id::CommandId;
@@ -531,4 +531,76 @@ fn settings_view_reduces_email_relevance() {
     ctx.current_view = ViewType::Inbox;
     let email_rel_inbox = category_relevance("Email", &ctx);
     assert_eq!(email_rel_inbox, 4);
+}
+
+#[test]
+fn recency_bonus_is_log_scaled() {
+    assert_eq!(recency_bonus(0), 0);
+    assert_eq!(recency_bonus(1), 16);
+    assert_eq!(recency_bonus(7), 32);
+    assert_eq!(recency_bonus(31), 48);
+    assert_eq!(recency_bonus(127), 64);
+    // Doubles in count add a constant 8 - log shape, no runaway.
+    assert_eq!(recency_bonus(255), 72);
+    // Stays well below the 1000 availability bonus even at saturation.
+    assert!(recency_bonus(u32::MAX) < 300);
+}
+
+#[test]
+fn fuzzy_recency_breaks_ties() {
+    // "Set Theme: Light" / "Set Theme: Dark" / "Set Theme: System" all
+    // share the matched prefix for "theme", so without recency the
+    // ranking is determined by alphabetical/registration order. Pumping
+    // usage on Dark should move it ahead of Light and System.
+    let mut registry = CommandRegistry::new();
+    let ctx = empty_context();
+
+    let baseline = registry.query(&ctx, "theme");
+    let baseline_dark_pos = baseline
+        .iter()
+        .position(|m| m.id == CommandId::ViewSetThemeDark)
+        .expect("Dark in baseline");
+
+    for _ in 0..20 {
+        registry.usage.record_usage(CommandId::ViewSetThemeDark);
+    }
+
+    let after = registry.query(&ctx, "theme");
+    let after_dark_pos = after
+        .iter()
+        .position(|m| m.id == CommandId::ViewSetThemeDark)
+        .expect("Dark in after");
+
+    assert!(
+        after_dark_pos < baseline_dark_pos,
+        "Dark should rise after heavy usage; baseline pos {baseline_dark_pos} -> after pos {after_dark_pos}"
+    );
+}
+
+#[test]
+fn fuzzy_recency_does_not_override_availability() {
+    // EmailArchive requires a selected thread. With no selection it's
+    // unavailable. Even with massive usage, an unavailable command must
+    // not outrank an available command matching the same query.
+    let mut registry = CommandRegistry::new();
+    let ctx = empty_context(); // no selection -> EmailArchive unavailable
+
+    for _ in 0..1000 {
+        registry.usage.record_usage(CommandId::EmailArchive);
+    }
+
+    let results = registry.query(&ctx, "arch");
+    let archive_pos = results
+        .iter()
+        .position(|m| m.id == CommandId::EmailArchive)
+        .expect("Archive present even when unavailable");
+
+    // Anything above Archive in the list must be available.
+    for m in &results[..archive_pos] {
+        assert!(
+            m.available,
+            "{:?} ranked above unavailable Archive but is itself unavailable",
+            m.id
+        );
+    }
 }

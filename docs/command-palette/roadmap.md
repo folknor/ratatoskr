@@ -37,17 +37,14 @@ Files: `crates/cmdk/src/keybinding.rs`.
 
 ## Slice 4: Ranking Signals
 
-**Status:** Mostly done. One gap.
+**Status:** Done.
 
-What's wired into `CommandRegistry::query()` today (`crates/cmdk/src/registry/core.rs`):
+Wired into `CommandRegistry::query()` (`crates/cmdk/src/registry/core.rs`):
 
-- **Empty query** (`query_empty`): sorts by availability → recency (`UsageTracker::usage_count`) → `category_relevance` → alphabetical.
-- **Fuzzy query** (`query_fuzzy`): `score = raw_fuzzy + context_boost + availability_bonus(1000)`; sorted by score descending. `context_boost` combines category relevance and `focused_region_boost`.
+- **Empty query** (`query_empty`): sorts by availability, then raw recency count, then `category_relevance`, then alphabetical.
+- **Fuzzy query** (`query_fuzzy`): `score = raw_fuzzy + context_boost + availability_bonus(1000) + recency_bonus`. Recency is log-scaled (`recency_bonus(count)` in `scoring.rs`) so high-frequency commands don't dominate: 1 use adds 16, 7 uses adds 32, 127 uses adds 64. Stays well under the 1000 availability bonus, so an enabled never-used command still beats a disabled heavily-used one.
+- **Context boost**: combines `category_relevance` and `focused_region_boost`.
 - **Aliases / keywords**: folded into the haystack via `build_command_haystack(category, label, keywords)`, so alias hits surface through fuzzy score.
-
-What's missing:
-
-- **Recency in fuzzy results.** `query_fuzzy` reads `recency_score` into each `CommandMatch` but does not add it to the sort key — recency only orders the empty-query case. Folding usage count (or a log-scaled function of it) into the fuzzy score is the remaining work.
 
 ## Slice 5: Undo
 
@@ -56,7 +53,7 @@ What's missing:
 - `UndoStack<T>` bounded FIFO (capacity 20) and `UndoEntry<T>` in `crates/cmdk/src/undo.rs`.
 - `CommandId::Undo` registered with `Ctrl+Z`. `is_undoable` flag on descriptors; 13 email commands marked undoable.
 - `App.undo_stack` real; `dispatch_plan_with_undo` (in `crates/app/src/handlers/commands.rs`) pushes inverse plans and runs them via `Message::UndoCompleted` with toast + nav + thread-list reload.
-- Cross-account bulk undo splits per account and pushes one stack entry per split — minor UX wart (N presses for an N-account bulk action) noted in the dispatch comments.
+- Cross-account bulk undo splits per account and pushes one stack entry per split - minor UX wart (N presses for an N-account bulk action) noted in the dispatch comments.
 
 ## Slice 6a: Infrastructure + Keyboard Dispatch
 
@@ -79,7 +76,7 @@ What's missing:
 
 Known divergences (intentional or blocked):
 - `PaletteStage` is a bare unit enum; query/results/selection live as flat fields on `Palette`. Functionally equivalent to the spec's data-carrying variant.
-- Escape in stage 2 calls `back_to_stage1()` instead of closing — better UX, kept on purpose.
+- Escape in stage 2 calls `back_to_stage1()` instead of closing - better UX, kept on purpose.
 - `scroll_to_selected()` is a no-op (`crates/app/src/ui/palette.rs:620`). Blocked on the iced fork not exposing `scrollable::scroll_to()`. Arrow keys move the selection index but the scrollable doesn't follow.
 
 ## Slice 6d: Command-Backed UI Surfaces
@@ -106,8 +103,7 @@ A settings panel for viewing/searching/rebinding shortcuts with conflict detecti
 
 ## Remaining Work Summary
 
-1. **Fold recency into the fuzzy score** (Slice 4 gap).
-2. **`scroll_to_selected()`** — needs `scrollable::scroll_to()` on the iced fork.
-3. **Slice 6d expansion** — context menus, additional toolbars.
-4. **Slice 6f** — keybinding management UI (deferred).
-5. **`AppAskAi`** — dispatch stub returns `None`; waits on the Ask AI feature itself.
+1. **`scroll_to_selected()`** - needs `scrollable::scroll_to()` on the iced fork.
+2. **Slice 6d expansion** - context menus, additional toolbars.
+3. **Slice 6f** - keybinding management UI (deferred).
+4. **`AppAskAi`** - dispatch stub returns `None`; waits on the Ask AI feature itself.

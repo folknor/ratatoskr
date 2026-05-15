@@ -7,7 +7,7 @@ use crate::id::CommandId;
 use crate::keybinding::{KeyBinding, current_platform};
 
 use super::scoring::{
-    build_command_haystack, category_relevance, context_boost, input_mode_for,
+    build_command_haystack, category_relevance, context_boost, input_mode_for, recency_bonus,
 };
 use super::usage::UsageTracker;
 
@@ -160,10 +160,11 @@ impl CommandRegistry {
                 let available = (d.is_available)(ctx);
                 let boost = context_boost(d, ctx);
                 let availability_bonus = if available { 1000 } else { 0 };
+                let recency = self.usage.usage_count(d.id);
                 let score = raw_score
                     .saturating_add(boost)
-                    .saturating_add(availability_bonus);
-                let recency = self.usage.usage_count(d.id);
+                    .saturating_add(availability_bonus)
+                    .saturating_add(recency_bonus(recency));
 
                 results.push(CommandMatch {
                     id: d.id,

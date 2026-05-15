@@ -27,6 +27,19 @@ pub(super) fn context_boost(descriptor: &CommandDescriptor, ctx: &CommandContext
     boost
 }
 
+/// Score bonus from how often this command has been used.
+///
+/// Log-scaled so high-frequency commands don't dominate: 1 use → 16,
+/// 7 uses → 32, 31 uses → 48, 127 uses → 64. Stays well under the
+/// 1000 availability bonus so an enabled never-used command still
+/// outranks a disabled heavily-used one.
+pub(super) fn recency_bonus(count: u32) -> u32 {
+    if count == 0 {
+        return 0;
+    }
+    (32 - count.saturating_add(1).leading_zeros()) * 8
+}
+
 /// Returns 0-4 relevance points for how well a category matches the view.
 pub(super) fn category_relevance(category: &str, ctx: &CommandContext) -> u32 {
     match category {
