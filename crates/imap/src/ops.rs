@@ -566,6 +566,48 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
+    async fn mark_mdn_sent(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+    ) -> Result<(), ProviderError> {
+        let account_id = ctx.account_id.to_string();
+        let mid = message_id.to_string();
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
+
+        let lookup = ctx
+            .db
+            .with_conn(move |conn| {
+                conn.query_row(
+                    "SELECT imap_folder, imap_uid FROM messages \
+                     WHERE account_id = ?1 AND id = ?2 \
+                       AND imap_folder IS NOT NULL AND imap_uid IS NOT NULL",
+                    rusqlite::params![account_id, mid],
+                    |row| {
+                        let folder: String = row.get(0)?;
+                        let uid: i64 = row.get(1)?;
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        Ok((folder, uid as u32))
+                    },
+                )
+                .optional()
+                .map_err(|e| format!("lookup imap ref for mdn keyword: {e}"))
+            })
+            .await?;
+
+        let Some((folder, uid)) = lookup else {
+            // No IMAP ref - nothing to keyword. Local mdn_sent already set.
+            return Ok(());
+        };
+
+        with_session!(&config, session => {
+            imap_client::set_keyword_if_supported(
+                &mut session, &folder, uid, "+FLAGS", "$MDNSent",
+            ).await
+        })?;
+        Ok(())
+    }
+
     async fn star(
         &self,
         ctx: &ActionProviderCtx<'_>,

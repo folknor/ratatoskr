@@ -19,9 +19,9 @@ All four providers parse the incoming `Disposition-Notification-To` header into 
 
 `db::queries_extra::mdn::is_mdn_requested_graph` is the lookup helper (the name predates the wiring and is provider-agnostic in practice; it just reads the column).
 
-## Incoming: response infrastructure (built, unwired)
+## Incoming: response
 
-Everything below exists in code but has zero non-test consumers as of 2026-05-15.
+Wired into `crates/service/src/actions/mark_read.rs`: after a successful `read=true` provider mark_read, `mdn_send::send_mdn_responses` enumerates pending requests in the thread, resolves the per-sender policy, and on `Always` builds + sends an MDN via `ProviderOps::send_email`, marks `mdn_sent` locally, and pushes the server-side keyword via `ProviderOps::mark_mdn_sent`. `Ask` is treated as `Never` until the prompt UI ships. All steps soft-fail (log + continue) to keep the user-visible mark-read action atomic.
 
 ### Policy resolution
 
@@ -42,26 +42,10 @@ The `read_receipt_policy` table and the `default_read_receipt_policy` setting ke
 ### Sent-flag tracking
 
 - `mark_mdn_sent_local(conn, account_id, message_id)`: sets `messages.mdn_sent = 1`.
-- `mark_mdn_sent_imap(session, folder, uid)`: sets the `$MDNSent` IMAP keyword via `UID STORE +FLAGS`. Silent no-op if the server doesn't permit custom keywords.
-- `mark_mdn_sent_jmap(client, message_id)`: sets the `$mdnsent` JMAP keyword via `Email/set`.
-- `is_mdn_sent_imap(session, folder, uid)`: `UID SEARCH KEYWORD $MDNSent`.
 - `is_mdn_already_sent(conn, account_id, message_id)`: local DB check.
-- Graph has no server-side equivalent (`isReadReceiptRequested` is read-only); we track sent status via `mark_mdn_sent_local` only.
+- `ProviderOps::mark_mdn_sent(ctx, message_id)`: server-side keyword sync. IMAP looks up `(imap_folder, imap_uid)`, opens a session, sets `$MDNSent` via `UID STORE +FLAGS` (silent no-op if the server doesn't allow custom keywords). JMAP sends `Email/set` with `$mdnsent` true. Gmail and Graph use the default no-op trait impl - Graph's `isReadReceiptRequested` is read-only and Gmail has no equivalent keyword.
 
 ## Outstanding work
-
-### Wire the response (next backend slice)
-
-The MDN response chain has all the parts but no caller. Concretely:
-
-1. Hook into `crates/service/src/actions/mark_read.rs` after `mark_read_local` succeeds with `read == true`.
-2. For each message in the thread with `mdn_requested && !mdn_sent`:
-   - Read `from_address`, `headers.Message-ID`, account `email` + `display_name`.
-   - `resolve_read_receipt_policy(conn, account_id, sender_email)`.
-   - On `Always`: `build_mdn_message(...)`, send via provider's send path (`send_raw_email` for IMAP+SMTP, Gmail/JMAP raw send, Graph draft route), then `mark_mdn_sent_local` plus the provider-specific `mark_mdn_sent_*`.
-   - On `Ask`: stash a pending-prompt record (UI work, deferred); for now treat as `Never`.
-   - On `Never`: do nothing.
-3. Failures must be soft: provider send errors should not unmark-read; log and move on. The receipt is best-effort.
 
 ### Per-message prompt UI (deferred)
 

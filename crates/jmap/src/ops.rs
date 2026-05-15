@@ -158,6 +158,30 @@ impl ProviderOps for JmapOps {
         Ok(())
     }
 
+    async fn mark_mdn_sent(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        message_id: &str,
+    ) -> Result<(), ProviderError> {
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        let mut request = client.build();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
+        email_set.update(message_id).keyword("$mdnsent", true);
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("mdn keyword: {e}")))?;
+        let mut response = request
+            .send()
+            .await
+            .map_err(|e| ProviderError::Server(format!("mdn keyword: {e}")))?;
+        response
+            .get(&handle)
+            .map_err(|e| ProviderError::Server(format!("mdn keyword: {e}")))?;
+        Ok(())
+    }
+
     async fn star(
         &self,
         _ctx: &ActionProviderCtx<'_>,

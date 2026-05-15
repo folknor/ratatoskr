@@ -71,6 +71,19 @@ pub trait ProviderOps: Send + Sync {
         tag_id: &TagId,
     ) -> Result<(), ProviderError>;
 
+    /// Set the server-side "MDN already sent" marker for a single
+    /// message after we've responded to a read-receipt request.
+    /// IMAP/JMAP set the `$MDNSent`/`$mdnsent` keyword. Gmail and
+    /// Graph have no equivalent and the default no-op is correct
+    /// for them.
+    async fn mark_mdn_sent(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _message_id: &str,
+    ) -> Result<(), ProviderError> {
+        Ok(())
+    }
+
     // ── Send + Drafts ───────────────────────────────────────────
 
     /// Returns the sent message ID.

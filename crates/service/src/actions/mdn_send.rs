@@ -86,6 +86,18 @@ pub(crate) async fn send_mdn_responses(
                         candidate.message_id
                     );
                 }
+                // Server-side keyword sync. Soft-fail: cross-client
+                // coordination is best-effort; the local mdn_sent flag
+                // already prevents our own double-sends.
+                if let Err(e) = provider
+                    .mark_mdn_sent(&provider_ctx, &candidate.message_id)
+                    .await
+                {
+                    log::warn!(
+                        "[mdn] server keyword sync failed for {account_id}/{}: {e}",
+                        candidate.message_id
+                    );
+                }
             }
             Err(e) => {
                 log::warn!(

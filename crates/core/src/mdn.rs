@@ -88,82 +88,10 @@ pub fn build_mdn_message(
     raw.into_bytes()
 }
 
-// ---------------------------------------------------------------------------
-// $MDNSent keyword management
-// ---------------------------------------------------------------------------
-
-
-/// Set the `$mdnsent` keyword on a JMAP message via `Email/set`.
-///
-/// JMAP keywords are case-sensitive; the canonical form is lowercase `$mdnsent`.
-pub async fn mark_mdn_sent_jmap(
-    client: &bifrost_jmap::client::Client,
-    message_id: &str,
-) -> Result<(), String> {
-    let account_id = client.default_account_id().to_string();
-    let mut email_set = bifrost_jmap::email::EmailSet::new(&account_id);
-    email_set.update(message_id).keyword("$mdnsent", true);
-    let mut request = client.build();
-    let handle = request
-        .call(email_set)
-        .map_err(|e| format!("JMAP Email/set $mdnsent build: {e}"))?;
-    let mut response = request
-        .send()
-        .await
-        .map_err(|e| format!("JMAP Email/set $mdnsent send: {e}"))?;
-    response
-        .get(&handle)
-        .map_err(|e| format!("JMAP Email/set $mdnsent: {e}"))?;
-    Ok(())
-}
-
-/// Set the `$MDNSent` keyword on an IMAP message via `UID STORE +FLAGS`.
-///
-/// Checks PERMANENTFLAGS first - if the server does not support custom
-/// keywords (`\*` not in PERMANENTFLAGS), this is a silent no-op.
-/// The caller should always also call [`mark_mdn_sent_local`] to ensure
-/// local tracking regardless of server support.
-pub async fn mark_mdn_sent_imap(
-    session: &mut crate::imap::connection::ImapSession,
-    folder: &str,
-    uid: u32,
-) -> Result<(), String> {
-    crate::imap::client::set_keyword_if_supported(session, folder, uid, "+FLAGS", "$MDNSent").await
-}
-
-/// Check whether the `$MDNSent` keyword is already set on an IMAP message.
-///
-/// Performs a `UID SEARCH KEYWORD $MDNSent` scoped to the single UID.
-/// Returns `true` if the server reports the keyword is present.
-///
-/// If the search fails (e.g. server doesn't support custom keywords),
-/// returns `false` - the caller should fall back to the local DB check.
-pub async fn is_mdn_sent_imap(
-    session: &mut crate::imap::connection::ImapSession,
-    folder: &str,
-    uid: u32,
-) -> bool {
-    use crate::imap::connection::IMAP_CMD_TIMEOUT;
-
-    // SELECT the folder first
-    if tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
-        .await
-        .is_err()
-    {
-        return false;
-    }
-
-    let query = format!("UID {uid} KEYWORD $MDNSent");
-    let result = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_search(&query)).await;
-    match result {
-        Ok(Ok(uids)) => uids.contains(&uid),
-        _ => false,
-    }
-}
-
-// For Graph (Microsoft), `isReadReceiptRequested` is read-only on the API
-// side - there is no server-side keyword to set. We only track MDN sent
-// status locally via [`mark_mdn_sent_local`].
+// Server-side `$MDNSent` / `$mdnsent` keyword sync now lives behind
+// `ProviderOps::mark_mdn_sent` in each provider's `ops.rs`. Gmail and
+// Graph have no equivalent (Graph's `isReadReceiptRequested` is
+// read-only); their default trait impl is a no-op.
 
 // ---------------------------------------------------------------------------
 // Tests

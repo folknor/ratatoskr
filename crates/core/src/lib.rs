@@ -21,8 +21,6 @@ pub mod generation;
 pub(crate) use gmail;
 #[allow(clippy::single_component_path_imports)]
 pub(crate) use graph;
-#[allow(clippy::single_component_path_imports)]
-pub(crate) use imap;
 pub use label_colors;
 pub use store::inline_image_store;
 pub use sync::filters;
