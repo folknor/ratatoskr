@@ -737,6 +737,7 @@ impl ReadyApp {
                 handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp)
             }
             Message::SignatureOp(result) => self.handle_signature_op(result),
+            Message::LabelOp(op) => self.handle_label_op(op),
 
             // Pop-out windows - delegated to handlers/pop_out.rs
             Message::PopOut(window_id, pop_out_msg) => {

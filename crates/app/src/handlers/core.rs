@@ -659,6 +659,36 @@ impl ReadyApp {
         }
     }
 
+    pub(crate) fn handle_label_op(&mut self, op: handlers::LabelOp) -> Task<Message> {
+        let mutated = match op {
+            handlers::LabelOp::Loaded(Ok(groups)) => {
+                self.settings.labels_by_account = groups;
+                return Task::none();
+            }
+            handlers::LabelOp::Loaded(Err(e)) => {
+                log::error!("Failed to load cross-account labels: {e}");
+                return Task::none();
+            }
+            handlers::LabelOp::CreatedAck(Err(ref e))
+            | handlers::LabelOp::RenamedAck(Err(ref e))
+            | handlers::LabelOp::DeletedAck(Err(ref e))
+            | handlers::LabelOp::RecoloredAck(Err(ref e)) => {
+                log::error!("Label op failed: {e}");
+                false
+            }
+            handlers::LabelOp::CreatedAck(Ok(_))
+            | handlers::LabelOp::RenamedAck(Ok(()))
+            | handlers::LabelOp::DeletedAck(Ok(()))
+            | handlers::LabelOp::RecoloredAck(Ok(())) => true,
+        };
+
+        if mutated {
+            handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp)
+        } else {
+            Task::none()
+        }
+    }
+
     pub(crate) fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
         // Phase 6a-part-2: account.delete is now a single Service-side
         // IPC that folds cancel-and-await for sync/push/calendar
@@ -1035,6 +1065,8 @@ impl ReadyApp {
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task =
             handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp);
+        let labels_task =
+            handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp);
         let sync_task = self.sync_all_accounts();
         let auto_reply_task = self.check_auto_reply_status();
         // Per-account thread_participants backfill used to run from here.
@@ -1051,6 +1083,7 @@ impl ReadyApp {
         Task::batch([
             self.load_navigation_and_threads(),
             sig_task,
+            labels_task,
             sync_task,
             auto_reply_task,
         ])

@@ -763,6 +763,66 @@ impl Settings {
             }
             SettingsMessage::GroupSaved(Ok(())) | SettingsMessage::GroupDeleted(Ok(())) => {}
             SettingsMessage::GroupSaved(Err(_)) | SettingsMessage::GroupDeleted(Err(_)) => {}
+
+            // ── Label editor ────────────────────────────
+            SettingsMessage::OpenLabelEditor { account_id, label_id } => {
+                let editor = if account_id.is_empty() && label_id.is_empty() {
+                    LabelEditorState::new_create()
+                } else {
+                    self.labels_by_account
+                        .iter()
+                        .flat_map(|g| g.labels.iter())
+                        .find(|l| l.account_id == account_id && l.label_id == label_id)
+                        .map(LabelEditorState::from_row)
+                        .unwrap_or_else(LabelEditorState::new_create)
+                };
+                self.editing_label = Some(editor);
+                self.active_sheet = Some(SettingsSheetPage::EditLabel {
+                    account_id,
+                    label_id,
+                });
+                self.sheet_anim.go_mut(true, Instant::now());
+            }
+            SettingsMessage::LabelEditorNameChanged(v) => {
+                if let Some(ref mut editor) = self.editing_label {
+                    editor.name = v;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::LabelEditorColorChanged(bg, fg) => {
+                if let Some(ref mut editor) = self.editing_label {
+                    editor.color_bg = bg;
+                    editor.color_fg = fg;
+                    editor.has_override = true;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::LabelEditorColorReset => {
+                if let Some(ref mut editor) = self.editing_label {
+                    editor.has_override = false;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::LabelEditorSave
+            | SettingsMessage::LabelEditorDelete
+            | SettingsMessage::LabelEditorConfirmDelete => {
+                // Wiring to action handlers comes with Tier-2 task #3.
+                if let Some(ref mut editor) = self.editing_label
+                    && matches!(message, SettingsMessage::LabelEditorConfirmDelete)
+                {
+                    editor.show_delete_confirmation = true;
+                }
+            }
+            SettingsMessage::LabelEditorCancelDelete => {
+                if let Some(ref mut editor) = self.editing_label {
+                    editor.show_delete_confirmation = false;
+                }
+            }
+            SettingsMessage::LabelEditorCancel => {
+                self.editing_label = None;
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
+            }
             _ => {}
         }
     }

@@ -388,6 +388,9 @@ pub enum Message {
     // Signature operations
     SignatureOp(handlers::SignatureResult),
 
+    // Cross-account label operations (Mail Rules > Labels)
+    LabelOp(handlers::LabelOp),
+
     // Undo
     Undo,
     /// Undo compensation completed.

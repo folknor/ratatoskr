@@ -80,6 +80,9 @@ impl Settings {
                     editor.notes.undo();
                 }
             }
+            // Label editor fields are plain String today (no UndoableTextInput
+            // wrapping yet). Undo is a no-op until we upgrade them.
+            InputField::LabelName | InputField::LabelColorBg | InputField::LabelColorFg => {}
         }
     }
 
@@ -162,6 +165,7 @@ impl Settings {
                     editor.notes.redo();
                 }
             }
+            InputField::LabelName | InputField::LabelColorBg | InputField::LabelColorFg => {}
         }
     }
 }

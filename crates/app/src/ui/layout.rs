@@ -312,6 +312,10 @@ pub const PAD_SETTINGS_CONTENT: Padding = Padding {
 /// Minimum height for settings rows (ensures consistent row height
 /// whether the row contains a control or just text).
 pub const SETTINGS_ROW_HEIGHT: f32 = 52.0;
+/// Slim row reserved for in-list section headers (e.g. per-account
+/// dividers inside the Mail Rules > Labels list). Shorter than a normal
+/// row so the header reads as a separator, not an entry.
+pub const SETTINGS_SECTION_HEADER_HEIGHT: f32 = 36.0;
 /// Toggle rows with label + description need more room.
 pub const SETTINGS_TOGGLE_ROW_HEIGHT: f32 = 64.0;
 /// Height of the title-line inside a settings row that pairs the label

@@ -216,6 +216,7 @@ fn query_thread_label_decorations(
             let (resolved_bg, _) = resolve_label_color(
                 &name,
                 &label_account_id,
+                None,
                 color_bg.as_deref(),
                 color_fg.as_deref(),
             );
@@ -582,6 +583,7 @@ fn query_thread_labels(
         let (bg, fg) = resolve_label_color(
             &lr.name,
             &lr.account_id,
+            None,
             lr.color_bg.as_deref(),
             lr.color_fg.as_deref(),
         );

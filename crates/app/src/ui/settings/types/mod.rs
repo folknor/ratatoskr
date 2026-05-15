@@ -104,6 +104,10 @@ pub enum InputField {
     CaldavPassword,
     // Group editor
     GroupName,
+    // Label editor
+    LabelName,
+    LabelColorBg,
+    LabelColorFg,
     // Contact editor
     ContactDisplayName,
     ContactEmail,
@@ -132,6 +136,62 @@ pub(super) const DRAG_START_THRESHOLD: f32 = 4.0;
 pub struct EditableItem {
     pub label: String,
     pub enabled: Option<bool>,
+}
+
+/// State for the per-account label editor sheet.
+///
+/// Edits target one specific `(account_id, label_id)` pair. Create mode
+/// leaves both blank and writes the new label to every account on save
+/// (cross-account fan-out happens at the action layer, not here).
+#[derive(Debug, Clone)]
+pub struct LabelEditorState {
+    /// Account whose label is being edited. Empty in create mode.
+    #[allow(dead_code)]
+    pub account_id: String,
+    /// Label being edited. Empty in create mode.
+    pub label_id: String,
+    /// User-editable display name.
+    pub name: String,
+    /// User-selected background color hex (or the resolved current).
+    pub color_bg: String,
+    /// User-selected foreground color hex (or the resolved current).
+    pub color_fg: String,
+    /// True if `color_bg`/`color_fg` came from an existing override.
+    pub has_override: bool,
+    /// Show the destructive delete confirmation modal.
+    pub show_delete_confirmation: bool,
+    /// True once the user has edited any field.
+    pub dirty: bool,
+}
+
+impl LabelEditorState {
+    pub fn new_create() -> Self {
+        Self {
+            account_id: String::new(),
+            label_id: String::new(),
+            name: String::new(),
+            color_bg: "#999999".to_owned(),
+            color_fg: "#ffffff".to_owned(),
+            has_override: false,
+            show_delete_confirmation: false,
+            dirty: false,
+        }
+    }
+
+    pub fn from_row(
+        row: &rtsk::db::queries_extra::navigation::AccountLabelRow,
+    ) -> Self {
+        Self {
+            account_id: row.account_id.clone(),
+            label_id: row.label_id.clone(),
+            name: row.name.clone(),
+            color_bg: row.color_bg.clone(),
+            color_fg: row.color_fg.clone(),
+            has_override: row.has_color_override,
+            show_delete_confirmation: false,
+            dirty: false,
+        }
+    }
 }
 
 pub struct Settings {
@@ -191,8 +251,12 @@ pub struct Settings {
     pub hovered_help: Option<String>,
     // Editable lists
     pub drag_state: Option<DragState>,
-    // Demo data for Mail Rules tab
-    pub demo_labels: Vec<EditableItem>,
+    // Mail Rules > Labels (cross-account grouped tag-type labels).
+    // Loaded from `query_visible_labels` on boot and after any label mutation.
+    pub labels_by_account: Vec<rtsk::db::queries_extra::navigation::AccountLabelsGroup>,
+    /// Label editor sheet state (Mail Rules > Labels).
+    pub editing_label: Option<LabelEditorState>,
+    // Demo data for Mail Rules > Filters (placeholder until filters land).
     pub demo_filters: Vec<EditableItem>,
     // Accounts tab
     pub managed_accounts: Vec<ManagedAccount>,
@@ -415,24 +479,7 @@ impl Default for Settings {
                 .duration(Duration::from_millis(200)),
             hovered_help: None,
             drag_state: None,
-            demo_labels: vec![
-                EditableItem {
-                    label: "Important".into(),
-                    enabled: Some(true),
-                },
-                EditableItem {
-                    label: "Personal".into(),
-                    enabled: Some(true),
-                },
-                EditableItem {
-                    label: "Receipts".into(),
-                    enabled: Some(false),
-                },
-                EditableItem {
-                    label: "Travel".into(),
-                    enabled: None,
-                },
-            ],
+            labels_by_account: Vec::new(),
             demo_filters: vec![
                 EditableItem {
                     label: "Auto-archive promotions".into(),
@@ -446,6 +493,7 @@ impl Default for Settings {
             managed_accounts: Vec::new(),
             account_drag: None,
             editing_account: None,
+            editing_label: None,
             signatures: Vec::new(),
             signature_editor: None,
             confirm_delete_signature: None,

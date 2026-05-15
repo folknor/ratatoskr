@@ -30,16 +30,24 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
 
 /// Resolve display colors for a label.
 ///
-/// If `color_bg`/`color_fg` are both provided (e.g. synced from Gmail),
-/// return those. Otherwise, deterministically assign from the preset palette.
+/// Resolution priority (per docs/labels-unification/problem-statement.md):
+/// 1. User override (from `label_color_overrides`, keyed by normalized name).
+/// 2. Synced color (`color_bg`/`color_fg` from the label row).
+/// 3. Hash fallback from the preset palette.
+///
+/// The `override_color` argument is the looked-up override for this label's
+/// normalized name (`LOWER(TRIM(name))`). Callers that haven't loaded the
+/// override map pass `None` and get tier-2/tier-3 behavior.
 pub fn resolve_label_color<'a>(
     name: &'a str,
     account_id: &'a str,
+    override_color: Option<(&'a str, &'a str)>,
     color_bg: Option<&'a str>,
     color_fg: Option<&'a str>,
 ) -> (&'a str, &'a str) {
-    let result = match (color_bg, color_fg) {
-        (Some(bg), Some(fg)) => (bg, fg),
+    let result = match (override_color, color_bg, color_fg) {
+        (Some((bg, fg)), _, _) => (bg, fg),
+        (None, Some(bg), Some(fg)) => (bg, fg),
         _ => color_for_label(name, account_id),
     };
     log::debug!(
@@ -75,6 +83,7 @@ mod tests {
         let (bg, fg) = resolve_label_color(
             "Important",
             "acc-1",
+            None,
             Some("#ff0000"),
             Some("#ffffff"),
         );
@@ -84,11 +93,24 @@ mod tests {
 
     #[test]
     fn resolve_falls_back_to_hash() {
-        let (bg, fg) = resolve_label_color("Custom", "acc-1", None, None);
+        let (bg, fg) = resolve_label_color("Custom", "acc-1", None, None, None);
         assert!(bg.starts_with('#'));
         assert!(fg.starts_with('#'));
         let (expected_bg, expected_fg) = color_for_label("Custom", "acc-1");
         assert_eq!(bg, expected_bg);
         assert_eq!(fg, expected_fg);
+    }
+
+    #[test]
+    fn override_wins_over_synced() {
+        let (bg, fg) = resolve_label_color(
+            "Important",
+            "acc-1",
+            Some(("#00ff00", "#000000")),
+            Some("#ff0000"),
+            Some("#ffffff"),
+        );
+        assert_eq!(bg, "#00ff00");
+        assert_eq!(fg, "#000000");
     }
 }

@@ -14,6 +14,7 @@ pub(crate) mod commands;
 mod contacts;
 mod core;
 mod keyboard;
+pub mod labels;
 mod navigation;
 mod palette;
 pub(crate) mod pop_out;
@@ -22,6 +23,27 @@ pub(crate) mod search;
 pub mod signatures;
 
 use crate::ui::settings::SignatureEntry;
+use rtsk::db::queries_extra::navigation::AccountLabelsGroup;
+
+/// Result variants for per-account label operations driven from the
+/// Mail Rules > Labels settings section.
+///
+/// Each IPC-bound variant maps 1:1 to a Service action (create, delete,
+/// recolor, rename). `Loaded` is the only purely-local variant.
+#[derive(Debug, Clone)]
+pub enum LabelOp {
+    /// Re-listed labels grouped by account (`query_labels_by_account`).
+    Loaded(Result<Vec<AccountLabelsGroup>, String>),
+    /// `label.create` ack. Carries the normalized name created
+    /// (cross-account fan-out happens server-side).
+    CreatedAck(Result<String, String>),
+    /// `label.delete` ack for one `(account_id, label_id)`.
+    DeletedAck(Result<(), String>),
+    /// `label.recolor` ack (writes to `label_color_overrides`).
+    RecoloredAck(Result<(), String>),
+    /// `label.rename` ack for one `(account_id, label_id)`.
+    RenamedAck(Result<(), String>),
+}
 
 /// Result variants for signature operations, used as the output type
 /// of `Task::perform` so the caller can map them to `Message`

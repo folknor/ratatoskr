@@ -30,7 +30,8 @@ CREATE INDEX IF NOT EXISTS idx_labels_account ON labels(account_id);
 
 CREATE TABLE IF NOT EXISTS label_color_overrides (
     label_name TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
-    color_bg TEXT NOT NULL
+    color_bg TEXT NOT NULL,
+    color_fg TEXT NOT NULL
 );
 
 -- ── Threads ─────────────────────────────────────────────────

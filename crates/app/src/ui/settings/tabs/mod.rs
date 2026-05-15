@@ -16,6 +16,7 @@ mod contacts;
 mod general;
 mod groups;
 mod import;
+mod labels;
 mod mail_rules;
 mod people;
 mod reference;
@@ -70,6 +71,7 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
             Some(SettingsSheetPage::EditContact { .. }) => contacts::contact_editor_sheet(state),
             Some(SettingsSheetPage::EditGroup { .. }) => groups::group_editor_sheet(state),
             Some(SettingsSheetPage::ImportContacts) => import::import_wizard_sheet(state),
+            Some(SettingsSheetPage::EditLabel { .. }) => labels::label_editor_sheet(state),
             None => column![].into(),
         };
 

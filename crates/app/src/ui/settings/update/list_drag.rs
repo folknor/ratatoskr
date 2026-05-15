@@ -35,9 +35,27 @@ impl Settings {
         }
 
         let row_step = SETTINGS_ROW_HEIGHT + 1.0;
-        let count = self.list_items_mut(list_id).len();
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
+        let raw_target = (point.y / row_step).max(0.0) as usize;
+
+        // Labels list - `list_id` is `labels:{account_id}`.
+        if let Some(account_id) = list_id.strip_prefix("labels:") {
+            let Some(labels) = self.label_rows_for_account_mut(account_id) else {
+                return Task::none();
+            };
+            let count = labels.len();
+            let target = raw_target.min(count.saturating_sub(1));
+            if target != from {
+                labels.swap(from, target);
+                if let Some(ref mut drag) = self.drag_state {
+                    drag.dragging_index = target;
+                }
+            }
+            return Task::none();
+        }
+
+        let count = self.list_items_mut(list_id).len();
+        let target = raw_target.min(count.saturating_sub(1));
 
         if target != from {
             self.list_items_mut(list_id).swap(from, target);
@@ -49,10 +67,22 @@ impl Settings {
     }
 
     pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
+        // Labels live in `labels_by_account` and are handled in
+        // `handle_drag_move` via `label_rows_for_account_mut`. This helper
+        // only services the `EditableItem`-backed lists.
         match list_id {
-            "labels" => &mut self.demo_labels,
             "filters" => &mut self.demo_filters,
-            _ => &mut self.demo_labels,
+            _ => &mut self.demo_filters,
         }
+    }
+
+    pub(super) fn label_rows_for_account_mut(
+        &mut self,
+        account_id: &str,
+    ) -> Option<&mut Vec<rtsk::db::queries_extra::navigation::AccountLabelRow>> {
+        self.labels_by_account
+            .iter_mut()
+            .find(|g| g.account_id == account_id)
+            .map(|g| &mut g.labels)
     }
 }

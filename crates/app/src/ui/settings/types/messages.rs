@@ -163,6 +163,29 @@ pub enum SettingsMessage {
     GroupEditorFilterChanged(String),
     GroupEditorMembersFilterChanged(String),
     GroupMembersLoaded(String, Result<Vec<String>, String>),
+
+    // ── Mail Rules > Labels editor ─────────────────────────
+    /// Open the label editor sheet. Empty IDs = create new.
+    OpenLabelEditor {
+        account_id: String,
+        label_id: String,
+    },
+    /// Name field in the editor changed.
+    LabelEditorNameChanged(String),
+    /// User picked a new color in the editor.
+    LabelEditorColorChanged(String, String),
+    /// User reset the override (use synced/hash color again).
+    LabelEditorColorReset,
+    /// Save the editor (create or rename + recolor).
+    LabelEditorSave,
+    /// Delete the label being edited.
+    LabelEditorDelete,
+    /// Cancel and close the editor without saving.
+    LabelEditorCancel,
+    /// Confirm-delete dialog shown.
+    LabelEditorConfirmDelete,
+    /// Cancel the confirm-delete dialog.
+    LabelEditorCancelDelete,
 }
 
 /// Events the settings component emits upward to the App.
@@ -237,6 +260,12 @@ pub enum SettingsSheetPage {
         group_id: Option<String>,
     },
     ImportContacts,
+    /// Per-account label editor.
+    /// Empty `account_id`+`label_id` = creating a new label.
+    EditLabel {
+        account_id: String,
+        label_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

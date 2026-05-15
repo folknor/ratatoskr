@@ -316,6 +316,7 @@ fn build_account_labels(conn: &Connection, account_id: &str) -> Result<Vec<Navig
             let (bg, fg) = label_colors::resolve_label_color(
                 &label.name,
                 &label.account_id,
+                None,
                 label.color_bg.as_deref(),
                 label.color_fg.as_deref(),
             );
@@ -445,6 +446,7 @@ pub fn get_shared_mailbox_navigation(
                 let (bg, fg) = label_colors::resolve_label_color(
                     &label.name,
                     &label.account_id,
+                    None,
                     label.color_bg.as_deref(),
                     label.color_fg.as_deref(),
                 );
@@ -716,4 +718,336 @@ pub fn search_accounts_for_typeahead_sync(
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())
+}
+
+// ── Cross-account labels (settings + sidebar section 4) ─────
+
+/// A single row in the per-account backing list of a cross-account label.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelBacking {
+    pub account_id: String,
+    pub label_id: String,
+    pub display_name: String,
+}
+
+/// A label as the user sees it: one normalized name, optionally backed by
+/// rows on multiple accounts. The canonical entry point for sidebar
+/// section 4 and the Mail Rules > Labels settings list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossAccountLabel {
+    /// `LOWER(TRIM(name))`. The grouping key and the override-table key.
+    pub normalized_name: String,
+    /// Whatever display form the user typed. If backings disagree on
+    /// casing or whitespace, we pick the first row's display name.
+    pub display_name: String,
+    pub color_bg: String,
+    pub color_fg: String,
+    /// True if this label's color came from `label_color_overrides`.
+    pub has_color_override: bool,
+    /// Per-account rows that contribute to this label.
+    pub backing: Vec<LabelBacking>,
+    /// Sum of unread thread counts across all backings.
+    pub unread_count: i64,
+}
+
+/// A single label entry in the settings Mail Rules > Labels list.
+///
+/// One row per `(account_id, label_id)` pair - settings shows raw provider
+/// reality. Cross-account grouping is a sidebar concern.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountLabelRow {
+    pub account_id: String,
+    pub label_id: String,
+    pub name: String,
+    pub color_bg: String,
+    pub color_fg: String,
+    pub has_color_override: bool,
+    pub sort_order: i64,
+}
+
+/// Per-account section of the settings label list. Header text is the
+/// account's display name; rows are that account's tag-type labels in
+/// sort_order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountLabelsGroup {
+    pub account_id: String,
+    pub account_name: String,
+    /// Optional account color hex (used for the section header chrome
+    /// if the UI wants it - the settings list itself only uses the
+    /// name today).
+    pub account_color: Option<String>,
+    pub labels: Vec<AccountLabelRow>,
+}
+
+/// Return all tag-type labels grouped by account, in account `sort_order`
+/// then label `sort_order`. Drives the Mail Rules > Labels settings list.
+pub fn query_labels_by_account(
+    conn: &Connection,
+) -> Result<Vec<AccountLabelsGroup>, String> {
+    let overrides = load_label_color_overrides(conn)?;
+
+    let mut acc_stmt = conn
+        .prepare(
+            "SELECT id, COALESCE(account_name, email) AS name, \
+                    account_color \
+             FROM accounts \
+             WHERE is_active = 1 \
+             ORDER BY sort_order, name",
+        )
+        .map_err(|e| e.to_string())?;
+    let acc_rows = acc_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("id")?,
+                row.get::<_, String>("name")?,
+                row.get::<_, Option<String>>("account_color")?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut groups: Vec<AccountLabelsGroup> = Vec::new();
+    for r in acc_rows {
+        let (account_id, name, color) = r.map_err(|e| e.to_string())?;
+        groups.push(AccountLabelsGroup {
+            account_id,
+            account_name: name,
+            account_color: color,
+            labels: Vec::new(),
+        });
+    }
+
+    let mut lbl_stmt = conn
+        .prepare(
+            "SELECT id, account_id, name, color_bg, color_fg, \
+                    COALESCE(sort_order, 0) AS sort_order \
+             FROM labels \
+             WHERE label_kind = 'tag' AND COALESCE(visible, 1) = 1 \
+             ORDER BY account_id, sort_order, name",
+        )
+        .map_err(|e| e.to_string())?;
+    let lbl_rows = lbl_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("id")?,
+                row.get::<_, String>("account_id")?,
+                row.get::<_, String>("name")?,
+                row.get::<_, Option<String>>("color_bg")?,
+                row.get::<_, Option<String>>("color_fg")?,
+                row.get::<_, i64>("sort_order")?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for r in lbl_rows {
+        let (label_id, account_id, name, color_bg, color_fg, sort_order) =
+            r.map_err(|e| e.to_string())?;
+
+        let normalized = name.trim().to_lowercase();
+        let override_pair = overrides
+            .get(&normalized)
+            .map(|(b, f)| (b.as_str(), f.as_str()));
+        let has_color_override = override_pair.is_some();
+
+        let (bg, fg) = label_colors::resolve_label_color(
+            &name,
+            &account_id,
+            override_pair,
+            color_bg.as_deref(),
+            color_fg.as_deref(),
+        );
+        let bg = bg.to_owned();
+        let fg = fg.to_owned();
+
+        if let Some(group) = groups.iter_mut().find(|g| g.account_id == account_id) {
+            group.labels.push(AccountLabelRow {
+                account_id,
+                label_id,
+                name,
+                color_bg: bg,
+                color_fg: fg,
+                has_color_override,
+                sort_order,
+            });
+        }
+    }
+
+    // Settings should not show empty per-account sections.
+    groups.retain(|g| !g.labels.is_empty());
+
+    Ok(groups)
+}
+
+/// Return all tag-type labels grouped by normalized name across all accounts,
+/// sorted alphabetically. Used by sidebar section 4 and the settings tab.
+///
+/// Resolution rules per `docs/labels-unification/problem-statement.md`:
+/// - Grouping key is `LOWER(TRIM(name))`.
+/// - Color: override > synced consensus (exactly one non-null pair across
+///   backings) > hash fallback.
+/// - Unread count: SUM across backings of threads with `is_read = 0`.
+pub fn query_visible_labels(conn: &Connection) -> Result<Vec<CrossAccountLabel>, String> {
+    let overrides = load_label_color_overrides(conn)?;
+    let unread = load_cross_account_unread_by_normalized_name(conn)?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, account_id, name, color_bg, color_fg, \
+             LOWER(TRIM(name)) AS normalized \
+             FROM labels \
+             WHERE label_kind = 'tag' AND COALESCE(visible, 1) = 1 \
+             ORDER BY normalized, account_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("id")?,
+                row.get::<_, String>("account_id")?,
+                row.get::<_, String>("name")?,
+                row.get::<_, Option<String>>("color_bg")?,
+                row.get::<_, Option<String>>("color_fg")?,
+                row.get::<_, String>("normalized")?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut groups: HashMap<String, CrossAccountLabel> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    let mut synced_pairs: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+    for r in rows {
+        let (label_id, account_id, name, color_bg, color_fg, normalized) =
+            r.map_err(|e| e.to_string())?;
+
+        if !groups.contains_key(&normalized) {
+            order.push(normalized.clone());
+            groups.insert(
+                normalized.clone(),
+                CrossAccountLabel {
+                    normalized_name: normalized.clone(),
+                    display_name: name.clone(),
+                    color_bg: String::new(),
+                    color_fg: String::new(),
+                    has_color_override: false,
+                    backing: Vec::new(),
+                    unread_count: *unread.get(&normalized).unwrap_or(&0),
+                },
+            );
+        }
+
+        let group = groups.get_mut(&normalized).expect("just inserted");
+        group.backing.push(LabelBacking {
+            account_id: account_id.clone(),
+            label_id,
+            display_name: name.clone(),
+        });
+
+        if let (Some(bg), Some(fg)) = (color_bg, color_fg) {
+            synced_pairs
+                .entry(normalized.clone())
+                .or_default()
+                .push((bg, fg));
+        }
+    }
+
+    for normalized in &order {
+        let group = groups.get_mut(normalized).expect("in order");
+        let override_pair = overrides
+            .get(normalized)
+            .map(|(b, f)| (b.as_str(), f.as_str()));
+
+        let synced = synced_pairs.get(normalized).and_then(|pairs| {
+            let mut distinct: Vec<&(String, String)> = Vec::new();
+            for p in pairs {
+                if !distinct.contains(&p) {
+                    distinct.push(p);
+                }
+            }
+            (distinct.len() == 1).then(|| distinct[0].clone())
+        });
+
+        let synced_ref = synced.as_ref().map(|(b, f)| (b.as_str(), f.as_str()));
+
+        let (bg, fg) = label_colors::resolve_label_color(
+            &group.display_name,
+            "", // namespace empty -> grouping is by name, not per-account
+            override_pair,
+            synced_ref.map(|(b, _)| b),
+            synced_ref.map(|(_, f)| f),
+        );
+        group.color_bg = bg.to_owned();
+        group.color_fg = fg.to_owned();
+        group.has_color_override = override_pair.is_some();
+    }
+
+    Ok(order
+        .into_iter()
+        .map(|n| groups.remove(&n).expect("present"))
+        .collect())
+}
+
+fn load_label_color_overrides(
+    conn: &Connection,
+) -> Result<HashMap<String, (String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT LOWER(TRIM(label_name)) AS normalized, color_bg, color_fg \
+             FROM label_color_overrides",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("normalized")?,
+                row.get::<_, String>("color_bg")?,
+                row.get::<_, String>("color_fg")?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut map = HashMap::new();
+    for r in rows {
+        let (norm, bg, fg) = r.map_err(|e| e.to_string())?;
+        map.insert(norm, (bg, fg));
+    }
+    Ok(map)
+}
+
+fn load_cross_account_unread_by_normalized_name(
+    conn: &Connection,
+) -> Result<HashMap<String, i64>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT LOWER(TRIM(l.name)) AS normalized, \
+                    COUNT(DISTINCT t.account_id || ':' || t.id) AS unread \
+             FROM threads t \
+             INNER JOIN thread_labels tl \
+               ON tl.account_id = t.account_id AND tl.thread_id = t.id \
+             INNER JOIN labels l \
+               ON l.account_id = tl.account_id AND l.id = tl.label_id \
+             WHERE l.label_kind = 'tag' \
+               AND COALESCE(l.visible, 1) = 1 \
+               AND t.is_read = 0 \
+             GROUP BY normalized",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("normalized")?,
+                row.get::<_, i64>("unread")?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut map = HashMap::new();
+    for r in rows {
+        let (norm, count) = r.map_err(|e| e.to_string())?;
+        map.insert(norm, count);
+    }
+    Ok(map)
 }
