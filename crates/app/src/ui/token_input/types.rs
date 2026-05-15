@@ -8,7 +8,7 @@ pub struct Token {
     /// The email address this token represents.
     pub email: String,
     /// Display label shown on the token chip.
-    pub display_text: String,
+    pub label: String,
     /// Whether this token represents a contact group.
     pub is_group: bool,
     /// Group ID if this is a group token (for expand operations).

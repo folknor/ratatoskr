@@ -312,7 +312,7 @@ fn signature_account_row<'a>(
                 .map(|hex| widgets::SelectIcon::ColorDot(crate::ui::theme::hex_to_color(hex)));
             widgets::SelectOption {
                 value: account.id.clone(),
-                display_text: label,
+                label,
                 icon,
             }
         })

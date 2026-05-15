@@ -27,7 +27,7 @@ pub(super) fn csv_to_token_input(csv: Option<&str>) -> TokenInputValue {
         tiv.tokens.push(token_input::Token {
             id,
             email: addr.to_string(),
-            display_text: addr.to_string(),
+            label: addr.to_string(),
             is_group: false,
             group_id: None,
             member_count: None,

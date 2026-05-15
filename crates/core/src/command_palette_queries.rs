@@ -3,7 +3,7 @@ use crate::db::Connection;
 
 use crate::db::queries_extra::command_palette;
 
-/// User-visible folders/labels for an account.
+/// User-visible folders for an account, excluding system folders.
 pub fn get_user_folders_for_palette(
     conn: &Connection,
     account_id: &str,

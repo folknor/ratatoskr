@@ -464,16 +464,12 @@ pub async fn fetch_changed_flags(
                 let flags: Vec<_> = fetch.flags().collect();
                 let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
                 let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
-                let is_replied = flags.iter().any(|f| matches!(f, Flag::Answered));
-                let is_forwarded = flags.iter().any(|f| match f {
-                    Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
-                    _ => false,
-                });
+                let (is_replied, is_forwarded) = super::extract_reply_forward_state(flags.iter());
                 let keywords: Vec<String> = flags
                     .iter()
                     .filter_map(|f| match f {
                         Flag::Custom(cow)
-                            if common::label_flags::is_user_visible_keyword(cow) =>
+                            if common::folder_roles::is_user_visible_keyword(cow) =>
                         {
                             Some(cow.to_string())
                         }
@@ -539,16 +535,13 @@ pub async fn fetch_all_flags(
                 let flag_list: Vec<_> = fetch.flags().collect();
                 let is_read = flag_list.iter().any(|f| matches!(f, Flag::Seen));
                 let is_starred = flag_list.iter().any(|f| matches!(f, Flag::Flagged));
-                let is_replied = flag_list.iter().any(|f| matches!(f, Flag::Answered));
-                let is_forwarded = flag_list.iter().any(|f| match f {
-                    Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
-                    _ => false,
-                });
+                let (is_replied, is_forwarded) =
+                    super::extract_reply_forward_state(flag_list.iter());
                 let keywords: Vec<String> = flag_list
                     .iter()
                     .filter_map(|f| match f {
                         Flag::Custom(cow)
-                            if common::label_flags::is_user_visible_keyword(cow) =>
+                            if common::folder_roles::is_user_visible_keyword(cow) =>
                         {
                             Some(cow.to_string())
                         }

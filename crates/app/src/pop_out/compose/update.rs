@@ -102,7 +102,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 target.tokens.push(token_input::Token {
                     id,
                     email: match_entry.email,
-                    display_text: label,
+                    label,
                     is_group: match_entry.is_group,
                     group_id: match_entry.group_id,
                     member_count: match_entry.member_count,
@@ -240,7 +240,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     tokens.tokens.push(token_input::Token {
                         id,
                         email,
-                        display_text: label,
+                        label,
                         is_group: false,
                         group_id: None,
                         member_count: None,
@@ -258,12 +258,12 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             .tokens
             .iter()
             .find(|t| t.id == token_id)
-            .map(|t| t.display_text.clone())
+            .map(|t| t.label.clone())
             .unwrap_or_default();
             state.drag = Some(ComposeTokenDrag {
                 token_id,
                 source_field: field,
-                display_text: label,
+                label,
                 current_position: Point::ORIGIN,
             });
         }
@@ -357,7 +357,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     token_input::Token {
                         id,
                         email: String::new(),
-                        display_text: success.name.clone(),
+                        label: success.name.clone(),
                         is_group: true,
                         group_id: Some(success.group_id),
                         member_count: Some(success.member_count),
@@ -418,7 +418,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     token_input::Token {
                         id,
                         email: String::new(),
-                        display_text: matched.name,
+                        label: matched.name,
                         is_group: true,
                         group_id: Some(matched.id),
                         member_count: Some(matched.member_count),

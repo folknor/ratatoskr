@@ -9,8 +9,8 @@ use super::types::{Token, TokenId};
 /// count get a " (N)" suffix.
 pub(super) fn chip_display_label(token: &Token) -> String {
     match (token.is_group, token.member_count) {
-        (true, Some(n)) => format!("{} ({n})", token.display_text),
-        _ => token.display_text.clone(),
+        (true, Some(n)) => format!("{} ({n})", token.label),
+        _ => token.label.clone(),
     }
 }
 

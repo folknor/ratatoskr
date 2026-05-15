@@ -109,7 +109,7 @@ pub fn parse_jmap_email(
     // Non-system keywords are user-defined labels.
     let keyword_categories: Vec<String> = keywords
         .iter()
-        .filter(|kw| common::label_flags::is_user_visible_keyword(kw))
+        .filter(|kw| common::folder_roles::is_user_visible_keyword(kw))
         .map(|kw| (*kw).to_string())
         .collect();
 

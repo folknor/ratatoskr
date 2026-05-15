@@ -560,7 +560,7 @@ fn overflow_context_menu<'a>(
 
 fn context_menu_item<'a>(
     ico: iced::widget::Text<'a>,
-    display_text: &'a str,
+    label: &'a str,
     on_press: Message,
 ) -> Element<'a, Message> {
     button(
@@ -570,7 +570,7 @@ fn context_menu_item<'a>(
                 .height(SLOT_DROPDOWN)
                 .align_x(Alignment::Center)
                 .align_y(Alignment::Center),
-            container(text(display_text).size(TEXT_MD).style(text::base))
+            container(text(label).size(TEXT_MD).style(text::base))
                 .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
@@ -589,7 +589,7 @@ fn context_menu_item<'a>(
 /// dropdown (e.g. the rendering-mode picker in the overflow menu).
 fn context_menu_radio_item<'a>(
     selected: bool,
-    display_text: &'a str,
+    label: &'a str,
     on_press: Message,
 ) -> Element<'a, Message> {
     button(
@@ -599,7 +599,7 @@ fn context_menu_radio_item<'a>(
                 .height(SLOT_DROPDOWN)
                 .align_x(Alignment::Center)
                 .align_y(Alignment::Center),
-            container(text(display_text).size(TEXT_MD).style(text::base))
+            container(text(label).size(TEXT_MD).style(text::base))
                 .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)

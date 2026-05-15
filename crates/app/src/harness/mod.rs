@@ -1199,16 +1199,16 @@ fn get_u64_field(
     state: &mut State,
     table_idx: isize,
     key: &str,
-    display_text: &str,
+    label: &str,
 ) -> dellingr::Result<Option<u64>> {
     let top = state.get_top();
     state.push_string(key);
     state.get_table(table_idx)?;
     let result = match state.typ(-1) {
         LuaType::Nil => Ok(None),
-        LuaType::Number => latency_u64(state.to_number(-1)?, display_text).map(Some),
+        LuaType::Number => latency_u64(state.to_number(-1)?, label).map(Some),
         other => Err(lua_error_message(format!(
-            "{display_text} must be a non-negative integer, got {}",
+            "{label} must be a non-negative integer, got {}",
             other.as_str()
         ))),
     };
@@ -1216,12 +1216,12 @@ fn get_u64_field(
     result
 }
 
-fn latency_u64(value: f64, display_text: &str) -> dellingr::Result<u64> {
+fn latency_u64(value: f64, label: &str) -> dellingr::Result<u64> {
     if value.is_finite() && value >= 0.0 && value.fract() == 0.0 {
         Ok(value as u64)
     } else {
         Err(lua_error_message(format!(
-            "{display_text} must be a non-negative integer, got {value}"
+            "{label} must be a non-negative integer, got {value}"
         )))
     }
 }

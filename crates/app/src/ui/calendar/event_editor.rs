@@ -269,12 +269,12 @@ pub(super) fn event_editor_card<'a>(
 
 /// A labeled form field row: label on left, widget on right.
 fn form_field<'a>(
-    display_text: &'a str,
+    label: &'a str,
     widget: Element<'a, CalendarMessage>,
 ) -> Element<'a, CalendarMessage> {
     row![
         container(
-            text(display_text)
+            text(label)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
         )

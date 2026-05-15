@@ -174,9 +174,9 @@ pub(super) fn token_context_menu<'a>(
     window_id: iced::window::Id,
     ctx: &TokenContextMenuState,
 ) -> Element<'a, Message> {
-    let mk = |display_text: &'a str, msg: ComposeMessage| {
+    let mk = |label: &'a str, msg: ComposeMessage| {
         button(
-            container(text(display_text).size(TEXT_MD).style(text::base))
+            container(text(label).size(TEXT_MD).style(text::base))
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
         )

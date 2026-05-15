@@ -386,7 +386,7 @@ fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> El
 // TODO(refactor): bundle row params (autocomplete + selection state) into a struct.
 #[allow(clippy::too_many_arguments)]
 fn build_recipient_row_inner<'a>(
-    display_text: &'a str,
+    label: &'a str,
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
     autocomplete_open: bool,
@@ -417,7 +417,7 @@ fn build_recipient_row_inner<'a>(
 
     row![
         container(
-            text(display_text)
+            text(label)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style())
         )

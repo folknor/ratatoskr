@@ -1277,5 +1277,5 @@ fn split_cross_account_id(encoded: &str) -> Option<(String, bool, String)> {
     if account_id.is_empty() || label_id.is_empty() {
         return None;
     }
-    Some((account_id, kind == "l" || kind == "t", label_id))
+    Some((account_id, kind == "l", label_id))
 }

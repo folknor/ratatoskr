@@ -237,7 +237,6 @@ async fn dispatch_pending_op(
             );
             let source = params
                 .get("sourceFolderId")
-                .or_else(|| params.get("sourceLabelId"))
                 .and_then(serde_json::Value::as_str)
                 .map(common::typed_ids::FolderId::from);
             super::move_to_folder::move_to_folder(
@@ -325,7 +324,6 @@ async fn dispatch_pending_op_with_provider(
             );
             let source = params
                 .get("sourceFolderId")
-                .or_else(|| params.get("sourceLabelId"))
                 .and_then(serde_json::Value::as_str)
                 .map(common::typed_ids::FolderId::from);
             super::move_to_folder::move_to_folder_with_provider(

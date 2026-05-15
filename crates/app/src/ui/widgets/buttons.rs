@@ -93,13 +93,13 @@ pub fn command_icon_button<'a>(
 
 pub fn action_icon_button<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    display_text: &'a str,
+    label: &'a str,
     on_press: M,
 ) -> Element<'a, M> {
     button(
         row![
             container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
-            container(text(display_text).size(TEXT_SM).style(text::secondary))
+            container(text(label).size(TEXT_SM).style(text::secondary))
                 .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XXS)
@@ -113,13 +113,13 @@ pub fn action_icon_button<'a, M: Clone + 'a>(
 
 pub fn reply_button<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    display_text: &'a str,
+    label: &'a str,
     on_press: M,
 ) -> Element<'a, M> {
     button(
         row![
             ico.size(ICON_SM).style(text::secondary),
-            text(display_text).size(TEXT_SM).style(text::secondary),
+            text(label).size(TEXT_SM).style(text::secondary),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),

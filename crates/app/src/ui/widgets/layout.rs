@@ -114,9 +114,9 @@ pub fn empty_placeholder<'a, M: 'a>(title: &'a str, subtitle: &'a str) -> Elemen
     .into()
 }
 
-pub fn section_header<'a, M: 'a>(display_text: &'a str) -> Element<'a, M> {
+pub fn section_header<'a, M: 'a>(label: &'a str) -> Element<'a, M> {
     container(
-        text(display_text)
+        text(label)
             .size(TEXT_XS)
             .style(theme::TextClass::Tertiary.style()),
     )
@@ -125,10 +125,10 @@ pub fn section_header<'a, M: 'a>(display_text: &'a str) -> Element<'a, M> {
     .into()
 }
 
-pub fn stat_row<'a, M: 'a>(display_text: &'a str, value: &'a str) -> Element<'a, M> {
+pub fn stat_row<'a, M: 'a>(label: &'a str, value: &'a str) -> Element<'a, M> {
     container(
         row![
-            text(display_text)
+            text(label)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
             Space::new().width(Length::Fill),

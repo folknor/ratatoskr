@@ -22,7 +22,7 @@ pub(crate) enum SearchIntent {
 struct UiSearchContext {
     current_scope: ViewScope,
     editing_pinned_search: Option<i64>,
-    entered_from_folder_view: bool,
+    entered_from_scope_view: bool,
     pinned_searches: Vec<db::PinnedSearch>,
 }
 
@@ -104,7 +104,7 @@ pub struct SearchExecutionResult {
 }
 
 fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> ResolvedSearch {
-    let folder_restore = if ctx.entered_from_folder_view {
+    let folder_restore = if ctx.entered_from_scope_view {
         FolderRestoreBehavior::EnterSearchFromFolderView
     } else {
         FolderRestoreBehavior::LeaveAsIs
@@ -232,7 +232,7 @@ fn execution_scope_to_account_scope(scope: &SearchScope) -> AccountScope {
 impl ReadyApp {
     fn record_search_restore_origin(&mut self) {
         if self.thread_list.mode == ThreadListMode::Scope {
-            self.was_in_folder_view = true;
+            self.was_in_scope_view = true;
         }
     }
 
@@ -240,7 +240,7 @@ impl ReadyApp {
         UiSearchContext {
             current_scope: self.current_scope().clone(),
             editing_pinned_search: self.editing_pinned_search,
-            entered_from_folder_view: self.thread_list.mode == ThreadListMode::Scope,
+            entered_from_scope_view: self.thread_list.mode == ThreadListMode::Scope,
             pinned_searches: self.pinned_searches.clone(),
         }
     }
@@ -631,7 +631,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|s| s.starts_with(&partial.to_lowercase()))
                 .map(|s| TypeaheadItem {
-                    display_text: s.to_string(),
+                    label: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
                 })
@@ -644,7 +644,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|s| s.starts_with(&partial.to_lowercase()))
                 .map(|s| TypeaheadItem {
-                    display_text: s.to_string(),
+                    label: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
                 })
@@ -669,7 +669,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|s| s.starts_with(&partial.to_lowercase()))
                 .map(|s| TypeaheadItem {
-                    display_text: s.to_string(),
+                    label: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
                 })
@@ -687,7 +687,7 @@ impl ReadyApp {
                 .iter()
                 .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
                 .map(|(label, value)| TypeaheadItem {
-                    display_text: label.to_string(),
+                    label: label.to_string(),
                     detail: Some(format!("{operator}:{value}")),
                     insert_value: value.to_string(),
                 })
@@ -863,7 +863,7 @@ impl ReadyApp {
         self.search_debounce_deadline = None;
         let _ = self.search_generation.next();
         self.thread_list.mode = ThreadListMode::Scope;
-        self.was_in_folder_view = false;
+        self.was_in_scope_view = false;
     }
 
     /// Restore the thread list to folder view after clearing search.
@@ -878,8 +878,8 @@ impl ReadyApp {
         self.thread_list.search_query.clear();
         self.clear_pinned_search_context();
         self.clear_thread_selection();
-        if self.was_in_folder_view {
-            self.was_in_folder_view = false;
+        if self.was_in_scope_view {
+            self.was_in_scope_view = false;
             let token = self.nav_generation.next();
             return self.load_threads_for_current_view(token);
         }
@@ -899,7 +899,7 @@ pub(crate) async fn execute_search(
     scope: rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        if let Some(ref ss) = search_state {
+        let mut threads = if let Some(ref ss) = search_state {
             // M2 fix: pass body_store so per-message attribution can
             // score body matches. Without it, body+attachment co-matches
             // skewed toward attachment attribution and the documented
@@ -908,15 +908,17 @@ pub(crate) async fn execute_search(
             // at boot; the attribution falls back to subject/from/
             // attachments-only when None.
             let results = rtsk::search_pipeline::search(&query, ss, conn, body_store.as_ref())?;
-            Ok(results
+            results
                 .into_iter()
                 .map(unified_result_to_thread)
                 .filter(|thread| thread_matches_scope(thread, &scope))
-                .collect())
+                .collect::<Vec<_>>()
         } else {
             let results = rtsk::search_pipeline::search_sql_fallback(&query, conn, &scope)?;
-            Ok(results.into_iter().map(unified_result_to_thread).collect())
-        }
+            results.into_iter().map(unified_result_to_thread).collect()
+        };
+        crate::helpers::apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
     })
     .await
 }

@@ -1,5 +1,4 @@
 use common::folder_roles::{SYSTEM_FOLDER_ROLES, system_folder_by_jmap_role};
-use common::label_flags::assemble_labels;
 use std::collections::HashMap;
 
 pub struct MailboxFolderMapping {
@@ -39,25 +38,27 @@ pub struct MailboxInfo {
     pub name: String,
 }
 
-/// Derive folder and label IDs from an email's mailbox membership and keywords.
+/// Resolve an email's mailbox membership to Ratatoskr folder IDs, plus a
+/// synthetic DRAFT folder ID when the message carries the `$draft` keyword.
 pub fn get_labels_for_email(
     mailbox_ids: &[&str],
     keywords: &[&str],
     mailbox_map: &HashMap<String, MailboxInfo>,
 ) -> Vec<String> {
-    let folder_ids = mailbox_ids.iter().filter_map(|mb_id| {
-        mailbox_map
-            .get(*mb_id)
-            .map(|info| map_mailbox_to_folder(info.role.as_deref(), mb_id, &info.name).folder_id)
-    });
+    let mut folder_ids: Vec<String> = mailbox_ids
+        .iter()
+        .filter_map(|mb_id| {
+            mailbox_map
+                .get(*mb_id)
+                .map(|info| map_mailbox_to_folder(info.role.as_deref(), mb_id, &info.name).folder_id)
+        })
+        .collect();
 
-    assemble_labels(
-        folder_ids,
-        std::iter::empty::<String>(),
-        keywords.contains(&"$seen"),
-        keywords.contains(&"$flagged"),
-        keywords.contains(&"$draft"),
-    )
+    if keywords.contains(&"$draft") && !folder_ids.iter().any(|id| id == "DRAFT") {
+        folder_ids.push("DRAFT".to_string());
+    }
+
+    folder_ids
 }
 
 /// Reverse lookup: Ratatoskr folder ID -> JMAP mailbox ID.

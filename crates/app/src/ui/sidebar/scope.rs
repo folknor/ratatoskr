@@ -53,7 +53,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 
     entries.push(DropdownEntry {
         icon: DropdownIcon::Icon(icon::INBOX_CODEPOINT),
-        display_text: "All Accounts",
+        label: "All Accounts",
         selected: matches!(sidebar.selected_scope, ViewScope::AllAccounts),
         on_press: SidebarMessage::SelectAllAccounts,
     });
@@ -69,7 +69,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 name,
                 color: acc.account_color.as_deref().map(theme::hex_to_color),
             },
-            display_text: name,
+            label: name,
             selected: matches!(&sidebar.selected_scope, ViewScope::Account(id) if *id == acc.id),
             on_press: SidebarMessage::SelectAccount(idx),
         });
@@ -85,7 +85,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         );
         entries.push(DropdownEntry {
             icon: DropdownIcon::Icon('\u{e1a4}'), // users icon
-            display_text: name,
+            label: name,
             selected,
             on_press: SidebarMessage::SelectSharedMailbox(
                 sm.account_id.clone(),
@@ -103,7 +103,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         );
         entries.push(DropdownEntry {
             icon: DropdownIcon::Icon('\u{e0d7}'),
-            display_text: &pf.display_name,
+            label: &pf.display_name,
             selected,
             on_press: SidebarMessage::SelectPublicFolder(
                 pf.account_id.clone(),

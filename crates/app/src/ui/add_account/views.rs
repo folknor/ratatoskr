@@ -7,11 +7,11 @@ use crate::ui::theme;
 use super::state::{AddAccountMessage, ManualAuthMethod, SecurityOption};
 
 pub(super) fn primary_button<'a>(
-    display_text: &'a str,
+    label: &'a str,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
     button(
-        container(text(display_text).size(TEXT_LG).color(theme::ON_AVATAR))
+        container(text(label).size(TEXT_LG).color(theme::ON_AVATAR))
             .center_x(Length::Fill),
     )
         .on_press(on_press)
@@ -22,11 +22,11 @@ pub(super) fn primary_button<'a>(
 }
 
 pub(super) fn ghost_button<'a>(
-    display_text: &'a str,
+    label: &'a str,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
     button(
-        container(text(display_text).size(TEXT_LG).style(text::secondary))
+        container(text(label).size(TEXT_LG).style(text::secondary))
             .center_x(Length::Fill),
     )
         .on_press(on_press)
@@ -37,13 +37,13 @@ pub(super) fn ghost_button<'a>(
 }
 
 pub(super) fn labeled_input<'a>(
-    display_text: &'a str,
+    label: &'a str,
     placeholder: &'a str,
     value: &'a str,
     on_input: impl Fn(String) -> AddAccountMessage + 'a,
 ) -> Element<'a, AddAccountMessage> {
     column![
-        text(display_text).size(TEXT_SM).style(text::secondary),
+        text(label).size(TEXT_SM).style(text::secondary),
         text_input(placeholder, value)
             .on_input(on_input)
             .size(TEXT_LG)

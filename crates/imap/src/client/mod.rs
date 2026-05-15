@@ -29,6 +29,26 @@ pub(crate) fn mailbox_supports_custom_keywords(mailbox: &async_imap::types::Mail
         .any(|f| matches!(f, Flag::MayCreate))
 }
 
+/// Derive `(is_replied, is_forwarded)` from a flag list. `\Answered` maps to
+/// replied; the `$Forwarded` RFC 5788 keyword maps to forwarded.
+pub(crate) fn extract_reply_forward_state<'a, I>(flags: I) -> (bool, bool)
+where
+    I: IntoIterator<Item = &'a Flag<'a>>,
+{
+    let mut is_replied = false;
+    let mut is_forwarded = false;
+    for flag in flags {
+        match flag {
+            Flag::Answered => is_replied = true,
+            Flag::Custom(keyword) if keyword.eq_ignore_ascii_case("$Forwarded") => {
+                is_forwarded = true;
+            }
+            _ => {}
+        }
+    }
+    (is_replied, is_forwarded)
+}
+
 /// Build a standardised timeout error message for IMAP operations.
 pub(crate) fn timeout_err(operation: &str, timeout: Duration) -> String {
     format!(
@@ -288,11 +308,7 @@ pub async fn fetch_messages(
         let flags: Vec<_> = fetch.flags().collect();
         let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
         let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
-        let is_replied = flags.iter().any(|f| matches!(f, Flag::Answered));
-        let is_forwarded = flags.iter().any(|f| match f {
-            Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
-            _ => false,
-        });
+        let (is_replied, is_forwarded) = extract_reply_forward_state(flags.iter());
         let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
         // Extract INTERNALDATE as fallback for messages with unparseable Date headers
@@ -362,11 +378,7 @@ pub async fn fetch_message_body(
     let flags: Vec<_> = fetch.flags().collect();
     let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
     let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
-    let is_replied = flags.iter().any(|f| matches!(f, Flag::Answered));
-    let is_forwarded = flags.iter().any(|f| match f {
-        Flag::Custom(keyword) => keyword.eq_ignore_ascii_case("$Forwarded"),
-        _ => false,
-    });
+    let (is_replied, is_forwarded) = extract_reply_forward_state(flags.iter());
     let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
     let parser = MessageParser::default();

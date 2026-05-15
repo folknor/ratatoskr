@@ -444,14 +444,12 @@ async fn raw_parse_fetch_responses(
                 }
 
                 // Parse flags
-                let flags_str = extract_flags_from_fetch(&line);
-                let is_read = flags_str.contains("\\Seen");
-                let is_starred = flags_str.contains("\\Flagged");
-                let is_replied = flags_str.contains("\\Answered");
-                let is_forwarded = flags_str
-                    .to_ascii_lowercase()
-                    .contains("$forwarded");
-                let is_draft = flags_str.contains("\\Draft");
+                let flags = extract_flags_from_fetch(&line);
+                let is_read = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"));
+                let is_starred = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Flagged"));
+                let is_replied = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Answered"));
+                let is_forwarded = flags.iter().any(|f| f.eq_ignore_ascii_case("$Forwarded"));
+                let is_draft = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Draft"));
 
                 // Parse INTERNALDATE
                 let internal_date = extract_internal_date(&line);
@@ -500,15 +498,21 @@ fn extract_fetch_uid(line: &str) -> Option<u32> {
     after_uid[..end].parse().ok()
 }
 
-/// Extract flags string from FETCH response like "FLAGS (\Seen \Flagged)"
-fn extract_flags_from_fetch(line: &str) -> String {
-    if let Some(flags_start) = line.find("FLAGS (") {
-        let after = &line[flags_start + 7..];
-        if let Some(end) = after.find(')') {
-            return after[..end].to_string();
-        }
-    }
-    String::new()
+/// Extract flag tokens from a FETCH response line like `FLAGS (\Seen \Flagged $Forwarded)`.
+/// Splitting on whitespace gives exact-token comparisons so that, for example, a
+/// custom keyword `$forwarded_priority` can't satisfy a `$Forwarded` check.
+fn extract_flags_from_fetch(line: &str) -> Vec<String> {
+    let Some(flags_start) = line.find("FLAGS (") else {
+        return Vec::new();
+    };
+    let after = &line[flags_start + 7..];
+    let Some(end) = after.find(')') else {
+        return Vec::new();
+    };
+    after[..end]
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Extract INTERNALDATE from FETCH response.

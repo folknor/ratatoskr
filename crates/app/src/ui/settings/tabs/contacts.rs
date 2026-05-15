@@ -149,7 +149,7 @@ fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMes
 
 fn contact_field_input(
     id: &str,
-    display_text: &str,
+    label: &str,
     placeholder: &str,
     value: &str,
     contact_field: ContactField,
@@ -157,7 +157,7 @@ fn contact_field_input(
 ) -> RowBuilder<'static> {
     input_row(
         id,
-        display_text,
+        label,
         placeholder,
         value,
         move |v| SettingsMessage::ContactEditorFieldChanged(contact_field.clone(), v),

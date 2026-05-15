@@ -88,13 +88,13 @@ fn group_add_candidate_pill<'a>(
     contact: &'a crate::db::ContactEntry,
 ) -> Element<'a, SettingsMessage> {
     let email_for_press = contact.email.clone();
-    let display_text: &str = contact.display_name.as_deref().unwrap_or(&contact.email);
+    let label: &str = contact.display_name.as_deref().unwrap_or(&contact.email);
     button(
         container(
             row![
                 container(icon::plus().size(ICON_SM).style(text::primary))
                     .align_y(Alignment::Center),
-                container(text(display_text).size(TEXT_LG).style(text::base))
+                container(text(label).size(TEXT_LG).style(text::base))
                     .align_y(Alignment::Center)
                     .width(Length::Fill),
                 container(

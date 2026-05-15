@@ -687,7 +687,7 @@ pub fn apply_flag_changes(
         let Some(ref tid) = thread_id else { continue };
 
         for kw in &change.keywords {
-            if !common::label_flags::is_user_visible_keyword(kw) {
+            if !common::folder_roles::is_user_visible_keyword(kw) {
                 continue;
             }
             let label_id = format!("kw:{kw}");

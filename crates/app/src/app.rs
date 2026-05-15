@@ -132,10 +132,10 @@ pub struct ReadyApp {
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
-    /// Whether the user was in a folder view before entering search.
+    /// Whether the user was in a sidebar-scoped view before entering search.
     /// When search is cleared, threads are reloaded from the current
     /// navigation state instead of restoring a stale clone.
-    pub(crate) was_in_folder_view: bool,
+    pub(crate) was_in_scope_view: bool,
 
     // Search history (recent queries from pinned_searches)
     pub(crate) search_history: Vec<String>,
@@ -416,7 +416,7 @@ impl ReadyApp {
             search_generation: GenerationCounter::new(),
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
-            was_in_folder_view: false,
+            was_in_scope_view: false,
             search_history: Vec::new(),
             pinned_searches: Vec::new(),
             editing_pinned_search: None,

@@ -27,7 +27,7 @@ pub enum AutoAdvanceDirection {
 /// A single typeahead suggestion item.
 #[derive(Debug, Clone)]
 pub struct TypeaheadItem {
-    pub display_text: String,
+    pub label: String,
     pub detail: Option<String>,
     pub insert_value: String,
 }
@@ -619,7 +619,7 @@ fn thread_list_header<'a>(
             } else {
                 theme::ButtonClass::Action
             };
-            let mut item_row = row![text(&item.display_text).size(TEXT_SM),]
+            let mut item_row = row![text(&item.label).size(TEXT_SM),]
                 .spacing(SPACE_XS)
                 .align_y(iced::Alignment::Center);
             if let Some(ref detail) = item.detail {

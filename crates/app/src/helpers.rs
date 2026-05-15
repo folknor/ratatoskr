@@ -251,7 +251,7 @@ async fn load_shared_mailbox_threads(
     .await
 }
 
-fn apply_thread_decorations(
+pub(crate) fn apply_thread_decorations(
     conn: &rtsk::db::Connection,
     threads: &mut [Thread],
 ) -> Result<(), String> {
@@ -288,7 +288,7 @@ async fn load_public_folder_items_async(
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         let items = get_public_folder_items(conn, &account_id, &folder_id, Some(1000))?;
-        Ok(items
+        let mut threads: Vec<Thread> = items
             .into_iter()
             .map(|item| Thread {
                 id: item.item_id,
@@ -311,7 +311,9 @@ async fn load_public_folder_items_async(
                 match_kind: None,
                 also_matched: Vec::new(),
             })
-            .collect())
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
     })
     .await
 }

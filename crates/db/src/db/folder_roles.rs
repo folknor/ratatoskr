@@ -157,6 +157,32 @@ pub fn imap_name_to_special_use(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Label IDs that historically encoded message state (read / starred) in
+/// `thread_labels` rows. The current data model stores these as boolean
+/// columns on `messages` / `threads`, so any rows carrying these IDs are
+/// stale projections that should be filtered on read and never written.
+pub fn is_message_state_label_id(label_id: &str) -> bool {
+    matches!(label_id, "UNREAD" | "STARRED")
+}
+
+/// RFC 5788 reserved IMAP system keywords. These never appear in the
+/// user-visible LABELS section: `$Forwarded` is routed into the
+/// `is_forwarded` message-state column, and the rest are handled by the
+/// sync pipeline rather than surfaced as labels.
+pub fn is_reserved_imap_system_keyword(keyword: &str) -> bool {
+    matches!(
+        keyword.to_ascii_lowercase().as_str(),
+        "$forwarded" | "$mdnsent" | "$junk" | "$notjunk" | "$phishing"
+    )
+}
+
+/// IMAP custom keywords that should appear as user-visible labels: anything
+/// that isn't `$`-prefixed (which is reserved for system semantics) and
+/// isn't one of the RFC 5788 reserved keywords.
+pub fn is_user_visible_keyword(keyword: &str) -> bool {
+    !keyword.starts_with('$') && !is_reserved_imap_system_keyword(keyword)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

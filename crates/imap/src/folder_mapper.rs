@@ -52,14 +52,11 @@ pub fn map_folder_to_folder(folder: &ImapFolder) -> FolderMapping {
     }
 }
 
-/// Get folder IDs that a message in a given folder should have.
-pub fn get_folder_ids_for_message(
-    folder_id: &str,
-    is_read: bool,
-    is_starred: bool,
-    is_draft: bool,
-) -> Vec<String> {
-    let _ = (is_read, is_starred);
+/// Folder IDs that a message in a given folder should have. The `DRAFT`
+/// system folder is added when the message carries the `\Draft` flag, so
+/// drafts surface in the universal Drafts view regardless of which folder
+/// the server actually stores them in.
+pub fn get_folder_ids_for_message(folder_id: &str, is_draft: bool) -> Vec<String> {
     let mut folders = vec![folder_id.to_string()];
     if is_draft {
         folders.push("DRAFT".to_string());
@@ -137,10 +134,13 @@ mod tests {
 
     #[test]
     fn test_get_folder_ids_for_message() {
-        let folders = get_folder_ids_for_message("INBOX", false, true, false);
-        assert!(folders.contains(&"INBOX".to_string()));
-        assert!(!folders.contains(&"UNREAD".to_string()));
-        assert!(!folders.contains(&"STARRED".to_string()));
-        assert!(!folders.contains(&"DRAFT".to_string()));
+        let folders = get_folder_ids_for_message("INBOX", false);
+        assert_eq!(folders, vec!["INBOX".to_string()]);
+    }
+
+    #[test]
+    fn test_get_folder_ids_for_draft() {
+        let folders = get_folder_ids_for_message("Drafts", true);
+        assert_eq!(folders, vec!["Drafts".to_string(), "DRAFT".to_string()]);
     }
 }

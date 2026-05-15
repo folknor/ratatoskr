@@ -88,7 +88,7 @@ impl AutocompleteState {
 pub struct ComposeTokenDrag {
     pub token_id: TokenId,
     pub source_field: RecipientField,
-    pub display_text: String,
+    pub label: String,
     pub current_position: Point,
 }
 

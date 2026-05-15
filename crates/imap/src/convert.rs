@@ -38,7 +38,7 @@ pub fn convert_imap_message(
         .clone()
         .unwrap_or_else(|| synthetic_message_id(account_id, &msg.folder, msg.uid));
 
-    let label_ids = get_folder_ids_for_message(folder_id, msg.is_read, msg.is_starred, msg.is_draft);
+    let label_ids = get_folder_ids_for_message(folder_id, msg.is_draft);
 
     let snippet = msg.snippet.clone().unwrap_or_else(|| {
         msg.body_text

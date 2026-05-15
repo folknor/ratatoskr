@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use common::folder_roles::graph_well_known_aliases;
-use common::label_flags::prefixed_labels;
 
 use super::types::GraphMailFolder;
 
@@ -104,10 +103,9 @@ impl FolderMap {
             .get(parent_folder_id)
             .map(|mapping| vec![mapping.folder_id.clone()])
             .unwrap_or_default();
-        let category_refs = categories.iter().map(String::as_str);
         folder_ids
             .into_iter()
-            .chain(prefixed_labels("cat:", category_refs))
+            .chain(categories.iter().map(|cat| format!("cat:{cat}")))
             .collect()
     }
 

@@ -47,7 +47,7 @@ impl DropdownIcon<'_> {
 /// One entry in a dropdown menu.
 pub struct DropdownEntry<'a, M> {
     pub icon: DropdownIcon<'a>,
-    pub display_text: &'a str,
+    pub label: &'a str,
     pub selected: bool,
     pub on_press: M,
 }
@@ -56,7 +56,7 @@ pub struct DropdownEntry<'a, M> {
 /// Both trigger and items share the same two-slot layout.
 pub fn dropdown<'a, M: Clone + 'a>(
     trigger_icon: DropdownIcon<'a>,
-    trigger_display_text: &'a str,
+    trigger_label: &'a str,
     open: bool,
     on_toggle: M,
     items: Vec<DropdownEntry<'a, M>>,
@@ -68,7 +68,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
                 .height(SLOT_DROPDOWN)
                 .align_x(Alignment::Center)
                 .align_y(Alignment::Center),
-            container(text(trigger_display_text).size(TEXT_MD).style(text::base))
+            container(text(trigger_label).size(TEXT_MD).style(text::base))
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
             container(
@@ -101,7 +101,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
                         .height(SLOT_DROPDOWN)
                         .align_x(Alignment::Center)
                         .align_y(Alignment::Center),
-                    container(text(entry.display_text).size(TEXT_MD).style(text::base))
+                    container(text(entry.label).size(TEXT_MD).style(text::base))
                         .width(Length::Fill)
                         .align_y(Alignment::Center),
                 ]
@@ -233,7 +233,7 @@ pub struct SelectOption<'a> {
     /// The value passed back through `on_select`. Trigger picks the matching
     /// option by exact equality against `selected_value`.
     pub value: String,
-    pub display_text: &'a str,
+    pub label: &'a str,
     pub icon: Option<SelectIcon>,
 }
 
@@ -254,7 +254,7 @@ pub fn select_with_icons<'a, M: Clone + 'a>(
         .and_then(|v| options.iter().position(|o| o.value == v));
 
     let (trigger_icon, trigger_label) = match selected_idx {
-        Some(i) => (options[i].icon, options[i].display_text),
+        Some(i) => (options[i].icon, options[i].label),
         None => (None, placeholder),
     };
 
@@ -309,7 +309,7 @@ pub fn select_with_icons<'a, M: Clone + 'a>(
                     .push(container(kind.into_element::<M>()).align_y(Alignment::Center));
             }
             item_row = item_row.push(
-                container(text(opt.display_text).size(TEXT_MD).style(text::base))
+                container(text(opt.label).size(TEXT_MD).style(text::base))
                     .width(Length::Fill)
                     .align_y(Alignment::Center),
             );

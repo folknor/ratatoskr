@@ -54,31 +54,31 @@ pub enum ActionAppearance {
 /// the button disabled.
 #[derive(Debug, Clone)]
 pub struct DialogAction<M> {
-    pub display_text: String,
+    pub label: String,
     pub appearance: ActionAppearance,
     pub on_press: Option<M>,
 }
 
 impl<M: Clone> DialogAction<M> {
-    pub fn default_action(display_text: impl Into<String>, on_press: M) -> Self {
+    pub fn default_action(label: impl Into<String>, on_press: M) -> Self {
         Self {
-            display_text: display_text.into(),
+            label: label.into(),
             appearance: ActionAppearance::Default,
             on_press: Some(on_press),
         }
     }
 
-    pub fn suggested(display_text: impl Into<String>, on_press: M) -> Self {
+    pub fn suggested(label: impl Into<String>, on_press: M) -> Self {
         Self {
-            display_text: display_text.into(),
+            label: label.into(),
             appearance: ActionAppearance::Suggested,
             on_press: Some(on_press),
         }
     }
 
-    pub fn destructive(display_text: impl Into<String>, on_press: M) -> Self {
+    pub fn destructive(label: impl Into<String>, on_press: M) -> Self {
         Self {
-            display_text: display_text.into(),
+            label: label.into(),
             appearance: ActionAppearance::Destructive,
             on_press: Some(on_press),
         }
@@ -172,7 +172,7 @@ fn build_action_row<'a, M: Clone + 'a>(actions: Vec<DialogAction<M>>) -> Element
 }
 
 fn render_action<'a, M: Clone + 'a>(action: DialogAction<M>) -> Element<'a, M> {
-    let label = text(action.display_text).size(TEXT_MD);
+    let label = text(action.label).size(TEXT_MD);
     let label = if matches!(action.appearance, ActionAppearance::Default) {
         label.style(iced::widget::text::base)
     } else {

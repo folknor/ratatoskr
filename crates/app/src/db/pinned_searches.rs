@@ -77,11 +77,16 @@ impl Db {
         ids: Vec<(String, String)>,
     ) -> Result<Vec<Thread>, String> {
         let db = self.read_db_state();
-        Ok(db_get_threads_by_ids(&db, ids)
+        let mut threads: Vec<Thread> = db_get_threads_by_ids(&db, ids)
             .await?
             .into_iter()
             .map(db_thread_to_app_thread)
-            .collect())
+            .collect();
+        self.with_conn(move |conn| {
+            crate::helpers::apply_thread_decorations(conn, &mut threads)?;
+            Ok(threads)
+        })
+        .await
     }
 
     pub async fn get_recent_search_queries(&self, limit: usize) -> Result<Vec<String>, String> {
