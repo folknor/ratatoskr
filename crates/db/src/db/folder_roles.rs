@@ -88,6 +88,8 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
         imap_special_use: Some("\\Archive"),
         imap_name_aliases: &["archive", "archives"],
     },
+    // Virtual navigation handle only. Providers expose starred as message
+    // state, so STARRED is filtered out of labels/thread_labels writes.
     SystemFolderRole {
         label_id: "STARRED",
         label_name: "Starred",

@@ -36,6 +36,7 @@ pub struct ThreadDetailMessage {
 
     // Content
     pub subject: Option<String>,
+    pub message_id_header: Option<String>,
     pub body_html: Option<String>,
     pub body_text: Option<String>,
 
@@ -307,7 +308,7 @@ fn query_messages(
         .prepare(
             "SELECT id, thread_id, account_id, from_address, from_name, \
                     to_addresses, cc_addresses, bcc_addresses, \
-                    subject, date, is_read, is_starred, is_replied, is_forwarded \
+                    subject, message_id_header, date, is_read, is_starred, is_replied, is_forwarded \
              FROM messages \
              WHERE account_id = ?1 AND thread_id = ?2 \
              ORDER BY date DESC",
@@ -327,6 +328,7 @@ fn query_messages(
                 bcc_addresses: row.get("bcc_addresses")?,
                 date: row.get("date")?,
                 subject: row.get("subject")?,
+                message_id_header: row.get("message_id_header")?,
                 is_read: row.get::<_, i64>("is_read")? != 0,
                 is_starred: row.get::<_, i64>("is_starred")? != 0,
                 is_replied: row.get::<_, i64>("is_replied")? != 0,

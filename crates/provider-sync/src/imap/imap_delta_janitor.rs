@@ -80,10 +80,8 @@ async fn sync_flags_on_session_inner(
         return Ok(0);
     }
 
-    let local_map: std::collections::HashMap<u32, (bool, bool)> = local_flags
-        .into_iter()
-        .map(|(uid, is_read, is_starred)| (uid, (is_read, is_starred)))
-        .collect();
+    let local_map: std::collections::HashMap<u32, sync_pipeline::LocalImapFlags> =
+        local_flags.into_iter().map(|flags| (flags.uid, flags)).collect();
 
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
@@ -97,8 +95,14 @@ async fn sync_flags_on_session_inner(
         .into_iter()
         .filter(|sf| {
             match local_map.get(&sf.uid) {
-                Some(&(local_read, local_starred)) => {
-                    sf.is_read != local_read || sf.is_starred != local_starred
+                Some(local) => {
+                    let mut server_keywords = sf.keywords.clone();
+                    server_keywords.sort();
+                    server_keywords != local.keywords
+                        || sf.is_read != local.is_read
+                        || sf.is_starred != local.is_starred
+                        || sf.is_replied != local.is_replied
+                        || sf.is_forwarded != local.is_forwarded
                 }
                 None => false, // UID not in local DB, skip (will be fetched as new)
             }

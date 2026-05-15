@@ -183,7 +183,10 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
-    sync_persistence::replace_thread_labels(
+    // JMAP Email/changes returns changed messages, not full thread state.
+    // Merge here so partial pages do not erase aggregate labels from other
+    // messages in the same thread.
+    sync_persistence::merge_thread_labels(
         tx,
         account_id,
         thread_id,

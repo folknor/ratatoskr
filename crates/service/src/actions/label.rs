@@ -29,11 +29,17 @@ pub(crate) async fn add_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind = db::db::queries_extra::action_helpers::get_label_kind_sync(
+        let label_kind = match db::db::queries_extra::action_helpers::get_label_kind_sync(
             &conn, &lid, &aid,
         )
         .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
-        .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
+        {
+            Some(kind) => kind,
+            None => ensure_prefixed_tag_label(&conn, &aid, &lid)
+                .transpose()
+                .map_err(ActionError::db)?
+                .ok_or_else(|| ActionError::not_found("label not found for this account"))?,
+        };
 
         if label_kind != "tag" {
             return Err(ActionError::invalid_state(
@@ -52,6 +58,35 @@ pub(crate) async fn add_label_local(
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r)
+}
+
+fn ensure_prefixed_tag_label(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    label_id: &str,
+) -> Option<Result<String, String>> {
+    let (name, label_type, sort_order) = if let Some(keyword) = label_id.strip_prefix("kw:") {
+        (keyword.to_string(), "user", None)
+    } else if let Some(category) = label_id.strip_prefix("cat:") {
+        (category.to_string(), "user", None)
+    } else if label_id == "importance:high" {
+        ("High importance".to_string(), "system", Some(10_000))
+    } else if label_id == "importance:low" {
+        ("Low importance".to_string(), "system", Some(10_001))
+    } else {
+        return None;
+    };
+
+    Some(
+        conn.execute(
+            "INSERT OR IGNORE INTO labels \
+             (id, account_id, name, type, label_kind, sort_order) \
+             VALUES (?1, ?2, ?3, ?4, 'tag', COALESCE(?5, 0))",
+            rusqlite::params![label_id, account_id, name, label_type, sort_order],
+        )
+        .map(|_| "tag".to_string())
+        .map_err(|e| format!("ensure prefixed tag label: {e}")),
+    )
 }
 
 /// Provider dispatch for add-label (assumes local mutation already applied).

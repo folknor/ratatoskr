@@ -55,6 +55,7 @@ pub fn parse_message(
     is_replied: bool,
     is_forwarded: bool,
     is_draft: bool,
+    keyword_categories: Vec<String>,
     internal_date: Option<i64>,
 ) -> Result<ImapMessage, String> {
     let message = parser.parse(raw).ok_or("Failed to parse MIME message")?;
@@ -248,6 +249,7 @@ pub fn parse_message(
         is_replied,
         is_forwarded,
         is_draft,
+        keyword_categories,
         body_html,
         body_text,
         snippet,

@@ -79,6 +79,7 @@ pub enum MessageViewMessage {
 pub struct MessageViewState {
     // ── Identity ──
     pub message_id: String,
+    pub message_id_header: Option<String>,
     pub thread_id: String,
     pub account_id: String,
 
@@ -141,6 +142,7 @@ impl MessageViewState {
     ) -> Self {
         Self {
             message_id: msg.id.clone(),
+            message_id_header: msg.message_id_header.clone(),
             thread_id: msg.thread_id.clone(),
             account_id: msg.account_id.clone(),
             from_name: msg.from_name.clone(),
@@ -183,6 +185,7 @@ impl MessageViewState {
     ) -> Self {
         Self {
             message_id: msg.message_id.clone(),
+            message_id_header: None,
             thread_id: msg.thread_id.clone(),
             account_id: msg.account_id.clone(),
             from_name: msg.from_name.clone(),
@@ -220,6 +223,7 @@ impl MessageViewState {
     ) -> Self {
         Self {
             message_id: entry.message_id.clone(),
+            message_id_header: None,
             thread_id: entry.thread_id.clone(),
             account_id: entry.account_id.clone(),
             from_name: None,

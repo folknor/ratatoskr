@@ -14,7 +14,7 @@ use rusqlite::{Connection, params};
 // messages table
 // ---------------------------------------------------------------------------
 
-/// Update the `is_read` and `is_starred` flags on a single message matched by
+/// Update IMAP-backed message state on a single message matched by
 /// `(account_id, imap_folder, imap_uid)`. Returns the number of rows updated.
 #[allow(clippy::too_many_arguments)]
 pub fn set_message_imap_flags(

@@ -90,6 +90,7 @@ fn convert_message(msg: thread_detail::ThreadDetailMessage) -> ThreadMessage {
         cc_addresses: msg.cc_addresses,
         date: Some(msg.date),
         subject: msg.subject,
+        message_id_header: msg.message_id_header,
         snippet: msg.collapsed_summary,
         body_html: msg.body_html,
         body_text: msg.body_text,

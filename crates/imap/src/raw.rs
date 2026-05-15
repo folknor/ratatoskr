@@ -18,6 +18,7 @@ struct RawFetchedMessage {
     is_replied: bool,
     is_forwarded: bool,
     is_draft: bool,
+    keyword_categories: Vec<String>,
     internal_date: Option<i64>,
     body: Vec<u8>,
 }
@@ -159,6 +160,7 @@ pub async fn raw_fetch_messages(
             raw_msg.is_replied,
             raw_msg.is_forwarded,
             raw_msg.is_draft,
+            raw_msg.keyword_categories.clone(),
             raw_msg.internal_date,
         ) {
             Ok(msg) => messages.push(msg),
@@ -450,6 +452,11 @@ async fn raw_parse_fetch_responses(
                 let is_replied = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Answered"));
                 let is_forwarded = flags.iter().any(|f| f.eq_ignore_ascii_case("$Forwarded"));
                 let is_draft = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Draft"));
+                let keyword_categories: Vec<String> = flags
+                    .iter()
+                    .filter(|flag| common::folder_roles::is_user_visible_keyword(flag))
+                    .cloned()
+                    .collect();
 
                 // Parse INTERNALDATE
                 let internal_date = extract_internal_date(&line);
@@ -474,6 +481,7 @@ async fn raw_parse_fetch_responses(
                         is_replied,
                         is_forwarded,
                         is_draft,
+                        keyword_categories,
                         internal_date,
                         body,
                     });

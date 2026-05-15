@@ -138,6 +138,16 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(account_id, thread_id, date ASC);
 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(account_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_address);
+
+CREATE TABLE IF NOT EXISTS message_keywords (
+    account_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    keyword TEXT NOT NULL,
+    label_id TEXT NOT NULL,
+    PRIMARY KEY (account_id, message_id, label_id),
+    FOREIGN KEY (account_id, message_id) REFERENCES messages(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_keywords_label ON message_keywords(account_id, label_id);
 CREATE INDEX IF NOT EXISTS idx_messages_imap_uid ON messages(account_id, imap_folder, imap_uid);
 CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id_header);
 CREATE INDEX IF NOT EXISTS idx_messages_invite_uid ON messages(account_id, meeting_invite_uid)

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use iced::Task;
 
 use crate::pop_out::PopOutWindow;
+use crate::pop_out::compose::ComposeMode;
 use crate::{Message, ReadyApp};
 
-use service::actions::SendAttachment;
+use service::actions::{SendAttachment, SendIntent};
 
 impl ReadyApp {
     /// Build a MIME message from the compose state, save it to the draft row
@@ -93,6 +94,8 @@ impl ReadyApp {
             in_reply_to: state.reply_message_id.clone(),
             references: state.reply_message_id.clone(),
             thread_id: state.reply_thread_id.clone(),
+            source_message_id: state.reply_source_message_id.clone(),
+            intent: send_intent_from_mode(&state.mode),
         };
 
         // Set sending state and dispatch
@@ -284,9 +287,19 @@ fn stage_and_build_wire(
             in_reply_to: request.in_reply_to,
             references: request.references,
             thread_id: request.thread_id,
+            source_message_id: request.source_message_id,
+            intent: wire_send_intent(request.intent),
         },
         attachments: wire_attachments,
     })
+}
+
+fn wire_send_intent(intent: SendIntent) -> service_api::SendIntent {
+    match intent {
+        SendIntent::New => service_api::SendIntent::New,
+        SendIntent::Reply => service_api::SendIntent::Reply,
+        SendIntent::Forward => service_api::SendIntent::Forward,
+    }
 }
 
 /// Write bytes to a file. Uses `File::create` + `write_all` rather
@@ -296,4 +309,12 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
     file.write_all(bytes)?;
     Ok(())
+}
+
+fn send_intent_from_mode(mode: &ComposeMode) -> SendIntent {
+    match mode {
+        ComposeMode::New => SendIntent::New,
+        ComposeMode::Reply { .. } | ComposeMode::ReplyAll { .. } => SendIntent::Reply,
+        ComposeMode::Forward { .. } => SendIntent::Forward,
+    }
 }

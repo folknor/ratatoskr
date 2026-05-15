@@ -17,6 +17,7 @@ use lettre::message::{
 
 use db::db::ReadDbState;
 use common::encoding::encode_base64url_nopad;
+pub use common::types::SendIntent;
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -65,6 +66,10 @@ pub struct SendRequest {
     pub references: Option<String>,
     /// Provider thread ID (for threading on send).
     pub thread_id: Option<String>,
+    /// Local DB message ID for the message being replied to or forwarded.
+    pub source_message_id: Option<String>,
+    /// Whether this send is new mail, a reply, or a forward.
+    pub intent: SendIntent,
 }
 
 /// Errors that can occur during the send pipeline.
@@ -219,6 +224,36 @@ pub async fn mark_draft_failed(db: &ReadDbState, draft_id: String) -> Result<(),
     .await
 }
 
+pub async fn mark_send_intent_local(
+    db: &ReadDbState,
+    account_id: String,
+    source_message_id: Option<String>,
+    intent: SendIntent,
+) -> Result<(), String> {
+    let Some(message_id) = source_message_id else {
+        return Ok(());
+    };
+
+    let (is_replied, is_forwarded) = match intent {
+        SendIntent::New => return Ok(()),
+        SendIntent::Reply => (true, false),
+        SendIntent::Forward => (false, true),
+    };
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "UPDATE messages \
+             SET is_replied = CASE WHEN ?3 THEN 1 ELSE is_replied END, \
+                 is_forwarded = CASE WHEN ?4 THEN 1 ELSE is_forwarded END \
+             WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![account_id, message_id, is_replied, is_forwarded],
+        )
+        .map_err(|e| format!("mark send intent local: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +273,8 @@ mod tests {
             in_reply_to: None,
             references: None,
             thread_id: None,
+            source_message_id: None,
+            intent: SendIntent::New,
         }
     }
 

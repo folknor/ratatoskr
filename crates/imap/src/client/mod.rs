@@ -49,6 +49,22 @@ where
     (is_replied, is_forwarded)
 }
 
+/// Extract custom IMAP keywords that should surface as user-visible labels.
+pub(crate) fn extract_user_keywords<'a, I>(flags: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a Flag<'a>>,
+{
+    flags
+        .into_iter()
+        .filter_map(|flag| match flag {
+            Flag::Custom(keyword) if common::folder_roles::is_user_visible_keyword(keyword) => {
+                Some(keyword.to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Build a standardised timeout error message for IMAP operations.
 pub(crate) fn timeout_err(operation: &str, timeout: Duration) -> String {
     format!(
@@ -310,6 +326,7 @@ pub async fn fetch_messages(
         let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
         let (is_replied, is_forwarded) = extract_reply_forward_state(flags.iter());
         let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
+        let keyword_categories = extract_user_keywords(flags.iter());
 
         // Extract INTERNALDATE as fallback for messages with unparseable Date headers
         let internal_date = fetch.internal_date().map(|dt| dt.timestamp());
@@ -325,6 +342,7 @@ pub async fn fetch_messages(
             is_replied,
             is_forwarded,
             is_draft,
+            keyword_categories,
             internal_date,
         ) {
             Ok(msg) => messages.push(msg),
@@ -380,6 +398,7 @@ pub async fn fetch_message_body(
     let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
     let (is_replied, is_forwarded) = extract_reply_forward_state(flags.iter());
     let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
+    let keyword_categories = extract_user_keywords(flags.iter());
 
     let parser = MessageParser::default();
     parse_message(
@@ -393,6 +412,7 @@ pub async fn fetch_message_body(
         is_replied,
         is_forwarded,
         is_draft,
+        keyword_categories,
         None,
     )
 }

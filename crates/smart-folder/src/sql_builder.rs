@@ -306,6 +306,7 @@ fn build_folder_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
                 "EXISTS (SELECT 1 FROM thread_labels tl \
                  JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
                  WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id \
+                 AND l.label_kind = 'container' \
                  AND (l.name LIKE '%' || ?{idx} || '%' \
                    OR l.imap_folder_path LIKE '%' || ?{idx} || '%'))"
             )
@@ -412,7 +413,9 @@ fn build_thread_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 fn build_is_tagged_clause(ctx: &mut QueryContext) {
     ctx.thread_flag_clauses.push(
         "EXISTS (SELECT 1 FROM thread_labels tl2 \
-         WHERE tl2.thread_id = t.id AND tl2.account_id = t.account_id)"
+         JOIN labels l2 ON l2.account_id = tl2.account_id AND l2.id = tl2.label_id \
+         WHERE tl2.thread_id = t.id AND tl2.account_id = t.account_id \
+         AND l2.label_kind = 'tag')"
             .to_owned(),
     );
 }
@@ -450,6 +453,7 @@ fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
                 "EXISTS (SELECT 1 FROM thread_labels tl \
                  JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
                  WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id \
+                 AND l.label_kind = 'tag' \
                  AND LOWER(l.name) = LOWER(?{idx}))"
             )
         })

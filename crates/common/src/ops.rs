@@ -4,7 +4,7 @@ use super::error::ProviderError;
 use super::typed_ids::{FolderId, LabelId};
 use super::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderParsedMessage, ProviderProfile, ProviderTestResult,
+    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SendIntent,
 };
 
 /// Common operations that every email provider must support.
@@ -93,6 +93,15 @@ pub trait ProviderOps: Send + Sync {
         raw_base64url: &str,
         thread_id: Option<&str>,
     ) -> Result<String, ProviderError>;
+
+    async fn mark_send_intent(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _source_message_id: Option<&str>,
+        _intent: SendIntent,
+    ) -> Result<(), ProviderError> {
+        Ok(())
+    }
 
     /// Returns the draft ID.
     async fn create_draft(

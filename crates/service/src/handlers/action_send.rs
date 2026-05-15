@@ -61,6 +61,10 @@ pub(crate) struct JournaledMessage {
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub source_message_id: Option<String>,
+    #[serde(default)]
+    pub intent: service_api::SendIntent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +205,8 @@ fn transfer_attachments(
             in_reply_to: request.message.in_reply_to,
             references: request.message.references,
             thread_id: request.message.thread_id,
+            source_message_id: request.message.source_message_id,
+            intent: request.message.intent,
         },
         attachments: journaled_attachments,
     })

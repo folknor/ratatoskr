@@ -426,6 +426,7 @@ impl ReadyApp {
             .and_then(|idx| self.thread_list.threads.get(idx))
             .map(|t| t.id.clone());
         let message_id = msg.as_ref().map(|m| m.id.clone());
+        let message_id_header = msg.as_ref().and_then(|m| m.message_id_header.clone());
         let snippet = msg.as_ref().and_then(|m| m.snippet.clone());
 
         let state = pop_out::compose::ComposeState::new_reply(
@@ -437,6 +438,7 @@ impl ReadyApp {
             snippet.as_deref(),
             thread_id.as_deref(),
             message_id.as_deref(),
+            message_id_header.as_deref(),
         );
 
         self.open_compose_window_with_state(state, mode)

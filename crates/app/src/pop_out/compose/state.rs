@@ -41,6 +41,7 @@ pub struct ComposeState {
     // Reply context
     pub reply_thread_id: Option<String>,
     pub reply_message_id: Option<String>,
+    pub reply_source_message_id: Option<String>,
 
     // Status message (e.g. "Send not yet wired")
     pub status: Option<String>,
@@ -130,6 +131,7 @@ impl ComposeState {
             mode: ComposeMode::New,
             reply_thread_id: None,
             reply_message_id: None,
+            reply_source_message_id: None,
             status: None,
             recipients_error: None,
             discard_confirm_open: false,
@@ -213,6 +215,7 @@ impl ComposeState {
             mode: ComposeMode::New,
             reply_thread_id: draft.thread_id.clone(),
             reply_message_id: draft.reply_to_message_id.clone(),
+            reply_source_message_id: None,
             status: None,
             recipients_error: None,
             discard_confirm_open: false,
@@ -256,6 +259,7 @@ impl ComposeState {
         quoted_body: Option<&str>,
         thread_id: Option<&str>,
         message_id: Option<&str>,
+        message_id_header: Option<&str>,
     ) -> Self {
         let mut state = Self::new(accounts);
         state.mode = mode.clone();
@@ -315,7 +319,8 @@ impl ComposeState {
         }
 
         state.reply_thread_id = thread_id.map(String::from);
-        state.reply_message_id = message_id.map(String::from);
+        state.reply_source_message_id = message_id.map(String::from);
+        state.reply_message_id = message_id_header.or(message_id).map(String::from);
 
         state
     }

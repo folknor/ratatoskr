@@ -503,13 +503,7 @@ pub fn replace_thread_labels<'a>(
     thread_id: &str,
     labels: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    use crate::db::folder_roles::{is_message_state_label_id, is_reserved_imap_system_keyword};
-
-    let unique_labels: HashSet<&str> = labels
-        .into_iter()
-        .filter(|label_id| !is_message_state_label_id(label_id))
-        .filter(|label_id| !is_reserved_imap_system_keyword(label_id))
-        .collect();
+    let unique_labels = filtered_thread_labels(labels);
 
     tx.execute(
         "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
@@ -527,6 +521,39 @@ pub fn replace_thread_labels<'a>(
     }
 
     Ok(())
+}
+
+/// Add labels observed from a partial provider update without deleting the
+/// thread's existing aggregate. Providers that persist message deltas use this
+/// because the DB does not store per-message label membership.
+pub fn merge_thread_labels<'a>(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    labels: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    for label_id in filtered_thread_labels(labels) {
+        tx.execute(
+            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, thread_id, label_id],
+        )
+        .map_err(|e| format!("merge thread label: {e}"))?;
+    }
+
+    Ok(())
+}
+
+fn filtered_thread_labels<'a>(
+    labels: impl IntoIterator<Item = &'a str>,
+) -> HashSet<&'a str> {
+    use crate::db::folder_roles::{is_message_state_label_id, is_reserved_imap_system_keyword};
+
+    labels
+        .into_iter()
+        .filter(|label_id| !is_message_state_label_id(label_id))
+        .filter(|label_id| !is_reserved_imap_system_keyword(label_id))
+        .collect()
 }
 
 pub fn reassign_messages_and_repair_threads(

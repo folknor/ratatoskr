@@ -12,7 +12,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult,
+    ProviderProfile, ProviderTestResult, SendIntent,
 };
 
 use super::client::JmapClient;
@@ -465,6 +465,40 @@ impl ProviderOps for JmapOps {
 
         log::info!("[JMAP] Email sent successfully, email_id={email_id}");
         Ok(email_id)
+    }
+
+    async fn mark_send_intent(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        source_message_id: Option<&str>,
+        intent: SendIntent,
+    ) -> Result<(), ProviderError> {
+        let Some(source_message_id) = source_message_id else {
+            return Ok(());
+        };
+        let keyword = match intent {
+            SendIntent::New => return Ok(()),
+            SendIntent::Reply => "$answered",
+            SendIntent::Forward => "$forwarded",
+        };
+
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        let mut request = client.build();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
+        email_set.update(source_message_id).keyword(keyword, true);
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("send intent keyword: {e}")))?;
+        let mut response = request
+            .send()
+            .await
+            .map_err(|e| ProviderError::Server(format!("send intent keyword: {e}")))?;
+        response
+            .get(&handle)
+            .map_err(|e| ProviderError::Server(format!("send intent keyword: {e}")))?;
+        Ok(())
     }
 
     async fn create_draft(

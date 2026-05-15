@@ -322,6 +322,15 @@ pub struct MarkChatReadAck {
 /// non-attachment fields of the Service-side `SendRequest`. Stays
 /// small (headers + bodies) so the JSON-RPC frame fits comfortably
 /// under the 4 MiB cap regardless of attachment count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendIntent {
+    #[default]
+    New,
+    Reply,
+    Forward,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendWireMessage {
     pub draft_id: String,
@@ -335,6 +344,10 @@ pub struct SendWireMessage {
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub source_message_id: Option<String>,
+    #[serde(default)]
+    pub intent: SendIntent,
 }
 
 /// Per-attachment metadata carried over the wire. The bytes themselves
@@ -670,6 +683,8 @@ mod tests {
                 in_reply_to: None,
                 references: None,
                 thread_id: None,
+                source_message_id: None,
+                intent: SendIntent::New,
             },
             attachments: vec![SendWireAttachment {
                 source: SendAttachmentSource::StagingFile {

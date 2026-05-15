@@ -44,7 +44,7 @@ pub use folder::{create_folder, delete_folder, rename_folder};
 pub use label::{add_label, remove_label};
 pub use mark_read::mark_read;
 // Re-export send types so callers import from actions, not crate::send directly.
-pub use crate::send::{SendAttachment, SendRequest};
+pub use crate::send::{SendAttachment, SendIntent, SendRequest};
 pub use common::typed_ids::{FolderId, LabelId};
 pub use log::MutationLog;
 pub use move_to_folder::move_to_folder;

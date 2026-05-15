@@ -18,7 +18,7 @@ use service_api::{
     ClientNotification, ContactDeleteParams, ContactSaveParams, ExtractStatusParams,
     IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId, PlanId,
     ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
-    SendAttachmentSource, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
+    SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
     TestSeedAccountParams,
@@ -3043,6 +3043,8 @@ fn parse_send_message(
         in_reply_to: get_string_field(state, message_idx, "in_reply_to")?,
         references: get_string_field(state, message_idx, "references")?,
         thread_id: get_string_field(state, message_idx, "thread_id")?,
+        source_message_id: get_string_field(state, message_idx, "source_message_id")?,
+        intent: SendIntent::New,
     };
     state.set_top(top as isize);
     Ok(message)

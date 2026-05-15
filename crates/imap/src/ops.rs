@@ -10,6 +10,7 @@ use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
+    SendIntent,
 };
 use smtp;
 
@@ -88,6 +89,31 @@ pub fn parse_imap_message_id(message_id: &str, account_id: &str) -> Result<(Stri
         .parse()
         .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
     Ok((folder.to_string(), uid))
+}
+
+async fn source_imap_location(
+    ctx: &ProviderCtx<'_>,
+    source_message_id: &str,
+) -> Result<Option<(String, u32)>, ProviderError> {
+    let account_id = ctx.account_id.to_string();
+    let message_id = source_message_id.to_string();
+    ctx.db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT imap_folder, imap_uid FROM messages \
+                 WHERE account_id = ?1 AND id = ?2 AND imap_folder IS NOT NULL AND imap_uid IS NOT NULL",
+                rusqlite::params![account_id, message_id],
+                |row| {
+                    let folder: String = row.get(0)?;
+                    let uid: i64 = row.get(1)?;
+                    Ok((folder, u32::try_from(uid).unwrap_or(0)))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("lookup source IMAP message: {e}"))
+        })
+        .await
+        .map_err(ProviderError::Db)
 }
 
 /// Minimal info needed to locate a message on the IMAP server.
@@ -780,6 +806,41 @@ impl ProviderOps for ImapOps {
         }
 
         Ok(message_id)
+    }
+
+    async fn mark_send_intent(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        source_message_id: Option<&str>,
+        intent: SendIntent,
+    ) -> Result<(), ProviderError> {
+        let Some(source_message_id) = source_message_id else {
+            return Ok(());
+        };
+        let Some((folder, uid)) = source_imap_location(ctx, source_message_id).await? else {
+            return Ok(());
+        };
+
+        let account_id = ctx.account_id.to_string();
+        let config =
+            crate::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
+                .await?;
+
+        match intent {
+            SendIntent::New => Ok(()),
+            SendIntent::Reply => {
+                with_session!(&config, session => {
+                    imap_client::set_flags(&mut session, &folder, &uid.to_string(), "+FLAGS", "(\\Answered)").await
+                })
+                .map_err(ProviderError::Server)
+            }
+            SendIntent::Forward => {
+                with_session!(&config, session => {
+                    imap_client::set_keyword_if_supported(&mut session, &folder, uid, "+FLAGS", "$Forwarded").await
+                })
+                .map_err(ProviderError::Server)
+            }
+        }
     }
 
     async fn create_draft(

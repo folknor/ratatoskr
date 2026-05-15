@@ -256,6 +256,17 @@ pub fn generate_threads(
         let is_muted = rng.random::<f64>() < 0.01;
         let mut has_attachments = false;
 
+        // ~8% of multi-message threads end with a forward, so the ↪ glyph
+        // and the "Fwd: …" subject derivation get exercised in dev. Picked
+        // here at thread scope so the message loop can match on `mi` and
+        // rewrite the subject in the same place it would otherwise apply
+        // the Re: prefix.
+        let forward_target_mi: Option<u32> = if num_msgs >= 2 && rng.random::<f64>() < 0.08 {
+            Some(num_msgs - 1)
+        } else {
+            None
+        };
+
         // Folder
         let folder_name = weighted_choice(
             rng,
@@ -348,11 +359,20 @@ pub fn generate_threads(
                 + i64::from(mi) * i64::from(rng.random_range(1..49)) * 3600
                 + i64::from(rng.random_range(0..60)) * 60;
 
+            let is_forward_msg = forward_target_mi == Some(mi);
             let msg_subject = if mi == 0 {
                 subject.clone()
+            } else if is_forward_msg {
+                format!("Fwd: {subject}")
             } else {
                 format!("{re_prefix} {subject}")
             };
+            // Mirror Gmail's parser: the bit lives on the self-sent reply
+            // (mi > 0, sender alternation puts self on odd indices). The
+            // thread-level MAX(is_replied) decoration in thread_detail.rs
+            // turns this into the ↩ glyph in cards.rs:94.
+            let msg_is_replied = mi > 0 && mi % 2 == 1 && !is_forward_msg;
+            let msg_is_forwarded = is_forward_msg;
             let snippet = msg_subject.chars().take(200).collect::<String>();
 
             let msg_is_read = if mi < num_msgs - 1 { true } else { is_read };
@@ -425,11 +445,11 @@ pub fn generate_threads(
             conn.execute(
                 "INSERT INTO messages (id, account_id, thread_id, from_address, from_name,
                  to_addresses, cc_addresses, subject, snippet, date,
-                 is_read, is_starred, body_cached, raw_size, internal_date,
+                 is_read, is_starred, is_replied, is_forwarded, body_cached, raw_size, internal_date,
                  message_id_header, references_header, in_reply_to_header,
                  imap_uid, imap_folder, list_unsubscribe, list_unsubscribe_post)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                         ?11, ?12, 1, ?13, ?10, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                         ?11, ?12, ?13, ?14, 1, ?15, ?10, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
                 rusqlite::params![
                     msg_id,
                     acc.id,
@@ -443,6 +463,8 @@ pub fn generate_threads(
                     msg_date,
                     msg_is_read as i32,
                     (is_starred && mi == 0) as i32,
+                    msg_is_replied as i32,
+                    msg_is_forwarded as i32,
                     raw_size,
                     msg_id_header,
                     references,

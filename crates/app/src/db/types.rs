@@ -99,6 +99,7 @@ pub struct ThreadMessage {
     pub cc_addresses: Option<String>,
     pub date: Option<i64>,
     pub subject: Option<String>,
+    pub message_id_header: Option<String>,
     /// Quote/signature-stripped summary for collapsed view.
     /// Falls back to snippet when loaded via legacy path.
     pub snippet: Option<String>,

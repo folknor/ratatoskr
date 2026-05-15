@@ -1,13 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension};
 
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
+    recompute_thread_read_starred, set_message_imap_flags, sync_thread_read_starred_labels,
     upsert_labels,
-    get_thread_id_for_imap_uid, recompute_thread_read_starred, set_message_imap_flags,
-    sync_thread_read_starred_labels,
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
@@ -60,6 +59,7 @@ pub(crate) struct DbInsertData {
     imap_folder: String,
     has_body: bool,
     mdn_requested: bool,
+    keyword_categories: Vec<String>,
     attachments: Vec<DbAttachment>,
 }
 
@@ -108,6 +108,7 @@ impl DbInsertData {
             imap_folder: imap.folder.clone(),
             has_body: imap.body_html.is_some() || imap.body_text.is_some(),
             mdn_requested: imap.mdn_requested,
+            keyword_categories: imap.keyword_categories.clone(),
             attachments: imap
                 .attachments
                 .iter()
@@ -242,6 +243,129 @@ fn existing_imap_message_identity(
     .map_err(|e| format!("lookup existing IMAP message: {e}"))
 }
 
+fn imap_message_identity_in_tx(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    folder: &str,
+    uid: u32,
+) -> Result<Option<(String, String)>, String> {
+    tx.query_row(
+        "SELECT id, thread_id FROM messages \
+         WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
+         LIMIT 1",
+        rusqlite::params![account_id, folder, i64::from(uid)],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| format!("lookup IMAP message identity: {e}"))
+}
+
+fn imap_keyword_label_id(keyword: &str) -> String {
+    format!("kw:{keyword}")
+}
+
+fn upsert_imap_keyword_labels(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    keywords: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    let mut unique = HashSet::new();
+    let mut label_pairs = Vec::new();
+
+    for keyword in keywords {
+        if !common::folder_roles::is_user_visible_keyword(keyword) {
+            continue;
+        }
+        if unique.insert(keyword.clone()) {
+            label_pairs.push((keyword.clone(), imap_keyword_label_id(keyword)));
+        }
+    }
+
+    if label_pairs.is_empty() {
+        return Ok(label_pairs);
+    }
+
+    let rows: Vec<LabelWriteRow> = label_pairs
+        .iter()
+        .map(|(keyword, label_id)| LabelWriteRow {
+            id: label_id.clone(),
+            account_id: account_id.to_string(),
+            name: keyword.clone(),
+            label_type: "user".to_string(),
+            label_kind: "tag".to_string(),
+            color_bg: None,
+            color_fg: None,
+            sort_order: None,
+            imap_folder_path: None,
+            imap_special_use: None,
+            parent_label_id: None,
+            right_read: None,
+            right_add: None,
+            right_remove: None,
+            right_set_seen: None,
+            right_set_keywords: None,
+            right_create_child: None,
+            right_rename: None,
+            right_delete: None,
+            right_submit: None,
+            is_subscribed: None,
+        })
+        .collect();
+    upsert_labels(tx, &rows)?;
+    Ok(label_pairs)
+}
+
+fn replace_message_keywords(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    message_id: &str,
+    keywords: &[String],
+) -> Result<(), String> {
+    let label_pairs = upsert_imap_keyword_labels(tx, account_id, keywords)?;
+
+    tx.execute(
+        "DELETE FROM message_keywords WHERE account_id = ?1 AND message_id = ?2",
+        rusqlite::params![account_id, message_id],
+    )
+    .map_err(|e| format!("delete message keywords: {e}"))?;
+
+    for (keyword, label_id) in label_pairs {
+        tx.execute(
+            "INSERT OR IGNORE INTO message_keywords (account_id, message_id, keyword, label_id) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![account_id, message_id, keyword, label_id],
+        )
+        .map_err(|e| format!("insert message keyword: {e}"))?;
+    }
+
+    Ok(())
+}
+
+fn recompute_thread_keyword_labels(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM thread_labels \
+         WHERE account_id = ?1 AND thread_id = ?2 AND label_id LIKE 'kw:%'",
+        rusqlite::params![account_id, thread_id],
+    )
+    .map_err(|e| format!("delete thread keyword labels: {e}"))?;
+
+    tx.execute(
+        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+         SELECT DISTINCT m.account_id, m.thread_id, mk.label_id \
+         FROM messages m \
+         JOIN message_keywords mk ON mk.account_id = m.account_id AND mk.message_id = m.id \
+         WHERE m.account_id = ?1 AND m.thread_id = ?2",
+        rusqlite::params![account_id, thread_id],
+    )
+    .map_err(|e| format!("insert thread keyword labels: {e}"))?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Shared helper: store a chunk of converted messages to DB + body store + search
 // ---------------------------------------------------------------------------
@@ -274,6 +398,7 @@ pub(crate) async fn store_chunk(
             }
             resolved_ids.push((original_id, d.id.clone()));
             d.insert(&tx)?;
+            replace_message_keywords(&tx, &d.account_id, &d.id, &d.keyword_categories)?;
         }
         tx.commit().map_err(|e| format!("commit: {e}"))?;
         Ok(resolved_ids)
@@ -624,11 +749,12 @@ pub struct FolderSyncState {
     pub _last_sync_at: Option<i64>,
 }
 
-/// Batch-update message flags from CONDSTORE CHANGEDSINCE results.
+/// Batch-update message flags from CONDSTORE CHANGEDSINCE or full FLAGS results.
 ///
 /// Matches messages by `(account_id, imap_folder, imap_uid)` - the indexed
-/// columns - and updates `is_read` and `is_starred`. Also updates the parent
-/// thread's aggregate flags.
+/// columns - and updates message-state booleans plus per-message keyword
+/// membership. Thread-level `kw:` labels are then recomputed from that
+/// per-message table so removed keywords do not stick forever.
 pub fn apply_flag_changes(
     conn: &Connection,
     account_id: &str,
@@ -661,70 +787,19 @@ pub fn apply_flag_changes(
             )?;
         updated += count as u64;
 
-        // Collect affected thread IDs for reaggregation
-        if let Some(tid) =
-            get_thread_id_for_imap_uid(&tx, account_id, folder, i64::from(change.uid))?
+        if let Some((message_id, tid)) =
+            imap_message_identity_in_tx(&tx, account_id, folder, change.uid)?
         {
+            replace_message_keywords(&tx, account_id, &message_id, &change.keywords)?;
             affected_threads.insert(tid);
         }
     }
 
-    // Reaggregate thread-level is_read/is_starred from constituent messages
+    // Reaggregate thread-level state from constituent messages.
     for tid in &affected_threads {
         recompute_thread_read_starred(&tx, account_id, tid)?;
         sync_thread_read_starred_labels(&tx, account_id, tid)?;
-    }
-
-    // Sync custom keywords to the unified labels system.
-    // Each keyword becomes a tag-type label; thread_labels entries link them.
-    for change in changes {
-        if change.keywords.is_empty() {
-            continue;
-        }
-        // Look up the thread_id for this message
-        let thread_id: Option<String> =
-            get_thread_id_for_imap_uid(&tx, account_id, folder, i64::from(change.uid)).ok().flatten();
-        let Some(ref tid) = thread_id else { continue };
-
-        for kw in &change.keywords {
-            if !common::folder_roles::is_user_visible_keyword(kw) {
-                continue;
-            }
-            let label_id = format!("kw:{kw}");
-            upsert_labels(
-                &tx,
-                &[LabelWriteRow {
-                    id: label_id.clone(),
-                    account_id: account_id.to_string(),
-                    name: kw.clone(),
-                    label_type: "user".to_string(),
-                    label_kind: "tag".to_string(),
-                    color_bg: None,
-                    color_fg: None,
-                    sort_order: None,
-                    imap_folder_path: None,
-                    imap_special_use: None,
-                    parent_label_id: None,
-                    right_read: None,
-                    right_add: None,
-                    right_remove: None,
-                    right_set_seen: None,
-                    right_set_keywords: None,
-                    right_create_child: None,
-                    right_rename: None,
-                    right_delete: None,
-                    right_submit: None,
-                    is_subscribed: None,
-                }],
-            )?;
-            // Link to thread
-            tx.execute(
-                "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![account_id, tid, label_id],
-            )
-            .map_err(|e| format!("insert keyword thread_label: {e}"))?;
-        }
+        recompute_thread_keyword_labels(&tx, account_id, tid)?;
     }
 
     tx.commit()
@@ -795,18 +870,25 @@ pub fn get_local_uids_for_folder(
     Ok(result)
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalImapFlags {
+    pub uid: u32,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
+    pub keywords: Vec<String>,
+}
+
 /// Get locally cached flags for all messages in a folder.
-///
-/// Returns `(imap_uid, is_read, is_starred)` tuples for diffing against
-/// server-side flags (non-CONDSTORE fallback).
 pub fn get_local_flags_for_folder(
     conn: &Connection,
     account_id: &str,
     folder_path: &str,
-) -> Result<Vec<(u32, bool, bool)>, String> {
+) -> Result<Vec<LocalImapFlags>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT imap_uid, is_read, is_starred FROM messages \
+            "SELECT id, imap_uid, is_read, is_starred, is_replied, is_forwarded FROM messages \
              WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid IS NOT NULL",
         )
         .map_err(|e| format!("prepare get_local_flags: {e}"))?;
@@ -814,16 +896,52 @@ pub fn get_local_flags_for_folder(
     let rows = stmt
         .query_map(rusqlite::params![account_id, folder_path], |row| {
             Ok((
+                row.get::<_, String>("id")?,
                 u32::try_from(row.get::<_, i64>("imap_uid")?).unwrap_or(0),
                 row.get::<_, bool>("is_read")?,
                 row.get::<_, bool>("is_starred")?,
+                row.get::<_, bool>("is_replied")?,
+                row.get::<_, bool>("is_forwarded")?,
             ))
         })
         .map_err(|e| format!("query local flags: {e}"))?;
 
+    let mut keywords_by_message: HashMap<String, Vec<String>> = HashMap::new();
+    let mut kw_stmt = conn
+        .prepare(
+            "SELECT m.id, mk.keyword \
+             FROM messages m \
+             JOIN message_keywords mk ON mk.account_id = m.account_id AND mk.message_id = m.id \
+             WHERE m.account_id = ?1 AND m.imap_folder = ?2 AND m.imap_uid IS NOT NULL",
+        )
+        .map_err(|e| format!("prepare local keyword flags: {e}"))?;
+    let kw_rows = kw_stmt
+        .query_map(rusqlite::params![account_id, folder_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query local keyword flags: {e}"))?;
+    for row in kw_rows {
+        let (message_id, keyword) = row.map_err(|e| format!("read keyword flag row: {e}"))?;
+        keywords_by_message
+            .entry(message_id)
+            .or_default()
+            .push(keyword);
+    }
+
     let mut result = Vec::new();
     for row in rows {
-        result.push(row.map_err(|e| format!("read flag row: {e}"))?);
+        let (message_id, uid, is_read, is_starred, is_replied, is_forwarded) =
+            row.map_err(|e| format!("read flag row: {e}"))?;
+        let mut keywords = keywords_by_message.remove(&message_id).unwrap_or_default();
+        keywords.sort();
+        result.push(LocalImapFlags {
+            uid,
+            is_read,
+            is_starred,
+            is_replied,
+            is_forwarded,
+            keywords,
+        });
     }
     Ok(result)
 }

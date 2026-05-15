@@ -197,6 +197,7 @@ impl ReadyApp {
             mv.body_text.as_deref().or(mv.snippet.as_deref()),
             Some(&mv.thread_id),
             Some(&mv.message_id),
+            mv.message_id_header.as_deref(),
         );
 
         self.open_compose_window_with_state(state, mode)
@@ -235,6 +236,7 @@ impl ReadyApp {
         let cc_emails = last_message.and_then(|m| m.cc_addresses.as_deref());
         let thread_id = selected_thread.map(|t| t.id.as_str());
         let message_id = last_message.map(|m| m.id.as_str());
+        let message_id_header = last_message.and_then(|m| m.message_id_header.as_deref());
         let snippet = last_message.and_then(|m| m.snippet.as_deref());
 
         let state = ComposeState::new_reply(
@@ -246,6 +248,7 @@ impl ReadyApp {
             snippet,
             thread_id,
             message_id,
+            message_id_header,
         );
 
         self.open_compose_window_with_state(state, mode)

@@ -12,14 +12,14 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, LabelId};
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult,
+    ProviderProfile, ProviderTestResult, SendIntent,
 };
 use db::db::ReadDbState;
 
 use super::client::GraphClient;
 use super::types::{
     GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder, GraphMessagePatch,
-    GraphRenameFolderRequest, SingleValueExtendedProperty,
+    GraphRenameFolderRequest, LAST_VERB_EXECUTED_PROPERTY_ID, SingleValueExtendedProperty,
 };
 
 use self::helpers::{
@@ -215,6 +215,36 @@ impl ProviderOps for GraphOps {
         thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         Ok(send_via_draft(&self.client, ctx, raw_base64url, thread_id).await?)
+    }
+
+    async fn mark_send_intent(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        source_message_id: Option<&str>,
+        intent: SendIntent,
+    ) -> Result<(), ProviderError> {
+        let Some(source_message_id) = source_message_id else {
+            return Ok(());
+        };
+        let value = match intent {
+            SendIntent::New => return Ok(()),
+            SendIntent::Reply => "102",
+            SendIntent::Forward => "104",
+        };
+
+        let enc_id = urlencoding::encode(source_message_id);
+        let patch = GraphMessagePatch {
+            single_value_extended_properties: Some(vec![SingleValueExtendedProperty {
+                id: LAST_VERB_EXECUTED_PROPERTY_ID.to_string(),
+                value: value.to_string(),
+            }]),
+            ..Default::default()
+        };
+        let me = self.me();
+        self.client
+            .patch(&format!("{me}/messages/{enc_id}"), &patch, ctx.db)
+            .await
+            .map_err(ProviderError::Server)
     }
 
     async fn create_draft(

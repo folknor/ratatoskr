@@ -8,13 +8,13 @@ use rtsk::db::queries_extra::navigation::{
 };
 use rtsk::db::queries_extra::{
     get_active_account_ids_sync, get_public_folder_items, get_threads_for_shared_mailbox,
-    get_threads_scoped, query_thread_list_decorations,
+    get_snoozed_threads, get_starred_threads, get_threads_scoped, query_thread_list_decorations,
 };
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{ChatList, GenerationToken, Nav};
 use rtsk::scope::ViewScope;
 use std::sync::Arc;
-use types::{Bundle, FeatureView, SidebarSelection};
+use types::{Bundle, FeatureView, SidebarSelection, SystemFolder};
 
 impl ReadyApp {
     pub(crate) fn current_scope(&self) -> &ViewScope {
@@ -74,7 +74,7 @@ impl ReadyApp {
                     } => {
                         let aid = account_id.clone();
                         let mid = mailbox_id.clone();
-                        let label_id = selection.folder_id_for_thread_query();
+                        let label_id = thread_query_label_for_selection(&selection);
                         load_shared_mailbox_threads(db, aid, mid, label_id).await
                     }
                     ViewScope::PublicFolder {
@@ -95,7 +95,7 @@ impl ReadyApp {
                                 load_threads_for_feature_view(*feature).await
                             }
                             _ => {
-                                let label_id = selection.folder_id_for_thread_query();
+                                let label_id = thread_query_label_for_selection(&selection);
                                 load_threads_scoped(db, scope, label_id).await
                             }
                         }
@@ -150,14 +150,21 @@ async fn load_threads_scoped(
     label_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        let db_threads = get_threads_scoped(conn, &scope, label_id.as_deref(), Some(1000), None)?;
+        let label = label_id.as_deref();
+        let db_threads = match label {
+            // Starred and Snoozed are virtual folders backed by thread state,
+            // not rows in thread_labels.
+            Some("STARRED") => get_starred_threads(conn, &scope, Some(1000), None)?,
+            Some("SNOOZED") => get_snoozed_threads(conn, &scope, Some(1000), None)?,
+            _ => get_threads_scoped(conn, &scope, label, Some(1000), None)?,
+        };
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
             .collect();
 
         // When viewing Drafts, also include local-only drafts
-        if label_id.as_deref() == Some("DRAFT") {
+        if label == Some("DRAFT") {
             let local =
                 rtsk::db::queries_extra::get_local_draft_summaries(conn, &scope, Some(1000), None)?;
             let local_threads: Vec<Thread> =
@@ -171,6 +178,15 @@ async fn load_threads_scoped(
         Ok(threads)
     })
     .await
+}
+
+fn thread_query_label_for_selection(selection: &SidebarSelection) -> Option<String> {
+    match selection {
+        // Single-account All Mail is the full scoped thread set, so it must
+        // deliberately avoid the thread_labels path.
+        SidebarSelection::Folder(SystemFolder::AllMail) => None,
+        _ => selection.folder_id_for_thread_query(),
+    }
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

@@ -10,7 +10,7 @@ use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
 use types::{FolderId, SidebarSelection};
 
-use super::search_here::build_search_here_prefix;
+use super::search_here::build_search_here_user_folder_prefix;
 use super::{Sidebar, SidebarMessage};
 
 /// A node in the depth-first tree traversal.
@@ -246,7 +246,7 @@ fn folder_row<'a>(
     .width(Length::Fill)
     .into();
 
-    let query_prefix = build_search_here_prefix(&folder.name, sidebar);
+    let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar);
     mouse_area(label_btn)
         .on_right_press(SidebarMessage::SearchHere(query_prefix))
         .into()

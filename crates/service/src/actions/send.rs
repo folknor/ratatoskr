@@ -3,7 +3,10 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use db::progress::NoopProgressReporter;
-use crate::send::{SendRequest, build_mime_message_base64url, mark_draft_failed, mark_draft_sent};
+use crate::send::{
+    SendIntent, SendRequest, build_mime_message_base64url, mark_draft_failed,
+    mark_draft_sent, mark_send_intent_local,
+};
 use common::types::ProviderCtx;
 
 /// Send an email: build MIME, persist draft, dispatch to provider.
@@ -31,10 +34,13 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     let draft_id = request.draft_id.clone();
     let account_id = request.account_id.clone();
     let thread_id = request.thread_id.clone();
+    let source_message_id = request.source_message_id.clone();
+    let send_intent = request.intent;
     // Clone for use after the spawn_blocking closure moves the originals.
     let draft_id_outer = draft_id.clone();
     let account_id_outer = account_id.clone();
     let thread_id_outer = thread_id.clone();
+    let source_message_id_outer = source_message_id.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let mime_base64url = build_mime_message_base64url(&request)
             .map_err(|e| ActionError::build(format!("{e}")))?;
@@ -109,6 +115,28 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     {
         Ok(sent_message_id) => {
             mlog.set_remote_id(&sent_message_id);
+            if send_intent != SendIntent::New {
+                if let Err(e) = provider
+                    .mark_send_intent(
+                        &provider_ctx,
+                        source_message_id_outer.as_deref(),
+                        send_intent,
+                    )
+                    .await
+                {
+                    log::warn!("Provider send-intent writeback failed: {e}");
+                }
+                if let Err(e) = mark_send_intent_local(
+                    &ctx.db,
+                    account_id_outer.clone(),
+                    source_message_id_outer,
+                    send_intent,
+                )
+                .await
+                {
+                    log::warn!("Local send-intent writeback failed: {e}");
+                }
+            }
             let _ = mark_draft_sent(&ctx.db, draft_id_outer, sent_message_id).await;
             ActionOutcome::Success
         }

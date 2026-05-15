@@ -4,7 +4,7 @@ use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, MessageInsertRow, delete_message_reaction,
     insert_attachments, insert_messages, upsert_message_reaction,
-    upsert_message_reaction_update_type,
+    upsert_message_reaction_update_type, LabelWriteRow, upsert_labels,
 };
 
 use super::super::client::GraphClient;
@@ -127,6 +127,7 @@ fn store_thread_to_db(
     user_emails: &[String],
 ) -> Result<(), String> {
     upsert_thread_record(tx, account_id, thread_id, messages, shared_mailbox_id)?;
+    upsert_graph_label_rows(tx, account_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     insert_exchange_reactions(tx, account_id, messages)?;
 
@@ -206,7 +207,9 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
-    sync_persistence::replace_thread_labels(
+    // Graph delta pages contain only changed messages. Merge labels so an
+    // update to one message does not drop aggregate labels from siblings.
+    sync_persistence::merge_thread_labels(
         tx,
         account_id,
         thread_id,
@@ -214,6 +217,91 @@ fn set_thread_labels(
             .iter()
             .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
     )
+}
+
+fn upsert_graph_label_rows(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    messages: &[ParsedGraphMessage],
+) -> Result<(), String> {
+    let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for msg in messages {
+        for category in &msg.categories {
+            let label_id = format!("cat:{category}");
+            if seen.insert(label_id.clone()) {
+                rows.push(LabelWriteRow {
+                    id: label_id,
+                    account_id: account_id.to_string(),
+                    name: category.clone(),
+                    label_type: "user".to_string(),
+                    label_kind: "tag".to_string(),
+                    color_bg: None,
+                    color_fg: None,
+                    sort_order: None,
+                    imap_folder_path: None,
+                    imap_special_use: None,
+                    parent_label_id: None,
+                    right_read: None,
+                    right_add: None,
+                    right_remove: None,
+                    right_set_seen: None,
+                    right_set_keywords: None,
+                    right_create_child: None,
+                    right_rename: None,
+                    right_delete: None,
+                    right_submit: None,
+                    is_subscribed: None,
+                });
+            }
+        }
+
+        for label_id in &msg.base.label_ids {
+            let Some((id, name, sort_order)) = graph_importance_label(label_id) else {
+                continue;
+            };
+            if seen.insert(id.to_string()) {
+                rows.push(LabelWriteRow {
+                    id: id.to_string(),
+                    account_id: account_id.to_string(),
+                    name: name.to_string(),
+                    label_type: "system".to_string(),
+                    label_kind: "tag".to_string(),
+                    color_bg: None,
+                    color_fg: None,
+                    sort_order: Some(sort_order),
+                    imap_folder_path: None,
+                    imap_special_use: None,
+                    parent_label_id: None,
+                    right_read: None,
+                    right_add: None,
+                    right_remove: None,
+                    right_set_seen: None,
+                    right_set_keywords: None,
+                    right_create_child: None,
+                    right_rename: None,
+                    right_delete: None,
+                    right_submit: None,
+                    is_subscribed: None,
+                });
+            }
+        }
+    }
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    upsert_labels(tx, &rows)
+}
+
+fn graph_importance_label(label_id: &str) -> Option<(&'static str, &'static str, i64)> {
+    match label_id {
+        "importance:high" => Some(("importance:high", "High importance", 10_000)),
+        "importance:low" => Some(("importance:low", "Low importance", 10_001)),
+        _ => None,
+    }
 }
 
 fn upsert_messages(

@@ -703,6 +703,44 @@ pub fn get_threads_for_shared_mailbox(
 ) -> Result<Vec<DbThread>, String> {
     let lim = limit.unwrap_or(200);
 
+    if matches!(label_id, Some("STARRED" | "SNOOZED")) {
+        // Shared-mailbox Starred and Snoozed use the same virtual-folder
+        // semantics as personal mail: state columns, not thread_labels rows.
+        let flag_col = flag_column(label_id.unwrap_or("STARRED"));
+        let sql = format!(
+            "WITH mb_threads AS (
+               SELECT id FROM threads
+               WHERE account_id = ?1 AND shared_mailbox_id = ?2
+             )
+             SELECT t.*, m.from_name, m.from_address FROM threads t
+             LEFT JOIN (
+               SELECT id, account_id, thread_id, from_name, from_address FROM (
+                 SELECT id, account_id, thread_id, from_name, from_address,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY account_id, thread_id
+                          ORDER BY date DESC, id DESC
+                        ) AS rn
+                 FROM messages
+                 WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
+               ) WHERE rn = 1
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+               AND t.is_chat_thread = 0
+               AND t.{flag_col} = 1
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?3"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        return stmt
+            .query_map(
+                rusqlite::params![account_id, mailbox_id, lim],
+                DbThread::from_row,
+            )
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string());
+    }
+
     let sql = if label_id.is_some() {
         "WITH mb_threads AS (
                SELECT id FROM threads

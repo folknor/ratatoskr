@@ -1,3 +1,4 @@
+use common::folder_roles::is_user_visible_keyword;
 use common::text::truncate_graphemes;
 use sync::threading::ThreadableMessage;
 use sync::types::MessageMeta;
@@ -38,7 +39,12 @@ pub fn convert_imap_message(
         .clone()
         .unwrap_or_else(|| synthetic_message_id(account_id, &msg.folder, msg.uid));
 
-    let label_ids = get_folder_ids_for_message(folder_id, msg.is_draft);
+    let mut label_ids = get_folder_ids_for_message(folder_id, msg.is_draft);
+    for keyword in &msg.keyword_categories {
+        if is_user_visible_keyword(keyword) {
+            label_ids.push(format!("kw:{keyword}"));
+        }
+    }
 
     let snippet = msg.snippet.clone().unwrap_or_else(|| {
         msg.body_text
@@ -105,6 +111,7 @@ mod tests {
             is_replied: false,
             is_forwarded: false,
             is_draft: false,
+            keyword_categories: Vec::new(),
             body_html: Some("<p>Hello</p>".to_string()),
             body_text: Some("Hello".to_string()),
             snippet: None,

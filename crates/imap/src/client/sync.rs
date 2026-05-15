@@ -323,6 +323,7 @@ pub async fn sync_folder(
                     let (is_replied, is_forwarded) =
                         super::extract_reply_forward_state(flags.iter());
                     let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
+                    let keyword_categories = super::extract_user_keywords(flags.iter());
                     let internal_date = f.internal_date().map(|dt| dt.timestamp());
 
                     match parse_message(
@@ -336,6 +337,7 @@ pub async fn sync_folder(
                         is_replied,
                         is_forwarded,
                         is_draft,
+                        keyword_categories,
                         internal_date,
                     ) {
                         Ok(msg) => all_messages.push(msg),

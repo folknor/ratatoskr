@@ -70,6 +70,7 @@ pub struct ImapMessage {
     pub is_replied: bool,
     pub is_forwarded: bool,
     pub is_draft: bool,
+    pub keyword_categories: Vec<String>,
     pub body_html: Option<String>,
     pub body_text: Option<String>,
     pub snippet: Option<String>,

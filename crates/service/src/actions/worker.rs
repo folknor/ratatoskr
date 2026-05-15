@@ -430,10 +430,20 @@ async fn build_send_request(
             in_reply_to: payload.message.in_reply_to,
             references: payload.message.references,
             thread_id: payload.message.thread_id,
+            source_message_id: payload.message.source_message_id,
+            intent: send_intent_from_wire(payload.message.intent),
         })
     })
     .await
     .map_err(|e| format!("spawn_blocking build_send_request: {e}"))?
+}
+
+fn send_intent_from_wire(intent: service_api::SendIntent) -> crate::send::SendIntent {
+    match intent {
+        service_api::SendIntent::New => crate::send::SendIntent::New,
+        service_api::SendIntent::Reply => crate::send::SendIntent::Reply,
+        service_api::SendIntent::Forward => crate::send::SendIntent::Forward,
+    }
 }
 
 /// Build an `ActionContext` from the boot-shared inputs.

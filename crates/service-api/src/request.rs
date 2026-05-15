@@ -2094,6 +2094,8 @@ mod tests {
                 in_reply_to: None,
                 references: None,
                 thread_id: None,
+                source_message_id: None,
+                intent: crate::action::SendIntent::New,
             },
             attachments: Vec::new(),
         };
@@ -2123,6 +2125,8 @@ mod tests {
                 in_reply_to: None,
                 references: None,
                 thread_id: None,
+                source_message_id: None,
+                intent: crate::action::SendIntent::New,
             },
             attachments: Vec::new(),
         };
@@ -2154,6 +2158,8 @@ mod tests {
                 in_reply_to: None,
                 references: None,
                 thread_id: None,
+                source_message_id: None,
+                intent: crate::action::SendIntent::New,
             },
             attachments: vec![SendWireAttachment {
                 source: SendAttachmentSource::StagingFile {
