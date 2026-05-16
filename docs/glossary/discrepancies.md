@@ -103,7 +103,7 @@ WHERE 1=1 {thread_flag_where}
 
 So the pill counted "threads where there exists a message satisfying *every* filter simultaneously, including being unread." The list did not enforce unread at all - it just showed whatever the saved query matched and let the thread-list UI render bold/unread state from `t.is_read` (the thread aggregate). Two paths, same domain question (what does this smart folder contain), different answers.
 
-Resolved: `build_thread_state_clauses` emits read, unread, and starred predicates against `threads` through `thread_flag_clauses`, and the list and count builders consume the same thread-flag clause set. Per-glossary aggregate semantics are in `docs/glossary/folders-labels.md`.
+Resolved (historical; the fix predates this document's current revision): `build_thread_state_clauses` emits read, unread, and starred predicates against `threads` through `thread_flag_clauses`, and the list and count builders consume the same thread-flag clause set. The named function (`smart_folder::count_smart_folder_unread`) still exists with the corrected behavior. Per-glossary aggregate semantics are in `docs/glossary/folders-labels.md`.
 
 This is the worked example for **#1 (grain.vertical)**. The framework above generalizes the lesson.
 
@@ -113,11 +113,17 @@ Three issues remain in active inventory. Each names the shared promise, the cont
 
 ### Optimistic Local Label Intent
 
-Local label actions write directly to `thread_labels` before the provider echoes the change. A concurrent IMAP/JMAP keyword recompute (`crates/provider-sync/src/keyword_membership.rs`) can temporarily erase that optimistic `kw:*` row, because the per-message `message_keywords` union has not observed the local intent yet. The window is small but user-visible: a label flickers off and back on as the recompute and the action queue race.
+Local label actions write directly to `thread_labels` (and `thread_label_groups` for group composites) before the provider echoes the change. Any provider-truth path that DELETE+INSERTs `thread_labels` for that thread before the local action has been echoed can erase the optimistic row. The erase surfaces today are:
 
-Two paths answer the same domain question - "what labels are currently on this thread, as far as the user is concerned" - and give different answers. The local UI sees the optimistic state immediately after the action; sync recompute sees provider truth and overwrites the optimistic row on poll.
+- `crates/provider-sync/src/keyword_membership.rs::recompute_thread_keyword_labels` (IMAP and JMAP keyword paths).
+- `crates/provider-sync/src/imap/thread_store.rs::replace_full_thread_labels` (IMAP `imap_initial` and `imap_delta`).
+- `crates/provider-sync/src/gmail/sync/storage.rs` full-thread replace (Gmail).
 
-The cure is a small local overlay (table or queue-derived projection) that holds pending intent until the provider echoes or the action fails permanently. User-facing label-membership reads merge provider truth with the overlay; sync recompute paths never observe the overlay. A persisted per-thread generation counter advances on every membership write and drives clearance for async-echo provider paths.
+The window is small but user-visible: a label flickers off and back on as the destructive replace and the action queue race.
+
+Two paths answer the same domain question - "what labels are currently on this thread, as far as the user is concerned" - and give different answers. The local UI sees the optimistic state immediately after the action; sync sees provider truth and overwrites the optimistic row on the next persist.
+
+The cure is a small local overlay (table or queue-derived projection) that holds pending intent until the provider echoes or the action fails permanently. User-facing label-membership reads merge provider truth with the overlay; sync recompute paths never observe the overlay. A persisted per-thread generation counter advances on every provider-truth membership write and drives clearance for async-echo provider paths.
 
 Detailed design and three-stage implementation plan: `docs/optimistic-label-intent.md`.
 
@@ -134,19 +140,21 @@ Unread is a weak concept for Drafts, and arguably for Sent, Trash, Spam, and Arc
 - Collapse to one rule, all pills = unread. Accept that Drafts (and similar folders) will rarely show a pill.
 - Per-folder semantics (Inbox/Starred/Snoozed = unread; Drafts/Sent/Trash/Spam/Archive = total) with a visual distinction (different pill style) so users can tell which count they're looking at.
 
-This is a product decision rather than a pure contracts decision, but whichever direction wins, the contracts machinery is the same: `get_drafts_view` and `get_draft_count_with_local` (and any equivalent pairs for other affected folders) migrate together. The canonical-entry pair is what enforces list/count agreement regardless of which predicate they end up carrying.
+The product decision determines which membership predicate the pill represents. The contract failure is that list query and count query can carry different predicates without the type system noticing - and the canonical-entry pair is what enforces single-predicate-per-folder regardless of which predicate is chosen. `get_drafts_view` and `get_draft_count_with_local` (and any equivalent pairs for other affected folders) migrate together; that pairing is type-level. The predicate they carry is product-level.
 
 Tags: contracts=canonical-entry; enforcement=capability-token; promise=list query and count query for a given folder answer the same membership question, with a single declared predicate per folder.
 
 ### Cross-Client Folder/Label Move Reconciliation
 
-Graph and JMAP delta-sync persistence (`crates/provider-sync/src/graph/sync/persistence.rs::set_thread_labels`, `crates/provider-sync/src/jmap/sync/storage.rs::set_thread_labels`) call `merge_thread_labels`, so partial-delta pages no longer wipe sibling-message labels. The trade-off is asymmetric: when another client moves a thread (Inbox to Archive, say), the new folder row gets added but the old folder row is never removed, because the delta only reports what the changed message *is* in, not what it's no longer in. Same-client moves are fine - the action service updates `thread_labels` locally before dispatching, so the source row is removed in the same transaction.
+Graph delta-sync persistence (`crates/provider-sync/src/graph/sync/persistence.rs:210-211`) calls both `merge_partial_delta_folders` and `merge_partial_delta_labels` for `thread_folders` and `thread_labels`; JMAP delta-sync persistence (`crates/provider-sync/src/jmap/sync/storage.rs:196`) calls `merge_partial_delta_folders` for `thread_folders` only (JMAP keyword-shaped labels flow through `recompute_thread_keyword_labels` separately). Partial-delta pages no longer wipe sibling-message rows. The trade-off is asymmetric: when another client moves a thread (Inbox to Archive, say), the new `thread_folders` row gets added but the old one is never removed, because the delta only reports what the changed message *is* in, not what it's no longer in. Same-client moves are fine - the action service updates `thread_folders` locally before dispatching, so the source row is removed in the same transaction.
 
-The Promise Rule violation: Gmail full-thread sync and Graph/JMAP partial-delta sync both claim to answer "what folders does this thread currently live in." Gmail's answer is correct (full replace); Graph and JMAP under-remove, carrying stale folder rows after cross-client moves.
+The Promise Rule violation: Gmail full-thread sync and Graph/JMAP partial-delta sync both claim to answer "what folders does this thread currently live in." Gmail's answer is correct (full replace); Graph and JMAP under-remove, carrying stale `thread_folders` rows after cross-client moves. The same shape applies to Graph's `thread_labels` partial-delta path, since `merge_partial_delta_labels` is the same merge semantics applied to a different table.
 
 Not a type-system fix. The cure is data-model: a per-message folder/category membership table analogous to the existing `message_keywords` table that the IMAP/JMAP keyword-membership slice already uses. Thread folder/label membership is recomputed from the per-message union on every persist, the same way `kw:*` rows are recomputed from `message_keywords`. The keyword-membership slice (`crates/provider-sync/src/keyword_membership.rs`) is the existing partial implementation of this pattern; broadening it to folders is an architectural slice, not a type-level migration.
 
-Until that pattern is extended to folders and labels broadly, stale folder rows are an accepted artifact of the cross-client move case. A periodic full-thread reconciler that prunes against the per-message union is the lighter-weight alternative if the per-message table is deferred.
+Until that pattern is extended to folders and labels broadly, stale rows are an accepted artifact of the cross-client move case. A periodic full-thread reconciler that prunes against the per-message union is the lighter-weight alternative if the per-message table is deferred.
+
+Severity note: post-labels-unification, a stale `thread_labels` row on a member-bearing label now renders the whole group pill via the `thread_labels` JOIN `label_group_members` rendering path (`docs/labels-unification/redesign.md` § "Message pill rendering"). Before that work, a stale row only surfaced as a per-account label the message UI did not foreground. After the unification, the same stale row shapes like a deliberate user "apply group" action and users who never used a group can see it attached to threads they did not touch. This raises the priority of either the per-message membership store or the periodic reconciler.
 
 Tags: contracts=mutation-capability,completion-state; enforcement=sealed-constructor; promise=thread folder/label membership reflects current provider truth across all sync paths, including partial-delta after cross-client mutation.
 
