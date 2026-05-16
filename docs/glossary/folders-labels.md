@@ -60,6 +60,8 @@ For each provider, exhaustively: what counts as a folder, what counts as a label
 
 Gmail's API permits system labels and user labels to coexist on a single message. Ratatoskr models the system ones as containers anyway because their UI semantics are move-style (archive removes `INBOX`, trash moves to `TRASH`, etc.).
 
+`STARRED` is intentionally absent from the system-labels row above. It is **not** a folder in Ratatoskr - it is the message-state row below, backed by `threads.is_starred`. The universal Starred sidebar entry is a virtual navigation handle queried via `get_starred_threads`, not a `folders` row; see "Identity" below for the virtual navigation IDs that never appear in any membership table.
+
 ### Microsoft Graph (Exchange)
 
 | Provider primitive | Ratatoskr classification |

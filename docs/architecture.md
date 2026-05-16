@@ -253,6 +253,20 @@ The action pipeline flows: `MailActionIntent -> resolve_intent -> build_executio
 
 Toggle actions (boolean state flips) need only the `MailOperation` variant and a `ToggleField` entry - `build_execution_plan` handles per-thread resolution, optimistic UI, and rollback generically.
 
+### Composite operations
+
+A composite operation is a single planner-level `MailOperation` that fans out internally to N per-resource provider dispatches inside its service-side action function. The fan-out is invisible to the planner: one `OperationOutcome` returns, one toast fires, one undo payload covers the whole apply/remove pair. `ApplyLabelGroup` / `RemoveLabelGroup` (`crates/service/src/actions/label_group.rs`) are the worked example - one composite op per (thread, group), N member-label dispatches inside.
+
+Composites change three things relative to a regular action and getting any one of them wrong reproduces the failure shape that landed in the labels-unification refactor:
+
+1. **Retry preflight is load-bearing.** When the pending-ops drainer re-runs a composite retry, the service-side function MUST re-read its local-intent state (`thread_label_groups` for the label-group composite) before dispatching any member writes. If the user has reversed intent in the meantime - removed the group after an Apply enqueued, re-applied after a Remove enqueued - the queued member writes will resurrect or re-clear a pill against current intent for the entire retry-queue TTL. The preflight skips the queued member dispatches and resolves the retry as `Success`.
+
+2. **Per-member dispatches must not enqueue per-member retries.** The composite's preflight contract only fires when the *composite* op type lands in `pending_operations`. If the inner member dispatches call the standard `enqueue_if_retryable` and enqueue raw `addLabel` / `removeLabel` rows, the drainer will re-run those per-member ops directly, with no preflight, and the contract above is bypassed. Either thread a "suppress per-member enqueue" flag through `ActionContext` so the composite enqueues a single composite-typed row covering the failed members, or factor out a `_no_enqueue` helper that the composite calls and that the per-member entry points wrap.
+
+3. **`MailUndoPayload` pairs composites as wholes.** `ApplyLabelGroup` undoes via `RemoveLabelGroup` and vice versa; member-level undo is not exposed. The composite reads current member state at undo dispatch time - so member-set drift between original apply and undo means the undo touches the *current* member set, not the historical one. This is tolerable when members are user-authored and changes are local; document the same property for any new composite.
+
+The composite reports a single `OperationOutcome` to the planner. Per-member provider failures are reconciled by the composite's own retry path with the preflight described above, never as separate planner notifications. Local writes from the composite's local step stay committed regardless of provider outcomes, matching the per-label-action contract in `crates/service/src/actions/label.rs`.
+
 ## Database Integrity
 
 All tables with `account_id` CASCADE on account deletion. Migration 77 recreated the 16 tables that were missing the constraint. `delete_account_orchestrate()` handles external store cleanup (body store, inline images, attachment cache, search index).
