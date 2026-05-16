@@ -931,18 +931,24 @@ pub fn query_labels_by_account(
         let (label_id, account_id, name, server_color_bg, server_color_fg, user_color_bg, user_color_fg, sort_order) =
             r.map_err(|e| e.to_string())?;
 
-        let user_pair = user_color_bg.as_deref().zip(user_color_fg.as_deref());
+        let user_pair = label_colors::LabelStyleHex::from_optional_pair(
+            user_color_bg.as_deref(),
+            user_color_fg.as_deref(),
+        )?;
         let has_color_override = user_pair.is_some();
+        let server_pair = label_colors::LabelStyleHex::from_optional_pair(
+            server_color_bg.as_deref(),
+            server_color_fg.as_deref(),
+        )?;
 
-        let (bg, fg) = label_colors::resolve_label_color(
+        let style = label_colors::resolve_label_color(
             &name,
             &account_id,
             user_pair,
-            server_color_bg.as_deref(),
-            server_color_fg.as_deref(),
+            server_pair,
         );
-        let bg = bg.to_owned();
-        let fg = fg.to_owned();
+        let bg = style.bg().to_owned();
+        let fg = style.fg().to_owned();
 
         if let Some(group) = groups.iter_mut().find(|g| g.account_id == account_id) {
             group.labels.push(AccountLabelRow {
@@ -962,4 +968,3 @@ pub fn query_labels_by_account(
 
     Ok(groups)
 }
-

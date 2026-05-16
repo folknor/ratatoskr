@@ -1,11 +1,7 @@
-use db::db::types::AccountScope;
-
 /// What the user is currently viewing - drives query routing and UI context.
 ///
-/// This is a UI-scoping concept, not a database type. The translation from
-/// `ViewScope` to `AccountScope` (for personal-account variants) happens in the
-/// routing layer. `SharedMailbox` and `PublicFolder` scopes route to entirely
-/// different query paths.
+/// This is a UI-scoping concept, not a database type. Personal accounts,
+/// shared mailboxes, and public folders route through different query paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewScope {
     /// All personal accounts.
@@ -25,17 +21,6 @@ pub enum ViewScope {
 }
 
 impl ViewScope {
-    /// Convert to `AccountScope` for query functions that only understand
-    /// personal accounts. Returns `None` for scopes that need different
-    /// query paths (shared mailbox, public folder).
-    pub fn to_account_scope(&self) -> Option<AccountScope> {
-        match self {
-            Self::AllAccounts => Some(AccountScope::All),
-            Self::Account(id) => Some(AccountScope::Single(id.clone())),
-            Self::SharedMailbox { .. } | Self::PublicFolder { .. } => None,
-        }
-    }
-
     /// The parent account ID, if this scope is tied to a specific account.
     pub fn account_id(&self) -> Option<&str> {
         match self {

@@ -130,6 +130,8 @@ The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`
 
 ### 2. #5-pre MailProviderKind - boundary parse (high fidelity)
 
+**Status:** started. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch now parses account `provider` rows into the enum before matching. The full workspace migration is still open.
+
 **Inventory:** No direct entries (this is prereq infrastructure for #5c). Implicitly addressed by every Shape 6 entry where a provider-identity string flows alongside a label string.
 
 **Design sketch.** A typed `MailProviderKind` enum lives in `types`:
@@ -341,6 +343,8 @@ Same shape for the `Thread` constructors: four near-identical converters (`db_th
 
 ### 5. #5b LabelStyle - sealed constructor + crate-boundary split (high fidelity)
 
+**Status:** low-level resolver slice landed. `label-colors::LabelStyleHex` is a complete `(bg, fg)` pair, `resolve_label_color` accepts only complete pairs, label write APIs reject partial DB pairs, and the labels schema has matching complete-or-missing CHECK constraints. The UI-side `LabelPaint` migration remains open.
+
 **Inventory:** Shape 5's `resolve_label_color` partial-pair entry, Shape 2's label-color resolver entry.
 
 Sequenced adjacent to #3 because LabelStyle is a completion-state migration (partial-or-missing color → complete `(bg, fg)` pair). Rides on the same sealed-constructor pattern; contained within `label-colors` and `app` with no cross-crate construction concern.
@@ -512,6 +516,8 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 **Success criteria.** Shape 8 inventory entries resolve. A compile-fail test attempts to call `get_draft_threads_synced` from the sidebar render path and fails. A compile-fail test attempts to call `search_sql_fallback` from `app` and fails.
 
 ### 8. #1 grain.scope - exhaustive dispatch (high fidelity)
+
+**Status:** landed for the documented failure shape. `ViewScope::to_account_scope()` is deleted; navigation and thread loading now dispatch on `ViewScope` exhaustively before constructing an `AccountScope` for personal-account query paths.
 
 **Inventory:** `core/src/scope.rs:31-36`, parts of Shape 8.
 

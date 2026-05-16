@@ -8,6 +8,7 @@ use super::types::{
     CategoryCount, DbAttachment, DbContact, DbFolder, DbLabel, DbThread, ThreadCategoryRow,
     ThreadInfoRow,
 };
+use super::queries_extra::validate_label_color_pairs;
 use super::ReadDbState;
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
@@ -332,6 +333,14 @@ pub fn remove_thread_folder(
 // ---------------------------------------------------------------------------
 
 pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
+    validate_label_color_pairs(
+        &label.id,
+        label.server_color_bg.as_deref(),
+        label.server_color_fg.as_deref(),
+        label.user_color_bg.as_deref(),
+        label.user_color_fg.as_deref(),
+    )?;
+
     conn.execute(
         "INSERT INTO labels (account_id, id, name, visible, sort_order, server_color_bg, server_color_fg, user_color_bg, user_color_fg, is_undeletable)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)

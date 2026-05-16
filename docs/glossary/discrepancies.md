@@ -232,9 +232,7 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
 Credential accessor entries resolved by contract #5a: `common::crypto::StoredSecret` is now the only raw storage parser, `decrypt_or_raw` and `decrypt_if_needed` are deleted, and Gmail, Graph, JMAP, and IMAP decrypt through the typed parse product. Legacy plaintext remains accepted only inside `StoredSecret`; the strict rejection or one-shot migration decision remains open in `docs/contracts-roadmap.md`.
 
-- `crates/label-colors/src/lib.rs:40-58` *(deep slice: core + seen + label-colors)* - `resolve_label_color()` accepts both complete user-color pairs `Option<(&str, &str)>` and partial synced colors `Option<&str>, Option<&str>` as separate arguments. The function enforces that both `server_color_bg` AND `server_color_fg` are present together (line 49: `(None, Some(bg), Some(fg))`), but does not validate that if either is present, the other is also present. Current convention: callers must ensure synced colors are always paired. No type prevents a call site from passing `Some(bg)` with `None` for `fg`, which would silently fall through to the hash fallback despite a synced value being partially available.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=a label style is a complete (bg, fg) pair or nothing.
+Label color pair entry resolved by contract #5b low-level slice: `label-colors::LabelStyleHex` is now a complete pair, `resolve_label_color` no longer accepts separate optional foreground/background arguments, and partial DB pairs are rejected by label write APIs plus schema CHECK constraints instead of falling through to hash fallback.
 
 ### Shape 6 - Kind-encoded-in-string
 
@@ -286,9 +284,7 @@ Credential accessor entries resolved by contract #5a: `common::crypto::StoredSec
 
   Tags: contracts=grain.vertical,validated-domain; enforcement=sealed-constructor; promise=label-group query alias is grain-correct.
 
-- `crates/core/src/scope.rs:31-36` *(deep slice: core + seen + label-colors)* - `ViewScope::to_account_scope()` exhaustively matches the four variants and returns `None` for scope types that need different query paths (SharedMailbox, PublicFolder). Current convention: callers that receive `None` must dispatch to dedicated query paths. However, the function is not forced to exhaustively handle both arms: a hypothetical refactor that adds a new `ViewScope` variant would type-check but `to_account_scope()` would still compile if the match statement misses the new variant (relying on catch-all `_ => None` if one existed). Current code has no catch-all (correctly), but the pattern could be fragile across future schema changes.
-
-  Tags: contracts=grain.scope,canonical-entry; enforcement=capability-token; promise=ViewScope dispatch covers all four scope variants without `Option` escape.
+ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope::to_account_scope()` is deleted, and the app navigation/thread loaders match the full `ViewScope` enum before routing to personal-account, shared-mailbox, or public-folder query paths.
 
 - `crates/common/src/html_sanitizer.rs:332-353` *(deep slice: stores + crypto-key + common)* - `sanitize_html_body_with_image_policy(html, block_remote_images: bool, sender_is_allowlisted: bool)` branches on a boolean `block_remote_images` to decide whether to call `strip_remote_images`. Current convention: the decision is made by the caller before dispatch. If a call site fails to set `block_remote_images` correctly, the same HTML receives different treatment at different times silently. The two entry points (`sanitize_html_body` always passes through, `sanitize_html_body_with_image_policy` branches) mean a future caller that needs image blocking must remember to use the second entry point and pass the two booleans in the right positions.
 

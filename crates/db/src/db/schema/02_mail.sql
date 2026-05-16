@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS labels (
     user_color_bg TEXT,
     user_color_fg TEXT,
     is_undeletable INTEGER NOT NULL DEFAULT 0,
+    CHECK (
+        (server_color_bg IS NULL AND server_color_fg IS NULL)
+        OR (server_color_bg IS NOT NULL AND server_color_fg IS NOT NULL)
+    ),
+    CHECK (
+        (user_color_bg IS NULL AND user_color_fg IS NULL)
+        OR (user_color_bg IS NOT NULL AND user_color_fg IS NOT NULL)
+    ),
     PRIMARY KEY (account_id, id)
 );
 CREATE INDEX IF NOT EXISTS labels_account ON labels(account_id);

@@ -108,6 +108,14 @@ pub fn insert_folders_batch(tx: &Transaction, rows: &[FolderWriteRow]) -> Result
 /// it stays that way.
 pub fn upsert_labels(tx: &Transaction, rows: &[LabelWriteRow]) -> Result<(), String> {
     for row in rows {
+        validate_label_color_pairs(
+            &row.id,
+            row.server_color_bg.as_deref(),
+            row.server_color_fg.as_deref(),
+            row.user_color_bg.as_deref(),
+            row.user_color_fg.as_deref(),
+        )?;
+
         tx.execute(
             "INSERT INTO labels \
              (id, account_id, name, visible, sort_order, server_color_bg, server_color_fg, \
@@ -139,6 +147,32 @@ pub fn upsert_labels(tx: &Transaction, rows: &[LabelWriteRow]) -> Result<(), Str
     }
 
     Ok(())
+}
+
+pub fn validate_label_color_pairs(
+    label_id: &str,
+    server_color_bg: Option<&str>,
+    server_color_fg: Option<&str>,
+    user_color_bg: Option<&str>,
+    user_color_fg: Option<&str>,
+) -> Result<(), String> {
+    validate_label_color_pair(label_id, "server", server_color_bg, server_color_fg)?;
+    validate_label_color_pair(label_id, "user", user_color_bg, user_color_fg)?;
+    Ok(())
+}
+
+fn validate_label_color_pair(
+    label_id: &str,
+    source: &str,
+    bg: Option<&str>,
+    fg: Option<&str>,
+) -> Result<(), String> {
+    match (bg, fg) {
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+        _ => Err(format!(
+            "label {label_id} has incomplete {source} color pair"
+        )),
+    }
 }
 
 fn sort_folders_parent_first(rows: &[FolderWriteRow]) -> Result<Vec<&FolderWriteRow>, String> {
@@ -177,4 +211,28 @@ fn sort_folders_parent_first(rows: &[FolderWriteRow]) -> Result<Vec<&FolderWrite
     }
 
     Ok(sorted)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::validate_label_color_pairs;
+
+    #[test]
+    fn label_color_pairs_accept_complete_or_missing() {
+        validate_label_color_pairs("lbl", Some("#111111"), Some("#ffffff"), None, None).unwrap();
+        validate_label_color_pairs("lbl", None, None, Some("#222222"), Some("#000000")).unwrap();
+        validate_label_color_pairs("lbl", None, None, None, None).unwrap();
+    }
+
+    #[test]
+    fn label_color_pairs_reject_partial_values() {
+        let server = validate_label_color_pairs("lbl", Some("#111111"), None, None, None)
+            .expect_err("partial server color should fail");
+        assert!(server.contains("incomplete server color pair"));
+
+        let user = validate_label_color_pairs("lbl", None, None, None, Some("#ffffff"))
+            .expect_err("partial user color should fail");
+        assert!(user.contains("incomplete user color pair"));
+    }
 }

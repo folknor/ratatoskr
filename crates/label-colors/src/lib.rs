@@ -28,6 +28,37 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
     (bg, fg)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LabelStyleHex<'a> {
+    bg: &'a str,
+    fg: &'a str,
+}
+
+impl<'a> LabelStyleHex<'a> {
+    pub fn new(bg: &'a str, fg: &'a str) -> Self {
+        Self { bg, fg }
+    }
+
+    pub fn from_optional_pair(
+        bg: Option<&'a str>,
+        fg: Option<&'a str>,
+    ) -> Result<Option<Self>, String> {
+        match (bg, fg) {
+            (Some(bg), Some(fg)) => Ok(Some(Self::new(bg, fg))),
+            (None, None) => Ok(None),
+            _ => Err("label color pair is incomplete".to_string()),
+        }
+    }
+
+    pub fn bg(self) -> &'a str {
+        self.bg
+    }
+
+    pub fn fg(self) -> &'a str {
+        self.fg
+    }
+}
+
 /// Resolve display colors for a label.
 ///
 /// Resolution priority:
@@ -40,24 +71,27 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
 pub fn resolve_label_color<'a>(
     name: &'a str,
     account_id: &'a str,
-    user_color: Option<(&'a str, &'a str)>,
-    server_color_bg: Option<&'a str>,
-    server_color_fg: Option<&'a str>,
-) -> (&'a str, &'a str) {
-    let result = match (user_color, server_color_bg, server_color_fg) {
-        (Some((bg, fg)), _, _) => (bg, fg),
-        (None, Some(bg), Some(fg)) => (bg, fg),
-        _ => color_for_label(name, account_id),
+    user_color: Option<LabelStyleHex<'a>>,
+    server_color: Option<LabelStyleHex<'a>>,
+) -> LabelStyleHex<'a> {
+    let result = match (user_color, server_color) {
+        (Some(style), _) => style,
+        (None, Some(style)) => style,
+        (None, None) => {
+            let (bg, fg) = color_for_label(name, account_id);
+            LabelStyleHex::new(bg, fg)
+        }
     };
     log::debug!(
         "Resolved label color: name={name}, bg={}, fg={}",
-        result.0,
-        result.1,
+        result.bg(),
+        result.fg(),
     );
     result
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -79,37 +113,41 @@ mod tests {
 
     #[test]
     fn resolve_prefers_synced() {
-        let (bg, fg) = resolve_label_color(
+        let style = resolve_label_color(
             "Important",
             "acc-1",
             None,
-            Some("#ff0000"),
-            Some("#ffffff"),
+            Some(LabelStyleHex::new("#ff0000", "#ffffff")),
         );
-        assert_eq!(bg, "#ff0000");
-        assert_eq!(fg, "#ffffff");
+        assert_eq!(style.bg(), "#ff0000");
+        assert_eq!(style.fg(), "#ffffff");
     }
 
     #[test]
     fn resolve_falls_back_to_hash() {
-        let (bg, fg) = resolve_label_color("Custom", "acc-1", None, None, None);
-        assert!(bg.starts_with('#'));
-        assert!(fg.starts_with('#'));
+        let style = resolve_label_color("Custom", "acc-1", None, None);
+        assert!(style.bg().starts_with('#'));
+        assert!(style.fg().starts_with('#'));
         let (expected_bg, expected_fg) = color_for_label("Custom", "acc-1");
-        assert_eq!(bg, expected_bg);
-        assert_eq!(fg, expected_fg);
+        assert_eq!(style.bg(), expected_bg);
+        assert_eq!(style.fg(), expected_fg);
     }
 
     #[test]
     fn user_color_wins_over_synced() {
-        let (bg, fg) = resolve_label_color(
+        let style = resolve_label_color(
             "Important",
             "acc-1",
-            Some(("#00ff00", "#000000")),
-            Some("#ff0000"),
-            Some("#ffffff"),
+            Some(LabelStyleHex::new("#00ff00", "#000000")),
+            Some(LabelStyleHex::new("#ff0000", "#ffffff")),
         );
-        assert_eq!(bg, "#00ff00");
-        assert_eq!(fg, "#000000");
+        assert_eq!(style.bg(), "#00ff00");
+        assert_eq!(style.fg(), "#000000");
+    }
+
+    #[test]
+    fn incomplete_color_pair_is_rejected() {
+        let err = LabelStyleHex::from_optional_pair(Some("#ff0000"), None).unwrap_err();
+        assert!(err.contains("incomplete"));
     }
 }

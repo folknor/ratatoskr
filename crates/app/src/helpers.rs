@@ -48,9 +48,9 @@ impl ReadyApp {
                             folders: Vec::new(),
                         })
                     }
-                    _ => {
-                        let scope = view_scope.to_account_scope().unwrap_or(AccountScope::All);
-                        load_navigation(db, scope).await
+                    ViewScope::AllAccounts => load_navigation(db, AccountScope::All).await,
+                    ViewScope::Account(account_id) => {
+                        load_navigation(db, AccountScope::Single(account_id.clone())).await
                     }
                 };
                 (load_gen, r)
@@ -114,48 +114,16 @@ impl ReadyApp {
                         let fid = folder_id.clone();
                         load_public_folder_items_async(db, aid, fid).await
                     }
-                    _ => {
-                        let scope = view_scope.to_account_scope().unwrap_or(AccountScope::All);
-                        match &selection {
-                            SidebarSelection::Bundle(bundle) => {
-                                load_threads_for_bundle_view(db, scope, *bundle).await
-                            }
-                            SidebarSelection::FeatureView(feature) => {
-                                load_threads_for_feature_view(*feature).await
-                            }
-                            SidebarSelection::LabelGroup(group_id) => {
-                                load_threads_for_label_group_view(db, scope, group_id.as_i64())
-                                    .await
-                            }
-                            // Virtual views are not folders; they route to the
-                            // helpers that read `threads.is_starred` /
-                            // `is_snoozed` / no filter rather than joining
-                            // `thread_folders`.
-                            SidebarSelection::VirtualView(VirtualView::Starred) => {
-                                load_threads_starred(db, scope).await
-                            }
-                            SidebarSelection::VirtualView(VirtualView::Snoozed) => {
-                                load_threads_snoozed(db, scope).await
-                            }
-                            SidebarSelection::VirtualView(VirtualView::AllMail) => {
-                                load_threads_scoped(db, scope, None).await
-                            }
-                            // Smart folders are search results, not folder-
-                            // membership queries. The threads loader cannot
-                            // resolve them; the search path
-                            // (`handle_smart_folder_selected`) owns this.
-                            // Return an empty list as a no-op rather than
-                            // either passing the smart-folder id to a
-                            // folder query (silent 0 rows) or returning
-                            // every thread under the scope (worse). The
-                            // search engine re-fires on the events that
-                            // matter (initial click; explicit refresh).
-                            SidebarSelection::SmartFolder { .. } => Ok(Vec::new()),
-                            _ => {
-                                let label_id = selection.folder_id_for_thread_query();
-                                load_threads_scoped(db, scope, label_id).await
-                            }
-                        }
+                    ViewScope::AllAccounts => {
+                        load_personal_scope_threads(db, AccountScope::All, selection).await
+                    }
+                    ViewScope::Account(account_id) => {
+                        load_personal_scope_threads(
+                            db,
+                            AccountScope::Single(account_id.clone()),
+                            selection,
+                        )
+                        .await
                     }
                 };
                 (load_gen, r)
@@ -198,6 +166,44 @@ pub(crate) async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, Strin
 async fn load_navigation(db: Arc<Db>, scope: AccountScope) -> Result<NavigationState, String> {
     db.with_conn(move |conn| get_navigation_state(conn, &scope))
         .await
+}
+
+async fn load_personal_scope_threads(
+    db: Arc<Db>,
+    scope: AccountScope,
+    selection: SidebarSelection,
+) -> Result<Vec<Thread>, String> {
+    match &selection {
+        SidebarSelection::Bundle(bundle) => load_threads_for_bundle_view(db, scope, *bundle).await,
+        SidebarSelection::FeatureView(feature) => load_threads_for_feature_view(*feature).await,
+        SidebarSelection::LabelGroup(group_id) => {
+            load_threads_for_label_group_view(db, scope, group_id.as_i64()).await
+        }
+        // Virtual views are not folders; they route to the helpers that read
+        // `threads.is_starred` / `is_snoozed` / no filter rather than joining
+        // `thread_folders`.
+        SidebarSelection::VirtualView(VirtualView::Starred) => {
+            load_threads_starred(db, scope).await
+        }
+        SidebarSelection::VirtualView(VirtualView::Snoozed) => {
+            load_threads_snoozed(db, scope).await
+        }
+        SidebarSelection::VirtualView(VirtualView::AllMail) => {
+            load_threads_scoped(db, scope, None).await
+        }
+        // Smart folders are search results, not folder-membership queries.
+        // The threads loader cannot resolve them; the search path
+        // (`handle_smart_folder_selected`) owns this. Return an empty list as
+        // a no-op rather than either passing the smart-folder id to a folder
+        // query (silent 0 rows) or returning every thread under the scope
+        // (worse). The search engine re-fires on the events that matter
+        // (initial click; explicit refresh).
+        SidebarSelection::SmartFolder { .. } => Ok(Vec::new()),
+        _ => {
+            let label_id = selection.folder_id_for_thread_query();
+            load_threads_scoped(db, scope, label_id).await
+        }
+    }
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

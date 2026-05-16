@@ -2,6 +2,7 @@ use db::db::ReadDbState;
 use provider_sync::ProviderSyncOps;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use types::MailProviderKind;
 
 use super::outcome::RemoteFailureKind;
 
@@ -23,32 +24,34 @@ pub async fn create_provider(
     encryption_key: [u8; 32],
 ) -> Result<Box<dyn ProviderSyncOps>, String> {
     let aid = account_id.to_string();
-    let provider = db
+    let raw_provider = db
         .with_conn(move |conn| {
             db::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
         })
         .await?;
+    match raw_provider.as_str() {
+        "harness-offline" => return Ok(Box::new(HarnessOfflineProvider::immediate())),
+        "harness-slow-sync" => return Ok(Box::new(HarnessOfflineProvider::slow_sync())),
+        _ => {}
+    }
 
-    match provider.as_str() {
-        "gmail_api" => {
+    match MailProviderKind::parse(&raw_provider)? {
+        MailProviderKind::Gmail => {
             let client =
                 gmail::client::GmailClient::from_account(db, account_id, encryption_key).await?;
             Ok(Box::new(gmail::ops::GmailOps::new(client)))
         }
-        "graph" => {
+        MailProviderKind::Graph => {
             let client =
                 graph::client::GraphClient::from_account(db, account_id, encryption_key).await?;
             Ok(Box::new(graph::ops::GraphOps::new(client)))
         }
-        "jmap" => {
+        MailProviderKind::Jmap => {
             let client =
                 jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
             Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
-        "harness-offline" => Ok(Box::new(HarnessOfflineProvider::immediate())),
-        "harness-slow-sync" => Ok(Box::new(HarnessOfflineProvider::slow_sync())),
-        "imap" => Ok(Box::new(imap::ops::ImapOps::new(encryption_key))),
-        other => Err(format!("Unknown provider: {other}")),
+        MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(encryption_key))),
     }
 }
 
