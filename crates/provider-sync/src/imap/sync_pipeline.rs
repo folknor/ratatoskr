@@ -512,8 +512,9 @@ pub fn sync_folders_to_folders(
                 // blocking the user from deleting their own folder. The
                 // mapper's name-fallback still routes such folders to
                 // canonical IDs at the storage layer; we only refuse to
-                // mark them as system here. See `docs/labels-unification/
-                // redesign.md` "is_undeletable".
+                // mark them as system here. `is_undeletable` should reflect
+                // a provider's system classification, not Ratatoskr's
+                // role-name inference.
                 is_undeletable: folder.special_use.is_some(),
             })
         })

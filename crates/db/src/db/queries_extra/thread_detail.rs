@@ -52,11 +52,11 @@ pub struct ThreadDetailMessage {
 /// Label groups with resolved colors, for the thread header pills
 /// and thread card label dots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-/// A label-group decoration attached to a thread - one row per group that
-/// the thread renders a pill for. Post-split (`docs/labels-unification/
-/// redesign.md`) every entry is a `label_groups` row; raw provider labels
-/// never reach the message UI. `label_id` is the stringified
-/// `label_groups.id`; older naming kept to avoid app/wire churn.
+/// A label-group decoration attached to a thread - one row per group
+/// the thread renders a pill for. Every entry is a `label_groups` row;
+/// raw provider labels never reach the message UI. `label_id` is the
+/// stringified `label_groups.id`; older naming kept to avoid app/wire
+/// churn.
 #[serde(rename_all = "camelCase")]
 pub struct ThreadLabel {
     pub label_id: String,

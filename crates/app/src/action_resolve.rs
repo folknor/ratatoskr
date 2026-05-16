@@ -26,11 +26,10 @@ pub enum MailActionIntent {
     MoveToFolder { folder_id: FolderId },
     // Per-account label intents. The message UI MUST NOT construct these:
     // user-facing apply/remove targets `ApplyLabelGroup` / `RemoveLabelGroup`
-    // only (see `docs/labels-unification/redesign.md` "Action pipeline
-    // integration"). These variants exist solely for (a) Settings-side
-    // per-account label management and (b) symmetric undo round-tripping
-    // through `MailUndoPayload`. Wiring a context menu item to either is
-    // a regression.
+    // only. These variants exist solely for (a) Settings-side per-account
+    // label management and (b) symmetric undo round-tripping through
+    // `MailUndoPayload`. Wiring a context menu item to either is a
+    // regression.
     AddLabel { label_id: LabelId },
     RemoveLabel { label_id: LabelId },
     ApplyLabelGroup { group_id: LabelGroupId },

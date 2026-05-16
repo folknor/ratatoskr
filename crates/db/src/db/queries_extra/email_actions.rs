@@ -2,8 +2,9 @@
 //!
 //! Label-side equivalents have been retired: the action service writes
 //! pending intent into `pending_thread_label_intents` and lets the
-//! provider-truth path own `thread_labels` writes. See
-//! `docs/optimistic-label-intent.md`.
+//! provider-truth path own `thread_labels` writes. See the doc comments
+//! on `crates/db/src/db/queries_extra/label_intent.rs` for the overlay
+//! lifecycle.
 
 use rusqlite::{Connection, params};
 

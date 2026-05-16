@@ -215,7 +215,7 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates
       AND tl.thread_id = m.thread_id
       AND LOWER(lg.name) = LOWER(?N))
   ```
-- OR semantics for multiple `label:` values: parts joined with `OR`. The binding is by name, not group_id, so a group rename changes which group a persisted query resolves to (per `docs/labels-unification/redesign.md` "Open").
+- OR semantics for multiple `label:` values: parts joined with `OR`. The binding is by name, not group_id, so a group rename changes which group a persisted query resolves to. Stable group-id binding for persisted queries is tracked in `TODO.md`.
 - Threads carrying raw labels that are not members of any group stop matching. Raw `(account_id, label_id)` membership has no user-facing operator post-split.
 
 **`has:contact` operator:**

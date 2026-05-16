@@ -3,9 +3,9 @@
 //! Read path lives here. Writes (create / delete / rename / recolor) are
 //! scaffolded as stub Tasks until the action service grows the matching
 //! `label.create`, `label.delete`, `label.recolor`, `label.rename` actions.
-//! Per the labels-unification redesign, every per-account label is keyed
-//! on `(account_id, label_id)`; the pre-split `normalized_name` collapse
-//! is gone (see `docs/labels-unification/redesign.md` "Reversal 2").
+//! Every per-account label is keyed on `(account_id, label_id)`; cross-
+//! account labels are explicit user-created groups (`label_groups`), not
+//! auto-collapse by normalised name. See `docs/glossary/folders-labels.md`.
 
 use std::sync::Arc;
 

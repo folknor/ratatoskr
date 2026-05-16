@@ -10,9 +10,12 @@ use super::provider::{classify_provider_error, create_provider};
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
 
 /// Distinguishes initial dispatch from a pending-ops drain retry. The
-/// preflight (per `docs/labels-unification/redesign.md` "Retry preflight")
-/// short-circuits a retry whose intent has been reversed by the user since
-/// the queued composite landed.
+/// retry preflight short-circuits a queued composite whose intent has
+/// been reversed by the user since it landed: an Apply retry whose
+/// group is no longer rendered on the thread (overlay-aware) skips its
+/// queued member `AddLabel` dispatches, and vice versa for Remove. This
+/// prevents stale retries from resurrecting or re-clearing a pill
+/// against current user intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DispatchKind {
     Initial,
@@ -531,9 +534,9 @@ fn composite_retryability(error: &str) -> bool {
 /// Per-member provider dispatch. Runs each member write through an explicit
 /// no-enqueue helper, so a per-member failure does NOT enqueue a raw
 /// `addLabel` / `removeLabel` row. Those would bypass the composite retry
-/// preflight (`docs/labels-unification/redesign.md` "Retry preflight").
-/// Instead the composite caller enqueues a single composite-typed row
-/// covering the failed members via [`enqueue_composite_if_local_only`].
+/// preflight described on `DispatchKind` above. Instead the composite
+/// caller enqueues a single composite-typed row covering the failed
+/// members via [`enqueue_composite_if_local_only`].
 ///
 /// Continues past per-member `Failed` outcomes so a single hard error
 /// (e.g. a member whose label row was deleted between member-read and

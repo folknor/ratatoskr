@@ -24,12 +24,11 @@ pub enum NavSize {
 
 /// Count to render alongside a `nav_button`. Universal sidebar entries
 /// (Inbox, Drafts, Sent, ...) must pass `Universal(UniversalUnreadCount)`
-/// so the discrepancies-doc invariant - "the universal-pill widget is
-/// fed only by the unread-count question" - is checked at the widget
-/// boundary. A future contributor who tried to route
-/// `DraftTotalCount` (synced + local) through the universal pill cannot
-/// reach `Universal`, because the only constructor for
-/// `UniversalUnreadCount` is `from_synced_thread_count`. Non-universal
+/// so the "universal pill is fed only by the unread-count question"
+/// invariant is checked at the widget boundary. A future contributor
+/// who tried to route `DraftTotalCount` (synced + local) through the
+/// universal pill cannot reach `Universal`, because the only constructor
+/// for `UniversalUnreadCount` is `from_synced_thread_count`. Non-universal
 /// entries (smart folders, label groups, settings tabs) use `General`.
 #[derive(Debug, Clone, Copy)]
 pub enum NavBadge {

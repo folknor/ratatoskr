@@ -132,10 +132,10 @@ Thread-level state has two sources of truth, depending on what is being aggregat
 
     The `query_thread_state_decorations` helper (`crates/db/src/db/queries_extra/thread_detail.rs`) computes thread-level decorations on read; the `recompute_thread_read_starred` helper writes the `threads` aggregates. Both helpers must apply the `is_reaction = 0` filter and the correct per-field reducer.
 - **Folder / label memberships** are thread-level aggregates. Folder membership lives in `thread_folders`. Raw provider label membership lives in `thread_labels`. Pending same-client label intent lives in `pending_thread_label_intents` and is merged only by user-facing reads.
-    - **Gmail and IMAP** sync the entire thread's message metadata before writing the aggregate. Gmail storage and the IMAP thread-store pass call provider-local private replace wrappers after collecting the full folder/label union. Safe destructive replace because the input is the full union.
-    - **Graph and JMAP** receive partial delta pages (only changed messages, not the full thread). Their sync modules call provider-local private merge wrappers, which insert new memberships but never remove. This preserves sibling-message memberships that the delta page does not mention. Trade-off: when another client moves the thread (so the source folder is gone from every message but the delta only tells us what folder the message is in *now*), the stale source-folder row is not cleaned up. Tracked in `TODO.md` as the "cross-client folder/label moves" item.
+    - **Gmail and IMAP** sync the entire thread's message metadata before writing the aggregate. The provider-sync entry point is `replace_thread_membership_from_full_coverage` (`crates/provider-sync/src/thread_membership.rs`); destructive replace is safe because the input is the full union.
+    - **Graph and JMAP** receive partial delta pages (only changed messages, not the full thread). They write per-message ground truth through `message_folders` and `message_labels` (Graph) or `message_folders` + `message_keywords` (JMAP), and the thread-level aggregate is recomputed from the per-message union via `replace_message_membership_and_recompute`. A cross-client move that subtracts the source folder/label from every message is observable in the per-message tables, so the stale source-folder row gets cleaned up on recompute.
 
-Same-client moves are correct under both schemes because the action service updates `thread_folders` locally (removing the source folder, adding the target) before dispatching to the provider.
+Same-client moves are correct under both schemes because the action service updates `thread_folders` locally (removing the source folder, adding the target) before dispatching to the provider. Same-client label actions write `pending_thread_label_intents` and let provider-truth writes clear matching intent rows; see `crates/db/src/db/queries_extra/label_intent.rs` for the overlay lifecycle.
 
 ---
 
@@ -262,6 +262,10 @@ Junction: `(account_id, thread_id, label_id)`. A row means "this thread has this
 ### `label_groups`, `label_group_members`, `pending_thread_label_intents`
 
 User-visible label groups. `label_groups` stores the group name and colour. `label_group_members` maps raw provider labels into at most one group. `pending_thread_label_intents` stores local add/remove intent per `(account_id, thread_id, label_id)` while provider truth is pending; group rendering derives from that overlay plus `thread_labels`.
+
+The smart-folder `is:tagged` operator and the `label:` operator both resolve to group membership, not raw `thread_labels` membership. A consequence: threads carrying labels that are not members of any group do not match `is:tagged`. Those labels remain in the per-account view in Settings, but are not represented in any group-based query. Users who want a label to participate in `is:tagged` add it to a group.
+
+Synthesised `importance:high` / `importance:low` rows in `labels` always carry `is_undeletable = 1`, set by both the bootstrap synth path (account add) and the on-demand escape valve `ensure_prefixed_tag_label` (`crates/service/src/actions/label.rs`). The two are mutually exclusive at the provider level - the action service clears the opposite slot when one is set - and the Settings group-member picker rejects adding `importance:high` to a group that already contains `importance:low` (and vice versa).
 
 ### `message_keywords` table
 

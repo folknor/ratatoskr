@@ -163,9 +163,7 @@ fn set_thread_labels(
     // user label observed on a message before the next `sync_labels` pass
     // would otherwise FK-fail the whole transaction. Placeholder name is
     // the label id - sync_labels overwrites it with the real display name
-    // and colour on its next cycle. See
-    // `docs/labels-unification/redesign.md` "Action pipeline integration"
-    // (the same pattern handles label observation between master-list pulls).
+    // and colour on its next cycle.
     let placeholder_rows: Vec<LabelWriteRow> = labels
         .iter()
         .map(|label| {

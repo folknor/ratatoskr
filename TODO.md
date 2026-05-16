@@ -84,11 +84,17 @@ As a general rule, TODO.md items are **removed** when completed.
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
 
-### Labels Unification - `docs/labels-unification/redesign.md`
+### Labels Unification - `docs/glossary/folders-labels.md`
 
-**10 discrepancies remain** - see `docs/labels-unification/discrepancies.md`. Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
+Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
 
 - [ ] **Label picker overlay** - Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
+
+- [ ] **Default colours for `importance:high` / `importance:low` in a user group** - Synth rows have no `server_color_*`, so the first user group that includes one of them needs a colour seed. Decide: pick a sensible default (red/orange shades for `high`, blue/grey for `low`) when the picker adds an `importance:*` row to a fresh group, or surface a colour prompt at add-time.
+
+- [ ] **Resync cadence for Graph `masterCategories`** - Full fetch, no delta endpoint. Today it runs on account add only. Decide a periodic refresh cadence so user-added/renamed Outlook categories appear without an app restart.
+
+- [ ] **Stable smart-folder group binding** - The landed `label:` SQL resolves by group name at execution time, so a group rename silently changes which group a persisted smart-folder query resolves to. Binding by `group_id` would survive renames, but requires changing the persisted smart-folder representation away from plain text.
 
 ### Search - `docs/search/problem-statement.md`
 
@@ -166,7 +172,7 @@ All 6 backend phases complete (discovery, sync, rights, subscription, notificati
 
 - [ ] **Subscription toggle in sidebar** - `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
 
-### Labels - `docs/labels-unification/redesign.md`
+### Labels - `docs/glossary/folders-labels.md`
 
 - [ ] **Label picker UI** - Overlay for applying/removing tag-type labels from messages. Triggered from reading pane or command palette. Lists all available labels with colors. Provider dispatch via `add_tag()`/`remove_tag()`.
 

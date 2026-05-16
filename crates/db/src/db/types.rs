@@ -715,6 +715,12 @@ pub struct DbTaskTag {
 
 // ── Folder Unread Count ─────────────────────────────────────
 
+/// `is_read = 0` subset of a folder's synced thread membership. This is the
+/// only count shape the universal sidebar pill (Inbox, Drafts, Sent, ...)
+/// accepts. Disjoint from `DraftTotalCount` so a future contributor cannot
+/// route synced+local totals through the pill without a type error - the
+/// Drafts pill stays "unread within folder membership" like every other
+/// universal pill, not a total-count carve-out.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UniversalUnreadCount(i64);
@@ -737,6 +743,10 @@ impl rusqlite::types::FromSql for UniversalUnreadCount {
     }
 }
 
+/// Synced draft threads plus local-only drafts (`local_drafts` table).
+/// Used by pane headers and compose-pane indicators that genuinely want a
+/// total. Intentionally not assignable to `UniversalUnreadCount` so this
+/// shape cannot reach the universal sidebar pill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct DraftTotalCount(i64);

@@ -99,8 +99,8 @@ pub fn unsnooze_thread_sync(
 /// Upsert a single `folders` row reflecting a provider mutation result
 /// (create / rename). User-initiated by definition - `is_undeletable` is
 /// never set or cleared here; that classification belongs at sync ingest
-/// (see `docs/labels-unification/redesign.md` "is_undeletable"). If a
-/// row already exists from sync, the existing `is_undeletable` flag is
+/// (the provider's own system flag is the source of truth). If a row
+/// already exists from sync, the existing `is_undeletable` flag is
 /// preserved.
 ///
 /// Precondition: when `parent_id` is Some, the parent folder must already

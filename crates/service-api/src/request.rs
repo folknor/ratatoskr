@@ -319,10 +319,11 @@ pub struct TestDbFolderRow {
 }
 
 /// A row from the `labels` (tag-only) table, surfaced to harness scripts.
-/// Post-split (`docs/labels-unification/redesign.md`) this is provider
-/// labels exclusively: Gmail user labels, Exchange categories
-/// (`cat:{name}`), IMAP/JMAP keywords (`kw:{keyword}`), and synthesised
-/// Graph importance (`importance:high` / `importance:low`).
+/// The labels table is tag-only after the folders/labels split: provider
+/// labels exclusively (Gmail user labels, Exchange categories
+/// `cat:{name}`, IMAP/JMAP keywords `kw:{keyword}`, synthesised Graph
+/// importance `importance:high` / `importance:low`). Folders live in the
+/// separate `folders` table; see `docs/glossary/folders-labels.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbLabelRow {
     pub id: String,

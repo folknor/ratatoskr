@@ -136,8 +136,8 @@ pub fn is_gmail_system_folder_label_id(label_id: &str) -> bool {
 
 /// Graph IDs that the provider exposes as tag-shaped (Exchange categories
 /// and synthesised importance labels). Used at sync ingest to partition
-/// per-message label IDs into folder writes vs label writes; see
-/// `docs/labels-unification/redesign.md` "ID encoding by origin".
+/// per-message label IDs into folder writes vs label writes; see the ID
+/// encoding tables in `docs/glossary/folders-labels.md`.
 ///
 /// Backed by `types::LabelKind::parse(_, Graph)` so the predicate matches
 /// exactly the inputs the typed boundary accepts as a Graph label - i.e.

@@ -1273,12 +1273,9 @@ fn credential_summary(
     })
 }
 
-// Post-split (`docs/labels-unification/redesign.md`): the harness wire
-// envelope surfaces `folders` and `labels` as separate fields, mirroring
-// the storage split. The pre-split synthesised `label_kind` / `label_type`
-// discriminators and the merged `color_bg`/`color_fg` aliases are gone;
-// scripts query `state.folders[id]` or `state.labels[id]` for the right
-// table.
+// The harness wire envelope surfaces `folders` and `labels` as separate
+// fields, mirroring the storage split. Scripts query
+// `state.folders[id]` or `state.labels[id]` for the right table.
 
 fn read_harness_folders(
     conn: &Connection,

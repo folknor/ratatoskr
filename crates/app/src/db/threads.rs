@@ -21,8 +21,7 @@ use crate::ui::label_paint::LabelPaint;
 
 /// A label-group pill resolved for the reading-pane display. Every entry
 /// is a `label_groups` row by construction - raw provider labels never
-/// reach this surface (see `docs/labels-unification/redesign.md` "Message
-/// pill rendering"). `label_id` holds the stringified group id.
+/// reach this surface. `label_id` holds the stringified group id.
 #[derive(Debug, Clone)]
 pub struct ResolvedLabel {
     pub label_id: String,

@@ -14,7 +14,7 @@ use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch,
 // `type: "system"` rows (INBOX, SENT, CATEGORY_*, CHAT, etc.) are folders
 // in Ratatoskr and `type: "user"` rows are labels. This module partitions
 // them at ingest and routes each side to the appropriate writer.
-// See `docs/labels-unification/redesign.md` "Per-provider mapping".
+// See `docs/glossary/folders-labels.md` "Per-provider mapping".
 
 pub(super) async fn sync_labels(ctx: &SyncCtx<'_>) -> Result<(), String> {
     let labels = ctx.client.list_labels(ctx.db).await?;

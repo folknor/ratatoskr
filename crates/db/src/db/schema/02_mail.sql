@@ -56,6 +56,11 @@ CREATE INDEX IF NOT EXISTS labels_account ON labels(account_id);
 -- references hold `label_groups.id` integers. Without AUTOINCREMENT,
 -- SQLite would reuse rowids after a DELETE, silently rebinding a saved
 -- `label:Foo`-resolved id to a freshly-created group.
+--
+-- UNIQUE(name COLLATE NOCASE) is load-bearing: smart-folder and search
+-- resolve `label:Work` by name at execution time, so duplicate names
+-- (including "Work" vs "work") would be ambiguous and would also let
+-- user typos create near-duplicate groups.
 CREATE TABLE IF NOT EXISTS label_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -64,6 +69,14 @@ CREATE TABLE IF NOT EXISTS label_groups (
     UNIQUE (name COLLATE NOCASE)
 );
 
+-- UNIQUE(account_id, label_id) makes shared membership impossible: a
+-- per-account label belongs to at most one group. Without it, removing
+-- group G1 from a thread would dispatch RemoveLabel for X, which would
+-- also clear G2's `thread_labels`-path rendering on that thread - the
+-- wrong behaviour, undetectable without provenance tracking. Forbidding
+-- shared membership eliminates the case structurally. The Settings
+-- picker surfaces "this label is in <other group>; move it?" when the
+-- user attempts an add that would violate this constraint.
 CREATE TABLE IF NOT EXISTS label_group_members (
     group_id INTEGER NOT NULL,
     account_id TEXT NOT NULL,
