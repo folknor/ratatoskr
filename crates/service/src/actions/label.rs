@@ -93,6 +93,27 @@ async fn add_label_dispatch(
     thread_id: &str,
     label_id: &LabelId,
 ) -> ActionOutcome {
+    add_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, true).await
+}
+
+async fn add_label_dispatch_no_enqueue(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &LabelId,
+) -> ActionOutcome {
+    add_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, false).await
+}
+
+async fn add_label_dispatch_inner(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &LabelId,
+    enqueue_pending: bool,
+) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
@@ -109,15 +130,17 @@ async fn add_label_dispatch(
             retryable: true,
         },
     };
-    enqueue_if_retryable(
-        ctx,
-        &outcome,
-        account_id,
-        "addLabel",
-        thread_id,
-        &params_json,
-    )
-    .await;
+    if enqueue_pending {
+        enqueue_if_retryable(
+            ctx,
+            &outcome,
+            account_id,
+            "addLabel",
+            thread_id,
+            &params_json,
+        )
+        .await;
+    }
     mlog.emit(&outcome);
     outcome
 }
@@ -179,6 +202,29 @@ pub(crate) async fn add_label_with_provider(
     add_label_dispatch(ctx, provider, account_id, thread_id, label_id).await
 }
 
+/// Add label with a pre-constructed provider without enqueueing a member retry.
+///
+/// Composite label-group writes enqueue their own retry row after the member
+/// loop, because only the composite retry path has the preflight that detects
+/// user-reversed intent.
+pub(crate) async fn add_label_with_provider_no_enqueue(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &LabelId,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("add_label", account_id, thread_id);
+
+    if let Err(e) = add_label_local(ctx, account_id, thread_id, label_id).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    add_label_dispatch_no_enqueue(ctx, provider, account_id, thread_id, label_id).await
+}
+
 /// Local DB mutation for remove-label: validate label exists, then delete from
 /// `thread_labels` (idempotent).
 pub(crate) async fn remove_label_local(
@@ -220,6 +266,27 @@ async fn remove_label_dispatch(
     thread_id: &str,
     label_id: &LabelId,
 ) -> ActionOutcome {
+    remove_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, true).await
+}
+
+async fn remove_label_dispatch_no_enqueue(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &LabelId,
+) -> ActionOutcome {
+    remove_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, false).await
+}
+
+async fn remove_label_dispatch_inner(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &LabelId,
+    enqueue_pending: bool,
+) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
@@ -238,15 +305,17 @@ async fn remove_label_dispatch(
             retryable: true,
         },
     };
-    enqueue_if_retryable(
-        ctx,
-        &outcome,
-        account_id,
-        "removeLabel",
-        thread_id,
-        &params_json,
-    )
-    .await;
+    if enqueue_pending {
+        enqueue_if_retryable(
+            ctx,
+            &outcome,
+            account_id,
+            "removeLabel",
+            thread_id,
+            &params_json,
+        )
+        .await;
+    }
     mlog.emit(&outcome);
     outcome
 }
@@ -308,6 +377,26 @@ pub(crate) async fn remove_label_with_provider(
     }
 
     remove_label_dispatch(ctx, provider, account_id, thread_id, label_id).await
+}
+
+/// Remove label with a pre-constructed provider without enqueueing a member
+/// retry. See `add_label_with_provider_no_enqueue`.
+pub(crate) async fn remove_label_with_provider_no_enqueue(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &LabelId,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
+
+    if let Err(e) = remove_label_local(ctx, account_id, thread_id, label_id).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    remove_label_dispatch_no_enqueue(ctx, provider, account_id, thread_id, label_id).await
 }
 
 fn opposite_importance_label(label_id: &str) -> Option<&'static str> {

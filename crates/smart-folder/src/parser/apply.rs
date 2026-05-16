@@ -1,5 +1,6 @@
 use super::ParsedQuery;
 use super::dates::parse_date_to_timestamp;
+use types::DateBound;
 
 /// MIME type expansions for `has:` operator values.
 const HAS_EXPANSIONS: &[(&str, &[&str])] = &[
@@ -68,10 +69,10 @@ pub(super) fn apply_operator(result: &mut ParsedQuery, operator: &str, value: &s
         "has" => return apply_has_operator(result, value),
         "is" => return apply_is_operator(result, value),
         "before" => {
-            result.before = parse_date_to_timestamp(value);
+            result.before = parse_date_to_timestamp(value).map(DateBound::before);
         }
         "after" => {
-            result.after = parse_date_to_timestamp(value);
+            result.after = parse_date_to_timestamp(value).map(DateBound::after);
         }
         "label" => result.label.push(value.to_owned()),
         "account" => result.account.push(value.to_owned()),

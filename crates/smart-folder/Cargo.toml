@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 db = { path = "../db" }
+types = { path = "../types" }
 rusqlite.workspace = true
 chrono.workspace = true
 log = "0.4"

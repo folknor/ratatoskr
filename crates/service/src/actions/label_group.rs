@@ -419,14 +419,12 @@ async fn remove_label_group_with_kind(
     }
 }
 
-/// Per-member provider dispatch. Runs each `add_label_with_provider` /
-/// `remove_label_with_provider` against a clone of the context with
-/// `suppress_pending_enqueue = true`, so a per-member failure does NOT
-/// enqueue a raw `addLabel` / `removeLabel` row. Those would bypass the
-/// composite retry preflight (`docs/labels-unification/redesign.md`
-/// "Retry preflight"). Instead the composite caller enqueues a single
-/// composite-typed row covering the failed members via
-/// [`enqueue_composite_if_local_only`].
+/// Per-member provider dispatch. Runs each member write through an explicit
+/// no-enqueue helper, so a per-member failure does NOT enqueue a raw
+/// `addLabel` / `removeLabel` row. Those would bypass the composite retry
+/// preflight (`docs/labels-unification/redesign.md` "Retry preflight").
+/// Instead the composite caller enqueues a single composite-typed row
+/// covering the failed members via [`enqueue_composite_if_local_only`].
 ///
 /// Continues past per-member `Failed` outcomes so a single hard error
 /// (e.g. a member whose label row was deleted between member-read and
@@ -441,22 +439,17 @@ async fn dispatch_member_ops(
     labels: Vec<LabelId>,
     apply: bool,
 ) -> ActionOutcome {
-    let mut member_ctx = ctx.clone();
-    member_ctx.suppress_pending_enqueue = true;
-
     let mut saw_local_only = false;
     let mut last_failed: Option<ActionError> = None;
     for label_id in labels {
         let outcome = if apply {
-            label::add_label_with_provider(&member_ctx, provider, account_id, thread_id, &label_id)
-                .await
+            label::add_label_with_provider_no_enqueue(
+                ctx, provider, account_id, thread_id, &label_id,
+            )
+            .await
         } else {
-            label::remove_label_with_provider(
-                &member_ctx,
-                provider,
-                account_id,
-                thread_id,
-                &label_id,
+            label::remove_label_with_provider_no_enqueue(
+                ctx, provider, account_id, thread_id, &label_id,
             )
             .await
         };

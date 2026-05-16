@@ -218,7 +218,7 @@
         let today = chrono::Local::now().date_naive();
         let expected = today - chrono::Duration::days(7);
         let expected_ts = naive_date_to_timestamp(expected);
-        assert_eq!(q.after, expected_ts);
+        assert_eq!(q.after.map(DateBound::timestamp), expected_ts);
     }
 
     #[test]
@@ -227,7 +227,7 @@
         assert!(q.after.is_some());
         let today = chrono::Local::now().date_naive();
         let expected_ts = naive_date_to_timestamp(today);
-        assert_eq!(q.after, expected_ts);
+        assert_eq!(q.after.map(DateBound::timestamp), expected_ts);
     }
 
     #[test]
@@ -235,7 +235,7 @@
         let q = parse_query("after:2025");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2025, 1, 1).and_then(naive_date_to_timestamp);
-        assert_eq!(q.after, expected);
+        assert_eq!(q.after.map(DateBound::timestamp), expected);
     }
 
     #[test]
@@ -243,7 +243,7 @@
         let q = parse_query("after:202603");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(naive_date_to_timestamp);
-        assert_eq!(q.after, expected);
+        assert_eq!(q.after.map(DateBound::timestamp), expected);
     }
 
     #[test]
@@ -251,7 +251,7 @@
         let q = parse_query("after:20260311");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
-        assert_eq!(q.after, expected);
+        assert_eq!(q.after.map(DateBound::timestamp), expected);
     }
 
     #[test]
@@ -259,7 +259,7 @@
         let q = parse_query("before:2026/03/11");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
-        assert_eq!(q.before, expected);
+        assert_eq!(q.before.map(DateBound::timestamp), expected);
     }
 
     #[test]
@@ -267,7 +267,7 @@
         let q = parse_query("before:2026-03-11");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
-        assert_eq!(q.before, expected);
+        assert_eq!(q.before.map(DateBound::timestamp), expected);
     }
 
     #[test]
@@ -275,7 +275,7 @@
         let q = parse_query("after:2026 03 11");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
-        assert_eq!(q.after, expected);
+        assert_eq!(q.after.map(DateBound::timestamp), expected);
     }
 
     #[test]
@@ -283,7 +283,7 @@
         let q = parse_query("after:2026 03 hello");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(naive_date_to_timestamp);
-        assert_eq!(q.after, expected);
+        assert_eq!(q.after.map(DateBound::timestamp), expected);
         assert_eq!(q.free_text, "hello");
     }
 
@@ -292,7 +292,7 @@
         let q = parse_query("after:2026 hello");
         let expected =
             chrono::NaiveDate::from_ymd_opt(2026, 1, 1).and_then(naive_date_to_timestamp);
-        assert_eq!(q.after, expected);
+        assert_eq!(q.after.map(DateBound::timestamp), expected);
         assert_eq!(q.free_text, "hello");
     }
 

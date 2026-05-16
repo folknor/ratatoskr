@@ -6,6 +6,7 @@ mod lexer;
 mod tests;
 
 use lexer::OPERATORS;
+use types::DateBound;
 
 // ── Cursor context analysis ─────────────────────────────
 
@@ -122,8 +123,8 @@ pub struct ParsedQuery {
     pub is_tagged: Option<bool>,
 
     // Date
-    pub before: Option<i64>,
-    pub after: Option<i64>,
+    pub before: Option<DateBound>,
+    pub after: Option<DateBound>,
 }
 
 impl ParsedQuery {

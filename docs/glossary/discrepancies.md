@@ -25,7 +25,7 @@ The cure splits into two sub-axes, and inventory entries are tagged separately:
 
 ### 2. Canonical Answer Optional
 
-A caller can choose a non-canonical entry point and get a normal-looking result that silently disagrees with the canonical one. `get_draft_threads` returns only synced drafts; `get_draft_count_with_local` returns synced + local. A new call site to `get_draft_threads` undercounts the sidebar silently. `search()` returns Tantivy-ranked results; `search_sql_fallback()` returns SQL-only results. A call site that picks the wrong one when Tantivy is available gets a degraded result set with no indication.
+A caller can choose a non-canonical entry point and get a normal-looking result that silently disagrees with the canonical one. `get_draft_threads` returns only synced drafts; `get_draft_count_with_local` returns synced + local. A new call site to `get_draft_threads` undercounts the sidebar silently. The original search example had `search()` returning Tantivy-ranked results while `search_sql_fallback()` returned SQL-only results; that sub-case is now resolved by making fallback private and returning `SearchResults::{FullIndex, Degraded}` from the public entry point.
 
 The cure is one public entry point per question. Narrower paths exist only behind explicit capability or marker types ("I know I want synced drafts only and I accept the undercount"). Doc-comment-enforced contracts are not enforcement.
 
@@ -292,7 +292,7 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
 ### Shape 7 - Composite/global-flag contract
 
-- `crates/service/src/actions/label_group.rs:445` *(slice 7)* - `member_ctx.suppress_pending_enqueue = true` inside `dispatch_member_ops`. The composite applies the flag to a cloned context before dispatching per-member label additions/removals (line 451-461). Current convention: comments at line 422-429 flag the design; the contract is "any composite must clone and set this flag before dispatching member writes." A future composite action that forgets the clone-and-set re-introduces the bug: the member writes enqueue individual pending ops, the composite returns success, but the drainer later re-executes those per-member ops without the composite's preflight (lines 78-94 in `apply_label_group_local`), violating the invariant that user-reversed intent between apply and retry drains correctly. Compile-time direction: per-member dispatches should go through a `_no_enqueue` entry point that both composites and non-composite callers route through uniformly.
+- `crates/service/src/actions/label.rs`, `crates/service/src/actions/label_group.rs` *(resolved for composite member dispatch by contract #4)* - Label-group composites now dispatch member writes through explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers. `dispatch_member_ops` no longer clones `ActionContext` or sets `suppress_pending_enqueue`; the composite path structurally cannot enqueue raw `addLabel` / `removeLabel` retries for its members. `ActionContext::suppress_pending_enqueue` still exists for pending-op retry-loop suppression, which is a separate use of the flag.
 
   Tags: contracts=mutation-capability; enforcement=capability-token; promise=composite operations do not enqueue per-member retries.
 
@@ -302,7 +302,7 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
   Tags: contracts=canonical-entry; enforcement=capability-token; promise=Drafts list and Drafts count answer the same membership question.
 
-- `crates/core/src/search_pipeline.rs:51-90` *(deep slice: smart-folder + search)* - `search()` is the unified entry point, but internally dispatches to `search_sql_only`, `search_tantivy_only`, `search_combined`, each with distinct query semantics. The `search_sql_fallback` function (lines 95-130) exists as a parallel entry point that routes differently: it returns empty results for free-text-only queries (line 106) instead of consulting Tantivy. Current convention: callers must use `search()` for full-feature behavior and `search_sql_fallback()` for degraded-mode-only. Type system does not prevent a call site from accidentally using the fallback path when Tantivy is available, leading to silent result-set discrepancy (no-results vs Tantivy-ranked results).
+- `crates/core/src/search_pipeline.rs`, `crates/app/src/handlers/search.rs` *(resolved by contract #2)* - `search()` is now the only public search entry point. SQL fallback is private to `core/search_pipeline`, and the public result is `SearchResults::FullIndex` or `SearchResults::Degraded`, forcing the app caller to match the result-set quality before converting rows.
 
   Tags: contracts=canonical-entry,completion-state; enforcement=capability-token; promise=the public search result declares whether it is full-index or degraded, and the renderer must handle both - no silent fallback.
 
@@ -328,13 +328,13 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
 *(Sub-case of Shape 1 (grain.vertical) on the operator axis rather than the column-alias axis.)*
 
-- `crates/smart-folder/src/parser/dates.rs` *(deep slice: smart-folder + search)*: The parser converts user date input to Unix timestamps at **start-of-day in local time** (line 127: `date.and_hms_opt(0, 0, 0)` then `Local::from_local_datetime`). Tantivy stores and queries dates via `TantivyDateTime::from_timestamp_secs()` (search/lib.rs:806, 815) using the same Unix-seconds representation. However, the range semantics differ: smart-folder's `before:` generates `m.date < ?` (strictly less than start-of-day), while Tantivy's `before:` uses `Bound::Included(Term)` (line 813), making the threshold inclusive. A message with `date = start_of_day_timestamp` would match Tantivy `before:DATE` but not smart-folder `m.date < start_of_day_timestamp`. Neither path applies a time-zone adjustment at the comparison boundary, so the discrepancy depends on the user's local time at search-submission moment.
+- `crates/types/src/date_bound.rs`, `crates/smart-folder/src/sql_builder.rs`, `crates/search/src/lib.rs` *(resolved by contract #1 grain.vertical)* - `before:` / `after:` boundaries now parse to `DateBound`. SQL clauses and Tantivy range queries both use the `DateBound` emitters, so boundary inclusivity is decided once. Both paths now use exclusive bounds.
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=`before:`/`after:` boundary inclusivity is identical across all query paths.
 
 ### Shape 12 - Partial-enrichment contract mismatch
 
-- `crates/core/src/search_pipeline.rs` *(deep slice: core + seen + label-colors)*: The `enrich_from_sql()` function (line 398-415) is called only in the combined path (line 212), never in SQL-only (line 141) or Tantivy-only (line 162). SQL-only uses `db_thread_to_unified()` (line 141) which hardcodes `match_kind: MatchKind::Body` and `also_matched: Vec::new()`, and Tantivy-only propagates the Tantivy result's attribution (lines 392-393). The three paths use different enrichment strategies: SQL-only gets zero attribution, Tantivy-only preserves message-level attribution, combined gets both SQL metadata + Tantivy attribution. The contract is that `enrich_from_sql()` is optional metadata enrichment, not required state-correction, but callers of `search_sql_fallback()` (line 95-130) get SQL-only results without ever knowing they lack the SQL-metadata enrichment step available in the main search path.
+- `crates/core/src/search_pipeline.rs` *(deep slice: search enrichment)*: The `enrich_from_sql()` function is called only in the combined path, never in SQL-only or Tantivy-only. SQL-only uses `db_thread_to_unified()` which hardcodes `match_kind: MatchKind::Body` and `also_matched: Vec::new()`, and Tantivy-only propagates the Tantivy result's attribution. The three paths still use different enrichment strategies; however, the canonical-entry part of the failure is resolved because SQL fallback is private and `search()` returns `SearchResults::Degraded` when it has to use that path.
 
   Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor,capability-token; promise=a `UnifiedSearchResult` reaching the renderer is fully enriched, regardless of which internal path produced it.
 

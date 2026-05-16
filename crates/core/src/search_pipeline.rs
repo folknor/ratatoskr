@@ -40,6 +40,13 @@ pub struct UnifiedSearchResult {
     pub also_matched: Vec<MatchKind>,
 }
 
+/// Search result quality is a property of the result set, not each row.
+#[derive(Debug, Clone)]
+pub enum SearchResults {
+    FullIndex(Vec<UnifiedSearchResult>),
+    Degraded(Vec<UnifiedSearchResult>),
+}
+
 // ── Public entry point ──────────────────────────────────────
 
 /// Parse a query string and route it through the appropriate search backend(s).
@@ -48,19 +55,37 @@ pub struct UnifiedSearchResult {
 /// - Operators only (e.g. `is:unread from:alice`) routes through SQL.
 /// - Free text only (e.g. `meeting notes`) routes through Tantivy.
 /// - Both operators and free text intersects SQL candidates with Tantivy scores.
+///
+/// `scope` is consulted by the degraded SQL fallback. Full-index paths keep
+/// the existing search behavior and let the caller apply the current view
+/// scope after row conversion.
 pub fn search(
     query: &str,
-    search_state: &SearchReadState,
+    search_state: Option<&SearchReadState>,
     conn: &Connection,
+    scope: &AccountScope,
     body_read: Option<&store::body_store::BodyStoreReadState>,
-) -> Result<Vec<UnifiedSearchResult>, String> {
+) -> Result<SearchResults, String> {
     let parsed = parse_query(query);
 
     let has_free_text = !parsed.free_text.is_empty();
     let has_operators = parsed.has_any_operator();
 
+    if !has_free_text && !has_operators {
+        return Ok(SearchResults::FullIndex(Vec::new()));
+    }
+
+    let Some(search_state) = search_state else {
+        let results = search_sql_fallback(&parsed, conn, scope)?;
+        log::info!(
+            "Search executed via degraded_sql_fallback path, returned {} results",
+            results.len()
+        );
+        return Ok(SearchResults::Degraded(results));
+    };
+
     let path_name = match (has_free_text, has_operators) {
-        (false, false) => "empty",
+        (false, false) => unreachable!("empty search returned before routing"),
         (false, true) => "sql_only",
         (true, false) => "tantivy_only",
         (true, true) => "combined",
@@ -68,7 +93,7 @@ pub fn search(
     log::debug!("Search pipeline routing: path={path_name}, query={query:?}");
 
     let result = match (has_free_text, has_operators) {
-        (false, false) => Ok(vec![]),
+        (false, false) => unreachable!("empty search returned before routing"),
         (false, true) => search_sql_only(&parsed, conn),
         (true, false) => search_tantivy_only(&parsed, search_state, conn, body_read),
         (true, true) => search_combined(&parsed, search_state, conn, body_read),
@@ -86,22 +111,21 @@ pub fn search(
         }
     }
 
-    result
+    result.map(SearchResults::FullIndex)
 }
 
-/// SQL-only fallback entry point for cases where no Tantivy search state is
-/// available. This keeps SQL shape and row mapping out of presentation-layer
-/// code even in degraded search mode.
-pub fn search_sql_fallback(
-    query: &str,
+/// SQL-only fallback for cases where no Tantivy search state is available.
+/// Kept private so callers route through `search()` and handle degraded
+/// quality explicitly.
+fn search_sql_fallback(
+    parsed: &ParsedQuery,
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
-    let parsed = parse_query(query);
     let scope = scope.clone();
 
     if parsed.has_any_operator() || parsed.free_text.is_empty() {
-        let db_threads = query_threads(conn, &parsed, &scope, Some(200), Some(0))?;
+        let db_threads = query_threads(conn, parsed, &scope, Some(200), Some(0))?;
         Ok(db_threads.into_iter().map(db_thread_to_unified).collect())
     } else {
         let pattern = format!("%{}%", parsed.free_text);

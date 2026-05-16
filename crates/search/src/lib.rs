@@ -9,6 +9,7 @@ use tantivy::schema::{
 };
 use tantivy::snippet::SnippetGenerator;
 use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, ReloadPolicy, Term};
+use types::DateBound;
 
 // ── Schema version sentinel ─────────────────────────────────────────────
 
@@ -253,9 +254,25 @@ pub struct SearchParams {
     pub has_attachment: Option<bool>,
     pub is_unread: Option<bool>,
     pub is_starred: Option<bool>,
-    pub before: Option<i64>,
-    pub after: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_before_bound")]
+    pub before: Option<DateBound>,
+    #[serde(default, deserialize_with = "deserialize_after_bound")]
+    pub after: Option<DateBound>,
     pub limit: Option<usize>,
+}
+
+fn deserialize_before_bound<'de, D>(deserializer: D) -> Result<Option<DateBound>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(|value| value.map(DateBound::before))
+}
+
+fn deserialize_after_bound<'de, D>(deserializer: D) -> Result<Option<DateBound>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(|value| value.map(DateBound::after))
 }
 
 // ── Field helpers ───────────────────────────────────────────────────────
@@ -796,12 +813,13 @@ impl SearchReadState {
             ));
         }
 
-        // Date range: after <= date <= before
+        // Date range bounds are emitted by DateBound so SQL and Tantivy share
+        // the same inclusivity semantics.
         if params.after.is_some() || params.before.is_some() {
             let lower = params
                 .after
-                .map(|ts| {
-                    std::ops::Bound::Included(Term::from_field_date(
+                .map(|bound| {
+                    bound.to_range_bound(|ts| Term::from_field_date(
                         self.fields.date,
                         TantivyDateTime::from_timestamp_secs(ts),
                     ))
@@ -809,8 +827,8 @@ impl SearchReadState {
                 .unwrap_or(std::ops::Bound::Unbounded);
             let upper = params
                 .before
-                .map(|ts| {
-                    std::ops::Bound::Included(Term::from_field_date(
+                .map(|bound| {
+                    bound.to_range_bound(|ts| Term::from_field_date(
                         self.fields.date,
                         TantivyDateTime::from_timestamp_secs(ts),
                     ))
@@ -1220,6 +1238,78 @@ mod tests {
         assert_eq!(grouped[0].thread_id, "t1");
         assert_eq!(grouped[1].thread_id, "t3");
         assert_eq!(grouped[2].thread_id, "t2");
+    }
+
+    fn build_date_boundary_test_index() -> SearchReadState {
+        let schema = build_schema();
+        let fields = Fields::from_schema(&schema);
+        let index = Index::create_in_ram(schema);
+        let mut writer: tantivy::IndexWriter = index.writer(15_000_000).expect("writer");
+        for (message_id, date) in [("before", 999), ("exact", 1000), ("after", 1001)] {
+            let doc = SearchDocument {
+                message_id: message_id.into(),
+                account_id: "acct1".into(),
+                thread_id: format!("thread-{message_id}"),
+                subject: Some("boundary".into()),
+                from_name: Some("alice".into()),
+                from_address: Some("alice@example.com".into()),
+                to_addresses: None,
+                body_text: Some("boundary marker".into()),
+                snippet: Some("boundary marker".into()),
+                date,
+                is_read: false,
+                is_starred: false,
+                has_attachment: false,
+                attachments: Vec::new(),
+            };
+            writer.add_document(build_search_doc(&fields, &doc)).expect("add");
+        }
+        writer.commit().expect("commit");
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()
+            .expect("reader");
+        SearchReadState { reader, fields }
+    }
+
+    fn date_boundary_params(after: Option<DateBound>, before: Option<DateBound>) -> SearchParams {
+        SearchParams {
+            account_ids: None,
+            free_text: Some("boundary".into()),
+            from: Vec::new(),
+            to: Vec::new(),
+            subject: None,
+            has_attachment: None,
+            is_unread: None,
+            is_starred: None,
+            before,
+            after,
+            limit: Some(10),
+        }
+    }
+
+    #[test]
+    fn date_bounds_exclude_exact_threshold() {
+        let read = build_date_boundary_test_index();
+
+        let after_results = read
+            .search_with_filters(&date_boundary_params(Some(DateBound::after(1000)), None))
+            .expect("after search");
+        let after_ids: Vec<&str> = after_results
+            .iter()
+            .map(|result| result.message_id.as_str())
+            .collect();
+        assert_eq!(after_ids, vec!["after"]);
+
+        let before_results = read
+            .search_with_filters(&date_boundary_params(None, Some(DateBound::before(1000))))
+            .expect("before search");
+        let before_ids: Vec<&str> = before_results
+            .iter()
+            .map(|result| result.message_id.as_str())
+            .collect();
+        assert_eq!(before_ids, vec!["before"]);
     }
 
     // ── Multi-account search tests ───────────────────────────────────

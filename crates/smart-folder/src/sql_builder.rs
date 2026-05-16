@@ -215,12 +215,16 @@ fn build_attachment_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 
 fn build_date_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if let Some(before) = parsed.before {
-        let idx = ctx.push_param(Box::new(before));
-        ctx.msg_clauses.push(format!("m.date < ?{idx}"));
+        let idx = ctx.next_idx;
+        let (clause, value) = before.to_sql_clause("m.date", idx);
+        ctx.push_param(Box::new(value));
+        ctx.msg_clauses.push(clause);
     }
     if let Some(after) = parsed.after {
-        let idx = ctx.push_param(Box::new(after));
-        ctx.msg_clauses.push(format!("m.date > ?{idx}"));
+        let idx = ctx.next_idx;
+        let (clause, value) = after.to_sql_clause("m.date", idx);
+        ctx.push_param(Box::new(value));
+        ctx.msg_clauses.push(clause);
     }
 }
 
@@ -750,7 +754,7 @@ mod tests {
         seed_split_thread_state_fixture(&conn);
 
         let mut parsed = parse_query("is:starred");
-        parsed.after = Some(2500);
+        parsed.after = Some(types::DateBound::after(2500));
         let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
 
         assert_eq!(threads.len(), 1);
@@ -848,7 +852,7 @@ mod tests {
         seed_split_thread_state_fixture(&conn);
 
         let mut parsed = parse_query("is:starred");
-        parsed.after = Some(2500);
+        parsed.after = Some(types::DateBound::after(2500));
         parsed.is_unread = Some(true);
         let count = count_matching(&conn, &parsed, &AccountScope::All).expect("count");
 

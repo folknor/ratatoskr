@@ -6294,6 +6294,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "tokio",
+ "types",
 ]
 
 [[package]]
@@ -6705,6 +6706,7 @@ dependencies = [
  "hotpath 0.16.0",
  "log",
  "rusqlite",
+ "types",
 ]
 
 [[package]]

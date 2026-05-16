@@ -899,24 +899,32 @@ pub(crate) async fn execute_search(
     scope: rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        let mut threads = if let Some(ref ss) = search_state {
-            // M2 fix: pass body_store so per-message attribution can
-            // score body matches. Without it, body+attachment co-matches
-            // skewed toward attachment attribution and the documented
-            // "matched in body + also_matched: [Attachment]" outcome
-            // never appeared. Optional because body_store init can fail
-            // at boot; the attribution falls back to subject/from/
-            // attachments-only when None.
-            let results = rtsk::search_pipeline::search(&query, ss, conn, body_store.as_ref())?;
-            results
-                .into_iter()
-                .map(unified_result_to_thread)
-                .filter(|thread| thread_matches_scope(thread, &scope))
-                .collect::<Vec<_>>()
-        } else {
-            let results = rtsk::search_pipeline::search_sql_fallback(&query, conn, &scope)?;
-            results.into_iter().map(unified_result_to_thread).collect()
+        // M2 fix: pass body_store so per-message attribution can score body
+        // matches. Without it, body+attachment co-matches skewed toward
+        // attachment attribution and the documented "matched in body +
+        // also_matched: [Attachment]" outcome never appeared. Optional
+        // because body_store init can fail at boot; the attribution falls
+        // back to subject/from/attachments-only when None.
+        let results = rtsk::search_pipeline::search(
+            &query,
+            search_state.as_deref(),
+            conn,
+            &scope,
+            body_store.as_ref(),
+        )?;
+        let results = match results {
+            rtsk::search_pipeline::SearchResults::FullIndex(results) => results,
+            rtsk::search_pipeline::SearchResults::Degraded(results) => {
+                // Keep the match at the UI boundary so degraded search can
+                // grow a banner here without changing the search API again.
+                results
+            }
         };
+        let mut threads = results
+            .into_iter()
+            .map(unified_result_to_thread)
+            .filter(|thread| thread_matches_scope(thread, &scope))
+            .collect::<Vec<_>>();
         crate::helpers::apply_thread_decorations(conn, &mut threads)?;
         Ok(threads)
     })

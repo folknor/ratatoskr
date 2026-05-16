@@ -58,7 +58,7 @@ The following questions were open in the previous version of this doc; they are 
 
 ### Remaining open questions
 
-- **Inclusive vs exclusive `DateBound`?** Pick one. Tantivy is inclusive today; smart-folder is exclusive. Either is fine; the choice must be encoded in `DateBound` once, not per-builder.
+- **Inclusive vs exclusive `DateBound`?** Resolved: `DateBound` emits exclusive bounds for both SQL and Tantivy.
 - **JMAP non-keyword labels - possible or not?** If keyword-only by construction, Shape 10 is fully resolved by an IMAP-style recompute pattern applied to JMAP. If non-keyword JMAP labels can flow, this is a data-loss bug to fix during the #4 migration. Verify before designing.
 - **Legacy plaintext credentials - still load-bearing?** If yes, `StoredSecret::parse` stays tolerant of both formats forever. If no, the parser becomes strict and legacy support moves to a one-shot re-encrypt migration.
 - **`#5c` on-disk format:** boundary adapter at the DB read/write boundary (recommended) vs DB restructure (cleaner, larger).
@@ -165,6 +165,8 @@ Every existing `provider: &str` or `provider_name: String` parameter **in the ma
 
 ### 3. #1 grain.vertical - sealed constructor (high fidelity within crate)
 
+**Status:** DateBound slice landed. `types::DateBound` is a sealed date-boundary parse product with exclusive SQL and Tantivy range emitters. Smart-folder parsed queries carry `DateBound`, SQL date clauses use `DateBound::to_sql_clause`, and Tantivy range queries use `DateBound::to_range_bound`. Thread aggregate and predicate-grain slices remain open.
+
 **Inventory:** Shape 1 entries (chat.rs, thread_detail.rs, smart-folder), Shape 3 entries (thread_persistence.rs, sync/pipeline.rs, dev-seed), Shape 9 entries (search-pipeline grouping/metadata), Shape 11 (date boundary), parts of Shape 12.
 
 **Design sketch.** One sealed `ThreadAggregate` struct with private fields, accessor methods, and per-field reducers enforced inside its constructors:
@@ -248,12 +250,12 @@ impl DateBound {
     pub fn after(timestamp: i64) -> DateBound { ... }
 
     /// SQL emitter - generates a clause with inclusivity decided once.
-    pub fn to_sql_clause(&self, column: &str) -> (String, i64) { ... }
+    pub fn to_sql_clause(&self, column: &str, param_idx: usize) -> (String, i64) { ... }
 
     /// Generic range emitter - caller passes a closure that builds the consumer's
     /// term type (Tantivy's `Term`, or any other range key). The inclusivity
     /// choice is applied here; Tantivy doesn't need to leak into `types`.
-    pub fn to_range_bounds<T>(&self, make_term: impl FnOnce(i64) -> T)
+    pub fn to_range_bound<T>(&self, make_term: impl FnOnce(i64) -> T)
         -> std::ops::Bound<T>
     {
         match self.direction { /* Included/Excluded per chosen semantics */ }
@@ -272,7 +274,7 @@ impl DateBound {
 - `crates/sync/src/pipeline.rs` - in-memory aggregate switches to `compute_from_messages`.
 - `crates/dev-seed/src/threads.rs` - thread aggregate derives from the seeded message vec via `compute_from_messages`.
 - `crates/types/src/date_bound.rs` - new module.
-- `crates/search/src/lib.rs` - Tantivy `before:` / `after:` boundary uses `DateBound::to_range_bounds` with a Tantivy-term closure.
+- `crates/search/src/lib.rs` - Tantivy `before:` / `after:` boundary uses `DateBound::to_range_bound` with a Tantivy-term closure.
 
 **Success criteria.** All Shape 1 and Shape 3 (`grain.vertical`) inventory entries either get a `// resolved by contract #1 grain.vertical` annotation and disappear, or get reclassified as evidence for a different contract. A compile-fail test attempts to construct a `ThreadAggregate` via struct literal from outside `db` and fails. Another attempts to construct a `NonReactionMessage` outside `db` and fails. A third attempts to construct a `DateBound` via struct literal and fails.
 
@@ -387,6 +389,8 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 ### 6. #4 Mutation Capability - capability token (high fidelity, option 4)
 
+**Status:** composite no-enqueue slice landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; the broader merge-vs-replace capability migration remains open.
+
 **Inventory:** Shape 4 entries (merge vs replace helpers, JMAP keyword path), Shape 7 (composite suppress flag), Shape 10 (partial-delta keyword loss as a #4 instance).
 
 **Design sketch.** Option 4 from §Fidelity. The layering:
@@ -468,7 +472,7 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Inventory:** Shape 8 entries (drafts list/count, search vs fallback), partial Shape 12.
 
-**Status:** Drafts list slice landed. `get_drafts_view` is the only public Drafts-list query; it returns a sealed `DraftsView` whose synced/local parts are available only through `into_parts`. `get_draft_threads_synced` and `get_local_draft_summaries` are crate-private. The app calls the canonical query instead of merging direct synced/local query calls. Search fallback consolidation remains open.
+**Status:** Drafts list and search-fallback slices landed. `get_drafts_view` is the only public Drafts-list query; it returns a sealed `DraftsView` whose synced/local parts are available only through `into_parts`. `get_draft_threads_synced` and `get_local_draft_summaries` are crate-private. Search callers now go through `search()`, which returns `SearchResults::FullIndex` or `SearchResults::Degraded`; `search_sql_fallback` is private to `core/search_pipeline`.
 
 **On inspection, neither sub-case is cross-crate.** Drafts orchestration is internal to `db` (synced query + local query both live there, the merge is a `db` function). Search unification is internal to `core/search_pipeline` (`search`, `search_sql_only`, `search_combined`, `search_sql_fallback` all live in the same module). Standard within-crate sealing applies - `pub(crate)` on the non-canonical entries, `pub` on the unified entry.
 
@@ -501,9 +505,9 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
       // Returns SearchResults::FullIndex or SearchResults::Degraded.
   }
 
-  // pub(crate): internal dispatch arms. Not callable from app.
-  pub(crate) fn search_sql_fallback(...) -> Result<SearchResults, String> { ... }
-  pub(crate) fn search_combined(...) -> Result<SearchResults, String> { ... }
+  // private: internal dispatch arms. Not callable from app.
+  fn search_sql_fallback(...) -> Result<Vec<UnifiedSearchResult>, String> { ... }
+  fn search_combined(...) -> Result<Vec<UnifiedSearchResult>, String> { ... }
   // ...etc
   ```
 
@@ -513,7 +517,7 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 - `crates/db/src/db/queries_extra/scoped_queries.rs` - `get_draft_threads` becomes `pub(crate)` and renamed `get_draft_threads_synced`; `count_local_drafts` becomes `pub(crate)`; `get_drafts_view` and `get_draft_count_with_local` are the public entries.
 - `crates/app/src/helpers.rs` - `load_threads_for_current_view` calls `get_drafts_view` directly; the previous app-layer merge in `helpers.rs:167-175` disappears behind the DB-owned canonical query.
-- `crates/core/src/search_pipeline.rs` - `search_sql_fallback` and the internal-dispatch functions become `pub(crate)`. `search` is the only public entry.
+- `crates/core/src/search_pipeline.rs` - `search_sql_fallback` and the internal-dispatch functions are private. `search` is the only public entry and returns `SearchResults`.
 
 **Success criteria.** Shape 8 inventory entries resolve. A compile-fail test attempts to call `get_draft_threads_synced` from the sidebar render path and fails. A compile-fail test attempts to call `search_sql_fallback` from `app` and fails.
 
