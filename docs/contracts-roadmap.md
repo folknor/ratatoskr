@@ -1,6 +1,6 @@
 # Contracts Roadmap
 
-Implementation arc for landing the compile-time enforcement named in `docs/glossary/discrepancies.md`. That doc is the *what is broken* doc — the contract failures, the evidence, the tags. This doc is the *what we do about it* doc: which contract to land first, why, what the design surface looks like, what success looks like, and what fidelity each contract reaches in Rust.
+Implementation arc for landing the compile-time enforcement named in `docs/glossary/discrepancies.md`. That doc is the *what is broken* doc - the contract failures, the evidence, the tags. This doc is the *what we do about it* doc: which contract to land first, why, what the design surface looks like, what success looks like, and what fidelity each contract reaches in Rust.
 
 This is not a product roadmap. It does not name dates. It names sequencing, the type-design sketch for each contract, the migration scope, and the open design questions that need to be answered before a contract's type lands. The migrations themselves will get their own PR-shaped tracking when the design questions are answered.
 
@@ -8,25 +8,25 @@ This is not a product roadmap. It does not name dates. It names sequencing, the 
 
 Before touching any of this, read in order:
 
-1. `docs/architecture.md` — the guiding principle ("make the right thing the only thing"), crate boundaries, the existing settled patterns. The composite-operations section is directly relevant to contract #4.
-2. `docs/glossary/folders-labels.md` — the binding rules for thread aggregates, folder/label storage split, prefix conventions. Several contracts encode these rules into types. Note in particular the **per-field reducer rule** — `is_read` is MIN (all-read), `is_starred` / `is_replied` / `is_forwarded` are ANY, `last_message_at` is MAX. This is not uniform.
-3. `docs/glossary/discrepancies.md` — the contract-failure taxonomy and tagged inventory. Every migration below references entries there.
+1. `docs/architecture.md` - the guiding principle ("make the right thing the only thing"), crate boundaries, the existing settled patterns. The composite-operations section is directly relevant to contract #4.
+2. `docs/glossary/folders-labels.md` - the binding rules for thread aggregates, folder/label storage split, prefix conventions. Several contracts encode these rules into types. Note in particular the **per-field reducer rule** - `is_read` is MIN (all-read), `is_starred` / `is_replied` / `is_forwarded` are ANY, `last_message_at` is MAX. This is not uniform.
+3. `docs/glossary/discrepancies.md` - the contract-failure taxonomy and tagged inventory. Every migration below references entries there.
 
 ## Fidelity
 
 Not every enforcement technique reaches the same ceiling in Rust. Each contract migration below carries a `Fidelity:` annotation. Naming this honestly matters: it determines whether the contract is *structurally enforced* or whether the contract is *named and reviewer-disciplined*.
 
-### High fidelity — compile-time enforcement is total within the technique's scope
+### High fidelity - compile-time enforcement is total within the technique's scope
 
-- **Boundary parse** (#5): the parser is the only constructor from raw external values. The total domain type — `LabelKind`, `MailProviderKind`, `StoredSecret` — accepts no raw construction. Payload-carrying enum variants are constructors *by inclusion*, so the validation has to live one layer down: variant payloads are themselves private-fielded validated newtypes (`KeywordName`, `CategoryName`, `GraphGuid`, `ImapPath`, etc.) with their own boundary parsers. Total within the parsing crate.
-- **Sealed constructor within-crate** (#1 grain.vertical, #3, #5b, #2): `pub` constructors with **private struct fields** plus accessor methods, taking typed inputs that prove preconditions. The constructor can be called from any crate that depends on the owning crate, but the struct value cannot be forged by an external `Struct { ... }` literal because the fields are private. Total fidelity is preserved as long as the typed input chain leads back to a private-fielded constructor in the same crate. (Public fields would defeat this — `pub` fields let external crates construct the struct directly and bypass the constructor entirely.)
+- **Boundary parse** (#5): the parser is the only constructor from raw external values. The total domain type - `LabelKind`, `MailProviderKind`, `StoredSecret` - accepts no raw construction. Payload-carrying enum variants are constructors *by inclusion*, so the validation has to live one layer down: variant payloads are themselves private-fielded validated newtypes (`KeywordName`, `CategoryName`, `GraphGuid`, `ImapPath`, etc.) with their own boundary parsers. Total within the parsing crate.
+- **Sealed constructor within-crate** (#1 grain.vertical, #3, #5b, #2): `pub` constructors with **private struct fields** plus accessor methods, taking typed inputs that prove preconditions. The constructor can be called from any crate that depends on the owning crate, but the struct value cannot be forged by an external `Struct { ... }` literal because the fields are private. Total fidelity is preserved as long as the typed input chain leads back to a private-fielded constructor in the same crate. (Public fields would defeat this - `pub` fields let external crates construct the struct directly and bypass the constructor entirely.)
 - **Exhaustive dispatch** (#1 grain.scope, #5c match arms on enums): a `match` on an enum with no catch-all is compile-time enforced. Adding a variant is a compile error in every match.
 
-### Cross-crate capability — the menu, and the standing answer
+### Cross-crate capability - the menu, and the standing answer
 
 For capability tokens that cross a crate boundary, four options exist. Rust has no friend-crate mechanism, so the "constructor must be sealed against external misuse" property cannot be reached without ownership restructuring.
 
-1. **Public constructor with private fields.** The struct's fields are private; only the constructor can produce values. The constructor itself is public — any crate that depends on the owning crate can call it. Fidelity: medium-low. The shape of the value is sealed, but the *act* of constructing one is by convention.
+1. **Public constructor with private fields.** The struct's fields are private; only the constructor can produce values. The constructor itself is public - any crate that depends on the owning crate can call it. Fidelity: medium-low. The shape of the value is sealed, but the *act* of constructing one is by convention.
 
 2. **Facade in a downstream crate.** The construction logic lives in a designated facade that takes typed evidence and produces the capability-token value via option 1's constructor. Fidelity: still medium-low. The facade raises the sanctioned-path visibility but does not seal construction.
 
@@ -36,15 +36,15 @@ For capability tokens that cross a crate boundary, four options exist. Rust has 
 
 Options 2 and 3 raise the floor but do not reach the same compile-time guarantee as options 1 or 4. The honest binary is option 1 (medium) or option 4 (high).
 
-**Standing answer for this project:** option 4 for capability contracts that are load-bearing for correctness — specifically contract #4 (mutation capability, where merge-vs-replace is data-loss-shaped). Contracts that initially looked cross-crate but on inspection are within-crate concerns (notably #2 canonical-entry — both the Drafts and search unifications are internal to their owning crates) achieve high fidelity through ordinary within-crate sealing and are not subject to this menu.
+**Standing answer for this project:** option 4 for capability contracts that are load-bearing for correctness - specifically contract #4 (mutation capability, where merge-vs-replace is data-loss-shaped). Contracts that initially looked cross-crate but on inspection are within-crate concerns (notably #2 canonical-entry - both the Drafts and search unifications are internal to their owning crates) achieve high fidelity through ordinary within-crate sealing and are not subject to this menu.
 
 ### Option 4 is a controlled split, not a weakening
 
 The architecture-doc rule "shared-table SQL belongs to `db`" remains intact. What option 4 does is *clarify* the layering:
 
-- **`db` keeps schema, migrations, and the raw row-level SQL primitives.** Operations like `db::raw::delete_thread_label_rows(tx, key)` and `db::raw::insert_thread_label_rows(tx, key, labels)` — boring, batch-shaped, no delta-awareness — stay in `db`. The SQL strings still live in `db`. The schema migration story is unchanged.
-- **`provider-sync` owns the delta-semantic orchestration.** Whether a particular thread write is a full-snapshot replace or a partial-delta merge is *provider knowledge* — only the provider's sync code knows which delta semantics it's operating under. The capability-gated helpers `replace_thread_labels(input: ReplaceInput<…>, …)` and `merge_thread_labels(input: MergeInput<…>, …)` live where that knowledge lives, calling `db::raw` underneath.
-- **Validation that mixes raw IDs with semantic decisions moves with the orchestration.** `filtered_membership_ids` — which today drops message-state label IDs and reserved IMAP system keywords before writing — is provider-semantic, not raw. It moves to `provider-sync`. Under #5c (typed `LabelKind`), most of what that filter does becomes structurally unrepresentable anyway; the filter's role during transition is defensive cleanup of legacy string IDs.
+- **`db` keeps schema, migrations, and the raw row-level SQL primitives.** Operations like `db::raw::delete_thread_label_rows(tx, key)` and `db::raw::insert_thread_label_rows(tx, key, labels)` - boring, batch-shaped, no delta-awareness - stay in `db`. The SQL strings still live in `db`. The schema migration story is unchanged.
+- **`provider-sync` owns the delta-semantic orchestration.** Whether a particular thread write is a full-snapshot replace or a partial-delta merge is *provider knowledge* - only the provider's sync code knows which delta semantics it's operating under. The capability-gated helpers `replace_thread_labels(input: ReplaceInput<…>, …)` and `merge_thread_labels(input: MergeInput<…>, …)` live where that knowledge lives, calling `db::raw` underneath.
+- **Validation that mixes raw IDs with semantic decisions moves with the orchestration.** `filtered_membership_ids` - which today drops message-state label IDs and reserved IMAP system keywords before writing - is provider-semantic, not raw. It moves to `provider-sync`. Under #5c (typed `LabelKind`), most of what that filter does becomes structurally unrepresentable anyway; the filter's role during transition is defensive cleanup of legacy string IDs.
 
 The rule isn't weakened. The clarification is: *provider-delta-aware orchestration of shared-table writes lives where the provider knowledge is*, and that is one layer up from `db`.
 
@@ -52,15 +52,15 @@ The rule isn't weakened. The clarification is: *provider-delta-aware orchestrati
 
 The following questions were open in the previous version of this doc; they are now resolved:
 
-- **Cross-crate capability option for #4:** option 4. Verified cheap — the four helper bodies in `db::queries_extra::thread_persistence` are 15-25 lines each, comprised of DELETE-then-INSERT-OR-IGNORE loops; `db::raw` is a clean row-operation layer with no leaky internals.
-- **Cross-crate capability option for #2:** not applicable — neither sub-case is cross-crate. Drafts orchestration is internal to `db`; search unification is internal to `core/search_pipeline`.
+- **Cross-crate capability option for #4:** option 4. Verified cheap - the four helper bodies in `db::queries_extra::thread_persistence` are 15-25 lines each, comprised of DELETE-then-INSERT-OR-IGNORE loops; `db::raw` is a clean row-operation layer with no leaky internals.
+- **Cross-crate capability option for #2:** not applicable - neither sub-case is cross-crate. Drafts orchestration is internal to `db`; search unification is internal to `core/search_pipeline`.
 - **Staged-migration shape for option 4:** single-landing per atomic move, per the migration ground rules. The `sync::pipeline::store_threads` persistence half moves up to `provider-sync` because both of its current callers (`provider-sync/imap/imap_initial.rs`, `provider-sync/imap/imap_delta.rs`) live there. Threading (JWZ algorithm + `MessageMeta` types) stays in `sync`.
 
 ### Remaining open questions
 
 - **Inclusive vs exclusive `DateBound`?** Pick one. Tantivy is inclusive today; smart-folder is exclusive. Either is fine; the choice must be encoded in `DateBound` once, not per-builder.
-- **JMAP non-keyword labels — possible or not?** If keyword-only by construction, Shape 10 is fully resolved by an IMAP-style recompute pattern applied to JMAP. If non-keyword JMAP labels can flow, this is a data-loss bug to fix during the #4 migration. Verify before designing.
-- **Legacy plaintext credentials — still load-bearing?** If yes, `StoredSecret::parse` stays tolerant of both formats forever. If no, the parser becomes strict and legacy support moves to a one-shot re-encrypt migration.
+- **JMAP non-keyword labels - possible or not?** If keyword-only by construction, Shape 10 is fully resolved by an IMAP-style recompute pattern applied to JMAP. If non-keyword JMAP labels can flow, this is a data-loss bug to fix during the #4 migration. Verify before designing.
+- **Legacy plaintext credentials - still load-bearing?** If yes, `StoredSecret::parse` stays tolerant of both formats forever. If no, the parser becomes strict and legacy support moves to a one-shot re-encrypt migration.
 - **`#5c` on-disk format:** boundary adapter at the DB read/write boundary (recommended) vs DB restructure (cleaner, larger).
 - **`#5c` IPC wire format:** serde `#[serde(tag, content)]` on `FolderKind` / `LabelKind` (cleaner) vs `String` on the wire with parse-at-IPC-boundary (smaller migration).
 
@@ -69,15 +69,15 @@ The following questions were open in the previous version of this doc; they are 
 Sequence chosen by *leverage per migration* and *fidelity tier*. Land high-fidelity migrations first.
 
 0. **Glossary fix** (`folders-labels.md` per-field reducer naming). Doc-only, blocks every contract that encodes the rule. Already landed.
-1. **#5a Credentials** — smallest boundary-parse, debugs migration mechanics.
-2. **#5-pre MailProviderKind** — prereq for #5c, second boundary-parse migration, still small. Lands in `types`.
-3. **#1 grain.vertical** — high-fidelity sealed-constructor in `db`, highest leverage in the inventory.
-4. **#3 Completion State** — same technique, contained in `search` (partial type) and `core/search_pipeline` (enriched type + result-set enum).
-5. **#5b LabelStyle** — rides with #3's pattern (partial-to-complete transition). High fidelity, contained in `label-colors` and `app`.
-6. **#4 Mutation Capability** — option 4 from §Fidelity. Raw row primitives stay in `db::raw`; capability-gated helpers and the `store_threads` persistence half move to `provider-sync`.
-7. **#2 Canonical Answer** — high-fidelity within owning crates (`db` for Drafts, `core/search_pipeline` for search).
-8. **#1 grain.scope** — refactor, no new types, easy after the vocabulary is settled.
-9. **#5c FolderKind + LabelKind** — the broad migration. `MailLocator` as parse-product only; operation APIs stay narrow.
+1. **#5a Credentials** - smallest boundary-parse, debugs migration mechanics.
+2. **#5-pre MailProviderKind** - prereq for #5c, second boundary-parse migration, still small. Lands in `types`.
+3. **#1 grain.vertical** - high-fidelity sealed-constructor in `db`, highest leverage in the inventory.
+4. **#3 Completion State** - same technique, contained in `search` (partial type) and `core/search_pipeline` (enriched type + result-set enum).
+5. **#5b LabelStyle** - rides with #3's pattern (partial-to-complete transition). High fidelity, contained in `label-colors` and `app`.
+6. **#4 Mutation Capability** - option 4 from §Fidelity. Raw row primitives stay in `db::raw`; capability-gated helpers and the `store_threads` persistence half move to `provider-sync`.
+7. **#2 Canonical Answer** - high-fidelity within owning crates (`db` for Drafts, `core/search_pipeline` for search).
+8. **#1 grain.scope** - refactor, no new types, easy after the vocabulary is settled.
+9. **#5c FolderKind + LabelKind** - the broad migration. `MailLocator` as parse-product only; operation APIs stay narrow.
 
 ## Per-Contract Design
 
@@ -87,7 +87,7 @@ Sequence chosen by *leverage per migration* and *fidelity tier*. Land high-fidel
 
 `docs/glossary/folders-labels.md` previously stated that all four per-message booleans aggregate via `MAX()`. This was wrong: `is_read` is the only MIN (all-read); `is_starred`, `is_replied`, `is_forwarded` are ANY; `last_message_at` is `MAX(date)`. The doc now names each reducer per-field. Any sealed constructor that encodes the aggregate must use the corrected reducers, not the uniform MAX rule that the doc bug implied.
 
-### 1. #5a Credentials — boundary parse (high fidelity)
+### 1. #5a Credentials - boundary parse (high fidelity)
 
 **Status:** code path landed for current credential readers. `decrypt_or_raw` and `decrypt_if_needed` are removed; Gmail, Graph, JMAP, and IMAP consume `StoredSecret`. The external-construction check is pinned by the `StoredSecret` rustdoc `compile_fail` example.
 
@@ -116,7 +116,7 @@ impl StoredSecret {
 }
 ```
 
-The name is **`StoredSecret`**, not `EncryptedToken` — the latter would be misleading while the legacy plaintext path is still load-bearing. Once the plaintext path is eliminated (via a one-shot re-encrypt migration), the type could be renamed.
+The name is **`StoredSecret`**, not `EncryptedToken` - the latter would be misleading while the legacy plaintext path is still load-bearing. Once the plaintext path is eliminated (via a one-shot re-encrypt migration), the type could be renamed.
 
 The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`. The two-variant decryption API (`decrypt_or_raw` vs `decrypt_if_needed`) collapses to one.
 
@@ -124,11 +124,11 @@ The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`
 
 **Migration scope.** `crates/common/src/crypto.rs`; the four provider client modules that call `decrypt_or_raw` / `decrypt_if_needed`. ~10 call sites total.
 
-**Open question.** Is the legacy plaintext path still load-bearing in 2026, or can it be migrated to "rejection + one-time re-encrypt" cleanly? Worth checking before deciding whether the parser accepts both formats forever or only during a migration window. If the answer is "rejection," the parse function becomes strict and the legacy support moves to a one-shot migration script — and the type can be renamed to `EncryptedSecret` to reflect the narrowed invariant.
+**Open question.** Is the legacy plaintext path still load-bearing in 2026, or can it be migrated to "rejection + one-time re-encrypt" cleanly? Worth checking before deciding whether the parser accepts both formats forever or only during a migration window. If the answer is "rejection," the parse function becomes strict and the legacy support moves to a one-shot migration script - and the type can be renamed to `EncryptedSecret` to reflect the narrowed invariant.
 
 **Success criteria.** `decrypt_or_raw` and `decrypt_if_needed` are gone. The four provider clients consume `StoredSecret` directly. A compile-fail test attempts to pass a raw `String` to a function expecting `StoredSecret` and fails.
 
-### 2. #5-pre MailProviderKind — boundary parse (high fidelity)
+### 2. #5-pre MailProviderKind - boundary parse (high fidelity)
 
 **Inventory:** No direct entries (this is prereq infrastructure for #5c). Implicitly addressed by every Shape 6 entry where a provider-identity string flows alongside a label string.
 
@@ -151,7 +151,7 @@ impl MailProviderKind {
 
 Every existing `provider: &str` or `provider_name: String` parameter **in the mail-provider sense** becomes `provider: MailProviderKind`. Account rows in the DB serialize the kind via the `as_str` form. Wire types (IPC, log fields) round-trip through serde.
 
-**The name is `MailProviderKind`, not `ProviderKind`.** "Provider" is overloaded across the codebase: OAuth identity providers (Google/Microsoft as IDP), the autodiscovery registry, calendar providers, cloud-attachment providers, and mail providers all exist. The bare name `ProviderKind` would invite confusion at every site where a different provider axis is meant. Adjacent provider axes get their own kind enums if a typed analog is warranted — they are not part of this migration's scope.
+**The name is `MailProviderKind`, not `ProviderKind`.** "Provider" is overloaded across the codebase: OAuth identity providers (Google/Microsoft as IDP), the autodiscovery registry, calendar providers, cloud-attachment providers, and mail providers all exist. The bare name `ProviderKind` would invite confusion at every site where a different provider axis is meant. Adjacent provider axes get their own kind enums if a typed analog is warranted - they are not part of this migration's scope.
 
 **Fidelity:** high. The parser is the only constructor; consumers receive the enum.
 
@@ -161,7 +161,7 @@ Every existing `provider: &str` or `provider_name: String` parameter **in the ma
 
 **Success criteria.** No function in the workspace accepts `provider: &str` for the *mail-provider-identity sense*. Adjacent provider axes (OAuth, discovery, calendar, cloud attachments) are explicitly out of scope. A compile-fail test attempts to pass `"gmail"` as a string where `MailProviderKind` is expected and fails.
 
-### 3. #1 grain.vertical — sealed constructor (high fidelity within crate)
+### 3. #1 grain.vertical - sealed constructor (high fidelity within crate)
 
 **Inventory:** Shape 1 entries (chat.rs, thread_detail.rs, smart-folder), Shape 3 entries (thread_persistence.rs, sync/pipeline.rs, dev-seed), Shape 9 entries (search-pipeline grouping/metadata), Shape 11 (date boundary), parts of Shape 12.
 
@@ -245,10 +245,10 @@ impl DateBound {
     pub fn before(timestamp: i64) -> DateBound { ... }
     pub fn after(timestamp: i64) -> DateBound { ... }
 
-    /// SQL emitter — generates a clause with inclusivity decided once.
+    /// SQL emitter - generates a clause with inclusivity decided once.
     pub fn to_sql_clause(&self, column: &str) -> (String, i64) { ... }
 
-    /// Generic range emitter — caller passes a closure that builds the consumer's
+    /// Generic range emitter - caller passes a closure that builds the consumer's
     /// term type (Tantivy's `Term`, or any other range key). The inclusivity
     /// choice is applied here; Tantivy doesn't need to leak into `types`.
     pub fn to_range_bounds<T>(&self, make_term: impl FnOnce(i64) -> T)
@@ -263,25 +263,25 @@ impl DateBound {
 
 **Migration scope.**
 
-- `crates/db/src/db/queries_extra/thread_persistence.rs` — `ThreadAggregate`, `NonReactionMessage`, `compute_in_tx`, `compute_from_messages`.
-- `crates/db/src/db/queries_extra/thread_detail.rs` — `query_thread_state_decorations` consumes the typed aggregate.
-- `crates/db/src/db/queries_extra/chat.rs` — chat unread query and recompute share the typed predicate.
-- `crates/smart-folder/src/sql_builder.rs` — `ThreadPredicate` / `MessagePredicate`; date predicates consume `DateBound::to_sql_clause`.
-- `crates/sync/src/pipeline.rs` — in-memory aggregate switches to `compute_from_messages`.
-- `crates/dev-seed/src/threads.rs` — thread aggregate derives from the seeded message vec via `compute_from_messages`.
-- `crates/types/src/date_bound.rs` — new module.
-- `crates/search/src/lib.rs` — Tantivy `before:` / `after:` boundary uses `DateBound::to_range_bounds` with a Tantivy-term closure.
+- `crates/db/src/db/queries_extra/thread_persistence.rs` - `ThreadAggregate`, `NonReactionMessage`, `compute_in_tx`, `compute_from_messages`.
+- `crates/db/src/db/queries_extra/thread_detail.rs` - `query_thread_state_decorations` consumes the typed aggregate.
+- `crates/db/src/db/queries_extra/chat.rs` - chat unread query and recompute share the typed predicate.
+- `crates/smart-folder/src/sql_builder.rs` - `ThreadPredicate` / `MessagePredicate`; date predicates consume `DateBound::to_sql_clause`.
+- `crates/sync/src/pipeline.rs` - in-memory aggregate switches to `compute_from_messages`.
+- `crates/dev-seed/src/threads.rs` - thread aggregate derives from the seeded message vec via `compute_from_messages`.
+- `crates/types/src/date_bound.rs` - new module.
+- `crates/search/src/lib.rs` - Tantivy `before:` / `after:` boundary uses `DateBound::to_range_bounds` with a Tantivy-term closure.
 
 **Success criteria.** All Shape 1 and Shape 3 (`grain.vertical`) inventory entries either get a `// resolved by contract #1 grain.vertical` annotation and disappear, or get reclassified as evidence for a different contract. A compile-fail test attempts to construct a `ThreadAggregate` via struct literal from outside `db` and fails. Another attempts to construct a `NonReactionMessage` outside `db` and fails. A third attempts to construct a `DateBound` via struct literal and fails.
 
-### 4. #3 Completion State — sealed constructor (high fidelity within crate)
+### 4. #3 Completion State - sealed constructor (high fidelity within crate)
 
 **Inventory:** Shape 2 entries (Thread converters, `MatchKind::Body` hardcoded, `is_read: false` hardcoded in Tantivy), Shape 12 (partial enrichment).
 
 **Design sketch.** Two-type completion pairs with a single transition function. Owning crates named explicitly:
 
 ```rust
-// crates/search/src/lib.rs — PartialSearchHit is owned by `search`
+// crates/search/src/lib.rs - PartialSearchHit is owned by `search`
 // because that's the crate that builds it from Tantivy results.
 
 pub struct PartialSearchHit {
@@ -293,7 +293,7 @@ pub struct PartialSearchHit {
     // ...partial metadata from Tantivy's stored fields
 }
 
-// crates/core/src/search_pipeline.rs — EnrichedSearchHit and SearchResults
+// crates/core/src/search_pipeline.rs - EnrichedSearchHit and SearchResults
 // live in `core` because that's where the enrichment transition runs
 // (`core` depends on `search`, so it can consume PartialSearchHit).
 
@@ -327,19 +327,19 @@ pub enum SearchResults {
 
 Same shape for the `Thread` constructors: four near-identical converters (`db_thread_to_app_thread`, `local_draft_to_app_thread`, `unified_result_to_thread`, the public-folder inline converter) collapse to `PartialThread` → `DecoratedThread` with a single `decorate(...)` transition.
 
-`LabelStyle` is its own #5b migration — see that section for the crate-boundary split.
+`LabelStyle` is its own #5b migration - see that section for the crate-boundary split.
 
 **Fidelity:** high. Private fields on both partial and enriched types; the transition function is the sole constructor for the enriched type.
 
 **Migration scope.**
 
-- `crates/search/src/lib.rs` — `PartialSearchHit` defined here; `collect_results` returns it. `MatchKind::Body` is no longer a default.
-- `crates/core/src/search_pipeline.rs` — `EnrichedSearchHit` and `SearchResults` defined here; `from_partial` is the sole transition.
-- `crates/app/src/helpers.rs`, `crates/app/src/db/pinned_searches.rs`, `crates/app/src/handlers/search.rs` — four Thread converters → one constructor.
+- `crates/search/src/lib.rs` - `PartialSearchHit` defined here; `collect_results` returns it. `MatchKind::Body` is no longer a default.
+- `crates/core/src/search_pipeline.rs` - `EnrichedSearchHit` and `SearchResults` defined here; `from_partial` is the sole transition.
+- `crates/app/src/helpers.rs`, `crates/app/src/db/pinned_searches.rs`, `crates/app/src/handlers/search.rs` - four Thread converters → one constructor.
 
 **Success criteria.** Renderer signatures accept only enriched types. The search view exhaustively matches `SearchResults::{FullIndex, Degraded}`. A compile-fail test attempts to pass `PartialSearchHit` to the result-row renderer and fails. The four Thread converters collapse to one constructor.
 
-### 5. #5b LabelStyle — sealed constructor + crate-boundary split (high fidelity)
+### 5. #5b LabelStyle - sealed constructor + crate-boundary split (high fidelity)
 
 **Inventory:** Shape 5's `resolve_label_color` partial-pair entry, Shape 2's label-color resolver entry.
 
@@ -348,7 +348,7 @@ Sequenced adjacent to #3 because LabelStyle is a completion-state migration (par
 **Design sketch.** Two types, one per crate-boundary, both with private fields:
 
 ```rust
-// crates/label-colors/src/lib.rs — low-level, no iced dependency
+// crates/label-colors/src/lib.rs - low-level, no iced dependency
 pub struct LabelStyleHex {
     bg: HexColor,
     fg: HexColor,
@@ -360,7 +360,7 @@ impl LabelStyleHex {
     pub fn fg(&self) -> HexColor { self.fg }
 }
 
-// crates/app/src/... — UI layer
+// crates/app/src/... - UI layer
 pub struct LabelPaint {
     bg: iced::Color,
     fg: iced::Color,
@@ -381,7 +381,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 **Success criteria.** Every widget that draws a label-shaped surface accepts `LabelPaint` and nothing else. A compile-fail test attempts to pass raw hex strings to the renderer and fails.
 
-### 6. #4 Mutation Capability — capability token (high fidelity, option 4)
+### 6. #4 Mutation Capability - capability token (high fidelity, option 4)
 
 **Inventory:** Shape 4 entries (merge vs replace helpers, JMAP keyword path), Shape 7 (composite suppress flag), Shape 10 (partial-delta keyword loss as a #4 instance).
 
@@ -434,7 +434,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
   ```
   `FullThreadFetch` and `PartialDeltaPage` are typed evidence; only legitimate caller sites within `provider-sync` can produce them.
 
-- **`filtered_membership_ids` moves with the orchestration.** Today it drops message-state label IDs and reserved IMAP system keywords before writing — provider-semantic decisions, not row-level concerns. It lives in `provider-sync`. Under #5c (typed `LabelKind`), most of what it filters becomes structurally unrepresentable; during transition it stays as defensive cleanup over legacy `String` IDs.
+- **`filtered_membership_ids` moves with the orchestration.** Today it drops message-state label IDs and reserved IMAP system keywords before writing - provider-semantic decisions, not row-level concerns. It lives in `provider-sync`. Under #5c (typed `LabelKind`), most of what it filters becomes structurally unrepresentable; during transition it stays as defensive cleanup over legacy `String` IDs.
 
 - **`sync::pipeline::store_threads` persistence half moves up.** The function is currently called only from `provider-sync/imap/imap_initial.rs` and `provider-sync/imap/imap_delta.rs`. The JWZ-threading half (computing `ThreadGroup` values, the `MessageMeta` types) stays in `sync`; the persistence half (the per-thread aggregate + replace_thread_folders/labels calls) moves to `provider-sync`. After the move, the two IMAP callers compose: `let groups = sync::compute_thread_groups(...); provider_sync::store_thread_groups(groups, ...);`.
 
@@ -447,12 +447,12 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 - New: `crates/db/src/db/raw/thread_membership.rs` (boring row ops).
 - New: `crates/provider-sync/src/thread_writes.rs` (`ReplaceInput`, `MergeInput`, `replace_thread_labels`, `merge_thread_labels`, evidence types, `filtered_membership_ids`).
 - New: `crates/provider-sync/src/store_threads.rs` (persistence half lifted from `sync::pipeline`).
-- `crates/db/src/db/queries_extra/thread_persistence.rs` — `replace_thread_*` / `merge_thread_*` deleted (or downgraded to private helpers if any internal caller still needs them).
-- `crates/sync/src/pipeline.rs` — `store_threads` keeps JWZ-threading logic but stops calling `replace_thread_*`; persistence half is gone.
-- `crates/provider-sync/src/imap/imap_initial.rs`, `imap_delta.rs` — compose the split: `sync::compute_thread_groups` + `provider_sync::store_thread_groups`.
-- `crates/provider-sync/src/gmail/sync/storage.rs`, `graph/sync/persistence.rs`, `jmap/sync/storage.rs` — re-import from `provider_sync::thread_writes`. JMAP grows the missing `merge_thread_labels` call (Shape 10 / fixed if non-keyword JMAP labels exist, see open question).
-- `crates/service/src/actions/label.rs` — split `add_label` into `add_label_no_enqueue` + `add_label` requiring `EnqueueCapability`.
-- `crates/service/src/actions/label_group.rs` — composite calls only `_no_enqueue` entry points. `ActionContext.suppress_pending_enqueue` is deleted.
+- `crates/db/src/db/queries_extra/thread_persistence.rs` - `replace_thread_*` / `merge_thread_*` deleted (or downgraded to private helpers if any internal caller still needs them).
+- `crates/sync/src/pipeline.rs` - `store_threads` keeps JWZ-threading logic but stops calling `replace_thread_*`; persistence half is gone.
+- `crates/provider-sync/src/imap/imap_initial.rs`, `imap_delta.rs` - compose the split: `sync::compute_thread_groups` + `provider_sync::store_thread_groups`.
+- `crates/provider-sync/src/gmail/sync/storage.rs`, `graph/sync/persistence.rs`, `jmap/sync/storage.rs` - re-import from `provider_sync::thread_writes`. JMAP grows the missing `merge_thread_labels` call (Shape 10 / fixed if non-keyword JMAP labels exist, see open question).
+- `crates/service/src/actions/label.rs` - split `add_label` into `add_label_no_enqueue` + `add_label` requiring `EnqueueCapability`.
+- `crates/service/src/actions/label_group.rs` - composite calls only `_no_enqueue` entry points. `ActionContext.suppress_pending_enqueue` is deleted.
 
 Per the migration ground rules, the move is a single-landing atomic PR. No source-level relocation shims. If the scope is too large for one landing, re-scope by helper-and-its-callers, with the corresponding type moving alongside the first helper.
 
@@ -460,11 +460,11 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Success criteria.** Shape 4 inventory entries either resolve (`// resolved by contract #4`) or move to a "verified consistent under #4" note. Shape 7's composite preflight bug is structurally impossible: a compile-fail test attempts to call the enqueueing variant from inside a composite and fails. A compile-fail test attempts to construct a `ReplaceInput` from `provider-sync/graph` (which has only partial-delta evidence) and fails.
 
-### 7. #2 Canonical Answer — sealed within owning crates (high fidelity)
+### 7. #2 Canonical Answer - sealed within owning crates (high fidelity)
 
 **Inventory:** Shape 8 entries (drafts list/count, search vs fallback), partial Shape 12.
 
-**On inspection, neither sub-case is cross-crate.** Drafts orchestration is internal to `db` (synced query + local query both live there, the merge is a `db` function). Search unification is internal to `core/search_pipeline` (`search`, `search_sql_only`, `search_combined`, `search_sql_fallback` all live in the same module). Standard within-crate sealing applies — `pub(crate)` on the non-canonical entries, `pub` on the unified entry.
+**On inspection, neither sub-case is cross-crate.** Drafts orchestration is internal to `db` (synced query + local query both live there, the merge is a `db` function). Search unification is internal to `core/search_pipeline` (`search`, `search_sql_only`, `search_combined`, `search_sql_fallback` all live in the same module). Standard within-crate sealing applies - `pub(crate)` on the non-canonical entries, `pub` on the unified entry.
 
 **Design sketch.**
 
@@ -484,7 +484,7 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
   pub(crate) fn count_local_drafts(...) -> Result<i64, String> { ... }
   ```
-  `DraftsView` is a private-fielded type — external callers consume it through accessors and cannot forge it.
+  `DraftsView` is a private-fielded type - external callers consume it through accessors and cannot forge it.
 
 - **Search (within `core/search_pipeline`):**
   ```rust
@@ -505,13 +505,13 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Migration scope.**
 
-- `crates/db/src/db/queries_extra/scoped_queries.rs` — `get_draft_threads` becomes `pub(crate)` and renamed `get_draft_threads_synced`; `count_local_drafts` becomes `pub(crate)`; `drafts_list_for_scope` and `drafts_count_for_scope` are the new public entries.
-- `crates/app/src/helpers.rs` — `load_threads_for_current_view` calls `drafts_list_for_scope` directly; the previous app-layer merge in `helpers.rs:167-175` disappears (the merge now lives in `db`).
-- `crates/core/src/search_pipeline.rs` — `search_sql_fallback` and the internal-dispatch functions become `pub(crate)`. `search` is the only public entry.
+- `crates/db/src/db/queries_extra/scoped_queries.rs` - `get_draft_threads` becomes `pub(crate)` and renamed `get_draft_threads_synced`; `count_local_drafts` becomes `pub(crate)`; `drafts_list_for_scope` and `drafts_count_for_scope` are the new public entries.
+- `crates/app/src/helpers.rs` - `load_threads_for_current_view` calls `drafts_list_for_scope` directly; the previous app-layer merge in `helpers.rs:167-175` disappears (the merge now lives in `db`).
+- `crates/core/src/search_pipeline.rs` - `search_sql_fallback` and the internal-dispatch functions become `pub(crate)`. `search` is the only public entry.
 
 **Success criteria.** Shape 8 inventory entries resolve. A compile-fail test attempts to call `get_draft_threads_synced` from the sidebar render path and fails. A compile-fail test attempts to call `search_sql_fallback` from `app` and fails.
 
-### 8. #1 grain.scope — exhaustive dispatch (high fidelity)
+### 8. #1 grain.scope - exhaustive dispatch (high fidelity)
 
 **Inventory:** `core/src/scope.rs:31-36`, parts of Shape 8.
 
@@ -536,18 +536,18 @@ Today the dispatch is spread across `crates/app/src/helpers.rs::load_threads_sco
 
 **Success criteria.** `to_account_scope` is deleted. Every consumer of `ViewScope` either takes the full enum and dispatches exhaustively, or takes a narrower type (e.g., `AccountScope`) that is structurally unreachable from the broader scope variants.
 
-### 9. #5c FolderKind + LabelKind — boundary parse, separate types
+### 9. #5c FolderKind + LabelKind - boundary parse, separate types
 
 **Inventory:** Shape 6 entries (every `kw:` / `cat:` / `importance:` prefix call site), the system-folder-shorthand entry, parts of Shape 5 (validated domain).
 
-**Design sketch.** Two separate enums in `types`, plus a `MailLocator` parse-product enum used only at parse boundaries. **Operation APIs accept narrow types.** Provider-native system labels are normalized to canonical Ratatoskr IDs on ingest, per `docs/glossary/folders-labels.md` — they never appear as provider-specific variants in `FolderKind`.
+**Design sketch.** Two separate enums in `types`, plus a `MailLocator` parse-product enum used only at parse boundaries. **Operation APIs accept narrow types.** Provider-native system labels are normalized to canonical Ratatoskr IDs on ingest, per `docs/glossary/folders-labels.md` - they never appear as provider-specific variants in `FolderKind`.
 
 **Payload types are themselves private-fielded validated newtypes.** Because public enum variants are constructors by inclusion, the seal lives one layer down on the payload type.
 
 ```rust
 // crates/types/src/folder_label.rs
 
-// Validated payload types — private fields, parser-only construction.
+// Validated payload types - private fields, parser-only construction.
 
 pub struct KeywordName(String);
 impl KeywordName {
@@ -564,14 +564,14 @@ pub struct GmailLabelId(String);
 pub struct JmapId(String);
 // each with its own private field + parse function.
 
-// Folder and label kind enums — variants carry validated payloads.
+// Folder and label kind enums - variants carry validated payloads.
 
 pub enum FolderKind {
     /// Canonical Ratatoskr system folder. Gmail INBOX, Graph inbox, IMAP \Inbox,
-    /// JMAP role:inbox — all normalize here on ingest via SYSTEM_FOLDER_ROLES.
+    /// JMAP role:inbox - all normalize here on ingest via SYSTEM_FOLDER_ROLES.
     System(SystemFolderId),
 
-    /// Provider-specific user folders. No GmailUser variant — Gmail user-created
+    /// Provider-specific user folders. No GmailUser variant - Gmail user-created
     /// labels are LabelKind, not FolderKind, per glossary.
     GraphUser(GraphGuid),    // graph-{guid}
     JmapUser(JmapId),        // jmap-{id}
@@ -623,7 +623,7 @@ impl MailLocator {
 }
 ```
 
-The `Namespace` parameter is load-bearing — a raw string alone is genuinely ambiguous. The namespace tells the parser which side of the folder/label divide to expect.
+The `Namespace` parameter is load-bearing - a raw string alone is genuinely ambiguous. The namespace tells the parser which side of the folder/label divide to expect.
 
 **Operation APIs stay narrow:**
 
@@ -636,13 +636,13 @@ fn remove_label(&self, label: &LabelKind, ...) -> ...;
 
 A folder cannot accidentally be passed where a label is expected. `MailLocator` exists only for parse-time discovery; no operation API accepts it.
 
-`opposite_importance_label` becomes `ImportanceLevel::opposite`, returning `ImportanceLevel` — never a string.
+`opposite_importance_label` becomes `ImportanceLevel::opposite`, returning `ImportanceLevel` - never a string.
 
 **Fidelity:** high. The parsers are the only constructors from raw values; payload types are themselves boundary-parsed; consumers receive the typed enum and exhaustively match.
 
 **Migration scope.** Largest of the migrations:
 
-- `crates/types/src/folder_label.rs` — new types (enums + validated payload newtypes).
+- `crates/types/src/folder_label.rs` - new types (enums + validated payload newtypes).
 - Every `*_label_id` / `*_folder_id` field that today is `String` becomes the narrow typed variant.
 - `MailActionIntent`, `MailOperation`, `WireMailOperation` use `FolderKind` and `LabelKind`.
 - Every provider's `add_label` / `remove_label` / `create_label` / `move_to_folder` accepts the narrow type and exhaustively matches the variant.
@@ -663,9 +663,9 @@ A folder cannot accidentally be passed where a label is expected. `MailLocator` 
 These apply to every contract migration.
 
 - **Each migration is a sequence of compile-checked landings, not one mega-PR.** Introduce the type, migrate one consumer, repeat. Brokkr's compile-fail tests are the safety net.
-- **No deprecated source shims.** Old call sites become compile errors during migration, not runtime warnings. No `#[deprecated]` wrappers that leave both APIs callable from new code; either the old function is gone or it returns a different type that doesn't satisfy the new signature. **This rule applies to cross-crate relocations too** — when a type or helper moves between crates (as in #4), the move is a single atomic landing; both crates do not expose the same source-level API simultaneously.
+- **No deprecated source shims.** Old call sites become compile errors during migration, not runtime warnings. No `#[deprecated]` wrappers that leave both APIs callable from new code; either the old function is gone or it returns a different type that doesn't satisfy the new signature. **This rule applies to cross-crate relocations too** - when a type or helper moves between crates (as in #4), the move is a single atomic landing; both crates do not expose the same source-level API simultaneously.
 - **Boundary adapters are allowed where the boundary is real.** A DB migration that reads both old and new format during a transition window is a boundary adapter, not a source shim. An IPC version-bump compatibility shim that translates an old wire format into the new typed value is a boundary adapter. The rule is: adapters live at the edge (disk, wire, external input) where the format is genuinely outside our control; they do not live at the source level where we control both producer and consumer.
-- **No `// TODO: migrate later` markers in code.** If a source-level call site can't migrate now, the type design isn't right yet — back to design, not technical debt. (Does not apply to boundary adapters, which are explicit migration boundaries.)
+- **No `// TODO: migrate later` markers in code.** If a source-level call site can't migrate now, the type design isn't right yet - back to design, not technical debt. (Does not apply to boundary adapters, which are explicit migration boundaries.)
 - **Each migration updates `discrepancies.md`** to retag or resolve the entries it addresses. The inventory shrinks as enforcement lands.
 
 ## Non-goals
@@ -676,6 +676,6 @@ These apply to every contract migration.
 
 ## Cross-references
 
-- `docs/glossary/discrepancies.md` — the tagged inventory each contract resolves.
-- `docs/architecture.md` — the guiding principles and existing settled patterns. The composite-operations section is the de-facto pre-existing spec for contract #4. The "shared-table SQL belongs to `db`" rule is *clarified* by #4's row-primitives-vs-orchestration split, not weakened — raw SQL stays in `db::raw`.
-- `docs/glossary/folders-labels.md` — the binding rules contracts #1, #3, #4, and #5c encode into types. Note the per-field reducer rule for thread aggregates.
+- `docs/glossary/discrepancies.md` - the tagged inventory each contract resolves.
+- `docs/architecture.md` - the guiding principles and existing settled patterns. The composite-operations section is the de-facto pre-existing spec for contract #4. The "shared-table SQL belongs to `db`" rule is *clarified* by #4's row-primitives-vs-orchestration split, not weakened - raw SQL stays in `db::raw`.
+- `docs/glossary/folders-labels.md` - the binding rules contracts #1, #3, #4, and #5c encode into types. Note the per-field reducer rule for thread aggregates.

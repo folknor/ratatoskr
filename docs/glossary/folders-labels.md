@@ -123,7 +123,7 @@ Some provider primitives are per-message booleans. They drive inline glyphs or f
 
 Thread-level state has two sources of truth, depending on what is being aggregated:
 
-- **Per-message booleans aggregate per-field — the reducer is not uniform.**
+- **Per-message booleans aggregate per-field - the reducer is not uniform.**
     - `is_read` is **all non-reaction messages read** (MIN over per-message `is_read`, equivalently "`COUNT(*) WHERE is_read = 0 AND is_reaction = 0` is 0"). A thread is read only when every non-reaction message in it is read.
     - `is_starred`, `is_replied`, `is_forwarded` are **any non-reaction message** with the flag set (MAX / `EXISTS`). A thread is starred when at least one non-reaction message in it is starred; same for replied and forwarded.
     - `last_message_at` is `MAX(date)` over non-reaction messages.
