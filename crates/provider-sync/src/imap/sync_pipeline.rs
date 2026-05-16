@@ -313,6 +313,13 @@ fn replace_message_keywords(
     Ok(())
 }
 
+// Recompute the thread-level `thread_labels` aggregate for an IMAP thread
+// from the per-message `message_keywords` rows. IMAP-account threads only
+// ever carry `kw:*` rows in `thread_labels` (no Gmail user labels, no
+// Exchange `cat:`, no `importance:*`), so the destructive replace is
+// safe without a prefix filter. The old `WHERE label_id LIKE 'kw:%'`
+// scoping was a holdover from the pre-split unified junction; see
+// `docs/labels-unification/redesign.md` "`message_keywords`".
 fn recompute_thread_keyword_labels(
     tx: &rusqlite::Transaction,
     account_id: &str,
@@ -320,7 +327,7 @@ fn recompute_thread_keyword_labels(
 ) -> Result<(), String> {
     tx.execute(
         "DELETE FROM thread_labels \
-         WHERE account_id = ?1 AND thread_id = ?2 AND label_id LIKE 'kw:%'",
+         WHERE account_id = ?1 AND thread_id = ?2",
         rusqlite::params![account_id, thread_id],
     )
     .map_err(|e| format!("delete thread keyword labels: {e}"))?;
@@ -591,13 +598,22 @@ pub fn sync_folders_to_folders(
                 right_delete: None,
                 right_submit: None,
                 is_subscribed: None,
-                is_undeletable: mapping.folder_type == "system",
+                // Only block deletion when the server advertised SPECIAL-USE
+                // for this mailbox. A user-created folder that happens to be
+                // named "Drafts" on a server without SPECIAL-USE was treated
+                // as a system folder by the previous name-fallback rule,
+                // blocking the user from deleting their own folder. The
+                // mapper's name-fallback still routes such folders to
+                // canonical IDs at the storage layer; we only refuse to
+                // mark them as system here. See `docs/labels-unification/
+                // redesign.md` "is_undeletable".
+                is_undeletable: folder.special_use.is_some(),
             }
         })
         .collect();
 
     insert_folders_batch(&tx, &rows)?;
-    tx.commit().map_err(|e| format!("commit labels: {e}"))?;
+    tx.commit().map_err(|e| format!("commit folders: {e}"))?;
     Ok(())
 }
 

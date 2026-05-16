@@ -139,7 +139,7 @@ pub(crate) async fn sync_mailboxes(
                 })
                 .collect();
             insert_folders_batch(&tx, &rows)?;
-            tx.commit().map_err(|e| format!("commit labels: {e}"))?;
+            tx.commit().map_err(|e| format!("commit folders: {e}"))?;
             Ok(())
         })
         .await?;

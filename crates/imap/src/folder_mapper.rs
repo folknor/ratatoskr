@@ -140,7 +140,11 @@ mod tests {
 
     #[test]
     fn test_get_folder_ids_for_draft() {
-        let folders = get_folder_ids_for_message("Drafts", true);
-        assert_eq!(folders, vec!["Drafts".to_string(), "DRAFT".to_string()]);
+        // Production input is the canonical "DRAFT" id from
+        // map_folder_to_folder (special-use `\Drafts` or name-fallback).
+        // The function adds the universal DRAFT marker so drafts surface
+        // in the universal Drafts view regardless of the source folder id.
+        let folders = get_folder_ids_for_message("DRAFT", true);
+        assert_eq!(folders, vec!["DRAFT".to_string(), "DRAFT".to_string()]);
     }
 }

@@ -1,5 +1,8 @@
 use db::db::ReadDbState;
-use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
+use db::db::queries_extra::{
+    AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
+    upsert_labels,
+};
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use store::inline_image_store::InlineImage;
@@ -140,6 +143,33 @@ fn set_thread_labels(
         } else {
             label_ids.push(label_id);
         }
+    }
+
+    // Pre-create `labels` rows for any user-label IDs referenced by these
+    // messages. `replace_thread_labels` inserts FK-constrained rows; a
+    // user label observed on a message before the next `sync_labels` pass
+    // would otherwise FK-fail the whole transaction. Placeholder name is
+    // the label id - sync_labels overwrites it with the real display name
+    // and colour on its next cycle. See
+    // `docs/labels-unification/redesign.md` "Action pipeline integration"
+    // (the same pattern handles label observation between master-list pulls).
+    let placeholder_rows: Vec<LabelWriteRow> = label_ids
+        .iter()
+        .map(|id| LabelWriteRow {
+            id: (*id).to_string(),
+            account_id: account_id.to_string(),
+            name: (*id).to_string(),
+            visible: None,
+            sort_order: None,
+            server_color_bg: None,
+            server_color_fg: None,
+            user_color_bg: None,
+            user_color_fg: None,
+            is_undeletable: false,
+        })
+        .collect();
+    if !placeholder_rows.is_empty() {
+        upsert_labels(tx, &placeholder_rows)?;
     }
 
     sync_persistence::replace_thread_folders(tx, account_id, thread_id, folder_ids)?;

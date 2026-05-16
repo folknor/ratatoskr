@@ -44,13 +44,17 @@ pub(super) async fn sync_folders(
     let folder_map = FolderMap::build(&resolved, &all_folders);
 
     // Phase 3: Persist folders to DB
-    persist_labels(ctx, &folder_map).await?;
+    persist_folders_and_importance(ctx, &folder_map).await?;
 
     Ok(folder_map)
 }
 
-/// Persist folders to the DB.
-async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
+/// Persist Graph mail folders (and the synthesised `importance:*` labels)
+/// to the DB.
+async fn persist_folders_and_importance(
+    ctx: &ProviderCtx<'_>,
+    folder_map: &FolderMap,
+) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
 
     let folder_rows: Vec<FolderWriteRow> = folder_map
@@ -89,7 +93,7 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
                 .map_err(|e| format!("begin tx: {e}"))?;
             insert_folders_batch(&tx, &folder_rows)?;
             upsert_labels(&tx, &label_rows)?;
-            tx.commit().map_err(|e| format!("commit labels: {e}"))?;
+            tx.commit().map_err(|e| format!("commit folders: {e}"))?;
             Ok(())
         })
         .await

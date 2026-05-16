@@ -7,19 +7,25 @@ use db::db::ReadDbState;
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 
 // ---------------------------------------------------------------------------
-// Label sync
+// Folder + label sync
 // ---------------------------------------------------------------------------
+//
+// Gmail returns all sidebar primitives from one `list_labels` call, but
+// `type: "system"` rows (INBOX, SENT, CATEGORY_*, CHAT, etc.) are folders
+// in Ratatoskr and `type: "user"` rows are labels. This module partitions
+// them at ingest and routes each side to the appropriate writer.
+// See `docs/labels-unification/redesign.md` "Per-provider mapping".
 
 pub(super) async fn sync_labels(ctx: &SyncCtx<'_>) -> Result<(), String> {
     let labels = ctx.client.list_labels(ctx.db).await?;
 
     let aid = ctx.account_id.to_string();
     ctx.db
-        .with_conn(move |conn| persist_labels(conn, &aid, &labels))
+        .with_conn(move |conn| persist_folders_and_labels(conn, &aid, &labels))
         .await
 }
 
-fn persist_labels(
+fn persist_folders_and_labels(
     conn: &rusqlite::Connection,
     account_id: &str,
     labels: &[GmailLabel],
@@ -77,7 +83,7 @@ fn persist_labels(
 
     insert_folders_batch(&tx, &folder_rows)?;
     upsert_labels(&tx, &label_rows)?;
-    tx.commit().map_err(|e| format!("commit labels: {e}"))?;
+    tx.commit().map_err(|e| format!("commit folders + labels: {e}"))?;
     Ok(())
 }
 

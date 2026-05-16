@@ -200,7 +200,7 @@ fn set_thread_labels(
         .iter()
         .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
     {
-        if is_graph_tag_id(label_id) {
+        if common::folder_roles::is_graph_tag_id(label_id) {
             label_ids.push(label_id);
         } else {
             folder_ids.push(label_id);
@@ -213,10 +213,6 @@ fn set_thread_labels(
         thread_id,
         label_ids,
     )
-}
-
-fn is_graph_tag_id(label_id: &str) -> bool {
-    label_id.starts_with("cat:") || label_id.starts_with("importance:")
 }
 
 fn upsert_graph_label_rows(

@@ -46,29 +46,22 @@ slice 6 deletes the harness compatibility shim.
 
 ## Slice 3 - provider sync split
 
-### CRITICAL
-
-**`recompute_thread_keyword_labels` still scopes deletes with `WHERE label_id LIKE 'kw:%'` AND writes into the labels-only junction.** `crates/provider-sync/src/imap/sync_pipeline.rs:316-339`. `redesign.md:146`: "The old `WHERE label_id LIKE 'kw:%'` filter, which scoped the delete to keyword rows within the unified junction, is unnecessary post-split because the junction is labels-only." Worse: the labels-only `thread_labels` table also holds non-`kw:` rows (Gmail user labels, Exchange `cat:`, `importance:*`). The scoped DELETE leaves stale rows untouched while the INSERT writes `kw:` IDs alongside them - a footgun the moment any junction writer crosses provider boundaries. Drop the LIKE filter; the function is keyword-specific by table membership alone.
-
-### HIGH
-
-**Gmail `replace_thread_labels` can FK-fail for any user label not yet present in `labels`.** `crates/provider-sync/src/gmail/sync/storage.rs:146-152` + `crates/db/src/db/queries_extra/thread_persistence.rs:545-552`. `INSERT OR IGNORE` suppresses PK/UNIQUE conflicts only - NOT FK violations (SQLite docs). The Gmail per-thread store path doesn't upsert `labels` rows for the user labels it references; it depends on `sync_labels` having run first. A race (label created on the server between two `sync_labels` cycles, or a history-id delta `LABEL_ADDED` for a label not yet cached) FK-fails the whole transaction. Graph dodges this because `upsert_graph_label_rows` runs inside the same tx; IMAP dodges it because `replace_message_keywords` upserts first. Gmail should collect referenced user-label IDs from `messages[*].base.label_ids` and upsert minimal `LabelWriteRow` placeholders for any unknown ones before calling `replace_thread_labels`.
-
-**`STARRED` in `SYSTEM_FOLDER_ROLES` propagates to `is_gmail_system_folder_label_id`.** `crates/db/src/db/folder_roles.rs:93-100, 140-142`. Slice 1 flagged the entry itself; the slice-3 consequence is two layers of negation. `is_gmail_system_folder_label_id("STARRED")` evaluates `is_system_folder_id("STARRED")`, which carves it out via `entry.label_id != "STARRED"` and returns `false`, routing `STARRED` to the label branch in `gmail/sync/storage.rs::set_thread_labels` where `filtered_thread_labels` strips it. The chain works only because of the carve-out condition. Remove the entry; drop the carve-out.
-
-### MEDIUM
-
-**IMAP `is_undeletable` keys on name-fallback role detection.** `crates/provider-sync/src/imap/sync_pipeline.rs:594` + `crates/imap/src/folder_mapper.rs:40-52`. `redesign.md:160`: "The classification source is the provider's own system flag at ingest, not Ratatoskr's role map." For IMAP that means `imap_special_use` (server flag), not `imap_name_to_special_use` (Ratatoskr's role map). A user folder named "Drafts" on a server that doesn't advertise SPECIAL-USE gets `folder_type = "system"` and `is_undeletable = 1`, blocking the user from deleting their own folder. Narrow `is_undeletable` to "special-use was advertised by the server".
-
-**Gmail user labels created on the server between syncs don't appear in `labels` until the next `sync_labels` cycle.** Softer manifestation of the HIGH above: `labels` snapshots "what the last list_labels saw," not "what's referenced on any thread." The HIGH fix solves this too.
-
-**Comments and error strings lie post-split.** `gmail/sync/labels.rs:31-76` is now a folder+label partitioner but the function name/comments still say labels-only. `graph/sync/folders.rs:44` has a `persist_labels` function name in a folders module. `jmap/sync/mailbox.rs:142` and `imap/sync_pipeline.rs:600` emit `"commit labels:"` error strings on folder inserts. `glossary:33` is binding on identifiers; the principle extends to error strings users see during ingest debugging.
-
-### LOW
-
-**`is_graph_tag_id` is a sibling prefix-sniff to the typed-ID rule.** `crates/provider-sync/src/graph/sync/persistence.rs:218-220`. Fair to do string-sniffing at the ingest boundary, but the helper should live next to `is_gmail_system_folder_label_id` in `common::folder_roles` or be inlined with a comment naming the spec line. Currently a free-floating local function that will get duplicated.
-
-**Stale test in `imap/src/folder_mapper.rs:141-145`.** `test_get_folder_ids_for_draft` constructs `get_folder_ids_for_message("Drafts", true)` and asserts `["Drafts", "DRAFT"]`. By post-split convention the input should already be canonical `"DRAFT"` from `map_folder_to_folder` (special-use `\Drafts`), so the test pins a code path that never fires in production.
+RESOLVED in this branch. `recompute_thread_keyword_labels` drops the
+LIKE filter (IMAP-account threads only carry `kw:*` rows by provider
+definition, so the destructive replace is safe). Gmail
+`set_thread_labels` pre-creates placeholder `labels` rows for any
+user-label IDs referenced by the messages so the FK in
+`replace_thread_labels` cannot fire ahead of the next `sync_labels`
+cycle. IMAP `is_undeletable` narrows to `folder.special_use.is_some()`,
+so a user-named "Drafts" on a server without SPECIAL-USE is no longer
+trapped as system. Gmail labels module renamed
+(`persist_folders_and_labels`) with a docstring naming the partition,
+Graph folders helper renamed (`persist_folders_and_importance`), and
+`"commit labels:"` error strings on folder inserts read
+`"commit folders:"` across IMAP / JMAP / Graph. `is_graph_tag_id`
+lifted to `common::folder_roles`. The stale
+`test_get_folder_ids_for_draft` was updated to use the canonical
+"DRAFT" id that production callers actually produce.
 
 ---
 

@@ -134,6 +134,14 @@ pub fn is_gmail_system_folder_label_id(label_id: &str) -> bool {
     is_system_folder_id(label_id) || label_id == "CHAT" || label_id.starts_with("CATEGORY_")
 }
 
+/// Graph IDs that the provider exposes as tag-shaped (Exchange categories
+/// and synthesised importance labels). Used at sync ingest to partition
+/// per-message label IDs into folder writes vs label writes; see
+/// `docs/labels-unification/redesign.md` "ID encoding by origin".
+pub fn is_graph_tag_id(label_id: &str) -> bool {
+    label_id.starts_with("cat:") || label_id.starts_with("importance:")
+}
+
 pub fn system_folder_by_imap_special_use(special_use: &str) -> Option<&'static SystemFolderRole> {
     SYSTEM_FOLDER_ROLES
         .iter()
