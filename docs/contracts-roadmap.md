@@ -60,7 +60,7 @@ The following questions were open in the previous version of this doc; they are 
 
 - **Inclusive vs exclusive `DateBound`?** Resolved: `DateBound` emits exclusive bounds for both SQL and Tantivy.
 - **JMAP non-keyword labels - possible or not?** Resolved: JMAP user mailboxes are folder-shaped, and JMAP label actions are keyword-only after the #5c typed label boundary. Shape 10 is fully resolved by the shared IMAP/JMAP keyword recompute helper.
-- **Legacy plaintext credentials - still load-bearing?** If yes, `StoredSecret::parse` stays tolerant of both formats forever. If no, the parser becomes strict and legacy support moves to a one-shot re-encrypt migration.
+- **Legacy plaintext credentials - still load-bearing?** Resolved: no. There are no existing users; legacy plaintext rows do not need to be preserved. The next credentials patch makes `StoredSecret::parse` strict (encrypted wire shape only) after a one-pass writer audit that confirms every credential-producing path encrypts; the `EncryptedSecret` rename is sequenced as an optional follow-up mechanical patch.
 - **`#5c` on-disk format:** boundary adapter at the DB read/write boundary (recommended) vs DB restructure (cleaner, larger).
 - **`#5c` IPC wire format:** serde `#[serde(tag, content)]` on `FolderKind` / `LabelKind` (cleaner) vs `String` on the wire with parse-at-IPC-boundary (smaller migration).
 
@@ -89,48 +89,45 @@ Sequence chosen by *leverage per migration* and *fidelity tier*. Land high-fidel
 
 ### 1. #5a Credentials - boundary parse (high fidelity)
 
-**Status:** code path landed for current credential readers. `decrypt_or_raw` and `decrypt_if_needed` are removed; Gmail, Graph, JMAP, and IMAP consume `StoredSecret`. The external-construction check is pinned by the `StoredSecret` rustdoc `compile_fail` example.
+**Status:** code path landed for current credential readers. `decrypt_or_raw` and `decrypt_if_needed` are removed; Gmail, Graph, JMAP, and IMAP consume `StoredSecret`. The external-construction check is pinned by the `StoredSecret` rustdoc `compile_fail` example. The strict-vs-tolerant disposition has resolved to strict (see Remaining open questions); the next credentials patch flips `StoredSecret::parse` to encrypted-only after the writer audit confirms every credential-producing path encrypts.
 
-**Inventory:** `crates/gmail/src/client.rs:122`, `crates/graph/src/client.rs:122`, `crates/common/src/crypto.rs:123-132`, `crates/common/src/crypto.rs:137-147`.
-
-**Design sketch.** `StoredSecret::parse(raw: String) -> StoredSecret` handles both encrypted format (`base64:base64`) and legacy plaintext at the parse boundary. Parsing is an infallible classification step; decryption is the fallible operation. Returns a single typed value that downstream code consumes. Readers see only the parsed type.
+**Design sketch.** `StoredSecret::parse(raw: String) -> Result<StoredSecret, ParseError>` accepts only the encrypted wire shape (`base64:base64` with valid base64 and IV/tag length classification at the parse boundary). Parsing is a classification step that distinguishes malformed from well-formed-but-undecryptable; decryption is a separate fallible operation. Readers see only the parsed type.
 
 ```rust
-pub struct StoredSecret(/* private: bytes + format discriminator */);
+pub struct StoredSecret(/* private: bytes */);
 
 impl StoredSecret {
-    pub fn parse(raw: String) -> StoredSecret {
-        // tolerant: accepts encrypted (base64:base64) OR legacy plaintext;
-        // returns typed value with format discriminator stored internally.
+    pub fn parse(raw: &str) -> Result<StoredSecret, ParseError> {
+        // strict: encrypted wire shape only. Pre-validates base64 and
+        // IV/tag lengths so that decrypt failures are classified
+        // separately from malformed stored secrets.
     }
 
     pub fn decrypt(&self, key: &[u8; 32]) -> Result<String, DecryptError> {
-        // typed reader; per-format dispatch happens internally; callers cannot fall through to raw.
+        // typed reader; AES-256-GCM authentication is the substantive check.
     }
 
-    pub fn decrypt_optional(raw: Option<String>, key: &[u8; 32])
-        -> Result<Option<String>, DecryptError>
+    pub fn decrypt_optional(raw: Option<&str>, key: &[u8; 32])
+        -> Result<Option<String>, ParseOrDecryptError>
     {
         // Optionality stays orthogonal to the storage format.
     }
 }
 ```
 
-The name is **`StoredSecret`**, not `EncryptedToken` - the latter would be misleading while the legacy plaintext path is still load-bearing. Once the plaintext path is eliminated (via a one-shot re-encrypt migration), the type could be renamed.
+The name **`StoredSecret`** is retained for the strict-parse patch to keep blame clean; a follow-up mechanical patch renames it to `EncryptedSecret` once the type's invariant is narrowed and the rename can land without conflating semantic and naming changes.
 
 The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`. The two-variant decryption API (`decrypt_or_raw` vs `decrypt_if_needed`) collapses to one.
 
 **Fidelity:** high. Boundary parse within `common`. The parser is the only public constructor; readers consume the typed value. Cross-crate consumers (`gmail`, `graph`, `jmap`, `imap`) receive the parsed type via `common::crypto`. Private fields prevent external construction.
 
-**Migration scope.** `crates/common/src/crypto.rs`; the four provider client modules that call `decrypt_or_raw` / `decrypt_if_needed`. ~10 call sites total.
+**Migration scope.** `crates/common/src/crypto.rs`; the four provider client modules; a writer audit across dev-seed, harness setup, fixtures, provider account creation, and settings/account update paths to confirm every credential-producing path uses the encrypt path before `parse` flips to strict. No existing users means no data migration; any path still writing plaintext is fixed in code first.
 
-**Open question.** Is the legacy plaintext path still load-bearing in 2026, or can it be migrated to "rejection + one-time re-encrypt" cleanly? Worth checking before deciding whether the parser accepts both formats forever or only during a migration window. If the answer is "rejection," the parse function becomes strict and the legacy support moves to a one-shot migration script - and the type can be renamed to `EncryptedSecret` to reflect the narrowed invariant.
-
-**Success criteria.** `decrypt_or_raw` and `decrypt_if_needed` are gone. The four provider clients consume `StoredSecret` directly. A compile-fail test attempts to pass a raw `String` to a function expecting `StoredSecret` and fails.
+**Success criteria.** `decrypt_or_raw` and `decrypt_if_needed` are gone (already landed). `StoredSecret::parse` rejects non-encrypted shapes. A compile-fail test attempts to pass a raw `String` to a function expecting `StoredSecret` and fails. A unit test confirms `parse` rejects plaintext-looking input.
 
 ### 2. #5-pre MailProviderKind - boundary parse (high fidelity)
 
-**Status:** in progress. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, cloud-upload support is keyed by `MailProviderKind`, and command-context provider availability now parses DB provider strings through `MailProviderKind` before adapting to the command palette's wire enum. The full workspace migration is still open.
+**Status:** in progress. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers (the `saehrimnir`-driven mock provider variants exercised by `brokkr service-test` / `service-suite`; see `docs/glossary/harness.md`) still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, cloud-upload support is keyed by `MailProviderKind`, and command-context provider availability now parses DB provider strings through `MailProviderKind` before adapting to the command palette's wire enum. The full workspace migration is still open.
 
 **Inventory:** No direct entries (this is prereq infrastructure for #5c). Implicitly addressed by every Shape 6 entry where a provider-identity string flows alongside a label string.
 
@@ -147,7 +144,7 @@ pub enum MailProviderKind {
 
 impl MailProviderKind {
     pub fn parse(raw: &str) -> Result<MailProviderKind, ParseError> { ... }
-    pub fn as_str(&self) -> &'static str { ... }
+    pub fn as_str(self) -> &'static str { ... }   // by value; the enum is Copy
 }
 ```
 
@@ -159,7 +156,7 @@ Every existing `provider: &str` or `provider_name: String` parameter **in the ma
 
 **Migration scope.** `crates/types/src/lib.rs` (new type); call sites in `core`, `service`, `provider-sync`, every mail-provider crate, the action service, dev-seed. Touches many files but each touch is mechanical.
 
-**Open question.** Should the type live in `types` or `common`? `types` is the lighter-weight crate (per AGENTS.md, minimal deps, serde-only). `common` already depends on `types`. The argument for `types` is that `service-api` can depend on `types` without pulling in `common`. Recommend `types`.
+**Decided.** Lives in `types` (`crates/types/src/mail_provider.rs`). `types` is the lighter-weight crate (per AGENTS.md, minimal deps, serde-only); `common` already depends on `types`. `service-api` can depend on `types` without pulling in `common`.
 
 **Success criteria.** No function in the workspace accepts `provider: &str` for the *mail-provider-identity sense*. Adjacent provider axes (OAuth, discovery, calendar, cloud attachments) are explicitly out of scope. A compile-fail test attempts to pass `"gmail"` as a string where `MailProviderKind` is expected and fails.
 
@@ -185,14 +182,17 @@ pub struct ThreadAggregate {
     snippet: String,
 }
 
-impl ThreadAggregate {
-    /// SQL-owning constructor. Applies `is_reaction = 0` inline and uses
-    /// the canonical per-field reducer (MIN for is_read, ANY for the others).
-    pub fn compute_thread_aggregate(tx: &Transaction, account_id: &str, thread_id: &str)
-        -> Result<ThreadAggregate, String> { ... }
+/// SQL-owning constructor. Applies `is_reaction = 0` inline and uses
+/// the canonical per-field reducer (MIN for is_read, ANY for the others).
+/// Lives as a free function in `db::queries_extra::thread_persistence`,
+/// not as an associated function on `ThreadAggregate`.
+pub fn compute_thread_aggregate(tx: &Transaction, account_id: &str, thread_id: &str)
+    -> Result<ThreadAggregate, String> { ... }
 
+impl ThreadAggregate {
     /// In-memory constructor for sync/pipeline and dev-seed.
-    /// Takes a typed input newtype that proves the is_reaction = 0 filter.
+    /// Takes a typed input newtype whose presence reflects caller-side
+    /// `is_reaction = 0` filtering at the call site.
     pub fn compute_from_messages(first: &NonReactionMessage, rest: &[NonReactionMessage])
         -> ThreadAggregate { ... }
 
@@ -203,11 +203,15 @@ impl ThreadAggregate {
     // ...etc
 }
 
-/// Typed proof that the `is_reaction = 0` filter has been applied.
+/// Newtype wrapping a message row the caller has filtered for
+/// `is_reaction = 0`. Sealed against struct-literal construction
+/// (private fields, `pub fn new(...)` constructor); the contract
+/// that callers actually filter is reviewer-enforced at the call
+/// site, not type-system enforced.
 pub struct NonReactionMessage { /* private fields */ }
 ```
 
-Both constructors are `pub` so `sync::pipeline` and `dev-seed` can call them from outside `db`. Sealing comes from **private struct fields plus the typed input newtype**, not from `pub(crate)` visibility.
+Both constructors are `pub` so `sync::pipeline` and `dev-seed` can call them from outside `db`. Sealing comes from **private struct fields plus the named-constructor pattern**, not from `pub(crate)` visibility. `NonReactionMessage` prevents struct-literal construction; it does not prove that the caller filtered.
 
 Per-field aggregate types (`ThreadReadAggregate`, etc.) are **not** introduced. The contract is *single place where the reducer rules live*, not *one type per rule*.
 
@@ -347,7 +351,8 @@ pub struct LabelStyleHex {
 }
 
 impl LabelStyleHex {
-    pub fn resolve(row: &LabelRow, palette: &PaletteFallback) -> LabelStyleHex { ... }
+    pub fn new(bg: &str, fg: &str) -> LabelStyleHex { ... }
+    pub fn from_optional_pair(bg: Option<&str>, fg: Option<&str>) -> Result<LabelStyleHex, LabelStyleError> { ... }
     pub fn bg(&self) -> HexColor { self.bg }
     pub fn fg(&self) -> HexColor { self.fg }
 }
@@ -367,7 +372,7 @@ impl LabelPaint {
 
 Partial values (`Some(bg), None`) cannot be constructed at either level. The resolver returns a complete pair or falls back to the palette.
 
-**Fidelity:** high within each crate.
+**Fidelity:** the complete-or-missing invariant is sealed (the inner `LabelStyleHex` cannot be constructed in a partial state because both fields are required), and the boundary `LabelStyleHex::from_optional_pair` is the only sanctioned converter from `(Option<&str>, Option<&str>)`. What is *not* sealed is the inner hex validation: `LabelStyleHex::new(bg, fg)` accepts any `&str` and does not check hex shape. The completion-state contract is high-fidelity within the crate; the validated-domain contract on the colour strings themselves is medium fidelity and lives at the `LabelPaint::from_hex` boundary in the renderer.
 
 **Migration scope.** `crates/label-colors/src/lib.rs`, widget call sites (`reading_pane`, `thread_list`, sidebar).
 
@@ -375,7 +380,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 ### 6. #4 Mutation Capability - capability token (high fidelity, option 4)
 
-**Status:** composite no-enqueue, keyword-membership, and merge-vs-replace membership slices landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Provider-sync has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. Provider-sync also owns thread folder/label membership orchestration: full-thread paths call provider-local replace wrappers, partial-delta paths call provider-local merge wrappers, and `db` exposes only raw row insert/delete primitives. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; optimistic local-label intent while provider echo is pending remains a follow-up design point.
+**Status:** composite no-enqueue, keyword-membership, and merge-vs-replace membership slices landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Provider-sync has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. Provider-sync also owns thread folder/label membership orchestration: full-thread paths call provider-local replace wrappers, partial-delta paths call provider-local merge wrappers, and `db` exposes only raw row insert/delete primitives. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; optimistic local-label intent while provider echo is pending is sequenced as a separate design slice (see `docs/optimistic-label-intent.md`).
 
 **Inventory:** Shape 4 entries (merge vs replace helpers, JMAP keyword path), Shape 7 (composite suppress flag), Shape 10 (partial-delta keyword loss as a #4 instance).
 
@@ -393,22 +398,26 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 - **`provider-sync` owns the path-specific high-level helpers.**
   ```rust
-  // crates/provider-sync/src/gmail/sync/storage.rs
-  fn replace_full_thread_labels(tx: &Transaction, key: ThreadKey, labels: impl Iterator<Item = &str>)
+  // crates/provider-sync/src/gmail/sync/storage.rs (illustrative signature;
+  // the real functions take `account_id: &str, thread_id: &str` as
+  // separate parameters — no `ThreadKey` type exists today).
+  fn replace_full_thread_labels(tx: &Transaction, account_id: &str, thread_id: &str,
+                                labels: impl Iterator<Item = &str>)
       -> Result<(), String>
   {
       let labels = thread_membership::filtered_membership_ids(labels);
-      db::queries_extra::delete_thread_label_rows(tx, key)?;
-      db::queries_extra::insert_thread_label_rows(tx, key, &labels)?;
+      db::queries_extra::delete_thread_label_rows(tx, account_id, thread_id)?;
+      db::queries_extra::insert_thread_label_rows(tx, account_id, thread_id, &labels)?;
       Ok(())
   }
 
   // crates/provider-sync/src/graph/sync/persistence.rs
-  fn merge_partial_delta_labels(tx: &Transaction, key: ThreadKey, labels: impl Iterator<Item = &str>)
+  fn merge_partial_delta_labels(tx: &Transaction, account_id: &str, thread_id: &str,
+                                labels: impl Iterator<Item = &str>)
       -> Result<(), String>
   {
       let labels = thread_membership::filtered_membership_ids(labels);
-      db::queries_extra::insert_thread_label_rows(tx, key, &labels)?;
+      db::queries_extra::insert_thread_label_rows(tx, account_id, thread_id, &labels)?;
       Ok(())
   }
   ```
@@ -418,7 +427,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 - **`sync::pipeline::store_threads` persistence half moves up.** The function was called only from `provider-sync/imap/imap_initial.rs` and `provider-sync/imap/imap_delta.rs`. The JWZ-threading half (computing `ThreadGroup` values, the `MessageMeta` types) stays in `sync`; the persistence half (the per-thread aggregate plus provider-local membership replacement) moved to `provider-sync`.
 
-**Composite per-member dispatch (independent of cross-crate structure).** The per-member dispatch goes through `_no_enqueue` entry points typed as such. The public entry point that enqueues is `add_label(...)`; the composite-callable entry point is `add_label_no_enqueue(...) -> ActionOutcome`. The composite holds an `ActionContext` that does not include an `EnqueueCapability` token; the public `add_label` requires the token. `suppress_pending_enqueue: bool` disappears.
+**Composite per-member dispatch (independent of cross-crate structure).** The per-member dispatch goes through `_no_enqueue` entry points typed as such. The public entry point that enqueues is `add_label(...)`; the composite-callable entry point is `add_label_with_provider_no_enqueue(...) -> ActionOutcome`. The composite never reaches the enqueueing variant, so the composite-side use of `ActionContext.suppress_pending_enqueue` is structurally unreachable from inside `dispatch_member_ops`. The flag itself remains on `ActionContext` for the pending-op retry worker (a separate suppression case where the retry path re-runs the action and must not re-enqueue on success); the doc previously described this as the flag "disappearing," but only the composite-dispatch use disappears.
 
 **Fidelity:** high. The typed inputs and the helpers live in the same crate as their legitimate constructors; standard within-crate sealing applies.
 
@@ -495,7 +504,7 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Status:** landed for the documented failure shape. `ViewScope::to_account_scope()` is deleted; navigation and thread loading now dispatch on `ViewScope` exhaustively before constructing an `AccountScope` for personal-account query paths.
 
-**Inventory:** `core/src/scope.rs:31-36`, parts of Shape 8.
+**Inventory:** Shape-1 grain.scope entries (resolved; the cited `to_account_scope()` accessor in `crates/core/src/scope.rs` has been deleted along with its call sites), parts of Shape 8.
 
 **Design sketch.** `ViewScope::to_account_scope() -> Option<AccountScope>` is the failure shape. Replace with exhaustive dispatch:
 
@@ -646,7 +655,7 @@ A folder cannot accidentally be passed where a label is expected. `MailLocator` 
 
 These apply to every contract migration.
 
-- **Each migration is a sequence of compile-checked landings, not one mega-PR.** Introduce the type, migrate one consumer, repeat. Brokkr's compile-fail tests are the safety net.
+- **Each migration is a sequence of compile-checked landings, not one mega-PR.** Introduce the type, migrate one consumer, repeat. Compile-fail tests are the safety net; they live as `compile_fail` rustdoc examples on the sealed types themselves (see `crates/common/src/crypto.rs` for the `StoredSecret` example) and run as part of `brokkr check` via the standard cargo doc-test pipeline. Each per-contract Success criteria block names the specific compile-fail test that pins that contract.
 - **No deprecated source shims.** Old call sites become compile errors during migration, not runtime warnings. No `#[deprecated]` wrappers that leave both APIs callable from new code; either the old function is gone or it returns a different type that doesn't satisfy the new signature. **This rule applies to cross-crate relocations too** - when a type or helper moves between crates (as in #4), the move is a single atomic landing; both crates do not expose the same source-level API simultaneously.
 - **Boundary adapters are allowed where the boundary is real.** A DB migration that reads both old and new format during a transition window is a boundary adapter, not a source shim. An IPC version-bump compatibility shim that translates an old wire format into the new typed value is a boundary adapter. The rule is: adapters live at the edge (disk, wire, external input) where the format is genuinely outside our control; they do not live at the source level where we control both producer and consumer.
 - **No `// TODO: migrate later` markers in code.** If a source-level call site can't migrate now, the type design isn't right yet - back to design, not technical debt. (Does not apply to boundary adapters, which are explicit migration boundaries.)
@@ -661,5 +670,6 @@ These apply to every contract migration.
 ## Cross-references
 
 - `docs/glossary/discrepancies.md` - the tagged inventory each contract resolves.
+- `docs/optimistic-label-intent.md` - design slice for the contract #4 follow-up (optimistic local-label intent while provider echo is pending). Three-stage implementation plan.
 - `docs/architecture.md` - the guiding principles and existing settled patterns. The composite-operations section is the de-facto pre-existing spec for contract #4. The "shared-table SQL belongs to `db`" rule is *clarified* by #4's row-primitives-vs-orchestration split, not weakened - raw SQL stays in `db::queries_extra::thread_persistence`.
 - `docs/glossary/folders-labels.md` - the binding rules contracts #1, #3, #4, and #5c encode into types. Note the per-field reducer rule for thread aggregates.
