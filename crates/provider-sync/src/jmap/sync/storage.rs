@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 
 use db::db::queries_extra::{
-    AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
-    upsert_labels,
+    AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages,
 };
-use common::types::LabelKind;
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 
 use super::super::parse::ParsedJmapMessage;
 use super::SyncCtx;
+use crate::keyword_membership::{
+    KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
+};
 use crate::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,11 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
+            let affected_threads =
+                sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
+            for thread_id in &affected_threads {
+                recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, &aid, thread_id)?;
+            }
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
         })
@@ -280,53 +285,25 @@ fn upsert_attachments(
 // Keyword -> category sync
 // ---------------------------------------------------------------------------
 
-/// Ensure non-system JMAP keywords exist in the labels table.
-///
-/// Upserts each keyword as a label with a `kw:` prefix and links it to the
-/// thread via `thread_labels`.
+/// Replace per-message keyword rows for incoming JMAP messages, then
+/// recompute the thread aggregate from the full per-message union.
 fn sync_keyword_labels(
     tx: &rusqlite::Transaction,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
-    let mut unique_keywords: Vec<String> = messages
-        .iter()
-        .flat_map(|msg| msg.keyword_categories.iter().cloned())
-        .collect();
-    unique_keywords.sort();
-    unique_keywords.dedup();
-
-    if unique_keywords.is_empty() {
-        return Ok(());
-    }
-
-    for keyword in &unique_keywords {
-        let label_id = LabelKind::jmap_keyword(keyword)?.storage_id();
-        upsert_labels(
+    for msg in messages {
+        replace_message_keywords(
             tx,
-            &[LabelWriteRow {
-                id: label_id.clone(),
-                account_id: account_id.to_string(),
-                name: keyword.clone(),
-                visible: None,
-                sort_order: None,
-                server_color_bg: None,
-                server_color_fg: None,
-                user_color_bg: None,
-                user_color_fg: None,
-                is_undeletable: false,
-            }],
+            KeywordProvider::Jmap,
+            account_id,
+            &msg.base.id,
+            &msg.keyword_categories,
         )?;
-        tx.execute(
-            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![account_id, thread_id, label_id],
-        )
-        .map_err(|e| format!("insert jmap keyword thread_label: {e}"))?;
     }
 
-    Ok(())
+    recompute_thread_keyword_labels(tx, KeywordProvider::Jmap, account_id, thread_id)
 }
 
 // ---------------------------------------------------------------------------

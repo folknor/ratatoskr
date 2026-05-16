@@ -265,7 +265,7 @@ User-visible label groups. `label_groups` stores the group name and colour. `lab
 
 ### `message_keywords` table
 
-Per-message keyword membership for IMAP. Columns: `(account_id, message_id, keyword, label_id)` with PK `(account_id, message_id, label_id)`. The thread-level `kw:%` rows in `thread_labels` are derived from the union of `message_keywords` rows for messages in the thread - this is what makes IMAP keyword removal observable (the previous design had no per-message store, so removing a keyword on the server could not subtract from the thread aggregate). Other providers do not currently have an equivalent per-message membership table; folder/category aggregates on Graph and JMAP are reconciled by partial-delta merge instead.
+Per-message keyword membership for IMAP and JMAP. Columns: `(account_id, message_id, keyword, label_id)` with PK `(account_id, message_id, label_id)`. The thread-level `kw:%` rows in `thread_labels` are derived from the union of `message_keywords` rows for messages in the thread - this is what makes keyword removal observable. Incoming IMAP and JMAP message changes replace the message's keyword rows, then recompute the thread aggregate from the union. Graph categories are not keyword-shaped and are reconciled through the provider category path instead.
 
 ### `threads` table - message-state columns
 

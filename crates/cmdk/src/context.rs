@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use types::MailProviderKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -7,6 +8,17 @@ pub enum ProviderKind {
     Jmap,
     Graph,
     Imap,
+}
+
+impl From<MailProviderKind> for ProviderKind {
+    fn from(value: MailProviderKind) -> Self {
+        match value {
+            MailProviderKind::Gmail => Self::Gmail,
+            MailProviderKind::Jmap => Self::Jmap,
+            MailProviderKind::Graph => Self::Graph,
+            MailProviderKind::Imap => Self::Imap,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,5 +191,16 @@ mod tests {
         assert!(ctx.has_selection());
         assert!(!ctx.has_single_selection());
         assert_eq!(ctx.selection_count(), 2);
+    }
+
+    #[test]
+    fn command_provider_kind_maps_from_mail_provider_kind() {
+        assert_eq!(
+            ProviderKind::from(MailProviderKind::Gmail),
+            ProviderKind::Gmail
+        );
+        assert_eq!(ProviderKind::from(MailProviderKind::Graph), ProviderKind::Graph);
+        assert_eq!(ProviderKind::from(MailProviderKind::Jmap), ProviderKind::Jmap);
+        assert_eq!(ProviderKind::from(MailProviderKind::Imap), ProviderKind::Imap);
     }
 }

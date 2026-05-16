@@ -270,13 +270,9 @@ fn active_account_info(app: &ReadyApp) -> (Option<String>, Option<cmdk::Provider
 
 /// Map a provider string from the DB to a `ProviderKind` enum.
 fn provider_str_to_kind(provider: &str) -> Option<cmdk::ProviderKind> {
-    match provider {
-        "gmail_api" => Some(cmdk::ProviderKind::Gmail),
-        "jmap" => Some(cmdk::ProviderKind::Jmap),
-        "graph" => Some(cmdk::ProviderKind::Graph),
-        "imap" => Some(cmdk::ProviderKind::Imap),
-        _ => None,
-    }
+    types::MailProviderKind::parse(provider)
+        .ok()
+        .map(cmdk::ProviderKind::from)
 }
 
 struct ThreadState {

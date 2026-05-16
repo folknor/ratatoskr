@@ -59,7 +59,7 @@ The following questions were open in the previous version of this doc; they are 
 ### Remaining open questions
 
 - **Inclusive vs exclusive `DateBound`?** Resolved: `DateBound` emits exclusive bounds for both SQL and Tantivy.
-- **JMAP non-keyword labels - possible or not?** If keyword-only by construction, Shape 10 is fully resolved by an IMAP-style recompute pattern applied to JMAP. If non-keyword JMAP labels can flow, this is a data-loss bug to fix during the #4 migration. Verify before designing.
+- **JMAP non-keyword labels - possible or not?** Resolved: JMAP user mailboxes are folder-shaped, and JMAP label actions are keyword-only after the #5c typed label boundary. Shape 10 is fully resolved by the shared IMAP/JMAP keyword recompute helper.
 - **Legacy plaintext credentials - still load-bearing?** If yes, `StoredSecret::parse` stays tolerant of both formats forever. If no, the parser becomes strict and legacy support moves to a one-shot re-encrypt migration.
 - **`#5c` on-disk format:** boundary adapter at the DB read/write boundary (recommended) vs DB restructure (cleaner, larger).
 - **`#5c` IPC wire format:** serde `#[serde(tag, content)]` on `FolderKind` / `LabelKind` (cleaner) vs `String` on the wire with parse-at-IPC-boundary (smaller migration).
@@ -130,7 +130,7 @@ The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`
 
 ### 2. #5-pre MailProviderKind - boundary parse (high fidelity)
 
-**Status:** in progress. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, and cloud-upload support is now keyed by `MailProviderKind`. The full workspace migration is still open.
+**Status:** in progress. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, cloud-upload support is keyed by `MailProviderKind`, and command-context provider availability now parses DB provider strings through `MailProviderKind` before adapting to the command palette's wire enum. The full workspace migration is still open.
 
 **Inventory:** No direct entries (this is prereq infrastructure for #5c). Implicitly addressed by every Shape 6 entry where a provider-identity string flows alongside a label string.
 
@@ -373,7 +373,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 ### 6. #4 Mutation Capability - capability token (high fidelity, option 4)
 
-**Status:** composite no-enqueue slice landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; the broader merge-vs-replace capability migration remains open.
+**Status:** composite no-enqueue slice landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Keyword-membership slice also landed: provider-sync now has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; the broader merge-vs-replace capability migration remains open.
 
 **Inventory:** Shape 4 entries (merge vs replace helpers, JMAP keyword path), Shape 7 (composite suppress flag), Shape 10 (partial-delta keyword loss as a #4 instance).
 
@@ -442,13 +442,13 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 - `crates/db/src/db/queries_extra/thread_persistence.rs` - `replace_thread_*` / `merge_thread_*` deleted (or downgraded to private helpers if any internal caller still needs them).
 - `crates/sync/src/pipeline.rs` - `store_threads` keeps JWZ-threading logic but stops calling `replace_thread_*`; persistence half is gone.
 - `crates/provider-sync/src/imap/imap_initial.rs`, `imap_delta.rs` - compose the split: `sync::compute_thread_groups` + `provider_sync::store_thread_groups`.
-- `crates/provider-sync/src/gmail/sync/storage.rs`, `graph/sync/persistence.rs`, `jmap/sync/storage.rs` - re-import from `provider_sync::thread_writes`. JMAP grows the missing `merge_thread_labels` call (Shape 10 / fixed if non-keyword JMAP labels exist, see open question).
+- `crates/provider-sync/src/gmail/sync/storage.rs`, `graph/sync/persistence.rs`, `jmap/sync/storage.rs` - re-import from `provider_sync::thread_writes`. JMAP keyword rows are already handled by the shared per-message keyword recompute helper; any future non-keyword JMAP label membership must enter through the typed merge/replace helper rather than a raw `thread_labels` write.
 - `crates/service/src/actions/label.rs` - split `add_label` into `add_label_no_enqueue` + `add_label` requiring `EnqueueCapability`.
 - `crates/service/src/actions/label_group.rs` - composite calls only `_no_enqueue` entry points. `ActionContext.suppress_pending_enqueue` is deleted.
 
 Per the migration ground rules, the move is a single-landing atomic PR. No source-level relocation shims. If the scope is too large for one landing, re-scope by helper-and-its-callers, with the corresponding type moving alongside the first helper.
 
-**Remaining open question.** Does JMAP carry non-keyword raw labels? If keyword-only, Shape 10 is resolved by the IMAP-style recompute pattern applied to JMAP. If non-keyword JMAP labels can flow, this is a data-loss bug to fix during this migration.
+**Resolved question.** JMAP user mailboxes are folder-shaped, and JMAP label actions are keyword-only after the #5c typed label boundary. Shape 10 is resolved by applying the IMAP-style per-message keyword recompute pattern to JMAP. If future JMAP non-keyword labels are introduced, they need a typed membership helper before entering `thread_labels`.
 
 **Success criteria.** Shape 4 inventory entries either resolve (`// resolved by contract #4`) or move to a "verified consistent under #4" note. Shape 7's composite preflight bug is structurally impossible: a compile-fail test attempts to call the enqueueing variant from inside a composite and fails. A compile-fail test attempts to construct a `ReplaceInput` from `provider-sync/graph` (which has only partial-delta evidence) and fails.
 

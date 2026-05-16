@@ -1,18 +1,20 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use rusqlite::{Connection, OptionalExtension};
 
 use db::db::ReadDbState;
 use db::db::queries_extra::{
-    AttachmentInsertRow, FolderWriteRow, LabelWriteRow, MessageInsertRow, insert_attachments,
+    AttachmentInsertRow, FolderWriteRow, MessageInsertRow, insert_attachments,
     insert_folders_batch, insert_messages, recompute_thread_read_starred, set_message_imap_flags,
-    sync_thread_read_starred_labels, upsert_labels,
+    sync_thread_read_starred_labels,
 };
-use common::types::LabelKind;
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use seen::MessageAddresses;
 use store::inline_image_store::InlineImage;
+use crate::keyword_membership::{
+    KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
+};
 use crate::persistence;
 
 use super::convert::ConvertedMessage;
@@ -244,105 +246,6 @@ fn existing_imap_message_identity(
     .map_err(|e| format!("lookup existing IMAP message: {e}"))
 }
 
-fn upsert_imap_keyword_labels(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    keywords: &[String],
-) -> Result<Vec<(String, String)>, String> {
-    let mut unique = HashSet::new();
-    let mut label_pairs = Vec::new();
-
-    for keyword in keywords {
-        if !common::folder_roles::is_user_visible_keyword(keyword) {
-            continue;
-        }
-        if unique.insert(keyword.clone()) {
-            let label_id = LabelKind::imap_keyword(keyword)?.storage_id();
-            label_pairs.push((keyword.clone(), label_id));
-        }
-    }
-
-    if label_pairs.is_empty() {
-        return Ok(label_pairs);
-    }
-
-    let rows: Vec<LabelWriteRow> = label_pairs
-        .iter()
-        .map(|(keyword, label_id)| LabelWriteRow {
-            id: label_id.clone(),
-            account_id: account_id.to_string(),
-            name: keyword.clone(),
-            visible: None,
-            sort_order: None,
-            server_color_bg: None,
-            server_color_fg: None,
-            user_color_bg: None,
-            user_color_fg: None,
-            is_undeletable: false,
-        })
-        .collect();
-    upsert_labels(tx, &rows)?;
-    Ok(label_pairs)
-}
-
-fn replace_message_keywords(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    message_id: &str,
-    keywords: &[String],
-) -> Result<(), String> {
-    let label_pairs = upsert_imap_keyword_labels(tx, account_id, keywords)?;
-
-    tx.execute(
-        "DELETE FROM message_keywords WHERE account_id = ?1 AND message_id = ?2",
-        rusqlite::params![account_id, message_id],
-    )
-    .map_err(|e| format!("delete message keywords: {e}"))?;
-
-    for (keyword, label_id) in label_pairs {
-        tx.execute(
-            "INSERT OR IGNORE INTO message_keywords (account_id, message_id, keyword, label_id) \
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![account_id, message_id, keyword, label_id],
-        )
-        .map_err(|e| format!("insert message keyword: {e}"))?;
-    }
-
-    Ok(())
-}
-
-// Recompute the thread-level `thread_labels` aggregate for an IMAP thread
-// from the per-message `message_keywords` rows. IMAP-account threads only
-// ever carry `kw:*` rows in `thread_labels` (no Gmail user labels, no
-// Exchange `cat:`, no `importance:*`), so the destructive replace is
-// safe without a prefix filter. The old `WHERE label_id LIKE 'kw:%'`
-// scoping was a holdover from the pre-split unified junction; see
-// `docs/labels-unification/redesign.md` "`message_keywords`".
-fn recompute_thread_keyword_labels(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-) -> Result<(), String> {
-    tx.execute(
-        "DELETE FROM thread_labels \
-         WHERE account_id = ?1 AND thread_id = ?2",
-        rusqlite::params![account_id, thread_id],
-    )
-    .map_err(|e| format!("delete thread keyword labels: {e}"))?;
-
-    tx.execute(
-        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-         SELECT DISTINCT m.account_id, m.thread_id, mk.label_id \
-         FROM messages m \
-         JOIN message_keywords mk ON mk.account_id = m.account_id AND mk.message_id = m.id \
-         WHERE m.account_id = ?1 AND m.thread_id = ?2",
-        rusqlite::params![account_id, thread_id],
-    )
-    .map_err(|e| format!("insert thread keyword labels: {e}"))?;
-
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Shared helper: store a chunk of converted messages to DB + body store + search
 // ---------------------------------------------------------------------------
@@ -375,7 +278,13 @@ pub(crate) async fn store_chunk(
             }
             resolved_ids.push((original_id, d.id.clone()));
             d.insert(&tx)?;
-            replace_message_keywords(&tx, &d.account_id, &d.id, &d.keyword_categories)?;
+            replace_message_keywords(
+                &tx,
+                KeywordProvider::Imap,
+                &d.account_id,
+                &d.id,
+                &d.keyword_categories,
+            )?;
         }
         tx.commit().map_err(|e| format!("commit: {e}"))?;
         Ok(resolved_ids)
@@ -775,7 +684,13 @@ pub fn apply_flag_changes(
         if let Some((message_id, tid)) =
             existing_imap_message_identity(&tx, account_id, folder, change.uid)?
         {
-            replace_message_keywords(&tx, account_id, &message_id, &change.keywords)?;
+            replace_message_keywords(
+                &tx,
+                KeywordProvider::Imap,
+                account_id,
+                &message_id,
+                &change.keywords,
+            )?;
             affected_threads.insert(tid);
         }
     }
@@ -784,7 +699,7 @@ pub fn apply_flag_changes(
     for tid in &affected_threads {
         recompute_thread_read_starred(&tx, account_id, tid)?;
         sync_thread_read_starred_labels(&tx, account_id, tid)?;
-        recompute_thread_keyword_labels(&tx, account_id, tid)?;
+        recompute_thread_keyword_labels(&tx, KeywordProvider::Imap, account_id, tid)?;
     }
 
     tx.commit()
@@ -950,6 +865,9 @@ pub fn remove_deleted_messages(
 
     let affected_threads =
         persistence::delete_messages_and_cleanup_threads(&tx, account_id, deleted_message_ids)?;
+    for thread_id in &affected_threads {
+        recompute_thread_keyword_labels(&tx, KeywordProvider::Imap, account_id, thread_id)?;
+    }
 
     tx.commit().map_err(|e| format!("deletion commit: {e}"))?;
 

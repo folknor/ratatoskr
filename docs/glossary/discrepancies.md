@@ -216,13 +216,25 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=subscription summary picks all metadata from the same canonical message.
 
-- `crates/provider-sync/src/jmap/sync/storage.rs:180-197` *(slice 5)* - `set_thread_labels()` calls `merge_thread_folders()` only, never `merge_thread_labels()`. JMAP partial-delta label changes are handled only via `sync_keyword_labels()` (lines 286-329) which does `INSERT OR IGNORE` without any explicit delete or merge. Current convention: JMAP folders merge correctly; `kw:*` label changes INSERT-only into thread_labels. Non-keyword JMAP labels (if any) flow through `message.base.label_ids` but are never deleted from thread_labels on per-message removal, creating asymmetry with the Gmail/Graph `merge_thread_labels()` pattern. See also gmail/storage.rs:71 comment: `// messages. replace_thread_labels inserts FK-constrained rows` indicating replace semantics are used by Gmail full-thread paths.
+Keyword-membership instances resolved by contract #4 slice:
+`crates/provider-sync/src/keyword_membership.rs` now owns shared IMAP/JMAP
+per-message keyword membership. Incoming IMAP and JMAP message changes replace
+rows in `message_keywords`, then recompute thread-level `kw:*` rows from the
+`messages`/`message_keywords` union. IMAP and JMAP delete paths also recompute
+affected threads after `delete_messages_and_cleanup_threads`, so removed-message
+keywords no longer persist as orphaned thread rows. The recompute helper deletes
+and rebuilds `thread_labels` for the thread; for these providers, provider-visible
+label rows are keyword-only after the #5c typed label boundary. The broader
+merge-vs-replace capability-token migration remains open.
 
-  Tags: contracts=mutation-capability; enforcement=capability-token; promise=partial-delta paths handle label removal symmetrically with folder removal.
-
-- `crates/provider-sync/src/imap/sync_pipeline.rs:323-346` *(slice 5)* - `recompute_thread_keyword_labels()` destructively `DELETE FROM thread_labels` then re-inserts from `message_keywords` union. IMAP account threads carry only `kw:*` labels; the DELETE is safe (lines 329-333). However, the per-message `replace_message_keywords()` helper (lines 299-314) first deletes all keywords for a message, then inserts the new set. If a message is removed from a thread without calling `recompute_thread_keyword_labels()` after, stale `message_keywords` rows remain and the thread-level union grows stale until recompute fires.
-
-  Tags: contracts=mutation-capability,completion-state; enforcement=capability-token; promise=thread_labels `kw:%` rows = union of `message_keywords` for thread's messages.
+Remaining #4 caveat: optimistic local label actions still write directly to
+`thread_labels` before the provider echoes the change. A concurrent IMAP/JMAP
+keyword recompute can temporarily erase that optimistic `kw:*` row because the
+per-message `message_keywords` union has not observed it yet. IMAP already had
+this window; the shared recompute helper extends the same tradeoff to JMAP in
+exchange for removing orphaned keyword rows deterministically. The future
+merge-vs-replace capability slice should decide how optimistic local intent is
+represented while provider echo is pending.
 
 - `crates/provider-sync/src/gmail/sync/storage.rs` (implicit via call to sync_persistence) *(slice 6)* - Gmail calls `replace_thread_folders` + `replace_thread_labels` (per glossary § 175-177). JMAP (crates/provider-sync/src/jmap/sync/storage.rs:189-196) calls `merge_thread_folders` + no explicit label-merge call documented. Graph (crates/provider-sync/src/graph/sync/persistence.rs:209-215) calls `merge_thread_folders` + `merge_thread_labels`. Current convention: Gmail full-sync = replace; JMAP/Graph partial-delta = merge. No type prevents a provider from picking wrong helper if calling sync_persistence directly (though provider-sync crates own the call sites). (1 more elided)
 
@@ -307,11 +319,13 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
 ### Shape 10 - Partial-delta keyword label loss
 
-*(Instance of Shape 4 with a specific symptom: silent data loss rather than stale row.)*
-
-- JMAP's `sync_keyword_labels()` and IMAP's `recompute_thread_keyword_labels()` handle deletions differently *(slice 5)*. IMAP deletes and re-inserts the entire thread_labels `kw:*` set from message_keywords. JMAP only INSERTs new keywords; if a message with a keyword is removed from a thread via partial delta without the keyword being present in the current delta page, the thread_labels row persists orphaned. The invariant "thread_labels `kw:*` rows = union of message_keywords rows for messages in the thread" can drift between IMAP (enforced by recompute) and JMAP (enforcement is implicit in no-remove behavior).
-
-  Tags: contracts=mutation-capability,completion-state; enforcement=capability-token; promise=`thread_labels.kw:%` rows = union of `message_keywords` for thread's messages, across all providers.
+Resolved by contract #4 keyword-membership slice:
+`crates/provider-sync/src/keyword_membership.rs` is the shared IMAP/JMAP
+implementation for keyword membership. Both providers now replace per-message
+`message_keywords` rows for changed messages and recompute thread-level `kw:*`
+rows from the full per-message union, including after server-deletion cleanup.
+JMAP no longer has an INSERT-only keyword path, so `thread_labels.kw:%` rows are
+again the union of `message_keywords` for the thread's surviving messages.
 
 ### Shape 11 - Divergent date semantics in date-range construction
 

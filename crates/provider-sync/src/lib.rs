@@ -23,6 +23,7 @@ mod gmail_impl;
 mod graph_impl;
 mod imap_impl;
 mod jmap_impl;
+mod keyword_membership;
 pub mod gmail;
 pub mod graph;
 pub mod imap;

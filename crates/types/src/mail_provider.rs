@@ -1,5 +1,14 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// Canonical mail account provider identity.
+///
+/// ```compile_fail,E0308
+/// use types::MailProviderKind;
+///
+/// fn accepts_provider(_: MailProviderKind) {}
+///
+/// accepts_provider("gmail_api");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MailProviderKind {
     Gmail,
