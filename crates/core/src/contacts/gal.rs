@@ -4,6 +4,7 @@
 //! HTTP fetch logic and cache-age orchestration.
 
 use crate::db::ReadDbState;
+use types::MailProviderKind;
 
 // Re-export the entry type from db.
 pub use crate::db::queries_extra::contacts::GalEntry;
@@ -187,26 +188,26 @@ pub async fn refresh_gal_for_account(
 
     // Look up provider type via db
     let aid = account_id.to_string();
-    let provider: String = db
+    let provider = db
         .with_conn(move |conn| {
-            crate::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
+            crate::db::queries_extra::get_account_provider_sync(conn, &aid)
         })
         .await?;
 
-    let entries = match provider.as_str() {
-        "graph" => {
+    let entries = match provider {
+        MailProviderKind::Graph => {
             let client =
                 crate::graph::client::GraphClient::from_account(db, account_id, encryption_key)
                     .await?;
             fetch_graph_gal(&client, db).await?
         }
-        "gmail_api" => {
+        MailProviderKind::Gmail => {
             let client =
                 crate::gmail::client::GmailClient::from_account(db, account_id, encryption_key)
                     .await?;
             fetch_google_gal(&client, db).await?
         }
-        _ => return Ok(0), // IMAP/JMAP don't have organization directories
+        MailProviderKind::Jmap | MailProviderKind::Imap => return Ok(0),
     };
 
     let count = entries.len();

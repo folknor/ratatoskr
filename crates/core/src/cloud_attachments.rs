@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use base64::Engine as _;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
+use types::MailProviderKind;
 
 use crate::db::ReadDbState;
 
@@ -19,8 +20,8 @@ pub const LARGE_ATTACHMENT_THRESHOLD: u64 = 25 * 1024 * 1024;
 /// Only Exchange (Graph → OneDrive) and Gmail (Google Drive) have cloud
 /// upload support. JMAP and IMAP accounts should show a "file too large"
 /// warning when attachments exceed [`LARGE_ATTACHMENT_THRESHOLD`].
-pub fn supports_cloud_upload(provider: &str) -> bool {
-    matches!(provider, "graph" | "gmail")
+pub fn supports_cloud_upload(provider: MailProviderKind) -> bool {
+    matches!(provider, MailProviderKind::Graph | MailProviderKind::Gmail)
 }
 
 /// Build a human-readable warning for accounts without cloud upload support.
@@ -398,6 +399,14 @@ pub fn update_cloud_attachment_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloud_upload_support_is_typed_by_mail_provider() {
+        assert!(supports_cloud_upload(MailProviderKind::Gmail));
+        assert!(supports_cloud_upload(MailProviderKind::Graph));
+        assert!(!supports_cloud_upload(MailProviderKind::Jmap));
+        assert!(!supports_cloud_upload(MailProviderKind::Imap));
+    }
 
     #[test]
     fn detects_onedrive_links() {

@@ -298,15 +298,7 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
 ### Shape 8 - List/count entry-point split
 
-- `crates/db/src/db/queries_extra/scoped_queries.rs:621-664` *(slice 1)* - `get_draft_threads` returns only synced drafts (threads with DRAFT folder). `get_draft_count_with_local` (line 708) is the canonical count entry point, combining synced threads from `get_thread_count_scoped(..., Some("DRAFT"))` with local drafts from `count_local_drafts`. Current convention: the function docstring (621-636) explicitly flags that callers should use `get_draft_count_with_local` for accurate counts, and the app layer handles the merge at line 167-175 of helpers.rs. However, the type system does not prevent direct calls to `get_draft_threads` from a new call site, which would silently undercount. Per glossary § 101-108, this is the motivating example for the compile-time goal: one entry point for "everything in the Drafts list," with direct access to the synced-only path requiring an explicit opt-in (different function name or marker type).
-
-  Tags: contracts=canonical-entry; enforcement=capability-token; promise=Drafts list and Drafts count answer the same membership question.
-
-- `crates/db/src/db/queries_extra/scoped_queries.rs:638-664` *(slice 3)* - `get_draft_threads()` returns only server-synced drafts; `get_draft_count_with_local()` at line 708 returns synced + local. Doc comment at line 634: "Any consumer that calls `get_draft_threads` directly will silently disagree with `get_draft_count_with_local()` and with what the sidebar shows." Current convention: doc comment + app-layer merge in `crates/app/src/helpers.rs:167-175` (not enforced by type system).
-
-  Tags: contracts=canonical-entry; enforcement=capability-token; promise=Drafts list and Drafts count answer the same membership question.
-
-- `crates/core/src/db/queries_extra/navigation.rs` *(slice 4)* - The drafted sidebar count uses the unified entry point per glossary § 101-108. The merged list in `crates/app/src/helpers.rs` (outside this slice) invokes the same count path. Current convention: app-layer docstring flags direct `get_draft_threads` callers, but the type system does not enforce the unified entry point.
+- `crates/db/src/db/queries_extra/scoped_queries.rs:628-649`, `crates/app/src/helpers.rs:221-236`, `crates/core/src/db/queries_extra/navigation.rs:169` *(resolved by contract #2)* - Drafts list/count now have canonical public entries. `get_drafts_view` is the only externally-callable Drafts-list query and returns a sealed `DraftsView`; `get_draft_threads_synced` and `get_local_draft_summaries` are crate-private. The sidebar count continues to use `get_draft_count_with_local`, so list and count answer the same synced-plus-local membership question.
 
   Tags: contracts=canonical-entry; enforcement=capability-token; promise=Drafts list and Drafts count answer the same membership question.
 

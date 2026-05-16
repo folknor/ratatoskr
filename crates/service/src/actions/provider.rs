@@ -26,7 +26,7 @@ pub async fn create_provider(
     let aid = account_id.to_string();
     let raw_provider = db
         .with_conn(move |conn| {
-            db::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
+            db::db::queries_extra::get_account_provider_raw_sync(conn, &aid)
         })
         .await?;
     match raw_provider.as_str() {

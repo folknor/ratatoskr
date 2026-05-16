@@ -16,6 +16,7 @@ chrono.workspace = true
 chrono-tz = "0.10"
 flate2 = "1"
 label-colors = { path = "../label-colors" }
+types = { path = "../types" }
 lol_html = "2.9.0"
 mail-parser = "0.11.3"
 serde.workspace = true

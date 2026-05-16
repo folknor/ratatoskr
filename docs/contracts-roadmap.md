@@ -130,7 +130,7 @@ The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`
 
 ### 2. #5-pre MailProviderKind - boundary parse (high fidelity)
 
-**Status:** started. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch now parses account `provider` rows into the enum before matching. The full workspace migration is still open.
+**Status:** in progress. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, and cloud-upload support is now keyed by `MailProviderKind`. The full workspace migration is still open.
 
 **Inventory:** No direct entries (this is prereq infrastructure for #5c). Implicitly addressed by every Shape 6 entry where a provider-identity string flows alongside a label string.
 
@@ -468,6 +468,8 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Inventory:** Shape 8 entries (drafts list/count, search vs fallback), partial Shape 12.
 
+**Status:** Drafts list slice landed. `get_drafts_view` is the only public Drafts-list query; it returns a sealed `DraftsView` whose synced/local parts are available only through `into_parts`. `get_draft_threads_synced` and `get_local_draft_summaries` are crate-private. The app calls the canonical query instead of merging direct synced/local query calls. Search fallback consolidation remains open.
+
 **On inspection, neither sub-case is cross-crate.** Drafts orchestration is internal to `db` (synced query + local query both live there, the merge is a `db` function). Search unification is internal to `core/search_pipeline` (`search`, `search_sql_only`, `search_combined`, `search_sql_fallback` all live in the same module). Standard within-crate sealing applies - `pub(crate)` on the non-canonical entries, `pub` on the unified entry.
 
 **Design sketch.**
@@ -477,10 +479,10 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
   // crates/db/src/db/queries_extra/scoped_queries.rs
 
   // public: the only externally-callable Drafts list entry.
-  pub fn drafts_list_for_scope(...) -> Result<DraftsView, String> { ... }
+  pub fn get_drafts_view(...) -> Result<DraftsView, String> { ... }
 
   // public: the only externally-callable Drafts count entry.
-  pub fn drafts_count_for_scope(...) -> Result<i64, String> { ... }
+  pub fn get_draft_count_with_local(...) -> Result<i64, String> { ... }
 
   // pub(crate): synced-only path. Visible to db's internal merge; not callable
   // from app, core, or anywhere else.
@@ -509,8 +511,8 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Migration scope.**
 
-- `crates/db/src/db/queries_extra/scoped_queries.rs` - `get_draft_threads` becomes `pub(crate)` and renamed `get_draft_threads_synced`; `count_local_drafts` becomes `pub(crate)`; `drafts_list_for_scope` and `drafts_count_for_scope` are the new public entries.
-- `crates/app/src/helpers.rs` - `load_threads_for_current_view` calls `drafts_list_for_scope` directly; the previous app-layer merge in `helpers.rs:167-175` disappears (the merge now lives in `db`).
+- `crates/db/src/db/queries_extra/scoped_queries.rs` - `get_draft_threads` becomes `pub(crate)` and renamed `get_draft_threads_synced`; `count_local_drafts` becomes `pub(crate)`; `get_drafts_view` and `get_draft_count_with_local` are the public entries.
+- `crates/app/src/helpers.rs` - `load_threads_for_current_view` calls `get_drafts_view` directly; the previous app-layer merge in `helpers.rs:167-175` disappears behind the DB-owned canonical query.
 - `crates/core/src/search_pipeline.rs` - `search_sql_fallback` and the internal-dispatch functions become `pub(crate)`. `search` is the only public entry.
 
 **Success criteria.** Shape 8 inventory entries resolve. A compile-fail test attempts to call `get_draft_threads_synced` from the sidebar render path and fails. A compile-fail test attempts to call `search_sql_fallback` from `app` and fails.

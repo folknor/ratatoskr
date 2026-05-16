@@ -618,24 +618,44 @@ pub fn get_snoozed_threads(
     get_flag_threads(conn, scope, "is_snoozed", limit, offset)
 }
 
-/// Draft threads (via `thread_folders` DRAFT folder), scoped by `AccountScope`.
+/// Complete Drafts view membership for the sidebar list.
 ///
-/// **Note**: This only returns server-synced drafts that have threads. Local-only
-/// drafts (in the `local_drafts` table) are not included because they have a
-/// different schema and no `DbThread` representation. Use
-/// `get_draft_count_with_local()` for a count that includes both.
+/// Server-synced drafts have real thread rows. Local-only drafts live in
+/// `local_drafts` until sync/send promotes them. This public entry point is the
+/// only external Drafts-list query, so the list and sidebar count answer the
+/// same membership question.
 ///
-/// **Caller responsibility - sidebar Drafts list is a mix.** The sidebar's
-/// Drafts view must show server-synced *and* local-only drafts together.
-/// The merge happens in `crates/app/src/helpers.rs` (the app layer): it
-/// calls this function for the synced subset, then `get_local_draft_summaries`
-/// for the local subset, promotes each `LocalDraftSummary` into the app's
-/// `Thread` shape, concatenates, and sorts by `last_message_at`. Any consumer
-/// that calls `get_draft_threads` directly will silently disagree with
-/// `get_draft_count_with_local()` and with what the sidebar shows. See
-/// `docs/glossary/discrepancies.md` for the broader pattern this fits into.
+/// `limit` and `offset` apply to each subset before merging. Callers that pass
+/// small page sizes must merge and re-sort the returned parts before display.
+#[derive(Debug, Clone)]
+pub struct DraftsView {
+    synced_threads: Vec<DbThread>,
+    local_drafts: Vec<LocalDraftSummary>,
+}
+
+impl DraftsView {
+    pub fn into_parts(self) -> (Vec<DbThread>, Vec<LocalDraftSummary>) {
+        (self.synced_threads, self.local_drafts)
+    }
+}
+
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn get_draft_threads(
+pub fn get_drafts_view(
+    conn: &Connection,
+    scope: &AccountScope,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<DraftsView, String> {
+    Ok(DraftsView {
+        synced_threads: get_draft_threads_synced(conn, scope, limit, offset)?,
+        local_drafts: get_local_draft_summaries(conn, scope, limit, offset)?,
+    })
+}
+
+/// Server-synced draft threads only. Kept crate-private so external callers
+/// cannot silently undercount Drafts by skipping local-only rows.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub(crate) fn get_draft_threads_synced(
     conn: &Connection,
     scope: &AccountScope,
     limit: Option<i64>,
@@ -735,7 +755,7 @@ pub struct LocalDraftSummary {
 /// Returns drafts from `local_drafts` where `sync_status != 'synced'`,
 /// ordered by `updated_at DESC`. These are combined with server-synced
 /// draft threads by the app layer to produce a unified drafts view.
-pub fn get_local_draft_summaries(
+pub(crate) fn get_local_draft_summaries(
     conn: &Connection,
     scope: &AccountScope,
     limit: Option<i64>,

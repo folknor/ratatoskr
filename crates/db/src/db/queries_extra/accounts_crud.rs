@@ -1,6 +1,7 @@
 use super::super::ReadDbState;
 use super::dynamic_update;
 use rusqlite::{Connection, OptionalExtension, params};
+use types::MailProviderKind;
 
 /// Parameters for creating a new account.
 #[derive(Debug, Clone)]
@@ -614,6 +615,28 @@ pub fn get_account_auth_info_sync(
         },
     )
     .map_err(|e| format!("Account not found: {e}"))
+}
+
+/// Look up the typed mail provider for an account.
+pub fn get_account_provider_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<MailProviderKind, String> {
+    let raw = get_account_provider_raw_sync(conn, account_id)?;
+    MailProviderKind::parse(&raw)
+}
+
+/// Look up the raw provider string for an account.
+///
+/// This is for explicit boundary code such as harness-provider handling.
+/// Normal mail-provider callers should use `get_account_provider_sync`.
+pub fn get_account_provider_raw_sync(conn: &Connection, account_id: &str) -> Result<String, String> {
+    conn.query_row(
+        "SELECT provider FROM accounts WHERE id = ?1",
+        params![account_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("lookup provider: {e}"))
 }
 
 /// Check whether an account with the given email already exists.

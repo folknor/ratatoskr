@@ -29,6 +29,7 @@ smart-folder = { path = "../smart-folder" }
 label-colors = { path = "../label-colors" }
 seen = { path = "../seen" }
 common = { path = "../common" }
+types = { path = "../types" }
 smtp = { path = "../smtp" }
 sync = { path = "../sync" }
 tokio-util = "0.7"

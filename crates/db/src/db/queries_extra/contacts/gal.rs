@@ -84,16 +84,3 @@ pub fn record_gal_refresh_sync(
     .map_err(|e| format!("record gal refresh: {e}"))?;
     Ok(())
 }
-
-/// Look up the provider type for an account.
-pub fn get_account_provider_sync(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-) -> Result<String, String> {
-    conn.query_row(
-        "SELECT provider FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("lookup provider: {e}"))
-}

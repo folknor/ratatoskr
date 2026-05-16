@@ -218,23 +218,26 @@ async fn load_threads_scoped(
         // they are backed by `threads.is_starred` / `is_snoozed`, not by
         // `thread_folders` membership.
         let label = label_id.as_deref();
+        if label == Some("DRAFT") {
+            let drafts = rtsk::db::queries_extra::get_drafts_view(conn, &scope, Some(1000), None)?;
+            let (synced_threads, local_drafts) = drafts.into_parts();
+            let mut threads: Vec<Thread> = synced_threads
+                .into_iter()
+                .map(db_thread_to_app_thread)
+                .collect();
+            let local_threads: Vec<Thread> =
+                local_drafts.into_iter().map(local_draft_to_app_thread).collect();
+            threads.extend(local_threads);
+            threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
+            apply_thread_decorations(conn, &mut threads)?;
+            return Ok(threads);
+        }
+
         let db_threads = get_threads_scoped(conn, &scope, label, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
             .collect();
-
-        // When viewing Drafts, also include local-only drafts
-        if label == Some("DRAFT") {
-            let local =
-                rtsk::db::queries_extra::get_local_draft_summaries(conn, &scope, Some(1000), None)?;
-            let local_threads: Vec<Thread> =
-                local.into_iter().map(local_draft_to_app_thread).collect();
-            threads.extend(local_threads);
-            // Sort all drafts together by updated_at DESC
-            threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
-        }
-
         apply_thread_decorations(conn, &mut threads)?;
         Ok(threads)
     })
