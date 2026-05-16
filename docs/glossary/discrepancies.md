@@ -124,6 +124,35 @@ The old `label_color_overrides` table stored `(label_name COLLATE NOCASE, color_
 
 Current model: `label_color_overrides` is gone. Raw labels carry `server_color_*` and `user_color_*`; user-visible groups carry their complete `color_bg` / `color_fg` pair. The compile-time goal still stands: a background-only override should not type-check as a complete label style.
 
+### Composite-action per-member retry suppression via a global flag
+
+`ActionContext` carries a `suppress_pending_enqueue: bool` field. The
+label-group composite (`crates/service/src/actions/label_group.rs`)
+clones the context, sets the flag, and dispatches per-member
+`add_label_with_provider` / `remove_label_with_provider` so the inner
+`enqueue_if_retryable` call becomes a no-op. That keeps per-member
+`addLabel` / `removeLabel` rows out of `pending_operations` and forces
+all retries through the composite-level preflight
+(`docs/labels-unification/redesign.md` "Retry preflight").
+
+The contract is correct but it's a magic global. Any future composite
+that forgets the clone-and-set step silently re-introduces the
+pre-fix bug: the composite returns one `OperationOutcome`, the
+planner sees the synchronous result, but the per-member writes have
+enqueued rows that the drainer will fan out individually with no
+preflight, fighting current user intent until the pending-ops TTL
+expires.
+
+Compile-time goal: per-member dispatches inside a composite should
+go through a typed `_provider_only` / `_no_enqueue` entry point that
+returns `ActionOutcome` without touching the pending-ops table, so
+the "suppress" decision is taken at the API boundary rather than in
+a stash-and-mutate dance on the context. The standalone entry points
+(`add_label`, `add_label_with_provider`) layer the enqueue on top of
+the provider-only call. A composite cannot accidentally bypass the
+preflight because the only path that enqueues is the standalone one
+and the composite is structurally unable to call it.
+
 ## Out of scope for this document
 
 - The Drafts pill semantics question (total-vs-unread contract). Tracked separately in `TODO.md`. That is a product decision about what the pill *should* count; this document is about ensuring the count means what the matching list says it means, whatever the product answer is.

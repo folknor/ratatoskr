@@ -811,6 +811,15 @@ pub fn get_local_draft_summaries(
 /// Uses a CTE to pre-filter thread IDs by `shared_mailbox_id`, then scopes
 /// the latest-message subquery to only those threads (avoiding a full scan
 /// of the messages table).
+/// Shared-mailbox threads filtered by a real `folders.id` value.
+///
+/// Virtual destinations (Starred / Snoozed / All Mail) must NOT pass
+/// through here - their backing is a boolean column on `threads`, not a
+/// `thread_folders` row. Use [`get_threads_for_shared_mailbox_starred`],
+/// [`get_threads_for_shared_mailbox_snoozed`], or
+/// [`get_threads_for_shared_mailbox_all`] respectively. The caller-side
+/// dispatch lives in `crates/app/src/helpers.rs` and is type-routed
+/// from `SidebarSelection` so a virtual id cannot land here by mistake.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_shared_mailbox(
     conn: &Connection,
@@ -820,44 +829,6 @@ pub fn get_threads_for_shared_mailbox(
     limit: Option<i64>,
 ) -> Result<Vec<DbThread>, String> {
     let lim = limit.unwrap_or(200);
-
-    if matches!(label_id, Some("STARRED" | "SNOOZED")) {
-        // Shared-mailbox Starred and Snoozed use the same virtual-folder
-        // semantics as personal mail: state columns, not thread_labels rows.
-        let flag_col = flag_column(label_id.unwrap_or("STARRED"));
-        let sql = format!(
-            "WITH mb_threads AS (
-               SELECT id FROM threads
-               WHERE account_id = ?1 AND shared_mailbox_id = ?2
-             )
-             SELECT t.*, m.from_name, m.from_address FROM threads t
-             LEFT JOIN (
-               SELECT id, account_id, thread_id, from_name, from_address FROM (
-                 SELECT id, account_id, thread_id, from_name, from_address,
-                        ROW_NUMBER() OVER (
-                          PARTITION BY account_id, thread_id
-                          ORDER BY date DESC, id DESC
-                        ) AS rn
-                 FROM messages
-                 WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
-               ) WHERE rn = 1
-             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
-               AND t.is_chat_thread = 0
-               AND t.{flag_col} = 1
-             ORDER BY t.is_pinned DESC, t.last_message_at DESC
-             LIMIT ?3"
-        );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        return stmt
-            .query_map(
-                rusqlite::params![account_id, mailbox_id, lim],
-                DbThread::from_row,
-            )
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string());
-    }
 
     let sql = if label_id.is_some() {
         "WITH mb_threads AS (
@@ -926,6 +897,74 @@ pub fn get_threads_for_shared_mailbox(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
     }
+}
+
+/// Shared-mailbox starred threads. Backed by `threads.is_starred`,
+/// not a `thread_folders` row - same virtual-folder semantics as
+/// personal-account starred.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn get_threads_for_shared_mailbox_starred(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<DbThread>, String> {
+    shared_mailbox_threads_by_flag(conn, account_id, mailbox_id, "is_starred", limit)
+}
+
+/// Shared-mailbox snoozed threads. Backed by `threads.is_snoozed`.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn get_threads_for_shared_mailbox_snoozed(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<DbThread>, String> {
+    shared_mailbox_threads_by_flag(conn, account_id, mailbox_id, "is_snoozed", limit)
+}
+
+/// Shared internal for the boolean-column virtuals above. `flag_col`
+/// is statically chosen by the public entry points, so SQL injection
+/// is structurally impossible.
+fn shared_mailbox_threads_by_flag(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+    flag_col: &'static str,
+    limit: Option<i64>,
+) -> Result<Vec<DbThread>, String> {
+    let lim = limit.unwrap_or(200);
+    let sql = format!(
+        "WITH mb_threads AS (
+           SELECT id FROM threads
+           WHERE account_id = ?1 AND shared_mailbox_id = ?2
+         )
+         SELECT t.*, m.from_name, m.from_address FROM threads t
+         LEFT JOIN (
+           SELECT id, account_id, thread_id, from_name, from_address FROM (
+             SELECT id, account_id, thread_id, from_name, from_address,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY account_id, thread_id
+                      ORDER BY date DESC, id DESC
+                    ) AS rn
+             FROM messages
+             WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
+           ) WHERE rn = 1
+         ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+         WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+           AND t.is_chat_thread = 0
+           AND t.{flag_col} = 1
+         ORDER BY t.is_pinned DESC, t.last_message_at DESC
+         LIMIT ?3"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_map(
+        rusqlite::params![account_id, mailbox_id, lim],
+        DbThread::from_row,
+    )
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }
 
 /// Shared-mailbox threads that render a user-created label group.

@@ -9,7 +9,8 @@ use rtsk::db::queries_extra::navigation::{
 use rtsk::db::queries_extra::{
     get_active_account_ids_sync, get_public_folder_items, get_snoozed_threads, get_starred_threads,
     get_threads_for_label_group, get_threads_for_shared_mailbox,
-    get_threads_for_shared_mailbox_label_group, get_threads_scoped, query_thread_list_decorations,
+    get_threads_for_shared_mailbox_label_group, get_threads_for_shared_mailbox_snoozed,
+    get_threads_for_shared_mailbox_starred, get_threads_scoped, query_thread_list_decorations,
 };
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{ChatList, GenerationToken, Nav};
@@ -85,22 +86,22 @@ impl ReadyApp {
                                 )
                                 .await
                             }
+                            // Type-routed virtual dispatch - mirrors the
+                            // personal-account path. No string-passing of
+                            // "STARRED" / "SNOOZED" / "all-mail" through
+                            // the folder-id parameter.
+                            SidebarSelection::VirtualView(VirtualView::Starred) => {
+                                load_shared_mailbox_starred(db, aid, mid).await
+                            }
+                            SidebarSelection::VirtualView(VirtualView::Snoozed) => {
+                                load_shared_mailbox_snoozed(db, aid, mid).await
+                            }
+                            SidebarSelection::VirtualView(VirtualView::AllMail) => {
+                                load_shared_mailbox_threads(db, aid, mid, None).await
+                            }
+                            SidebarSelection::SmartFolder { .. } => Ok(Vec::new()),
                             _ => {
-                                // `get_threads_for_shared_mailbox` intercepts
-                                // "STARRED" / "SNOOZED" internally to route to
-                                // the thread-state boolean columns; everything
-                                // else hits `thread_folders`. AllMail is the
-                                // unfiltered set (None).
-                                let label_id = match &selection {
-                                    SidebarSelection::VirtualView(VirtualView::Starred) => {
-                                        Some("STARRED".to_string())
-                                    }
-                                    SidebarSelection::VirtualView(VirtualView::Snoozed) => {
-                                        Some("SNOOZED".to_string())
-                                    }
-                                    SidebarSelection::VirtualView(VirtualView::AllMail) => None,
-                                    _ => selection.folder_id_for_thread_query(),
-                                };
+                                let label_id = selection.folder_id_for_thread_query();
                                 load_shared_mailbox_threads(db, aid, mid, label_id).await
                             }
                         }
@@ -139,6 +140,17 @@ impl ReadyApp {
                             SidebarSelection::VirtualView(VirtualView::AllMail) => {
                                 load_threads_scoped(db, scope, None).await
                             }
+                            // Smart folders are search results, not folder-
+                            // membership queries. The threads loader cannot
+                            // resolve them; the search path
+                            // (`handle_smart_folder_selected`) owns this.
+                            // Return an empty list as a no-op rather than
+                            // either passing the smart-folder id to a
+                            // folder query (silent 0 rows) or returning
+                            // every thread under the scope (worse). The
+                            // search engine re-fires on the events that
+                            // matter (initial click; explicit refresh).
+                            SidebarSelection::SmartFolder { .. } => Ok(Vec::new()),
                             _ => {
                                 let label_id = selection.folder_id_for_thread_query();
                                 load_threads_scoped(db, scope, label_id).await
@@ -341,6 +353,52 @@ async fn load_shared_mailbox_threads(
             &account_id,
             &mailbox_id,
             label_id.as_deref(),
+            Some(1000),
+        )?;
+        let mut threads: Vec<Thread> = db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+async fn load_shared_mailbox_starred(
+    db: Arc<Db>,
+    account_id: String,
+    mailbox_id: String,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_threads_for_shared_mailbox_starred(
+            conn,
+            &account_id,
+            &mailbox_id,
+            Some(1000),
+        )?;
+        let mut threads: Vec<Thread> = db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+async fn load_shared_mailbox_snoozed(
+    db: Arc<Db>,
+    account_id: String,
+    mailbox_id: String,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_threads_for_shared_mailbox_snoozed(
+            conn,
+            &account_id,
+            &mailbox_id,
             Some(1000),
         )?;
         let mut threads: Vec<Thread> = db_threads

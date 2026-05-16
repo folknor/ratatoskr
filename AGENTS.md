@@ -151,24 +151,6 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 - `fetch_text_body_values(true)` is accessed via `get_req.arguments().fetch_text_body_values(true)`, not directly on the get request.
 - `mailbox_changes(since_state, 0)` - max_changes of 0 is invalid per JMAP spec. Use 500.
 
-## Code Review (`review`)
-
-`review` is a CLI tool that fans out code review requests to anchored AI sessions. Each archetype has a stored prime prompt (in `.review.toml` under `[_prime].<archetype>`) that defines the review lens. Configuration lives in `.review.toml` at the repo root.
-
-Four archetypes: `security`, `bugs`, `perf`, `arch`.
-
-Multiple archetypes go in one invocation as a comma list (e.g. `review bugs,arch,perf --oneshot`).
-
-Use `--oneshot`. Prompt cache is ~1 hour, so starting a fresh session for each unrelated review is cheaper than resuming.
-
-```bash
-echo "review the new sync code" | review bugs --oneshot
-# session: 019de...
-# <findings>
-```
-
-Use `--session` for continuity within a thread.
-
 ## Encryption
 
 AES-256-GCM (`crates/common/src/crypto.rs` for the cipher; key load lives in the dep-free `crates/crypto-key/` crate shared between `common` and `service`). Key file: `ratatoskr.key` (or legacy `velo.key`) in app data dir. Format: base64-encoded 32 bytes. Encrypted-value wire format: `base64(iv):base64(ct+tag)`.
