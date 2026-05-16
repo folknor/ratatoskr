@@ -123,7 +123,14 @@ Some provider primitives are per-message booleans. They drive inline glyphs or f
 
 Thread-level state has two sources of truth, depending on what is being aggregated:
 
-- **Per-message booleans** (`is_read`, `is_starred`, `is_replied`, `is_forwarded`) aggregate via `MAX()` across the thread's messages. The `query_thread_state_decorations` helper (`crates/db/src/db/queries_extra/thread_detail.rs`) computes this on read; the `recompute_thread_read_starred` helper writes it back to the `threads` table. Adding a per-message boolean means: schema column + parser extraction + aggregation in both helpers.
+- **Per-message booleans aggregate per-field — the reducer is not uniform.**
+    - `is_read` is **all non-reaction messages read** (MIN over per-message `is_read`, equivalently "`COUNT(*) WHERE is_read = 0 AND is_reaction = 0` is 0"). A thread is read only when every non-reaction message in it is read.
+    - `is_starred`, `is_replied`, `is_forwarded` are **any non-reaction message** with the flag set (MAX / `EXISTS`). A thread is starred when at least one non-reaction message in it is starred; same for replied and forwarded.
+    - `last_message_at` is `MAX(date)` over non-reaction messages.
+
+    The reducer for each field is fixed. Adding a per-message boolean means: schema column + parser extraction + naming the reducer explicitly. Do not assume the reducer matches its neighbours; `is_read` is the only MIN, the others are ANY.
+
+    The `query_thread_state_decorations` helper (`crates/db/src/db/queries_extra/thread_detail.rs`) computes thread-level decorations on read; the `recompute_thread_read_starred` helper writes the `threads` aggregates. Both helpers must apply the `is_reaction = 0` filter and the correct per-field reducer.
 - **Folder / label memberships** are thread-level aggregates. Folder membership lives in `thread_folders`. Raw provider label membership lives in `thread_labels`. Local user-visible group intent lives in `thread_label_groups`.
     - **Gmail and IMAP** sync the entire thread's message metadata before writing the aggregate. `crates/sync/src/pipeline.rs::store_thread_groups_to_db` computes the union of folder IDs and raw label IDs across the thread's messages, then calls `replace_thread_folders` and `replace_thread_labels`. Safe destructive replace because the input is the full union.
     - **Graph and JMAP** receive partial delta pages (only changed messages, not the full thread). They call `merge_thread_folders` and `merge_thread_labels` instead, which insert new memberships but never remove. This preserves sibling-message memberships that the delta page does not mention. Trade-off: when another client moves the thread (so the source folder is gone from every message but the delta only tells us what folder the message is in *now*), the stale source-folder row is not cleaned up. Tracked in `TODO.md` as the "cross-client folder/label moves" item.
