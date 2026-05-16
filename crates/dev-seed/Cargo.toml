@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 db = { path = "../db" }
 store = { path = "../stores" }
+types = { path = "../types" }
 
 rusqlite.workspace = true
 chrono.workspace = true

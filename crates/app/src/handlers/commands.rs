@@ -5,7 +5,7 @@ use iced::Task;
 use crate::command_dispatch;
 use crate::{APP_DATA_DIR, Message, ReadyApp};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use service::actions::{ActionOutcome, LabelGroupId, LabelId};
+use service::actions::{ActionOutcome, FolderId, LabelGroupId};
 use rtsk::scope::ViewScope;
 
 #[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
@@ -991,14 +991,22 @@ fn undo_payload_to_ops(
     use service::actions::MailOperation;
     match payload {
         MailUndoPayload::Archive { account_id, thread_ids } => {
-            let inbox = LabelId::from("INBOX");
+            // Undo-archive is "put the thread back in INBOX". INBOX is the
+            // canonical inbox folder ID across all four providers, so this
+            // routes through MoveToFolder rather than AddLabel - the typed
+            // boundary in `LabelKind::parse` rejects system folder IDs as
+            // labels.
+            let inbox = FolderId::from("INBOX");
             thread_ids
                 .iter()
                 .map(|tid| {
                     (
                         account_id.clone(),
                         tid.clone(),
-                        MailOperation::AddLabel { label_id: inbox.clone() },
+                        MailOperation::MoveToFolder {
+                            dest: inbox.clone(),
+                            source: None,
+                        },
                     )
                 })
                 .collect()
@@ -1006,17 +1014,12 @@ fn undo_payload_to_ops(
         MailUndoPayload::Trash { account_id, thread_ids, source } => thread_ids
             .iter()
             .map(|tid| {
-                let op = if let Some(folder) = source {
-                    MailOperation::MoveToFolder {
-                        dest: folder.clone(),
-                        source: None,
-                    }
-                } else {
-                    MailOperation::AddLabel {
-                        label_id: LabelId::from("INBOX"),
-                    }
-                };
-                (account_id.clone(), tid.clone(), op)
+                let dest = source.clone().unwrap_or_else(|| FolderId::from("INBOX"));
+                (
+                    account_id.clone(),
+                    tid.clone(),
+                    MailOperation::MoveToFolder { dest, source: None },
+                )
             })
             .collect(),
         MailUndoPayload::MoveToFolder { account_id, thread_ids, source } => thread_ids

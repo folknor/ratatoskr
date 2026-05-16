@@ -176,7 +176,14 @@ pub async fn imap_initial_sync(
             tokio::time::sleep(std::time::Duration::from_millis(INTER_FOLDER_DELAY_MS)).await;
         }
 
-        let folder_mapping = map_folder_to_folder(folder);
+        let folder_mapping = match map_folder_to_folder(folder) {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("[sync] Initial sync folder {} skipped: {e}", folder.path);
+                folder_errors.push(format!("{}: {e}", folder.path));
+                continue;
+            }
+        };
 
         match sync_single_folder(
             progress,

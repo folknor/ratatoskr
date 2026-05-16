@@ -6,6 +6,7 @@ use db::db::queries_extra::{
     insert_attachments, insert_messages, upsert_message_reaction,
     upsert_message_reaction_update_type, LabelWriteRow, upsert_labels,
 };
+use common::types::{ImportanceLevel, LabelKind};
 
 use super::super::client::GraphClient;
 use super::super::parse::ParsedGraphMessage;
@@ -225,7 +226,7 @@ fn upsert_graph_label_rows(
 
     for msg in messages {
         for category in &msg.categories {
-            let label_id = format!("cat:{category}");
+            let label_id = LabelKind::graph_category(category)?.storage_id();
             if seen.insert(label_id.clone()) {
                 rows.push(LabelWriteRow {
                     id: label_id,
@@ -243,16 +244,16 @@ fn upsert_graph_label_rows(
         }
 
         for label_id in &msg.base.label_ids {
-            let Some((id, name, sort_order)) = graph_importance_label(label_id) else {
+            let Some(level) = ImportanceLevel::parse_label_id(label_id) else {
                 continue;
             };
-            if seen.insert(id.to_string()) {
+            if seen.insert(level.label_id().to_string()) {
                 rows.push(LabelWriteRow {
-                    id: id.to_string(),
+                    id: level.label_id().to_string(),
                     account_id: account_id.to_string(),
-                    name: name.to_string(),
+                    name: level.display_name().to_string(),
                     visible: None,
-                    sort_order: Some(sort_order),
+                    sort_order: Some(level.sort_order()),
                     server_color_bg: None,
                     server_color_fg: None,
                     user_color_bg: None,
@@ -268,14 +269,6 @@ fn upsert_graph_label_rows(
     }
 
     upsert_labels(tx, &rows)
-}
-
-fn graph_importance_label(label_id: &str) -> Option<(&'static str, &'static str, i64)> {
-    match label_id {
-        "importance:high" => Some(("importance:high", "High importance", 10_000)),
-        "importance:low" => Some(("importance:low", "Low importance", 10_001)),
-        _ => None,
-    }
 }
 
 fn upsert_messages(

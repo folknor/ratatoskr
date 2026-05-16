@@ -1,5 +1,6 @@
 use rand::RngExt;
 use rusqlite::Connection;
+use types::{ImportanceLevel, LabelKind, MailProviderKind};
 
 #[derive(Clone, Copy)]
 pub struct UserLabel {
@@ -253,13 +254,16 @@ static SYSTEM_LABELS: &[SystemLabel] = &[
     },
 ];
 
-fn seeded_user_label_id(provider: &str, name: &str) -> String {
-    match provider {
-        "gmail_api" => name.to_string(),
-        "graph" => format!("cat:{name}"),
-        "imap" | "jmap" => format!("kw:{name}"),
-        _ => name.to_string(),
-    }
+fn seeded_user_label_id(provider: &str, name: &str) -> Result<String, String> {
+    let kind = MailProviderKind::parse(provider)
+        .map_err(|e| format!("seed: unknown provider {provider:?}: {e}"))?;
+    let label = match kind {
+        MailProviderKind::Gmail => LabelKind::gmail_user(name),
+        MailProviderKind::Graph => LabelKind::graph_category(name),
+        MailProviderKind::Jmap => LabelKind::jmap_keyword(name),
+        MailProviderKind::Imap => LabelKind::imap_keyword(name),
+    }?;
+    Ok(label.storage_id())
 }
 
 /// Inserted account info needed by later stages.
@@ -327,7 +331,7 @@ pub fn seed_accounts(
         }
 
         for (i, ul) in preset.user_labels.iter().enumerate() {
-            let label_id = seeded_user_label_id(preset.provider, ul.name);
+            let label_id = seeded_user_label_id(preset.provider, ul.name)?;
             conn.execute(
                 "INSERT INTO labels (id, account_id, name, server_color_bg, server_color_fg, \
                  visible, sort_order, is_undeletable) \
@@ -348,18 +352,20 @@ pub fn seed_accounts(
         // Graph accounts: bootstrap synthesised importance:* labels per
         // `docs/labels-unification/redesign.md` "Synthesised rows for
         // Graph". Invariant: is_undeletable = 1, no server colour.
-        if preset.provider == "graph_api" {
-            for (id, name, sort) in [
-                ("importance:high", "High importance", 10_000),
-                ("importance:low", "Low importance", 10_001),
-            ] {
+        if MailProviderKind::parse(preset.provider) == Ok(MailProviderKind::Graph) {
+            for level in ImportanceLevel::ALL {
                 conn.execute(
                     "INSERT INTO labels (id, account_id, name, visible, sort_order, is_undeletable) \
                      VALUES (?1, ?2, ?3, 1, ?4, 1)",
-                    rusqlite::params![id, account_id, name, sort],
+                    rusqlite::params![
+                        level.label_id(),
+                        account_id,
+                        level.display_name(),
+                        level.sort_order(),
+                    ],
                 )
                 .map_err(|e| format!("insert importance synth: {e}"))?;
-                labels.push((name.to_string(), id.to_string()));
+                labels.push((level.display_name().to_string(), level.label_id().to_string()));
             }
         }
 

@@ -534,6 +534,8 @@ Today the dispatch is spread across `crates/app/src/helpers.rs::load_threads_sco
 
 ### 9. #5c FolderKind + LabelKind - boundary parse, separate types
 
+**Status:** label/provider-dispatch slice landed. `types::LabelKind`, `FolderKind`, `SystemFolderId`, `MailLocator`, and private-field payload newtypes own provider-specific storage encodings. Provider label dispatch now accepts `LabelKind`; Gmail, Graph, JMAP, and IMAP match typed variants instead of string prefixes. Sync/dev-seed label synthesis and smart-folder system-folder shorthands construct through the typed boundary. Raw action/DB/wire IDs remain string-shaped at the outer boundary, and folder operation APIs remain transitional.
+
 **Inventory:** Shape 6 entries (every `kw:` / `cat:` / `importance:` prefix call site), the system-folder-shorthand entry, parts of Shape 5 (validated domain).
 
 **Design sketch.** Two separate enums in `types`, plus a `MailLocator` parse-product enum used only at parse boundaries. **Operation APIs accept narrow types.** Provider-native system labels are normalized to canonical Ratatoskr IDs on ingest, per `docs/glossary/folders-labels.md` - they never appear as provider-specific variants in `FolderKind`.

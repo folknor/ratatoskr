@@ -51,7 +51,7 @@ pub(crate) async fn sync_mailboxes(
         } else {
             Some(role_to_str(&role))
         };
-        let mapping = map_mailbox_to_folder(role_str, id, name);
+        let mapping = map_mailbox_to_folder(role_str, id, name)?;
         jmap_id_to_folder_id.insert(id.to_string(), mapping.folder_id);
     }
 
@@ -78,7 +78,7 @@ pub(crate) async fn sync_mailboxes(
 
         mailbox_data.push((id.to_string(), role_str.map(String::from), name.to_string()));
 
-        let mapping = map_mailbox_to_folder(role_str, id, name);
+        let mapping = map_mailbox_to_folder(role_str, id, name)?;
         let parent_folder_id = mb
             .parent_id()
             .and_then(|pid| jmap_id_to_folder_id.get(pid))

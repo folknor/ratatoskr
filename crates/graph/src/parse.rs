@@ -4,6 +4,7 @@ use common::email_parsing::format_address_list;
 use common::encoding::decode_base64_standard;
 use common::headers::find_header_value_case_insensitive;
 use common::parsed_message::ParsedMessageBase;
+use common::types::ImportanceLevel;
 
 /// Parsed attachment metadata ready for DB persistence.
 #[derive(Debug, Clone)]
@@ -90,7 +91,8 @@ pub fn parse_graph_message(
     // Membership IDs from folder, categories, and synthesized importance labels.
     let parent_folder = msg.parent_folder_id.as_deref().unwrap_or("");
     let categories = msg.categories.as_deref().unwrap_or(&[]);
-    let mut label_ids = folder_map.get_folder_and_label_ids_for_message(parent_folder, categories);
+    let mut label_ids =
+        folder_map.get_folder_and_label_ids_for_message(parent_folder, categories)?;
     if let Some(label_id) = importance_label_id(msg.importance.as_deref()) {
         label_ids.push(label_id.to_string());
     }
@@ -210,11 +212,9 @@ pub fn parse_graph_message(
 }
 
 fn importance_label_id(importance: Option<&str>) -> Option<&'static str> {
-    match importance {
-        Some(value) if value.eq_ignore_ascii_case("high") => Some("importance:high"),
-        Some(value) if value.eq_ignore_ascii_case("low") => Some("importance:low"),
-        _ => None,
-    }
+    importance
+        .and_then(ImportanceLevel::from_graph_value)
+        .map(ImportanceLevel::label_id)
 }
 
 fn extract_last_verb_state(msg: &GraphMessage) -> (bool, bool) {

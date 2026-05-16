@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 
 use super::error::ProviderError;
-use super::typed_ids::{FolderId, LabelId};
+use super::typed_ids::FolderId;
 use super::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SendIntent,
+    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SendIntent, LabelKind,
 };
 
 /// Common operations that every email provider must support.
@@ -62,13 +62,13 @@ pub trait ProviderOps: Send + Sync {
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError>;
     async fn remove_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError>;
 
     /// Set the server-side "MDN already sent" marker for a single

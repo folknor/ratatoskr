@@ -104,7 +104,7 @@ pub fn insert_folders_batch(tx: &Transaction, rows: &[FolderWriteRow]) -> Result
 /// the invariant from `docs/labels-unification/redesign.md` "is_undeletable"
 /// holds even if a later sync pass forgets to set the flag: once a row is
 /// marked undeletable (e.g. by the bootstrap synth for `importance:*`,
-/// `ensure_prefixed_tag_label`, or a system-flag classification at ingest),
+/// the typed action-side label writer, or a system-flag classification at ingest),
 /// it stays that way.
 pub fn upsert_labels(tx: &Transaction, rows: &[LabelWriteRow]) -> Result<(), String> {
     for row in rows {

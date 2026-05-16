@@ -240,45 +240,34 @@ Label color pair entry resolved by contract #5b low-level slice: `label-colors::
 
   Tags: contracts=grain.vertical,validated-domain; enforcement=sealed-constructor; promise=per-message boolean reads carry their grain explicitly.
 
-- `crates/provider-sync/src/jmap/sync/storage.rs:304` *(slice 5)* - JMAP keyword prefix hardcoded as `format!("kw:{keyword}")` (line 304). If a future non-keyword JMAP label arrives and is processed through the standard label_ids path without prefix sniffing, the thread_labels row will land without the `kw:` prefix, breaking the invariant that JMAP IMAP-only keywords are prefixed. Current convention: IMAP upserts `kw:` rows via `replace_message_keywords()` in sync_pipeline.rs; JMAP upserts via `sync_keyword_labels()` format!. No call site sniffs the prefix to validate correctness-the assumption is that all callers know their category.
+Provider label/folder prefix entries resolved by contract #5c slice:
+`types::LabelKind`, `FolderKind`, `SystemFolderId`, and private-field payload
+types now own provider-specific storage encodings. JMAP/IMAP keyword rows,
+Graph category and importance rows, dev-seed label synthesis, Graph/JMAP/IMAP
+folder-id synthesis, and smart-folder system-folder shorthands construct or
+parse through those types. `ProviderOps::add_label` and `remove_label` now
+receive `LabelKind`, so Gmail, Graph, JMAP, and IMAP dispatch by exhaustive
+enum match instead of string prefixes. The transitional raw action and DB wire
+IDs remain string-shaped at the boundary, but service action code parses them
+before local synthesis or provider dispatch.
 
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=JMAP keyword labels carry the `kw:` prefix.
+Two call sites narrowed as a result of the typed boundary:
 
-- `crates/provider-sync/src/graph/sync/persistence.rs:227-228` *(slice 5)* - Graph category prefix hardcoded as `format!("cat:{category}")` (line 228). If a future Graph sync path processes categories without this prefix, the category label will misidentify as a standard label. Current convention: `upsert_graph_label_rows()` is the sole call site that synthesizes `cat:` rows; only called from `store_thread_to_db()` on every thread persist. If a new Graph endpoint or refactor bypasses `upsert_graph_label_rows()`, stale category labels land unprefixed.
+- JMAP `add_label` / `remove_label` no longer accept non-keyword label IDs
+  (the prior code interpreted a `jmap-<mailbox>` label ID as a mailbox toggle).
+  Mailbox membership now routes through `move_to_folder` exclusively. Per the
+  redesign, JMAP user mailboxes are folder-shaped, not label-shaped.
+- The undo path for Archive and Trash previously dispatched
+  `AddLabel { LabelId("INBOX") }` to put threads back in the inbox. Because
+  `INBOX` is a `SystemFolderId`, that no longer parses as a `LabelKind`;
+  `crates/app/src/handlers/commands.rs::undo_payload_to_ops` now dispatches
+  `MoveToFolder { dest: FolderId("INBOX") }` instead. The Gmail label-set
+  semantics still apply on the provider side (Gmail's `move_to_folder` adds
+  the destination label without removing other folder labels, so threads in
+  multiple Gmail labels keep them), while Graph/JMAP/IMAP do their respective
+  mailbox/folder moves.
 
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=Graph categories carry the `cat:` prefix.
-
-- `crates/provider-sync/src/graph/sync/persistence.rs:246-261` *(slice 5)* - Graph importance prefix hardcoded as the match arm in `graph_importance_label()` (line 273-278). The strings `"importance:high"` and `"importance:low"` are recognized as special and synthesized into label rows only inside `upsert_graph_label_rows()`. If importance labels flow through a different provider label sync path (e.g., a hypothetical direct label merge), they will not be recognized as system labels and will land as user-visible rows without `is_undeletable=true`.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=Graph importance labels carry the `importance:` prefix and `is_undeletable`.
-
-- `crates/jmap/src/ops.rs:295` *(slice 6)* - `label_id.as_str().strip_prefix("kw:")` extracts keyword from label ID. If a call site passes a non-kw: label, the conditional silently takes the false branch and treats it as a mailbox operation. Current convention: label IDs are strings; callers must know `kw:` implies keyword mutation vs mailbox. (2 more elided)
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=label routing dispatches by typed kind, not string prefix.
-
-- `crates/graph/src/ops/mod.rs:169` *(slice 6)* - `label_id_str.strip_prefix("cat:").unwrap_or(label_id_str)` extracts category name or defaults to the full string. If the caller passes `"importance:high"`, the strip_prefix returns None and the category name becomes `"importance:high"` (wrong). Current convention: call site should have already routed `importance:*` labels via `graph_importance_for_label` (line 164); if a future call site adds a label without the importance check, it silently misclassifies.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=label routing dispatches by typed kind, not string prefix.
-
-- `crates/imap/src/ops.rs:379` *(slice 6)* - `label_id.strip_prefix("kw:")` with `let Some(keyword) = ... else { ... invalid IMAP label ... }`. If a caller accidentally passes a `"folder-*"` label (which is valid folder syntax) to this remove path, the strip_prefix fails and the function errors instead of routing to folder removal. Current convention: remove_label must check the prefix before dispatch; a missing check silently rejects valid label IDs.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=label routing dispatches by typed kind, not string prefix.
-
-- `crates/service/src/actions/label.rs:57-66` *(slice 7)* - `label_id.strip_prefix("kw:") / "cat:" / "importance:"` in `ensure_prefixed_tag_label`. Current convention: `add_label_local` sniffs the prefix to determine label kind and synthesize rows; `opposite_importance_label` (line 313-318) pattern-matches hardcoded strings `"importance:high"` / `"importance:low"` to implement mutual exclusion. If a new action path (or retry dispatch) calls `add_label` directly without verifying prefix format, importance labels bypass the mutual-exclusion logic and both rows land. See also `ensure_prefixed_tag_label` comments (line 70-72): the OR semantic on `is_undeletable` repairs synced-before-invariant rows, but the write path doesn't validate that an importance row with `is_undeletable=false` already landed and needs repair before insertion.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=label kind dispatch is total over typed kinds, not partial over string prefixes.
-
-- `crates/dev-seed/src/accounts.rs:256-263` *(slice 10)* - `seeded_user_label_id()` synthesizes label IDs with provider-specific prefixes: `kw:` for IMAP/JMAP (line 260), `cat:` for Graph (line 259), bare string for Gmail. Current convention: the prefix encoding is documented inline (lines 256-262 comment), and the function is internal to seed-only. However, any future call site that needs to synthesize labels without going through this function risks generating rows with wrong prefix format. Type system does not prevent a hypothetical `create_label_for_provider(name: &str)` call from skipping the prefix injection.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=provider label IDs carry the right prefix for their provider.
-
-- `crates/dev-seed/src/accounts.rs:348-364` *(slice 10)* - Graph accounts bootstrap synthesised importance labels (lines 353-354) with hardcoded `"importance:high"` / `"importance:low"` ID strings and `is_undeletable = 1`. Current convention: per `docs/architecture.md` "Pre-create rows for any label_id that lands in `thread_labels`," the importance rows must always carry both the prefix and the undeletable flag. Dev-seed correctly synthesizes them here, but the contract is by convention: a future ingest path that treats importance labels as raw categories and injects them without the prefix / undeletable invariant would silently misclassify. The type system does not enforce that `importance:*` labels are a closed enum and never bare strings.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=importance labels are a closed enum, not bare strings.
-
-- `crates/smart-folder/src/sql_builder.rs:302-336` *(deep slice: smart-folder + search)* - `in_folder` clause uses hardcoded uppercase folder IDs (`INBOX`, `SENT`, `DRAFT`, `TRASH`, `SPAM`, `archive`, `IMPORTANT`) mapped from lowercase input (line 312-315). Current convention: the `IN_FOLDER_SHORTHANDS` constant defines the mapping. If a future refactor adds a new system folder without updating this map, queries with `in:newfolder` silently fail to match (taken as free text). Type system does not prevent a folder ID lookup from using the wrong case or missing entries.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=system folder IDs are a closed enum.
+  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=label and folder routing dispatches by typed kind, not prefix sniffing.
 
 - `crates/smart-folder/src/sql_builder.rs:425-443` *(deep slice: smart-folder + search)* - `label_group_rendered_fragment` uses string-formatted SQL with `account_alias`, `thread_alias`, and `group_predicate` parameters. Two call sites: `build_is_tagged_clause` (line 448-452) uses `"t.account_id"` / `"t.id"`, while `build_label_clause` (line 484-488) uses `"m.account_id"` / `"m.thread_id"`. Current convention: both produce syntactically valid SQL but filter on different table aliases. If `build_label_clause` were to receive a predicate meant for thread-level filtering (e.g., written by a maintainer assuming message-level), the divergence would silently propagate to the query. The helper factory should require typed alias parameters rather than strings.
 

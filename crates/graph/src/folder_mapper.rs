@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use common::folder_roles::graph_well_known_aliases;
+use common::types::{FolderKind, LabelKind};
 
 use super::types::GraphMailFolder;
 
@@ -31,7 +32,7 @@ impl FolderMap {
     pub fn build(
         resolved_wellknown: &HashMap<String, (&str, &str)>,
         all_folders: &[GraphMailFolder],
-    ) -> Self {
+    ) -> Result<Self, String> {
         // First pass: build opaque Graph ID -> Ratatoskr folder ID map for parent resolution.
         let graph_to_folder_id: HashMap<&str, String> = all_folders
             .iter()
@@ -39,11 +40,11 @@ impl FolderMap {
                 let folder_id = if let Some(&(lid, _)) = resolved_wellknown.get(&folder.id) {
                     lid.to_string()
                 } else {
-                    format!("graph-{}", folder.id)
+                    FolderKind::graph_user(&folder.id)?.storage_id()
                 };
-                (folder.id.as_str(), folder_id)
+                Ok((folder.id.as_str(), folder_id))
             })
-            .collect();
+            .collect::<Result<_, String>>()?;
 
         let mut by_graph_id = HashMap::new();
         let mut by_folder_id = HashMap::new();
@@ -65,7 +66,7 @@ impl FolderMap {
                 }
             } else {
                 FolderMapping {
-                    folder_id: format!("graph-{}", folder.id),
+                    folder_id: FolderKind::graph_user(&folder.id)?.storage_id(),
                     folder_name: folder.display_name.clone(),
                     folder_type: "user",
                     parent_folder_id,
@@ -76,10 +77,10 @@ impl FolderMap {
             by_graph_id.insert(folder.id.clone(), mapping);
         }
 
-        Self {
+        Ok(Self {
             by_graph_id,
             by_folder_id,
-        }
+        })
     }
 
     /// Look up a folder mapping by its opaque Graph ID.
@@ -93,20 +94,25 @@ impl FolderMap {
     }
 
     /// Derive folder and label IDs for a message from its folder and categories.
+    ///
+    /// Returns `Err` if any category fails the `CategoryName` validator (empty
+    /// or control characters). Dropping a category silently here would land a
+    /// message with an incomplete label set, so the parser surfaces the error
+    /// to the sync caller instead.
     pub fn get_folder_and_label_ids_for_message(
         &self,
         parent_folder_id: &str,
         categories: &[String],
-    ) -> Vec<String> {
-        let folder_ids = self
+    ) -> Result<Vec<String>, String> {
+        let mut ids = self
             .by_graph_id
             .get(parent_folder_id)
             .map(|mapping| vec![mapping.folder_id.clone()])
             .unwrap_or_default();
-        folder_ids
-            .into_iter()
-            .chain(categories.iter().map(|cat| format!("cat:{cat}")))
-            .collect()
+        for cat in categories {
+            ids.push(LabelKind::graph_category(cat)?.storage_id());
+        }
+        Ok(ids)
     }
 
     /// Return all mappings (for list_folders trait method).

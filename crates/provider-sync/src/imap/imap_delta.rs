@@ -125,7 +125,14 @@ pub async fn imap_delta_sync(
             tokio::time::sleep(std::time::Duration::from_millis(CIRCUIT_BREAKER_DELAY_MS)).await;
         }
 
-        let mapping = map_folder_to_folder(folder);
+        let mapping = match map_folder_to_folder(folder) {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("[sync] Delta new folder {} skipped: {e}", folder.path);
+                delta_errors.push(format!("{}: {e}", folder.path));
+                continue;
+            }
+        };
         match fetch_folder_uids(
             config,
             cancellation_token,
@@ -186,7 +193,14 @@ pub async fn imap_delta_sync(
             if cancellation_token.is_cancelled() {
                 return Err("sync cancelled".to_string());
             }
-            let mapping = map_folder_to_folder(folder);
+            let mapping = match map_folder_to_folder(folder) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::error!("[sync] Delta existing folder {} skipped: {e}", folder.path);
+                    delta_errors.push(format!("{}: {e}", folder.path));
+                    continue;
+                }
+            };
             let saved = match state_map.get(&folder.raw_path) {
                 Some(s) => s,
                 None => continue,

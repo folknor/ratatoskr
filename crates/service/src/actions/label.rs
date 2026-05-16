@@ -1,6 +1,7 @@
 use common::ops::ProviderOps;
 use common::typed_ids::LabelId;
 use common::types::ActionProviderCtx;
+use types::LabelKind;
 
 use super::context::ActionContext;
 use super::log::MutationLog;
@@ -26,17 +27,19 @@ pub(crate) async fn add_label_local(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let label_kind =
+            label_kind_for_account_sync(&conn, &aid, &lid).map_err(ActionError::db)?;
 
         let exists = db::db::queries_extra::action_helpers::label_exists_sync(&conn, &lid, &aid)
             .map_err(|e| ActionError::db(format!("label lookup: {e}")))?;
         if !exists {
-            ensure_prefixed_tag_label(&conn, &aid, &lid)
-                .transpose()
+            ensure_typed_tag_label(&conn, &aid, &label_kind)
                 .map_err(ActionError::db)?
                 .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
         }
 
-        if let Some(opposite) = opposite_importance_label(&lid) {
+        if let LabelKind::GraphImportance(level) = label_kind {
+            let opposite = level.opposite().label_id();
             db::db::queries_extra::remove_label(&conn, &aid, &tid, opposite)
                 .map_err(ActionError::db)?;
         }
@@ -49,40 +52,67 @@ pub(crate) async fn add_label_local(
     .and_then(|r| r)
 }
 
-fn ensure_prefixed_tag_label(
+fn label_kind_for_account_sync(
     conn: &rusqlite::Connection,
     account_id: &str,
     label_id: &str,
-) -> Option<Result<(), String>> {
-    let (name, sort_order, is_undeletable) = if let Some(keyword) = label_id.strip_prefix("kw:") {
-        (keyword.to_string(), None, false)
-    } else if let Some(category) = label_id.strip_prefix("cat:") {
-        (category.to_string(), None, false)
-    } else if label_id == "importance:high" {
-        ("High importance".to_string(), Some(10_000), true)
-    } else if label_id == "importance:low" {
-        ("Low importance".to_string(), Some(10_001), true)
-    } else {
-        return None;
+) -> Result<LabelKind, String> {
+    let provider = db::db::queries_extra::get_account_provider_sync(conn, account_id)?;
+    LabelKind::parse(label_id, provider)
+}
+
+async fn label_kind_for_account(
+    ctx: &ActionContext,
+    account_id: &str,
+    label_id: &LabelId,
+) -> Result<LabelKind, ActionError> {
+    let aid = account_id.to_string();
+    let lid = label_id.as_str().to_string();
+    ctx.db
+        .with_conn(move |conn| label_kind_for_account_sync(conn, &aid, &lid))
+        .await
+        .map_err(|e| ActionError::db(format!("label kind lookup: {e}")))
+}
+
+fn ensure_typed_tag_label(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    label: &LabelKind,
+) -> Result<Option<()>, String> {
+    let Some((name, sort_order, is_undeletable)) = label_write_metadata(label) else {
+        return Ok(None);
     };
+    let label_id = label.storage_id();
 
     // ON CONFLICT with OR semantics on is_undeletable repairs a pre-existing
-    // row that was synced before the invariant landed (e.g. an `importance:*`
-    // row written by an older sync pass with the flag cleared). This matches
+    // row that was synced before the invariant landed. This matches
     // the OR rule in `upsert_labels` so the invariant from redesign.md
     // "is_undeletable" holds regardless of writer.
-    Some(
-        conn.execute(
-            "INSERT INTO labels \
-             (id, account_id, name, sort_order, is_undeletable) \
-             VALUES (?1, ?2, ?3, COALESCE(?4, 0), ?5) \
-             ON CONFLICT(account_id, id) DO UPDATE SET \
-               is_undeletable = (labels.is_undeletable OR excluded.is_undeletable)",
-            rusqlite::params![label_id, account_id, name, sort_order, is_undeletable],
-        )
-        .map(|_| ())
-        .map_err(|e| format!("ensure prefixed tag label: {e}")),
+    conn.execute(
+        "INSERT INTO labels \
+         (id, account_id, name, sort_order, is_undeletable) \
+         VALUES (?1, ?2, ?3, COALESCE(?4, 0), ?5) \
+         ON CONFLICT(account_id, id) DO UPDATE SET \
+           is_undeletable = (labels.is_undeletable OR excluded.is_undeletable)",
+        rusqlite::params![label_id, account_id, name, sort_order, is_undeletable],
     )
+    .map(|_| Some(()))
+    .map_err(|e| format!("ensure typed tag label: {e}"))
+}
+
+fn label_write_metadata(label: &LabelKind) -> Option<(String, Option<i64>, bool)> {
+    match label {
+        LabelKind::GmailUser(_) => None,
+        LabelKind::GraphCategory(category) => Some((category.as_str().to_string(), None, false)),
+        LabelKind::GraphImportance(level) => Some((
+            level.display_name().to_string(),
+            Some(level.sort_order()),
+            true,
+        )),
+        LabelKind::JmapKeyword(keyword) | LabelKind::ImapKeyword(keyword) => {
+            Some((keyword.as_str().to_string(), None, false))
+        }
+    }
 }
 
 /// Provider dispatch for add-label (assumes local mutation already applied).
@@ -122,7 +152,18 @@ async fn add_label_dispatch_inner(
         db: &ctx.db,
         progress: &NoopProgressReporter,
     };
-    let result = provider.add_label(&provider_ctx, thread_id, label_id).await;
+    let label = match label_kind_for_account(ctx, account_id, label_id).await {
+        Ok(label) => label,
+        Err(e) => {
+            let outcome = ActionOutcome::LocalOnly {
+                reason: e,
+                retryable: false,
+            };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    let result = provider.add_label(&provider_ctx, thread_id, &label).await;
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
         Err(e) => ActionOutcome::LocalOnly {
@@ -295,8 +336,19 @@ async fn remove_label_dispatch_inner(
         db: &ctx.db,
         progress: &NoopProgressReporter,
     };
+    let label = match label_kind_for_account(ctx, account_id, label_id).await {
+        Ok(label) => label,
+        Err(e) => {
+            let outcome = ActionOutcome::LocalOnly {
+                reason: e,
+                retryable: false,
+            };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
     let result = provider
-        .remove_label(&provider_ctx, thread_id, label_id)
+        .remove_label(&provider_ctx, thread_id, &label)
         .await;
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
@@ -397,12 +449,4 @@ pub(crate) async fn remove_label_with_provider_no_enqueue(
     }
 
     remove_label_dispatch_no_enqueue(ctx, provider, account_id, thread_id, label_id).await
-}
-
-fn opposite_importance_label(label_id: &str) -> Option<&'static str> {
-    match label_id {
-        "importance:high" => Some("importance:low"),
-        "importance:low" => Some("importance:high"),
-        _ => None,
-    }
 }

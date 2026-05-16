@@ -9,10 +9,10 @@ const FOLDER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60)
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, LabelId};
+use common::typed_ids::FolderId;
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult, SendIntent,
+    LabelKind, ProviderProfile, ProviderTestResult, SendIntent,
 };
 use db::db::ReadDbState;
 
@@ -158,15 +158,18 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError> {
-        let label_id_str = label_id.as_str();
-        if let Some(importance) = graph_importance_for_label(label_id_str) {
-            let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-            return Ok(batch_set_importance(&self.client, ctx, &msg_ids, importance).await?);
-        }
-
-        let category = label_id_str.strip_prefix("cat:").unwrap_or(label_id_str);
+        let LabelKind::GraphCategory(category) = label else {
+            if let LabelKind::GraphImportance(level) = label {
+                let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
+                return Ok(batch_set_importance(&self.client, ctx, &msg_ids, level.graph_value()).await?);
+            }
+            return Err(ProviderError::Client(format!(
+                "Graph add_label received non-Graph label kind: {label:?}"
+            )));
+        };
+        let category = category.as_str();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         // Hold category lock for the entire read-modify-write to prevent clobber
         let _guard = self.client.lock_categories().await;
@@ -185,15 +188,18 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError> {
-        let label_id_str = label_id.as_str();
-        if graph_importance_for_label(label_id_str).is_some() {
-            let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-            return Ok(batch_set_importance(&self.client, ctx, &msg_ids, "normal").await?);
-        }
-
-        let category = label_id_str.strip_prefix("cat:").unwrap_or(label_id_str);
+        let LabelKind::GraphCategory(category) = label else {
+            if matches!(label, LabelKind::GraphImportance(_)) {
+                let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
+                return Ok(batch_set_importance(&self.client, ctx, &msg_ids, "normal").await?);
+            }
+            return Err(ProviderError::Client(format!(
+                "Graph remove_label received non-Graph label kind: {label:?}"
+            )));
+        };
+        let category = category.as_str();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         let _guard = self.client.lock_categories().await;
         let current = batch_get_categories(&self.client, ctx, &msg_ids).await?;
@@ -404,7 +410,7 @@ impl ProviderOps for GraphOps {
         };
 
         refresh_folder_map(&self.client, ctx).await?;
-        Ok(graph_folder_to_mutation(&created))
+        graph_folder_to_mutation(&created).map_err(ProviderError::Client)
     }
 
     async fn rename_folder(
@@ -497,14 +503,6 @@ impl ProviderOps for GraphOps {
                 .unwrap_or_default(),
             name: profile.display_name,
         })
-    }
-}
-
-fn graph_importance_for_label(label_id: &str) -> Option<&'static str> {
-    match label_id {
-        "importance:high" => Some("high"),
-        "importance:low" => Some("low"),
-        _ => None,
     }
 }
 

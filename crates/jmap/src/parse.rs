@@ -114,7 +114,7 @@ pub fn parse_jmap_email(
         .collect();
 
     let mailbox_ids = email.mailbox_ids();
-    let label_ids = get_labels_for_email(&mailbox_ids, &keywords, mailbox_map);
+    let label_ids = get_labels_for_email(&mailbox_ids, &keywords, mailbox_map)?;
 
     let has_attachments = email.has_attachment();
 

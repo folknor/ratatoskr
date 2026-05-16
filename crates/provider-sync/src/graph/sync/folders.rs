@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use common::types::ProviderCtx;
+use common::types::{ImportanceLevel, ProviderCtx};
 use db::db::ReadDbState;
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 
@@ -41,7 +41,7 @@ pub(super) async fn sync_folders(
     // Phase 2: Fetch full folder tree
     let all_folders = fetch_all_folders(client, ctx.db).await?;
 
-    let folder_map = FolderMap::build(&resolved, &all_folders);
+    let folder_map = FolderMap::build(&resolved, &all_folders)?;
 
     // Phase 3: Persist folders to DB
     persist_folders_and_importance(ctx, &folder_map).await?;
@@ -100,17 +100,14 @@ async fn persist_folders_and_importance(
 }
 
 fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
-    [
-        ("importance:high", "High importance", 10_000),
-        ("importance:low", "Low importance", 10_001),
-    ]
+    ImportanceLevel::ALL
     .into_iter()
-    .map(|(id, name, sort_order)| LabelWriteRow {
-        id: id.to_string(),
+    .map(|level| LabelWriteRow {
+        id: level.label_id().to_string(),
         account_id: account_id.to_string(),
-        name: name.to_string(),
+        name: level.display_name().to_string(),
         visible: None,
-        sort_order: Some(sort_order),
+        sort_order: Some(level.sort_order()),
         server_color_bg: None,
         server_color_fg: None,
         user_color_bg: None,

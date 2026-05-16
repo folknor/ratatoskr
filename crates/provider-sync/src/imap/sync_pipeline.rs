@@ -8,6 +8,7 @@ use db::db::queries_extra::{
     insert_folders_batch, insert_messages, recompute_thread_read_starred, set_message_imap_flags,
     sync_thread_read_starred_labels, upsert_labels,
 };
+use common::types::LabelKind;
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use seen::MessageAddresses;
@@ -243,10 +244,6 @@ fn existing_imap_message_identity(
     .map_err(|e| format!("lookup existing IMAP message: {e}"))
 }
 
-fn imap_keyword_label_id(keyword: &str) -> String {
-    format!("kw:{keyword}")
-}
-
 fn upsert_imap_keyword_labels(
     tx: &rusqlite::Transaction,
     account_id: &str,
@@ -260,7 +257,8 @@ fn upsert_imap_keyword_labels(
             continue;
         }
         if unique.insert(keyword.clone()) {
-            label_pairs.push((keyword.clone(), imap_keyword_label_id(keyword)));
+            let label_id = LabelKind::imap_keyword(keyword)?.storage_id();
+            label_pairs.push((keyword.clone(), label_id));
         }
     }
 
@@ -566,19 +564,19 @@ pub fn sync_folders_to_folders(
     let path_to_folder_id: std::collections::HashMap<&str, String> = folders
         .iter()
         .map(|f| {
-            let mapping = map_folder_to_folder(f);
-            (f.path.as_str(), mapping.folder_id)
+            let mapping = map_folder_to_folder(f)?;
+            Ok::<_, String>((f.path.as_str(), mapping.folder_id))
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     let rows: Vec<FolderWriteRow> = folders
         .iter()
         .map(|folder| {
-            let mapping = map_folder_to_folder(folder);
+            let mapping = map_folder_to_folder(folder)?;
             let parent_id =
                 derive_imap_parent_folder_id(&folder.path, &folder.delimiter, &path_to_folder_id);
 
-            FolderWriteRow {
+            Ok::<FolderWriteRow, String>(FolderWriteRow {
                 id: mapping.folder_id,
                 account_id: account_id.to_string(),
                 name: mapping.folder_name,
@@ -608,9 +606,9 @@ pub fn sync_folders_to_folders(
                 // mark them as system here. See `docs/labels-unification/
                 // redesign.md` "is_undeletable".
                 is_undeletable: folder.special_use.is_some(),
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     insert_folders_batch(&tx, &rows)?;
     tx.commit().map_err(|e| format!("commit folders: {e}"))?;

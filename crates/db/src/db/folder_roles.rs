@@ -138,8 +138,12 @@ pub fn is_gmail_system_folder_label_id(label_id: &str) -> bool {
 /// and synthesised importance labels). Used at sync ingest to partition
 /// per-message label IDs into folder writes vs label writes; see
 /// `docs/labels-unification/redesign.md` "ID encoding by origin".
+///
+/// Backed by `types::LabelKind::parse(_, Graph)` so the predicate matches
+/// exactly the inputs the typed boundary accepts as a Graph label - i.e.
+/// `cat:<non-empty>` or `importance:high|low`, nothing else.
 pub fn is_graph_tag_id(label_id: &str) -> bool {
-    label_id.starts_with("cat:") || label_id.starts_with("importance:")
+    types::LabelKind::parse(label_id, types::MailProviderKind::Graph).is_ok()
 }
 
 pub fn system_folder_by_imap_special_use(special_use: &str) -> Option<&'static SystemFolderRole> {

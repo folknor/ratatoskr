@@ -6,11 +6,11 @@ use rusqlite::{Connection, OptionalExtension};
 use common::error::ProviderError;
 use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, LabelId};
+use common::typed_ids::FolderId;
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
-    SendIntent,
+    FolderKind, LabelKind, MailProviderKind, ProviderParsedAttachment, ProviderParsedMessage,
+    ProviderProfile, ProviderTestResult, SendIntent,
 };
 use smtp;
 
@@ -21,12 +21,14 @@ use super::connection::connect;
 ///
 /// Mirrors the old TS `mapFolderToLabel` logic:
 /// system folders get well-known IDs (INBOX, SENT, …), user folders get `folder-{path}`.
-fn canonical_folder_id(path: &str, special_use: Option<&str>) -> String {
+fn canonical_folder_id(path: &str, special_use: Option<&str>) -> Result<String, String> {
     let lower = path.to_lowercase();
-    imap_special_use_to_label_id(special_use.unwrap_or_default())
+    if let Some(id) = imap_special_use_to_label_id(special_use.unwrap_or_default())
         .or_else(|| imap_name_to_special_use(&lower).and_then(imap_special_use_to_label_id))
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("folder-{path}"))
+    {
+        return Ok(id.to_string());
+    }
+    Ok(FolderKind::imap_user(path)?.storage_id())
 }
 
 /// Generate a short random hex string for pseudo-IDs.
@@ -341,10 +343,13 @@ fn resolve_folder_path(
     if let Some(path) = path {
         return Ok(path);
     }
-    folder_id
-        .strip_prefix("folder-")
-        .map(str::to_string)
-        .ok_or_else(|| format!("No IMAP folder path found for folder id {folder_id:?}"))
+    if let Ok(FolderKind::ImapUser(path)) = FolderKind::parse(folder_id, MailProviderKind::Imap) {
+        return Ok(path.as_path().to_string());
+    }
+
+    Err(format!(
+        "No IMAP folder path found for folder id {folder_id:?}"
+    ))
 }
 
 /// Connect, run an IMAP session body, then logout - mirroring the
@@ -373,22 +378,9 @@ async fn set_keyword_batched(
     config: &super::types::ImapConfig,
     ctx: &ActionProviderCtx<'_>,
     thread_id: &str,
-    label_id: &str,
+    keyword: &str,
     flag_op: &str,
 ) -> Result<(), ProviderError> {
-    let Some(keyword) = label_id.strip_prefix("kw:") else {
-        // IMAP only ever stores `kw:*` labels - cat:, importance:* and
-        // Gmail-native label ids cannot land on an IMAP account at ingest.
-        // If one arrives here it is a programmer error elsewhere (likely
-        // the label-group composite dispatching a cross-provider member);
-        // surface it as a hard failure rather than a silent success so
-        // the composite sees the breakage instead of marking a no-op
-        // member as Success.
-        return Err(ProviderError::Client(format!(
-            "IMAP keyword op received non-keyword label id `{label_id}`"
-        )));
-    };
-
     let account_id = ctx.account_id.to_string();
     let tid = thread_id.to_string();
 
@@ -733,20 +725,30 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError> {
+        let LabelKind::ImapKeyword(keyword) = label else {
+            return Err(ProviderError::Client(format!(
+                "IMAP add_label received non-IMAP keyword label kind: {label:?}"
+            )));
+        };
         let config = self.load_config(ctx.db, ctx.account_id).await?;
-        set_keyword_batched(&config, ctx, thread_id, label_id.as_str(), "+FLAGS").await
+        set_keyword_batched(&config, ctx, thread_id, keyword.as_str(), "+FLAGS").await
     }
 
     async fn remove_label(
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError> {
+        let LabelKind::ImapKeyword(keyword) = label else {
+            return Err(ProviderError::Client(format!(
+                "IMAP remove_label received non-IMAP keyword label kind: {label:?}"
+            )));
+        };
         let config = self.load_config(ctx.db, ctx.account_id).await?;
-        set_keyword_batched(&config, ctx, thread_id, label_id.as_str(), "-FLAGS").await
+        set_keyword_batched(&config, ctx, thread_id, keyword.as_str(), "-FLAGS").await
     }
 
     // ── Send + Drafts ───────────────────────────────────────────────────
@@ -995,12 +997,13 @@ impl ProviderOps for ImapOps {
             imap_client::list_folders(&mut session).await
         })?;
 
-        Ok(folders
+        folders
             .into_iter()
             .map(|f| {
-                let id = canonical_folder_id(&f.path, f.special_use.as_deref());
+                let id = canonical_folder_id(&f.path, f.special_use.as_deref())
+                    .map_err(ProviderError::Client)?;
                 let special_use = f.special_use;
-                ProviderFolderEntry {
+                Ok(ProviderFolderEntry {
                     id,
                     name: f.name,
                     path: f.path,
@@ -1015,9 +1018,9 @@ impl ProviderOps for ImapOps {
                     unread_count: Some(f.unseen),
                     color_bg: None,
                     color_fg: None,
-                }
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn create_folder(

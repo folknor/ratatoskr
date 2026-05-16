@@ -1,5 +1,6 @@
 use super::types::ImapFolder;
 use common::folder_roles::{imap_name_to_special_use, system_folder_by_imap_special_use};
+use common::types::FolderKind;
 
 /// Mapping from an IMAP folder to a Ratatoskr folder.
 #[derive(Debug, Clone)]
@@ -25,12 +26,16 @@ fn folder_name_to_special_use(name: &str) -> Option<&'static str> {
 }
 
 /// Map an IMAP folder to a Ratatoskr folder.
-pub fn map_folder_to_folder(folder: &ImapFolder) -> FolderMapping {
+///
+/// Returns `Err` only when the folder's path fails the `ImapPath` validator
+/// (empty or contains control characters). System-folder mapping always
+/// succeeds first; the fallible path runs only for user-defined folders.
+pub fn map_folder_to_folder(folder: &ImapFolder) -> Result<FolderMapping, String> {
     // Check special-use attribute first
     if let Some(ref su) = folder.special_use
         && let Some(mapping) = special_use_mapping(su)
     {
-        return mapping;
+        return Ok(mapping);
     }
 
     // Fall back to name-based detection
@@ -41,15 +46,15 @@ pub fn map_folder_to_folder(folder: &ImapFolder) -> FolderMapping {
         folder_name_to_special_use(&lower_path).or_else(|| folder_name_to_special_use(&lower_name))
         && let Some(mapping) = special_use_mapping(su)
     {
-        return mapping;
+        return Ok(mapping);
     }
 
     // User-defined folder
-    FolderMapping {
-        folder_id: format!("folder-{}", folder.path),
+    Ok(FolderMapping {
+        folder_id: FolderKind::imap_user(&folder.path)?.storage_id(),
         folder_name: folder.name.clone(),
         folder_type: "user".to_string(),
-    }
+    })
 }
 
 /// Folder IDs that a message in a given folder should have. The `DRAFT`
@@ -99,7 +104,7 @@ mod tests {
     #[test]
     fn test_special_use_inbox() {
         let f = make_folder("INBOX", "INBOX", Some("\\Inbox"));
-        let m = map_folder_to_folder(&f);
+        let m = map_folder_to_folder(&f).expect("system folder mapping");
         assert_eq!(m.folder_id, "INBOX");
         assert_eq!(m.folder_type, "system");
     }
@@ -107,14 +112,14 @@ mod tests {
     #[test]
     fn test_name_fallback_sent() {
         let f = make_folder("Sent Items", "Sent Items", None);
-        let m = map_folder_to_folder(&f);
+        let m = map_folder_to_folder(&f).expect("system folder mapping");
         assert_eq!(m.folder_id, "SENT");
     }
 
     #[test]
     fn test_user_folder() {
         let f = make_folder("Work/Projects", "Projects", None);
-        let m = map_folder_to_folder(&f);
+        let m = map_folder_to_folder(&f).expect("user folder mapping");
         assert_eq!(m.folder_id, "folder-Work/Projects");
         assert_eq!(m.folder_type, "user");
     }

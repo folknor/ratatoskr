@@ -66,6 +66,14 @@ pub fn store_threads(
             messages.sort_by_key(|m| m.date);
 
             // Collect all folder and label IDs including cross-folder copies.
+            //
+            // IMAP-only pipeline: `store_threads` is invoked from
+            // `provider-sync/src/imap/imap_{delta,initial}.rs` only. On IMAP
+            // the only label-shaped IDs are `kw:<keyword>` (everything else
+            // is a folder), so the prefix sniff here is total over the
+            // inputs this pipeline ever sees. If a future provider reuses
+            // this pipeline, partition through `LabelKind`/`FolderKind`
+            // instead.
             let mut all_folder_ids = HashSet::new();
             let mut all_label_ids = HashSet::new();
             for msg in &messages {

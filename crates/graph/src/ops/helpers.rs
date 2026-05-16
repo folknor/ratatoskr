@@ -1,4 +1,4 @@
-use common::types::{ActionProviderCtx, ProviderCtx, ProviderFolderMutation};
+use common::types::{ActionProviderCtx, FolderKind, ProviderCtx, ProviderFolderMutation};
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;
@@ -59,9 +59,11 @@ pub(super) async fn resolve_graph_folder_id(
     Ok(graph_folder_id)
 }
 
-pub(super) fn graph_folder_to_mutation(folder: &GraphMailFolder) -> ProviderFolderMutation {
-    ProviderFolderMutation {
-        id: format!("graph-{}", folder.id),
+pub(super) fn graph_folder_to_mutation(
+    folder: &GraphMailFolder,
+) -> Result<ProviderFolderMutation, String> {
+    Ok(ProviderFolderMutation {
+        id: FolderKind::graph_user(&folder.id)?.storage_id(),
         name: folder.display_name.clone(),
         path: folder.display_name.clone(),
         folder_type: "user".to_string(),
@@ -69,7 +71,7 @@ pub(super) fn graph_folder_to_mutation(folder: &GraphMailFolder) -> ProviderFold
         delimiter: Some("/".to_string()),
         color_bg: None,
         color_fg: None,
-    }
+    })
 }
 
 pub(super) async fn delete_folder_delta_token(

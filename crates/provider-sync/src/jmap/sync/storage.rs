@@ -4,6 +4,7 @@ use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels,
 };
+use common::types::LabelKind;
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
@@ -301,7 +302,7 @@ fn sync_keyword_labels(
     }
 
     for keyword in &unique_keywords {
-        let label_id = format!("kw:{keyword}");
+        let label_id = LabelKind::jmap_keyword(keyword)?.storage_id();
         upsert_labels(
             tx,
             &[LabelWriteRow {

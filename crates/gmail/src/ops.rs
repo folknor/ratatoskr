@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use common::encoding::encode_base64url_nopad;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
-use common::typed_ids::{FolderId, LabelId};
+use common::typed_ids::FolderId;
 use common::types::{
     ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult,
+    LabelKind, ProviderProfile, ProviderTestResult,
 };
 use db::db::ReadDbState;
 
@@ -125,8 +125,13 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError> {
+        let LabelKind::GmailUser(label_id) = label else {
+            return Err(ProviderError::Client(format!(
+                "Gmail add_label received non-Gmail label kind: {label:?}"
+            )));
+        };
         let add = vec![label_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &add, &[], ctx.db)
@@ -138,8 +143,13 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
-        label_id: &LabelId,
+        label: &LabelKind,
     ) -> Result<(), ProviderError> {
+        let LabelKind::GmailUser(label_id) = label else {
+            return Err(ProviderError::Client(format!(
+                "Gmail remove_label received non-Gmail label kind: {label:?}"
+            )));
+        };
         let remove = vec![label_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)

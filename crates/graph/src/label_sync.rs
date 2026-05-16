@@ -4,6 +4,7 @@ use super::client::GraphClient;
 use db::db::ReadDbState;
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use label_colors::preset_colors;
+use common::types::{ImportanceLevel, LabelKind};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,8 +57,9 @@ pub async fn graph_label_sync(
                     }
                 };
 
-                LabelWriteRow {
-                    id: format!("cat:{}", cat.display_name),
+                let label = LabelKind::graph_category(&cat.display_name)?;
+                Ok(LabelWriteRow {
+                    id: label.storage_id(),
                     account_id: aid.clone(),
                     name: cat.display_name.clone(),
                     visible: None,
@@ -67,9 +69,9 @@ pub async fn graph_label_sync(
                     user_color_bg: None,
                     user_color_fg: None,
                     is_undeletable: false,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_, String>>()?;
         rows.extend(importance_label_rows(&aid));
 
         upsert_labels(&tx, &rows)?;
@@ -82,17 +84,14 @@ pub async fn graph_label_sync(
 }
 
 fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
-    [
-        ("importance:high", "High importance", 10_000),
-        ("importance:low", "Low importance", 10_001),
-    ]
+    ImportanceLevel::ALL
     .into_iter()
-    .map(|(id, name, sort_order)| LabelWriteRow {
-        id: id.to_string(),
+    .map(|level| LabelWriteRow {
+        id: level.label_id().to_string(),
         account_id: account_id.to_string(),
-        name: name.to_string(),
+        name: level.display_name().to_string(),
         visible: None,
-        sort_order: Some(sort_order),
+        sort_order: Some(level.sort_order()),
         server_color_bg: None,
         server_color_fg: None,
         user_color_bg: None,

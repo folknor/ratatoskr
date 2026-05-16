@@ -1567,6 +1567,7 @@ dependencies = [
  "serde",
  "store",
  "toml",
+ "types",
  "xxhash-rust",
 ]
 

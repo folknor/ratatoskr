@@ -1,5 +1,6 @@
 use common::folder_roles::is_user_visible_keyword;
 use common::text::truncate_graphemes;
+use common::types::LabelKind;
 use sync::threading::ThreadableMessage;
 use sync::types::MessageMeta;
 
@@ -41,8 +42,10 @@ pub fn convert_imap_message(
 
     let mut label_ids = get_folder_ids_for_message(folder_id, msg.is_draft);
     for keyword in &msg.keyword_categories {
-        if is_user_visible_keyword(keyword) {
-            label_ids.push(format!("kw:{keyword}"));
+        if is_user_visible_keyword(keyword)
+            && let Ok(label) = LabelKind::imap_keyword(keyword)
+        {
+            label_ids.push(label.storage_id());
         }
     }
 

@@ -211,7 +211,7 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         &self,
         _ctx: &common::types::ActionProviderCtx<'_>,
         _thread_id: &str,
-        _label_id: &common::typed_ids::LabelId,
+        _label: &common::types::LabelKind,
     ) -> Result<(), common::error::ProviderError> {
         Err(Self::offline())
     }
@@ -220,7 +220,7 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         &self,
         _ctx: &common::types::ActionProviderCtx<'_>,
         _thread_id: &str,
-        _label_id: &common::typed_ids::LabelId,
+        _label: &common::types::LabelKind,
     ) -> Result<(), common::error::ProviderError> {
         Err(Self::offline())
     }

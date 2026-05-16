@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use db::db::FromRow;
 use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use db::db::types::{AccountScope, DbThread};
+use types::SystemFolderId;
 
 use super::parser::ParsedQuery;
 
@@ -116,17 +117,6 @@ impl QueryContext {
 }
 
 // ── In-folder shorthand mappings ─────────────────────────────
-
-/// Shorthands that map to folder_id joins on thread_folders.
-const IN_FOLDER_SHORTHANDS: &[(&str, &str)] = &[
-    ("inbox", "INBOX"),
-    ("sent", "SENT"),
-    ("drafts", "DRAFT"),
-    ("trash", "TRASH"),
-    ("spam", "SPAM"),
-    ("archive", "archive"),
-    ("important", "IMPORTANT"),
-];
 
 /// Shorthands that map to thread boolean flags instead of label joins.
 const IN_FLAG_SHORTHANDS: &[(&str, &str)] = &[
@@ -311,13 +301,7 @@ fn build_in_folder_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     let folder_values: Vec<&str> = parsed
         .in_folder
         .iter()
-        .filter_map(|v| {
-            let lower = v.to_ascii_lowercase();
-            IN_FOLDER_SHORTHANDS
-                .iter()
-                .find(|(name, _)| *name == lower)
-                .map(|(_, folder_id)| *folder_id)
-        })
+        .filter_map(|v| SystemFolderId::parse_shorthand(v).map(SystemFolderId::as_str))
         .collect();
 
     if folder_values.is_empty() {
