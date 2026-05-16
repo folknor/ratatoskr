@@ -98,7 +98,8 @@ pub use redacted::{RedactedBytes, RedactedString};
 pub use request::{
     TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams,
     TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow,
-    TestDbContactGroupRow, TestDbContactRow, TestDbLabelRow, TestDbLocalDraftRow,
+    TestDbContactGroupRow, TestDbContactRow, TestDbFolderRow, TestDbLabelRow,
+    TestDbLocalDraftRow,
     TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
     TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
     TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,

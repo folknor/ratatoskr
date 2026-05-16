@@ -88,7 +88,7 @@ As a general rule, TODO.md items are **removed** when completed.
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
 
-### Labels Unification - `docs/labels-unification/problem-statement.md`
+### Labels Unification - `docs/labels-unification/redesign.md`
 
 **10 discrepancies remain** - see `docs/labels-unification/discrepancies.md`. Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
 
@@ -170,7 +170,7 @@ All 6 backend phases complete (discovery, sync, rights, subscription, notificati
 
 - [ ] **Subscription toggle in sidebar** - `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
 
-### Labels - `docs/labels-unification/problem-statement.md`
+### Labels - `docs/labels-unification/redesign.md`
 
 - [ ] **Label picker UI** - Overlay for applying/removing tag-type labels from messages. Triggered from reading pane or command palette. Lists all available labels with colors. Provider dispatch via `add_tag()`/`remove_tag()`.
 

@@ -12,7 +12,7 @@ This document records two reversals: split the storage, and replace auto-collaps
 
 ## What this supersedes
 
-- `docs/labels-unification/problem-statement.md` in full. Its sidebar-structure, apply/remove, deletion, and migration sections describe the auto-collapse-by-name model that this design reverses. The schema phases (1-6) are also superseded.
+- `docs/labels-unification/problem-statement.md` (since deleted): the auto-collapse-by-name model it described is reversed here, and the schema phases (1-6) it proposed are superseded by the design below.
 - The removed "Why both are in the `labels` table" section of `docs/glossary/folders-labels.md`. Post-split, the code identifier rule is "`folder` always means a row in `folders`; `label` always means a row in `labels`; `label_group` means a row in `label_groups`."
 - The removed `label_color_overrides` table. User-recolour intent moves into per-row `user_color_*` columns on `labels` (visible only in Settings) and to the group's `color_bg`/`color_fg` (visible in sidebar and pills).
 

@@ -64,40 +64,40 @@ local work = label_by_id(cat_labels, "cat:Work")
 harness.assert(work ~= nil, "missing cat:Work")
 harness.assert_eq(work.account_id, account.account_id, "Work account_id")
 harness.assert_eq(work.name, "Work", "Work name")
-harness.assert_eq(work.label_kind, "tag", "Work label_kind")
-harness.assert_eq(work.label_type, "user", "Work label_type")
+-- Post labels-unification split: rows live in `labels` (tag-only) and
+-- carry server-supplied colours via `server_color_*`. Folder rows are
+-- in `state.folders`; no synthesised label_kind / label_type fields.
 -- label-colors preset0 = red (#e74c3c bg / #ffffff fg).
-harness.assert_eq(work.color_bg, "#e74c3c", "Work color_bg from preset0")
-harness.assert_eq(work.color_fg, "#ffffff", "Work color_fg from preset0")
+harness.assert_eq(work.server_color_bg, "#e74c3c", "Work server_color_bg from preset0")
+harness.assert_eq(work.server_color_fg, "#ffffff", "Work server_color_fg from preset0")
 harness.assert_eq(work.sort_order, 0, "Work sort_order (fixture index 0)")
 
 local personal = label_by_id(cat_labels, "cat:Personal")
 harness.assert(personal ~= nil, "missing cat:Personal")
-harness.assert_eq(personal.label_kind, "tag", "Personal label_kind")
 -- preset2 = brown (#8b4513 / #ffffff).
-harness.assert_eq(personal.color_bg, "#8b4513", "Personal color_bg from preset2")
-harness.assert_eq(personal.color_fg, "#ffffff", "Personal color_fg from preset2")
+harness.assert_eq(personal.server_color_bg, "#8b4513", "Personal server_color_bg from preset2")
+harness.assert_eq(personal.server_color_fg, "#ffffff", "Personal server_color_fg from preset2")
 harness.assert_eq(personal.sort_order, 1, "Personal sort_order (fixture index 1)")
 
 local urgent = label_by_id(cat_labels, "cat:Urgent")
 harness.assert(urgent ~= nil, "missing cat:Urgent")
 -- preset15 = dark red (#8b0000 / #ffffff).
-harness.assert_eq(urgent.color_bg, "#8b0000", "Urgent color_bg from preset15")
-harness.assert_eq(urgent.color_fg, "#ffffff", "Urgent color_fg from preset15")
+harness.assert_eq(urgent.server_color_bg, "#8b0000", "Urgent server_color_bg from preset15")
+harness.assert_eq(urgent.server_color_fg, "#ffffff", "Urgent server_color_fg from preset15")
 harness.assert_eq(urgent.sort_order, 2, "Urgent sort_order (fixture index 2)")
 
 -- The fourth fixture row has no `color` field, which the Graph API
--- surfaces as preset "None". preset_to_hex skips that, so color_bg
--- and color_fg land NULL.
+-- surfaces as preset "None". preset_to_hex skips that, so
+-- server_color_bg and server_color_fg land NULL.
 local uncategorised = label_by_id(cat_labels, "cat:Uncategorised")
 harness.assert(uncategorised ~= nil, "missing cat:Uncategorised")
 harness.assert(
-    uncategorised.color_bg == nil,
-    "Uncategorised color_bg should be nil when category has no preset"
+    uncategorised.server_color_bg == nil,
+    "Uncategorised server_color_bg should be nil when category has no preset"
 )
 harness.assert(
-    uncategorised.color_fg == nil,
-    "Uncategorised color_fg should be nil when category has no preset"
+    uncategorised.server_color_fg == nil,
+    "Uncategorised server_color_fg should be nil when category has no preset"
 )
 harness.assert_eq(uncategorised.sort_order, 3, "Uncategorised sort_order")
 

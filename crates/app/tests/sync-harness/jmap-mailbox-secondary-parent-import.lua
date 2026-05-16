@@ -22,10 +22,11 @@ local function run_sync(client, account_id, label)
     harness.assert_eq(result.result, "completed", result.error or (label .. " sync result"))
 end
 
-local function label_by_id(state, id)
-    for _, label in ipairs(state.labels) do
-        if label.id == id then
-            return label
+-- Post labels-unification split: JMAP mailboxes land in `folders`.
+local function row_by_id(rows, id)
+    for _, row in ipairs(rows) do
+        if row.id == id then
+            return row
         end
     end
     return nil
@@ -88,18 +89,17 @@ harness.assert(remote_id ~= nil, "created mailbox missing server id")
 run_sync(client, account.account_id, "delta secondary")
 
 local after = query_state(client, account.account_id, "after mailbox create")
-local label = label_by_id(after, "jmap-" .. remote_id)
-harness.assert(label ~= nil, "created child mailbox label missing")
-harness.assert_eq(label.name, "Secondary Child", "created child label name")
-harness.assert_eq(label.account_id, account.account_id, "created child label account")
-harness.assert_eq(label.parent_folder_id, "INBOX", "created child parent folder")
-harness.assert_eq(label.label_kind, "container", "created child label kind")
+local folder = row_by_id(after.folders, "jmap-" .. remote_id)
+harness.assert(folder ~= nil, "created child mailbox folder missing")
+harness.assert_eq(folder.name, "Secondary Child", "created child folder name")
+harness.assert_eq(folder.account_id, account.account_id, "created child folder account")
+harness.assert_eq(folder.parent_id, "INBOX", "created child parent folder")
 
 harness.write_summary({
     correct = 1,
     target_account = "account-secondary",
     remote_mailbox_id = remote_id,
-    parent_folder_id = label.parent_folder_id,
+    parent_folder_id = folder.parent_id,
 })
 
 local ok, shutdown_err = client:shutdown()

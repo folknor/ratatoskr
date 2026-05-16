@@ -943,11 +943,11 @@ pub struct TypeaheadItem {
 | `has:` | Static list: `attachment`, `pdf`, `image`, `excel`, `word`, `document`, `archive`, `video`, `audio`, `calendar`, `contact` | Has values |
 | `before:` / `after:` | Static presets: Today, Yesterday, Last 7 days, Last 30 days, Last 3 months, Last year | Date presets |
 
-#### Account scoping for label/folder typeahead
+#### Account scoping for typeahead
 
-When the query already contains an `account:` operator, `label:` and `folder:` typeahead results are scoped to that account. Parse the query up to the cursor position to extract any `account:` values, resolve them to account IDs, and pass those IDs as a filter to the label/folder queries.
+`folder:` is per-account: when the query carries an `account:` operator, parse it up to the cursor and pass the resolved account IDs as a filter to the folder query. If the same folder name exists on multiple accounts, append the account name in the `detail` field for disambiguation ("Receipts (Work Account)").
 
-When no `account:` is present, return results from all accounts. If the same label name exists on multiple accounts, append the account name in the `detail` field for disambiguation: "Clients (Work Account)".
+`label:` resolves to a row in `label_groups`, which is cross-account by construction (`docs/labels-unification/redesign.md` "Reversal 2: cross-account labels are explicit groups"). `label_groups` has no `account_id` column, so an `account:` operator does NOT scope the `label:` typeahead. Combining the two in a single query (`account:Work label:Important`) intersects "thread on account Work" with "thread renders group Important via either rendering path", not "label named Important on account Work". Sidebar fan-outs that emit `account:X label:Y` mean exactly that intersection. Label-group names are unique case-insensitively (the schema's `UNIQUE (name COLLATE NOCASE)` constraint), so account-disambiguation in the typeahead detail field is structurally unnecessary.
 
 ### 3.5 Date Presets
 

@@ -409,17 +409,47 @@ fn build_thread_state_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     }
 }
 
+/// SQL fragment: "thread (acct, tid) renders the label group with `<group_predicate>`".
+///
+/// `account_alias` and `thread_alias` name the outer columns to join on
+/// (e.g. `t.account_id` / `t.id` for thread-flag clauses, `m.account_id`
+/// / `m.thread_id` for message-clauses). `group_predicate` is the
+/// constraint on the `lg` alias (e.g. `"1=1"` for "any group", or
+/// `"LOWER(lg.name) = LOWER(?N)"` for a named group).
+///
+/// Both rendering paths from `docs/labels-unification/redesign.md`
+/// "Message pill rendering" are unioned: a local `thread_label_groups`
+/// row OR a `thread_labels` row whose `(account_id, label_id)` is in
+/// the group's member set. Any future change to the rendering rule
+/// must update this one helper rather than each call site.
+fn label_group_rendered_fragment(
+    account_alias: &str,
+    thread_alias: &str,
+    group_predicate: &str,
+) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM thread_label_groups tlg \
+            JOIN label_groups lg ON lg.id = tlg.group_id \
+            WHERE tlg.account_id = {account_alias} \
+              AND tlg.thread_id = {thread_alias} \
+              AND {group_predicate}) \
+          OR EXISTS (SELECT 1 FROM thread_labels tl \
+            JOIN label_group_members lgm \
+              ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id \
+            JOIN label_groups lg ON lg.id = lgm.group_id \
+            WHERE tl.account_id = {account_alias} \
+              AND tl.thread_id = {thread_alias} \
+              AND {group_predicate}))"
+    )
+}
+
 /// Build `is:tagged` clause - thread renders at least one label group.
 fn build_is_tagged_clause(ctx: &mut QueryContext) {
-    ctx.thread_flag_clauses.push(
-        "(EXISTS (SELECT 1 FROM thread_label_groups tlg \
-          WHERE tlg.thread_id = t.id AND tlg.account_id = t.account_id) \
-         OR EXISTS (SELECT 1 FROM thread_labels tl2 \
-          JOIN label_group_members lgm \
-            ON lgm.account_id = tl2.account_id AND lgm.label_id = tl2.label_id \
-          WHERE tl2.thread_id = t.id AND tl2.account_id = t.account_id))"
-            .to_owned(),
-    );
+    ctx.thread_flag_clauses.push(label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        "1=1",
+    ));
 }
 
 /// Build `in:starred` / `in:snoozed` as thread flag clauses.
@@ -451,20 +481,10 @@ fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
         .iter()
         .map(|label| {
             let idx = ctx.push_param(Box::new(label.clone()));
-            format!(
-                "EXISTS (SELECT 1 FROM label_groups lg \
-                 WHERE LOWER(lg.name) = LOWER(?{idx}) \
-                 AND (EXISTS (SELECT 1 FROM thread_label_groups tlg \
-                   WHERE tlg.account_id = m.account_id \
-                     AND tlg.thread_id = m.thread_id \
-                     AND tlg.group_id = lg.id) \
-                   OR EXISTS (SELECT 1 FROM thread_labels tl \
-                     JOIN label_group_members lgm \
-                       ON lgm.account_id = tl.account_id \
-                      AND lgm.label_id = tl.label_id \
-                      AND lgm.group_id = lg.id \
-                     WHERE tl.account_id = m.account_id \
-                       AND tl.thread_id = m.thread_id)))"
+            label_group_rendered_fragment(
+                "m.account_id",
+                "m.thread_id",
+                &format!("LOWER(lg.name) = LOWER(?{idx})"),
             )
         })
         .collect();

@@ -527,11 +527,11 @@ pub fn generate_threads(
         .map_err(|e| format!("update thread: {e}"))?;
 
         // Thread folders: primary folder only. All Mail is a virtual no-filter view.
-        if let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == folder_name) {
+        if let Some((_, folder_id)) = acc.folders.iter().find(|(name, _)| name == folder_name) {
             conn.execute(
                 "INSERT OR IGNORE INTO thread_folders (thread_id, account_id, folder_id)
                  VALUES (?1, ?2, ?3)",
-                rusqlite::params![thread_id, acc.id, label_id],
+                rusqlite::params![thread_id, acc.id, folder_id],
             )
             .map_err(|e| format!("insert thread_folder: {e}"))?;
         }

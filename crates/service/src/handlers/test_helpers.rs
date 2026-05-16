@@ -12,7 +12,7 @@ use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
     TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
     TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
-    TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
+    TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
     TestDelayNextWriteAck,
     TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
     TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
@@ -1127,6 +1127,7 @@ fn read_harness_db_state(
     let account_id = params.account_id.as_deref();
     Ok(TestQueryDbStateAck {
         account_count: count_accounts(conn, account_id)?,
+        folder_count: count_account_rows(conn, "folders", account_id)?,
         label_count: count_account_rows(conn, "labels", account_id)?,
         thread_count: count_account_rows(conn, "threads", account_id)?,
         thread_label_count: count_account_rows(conn, "thread_labels", account_id)?,
@@ -1139,6 +1140,7 @@ fn read_harness_db_state(
         contact_count: count_account_rows(conn, "contacts", account_id)?,
         contact_group_count: count_account_rows(conn, "contact_groups", account_id)?,
         accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
+        folders: read_harness_folders(conn, account_id)?,
         labels: read_harness_labels(conn, account_id)?,
         signatures: read_harness_signatures(conn, account_id)?,
         messages: read_harness_messages(conn, params)?,
@@ -1271,88 +1273,108 @@ fn credential_summary(
     })
 }
 
+// Post-split (`docs/labels-unification/redesign.md`): the harness wire
+// envelope surfaces `folders` and `labels` as separate fields, mirroring
+// the storage split. The pre-split synthesised `label_kind` / `label_type`
+// discriminators and the merged `color_bg`/`color_fg` aliases are gone;
+// scripts query `state.folders[id]` or `state.labels[id]` for the right
+// table.
+
+fn read_harness_folders(
+    conn: &Connection,
+    account_id: Option<&str>,
+) -> Result<Vec<TestDbFolderRow>, String> {
+    let cols = "id, account_id, name, parent_id, imap_folder_path,
+                imap_special_use, sort_order, visible, is_subscribed,
+                is_undeletable";
+    if let Some(id) = account_id {
+        let sql = format!(
+            "SELECT {cols} FROM folders WHERE account_id = ?1 \
+             ORDER BY account_id ASC, id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare folders query: {e}"))?;
+        let mapped = stmt
+            .query_map(params![id], test_db_folder_from_row)
+            .map_err(|e| format!("query folders: {e}"))?;
+        collect_rows(mapped, "folders")
+    } else {
+        let sql = format!("SELECT {cols} FROM folders ORDER BY account_id ASC, id ASC");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare folders query: {e}"))?;
+        let mapped = stmt
+            .query_map([], test_db_folder_from_row)
+            .map_err(|e| format!("query folders: {e}"))?;
+        collect_rows(mapped, "folders")
+    }
+}
+
+fn test_db_folder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbFolderRow> {
+    let sort_order = row.get::<_, Option<i64>>(6)?.unwrap_or(0);
+    let visible = row.get::<_, Option<i64>>(7)?.unwrap_or(1) != 0;
+    let is_subscribed = row.get::<_, Option<i64>>(8)?.map(|value| value != 0);
+    let is_undeletable = row.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0;
+    Ok(TestDbFolderRow {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        name: row.get(2)?,
+        parent_id: row.get(3)?,
+        imap_folder_path: row.get(4)?,
+        imap_special_use: row.get(5)?,
+        sort_order,
+        visible,
+        is_subscribed,
+        is_undeletable,
+    })
+}
+
 fn read_harness_labels(
     conn: &Connection,
     account_id: Option<&str>,
 ) -> Result<Vec<TestDbLabelRow>, String> {
-    match account_id {
-        Some(account_id) => {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, account_id, name,
-                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
-                            'container' AS label_kind,
-                            parent_id, imap_folder_path, imap_special_use,
-                            sort_order, visible, is_subscribed,
-                            NULL AS color_bg, NULL AS color_fg
-                     FROM folders
-                     WHERE account_id = ?1
-                     UNION ALL
-                     SELECT id, account_id, name,
-                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
-                            'tag' AS label_kind,
-                            NULL AS parent_id, NULL AS imap_folder_path, NULL AS imap_special_use,
-                            sort_order, visible, NULL AS is_subscribed,
-                            COALESCE(user_color_bg, server_color_bg) AS color_bg,
-                            COALESCE(user_color_fg, server_color_fg) AS color_fg
-                     FROM labels
-                     WHERE account_id = ?1
-                     ORDER BY account_id ASC, id ASC",
-                )
-                .map_err(|e| format!("prepare labels query: {e}"))?;
-            let mapped = stmt
-                .query_map(params![account_id], test_db_label_from_row)
-                .map_err(|e| format!("query labels: {e}"))?;
-            collect_rows(mapped, "labels")
-        }
-        None => {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, account_id, name,
-                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
-                            'container' AS label_kind,
-                            parent_id, imap_folder_path, imap_special_use,
-                            sort_order, visible, is_subscribed,
-                            NULL AS color_bg, NULL AS color_fg
-                     FROM folders
-                     UNION ALL
-                     SELECT id, account_id, name,
-                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
-                            'tag' AS label_kind,
-                            NULL AS parent_id, NULL AS imap_folder_path, NULL AS imap_special_use,
-                            sort_order, visible, NULL AS is_subscribed,
-                            COALESCE(user_color_bg, server_color_bg) AS color_bg,
-                            COALESCE(user_color_fg, server_color_fg) AS color_fg
-                     FROM labels
-                     ORDER BY account_id ASC, id ASC",
-                )
-                .map_err(|e| format!("prepare labels query: {e}"))?;
-            let mapped = stmt
-                .query_map([], test_db_label_from_row)
-                .map_err(|e| format!("query labels: {e}"))?;
-            collect_rows(mapped, "labels")
-        }
+    let cols = "id, account_id, name, sort_order, visible, is_undeletable,
+                server_color_bg, server_color_fg, user_color_bg, user_color_fg";
+    if let Some(id) = account_id {
+        let sql = format!(
+            "SELECT {cols} FROM labels WHERE account_id = ?1 \
+             ORDER BY account_id ASC, id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare labels query: {e}"))?;
+        let mapped = stmt
+            .query_map(params![id], test_db_label_from_row)
+            .map_err(|e| format!("query labels: {e}"))?;
+        collect_rows(mapped, "labels")
+    } else {
+        let sql = format!("SELECT {cols} FROM labels ORDER BY account_id ASC, id ASC");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare labels query: {e}"))?;
+        let mapped = stmt
+            .query_map([], test_db_label_from_row)
+            .map_err(|e| format!("query labels: {e}"))?;
+        collect_rows(mapped, "labels")
     }
 }
 
 fn test_db_label_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbLabelRow> {
-    let sort_order = row.get::<_, Option<i64>>(8)?.unwrap_or(0);
-    let visible = row.get::<_, Option<i64>>(9)?.unwrap_or(1) != 0;
-    let is_subscribed = row.get::<_, Option<i64>>(10)?.map(|value| value != 0);
+    let sort_order = row.get::<_, Option<i64>>(3)?.unwrap_or(0);
+    let visible = row.get::<_, Option<i64>>(4)?.unwrap_or(1) != 0;
+    let is_undeletable = row.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0;
     Ok(TestDbLabelRow {
         id: row.get(0)?,
         account_id: row.get(1)?,
         name: row.get(2)?,
-        label_type: row.get(3)?,
-        label_kind: row.get(4)?,
-        parent_folder_id: row.get(5)?,
-        imap_folder_path: row.get(6)?,
-        imap_special_use: row.get(7)?,
         sort_order,
         visible,
-        is_subscribed,
-        color_bg: row.get(11)?,
-        color_fg: row.get(12)?,
+        is_undeletable,
+        server_color_bg: row.get(6)?,
+        server_color_fg: row.get(7)?,
+        user_color_bg: row.get(8)?,
+        user_color_fg: row.get(9)?,
     })
 }
 

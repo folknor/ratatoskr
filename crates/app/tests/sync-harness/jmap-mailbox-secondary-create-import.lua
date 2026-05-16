@@ -26,10 +26,13 @@ local function run_sync(client, account_id, label)
     harness.assert_eq(result.result, "completed", result.error or (label .. " sync result"))
 end
 
-local function label_by_id(state, id)
-    for _, label in ipairs(state.labels) do
-        if label.id == id then
-            return label
+-- Post labels-unification split: JMAP mailboxes land in `folders`, not
+-- `labels`. Helper takes a row collection so the same lookup shape
+-- works for both tables.
+local function row_by_id(rows, id)
+    for _, row in ipairs(rows) do
+        if row.id == id then
+            return row
         end
     end
     return nil
@@ -109,15 +112,14 @@ run_sync(client, account.account_id, "delta secondary")
 harness.marker("SYNC_END")
 
 local after = query_state(client, account.account_id, "after mailbox create")
-local label_id = "jmap-" .. remote_id
-local label = label_by_id(after, label_id)
-harness.assert(label ~= nil, "created mailbox label missing")
-harness.assert_eq(label.account_id, account.account_id, "created mailbox label account")
-harness.assert_eq(label.name, "Secondary Scratch", "created mailbox label name")
-harness.assert_eq(label.label_kind, "container", "created mailbox label kind")
-harness.assert_eq(label.parent_folder_id, nil, "created mailbox parent")
-harness.assert_eq(label.is_subscribed, true, "created mailbox subscription flag")
-harness.assert_eq(after.label_count, before.label_count + 1, "label count after mailbox create")
+local folder_id = "jmap-" .. remote_id
+local folder = row_by_id(after.folders, folder_id)
+harness.assert(folder ~= nil, "created mailbox folder missing")
+harness.assert_eq(folder.account_id, account.account_id, "created mailbox folder account")
+harness.assert_eq(folder.name, "Secondary Scratch", "created mailbox folder name")
+harness.assert_eq(folder.parent_id, nil, "created mailbox parent")
+harness.assert_eq(folder.is_subscribed, true, "created mailbox subscription flag")
+harness.assert_eq(after.folder_count, before.folder_count + 1, "folder count after mailbox create")
 
 local requests = harness.mock_requests(jmap_endpoint, { stable = true })
 harness.assert(
@@ -133,8 +135,8 @@ harness.write_summary({
     correct = 1,
     target_account = "account-secondary",
     remote_mailbox_id = remote_id,
-    local_label_id = label_id,
-    label_count = after.label_count,
+    local_folder_id = folder_id,
+    folder_count = after.folder_count,
     provider_requests = #requests,
 })
 

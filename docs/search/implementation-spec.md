@@ -196,7 +196,27 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates
 - Starred and snoozed are thread flags, not label joins. The builder must handle the mapping.
 
 **`is:tagged` operator:**
-- Matches threads that render at least one explicit label group, either through `thread_label_groups` or through `thread_labels` joined to `label_group_members`.
+- Matches threads that render at least one explicit label group, either through `thread_label_groups` or through `thread_labels` joined to `label_group_members`. See `label_group_rendered_fragment` in `crates/smart-folder/src/sql_builder.rs` for the canonical SQL shape - both operators below share it.
+
+**`label:` operator:**
+- Resolves to a row in `label_groups` by case-insensitive name. `label_groups` has no `account_id` column - the binding is workspace-wide. The shape is the same as `is:tagged` plus a `LOWER(lg.name) = LOWER(?N)` predicate on the group join.
+- SQL (via the shared rendering-paths helper):
+  ```sql
+  EXISTS (SELECT 1 FROM thread_label_groups tlg
+    JOIN label_groups lg ON lg.id = tlg.group_id
+    WHERE tlg.account_id = m.account_id
+      AND tlg.thread_id = m.thread_id
+      AND LOWER(lg.name) = LOWER(?N))
+  OR EXISTS (SELECT 1 FROM thread_labels tl
+    JOIN label_group_members lgm
+      ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
+    JOIN label_groups lg ON lg.id = lgm.group_id
+    WHERE tl.account_id = m.account_id
+      AND tl.thread_id = m.thread_id
+      AND LOWER(lg.name) = LOWER(?N))
+  ```
+- OR semantics for multiple `label:` values: parts joined with `OR`. The binding is by name, not group_id, so a group rename changes which group a persisted query resolves to (per `docs/labels-unification/redesign.md` "Open").
+- Threads carrying raw labels that are not members of any group stop matching. Raw `(account_id, label_id)` membership has no user-facing operator post-split.
 
 **`has:contact` operator:**
 - `EXISTS (SELECT 1 FROM contacts WHERE email = m.from_address)` for sender

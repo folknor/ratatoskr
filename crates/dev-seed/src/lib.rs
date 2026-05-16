@@ -3,6 +3,7 @@ pub mod calendars;
 pub mod chats;
 pub mod config;
 pub mod contacts;
+pub mod label_groups;
 pub mod people;
 pub mod pinned_searches;
 pub mod templates;
@@ -119,6 +120,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
     )?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
     contacts::seed_groups(&conn, &mut rng, &pools.combined, &accs)?;
+    label_groups::seed_label_groups(&conn, &mut rng, &accs)?;
     pinned_searches::seed_pinned_searches(&conn, &accs)?;
 
     conn.execute_batch("COMMIT")

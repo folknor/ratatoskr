@@ -270,7 +270,14 @@ pub struct Account {
     pub account_name: String,
     pub provider: String,
     pub color: String,
-    /// Map from folder or tag label name to provider id.
+    /// `(folder_name, folder_id)` for every `folders` row inserted for
+    /// this account. Distinct from `labels` so that downstream seeders
+    /// route `INBOX`/`SENT`/etc. into `thread_folders` and never mix
+    /// folder ids into `thread_labels`.
+    pub folders: Vec<(String, String)>,
+    /// `(label_name, label_id)` for every per-account `labels` row.
+    /// Tag-only post-split; routes into `thread_labels` / member
+    /// pickers.
     pub labels: Vec<(String, String)>,
     pub category_labels: CategoryLabels,
 }
@@ -305,6 +312,7 @@ pub fn seed_accounts(
         )
         .map_err(|e| format!("insert account: {e}"))?;
 
+        let mut folders = Vec::new();
         let mut labels = Vec::new();
 
         for sl in SYSTEM_LABELS {
@@ -315,7 +323,7 @@ pub fn seed_accounts(
                 rusqlite::params![sl.id, account_id, sl.name, sl.sort, sl.special],
             )
             .map_err(|e| format!("insert system folder: {e}"))?;
-            labels.push((sl.name.to_string(), sl.id.to_string()));
+            folders.push((sl.name.to_string(), sl.id.to_string()));
         }
 
         for (i, ul) in preset.user_labels.iter().enumerate() {
@@ -335,6 +343,24 @@ pub fn seed_accounts(
             )
             .map_err(|e| format!("insert user label: {e}"))?;
             labels.push((ul.name.to_string(), label_id));
+        }
+
+        // Graph accounts: bootstrap synthesised importance:* labels per
+        // `docs/labels-unification/redesign.md` "Synthesised rows for
+        // Graph". Invariant: is_undeletable = 1, no server colour.
+        if preset.provider == "graph_api" {
+            for (id, name, sort) in [
+                ("importance:high", "High importance", 10_000),
+                ("importance:low", "Low importance", 10_001),
+            ] {
+                conn.execute(
+                    "INSERT INTO labels (id, account_id, name, visible, sort_order, is_undeletable) \
+                     VALUES (?1, ?2, ?3, 1, ?4, 1)",
+                    rusqlite::params![id, account_id, name, sort],
+                )
+                .map_err(|e| format!("insert importance synth: {e}"))?;
+                labels.push((name.to_string(), id.to_string()));
+            }
         }
 
         let sig_id = crate::next_uuid(rng);
@@ -360,6 +386,7 @@ pub fn seed_accounts(
             account_name: preset.account_name.to_string(),
             provider: preset.provider.to_string(),
             color: preset.color.to_string(),
+            folders,
             labels,
             category_labels: preset.category_labels,
         });

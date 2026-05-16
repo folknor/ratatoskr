@@ -132,12 +132,22 @@ harness.assert(
     "secondary leaked primary's inbox email"
 )
 
--- Labels are keyed by (account_id, id) so well-known names like INBOX
--- legitimately repeat across accounts. The leakage check is therefore
--- on the account_id column itself: when we query for primary's
--- account_id, every returned label row must carry that account_id.
+-- Post labels-unification split: folders (INBOX, SENT, CATEGORY_*, etc.)
+-- live in `state.folders`; user-created labels live in `state.labels`.
+-- Both are keyed by (account_id, id) so well-known canonical ids repeat
+-- across accounts. The leakage check is on account_id column itself.
 local function assert_labels_scoped(state, expected_account_id, label)
-    harness.assert(#state.labels >= 1, label .. " missing imported labels")
+    harness.assert(
+        #state.folders >= 1,
+        label .. " missing imported folders"
+    )
+    for _, row in ipairs(state.folders) do
+        harness.assert_eq(
+            row.account_id,
+            expected_account_id,
+            label .. " folder " .. row.id .. " has wrong account_id"
+        )
+    end
     for _, lbl in ipairs(state.labels) do
         harness.assert_eq(
             lbl.account_id,
@@ -145,14 +155,13 @@ local function assert_labels_scoped(state, expected_account_id, label)
             label .. " label " .. lbl.id .. " has wrong account_id"
         )
     end
-    local inbox = label_by_id(state.labels, "INBOX")
-    harness.assert(inbox ~= nil, label .. " missing canonical INBOX label")
+    local inbox = label_by_id(state.folders, "INBOX")
+    harness.assert(inbox ~= nil, label .. " missing canonical INBOX folder")
     harness.assert_eq(
         inbox.account_id,
         expected_account_id,
-        label .. " INBOX label has wrong account_id"
+        label .. " INBOX folder has wrong account_id"
     )
-    harness.assert_eq(inbox.label_kind, "container", label .. " INBOX label_kind")
 end
 
 assert_labels_scoped(primary_state, primary.account_id, "primary")

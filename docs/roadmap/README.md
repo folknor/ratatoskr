@@ -58,7 +58,7 @@ Local schema: `seen_addresses` table with `email`, `display_name`, `last_seen`, 
 
 These are features enterprise users actively rely on daily. Missing any of these is a reason not to switch.
 
-- [Labels (Color Flags)](research-provider-label-colors.md) - ✅ Backend complete. Missing: label picker UI, apply/remove from UI. See `docs/labels-unification/problem-statement.md`.
+- [Labels (Color Flags)](research-provider-label-colors.md) - ✅ Backend complete. Missing: label picker UI, apply/remove from UI. See `docs/labels-unification/redesign.md`.
 - [Auto-Responses](../auto-responses/problem-statement.md) - ⬚ Not started. Full read/write API on Exchange, Gmail, JMAP. Settings UI + status indicator needed.
 - [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) - ⚠️ Mostly done. Remote image strip + AMP blocking + link tracking indicators all implemented (2026-03-22). Remaining: UI for read receipt prompts.
 - [Cloud Attachment Linking](cloud-attachments.md) - ⚠️ Partial (OneDrive + Google Drive upload/permissions done)

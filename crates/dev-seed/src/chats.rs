@@ -497,11 +497,11 @@ pub fn seed_chats(
 
             // INBOX folder rows mirror the convention in
             // threads::generate_threads for INBOX threads.
-            if let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == "INBOX") {
+            if let Some((_, folder_id)) = acc.folders.iter().find(|(name, _)| name == "INBOX") {
                 conn.execute(
                     "INSERT OR IGNORE INTO thread_folders (thread_id, account_id, folder_id)
                      VALUES (?1, ?2, ?3)",
-                    rusqlite::params![thread_id, acc.id, label_id],
+                    rusqlite::params![thread_id, acc.id, folder_id],
                 )
                 .map_err(|e| format!("insert chat thread INBOX folder: {e}"))?;
             }

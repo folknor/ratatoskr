@@ -109,7 +109,7 @@ Compile-time goal: there should be one entry point that returns "everything that
 
 ### Per-account vs cross-account label aggregation (retired by label groups)
 
-The labels-unification auto-collapse design (`docs/labels-unification/problem-statement.md`) required section 4 of the sidebar to be a cross-account view: all tag-type labels from all accounts, grouped by normalized name (`LOWER(TRIM(l.name))`), with unread counts summed across accounts. That design is superseded by `docs/labels-unification/redesign.md`.
+The original labels-unification auto-collapse design required section 4 of the sidebar to be a cross-account view: all tag-type labels from all accounts, grouped by normalized name (`LOWER(TRIM(l.name))`), with unread counts summed across accounts. That design is superseded by `docs/labels-unification/redesign.md`.
 
 Current model: the sidebar LABELS section renders explicit `label_groups`, not raw labels grouped by name. Counts come from `get_label_group_unread_counts`, which unions `thread_label_groups` with raw `thread_labels` reached through `label_group_members`. Raw provider labels remain visible in Settings.
 

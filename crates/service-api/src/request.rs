@@ -299,15 +299,14 @@ pub struct TestDbAccountRow {
     pub refresh_token_sha256: Option<String>,
 }
 
+/// A row from the `folders` table, surfaced to harness scripts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TestDbLabelRow {
+pub struct TestDbFolderRow {
     pub id: String,
     pub account_id: String,
     pub name: String,
-    pub label_type: String,
-    pub label_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_folder_id: Option<String>,
+    pub parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imap_folder_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,10 +315,30 @@ pub struct TestDbLabelRow {
     pub visible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_subscribed: Option<bool>,
+    pub is_undeletable: bool,
+}
+
+/// A row from the `labels` (tag-only) table, surfaced to harness scripts.
+/// Post-split (`docs/labels-unification/redesign.md`) this is provider
+/// labels exclusively: Gmail user labels, Exchange categories
+/// (`cat:{name}`), IMAP/JMAP keywords (`kw:{keyword}`), and synthesised
+/// Graph importance (`importance:high` / `importance:low`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbLabelRow {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub visible: bool,
+    pub is_undeletable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color_bg: Option<String>,
+    pub server_color_bg: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color_fg: Option<String>,
+    pub server_color_fg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_color_bg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_color_fg: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,6 +483,8 @@ pub struct TestDbContactGroupRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
+    #[serde(default)]
+    pub folder_count: u64,
     pub label_count: u64,
     pub thread_count: u64,
     pub thread_label_count: u64,
@@ -478,6 +499,8 @@ pub struct TestQueryDbStateAck {
     #[serde(default)]
     pub contact_group_count: u64,
     pub accounts: Vec<TestDbAccountRow>,
+    #[serde(default)]
+    pub folders: Vec<TestDbFolderRow>,
     #[serde(default)]
     pub labels: Vec<TestDbLabelRow>,
     #[serde(default)]
