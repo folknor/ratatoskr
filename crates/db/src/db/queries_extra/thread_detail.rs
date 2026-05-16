@@ -52,14 +52,17 @@ pub struct ThreadDetailMessage {
 /// Label groups with resolved colors, for the thread header pills
 /// and thread card label dots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// A label-group decoration attached to a thread - one row per group that
+/// the thread renders a pill for. Post-split (`docs/labels-unification/
+/// redesign.md`) every entry is a `label_groups` row; raw provider labels
+/// never reach the message UI. `label_id` is the stringified
+/// `label_groups.id`; older naming kept to avoid app/wire churn.
 #[serde(rename_all = "camelCase")]
 pub struct ThreadLabel {
     pub label_id: String,
     pub name: String,
     pub color_bg: String,
     pub color_fg: String,
-    /// Compatibility discriminator for existing app display types.
-    pub label_kind: String,
 }
 
 #[derive(Debug, Clone)]
@@ -186,15 +189,23 @@ fn query_thread_label_decorations(
         return Ok(());
     }
     let placeholders = placeholders(thread_ids.len(), 2);
+    // Dedup is by `(thread_id, group_id)`: a thread can satisfy both
+    // rendering paths (local intent in `thread_label_groups` AND a member
+    // raw label in `thread_labels`) for the same group, and the pill must
+    // not render twice. UNION over the full row would dedup only when name
+    // and color match exactly - any future variance there would return two
+    // rows. The outer query collapses by `group_id` and picks the group's
+    // own name and color as the display source of truth.
+    // See `docs/labels-unification/redesign.md` "Message pill rendering".
     let sql = format!(
-        "SELECT thread_id, name, color_bg
+        "SELECT thread_id, MAX(name) AS name, MAX(color_bg) AS color_bg
          FROM (
            SELECT tlg.thread_id, lg.id AS group_id, lg.name, lg.color_bg
            FROM thread_label_groups tlg
            INNER JOIN label_groups lg ON lg.id = tlg.group_id
            WHERE tlg.account_id = ?1
              AND tlg.thread_id IN ({placeholders})
-           UNION
+           UNION ALL
            SELECT tl.thread_id, lg.id AS group_id, lg.name, lg.color_bg
            FROM thread_labels tl
            INNER JOIN label_group_members lgm
@@ -203,6 +214,7 @@ fn query_thread_label_decorations(
            WHERE tl.account_id = ?1
              AND tl.thread_id IN ({placeholders})
          )
+         GROUP BY thread_id, group_id
          ORDER BY name ASC"
     );
     let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(thread_ids.len() + 1);
@@ -584,7 +596,6 @@ fn query_thread_labels(
             name: lr.name,
             color_bg: lr.color_bg,
             color_fg: lr.color_fg,
-            label_kind: "group".to_owned(),
         });
     }
 

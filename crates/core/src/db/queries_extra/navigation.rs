@@ -90,7 +90,7 @@ pub struct NavigationState {
 
 /// Collect all folder IDs from `SYSTEM_FOLDER_ROLES` that should be hidden
 /// when listing an account's custom folders.
-fn system_label_ids() -> Vec<&'static str> {
+fn system_folder_ids() -> Vec<&'static str> {
     SYSTEM_FOLDER_ROLES.iter().map(|r| r.label_id).collect()
 }
 
@@ -256,7 +256,7 @@ fn build_account_folders(
     account_id: &str,
 ) -> Result<Vec<NavigationFolder>, String> {
     let all_folders = get_folders(conn, account_id)?;
-    let system_ids = system_label_ids();
+    let system_ids = system_folder_ids();
     let unread_by_folder = get_folder_unread_counts(conn, account_id)?;
 
     Ok(all_folders
@@ -507,7 +507,7 @@ pub fn get_shared_mailbox_navigation(
     mailbox_id: &str,
 ) -> Result<NavigationState, String> {
     let all_folders = get_folders(conn, account_id)?;
-    let system_ids = system_label_ids();
+    let system_ids = system_folder_ids();
 
     // Unread counts for folders, scoped to this shared mailbox.
     let mut folder_unread_stmt = conn
@@ -837,32 +837,6 @@ pub fn search_accounts_for_typeahead_sync(
 // ── Labels settings and explicit sidebar label groups ───────
 
 /// A single raw per-account label that belongs to an explicit label group.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LabelBacking {
-    pub account_id: String,
-    pub label_id: String,
-    pub display_name: String,
-}
-
-/// A user-created label group with optional raw provider-label members.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CrossAccountLabel {
-    /// Compatibility key for older callers; this is the group ID as text.
-    pub normalized_name: String,
-    /// Group display name.
-    pub display_name: String,
-    pub color_bg: String,
-    pub color_fg: String,
-    /// Groups own their color directly.
-    pub has_color_override: bool,
-    /// Per-account labels that are members of this group.
-    pub backing: Vec<LabelBacking>,
-    /// Unread threads rendering this group in the all-accounts scope.
-    pub unread_count: i64,
-}
-
 /// A single label entry in the settings Mail Rules > Labels list.
 ///
 /// One row per `(account_id, label_id)` pair - settings shows raw provider
@@ -989,65 +963,3 @@ pub fn query_labels_by_account(
     Ok(groups)
 }
 
-/// Return explicit label groups with their member backing rows.
-pub fn query_visible_labels(conn: &Connection) -> Result<Vec<CrossAccountLabel>, String> {
-    let unread = load_label_group_unread_counts(conn, &AccountScope::All)?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT lg.id AS group_id,
-                    lg.name AS group_name,
-                    lg.color_bg,
-                    lg.color_fg,
-                    lgm.account_id,
-                    lgm.label_id,
-                    l.name AS label_name
-             FROM label_groups lg
-             LEFT JOIN label_group_members lgm ON lgm.group_id = lg.id
-             LEFT JOIN labels l
-               ON l.account_id = lgm.account_id AND l.id = lgm.label_id
-             ORDER BY lg.name COLLATE NOCASE, lgm.account_id, l.sort_order, l.name",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>("group_id")?,
-                row.get::<_, String>("group_name")?,
-                row.get::<_, String>("color_bg")?,
-                row.get::<_, String>("color_fg")?,
-                row.get::<_, Option<String>>("account_id")?,
-                row.get::<_, Option<String>>("label_id")?,
-                row.get::<_, Option<String>>("label_name")?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut groups = Vec::new();
-    let mut by_id: HashMap<i64, usize> = HashMap::new();
-    for row in rows {
-        let (group_id, group_name, color_bg, color_fg, account_id, label_id, label_name) =
-            row.map_err(|e| e.to_string())?;
-        let idx = *by_id.entry(group_id).or_insert_with(|| {
-            groups.push(CrossAccountLabel {
-                normalized_name: group_id.to_string(),
-                display_name: group_name,
-                color_bg,
-                color_fg,
-                has_color_override: false,
-                backing: Vec::new(),
-                unread_count: unread.get(&group_id).copied().unwrap_or(0),
-            });
-            groups.len() - 1
-        });
-        if let (Some(account_id), Some(label_id), Some(display_name)) =
-            (account_id, label_id, label_name)
-        {
-            groups[idx].backing.push(LabelBacking {
-                account_id,
-                label_id,
-                display_name,
-            });
-        }
-    }
-    Ok(groups)
-}

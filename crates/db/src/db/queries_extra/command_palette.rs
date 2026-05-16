@@ -17,7 +17,11 @@ pub struct LabelGroupRow {
     pub name: String,
 }
 
-/// User-visible folders for an account, excluding system folders.
+/// User-visible folders for an account, excluding rows the user cannot
+/// delete. `is_undeletable = 0` covers system roles (INBOX, SENT, etc.)
+/// AND Gmail's `type: "system"` non-role labels like `CATEGORY_*` and
+/// `CHAT`, which live in `folders` but should not appear in user-facing
+/// folder pickers.
 pub fn get_user_folders_for_account_sync(
     conn: &Connection,
     account_id: &str,

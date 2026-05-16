@@ -18,15 +18,16 @@ use store::inline_image_store::InlineImageStoreReadState;
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
 
-/// Label group color info resolved from core's ThreadLabel.
+/// A label-group pill resolved for the reading-pane display. Every entry
+/// is a `label_groups` row by construction - raw provider labels never
+/// reach this surface (see `docs/labels-unification/redesign.md` "Message
+/// pill rendering"). `label_id` holds the stringified group id.
 #[derive(Debug, Clone)]
 pub struct ResolvedLabel {
     pub label_id: String,
     pub name: String,
     pub color_bg: String,
     pub color_fg: String,
-    /// Compatibility discriminator for existing display code.
-    pub label_kind: String,
 }
 
 /// Full thread detail data for the reading pane.
@@ -56,7 +57,6 @@ fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
             name: l.name,
             color_bg: l.color_bg,
             color_fg: l.color_fg,
-            label_kind: l.label_kind,
         })
         .collect();
 

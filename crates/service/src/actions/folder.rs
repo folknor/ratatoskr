@@ -99,7 +99,6 @@ pub async fn create_folder(
             &m.id,
             &aid,
             &m.name,
-            &m.folder_type,
             Some(m.path.as_str()),
             m.special_use.as_deref(),
             parent_id_for_db.as_deref(),
@@ -186,7 +185,6 @@ pub async fn rename_folder(
             &fid,
             &aid,
             &m.name,
-            &m.folder_type,
             Some(m.path.as_str()),
             m.special_use.as_deref(),
             None, // parent folder is not changed in rename

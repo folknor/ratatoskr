@@ -681,14 +681,6 @@ pub struct AttachmentSender {
     pub count: i64,
 }
 
-// ── Label sort order item ──────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LabelSortOrderItem {
-    pub id: String,
-    pub sort_order: i64,
-}
-
 // ── Task ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

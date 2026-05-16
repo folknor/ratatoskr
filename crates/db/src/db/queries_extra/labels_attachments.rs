@@ -1,91 +1,16 @@
 use super::super::ReadDbState;
-use super::super::types::{AttachmentSender, AttachmentWithContext, LabelSortOrderItem};
+use super::super::types::{AttachmentSender, AttachmentWithContext};
 use rusqlite::params;
 
-// TODO(refactor): wrap fields in an UpsertLabelParams struct.
-#[allow(clippy::too_many_arguments)]
-pub async fn db_upsert_label_coalesce(
-    db: &ReadDbState,
-    id: String,
-    account_id: String,
-    name: String,
-    label_type: String,
-    color_bg: Option<String>,
-    color_fg: Option<String>,
-    imap_folder_path: Option<String>,
-    imap_special_use: Option<String>,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let is_folder = imap_folder_path.is_some()
-            || imap_special_use.is_some()
-            || matches!(label_type.as_str(), "folder" | "container" | "system");
-
-        if is_folder {
-            conn.execute(
-                "INSERT INTO folders (id, account_id, name, imap_folder_path, imap_special_use, is_undeletable)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                     ON CONFLICT(account_id, id) DO UPDATE SET
-                       name = ?3,
-                       imap_folder_path = COALESCE(?4, imap_folder_path),
-                       imap_special_use = COALESCE(?5, imap_special_use),
-                       is_undeletable = ?6",
-                params![id, account_id, name, imap_folder_path, imap_special_use, label_type == "system"],
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            conn.execute(
-                "INSERT INTO labels (id, account_id, name, server_color_bg, server_color_fg, is_undeletable)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 0)
-                     ON CONFLICT(account_id, id) DO UPDATE SET
-                       name = ?3,
-                       server_color_bg = ?4,
-                       server_color_fg = ?5",
-                params![id, account_id, name, color_bg, color_fg],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_delete_labels_for_account(db: &ReadDbState, account_id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM labels WHERE account_id = ?1", params![account_id])
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM folders WHERE account_id = ?1", params![account_id])
-            .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_update_label_sort_order(
-    db: &ReadDbState,
-    account_id: String,
-    label_orders: Vec<LabelSortOrderItem>,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        for item in &label_orders {
-            tx.execute(
-                "UPDATE labels SET sort_order = ?1 WHERE account_id = ?2 AND id = ?3",
-                params![item.sort_order, account_id, item.id],
-            )
-            .map_err(|e| e.to_string())?;
-            tx.execute(
-                "UPDATE folders SET sort_order = ?1 WHERE account_id = ?2 AND id = ?3",
-                params![item.sort_order, account_id, item.id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
+// The pre-split unified `labels`-table helpers
+// (`db_upsert_label_coalesce`, `db_delete_labels_for_account`,
+// `db_update_label_sort_order`) were removed in slice 2 of the
+// labels-unification cleanup. They sniffed folder-vs-label at write time
+// from a `label_type` string, blind-updated both `labels` and `folders`
+// for the same `(account_id, id)`, and deleted from both tables under a
+// name that said only labels. Post-split, all writers must call the typed
+// helpers - `upsert_labels` / `insert_folders_batch` - so the table
+// is structurally determined at the call site.
 
 // TODO(refactor): wrap fields in an UpsertAttachmentParams struct.
 #[allow(clippy::too_many_arguments)]

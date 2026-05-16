@@ -100,6 +100,12 @@ pub fn insert_folders_batch(tx: &Transaction, rows: &[FolderWriteRow]) -> Result
     Ok(())
 }
 
+/// Upsert `labels` rows. `is_undeletable` uses OR semantics on conflict so
+/// the invariant from `docs/labels-unification/redesign.md` "is_undeletable"
+/// holds even if a later sync pass forgets to set the flag: once a row is
+/// marked undeletable (e.g. by the bootstrap synth for `importance:*`,
+/// `ensure_prefixed_tag_label`, or a system-flag classification at ingest),
+/// it stays that way.
 pub fn upsert_labels(tx: &Transaction, rows: &[LabelWriteRow]) -> Result<(), String> {
     for row in rows {
         tx.execute(
@@ -115,7 +121,7 @@ pub fn upsert_labels(tx: &Transaction, rows: &[LabelWriteRow]) -> Result<(), Str
                server_color_fg = excluded.server_color_fg, \
                user_color_bg = COALESCE(excluded.user_color_bg, labels.user_color_bg), \
                user_color_fg = COALESCE(excluded.user_color_fg, labels.user_color_fg), \
-               is_undeletable = excluded.is_undeletable",
+               is_undeletable = (excluded.is_undeletable OR labels.is_undeletable)",
             params![
                 row.id,
                 row.account_id,

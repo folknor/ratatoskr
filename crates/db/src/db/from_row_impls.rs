@@ -521,12 +521,6 @@ impl_from_row!(SortOrderItem {
     sort_order,
 });
 
-#[rustfmt::skip]
-impl_from_row!(LabelSortOrderItem {
-    id,
-    sort_order,
-});
-
 impl_from_row!(ImapMessageRow {
     id,
     imap_uid,

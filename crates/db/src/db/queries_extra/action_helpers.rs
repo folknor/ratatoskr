@@ -96,33 +96,37 @@ pub fn unsnooze_thread_sync(
     Ok(())
 }
 
-/// Upsert a folder row from a provider mutation result.
-#[allow(clippy::too_many_arguments)]
+/// Upsert a single `folders` row reflecting a provider mutation result
+/// (create / rename). User-initiated by definition - `is_undeletable` is
+/// never set or cleared here; that classification belongs at sync ingest
+/// (see `docs/labels-unification/redesign.md` "is_undeletable"). If a
+/// row already exists from sync, the existing `is_undeletable` flag is
+/// preserved.
+///
+/// Precondition: when `parent_id` is Some, the parent folder must already
+/// exist in `folders` for this account. The self-FK on
+/// `folders(account_id, parent_id)` rejects an orphan write outright;
+/// callers should rely on the provider sync that produced the parent
+/// rather than trying to upsert ancestors here. Batch ingest from sync
+/// goes through `insert_folders_batch`, which topologically sorts.
 pub fn upsert_folder_from_mutation_sync(
     conn: &Connection,
     folder_id: &str,
     account_id: &str,
     name: &str,
-    folder_type: &str,
     path: Option<&str>,
     special_use: Option<&str>,
     parent_id: Option<&str>,
 ) -> Result<(), String> {
     conn.execute(
         "INSERT INTO folders (id, account_id, name, imap_folder_path, imap_special_use, parent_id, is_undeletable) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0) \
          ON CONFLICT(account_id, id) DO UPDATE SET \
-           name = ?3, imap_folder_path = ?4, imap_special_use = ?5, \
-           parent_id = ?6, is_undeletable = ?7",
-        params![
-            folder_id,
-            account_id,
-            name,
-            path,
-            special_use,
-            parent_id,
-            folder_type == "system",
-        ],
+           name = excluded.name, \
+           imap_folder_path = excluded.imap_folder_path, \
+           imap_special_use = excluded.imap_special_use, \
+           parent_id = excluded.parent_id",
+        params![folder_id, account_id, name, path, special_use, parent_id],
     )
     .map_err(|e| format!("upsert folder: {e}"))?;
     Ok(())

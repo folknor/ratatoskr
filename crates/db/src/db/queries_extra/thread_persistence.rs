@@ -508,7 +508,7 @@ pub fn replace_thread_folders<'a>(
     thread_id: &str,
     folders: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    let unique_folders = filtered_thread_labels(folders);
+    let unique_folders = filtered_membership_ids(folders);
 
     tx.execute(
         "DELETE FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2",
@@ -534,7 +534,7 @@ pub fn replace_thread_labels<'a>(
     thread_id: &str,
     labels: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    let unique_labels = filtered_thread_labels(labels);
+    let unique_labels = filtered_membership_ids(labels);
 
     tx.execute(
         "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
@@ -562,7 +562,7 @@ pub fn merge_thread_folders<'a>(
     thread_id: &str,
     folders: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    for folder_id in filtered_thread_labels(folders) {
+    for folder_id in filtered_membership_ids(folders) {
         tx.execute(
             "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) \
              VALUES (?1, ?2, ?3)",
@@ -583,7 +583,7 @@ pub fn merge_thread_labels<'a>(
     thread_id: &str,
     labels: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    for label_id in filtered_thread_labels(labels) {
+    for label_id in filtered_membership_ids(labels) {
         tx.execute(
             "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
              VALUES (?1, ?2, ?3)",
@@ -595,7 +595,7 @@ pub fn merge_thread_labels<'a>(
     Ok(())
 }
 
-fn filtered_thread_labels<'a>(
+fn filtered_membership_ids<'a>(
     labels: impl IntoIterator<Item = &'a str>,
 ) -> HashSet<&'a str> {
     use crate::db::folder_roles::{is_message_state_label_id, is_reserved_imap_system_keyword};

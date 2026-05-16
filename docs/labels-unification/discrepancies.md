@@ -20,39 +20,27 @@ gains AUTOINCREMENT, `LabelId` doc-comment narrowed to tag-only,
 
 ## Slice 2 - DB query layer split
 
-### CRITICAL
+RESOLVED in this branch. `upsert_folder_from_mutation_sync` no longer
+derives `is_undeletable` (user creates never carry the system flag; on
+conflict the existing flag is preserved) and the precondition that
+`parent_id` already exists is documented at the helper. The three dead
+`db_upsert_label_coalesce` / `db_delete_labels_for_account` /
+`db_update_label_sort_order` helpers (and their associated
+`LabelSortOrderItem`) were deleted along with the dead
+`query_visible_labels` / `CrossAccountLabel` / `LabelBacking` shapes -
+no callers remained post-split. `upsert_labels` now ORs `is_undeletable`
+on conflict so the `importance:*` invariant survives sync clobber.
+`ThreadLabel.label_kind` removed (every entry is a group);
+`ResolvedLabel.label_kind` removed in app crate. `system_label_ids`
+renamed to `system_folder_ids`. `query_thread_label_decorations` now
+explicitly GROUPs by `(thread_id, group_id)` so a future variance in
+name/color cannot duplicate pills. `get_user_folders_for_account_sync`
+documents why it filters on `is_undeletable = 0`.
+`filtered_thread_labels` renamed to `filtered_membership_ids` (used by
+both folder and label thread-junction writers).
 
-**`upsert_folder_from_mutation_sync` bypasses the FK-safe writer.** `crates/db/src/db/queries_extra/action_helpers.rs:101-129` writes directly to `folders` with `INSERT ... ON CONFLICT ...` and accepts `parent_id` as a column. `redesign.md:142`: "all folder inserts route through a single `db` helper `insert_folders_batch(account_id, rows)` which topologically sorts by `parent_id` ... direct INSERTs against `folders` are not part of the public surface." This is the action-pipeline's create-folder result path; a parent-before-child violation on a freshly-synced child folder will hit the self-FK and fail. Must either call `insert_folders_batch` for a single row or document the precondition that `parent_id` is already present.
-
-**`upsert_folder_from_mutation_sync` derives `is_undeletable` from `folder_type == "system"` at action-mutation time.** Same file:124. Classification belongs at sync ingest (`redesign.md:160`). ON CONFLICT also clobbers `is_undeletable` on every refresh - an action-time mutation can overwrite a prior ingest-time flag. Drop the flag from this writer or validate the input.
-
-### HIGH
-
-**`db_upsert_label_coalesce` decides folder-vs-label by string-sniffing at write time.** `crates/db/src/db/queries_extra/labels_attachments.rs:19-45`. Picks the table via `imap_folder_path.is_some() || imap_special_use.is_some() || matches!(label_type.as_str(), "folder" | "container" | "system")`. `redesign.md:117`: "routing is structural through the type system, not string-prefix-based at the dispatch layer." Some sniffing is unavoidable at the ingest boundary, but matching on `label_type` strings is exactly the shape redesign aimed to leave behind. Lift the split into typed `FolderId`/`LabelId` at the caller, or rename to make the polymorphism honest.
-
-**`db_delete_labels_for_account` deletes from both `labels` and `folders` under a name that says only labels.** Same file:54-66. `glossary:33` code-identifier rule is binding. Rename to `db_delete_folders_and_labels_for_account` or split into two.
-
-**`db_update_label_sort_order` updates `labels` AND `folders` for the same `(account_id, id)`.** Same file:69-83. Reuses old unified-table behaviour: blind-update both tables hoping one matches. The typed ID at the call site already knows which table the row lives in. Route via `FolderId` / `LabelId`.
-
-**`upsert_labels` clobbers `is_undeletable` on every conflict.** `crates/db/src/db/queries_extra/label_persistence.rs:80-91`: `is_undeletable = excluded.is_undeletable`. `redesign.md:165` invariant: "any `importance:*` row in `labels` carries `is_undeletable = 1`, regardless of which writer produced it." If a future Graph synth writer forgets the flag, this clobber silently downgrades the row. Mirror the `user_color_*` pattern: `is_undeletable = labels.is_undeletable OR excluded.is_undeletable`, or branch on `id LIKE 'importance:%'`.
-
-### MEDIUM
-
-**`query_labels_by_account` keeps the old `LabelBacking`/`normalized_name` vocabulary.** `crates/core/src/db/queries_extra/navigation.rs:838-960`. `CrossAccountLabel.normalized_name` is now "the group ID as text" and `has_color_override` is hardcoded `false`. Load-bearing serialisation (Serialize derive, camelCase); field names lie post-split. Rename or document explicitly in the type doc.
-
-**`CrossAccountLabel.has_color_override` is dead.** Same range, always `false`. Per `redesign.md:177-178` groups own their colour directly. Drop the field or document why downstream still reads it.
-
-**`ThreadLabel.label_kind` is now a hardcoded `"group"` string.** `crates/db/src/db/queries_extra/thread_detail.rs:563-572`. Old doc said `"container" (folder/mailbox) or "tag" (category/keyword)`. The kept-around field shaped like the old `label_kind` is a name-lies-vs-comment. Either drop or rename to an honest `kind: "group"` enum.
-
-**`system_label_ids()` in `navigation.rs` is misnamed for folder use.** Lines 130-132. Body iterates `SYSTEM_FOLDER_ROLES`; callers (`build_account_folders`, `get_shared_mailbox_navigation`) use it to filter `folders`. `glossary:33` - rename to `system_folder_ids()`.
-
-**`query_thread_label_decorations` UNION dedup is by full tuple, not by `group_id`.** `crates/db/src/db/queries_extra/thread_detail.rs:189-207`. Inner SELECTs project `(thread_id, group_id, name, color_bg)`. Any future variance in `name` or `color_bg` between the TLG path and the TL-via-members path returns two rows for one group on one thread. `redesign.md:321`: "deduped by `group_id`." Make explicit: `SELECT DISTINCT thread_id, group_id, ...` or `GROUP BY`.
-
-### LOW
-
-**`get_user_folders_for_account_sync` excludes by `is_undeletable = 0`.** `crates/db/src/db/queries_extra/command_palette.rs:21-43`. Intentionally excludes Gmail `CATEGORY_*`/`CHAT`. Worth a one-line comment so future readers don't assume `is_undeletable` is only system folders.
-
-**`replace_thread_folders` / `merge_thread_folders` reuse `filtered_thread_labels`.** `crates/db/src/db/queries_extra/thread_persistence.rs:511, 565`. The helper filters `STARRED`/`UNREAD`/`$`-prefixed keywords - values that should never appear as folder IDs anyway. Reusing a function literally named `filtered_thread_labels` for folder writes hides the boundary. Rename to `filtered_membership_ids` or give folders their own filter.
+`TestDbLabelRow.label_kind` / `label_type` wire fields stay until
+slice 6 deletes the harness compatibility shim.
 
 ---
 
