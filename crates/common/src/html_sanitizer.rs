@@ -36,6 +36,29 @@ static CSS_URL_HTTP_REPLACE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)url\(\s*['"]?https?://[^)]*\)"#).expect("CSS_URL_HTTP_REPLACE_RE")
 });
 
+/// Remote-image handling for HTML sanitization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteImagePolicy {
+    /// Keep remote image references after the normal sanitizer passes.
+    AllowRemote,
+    /// Replace remote image references with blocked-image placeholders.
+    StripRemote,
+}
+
+impl RemoteImagePolicy {
+    pub fn from_settings(block_remote_images: bool, sender_is_allowlisted: bool) -> Self {
+        if block_remote_images && !sender_is_allowlisted {
+            Self::StripRemote
+        } else {
+            Self::AllowRemote
+        }
+    }
+
+    fn strips_remote(self) -> bool {
+        matches!(self, Self::StripRemote)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Stage 1: CSS inlining
 // ---------------------------------------------------------------------------
@@ -301,6 +324,18 @@ fn whitelist_sanitize(html: &str) -> String {
 /// through unchanged, so the pipeline is best-effort and never panics.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn sanitize_html_body(html: &str) -> String {
+    sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote)
+}
+
+/// Sanitize HTML with remote image blocking.
+///
+/// Same three-stage pipeline as [`sanitize_html_body`], plus:
+/// - Remote `<img src="http(s)://...">` tags are replaced with a
+///   placeholder unless the sender is allowlisted.
+/// - `cid:` URIs are always preserved (inline attachments).
+/// - AMP-specific elements (`amp-img`, `amp-list`, etc.) are stripped.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn sanitize_html_body_with_image_policy(html: &str, policy: RemoteImagePolicy) -> String {
     if html.is_empty() {
         return String::new();
     }
@@ -318,32 +353,9 @@ pub fn sanitize_html_body(html: &str) -> String {
         );
     }
 
-    whitelist_sanitize(&stage2)
-}
-
-/// Sanitize HTML with remote image blocking.
-///
-/// Same three-stage pipeline as [`sanitize_html_body`], plus:
-/// - Remote `<img src="http(s)://...">` tags are replaced with a
-///   placeholder unless the sender is allowlisted.
-/// - `cid:` URIs are always preserved (inline attachments).
-/// - AMP-specific elements (`amp-img`, `amp-list`, etc.) are stripped.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn sanitize_html_body_with_image_policy(
-    html: &str,
-    block_remote_images: bool,
-    sender_is_allowlisted: bool,
-) -> String {
-    if html.is_empty() {
-        return String::new();
-    }
-
-    let stage1 = inline_css(html);
-    let stage2 = strip_dangerous_elements(&stage1);
-
     let stage2b = strip_amp_elements(&stage2);
 
-    let stage2c = if block_remote_images && !sender_is_allowlisted {
+    let stage2c = if policy.strips_remote() {
         strip_remote_images(&stage2b)
     } else {
         stage2b
@@ -690,9 +702,25 @@ mod tests {
     // ── Remote image blocking tests ────────────────────────
 
     #[test]
+    fn remote_image_policy_from_settings_collapses_preferences() {
+        assert_eq!(
+            RemoteImagePolicy::from_settings(true, false),
+            RemoteImagePolicy::StripRemote
+        );
+        assert_eq!(
+            RemoteImagePolicy::from_settings(true, true),
+            RemoteImagePolicy::AllowRemote
+        );
+        assert_eq!(
+            RemoteImagePolicy::from_settings(false, false),
+            RemoteImagePolicy::AllowRemote
+        );
+    }
+
+    #[test]
     fn remote_images_blocked() {
         let html = r#"<img src="https://tracker.example.com/pixel.gif"><p>Text</p>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::StripRemote);
         assert!(!result.contains("tracker.example.com"));
         assert!(result.contains("Remote image blocked"));
         assert!(result.contains("Text"));
@@ -701,14 +729,14 @@ mod tests {
     #[test]
     fn remote_images_allowed_when_allowlisted() {
         let html = r#"<img src="https://example.com/photo.jpg"><p>Text</p>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, true);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(result.contains("https://example.com/photo.jpg"));
     }
 
     #[test]
     fn cid_images_not_blocked() {
         let html = r#"<img src="cid:image001@01D1234"><p>Text</p>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::StripRemote);
         assert!(result.contains("cid:"));
     }
 
@@ -717,14 +745,14 @@ mod tests {
         // ammonia strips data: URIs (defense-in-depth). Even though stage 2
         // allows data:image/* on <img src>, ammonia removes them.
         let html = r#"<img src="data:image/png;base64,iVBOR"><p>Text</p>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::StripRemote);
         assert!(!result.contains("data:image/png"));
     }
 
     #[test]
     fn remote_images_pass_when_policy_off() {
         let html = r#"<img src="https://example.com/photo.jpg">"#;
-        let result = sanitize_html_body_with_image_policy(html, false, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(result.contains("https://example.com/photo.jpg"));
     }
 
@@ -733,7 +761,7 @@ mod tests {
     #[test]
     fn amp_elements_stripped() {
         let html = r#"<amp-img src="photo.jpg" width="300" height="200"></amp-img><p>Text</p>"#;
-        let result = sanitize_html_body_with_image_policy(html, false, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(!result.contains("amp-img"));
         assert!(result.contains("Text"));
     }
@@ -741,7 +769,7 @@ mod tests {
     #[test]
     fn amp_carousel_stripped() {
         let html = r#"<amp-carousel type="slides"><div>Slide 1</div></amp-carousel><p>After</p>"#;
-        let result = sanitize_html_body_with_image_policy(html, false, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(!result.contains("amp-carousel"));
         assert!(result.contains("After"));
     }
@@ -749,7 +777,7 @@ mod tests {
     #[test]
     fn amp4email_attribute_stripped() {
         let html = r#"<html amp4email><head></head><body><p>Content</p></body></html>"#;
-        let result = sanitize_html_body_with_image_policy(html, false, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(!result.contains("amp4email"));
         assert!(result.contains("Content"));
     }
@@ -822,7 +850,7 @@ mod tests {
     fn css_url_tracking_pixel_blocked() {
         let html =
             r#"<div style="background:url(https://tracker.example.com/pixel.gif)">Text</div>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::StripRemote);
         assert!(!result.contains("tracker.example.com"));
         assert!(result.contains("Text"));
     }
@@ -830,28 +858,28 @@ mod tests {
     #[test]
     fn css_url_tracking_pixel_allowed_when_allowlisted() {
         let html = r#"<div style="background:url(https://example.com/bg.png)">Text</div>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, true);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(result.contains("example.com/bg.png"));
     }
 
     #[test]
     fn css_url_tracking_pixel_allowed_when_policy_off() {
         let html = r#"<div style="background:url(https://example.com/bg.png)">Text</div>"#;
-        let result = sanitize_html_body_with_image_policy(html, false, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::AllowRemote);
         assert!(result.contains("example.com/bg.png"));
     }
 
     #[test]
     fn css_url_with_single_quotes_blocked() {
         let html = r#"<div style="background-image: url('https://tracker.example.com/pixel.gif')">Text</div>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::StripRemote);
         assert!(!result.contains("tracker.example.com"));
     }
 
     #[test]
     fn css_url_data_uri_not_blocked() {
         let html = r#"<div style="background:url(data:image/png;base64,iVBOR)">Text</div>"#;
-        let result = sanitize_html_body_with_image_policy(html, true, false);
+        let result = sanitize_html_body_with_image_policy(html, RemoteImagePolicy::StripRemote);
         assert!(result.contains("data:image/png"));
     }
 

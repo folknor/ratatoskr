@@ -124,11 +124,11 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
 ### Shape 1 - Predicate alias divergence
 
-- `crates/db/src/db/queries_extra/chat.rs:235` *(slice 1)* - `WHERE t.is_chat_thread = 1 AND tp.email = ?1 AND m.is_read = 0` in unread-affected count query. Current convention: chat unread is computed against `m.is_read` (message-level) in the affected-count fetch (line 235) but also stored to and read from `chat_contacts.unread_count`. Divergence risk: if a future refactor moves the affected-count query to join `threads` and filter `t.is_read` instead, the recompute at line 413-421 would still use `m.is_read`, causing the stored aggregate to desync.
-
-  Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=chat unread count and chat unread recompute aggregate the same per-message predicate.
-
-- `crates/db/src/db/queries_extra/chat.rs:417` *(slice 1)* - `WHERE t.is_chat_thread = 1 AND m.is_read = 0 AND LOWER(m.from_address) = ?1` in the unread-recompute query (lines 413-421). Message-level predicate on `m.is_read`. The affected-count query (235) also uses `m.is_read`, so currently consistent. However, `chat_contacts.unread_count` is a thread-aggregate column (summarizes unread state per contact). Convention only prevents divergence here: the two query sites must both use `m.is_read` or both switch to `t.is_read` in lockstep.
+Chat unread predicate entries resolved by contract #1 grain.vertical:
+`crates/db/src/db/queries_extra/chat.rs` now names both chat-unread SQL shapes
+as constants next to each other. The unread contract for chats is explicitly
+message-grain, not thread-aggregate-grain, and the two count paths no longer
+hide independent inline query bodies in separate functions.
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=chat unread count and chat unread recompute aggregate the same per-message predicate.
 
@@ -136,7 +136,14 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread-level glyphs reflect non-reaction message state.
 
-- `crates/smart-folder/src/sql_builder.rs:219-223` *(deep slice: smart-folder + search)* - `m.date < ?{idx}` / `m.date > ?{idx}` in `build_date_clauses`. Current convention: date predicates operate at message-level in smart-folder's SQL path. However, `crates/core/src/search_pipeline.rs:345-362` converts Tantivy results to unified results using `t.last_message_at` when enriching from SQL results (line 354, 411). The two paths use different columns: smart-folder filters on `m.date` (message-specific), search pipeline's SQL-fallback path (lines 120) uses `t.last_message_at` (thread-aggregate). A thread with a recent read message and an older unread message would match `after:-7 m.date` in smart-folder but might diverge on `t.last_message_at` depending on which message was inserted most recently to the thread.
+Date predicate entry resolved by contract #1 grain.vertical:
+`DateBound` is the parsed boundary type for `before:` / `after:` and both the
+smart-folder SQL path and Tantivy filter path emit message-date predicates from
+that type. Core search routes operator-bearing SQL fallback through
+`smart_folder::query_threads`, so date operators answer the same membership
+question there as the smart-folder list query. Result display dates can still be
+thread aggregate dates (`t.last_message_at`), but that is result metadata rather
+than predicate membership.
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=date predicates across smart-folder and search return the same threads.
 
@@ -189,7 +196,13 @@ search therefore no longer presents an unattributed filter match as a body hit.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread aggregate uses the per-field reducer (MIN for is_read, MAX for is_starred) over non-reaction messages.
 
-- `crates/db/src/db/queries_extra/bundles.rs:68-93` *(slice 3)* - `HAVING t.last_message_at = MAX(t.last_message_at)` in the latest-message query: `t.last_message_at` is a thread aggregate, but `MAX(t.last_message_at)` inside a `GROUP BY tc.bundle` can only reference the grouped rows' aggregates. If `t.last_message_at` falls out of sync with the actual max message date for the thread, the predicate silently drifts. Current convention: `recompute_thread_read_starred()` in provider_sync_writes.rs is the canonical recompute path, but bundles query does not call it-it assumes staleness-free aggregates.
+Bundle latest metadata entry resolved by contract #1 grain.vertical:
+`crates/db/src/db/queries_extra/bundles.rs::db_get_bundle_summaries` now ranks
+bundle threads with `ROW_NUMBER() OVER (PARTITION BY tc.bundle ORDER BY
+t.last_message_at DESC, t.id DESC)` and joins the canonical
+`LATEST_MESSAGE_SUBQUERY` for displayed sender metadata. It no longer relies on
+`GROUP BY tc.bundle` plus `HAVING t.last_message_at = MAX(t.last_message_at)` to
+pick row metadata.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread `last_message_at` is the max message date for the thread.
 
@@ -205,9 +218,13 @@ search therefore no longer presents an unattributed filter match as a body hit.
 
   Tags: *(counter-example; no violation. Retained as reference for the correct seeding shape.)*
 
-- `crates/search/src/lib.rs:493-524` *(deep slice: smart-folder + search)* - `build_search_doc` constructs Tantivy documents with message-level `date` field (line 492-495), but the search pipeline materializes thread-aggregate results and sorts by `thread.last_message_at` (search_pipeline.rs:157). When a thread has multiple messages with different dates, the per-message doc carries the message's date, but thread-level sorting uses the thread-aggregate. A query `before:2025-01-01` against Tantivy would match a message with `date < threshold`, but thread-sort order is determined by `t.last_message_at` which might be a newer message's date. The result is correct filtering but potentially surprising ordering.
+Search date filter/sort note reclassified under the Promise Rule. Tantivy
+stores message-date terms because `before:` / `after:` are message-membership
+predicates; the materialized thread result can still display or sort by
+thread-level activity. Those are adjacent grains, not two paths claiming to
+answer the same predicate question.
 
-  Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=search filter grain and search sort grain answer the same question.
+  Tags: *(reclassified; no discrepancy under the Promise Rule.)*
 
 ### Shape 4 - Merge-vs-replace asymmetry
 
@@ -221,11 +238,21 @@ provider-side membership filtering, not a crate-wide replace/merge API. JMAP
 keyword membership is handled by the per-message keyword recompute helper
 instead of an INSERT-only thread-label path.
 
-- `crates/db/src/db/queries_extra/bundles.rs:85-106` *(slice 3)* - `db_get_bundle_summaries()` at line 85 (latest query): uses `JOIN messages m` without deduplication on per-bundle row, then groups by `tc.bundle` and selects via `HAVING t.last_message_at = MAX(t.last_message_at)`. The count query at line 68 uses `COUNT(DISTINCT t.id)` and `GROUP BY tc.bundle`. Pattern suggests bundle aggregate (per-thread summary) but aggregate-vs-message-query divergence on whether the latest sender/subject come from the message that matches the max timestamp per bundle or an arbitrary message-group combination. Current convention: raw SQL without intermediate summary table.
+Bundle summary metadata resolved by contract #1 grain.vertical:
+`db_get_bundle_summaries` and `db_get_bundle_summary` now select the latest
+thread deterministically and read displayed sender metadata from
+`LATEST_MESSAGE_SUBQUERY` instead of joining arbitrary `messages` rows inside
+the bundle aggregate. Subject remains the thread's canonical aggregate subject.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=bundle summary picks consistent metadata from the canonical latest message.
 
-- `crates/db/src/db/queries_extra/misc.rs:84-105` *(slice 3)* - `db_get_subscriptions()`: uses `MAX(m.date)` and `MAX(m.from_name)` alongside `GROUP BY LOWER(m.from_address)`. Query aggregates sender metadata across messages but picks the message with max date for the latest_unsubscribe headers. If a message has an older date but newer unsubscribe header, the mismatch is silent. Current convention: MAX() functions rely on message ordering, no explicit subquery for canonical latest-message.
+Subscription summary metadata resolved by contract #1 grain.vertical:
+`crates/db/src/db/queries_extra/misc.rs::db_get_subscriptions` now splits the
+query into a grouped aggregate CTE and a `latest` CTE with `ROW_NUMBER()` over
+`LOWER(m.from_address)`. `from_name`, unsubscribe headers, and post metadata
+therefore come from the same latest message row as the displayed latest date.
+This intentionally changes the unsubscribe UI's sender display from the prior
+lexical `MAX(m.from_name)` value to the latest message's display name.
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=subscription summary picks all metadata from the same canonical message.
 
@@ -238,16 +265,17 @@ affected threads after `delete_messages_and_cleanup_threads`, so removed-message
 keywords no longer persist as orphaned thread rows. The recompute helper deletes
 and rebuilds `thread_labels` for the thread; for these providers, provider-visible
 label rows are keyword-only after the #5c typed label boundary. The broader
-merge-vs-replace capability-token migration remains open.
+merge-vs-replace helper-selection migration is resolved by provider-local
+replace and merge wrappers.
 
-Remaining #4 caveat: optimistic local label actions still write directly to
+#4 follow-up caveat: optimistic local label actions still write directly to
 `thread_labels` before the provider echoes the change. A concurrent IMAP/JMAP
 keyword recompute can temporarily erase that optimistic `kw:*` row because the
 per-message `message_keywords` union has not observed it yet. IMAP already had
 this window; the shared recompute helper extends the same tradeoff to JMAP in
-exchange for removing orphaned keyword rows deterministically. The future
-merge-vs-replace capability slice should decide how optimistic local intent is
-represented while provider echo is pending.
+exchange for removing orphaned keyword rows deterministically. A future
+optimistic-intent slice should decide how local intent is represented while
+provider echo is pending.
 
 Provider sync membership call sites verified under contract #4: Gmail full-thread
 storage and the IMAP thread-store pass call provider-local replace wrappers;
@@ -264,7 +292,11 @@ Label color pair entry resolved by contract #5b: `label-colors::LabelStyleHex` i
 
 ### Shape 6 - Kind-encoded-in-string
 
-- `crates/core/src/db/queries.rs:38-39` *(slice 4)* - `is_replied` and `is_forwarded` are read from message rows as raw `i64` and cast to bool. Current convention: these columns exist on `messages` only (per glossary § 244-248); no per-message membership table yet. Any future call site that needs "thread that has been replied to" must use an explicit `EXISTS` subquery or risk silently omitting threads whose reply marker exists only on a subset of messages.
+Message flag row decoding resolved by contract #1 grain.vertical:
+`crates/core/src/db/queries.rs::row_to_message` now decodes `is_read`,
+`is_starred`, `is_replied`, and `is_forwarded` through a private `MessageFlag`
+enum. The raw SQLite integer-to-bool conversion is centralized behind a
+message-grain flag type instead of being repeated as untyped column casts.
 
   Tags: contracts=grain.vertical,validated-domain; enforcement=sealed-constructor; promise=per-message boolean reads carry their grain explicitly.
 
@@ -297,13 +329,24 @@ Two call sites narrowed as a result of the typed boundary:
 
   Tags: contracts=validated-domain; enforcement=boundary-parse; promise=label and folder routing dispatches by typed kind, not prefix sniffing.
 
-- `crates/smart-folder/src/sql_builder.rs:425-443` *(deep slice: smart-folder + search)* - `label_group_rendered_fragment` uses string-formatted SQL with `account_alias`, `thread_alias`, and `group_predicate` parameters. Two call sites: `build_is_tagged_clause` (line 448-452) uses `"t.account_id"` / `"t.id"`, while `build_label_clause` (line 484-488) uses `"m.account_id"` / `"m.thread_id"`. Current convention: both produce syntactically valid SQL but filter on different table aliases. If `build_label_clause` were to receive a predicate meant for thread-level filtering (e.g., written by a maintainer assuming message-level), the divergence would silently propagate to the query. The helper factory should require typed alias parameters rather than strings.
+Smart-folder label-group alias entry resolved by contract #1 grain.vertical:
+`label_group_rendered_fragment` now accepts the private
+`LabelGroupRenderGrain::{Thread, Message}` enum. The helper owns the only legal
+alias pairs (`t.account_id` / `t.id` and `m.account_id` / `m.thread_id`) instead
+of accepting free-form alias strings at each call site.
 
   Tags: contracts=grain.vertical,validated-domain; enforcement=sealed-constructor; promise=label-group query alias is grain-correct.
 
 ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope::to_account_scope()` is deleted, and the app navigation/thread loaders match the full `ViewScope` enum before routing to personal-account, shared-mailbox, or public-folder query paths.
 
-- `crates/common/src/html_sanitizer.rs:332-353` *(deep slice: stores + crypto-key + common)* - `sanitize_html_body_with_image_policy(html, block_remote_images: bool, sender_is_allowlisted: bool)` branches on a boolean `block_remote_images` to decide whether to call `strip_remote_images`. Current convention: the decision is made by the caller before dispatch. If a call site fails to set `block_remote_images` correctly, the same HTML receives different treatment at different times silently. The two entry points (`sanitize_html_body` always passes through, `sanitize_html_body_with_image_policy` branches) mean a future caller that needs image blocking must remember to use the second entry point and pass the two booleans in the right positions.
+HTML sanitizer image-policy entry resolved by contract #5 validated-domain:
+`sanitize_html_body_with_image_policy` now accepts `RemoteImagePolicy` instead
+of two positional booleans, and `sanitize_html_body` delegates to the same
+implementation with `RemoteImagePolicy::AllowRemote`. The preference booleans
+collapse at the boundary via `RemoteImagePolicy::from_settings`; the sanitizer
+itself consumes one typed decision. Because both public entry points now share
+the same pipeline, AMP elements are stripped consistently even when remote-image
+blocking is not requested.
 
   Tags: contracts=validated-domain,canonical-entry; enforcement=boundary-parse,capability-token; promise=HTML sanitization image policy is a single typed decision per call site.
 
@@ -325,11 +368,19 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
 ### Shape 9 - Implicit bundle/label semantics divergence
 
-- `crates/search/src/lib.rs:1142-1162` *(deep slice: smart-folder + search)* - `group_by_thread` keeps the highest-scoring result per thread_id, but the threading decision is message-level (line 1145-1152). When multiple messages in a thread match the query, only the highest-scoring one becomes the thread-group representative. However, thread-metadata enrichment (search_pipeline.rs:402-413) fills `subject`, `from_name`, `from_address` from the SQL thread row, not from the highest-scoring message. Current convention: Tantivy scores by message, grouping reduces to one message per thread, but metadata comes from the thread aggregate. If the best-matching message is old and a newer message with different sender is recent, the result displays the recent sender (from thread aggregate) paired with the old message's relevance score.
+Search result metadata source resolved by contract #3 completion-state:
+Tantivy still scores and groups by the highest-scoring message hit, but
+`core::search_pipeline` now enriches both Tantivy-only and combined paths from
+SQL before returning. The result's thread metadata source is therefore the SQL
+thread row on all full-index paths, while `rank` and match attribution remain
+message-hit evidence.
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=thread search results have a single declared metadata source.
 
-- `crates/core/src/search_pipeline.rs:154-163` *(deep slice: core + seen + label-colors)* - In Tantivy-only search, `search_state.search_with_filters()` returns Tantivy-ranked results keyed by message (line 154). `group_by_thread_unified()` (line 156) reduces to one message per thread by taking the highest score. The result's metadata (subject, from_name, from_address) comes from the highest-scoring message's stored Tantivy fields (lines 384-386), but in the combined path (line 212), `enrich_from_sql()` overwrites these with thread-aggregate values (lines 403-406). Current convention: Tantivy-only and combined paths use different metadata sources (message-level vs thread-aggregate), but the result type makes this decision invisible. A search that matches old and new messages in the same thread will show the old message's rank but the thread-aggregate's sender/subject in Tantivy-only, vs the highest-scoring message's metadata in combined.
+Search path metadata-source divergence resolved by contract #3 completion-state:
+the Tantivy-only path now calls `fetch_thread_rows_for_results` and
+`enrich_from_sql` before returning, matching the combined path. Stale index hits
+with no SQL thread row are dropped.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread search results have a single declared metadata source across all internal paths.
 

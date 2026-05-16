@@ -83,14 +83,19 @@ pub async fn db_get_bundle_summaries(
             .map_err(|e| e.to_string())?;
 
         let latest_sql = format!(
-            "SELECT tc.bundle, t.subject, m.from_name
+            "SELECT bundle, subject, from_name FROM (
+                 SELECT tc.bundle, t.subject, latest_m.from_name,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY tc.bundle
+                          ORDER BY t.last_message_at DESC, t.id DESC
+                        ) AS rn
                  FROM threads t
                  JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id AND tf.folder_id = 'INBOX'
                  JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.bundle IN ({placeholders})
-                 JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+                 LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}) latest_m
+                   ON latest_m.account_id = t.account_id AND latest_m.thread_id = t.id
                  WHERE t.account_id = ?1
-                 GROUP BY tc.bundle
-                 HAVING t.last_message_at = MAX(t.last_message_at)"
+             ) WHERE rn = 1"
         );
         let mut stmt2 = conn.prepare(&latest_sql).map_err(|e| e.to_string())?;
         let latest_rows: Vec<(String, Option<String>, Option<String>)> = stmt2
@@ -285,15 +290,19 @@ pub async fn db_get_bundle_summary(
                 |row| row.get("cnt"),
             )
             .map_err(|e| e.to_string())?;
-        let latest = conn
-            .query_row(
-                "SELECT t.subject, m.from_name
+        let latest_sql = format!(
+            "SELECT t.subject, latest_m.from_name
                      FROM threads t
                      JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id AND tf.folder_id = 'INBOX'
                      JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.bundle = ?2
-                     JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+                     LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}) latest_m
+                       ON latest_m.account_id = t.account_id AND latest_m.thread_id = t.id
                      WHERE t.account_id = ?1
-                     ORDER BY t.last_message_at DESC LIMIT 1",
+                     ORDER BY t.last_message_at DESC, t.id DESC LIMIT 1"
+        );
+        let latest = conn
+            .query_row(
+                &latest_sql,
                 params![account_id, bundle],
                 |row| {
                     Ok((

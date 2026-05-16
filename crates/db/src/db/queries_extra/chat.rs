@@ -2,6 +2,18 @@
 
 use rusqlite::{Connection, Transaction, params};
 
+const CHAT_UNREAD_AFFECTED_THREADS_SQL: &str = "SELECT DISTINCT m.account_id, m.thread_id \
+     FROM messages m \
+     INNER JOIN threads t \
+       ON t.id = m.thread_id AND t.account_id = m.account_id \
+     INNER JOIN thread_participants tp \
+       ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
+     WHERE t.is_chat_thread = 1 AND tp.email = ?1 AND m.is_read = 0";
+const CHAT_UNREAD_RECOMPUTE_SQL: &str = "SELECT COUNT(*) FROM messages m \
+     INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
+     WHERE t.is_chat_thread = 1 AND m.is_read = 0 \
+       AND LOWER(m.from_address) = ?1";
+
 /// Sidebar summary row for a chat contact.
 #[derive(Debug, Clone)]
 pub struct DbChatContactSummary {
@@ -225,15 +237,7 @@ pub fn mark_chat_read_local_sync(
 
     let affected: Vec<(String, String)> = {
         let mut stmt = tx
-            .prepare(
-                "SELECT DISTINCT m.account_id, m.thread_id \
-                 FROM messages m \
-                 INNER JOIN threads t \
-                   ON t.id = m.thread_id AND t.account_id = m.account_id \
-                 INNER JOIN thread_participants tp \
-                   ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
-                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 AND m.is_read = 0",
-            )
+            .prepare(CHAT_UNREAD_AFFECTED_THREADS_SQL)
             .map_err(|e| format!("prepare affected: {e}"))?;
         stmt.query_map(params![email], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -411,14 +415,7 @@ fn update_chat_summary(tx: &Transaction<'_>, email: &str) -> Result<(), String> 
         .ok();
 
     let unread: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages m \
-             INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
-             WHERE t.is_chat_thread = 1 AND m.is_read = 0 \
-               AND LOWER(m.from_address) = ?1",
-            params![email],
-            |row| row.get(0),
-        )
+        .query_row(CHAT_UNREAD_RECOMPUTE_SQL, params![email], |row| row.get(0))
         .unwrap_or(0);
 
     match latest {

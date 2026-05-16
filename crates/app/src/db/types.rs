@@ -108,7 +108,7 @@ impl Thread {
             from_name: t.from_name,
             from_address: t.from_address,
             is_local_draft: false,
-            // not a search hit — no field attribution to carry
+            // not a search hit - no field attribution to carry
             match_kind: None,
             also_matched: Vec::new(),
         }
@@ -133,7 +133,7 @@ impl Thread {
             from_name: None,
             from_address: d.from_email,
             is_local_draft: true,
-            // not a search hit — no field attribution to carry
+            // not a search hit - no field attribution to carry
             match_kind: None,
             also_matched: Vec::new(),
         }
@@ -158,7 +158,7 @@ impl Thread {
             from_name: item.sender_name,
             from_address: item.sender_email,
             is_local_draft: false,
-            // not a search hit — no field attribution to carry
+            // not a search hit - no field attribution to carry
             match_kind: None,
             also_matched: Vec::new(),
         }

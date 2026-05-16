@@ -81,19 +81,46 @@ pub async fn db_get_subscriptions(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT
-                       m.from_address,
-                       MAX(m.from_name) as from_name,
-                       MAX(m.list_unsubscribe) as latest_unsubscribe_header,
-                       MAX(m.list_unsubscribe_post) as latest_unsubscribe_post,
-                       COUNT(*) as message_count,
-                       MAX(m.date) as latest_date,
+                "WITH grouped AS (
+                       SELECT
+                         LOWER(m.from_address) AS sender_key,
+                         COUNT(*) AS message_count,
+                         MAX(m.date) AS latest_date
+                       FROM messages m
+                       WHERE m.account_id = ?1 AND m.list_unsubscribe IS NOT NULL
+                       GROUP BY LOWER(m.from_address)
+                     ),
+                     latest AS (
+                       SELECT from_address, from_name, list_unsubscribe, list_unsubscribe_post, sender_key
+                       FROM (
+                         SELECT
+                           m.from_address,
+                           m.from_name,
+                           m.list_unsubscribe,
+                           m.list_unsubscribe_post,
+                           LOWER(m.from_address) AS sender_key,
+                           ROW_NUMBER() OVER (
+                             PARTITION BY LOWER(m.from_address)
+                             ORDER BY m.date DESC, m.id DESC
+                           ) AS rn
+                         FROM messages m
+                         WHERE m.account_id = ?1 AND m.list_unsubscribe IS NOT NULL
+                       )
+                       WHERE rn = 1
+                     )
+                     SELECT
+                       latest.from_address,
+                       latest.from_name,
+                       latest.list_unsubscribe AS latest_unsubscribe_header,
+                       latest.list_unsubscribe_post AS latest_unsubscribe_post,
+                       grouped.message_count,
+                       grouped.latest_date,
                        ua.status
-                     FROM messages m
-                     LEFT JOIN unsubscribe_actions ua ON ua.account_id = m.account_id AND ua.from_address = LOWER(m.from_address)
-                     WHERE m.account_id = ?1 AND m.list_unsubscribe IS NOT NULL
-                     GROUP BY LOWER(m.from_address)
-                     ORDER BY MAX(m.date) DESC",
+                     FROM grouped
+                     JOIN latest ON latest.sender_key = grouped.sender_key
+                     LEFT JOIN unsubscribe_actions ua
+                       ON ua.account_id = ?1 AND ua.from_address = grouped.sender_key
+                     ORDER BY grouped.latest_date DESC",
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], SubscriptionEntry::from_row)

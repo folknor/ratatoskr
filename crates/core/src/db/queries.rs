@@ -19,6 +19,29 @@ pub use db::db::queries::{
 // Re-export FTS5/LIKE helpers.
 pub use db::db::sql_fragments::{build_fts_query, make_like_pattern};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageFlag {
+    Read,
+    Starred,
+    Replied,
+    Forwarded,
+}
+
+impl MessageFlag {
+    fn column(self) -> &'static str {
+        match self {
+            Self::Read => "is_read",
+            Self::Starred => "is_starred",
+            Self::Replied => "is_replied",
+            Self::Forwarded => "is_forwarded",
+        }
+    }
+
+    fn read_from(self, row: &Row<'_>) -> std::result::Result<bool, super::SqlError> {
+        Ok(row.get::<_, i64>(self.column())? != 0)
+    }
+}
+
 pub(crate) fn row_to_message(row: &Row<'_>) -> std::result::Result<DbMessage, super::SqlError> {
     Ok(DbMessage {
         id: row.get("id")?,
@@ -33,10 +56,10 @@ pub(crate) fn row_to_message(row: &Row<'_>) -> std::result::Result<DbMessage, su
         subject: row.get("subject")?,
         snippet: row.get("snippet")?,
         date: row.get("date")?,
-        is_read: row.get::<_, i64>("is_read")? != 0,
-        is_starred: row.get::<_, i64>("is_starred")? != 0,
-        is_replied: row.get::<_, i64>("is_replied")? != 0,
-        is_forwarded: row.get::<_, i64>("is_forwarded")? != 0,
+        is_read: MessageFlag::Read.read_from(row)?,
+        is_starred: MessageFlag::Starred.read_from(row)?,
+        is_replied: MessageFlag::Replied.read_from(row)?,
+        is_forwarded: MessageFlag::Forwarded.read_from(row)?,
         body_html: None,
         body_text: None,
         body_cached: row

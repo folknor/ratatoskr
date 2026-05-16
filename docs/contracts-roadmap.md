@@ -165,7 +165,7 @@ Every existing `provider: &str` or `provider_name: String` parameter **in the ma
 
 ### 3. #1 grain.vertical - sealed constructor (high fidelity within crate)
 
-**Status:** DateBound and thread-aggregate slices landed. `types::DateBound` is a sealed date-boundary parse product with exclusive SQL and Tantivy range emitters. Smart-folder parsed queries carry `DateBound`, SQL date clauses use `DateBound::to_sql_clause`, and Tantivy range queries use `DateBound::to_range_bound`. `db::queries_extra::ThreadAggregate` now has private fields, accessor methods, and a non-empty `compute_from_messages(first, rest)` in-memory constructor used by `sync::pipeline` and `dev-seed`. `NonReactionMessage` has private fields and a constructor boundary. Thread decoration and read/starred recompute paths now exclude reactions. Predicate-grain slices remain open.
+**Status:** DateBound, thread aggregate, and remaining predicate-grain slices landed. `types::DateBound` is a sealed date-boundary parse product with exclusive SQL and Tantivy range emitters. Smart-folder parsed queries carry `DateBound`, SQL date clauses use `DateBound::to_sql_clause`, and Tantivy range queries use `DateBound::to_range_bound`. `db::queries_extra::ThreadAggregate` now has private fields, accessor methods, and a non-empty `compute_from_messages(first, rest)` in-memory constructor used by `sync::pipeline` and `dev-seed`. `NonReactionMessage` has private fields and a constructor boundary. Thread decoration and read/starred recompute paths now exclude reactions. Chat unread counts name their message-grain SQL shapes, message row booleans decode through `MessageFlag`, smart-folder label-group SQL uses the private `LabelGroupRenderGrain` enum instead of free-form aliases, and bundle/subscription summaries now select displayed sender metadata from canonical latest rows instead of mixed aggregate fields.
 
 **Inventory:** Shape 1 entries (chat.rs, thread_detail.rs, smart-folder), Shape 3 entries (thread_persistence.rs, sync/pipeline.rs, dev-seed), Shape 9 entries (search-pipeline grouping/metadata), Shape 11 (date boundary), parts of Shape 12.
 
@@ -330,6 +330,8 @@ Same shape for the `Thread` constructors: four near-identical converters (`db_th
 ### 5. #5b LabelStyle - sealed constructor + crate-boundary split (high fidelity)
 
 **Status:** landed for the documented surfaces. `label-colors::LabelStyleHex` is a complete `(bg, fg)` pair, `resolve_label_color` accepts only complete pairs, label write APIs reject partial DB pairs, and the labels schema has matching complete-or-missing CHECK constraints. The hash fallback helper is private to `label-colors`, so synced/user colors cannot be bypassed from another crate. The app UI now has `LabelPaint` with private fields; reading-pane label pills, thread-list markers, sidebar label rows, and Settings label rows construct it from `LabelStyleHex` and pass `LabelPaint` to label-shaped widgets.
+
+Adjacent #5 cleanup landed for HTML sanitization: `common::html_sanitizer::RemoteImagePolicy` is now the typed image-loading decision consumed by `sanitize_html_body_with_image_policy`, and the no-policy helper delegates through the same implementation with `RemoteImagePolicy::AllowRemote`.
 
 **Inventory:** Shape 5's `resolve_label_color` partial-pair entry, Shape 2's label-color resolver entry.
 

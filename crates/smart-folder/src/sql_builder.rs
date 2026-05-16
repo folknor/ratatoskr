@@ -397,13 +397,35 @@ fn build_thread_state_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelGroupRenderGrain {
+    Thread,
+    Message,
+}
+
+impl LabelGroupRenderGrain {
+    fn account_column(self) -> &'static str {
+        match self {
+            Self::Thread => "t.account_id",
+            Self::Message => "m.account_id",
+        }
+    }
+
+    fn thread_column(self) -> &'static str {
+        match self {
+            Self::Thread => "t.id",
+            Self::Message => "m.thread_id",
+        }
+    }
+}
+
 /// SQL fragment: "thread (acct, tid) renders the label group with `<group_predicate>`".
 ///
-/// `account_alias` and `thread_alias` name the outer columns to join on
-/// (e.g. `t.account_id` / `t.id` for thread-flag clauses, `m.account_id`
-/// / `m.thread_id` for message-clauses). `group_predicate` is the
-/// constraint on the `lg` alias (e.g. `"1=1"` for "any group", or
-/// `"LOWER(lg.name) = LOWER(?N)"` for a named group).
+/// `grain` selects the only two legal outer-column pairs: thread flags use
+/// `t.account_id` / `t.id`, while message clauses use `m.account_id` /
+/// `m.thread_id`. `group_predicate` is the constraint on the `lg` alias
+/// (e.g. `"1=1"` for "any group", or `"LOWER(lg.name) = LOWER(?N)"` for a
+/// named group).
 ///
 /// Both rendering paths from `docs/labels-unification/redesign.md`
 /// "Message pill rendering" are unioned: a local `thread_label_groups`
@@ -411,22 +433,24 @@ fn build_thread_state_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 /// the group's member set. Any future change to the rendering rule
 /// must update this one helper rather than each call site.
 fn label_group_rendered_fragment(
-    account_alias: &str,
-    thread_alias: &str,
+    grain: LabelGroupRenderGrain,
     group_predicate: &str,
 ) -> String {
+    let account_column = grain.account_column();
+    let thread_column = grain.thread_column();
+
     format!(
         "(EXISTS (SELECT 1 FROM thread_label_groups tlg \
             JOIN label_groups lg ON lg.id = tlg.group_id \
-            WHERE tlg.account_id = {account_alias} \
-              AND tlg.thread_id = {thread_alias} \
+            WHERE tlg.account_id = {account_column} \
+              AND tlg.thread_id = {thread_column} \
               AND {group_predicate}) \
           OR EXISTS (SELECT 1 FROM thread_labels tl \
             JOIN label_group_members lgm \
               ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id \
             JOIN label_groups lg ON lg.id = lgm.group_id \
-            WHERE tl.account_id = {account_alias} \
-              AND tl.thread_id = {thread_alias} \
+            WHERE tl.account_id = {account_column} \
+              AND tl.thread_id = {thread_column} \
               AND {group_predicate}))"
     )
 }
@@ -434,8 +458,7 @@ fn label_group_rendered_fragment(
 /// Build `is:tagged` clause - thread renders at least one label group.
 fn build_is_tagged_clause(ctx: &mut QueryContext) {
     ctx.thread_flag_clauses.push(label_group_rendered_fragment(
-        "t.account_id",
-        "t.id",
+        LabelGroupRenderGrain::Thread,
         "1=1",
     ));
 }
@@ -470,8 +493,7 @@ fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
         .map(|label| {
             let idx = ctx.push_param(Box::new(label.clone()));
             label_group_rendered_fragment(
-                "m.account_id",
-                "m.thread_id",
+                LabelGroupRenderGrain::Message,
                 &format!("LOWER(lg.name) = LOWER(?{idx})"),
             )
         })
@@ -746,6 +768,19 @@ mod tests {
     }
 
     // -- is:tagged --
+
+    #[test]
+    fn label_group_rendered_fragment_uses_named_grains() {
+        let thread_fragment =
+            label_group_rendered_fragment(LabelGroupRenderGrain::Thread, "1=1");
+        assert!(thread_fragment.contains("tlg.account_id = t.account_id"));
+        assert!(thread_fragment.contains("tlg.thread_id = t.id"));
+
+        let message_fragment =
+            label_group_rendered_fragment(LabelGroupRenderGrain::Message, "1=1");
+        assert!(message_fragment.contains("tlg.account_id = m.account_id"));
+        assert!(message_fragment.contains("tlg.thread_id = m.thread_id"));
+    }
 
     #[test]
     fn is_tagged_finds_threads_with_labels() {
