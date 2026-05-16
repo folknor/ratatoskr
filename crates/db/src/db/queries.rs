@@ -53,6 +53,12 @@ pub fn get_folders(conn: &Connection, account_id: &str) -> Result<Vec<DbFolder>,
 }
 
 /// Get all labels for an account, ordered by sort_order then name.
+///
+/// Post-split: `labels` is tag-only. Message-state primitives (UNREAD, STARRED,
+/// `$`-prefixed RFC system keywords) are never inserted here because they fail
+/// classification at ingest, so no SELECT-side exclusion is needed. If a
+/// provider sync path is observed to leak one of those into `labels`, fix
+/// classification at ingest rather than re-adding a filter here.
 pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
     query_as::<DbLabel>(
         conn,

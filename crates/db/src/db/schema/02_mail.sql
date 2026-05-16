@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS folders (
     FOREIGN KEY (account_id, parent_id) REFERENCES folders(account_id, id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS folders_parent ON folders(account_id, parent_id);
+-- Covers the per-account `get_folders` scan
+-- (`WHERE account_id = ?1 ORDER BY sort_order, name`).
+CREATE INDEX IF NOT EXISTS folders_account ON folders(account_id, sort_order, name);
 
 CREATE TABLE IF NOT EXISTS labels (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -41,8 +44,12 @@ CREATE TABLE IF NOT EXISTS labels (
 );
 CREATE INDEX IF NOT EXISTS labels_account ON labels(account_id);
 
+-- AUTOINCREMENT is load-bearing: smart folders and other persisted
+-- references hold `label_groups.id` integers. Without AUTOINCREMENT,
+-- SQLite would reuse rowids after a DELETE, silently rebinding a saved
+-- `label:Foo`-resolved id to a freshly-created group.
 CREATE TABLE IF NOT EXISTS label_groups (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     color_bg TEXT NOT NULL,
     color_fg TEXT NOT NULL,

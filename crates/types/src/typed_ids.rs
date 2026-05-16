@@ -10,7 +10,14 @@
 #[serde(transparent)]
 pub struct FolderId(pub String);
 
-/// A label ID (Gmail user label, JMAP keyword, Graph category, IMAP keyword).
+/// A per-account label ID identifying a row in the `labels` table.
+///
+/// Post-split (`docs/labels-unification/redesign.md`) this is tag-only:
+/// Gmail user labels (bare native string), Exchange categories (`cat:{name}`),
+/// IMAP/JMAP keywords (`kw:{keyword}`), and synthesised Graph importance
+/// (`importance:high` / `importance:low`). Gmail system labels (INBOX, SENT,
+/// CATEGORY_*, CHAT, etc.) are folders now and flow through `FolderId`.
+///
 /// Used with `add_label`, `remove_label`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]

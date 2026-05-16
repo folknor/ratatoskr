@@ -15,7 +15,7 @@ use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{ChatList, GenerationToken, Nav};
 use rtsk::scope::ViewScope;
 use std::sync::Arc;
-use types::{Bundle, FeatureView, SidebarSelection, SystemFolder};
+use types::{Bundle, FeatureView, SidebarSelection, VirtualView};
 
 impl ReadyApp {
     pub(crate) fn current_scope(&self) -> &ViewScope {
@@ -86,7 +86,21 @@ impl ReadyApp {
                                 .await
                             }
                             _ => {
-                                let label_id = thread_query_label_for_selection(&selection);
+                                // `get_threads_for_shared_mailbox` intercepts
+                                // "STARRED" / "SNOOZED" internally to route to
+                                // the thread-state boolean columns; everything
+                                // else hits `thread_folders`. AllMail is the
+                                // unfiltered set (None).
+                                let label_id = match &selection {
+                                    SidebarSelection::VirtualView(VirtualView::Starred) => {
+                                        Some("STARRED".to_string())
+                                    }
+                                    SidebarSelection::VirtualView(VirtualView::Snoozed) => {
+                                        Some("SNOOZED".to_string())
+                                    }
+                                    SidebarSelection::VirtualView(VirtualView::AllMail) => None,
+                                    _ => selection.folder_id_for_thread_query(),
+                                };
                                 load_shared_mailbox_threads(db, aid, mid, label_id).await
                             }
                         }
@@ -112,8 +126,21 @@ impl ReadyApp {
                                 load_threads_for_label_group_view(db, scope, group_id.as_i64())
                                     .await
                             }
+                            // Virtual views are not folders; they route to the
+                            // helpers that read `threads.is_starred` /
+                            // `is_snoozed` / no filter rather than joining
+                            // `thread_folders`.
+                            SidebarSelection::VirtualView(VirtualView::Starred) => {
+                                load_threads_starred(db, scope).await
+                            }
+                            SidebarSelection::VirtualView(VirtualView::Snoozed) => {
+                                load_threads_snoozed(db, scope).await
+                            }
+                            SidebarSelection::VirtualView(VirtualView::AllMail) => {
+                                load_threads_scoped(db, scope, None).await
+                            }
                             _ => {
-                                let label_id = thread_query_label_for_selection(&selection);
+                                let label_id = selection.folder_id_for_thread_query();
                                 load_threads_scoped(db, scope, label_id).await
                             }
                         }
@@ -168,14 +195,12 @@ async fn load_threads_scoped(
     label_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
+        // `label_id` here is a real `folders.id` value (or None for All Mail).
+        // Virtual views (Starred / Snoozed) are dispatched upstream because
+        // they are backed by `threads.is_starred` / `is_snoozed`, not by
+        // `thread_folders` membership.
         let label = label_id.as_deref();
-        let db_threads = match label {
-            // Starred and Snoozed are virtual folders backed by thread state,
-            // not rows in thread_labels.
-            Some("STARRED") => get_starred_threads(conn, &scope, Some(1000), None)?,
-            Some("SNOOZED") => get_snoozed_threads(conn, &scope, Some(1000), None)?,
-            _ => get_threads_scoped(conn, &scope, label, Some(1000), None)?,
-        };
+        let db_threads = get_threads_scoped(conn, &scope, label, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
@@ -216,14 +241,38 @@ async fn load_threads_for_label_group_view(
     .await
 }
 
-fn thread_query_label_for_selection(selection: &SidebarSelection) -> Option<String> {
-    match selection {
-        // Single-account All Mail is the full scoped thread set, so it must
-        // deliberately avoid the thread_labels path.
-        SidebarSelection::Folder(SystemFolder::AllMail) => None,
-        SidebarSelection::LabelGroup(_) => None,
-        _ => selection.folder_id_for_thread_query(),
-    }
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+async fn load_threads_starred(
+    db: Arc<Db>,
+    scope: AccountScope,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_starred_threads(conn, &scope, Some(1000), None)?;
+        let mut threads: Vec<Thread> = db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+async fn load_threads_snoozed(
+    db: Arc<Db>,
+    scope: AccountScope,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_snoozed_threads(conn, &scope, Some(1000), None)?;
+        let mut threads: Vec<Thread> = db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
+    })
+    .await
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

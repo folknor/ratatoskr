@@ -35,13 +35,18 @@ pub fn selection_to_view_type(sel: &SidebarSelection) -> (ViewType, Option<Strin
         SidebarSelection::Folder(f) => {
             use types::SystemFolder;
             match f {
-                SystemFolder::Starred => (ViewType::Starred, None),
                 SystemFolder::Sent => (ViewType::Sent, None),
                 SystemFolder::Draft => (ViewType::Drafts, None),
-                SystemFolder::Snoozed => (ViewType::Snoozed, None),
                 SystemFolder::Trash => (ViewType::Trash, None),
                 SystemFolder::Spam => (ViewType::Spam, None),
-                SystemFolder::AllMail => (ViewType::AllMail, None),
+            }
+        }
+        SidebarSelection::VirtualView(v) => {
+            use types::VirtualView;
+            match v {
+                VirtualView::Starred => (ViewType::Starred, None),
+                VirtualView::Snoozed => (ViewType::Snoozed, None),
+                VirtualView::AllMail => (ViewType::AllMail, None),
             }
         }
         SidebarSelection::Bundle(_) => (ViewType::Bundle, None),
@@ -357,21 +362,21 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
 
         // Navigation - folder/view targets
         CommandId::NavGoInbox => Some(nav_msg(SidebarSelection::Inbox)),
-        CommandId::NavGoStarred => Some(nav_msg(SidebarSelection::Folder(
-            types::SystemFolder::Starred,
+        CommandId::NavGoStarred => Some(nav_msg(SidebarSelection::VirtualView(
+            types::VirtualView::Starred,
         ))),
         CommandId::NavGoSent => Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Sent))),
         CommandId::NavGoDrafts => Some(nav_msg(SidebarSelection::Folder(
             types::SystemFolder::Draft,
         ))),
-        CommandId::NavGoSnoozed => Some(nav_msg(SidebarSelection::Folder(
-            types::SystemFolder::Snoozed,
+        CommandId::NavGoSnoozed => Some(nav_msg(SidebarSelection::VirtualView(
+            types::VirtualView::Snoozed,
         ))),
         CommandId::NavGoTrash => Some(nav_msg(SidebarSelection::Folder(
             types::SystemFolder::Trash,
         ))),
-        CommandId::NavGoAllMail => Some(nav_msg(SidebarSelection::Folder(
-            types::SystemFolder::AllMail,
+        CommandId::NavGoAllMail => Some(nav_msg(SidebarSelection::VirtualView(
+            types::VirtualView::AllMail,
         ))),
         CommandId::NavGoPrimary => Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Primary))),
         CommandId::NavGoUpdates => Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Updates))),

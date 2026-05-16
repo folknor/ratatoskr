@@ -88,16 +88,6 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
         imap_special_use: Some("\\Archive"),
         imap_name_aliases: &["archive", "archives"],
     },
-    // Virtual navigation handle only. Providers expose starred as message
-    // state, so STARRED is filtered out of labels/thread_labels writes.
-    SystemFolderRole {
-        label_id: "STARRED",
-        label_name: "Starred",
-        jmap_role: None,
-        graph_alias: None,
-        imap_special_use: None,
-        imap_name_aliases: &[],
-    },
     SystemFolderRole {
         label_id: "IMPORTANT",
         label_name: "Important",
@@ -132,9 +122,12 @@ pub fn graph_well_known_aliases() -> Vec<(&'static str, &'static str, &'static s
 }
 
 pub fn is_system_folder_id(label_id: &str) -> bool {
+    // `STARRED` is intentionally absent from `SYSTEM_FOLDER_ROLES`: it is a
+    // virtual navigation handle backed by `threads.is_starred`, not a real
+    // folder row. See `docs/glossary/folders-labels.md` "Identity".
     SYSTEM_FOLDER_ROLES
         .iter()
-        .any(|entry| entry.label_id == label_id && entry.label_id != "STARRED")
+        .any(|entry| entry.label_id == label_id)
 }
 
 pub fn is_gmail_system_folder_label_id(label_id: &str) -> bool {

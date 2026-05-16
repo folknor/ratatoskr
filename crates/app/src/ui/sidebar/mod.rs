@@ -414,16 +414,16 @@ pub fn truncate_query(query: &str, max_chars: usize) -> String {
 
 /// Map a universal folder's DB ID to the corresponding `SidebarSelection`.
 pub(crate) fn universal_folder_selection(id: &str) -> SidebarSelection {
-    use types::{Bundle, FeatureView, SystemFolder};
+    use types::{Bundle, FeatureView, SystemFolder, VirtualView};
     match id {
         "INBOX" => SidebarSelection::Inbox,
-        "STARRED" => SidebarSelection::Folder(SystemFolder::Starred),
+        "STARRED" => SidebarSelection::VirtualView(VirtualView::Starred),
         "SENT" => SidebarSelection::Folder(SystemFolder::Sent),
         "DRAFT" => SidebarSelection::Folder(SystemFolder::Draft),
-        "SNOOZED" => SidebarSelection::Folder(SystemFolder::Snoozed),
+        "SNOOZED" => SidebarSelection::VirtualView(VirtualView::Snoozed),
         "TRASH" => SidebarSelection::Folder(SystemFolder::Trash),
         "SPAM" => SidebarSelection::Folder(SystemFolder::Spam),
-        "all-mail" => SidebarSelection::Folder(SystemFolder::AllMail),
+        "all-mail" => SidebarSelection::VirtualView(VirtualView::AllMail),
         "BUNDLE_PRIMARY" => SidebarSelection::Bundle(Bundle::Primary),
         "BUNDLE_UPDATES" => SidebarSelection::Bundle(Bundle::Updates),
         "BUNDLE_PROMOTIONS" => SidebarSelection::Bundle(Bundle::Promotions),
