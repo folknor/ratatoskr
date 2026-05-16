@@ -71,11 +71,16 @@ pub fn get_thread_id_for_imap_uid(
 // threads table
 // ---------------------------------------------------------------------------
 
-/// Recompute `is_read` / `is_starred` for a thread by aggregating its messages.
+/// Recompute `is_read` / `is_starred` for a thread by aggregating non-reaction
+/// messages.
 ///
 /// `is_read` becomes the MIN of all constituent message flags (a thread is
 /// read only when every message is read). `is_starred` becomes the MAX (starred
 /// if any message is starred).
+///
+/// If a thread has no non-reaction messages, the fallback is "read, not
+/// starred". Reaction-only threads should be transient cleanup cases rather
+/// than user-visible unread/starred threads.
 pub fn recompute_thread_read_starred(
     conn: &Connection,
     account_id: &str,
@@ -83,8 +88,8 @@ pub fn recompute_thread_read_starred(
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE threads SET \
-           is_read    = (SELECT MIN(is_read)    FROM messages WHERE account_id = ?1 AND thread_id = ?2), \
-           is_starred = (SELECT MAX(is_starred) FROM messages WHERE account_id = ?1 AND thread_id = ?2) \
+           is_read    = COALESCE((SELECT MIN(is_read)    FROM messages WHERE account_id = ?1 AND thread_id = ?2 AND is_reaction = 0), 1), \
+           is_starred = COALESCE((SELECT MAX(is_starred) FROM messages WHERE account_id = ?1 AND thread_id = ?2 AND is_reaction = 0), 0) \
          WHERE account_id = ?1 AND id = ?2",
         params![account_id, thread_id],
     )

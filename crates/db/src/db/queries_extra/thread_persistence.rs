@@ -6,13 +6,127 @@ use rusqlite::{Connection, Transaction};
 use crate::db::lookups;
 
 pub struct ThreadAggregate {
-    pub subject: Option<String>,
-    pub snippet: String,
-    pub last_date: i64,
-    pub message_count: i64,
-    pub is_read: bool,
-    pub is_starred: bool,
-    pub has_attachments: bool,
+    subject: Option<String>,
+    snippet: String,
+    last_date: i64,
+    message_count: i64,
+    is_read: bool,
+    is_starred: bool,
+    has_attachments: bool,
+}
+
+impl ThreadAggregate {
+    /// Compute a thread aggregate from non-reaction message inputs.
+    ///
+    /// The signature requires the caller to prove the rowset is non-empty.
+    /// When dates tie, iteration order decides the winning subject/snippet:
+    /// the first message with the earliest date supplies `subject`, and the
+    /// first message with the latest date supplies `snippet`.
+    pub fn compute_from_messages(first: &NonReactionMessage, rest: &[NonReactionMessage]) -> Self {
+        let mut subject_date_so_far = first.date;
+        let mut subject = first.subject.clone();
+        let mut latest_date = first.date;
+        let mut snippet = first.snippet.clone();
+        let mut is_read = first.is_read;
+        let mut is_starred = first.is_starred;
+        let mut has_attachments = first.has_attachments;
+
+        for message in rest {
+            if message.date < subject_date_so_far {
+                subject_date_so_far = message.date;
+                subject.clone_from(&message.subject);
+            }
+            if message.date > latest_date {
+                latest_date = message.date;
+                snippet.clone_from(&message.snippet);
+            }
+            is_read &= message.is_read;
+            is_starred |= message.is_starred;
+            has_attachments |= message.has_attachments;
+        }
+
+        Self {
+            subject,
+            snippet,
+            last_date: latest_date,
+            message_count: i64::try_from(rest.len() + 1).unwrap_or(i64::MAX),
+            is_read,
+            is_starred,
+            has_attachments,
+        }
+    }
+
+    pub fn subject(&self) -> Option<&str> {
+        self.subject.as_deref()
+    }
+
+    pub fn snippet(&self) -> &str {
+        &self.snippet
+    }
+
+    pub fn last_date(&self) -> i64 {
+        self.last_date
+    }
+
+    pub fn message_count(&self) -> i64 {
+        self.message_count
+    }
+
+    pub fn is_read(&self) -> bool {
+        self.is_read
+    }
+
+    pub fn is_starred(&self) -> bool {
+        self.is_starred
+    }
+
+    pub fn has_attachments(&self) -> bool {
+        self.has_attachments
+    }
+}
+
+/// Message input that has already excluded reaction rows.
+///
+/// ```compile_fail,E0451
+/// use db::db::queries_extra::NonReactionMessage;
+///
+/// let _ = NonReactionMessage {
+///     subject: None,
+///     snippet: String::new(),
+///     date: 0,
+///     is_read: true,
+///     is_starred: false,
+///     has_attachments: false,
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct NonReactionMessage {
+    subject: Option<String>,
+    snippet: String,
+    date: i64,
+    is_read: bool,
+    is_starred: bool,
+    has_attachments: bool,
+}
+
+impl NonReactionMessage {
+    pub fn new(
+        subject: Option<String>,
+        snippet: String,
+        date: i64,
+        is_read: bool,
+        is_starred: bool,
+        has_attachments: bool,
+    ) -> Self {
+        Self {
+            subject,
+            snippet,
+            date,
+            is_read,
+            is_starred,
+            has_attachments,
+        }
+    }
 }
 
 /// One message's address fields as raw, possibly-NULL strings from the
@@ -892,4 +1006,77 @@ fn fallback_parse_address_list(raw: &str) -> Vec<(Option<String>, String)> {
         }
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NonReactionMessage, ThreadAggregate};
+
+    fn msg(
+        subject: &str,
+        snippet: &str,
+        date: i64,
+        is_read: bool,
+        is_starred: bool,
+        has_attachments: bool,
+    ) -> NonReactionMessage {
+        NonReactionMessage::new(
+            Some(subject.to_string()),
+            snippet.to_string(),
+            date,
+            is_read,
+            is_starred,
+            has_attachments,
+        )
+    }
+
+    fn aggregate(messages: &[NonReactionMessage]) -> ThreadAggregate {
+        let (first, rest) = messages.split_first().expect("test messages are non-empty");
+        ThreadAggregate::compute_from_messages(first, rest)
+    }
+
+    #[test]
+    fn aggregate_single_message() {
+        let aggregate = aggregate(&[msg("subject", "snippet", 10, true, false, true)]);
+        assert_eq!(aggregate.subject(), Some("subject"));
+        assert_eq!(aggregate.snippet(), "snippet");
+        assert_eq!(aggregate.last_date(), 10);
+        assert_eq!(aggregate.message_count(), 1);
+        assert!(aggregate.is_read());
+        assert!(!aggregate.is_starred());
+        assert!(aggregate.has_attachments());
+    }
+
+    #[test]
+    fn aggregate_handles_descending_input() {
+        let aggregate = aggregate(&[
+            msg("newer", "newer snippet", 20, true, false, false),
+            msg("older", "older snippet", 10, true, false, false),
+        ]);
+        assert_eq!(aggregate.subject(), Some("older"));
+        assert_eq!(aggregate.snippet(), "newer snippet");
+        assert_eq!(aggregate.last_date(), 20);
+    }
+
+    #[test]
+    fn aggregate_reduces_flags() {
+        let aggregate = aggregate(&[
+            msg("a", "a", 10, true, false, false),
+            msg("b", "b", 20, false, true, false),
+            msg("c", "c", 30, true, false, true),
+        ]);
+        assert!(!aggregate.is_read());
+        assert!(aggregate.is_starred());
+        assert!(aggregate.has_attachments());
+    }
+
+    #[test]
+    fn aggregate_tie_breaks_by_iteration_order() {
+        let aggregate = aggregate(&[
+            msg("first", "first snippet", 10, true, false, false),
+            msg("second", "second snippet", 10, true, false, false),
+        ]);
+        assert_eq!(aggregate.subject(), Some("first"));
+        assert_eq!(aggregate.snippet(), "first snippet");
+    }
 }

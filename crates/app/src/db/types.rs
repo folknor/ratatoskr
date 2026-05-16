@@ -88,6 +88,104 @@ pub struct Thread {
     pub also_matched: Vec<rtsk::search::MatchKind>,
 }
 
+impl Thread {
+    pub fn from_db_thread(t: rtsk::db::types::DbThread) -> Self {
+        Self {
+            id: t.id,
+            account_id: t.account_id,
+            subject: t.subject,
+            snippet: t.snippet,
+            last_message_at: t.last_message_at,
+            message_count: t.message_count,
+            is_read: t.is_read,
+            is_starred: t.is_starred,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: t.is_pinned,
+            is_muted: t.is_muted,
+            has_attachments: t.has_attachments,
+            label_color_bgs: Vec::new(),
+            from_name: t.from_name,
+            from_address: t.from_address,
+            is_local_draft: false,
+            match_kind: None,
+            also_matched: Vec::new(),
+        }
+    }
+
+    pub fn from_local_draft(d: rtsk::db::queries_extra::LocalDraftSummary) -> Self {
+        Self {
+            id: d.id,
+            account_id: d.account_id,
+            subject: d.subject,
+            snippet: d.snippet,
+            last_message_at: Some(d.updated_at),
+            message_count: 1,
+            is_read: true,
+            is_starred: false,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: false,
+            is_muted: false,
+            has_attachments: false,
+            label_color_bgs: Vec::new(),
+            from_name: None,
+            from_address: d.from_email,
+            is_local_draft: true,
+            match_kind: None,
+            also_matched: Vec::new(),
+        }
+    }
+
+    pub fn from_public_folder_item(item: rtsk::db::queries_extra::PublicFolderItem) -> Self {
+        Self {
+            id: item.item_id,
+            account_id: item.account_id,
+            subject: item.subject,
+            snippet: item.body_preview,
+            last_message_at: item.received_at,
+            message_count: 1,
+            is_read: item.is_read,
+            is_starred: false,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: false,
+            is_muted: false,
+            has_attachments: false,
+            label_color_bgs: Vec::new(),
+            from_name: item.sender_name,
+            from_address: item.sender_email,
+            is_local_draft: false,
+            match_kind: None,
+            also_matched: Vec::new(),
+        }
+    }
+
+    pub fn from_search_result(r: rtsk::search_pipeline::UnifiedSearchResult) -> Self {
+        Self {
+            id: r.thread_id,
+            account_id: r.account_id,
+            subject: r.subject,
+            snippet: r.snippet,
+            last_message_at: r.date,
+            message_count: r.message_count.unwrap_or(1),
+            is_read: r.is_read,
+            is_starred: r.is_starred,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: false,
+            is_muted: false,
+            has_attachments: false,
+            label_color_bgs: Vec::new(),
+            from_name: r.from_name,
+            from_address: r.from_address,
+            is_local_draft: false,
+            match_kind: Some(r.match_kind),
+            also_matched: r.also_matched,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ThreadMessage {
     pub id: String,

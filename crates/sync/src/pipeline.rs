@@ -6,7 +6,7 @@ use crate::threading::ThreadGroup;
 
 use crate::types::MessageMeta;
 use db::db::queries_extra::{
-    ThreadAggregate, query_user_emails, reassign_messages_and_repair_threads,
+    NonReactionMessage, ThreadAggregate, query_user_emails, reassign_messages_and_repair_threads,
     replace_thread_folders, replace_thread_labels, upsert_thread_aggregate,
 };
 
@@ -65,9 +65,6 @@ pub fn store_threads(
             // Sort by date ascending
             messages.sort_by_key(|m| m.date);
 
-            let first = messages[0];
-            let last = messages[messages.len() - 1];
-
             // Collect all folder and label IDs including cross-folder copies.
             let mut all_folder_ids = HashSet::new();
             let mut all_label_ids = HashSet::new();
@@ -90,20 +87,27 @@ pub fn store_threads(
                 }
             }
 
-            let is_read = messages.iter().all(|m| m.is_read);
-            let is_starred = messages.iter().any(|m| m.is_starred);
-            let has_attachments = messages.iter().any(|m| m.has_attachments);
-
             let message_ids: Vec<&str> = messages.iter().map(|m| m.id.as_str()).collect();
-            let aggregate = ThreadAggregate {
-                subject: first.subject.clone(),
-                snippet: last.snippet.clone(),
-                last_date: last.date,
-                message_count: i64::try_from(messages.len()).unwrap_or(i64::MAX),
-                is_read,
-                is_starred,
-                has_attachments,
-            };
+            let aggregate_messages: Vec<NonReactionMessage> = messages
+                .iter()
+                .map(|m| {
+                    NonReactionMessage::new(
+                        m.subject.clone(),
+                        m.snippet.clone(),
+                        m.date,
+                        m.is_read,
+                        m.is_starred,
+                        m.has_attachments,
+                    )
+                })
+                .collect();
+            let (first_aggregate_message, rest_aggregate_messages) = aggregate_messages
+                .split_first()
+                .ok_or_else(|| "thread group missing aggregate messages".to_string())?;
+            let aggregate = ThreadAggregate::compute_from_messages(
+                first_aggregate_message,
+                rest_aggregate_messages,
+            );
             upsert_thread_aggregate(&tx, account_id, &group.thread_id, &aggregate, Some(false), None)?;
             replace_thread_folders(&tx, account_id, &group.thread_id, all_folder_ids.iter().map(String::as_str))?;
             replace_thread_labels(&tx, account_id, &group.thread_id, all_label_ids.iter().map(String::as_str))?;

@@ -165,7 +165,7 @@ Every existing `provider: &str` or `provider_name: String` parameter **in the ma
 
 ### 3. #1 grain.vertical - sealed constructor (high fidelity within crate)
 
-**Status:** DateBound slice landed. `types::DateBound` is a sealed date-boundary parse product with exclusive SQL and Tantivy range emitters. Smart-folder parsed queries carry `DateBound`, SQL date clauses use `DateBound::to_sql_clause`, and Tantivy range queries use `DateBound::to_range_bound`. Thread aggregate and predicate-grain slices remain open.
+**Status:** DateBound and thread-aggregate slices landed. `types::DateBound` is a sealed date-boundary parse product with exclusive SQL and Tantivy range emitters. Smart-folder parsed queries carry `DateBound`, SQL date clauses use `DateBound::to_sql_clause`, and Tantivy range queries use `DateBound::to_range_bound`. `db::queries_extra::ThreadAggregate` now has private fields, accessor methods, and a non-empty `compute_from_messages(first, rest)` in-memory constructor used by `sync::pipeline` and `dev-seed`. `NonReactionMessage` has private fields and a constructor boundary. Thread decoration and read/starred recompute paths now exclude reactions. Predicate-grain slices remain open.
 
 **Inventory:** Shape 1 entries (chat.rs, thread_detail.rs, smart-folder), Shape 3 entries (thread_persistence.rs, sync/pipeline.rs, dev-seed), Shape 9 entries (search-pipeline grouping/metadata), Shape 11 (date boundary), parts of Shape 12.
 
@@ -178,9 +178,7 @@ pub struct ThreadAggregate {
     // All fields are private. External crates cannot forge a literal.
     is_read: bool,
     is_starred: bool,
-    is_replied: bool,
-    is_forwarded: bool,
-    last_message_at: i64,
+    last_date: i64,
     message_count: i64,
     has_attachments: bool,
     subject: Option<String>,
@@ -190,46 +188,30 @@ pub struct ThreadAggregate {
 impl ThreadAggregate {
     /// SQL-owning constructor. Applies `is_reaction = 0` inline and uses
     /// the canonical per-field reducer (MIN for is_read, ANY for the others).
-    pub fn compute_in_tx(tx: &Transaction, key: ThreadKey)
+    pub fn compute_thread_aggregate(tx: &Transaction, account_id: &str, thread_id: &str)
         -> Result<ThreadAggregate, String> { ... }
 
     /// In-memory constructor for sync/pipeline and dev-seed.
     /// Takes a typed input newtype that proves the is_reaction = 0 filter.
-    pub fn compute_from_messages(messages: &[NonReactionMessage])
+    pub fn compute_from_messages(first: &NonReactionMessage, rest: &[NonReactionMessage])
         -> ThreadAggregate { ... }
 
     // Accessors. Fields stay private.
     pub fn is_read(&self) -> bool { self.is_read }
     pub fn is_starred(&self) -> bool { self.is_starred }
-    pub fn is_replied(&self) -> bool { self.is_replied }
-    pub fn is_forwarded(&self) -> bool { self.is_forwarded }
-    pub fn last_message_at(&self) -> i64 { self.last_message_at }
+    pub fn last_date(&self) -> i64 { self.last_date }
     // ...etc
 }
 
 /// Typed proof that the `is_reaction = 0` filter has been applied.
-pub struct NonReactionMessage(Message); // single private field
-
-impl Message {
-    /// The only way to produce `NonReactionMessage` values.
-    pub fn filter_non_reaction(messages: Vec<Message>) -> Vec<NonReactionMessage> {
-        messages.into_iter()
-            .filter(|m| !m.is_reaction)
-            .map(NonReactionMessage)
-            .collect()
-    }
-}
-
-impl NonReactionMessage {
-    pub fn as_message(&self) -> &Message { &self.0 }
-}
+pub struct NonReactionMessage { /* private fields */ }
 ```
 
 Both constructors are `pub` so `sync::pipeline` and `dev-seed` can call them from outside `db`. Sealing comes from **private struct fields plus the typed input newtype**, not from `pub(crate)` visibility.
 
 Per-field aggregate types (`ThreadReadAggregate`, etc.) are **not** introduced. The contract is *single place where the reducer rules live*, not *one type per rule*.
 
-**No intermediate filtered-rowset type.** The two constructors each own their filter: `compute_in_tx` owns the SQL with `WHERE is_reaction = 0` inline; `compute_from_messages` takes `&[NonReactionMessage]` (the newtype is the proof).
+**No intermediate filtered-rowset type.** The two constructors each own their filter: `compute_in_tx` owns the SQL with `WHERE is_reaction = 0` inline; `compute_from_messages` takes a non-empty `NonReactionMessage` input set (the newtype is the proof).
 
 For the query-builder side (the smart-folder motivating example), grain-branded predicates emit SQL against the right alias. A `ThreadPredicate` emits SQL against the `threads` table alias; a `MessagePredicate` emits SQL against the matched-messages subquery. The clause-list builders accept one or the other, not both.
 
@@ -279,6 +261,8 @@ impl DateBound {
 **Success criteria.** All Shape 1 and Shape 3 (`grain.vertical`) inventory entries either get a `// resolved by contract #1 grain.vertical` annotation and disappear, or get reclassified as evidence for a different contract. A compile-fail test attempts to construct a `ThreadAggregate` via struct literal from outside `db` and fails. Another attempts to construct a `NonReactionMessage` outside `db` and fails. A third attempts to construct a `DateBound` via struct literal and fails.
 
 ### 4. #3 Completion State - sealed constructor (high fidelity within crate)
+
+**Status:** search enrichment and app-thread constructor slices landed. Tantivy-only search now fetches thread metadata from SQL and applies `enrich_from_sql` before returning, dropping stale index hits that no longer have a thread row. This removes the `is_read: false` / `is_starred: false` placeholder leak for full-index free-text search. App `Thread` conversion defaults now live on associated constructors for DB threads, local drafts, public folder items, and search results. The broader partial/enriched type split remains open.
 
 **Inventory:** Shape 2 entries (Thread converters, `MatchKind::Body` hardcoded, `is_read: false` hardcoded in Tantivy), Shape 12 (partial enrichment).
 
@@ -339,7 +323,7 @@ Same shape for the `Thread` constructors: four near-identical converters (`db_th
 
 - `crates/search/src/lib.rs` - `PartialSearchHit` defined here; `collect_results` returns it. `MatchKind::Body` is no longer a default.
 - `crates/core/src/search_pipeline.rs` - `EnrichedSearchHit` and `SearchResults` defined here; `from_partial` is the sole transition.
-- `crates/app/src/helpers.rs`, `crates/app/src/db/pinned_searches.rs`, `crates/app/src/handlers/search.rs` - four Thread converters → one constructor.
+- `crates/app/src/helpers.rs`, `crates/app/src/db/pinned_searches.rs`, `crates/app/src/handlers/search.rs` - four Thread converters → associated constructors on `app::db::types::Thread`.
 
 **Success criteria.** Renderer signatures accept only enriched types. The search view exhaustively matches `SearchResults::{FullIndex, Degraded}`. A compile-fail test attempts to pass `PartialSearchHit` to the result-row renderer and fails. The four Thread converters collapse to one constructor.
 

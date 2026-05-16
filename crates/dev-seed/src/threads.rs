@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use rand::RngExt;
 use rusqlite::Connection;
 
+use db::db::queries_extra::{NonReactionMessage, ThreadAggregate};
+
 use crate::accounts::Account;
 use crate::contacts;
 use crate::people::{I18N_LOCALES, PeoplePools, Person};
@@ -254,7 +256,6 @@ pub fn generate_threads(
         };
         let is_important = rng.random::<f64>() < 0.05;
         let is_muted = rng.random::<f64>() < 0.01;
-        let mut has_attachments = false;
 
         // ~8% of multi-message threads end with a forward, so the ↪ glyph
         // and the "Fwd: …" subject derivation get exercised in dev. Picked
@@ -300,8 +301,7 @@ pub fn generate_threads(
 
         // Build messages
         let mut msg_refs: Vec<String> = Vec::new();
-        let mut latest_date: i64 = 0;
-        let mut latest_snippet = String::new();
+        let mut aggregate_messages = Vec::new();
 
         for mi in 0..num_msgs {
             let msg_id = crate::next_uuid(rng);
@@ -394,7 +394,6 @@ pub fn generate_threads(
                     att.mime_type,
                     size,
                 ));
-                has_attachments = true;
             }
 
             if rng.random::<f64>() < 0.20
@@ -415,8 +414,8 @@ pub fn generate_threads(
                         size,
                     ));
                 }
-                has_attachments = true;
             }
+            let msg_has_attachments = !msg_attachment_ids.is_empty();
 
             // IMAP UID
             let folder_key = (acc.id.clone(), folder_name.to_string());
@@ -440,6 +439,7 @@ pub fn generate_threads(
             };
 
             let raw_size = rng.random_range(2000..50001);
+            let msg_is_starred = is_starred && mi == 0;
 
             // Insert message
             conn.execute(
@@ -462,7 +462,7 @@ pub fn generate_threads(
                     snippet,
                     msg_date,
                     msg_is_read as i32,
-                    (is_starred && mi == 0) as i32,
+                    msg_is_starred as i32,
                     msg_is_replied as i32,
                     msg_is_forwarded as i32,
                     raw_size,
@@ -477,6 +477,14 @@ pub fn generate_threads(
             )
             .map_err(|e| format!("insert message: {e}"))?;
             stats.messages += 1;
+            aggregate_messages.push(NonReactionMessage::new(
+                Some(msg_subject),
+                snippet.clone(),
+                msg_date,
+                msg_is_read,
+                msg_is_starred,
+                msg_has_attachments,
+            ));
 
             // Generate body
             let body_html = templates::generate_body(rng, cat, locale_data);
@@ -506,20 +514,28 @@ pub fn generate_threads(
                 contacts::upsert_contact(conn, rng, &p.email, &p.display_name, &acc.id, msg_date)?;
             }
 
-            if msg_date > latest_date {
-                latest_date = msg_date;
-                latest_snippet.clone_from(&snippet);
-            }
         }
 
         // Update thread with final computed values
+        let (first_aggregate_message, rest_aggregate_messages) = aggregate_messages
+            .split_first()
+            .ok_or_else(|| "seed thread missing aggregate messages".to_string())?;
+        let aggregate = ThreadAggregate::compute_from_messages(
+            first_aggregate_message,
+            rest_aggregate_messages,
+        );
         conn.execute(
-            "UPDATE threads SET snippet = ?1, last_message_at = ?2, has_attachments = ?3
-             WHERE account_id = ?4 AND id = ?5",
+            "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3,
+             message_count = ?4, is_read = ?5, is_starred = ?6, has_attachments = ?7
+             WHERE account_id = ?8 AND id = ?9",
             rusqlite::params![
-                latest_snippet,
-                latest_date,
-                has_attachments as i32,
+                aggregate.subject(),
+                aggregate.snippet(),
+                aggregate.last_date(),
+                aggregate.message_count(),
+                aggregate.is_read() as i32,
+                aggregate.is_starred() as i32,
+                aggregate.has_attachments() as i32,
                 acc.id,
                 thread_id,
             ],

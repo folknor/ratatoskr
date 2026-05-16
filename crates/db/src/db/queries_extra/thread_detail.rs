@@ -146,7 +146,7 @@ fn query_thread_state_decorations(
                 COALESCE(MAX(is_replied), 0) AS is_replied,
                 COALESCE(MAX(is_forwarded), 0) AS is_forwarded
          FROM messages
-         WHERE account_id = ?1 AND thread_id IN ({placeholders})
+         WHERE account_id = ?1 AND is_reaction = 0 AND thread_id IN ({placeholders})
          GROUP BY thread_id"
     );
     let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(thread_ids.len() + 1);

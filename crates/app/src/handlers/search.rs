@@ -922,38 +922,13 @@ pub(crate) async fn execute_search(
         };
         let mut threads = results
             .into_iter()
-            .map(unified_result_to_thread)
+            .map(Thread::from_search_result)
             .filter(|thread| thread_matches_scope(thread, &scope))
             .collect::<Vec<_>>();
         crate::helpers::apply_thread_decorations(conn, &mut threads)?;
         Ok(threads)
     })
     .await
-}
-
-/// Convert a `UnifiedSearchResult` from the search pipeline to an app `Thread`.
-fn unified_result_to_thread(r: rtsk::search_pipeline::UnifiedSearchResult) -> Thread {
-    Thread {
-        id: r.thread_id,
-        account_id: r.account_id,
-        subject: r.subject,
-        snippet: r.snippet,
-        last_message_at: r.date,
-        message_count: r.message_count.unwrap_or(1),
-        is_read: r.is_read,
-        is_starred: r.is_starred,
-        is_replied: false,
-        is_forwarded: false,
-        is_pinned: false,
-        is_muted: false,
-        has_attachments: false,
-        label_color_bgs: Vec::new(),
-        from_name: r.from_name,
-        from_address: r.from_address,
-        is_local_draft: false,
-        match_kind: Some(r.match_kind),
-        also_matched: r.also_matched,
-    }
 }
 
 fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {

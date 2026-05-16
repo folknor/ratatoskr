@@ -6,6 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use db::db::FromRow;
+use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use db::db::types::{AccountScope, DbThread};
 use crate::db::Connection;
 use search::{
@@ -178,6 +180,18 @@ fn search_tantivy_only(
     let mut results = search_state.search_with_filters(&params)?;
     enrich_with_attribution(&mut results, &parsed.free_text, search_state, conn, body_read);
     let mut grouped = group_by_thread_unified(results);
+    let thread_rows = fetch_thread_rows_for_results(conn, &grouped)?;
+    let thread_map: HashMap<(String, String), &DbThread> = thread_rows
+        .iter()
+        .map(|thread| ((thread.account_id.clone(), thread.id.clone()), thread))
+        .collect();
+    grouped = grouped
+        .into_iter()
+        .filter_map(|r| {
+            let key = (r.account_id.clone(), r.thread_id.clone());
+            thread_map.get(&key).map(|thread| enrich_from_sql(r, thread))
+        })
+        .collect();
     grouped.sort_by(|a, b| {
         b.rank
             .partial_cmp(&a.rank)
@@ -204,11 +218,16 @@ fn search_combined(
         Some(crate::constants::DEFAULT_QUERY_LIMIT),
         Some(0),
     )?;
-    let candidate_ids: HashSet<String> = sql_threads.iter().map(|t| t.id.clone()).collect();
+    let candidate_ids: HashSet<(String, String)> = sql_threads
+        .iter()
+        .map(|t| (t.account_id.clone(), t.id.clone()))
+        .collect();
 
     // Build a lookup map for enrichment from SQL results.
-    let thread_map: HashMap<String, &DbThread> =
-        sql_threads.iter().map(|t| (t.id.clone(), t)).collect();
+    let thread_map: HashMap<(String, String), &DbThread> = sql_threads
+        .iter()
+        .map(|t| ((t.account_id.clone(), t.id.clone()), t))
+        .collect();
 
     // Step 2: Tantivy searches free text (no account filter - SQL handles it
     // via intersection, and account: values are display names, not IDs).
@@ -219,7 +238,7 @@ fn search_combined(
     // Step 3: Intersect - keep only Tantivy hits in the SQL candidate set.
     let mut filtered: Vec<TantivyResult> = tantivy_results
         .into_iter()
-        .filter(|r| candidate_ids.contains(&r.thread_id))
+        .filter(|r| candidate_ids.contains(&(r.account_id.clone(), r.thread_id.clone())))
         .collect();
 
     // Phase 7-8: per-message match-kind attribution. Runs before
@@ -233,7 +252,10 @@ fn search_combined(
     // Step 5: Enrich with SQL metadata where available.
     let mut enriched: Vec<UnifiedSearchResult> = grouped
         .into_iter()
-        .map(|r| enrich_from_sql(r, &thread_map))
+        .filter_map(|r| {
+            let key = (r.account_id.clone(), r.thread_id.clone());
+            thread_map.get(&key).map(|thread| enrich_from_sql(r, thread))
+        })
         .collect();
 
     // Step 6: Sort by rank descending.
@@ -397,6 +419,57 @@ fn group_by_thread_unified(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResu
         .collect()
 }
 
+fn fetch_thread_rows_for_results(
+    conn: &Connection,
+    results: &[UnifiedSearchResult],
+) -> Result<Vec<DbThread>, String> {
+    let mut seen = HashSet::new();
+    let mut keys = Vec::new();
+    for result in results {
+        if !seen.insert((result.account_id.clone(), result.thread_id.clone())) {
+            continue;
+        }
+        keys.push((result.account_id.clone(), result.thread_id.clone()));
+    }
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let values_sql = keys
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let account_idx = index * 2 + 1;
+            let thread_idx = account_idx + 1;
+            format!("(?{account_idx}, ?{thread_idx})")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "WITH requested(account_id, thread_id) AS (VALUES {values_sql})
+         SELECT t.*, m.from_name, m.from_address
+         FROM requested r
+         INNER JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
+         LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+         ) m ON m.account_id = t.account_id AND m.thread_id = t.id"
+    );
+
+    let mut params: Vec<Box<dyn db::db::ToSql>> = Vec::with_capacity(keys.len() * 2);
+    for (account_id, thread_id) in keys {
+        params.push(Box::new(account_id));
+        params.push(Box::new(thread_id));
+    }
+    let param_refs: Vec<&dyn db::db::ToSql> = params.iter().map(AsRef::as_ref).collect();
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("prepare search thread metadata: {e}"))?;
+    stmt.query_map(param_refs.as_slice(), DbThread::from_row)
+        .map_err(|e| format!("query search thread metadata: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("map search thread metadata: {e}"))
+}
+
 /// Convert a single Tantivy result into a `UnifiedSearchResult`.
 /// Propagates the `match_kind` + `also_matched` fields populated by
 /// `enrich_with_attribution` (phase 7-8).
@@ -418,22 +491,20 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
     }
 }
 
-/// Enrich a unified result with metadata from the SQL thread map.
+/// Enrich a unified result with metadata from the matching SQL thread row.
 fn enrich_from_sql(
     mut result: UnifiedSearchResult,
-    thread_map: &HashMap<String, &DbThread>,
+    thread: &DbThread,
 ) -> UnifiedSearchResult {
-    if let Some(t) = thread_map.get(&result.thread_id) {
-        result.subject = result.subject.or_else(|| t.subject.clone());
-        result.snippet = result.snippet.or_else(|| t.snippet.clone());
-        result.from_name = result.from_name.or_else(|| t.from_name.clone());
-        result.from_address = result.from_address.or_else(|| t.from_address.clone());
-        result.is_read = t.is_read;
-        result.is_starred = t.is_starred;
-        result.message_count = Some(t.message_count);
-        if result.date.is_none() {
-            result.date = t.last_message_at;
-        }
+    result.subject = result.subject.or_else(|| thread.subject.clone());
+    result.snippet = result.snippet.or_else(|| thread.snippet.clone());
+    result.from_name = result.from_name.or_else(|| thread.from_name.clone());
+    result.from_address = result.from_address.or_else(|| thread.from_address.clone());
+    result.is_read = thread.is_read;
+    result.is_starred = thread.is_starred;
+    result.message_count = Some(thread.message_count);
+    if result.date.is_none() {
+        result.date = thread.last_message_at;
     }
     result
 }
@@ -646,9 +717,6 @@ mod tests {
             from_name: Some("Alice".to_owned()),
             from_address: Some("alice@test.com".to_owned()),
         };
-        let mut map = HashMap::new();
-        map.insert("t1".to_owned(), &thread);
-
         let result = UnifiedSearchResult {
             thread_id: "t1".to_owned(),
             account_id: "acc1".to_owned(),
@@ -665,7 +733,7 @@ mod tests {
             also_matched: Vec::new(),
         };
 
-        let enriched = enrich_from_sql(result, &map);
+        let enriched = enrich_from_sql(result, &thread);
         // Subject was already set from Tantivy, so it stays.
         assert_eq!(enriched.subject.as_deref(), Some("Tantivy subject"));
         // Snippet was None, so it gets filled from SQL.

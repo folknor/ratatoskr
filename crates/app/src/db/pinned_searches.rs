@@ -2,7 +2,6 @@ use rtsk::db::pinned_searches::{
     DbPinnedSearch, db_get_pinned_search_thread_ids, db_get_recent_search_queries,
     db_get_threads_by_ids, db_list_pinned_searches,
 };
-use rtsk::db::types::DbThread;
 
 use super::connection::Db;
 use super::types::Thread;
@@ -27,30 +26,6 @@ fn db_pinned_search_to_app(ps: DbPinnedSearch) -> PinnedSearch {
         updated_at: ps.updated_at,
         scope_account_id: ps.scope_account_id,
         thread_ids: ps.thread_ids,
-    }
-}
-
-fn db_thread_to_app_thread(t: DbThread) -> Thread {
-    Thread {
-        id: t.id,
-        account_id: t.account_id,
-        subject: t.subject,
-        snippet: t.snippet,
-        last_message_at: t.last_message_at,
-        message_count: t.message_count,
-        is_read: t.is_read,
-        is_starred: t.is_starred,
-        is_replied: false,
-        is_forwarded: false,
-        is_pinned: t.is_pinned,
-        is_muted: t.is_muted,
-        has_attachments: t.has_attachments,
-        label_color_bgs: Vec::new(),
-        from_name: t.from_name,
-        from_address: t.from_address,
-        is_local_draft: false,
-        match_kind: None,
-        also_matched: Vec::new(),
     }
 }
 
@@ -80,7 +55,7 @@ impl Db {
         let mut threads: Vec<Thread> = db_get_threads_by_ids(&db, ids)
             .await?
             .into_iter()
-            .map(db_thread_to_app_thread)
+            .map(Thread::from_db_thread)
             .collect();
         self.with_conn(move |conn| {
             crate::helpers::apply_thread_decorations(conn, &mut threads)?;

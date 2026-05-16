@@ -63,7 +63,7 @@ Three techniques implement all five contract failures.
 
 ### Sealed Constructors
 
-A type's privacy boundary is its contract. The type exposes its fields but not its constructors; only one function in the crate can build the value, and that function enforces the derivation rule. `ThreadAggregate` has only `ThreadAggregate::compute_in_tx(tx, key)` and `ThreadAggregate::compute_from_messages(&[NonReactionMessage])`; there is no `ThreadAggregate { is_read, ... }` literal in scope outside the constructor's module. A second derivation rule cannot exist because a second constructor cannot exist.
+A type's privacy boundary is its contract. The type exposes its fields but not its constructors; only one function in the crate can build the value, and that function enforces the derivation rule. `ThreadAggregate` has only the SQL aggregate constructor and `ThreadAggregate::compute_from_messages(&first, rest)`; there is no `ThreadAggregate { is_read, ... }` literal in scope outside the constructor's module. A second derivation rule cannot exist because a second constructor cannot exist.
 
 Covers **#1 (grain)** and **#3 (completion state)**. The grain type is sealed; the partial-to-enriched transition is a sealed constructor on the enriched type.
 
@@ -132,7 +132,7 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=grain.vertical; enforcement=sealed-constructor; promise=chat unread count and chat unread recompute aggregate the same per-message predicate.
 
-- `crates/db/src/db/queries_extra/thread_detail.rs:147-151` *(slice 2)* - `query_thread_state_decorations` queries `MAX(is_replied)`, `MAX(is_forwarded)` from `messages` without filtering `is_reaction = 0`. Current convention: `compute_thread_aggregate` (thread_persistence.rs) filters `is_reaction = 0` in all its message-level queries (lines 62, 71, 81, 92, 102, 112). The divergence means thread decorations could include reactions when computing aggregate state would exclude them.
+- `crates/db/src/db/queries_extra/thread_detail.rs` *(resolved by contract #1 grain.vertical)* - `query_thread_state_decorations` now filters `is_reaction = 0` before aggregating `is_replied` and `is_forwarded`, matching the non-reaction rule used by thread aggregate computation.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread-level glyphs reflect non-reaction message state.
 
@@ -144,7 +144,7 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
 *(The provider `create_label` color-return entries and the store sync/async entries previously listed here have moved to the parking lot - neither cluster meets the promise rule.)*
 
-- `crates/app/src/helpers.rs:530-551` *(slice 1)* - `local_draft_to_app_thread` is a second constructor for the app's `Thread` type, parallel to `db_thread_to_app_thread` (line 505-528). It hardcodes `is_read: true`, `is_starred: false`, `is_replied: false`, `is_forwarded: false`, `has_attachments: false`, `label_color_bgs: Vec::new()`. Current convention: app-layer merge in `load_threads_for_current_view` (crates/app/src/helpers.rs:167-175 per glossary) concatenates synced drafts from `get_draft_threads` with local drafts promoted via `local_draft_to_app_thread`. If the canonical `db_thread_to_app_thread` gains new fields or default logic (e.g. label-color resolution per glossary § 87-98), the local-draft constructor will silently lack them, and the sidebar's draft list will show a subset of decorations for local drafts only.
+- `crates/app/src/db/types.rs`, `crates/app/src/helpers.rs` *(resolved by contract #3 completion-state)* - Local drafts now convert through `Thread::from_local_draft`, alongside `Thread::from_db_thread`, before decoration fill-in. Draft-specific defaults are centralized on the `Thread` type.
 
   Tags: contracts=canonical-entry,completion-state; enforcement=sealed-constructor,capability-token; promise=Drafts list rows have a single value shape regardless of sync state.
 
@@ -152,15 +152,15 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=canonical-entry,validated-domain; enforcement=sealed-constructor,boundary-parse; promise=label rendering consults the synced color before falling back to hash.
 
-- `crates/app/src/db/pinned_searches.rs:33-55` *(slice 8)* - Duplicate `db_thread_to_app_thread` converter: initializes `is_replied: false`, `is_forwarded: false`, `label_color_bgs: Vec::new()` identically to the helpers.rs copy (line 506). Convention: both feed through `apply_thread_decorations` (line 86) to fill in the actual values, but duplication creates divergence risk if decorations behavior changes and one site is missed. Current convention enforces consistency through shared decorator call, but the type system does not prevent a future copy from skipping the call.
+- `crates/app/src/db/pinned_searches.rs` *(resolved by contract #3 completion-state)* - Pinned-search thread snapshots now use `Thread::from_db_thread`; the duplicate DB-thread converter was removed.
 
   Tags: contracts=completion-state; enforcement=sealed-constructor; promise=thread values across views have a single derivation.
 
-- `crates/app/src/handlers/search.rs:927-949` *(slice 8)* - `unified_result_to_thread` inline converter: initializes `is_replied: false`, `is_forwarded: false`, `label_color_bgs: Vec::new()`, then calls `apply_thread_decorations` (line 920). Same pattern as other converters, but inlined at call site rather than factored into a shared helper.
+- `crates/app/src/handlers/search.rs` *(resolved by contract #3 completion-state)* - Search results now use `Thread::from_search_result`; the inline converter was removed.
 
   Tags: contracts=completion-state; enforcement=sealed-constructor; promise=thread values across views have a single derivation.
 
-- `crates/app/src/helpers.rs:478-498` *(slice 8)* - Public folder items inline converter: hardcodes the same fields and calls `apply_thread_decorations` (line 500). Initialization values identical to the other converters.
+- `crates/app/src/helpers.rs` *(resolved by contract #3 completion-state)* - Public folder rows now use `Thread::from_public_folder_item`; the inline converter was removed.
 
   Tags: contracts=completion-state; enforcement=sealed-constructor; promise=thread values across views have a single derivation.
 
@@ -168,17 +168,17 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor; promise=search results report which field actually matched.
 
-- `crates/core/src/search_pipeline.rs:388` *(deep slice: smart-folder + search)* - `is_read: false, is_starred: false` hardcoded in `tantivy_result_to_unified`. Tantivy results (line 388-389) never populate `is_read`/`is_starred` from the Tantivy doc's stored fields; they remain `false`. In the combined path (line 407), SQL enrichment overwrites them with correct values. In Tantivy-only (line 147-162), they remain `false` even though the Tantivy doc stored these values. Current convention: Tantivy-only results show stale read/starred state unless the caller also performs SQL enrichment (which Tantivy-only does not).
+- `crates/core/src/search_pipeline.rs` *(resolved by contract #3 completion-state)* - Tantivy-only search now fetches thread metadata from SQL and runs `enrich_from_sql` before returning rows. Stale index hits with no matching thread row are dropped, so `is_read` and `is_starred` placeholders no longer reach the renderer in the full-index text path.
 
   Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor; promise=search results show the thread's true read/starred state.
 
-- `crates/core/src/search_pipeline.rs:388-394` *(deep slice: core + seen + label-colors)* - `tantivy_result_to_unified()` hardcodes `is_read: false, is_starred: false` when converting Tantivy results, even though the TantivyResult struct has populated `match_kind` and `also_matched`. In the combined path (line 407), `enrich_from_sql()` overwrites these with correct values from the thread aggregate. In Tantivy-only (line 73), results remain `false` even though SQL enrichment is never called. Current convention: Tantivy-only search shows stale read/starred state until caller performs SQL enrichment. Current code at line 388-389 documents this as intentional ("false" initial state), but consumers of `search_tantivy_only` path (line 147-163) never overwrite these fields. *(Corroborates the prior smart-folder+search deep-slice entry above.)*
+- `crates/core/src/search_pipeline.rs` *(resolved by contract #3 completion-state)* - Duplicate evidence for the Tantivy-only placeholder leak above. The path now enriches from SQL before returning.
 
   Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor; promise=search results show the thread's true read/starred state.
 
 ### Shape 3 - Aggregate-vs-input drift
 
-- `crates/db/src/db/queries_extra/thread_persistence.rs:79-93` *(slice 2)* - `recompute_thread_read_starred` is the canonical write path for `threads.is_read` and `threads.is_starred` (provider_sync_writes.rs also names it as canonical per discrepancies.md). It uses `MIN(is_read)` and `MAX(is_starred)` across all messages without an `is_reaction = 0` filter. This differs from `compute_thread_aggregate` (same file, lines 68-86) which does filter reactions when reading message state during ingest. If reactions ever gain `is_read` or `is_starred` columns that differ from the containing message, the recompute and ingest paths will write different values to `threads`.
+- `crates/db/src/db/queries_extra/provider_sync_writes.rs` *(resolved by contract #1 grain.vertical)* - `recompute_thread_read_starred` now computes `MIN(is_read)` and `MAX(is_starred)` over non-reaction messages only, matching `compute_thread_aggregate`.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread aggregate uses the per-field reducer (MIN for is_read, MAX for is_starred) over non-reaction messages.
 
@@ -186,11 +186,11 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread `last_message_at` is the max message date for the thread.
 
-- `crates/sync/src/pipeline.rs:93-95` *(slice 5)* - Hardcoded thread aggregate computed in-memory via `.all(m.is_read)` / `.any(m.is_starred)` / `.any(m.has_attachments)` on the `messages` Vec. Current convention: Provider-sync callers (`crates/provider-sync/src/graph/sync/persistence.rs:178`, Gmail `storage.rs:118`, JMAP `storage.rs:169`) instead call `compute_thread_aggregate()` from `db`, which filters `WHERE is_reaction = 0` in all message-level queries. If a reaction message with different `is_read`/`is_starred` state arrives via the sync/pipeline path (JWZ threading), the aggregate will be computed differently from the DB recompute path that fires on provider sync.
+- `crates/sync/src/pipeline.rs` *(resolved by contract #1 grain.vertical)* - The JWZ threading storage path now builds `NonReactionMessage` inputs and calls `ThreadAggregate::compute_from_messages`, so the in-memory path uses the same reducer logic as the DB aggregate path.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=thread aggregate uses the canonical per-field reducer over non-reaction messages.
 
-- `crates/dev-seed/src/threads.rs:246-378` *(slice 10)* - Thread aggregate `is_read` is randomly sampled per-thread (line 246: `rng.random::<f64>() < 0.7`), but per-message `is_read` values are computed deterministically based on position in thread (line 378: `if mi < num_msgs - 1 { true } else { is_read }`). The thread's initial `is_read` random value (line 289) is not recomputed from `MIN(m.is_read)` after messages are inserted; the final state at line 517 does not touch `is_read`. Current convention: dev-seed seeding is one-time setup with no recompute contract, but the divergence between independently-randomized thread state and position-derived message state creates a database where `MIN(m.is_read) != t.is_read` can drift immediately. The same pattern applies to `is_starred`: thread-level random sample (line 247) vs message-level (line 465: `is_starred && mi == 0`), where only the first message carries the starred flag. Thread aggregate is initialized with the random boolean but never recomputed; the canonical recompute helper (`db::compute_thread_aggregate::MIN/MAX`) is not called.
+- `crates/dev-seed/src/threads.rs` *(resolved by contract #1 grain.vertical)* - Dev-seed now collects seeded messages as `NonReactionMessage` inputs and updates thread `is_read`, `is_starred`, `has_attachments`, message count, subject, snippet, and last-message date from `ThreadAggregate::compute_from_messages`.
 
   Tags: contracts=grain.vertical,completion-state; enforcement=sealed-constructor; promise=seeded thread aggregate derives from seeded message state via the canonical reducer.
 
@@ -334,7 +334,7 @@ ViewScope `Option` escape entry resolved by contract #1 grain.scope: `ViewScope:
 
 ### Shape 12 - Partial-enrichment contract mismatch
 
-- `crates/core/src/search_pipeline.rs` *(deep slice: search enrichment)*: The `enrich_from_sql()` function is called only in the combined path, never in SQL-only or Tantivy-only. SQL-only uses `db_thread_to_unified()` which hardcodes `match_kind: MatchKind::Body` and `also_matched: Vec::new()`, and Tantivy-only propagates the Tantivy result's attribution. The three paths still use different enrichment strategies; however, the canonical-entry part of the failure is resolved because SQL fallback is private and `search()` returns `SearchResults::Degraded` when it has to use that path.
+- `crates/core/src/search_pipeline.rs` *(partially resolved by contract #3 and #2)*: Tantivy-only and combined paths now both enrich from SQL before returning rows, so thread flags and counts are not placeholder state in full-index search results. SQL-only and degraded SQL fallback still use `db_thread_to_unified()` with `match_kind: MatchKind::Body` and empty `also_matched`; that remaining attribution gap is visible through `SearchResults::Degraded` only for fallback, while operator-only SQL search remains an open completion-state issue.
 
   Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor,capability-token; promise=a `UnifiedSearchResult` reaching the renderer is fully enriched, regardless of which internal path produced it.
 
