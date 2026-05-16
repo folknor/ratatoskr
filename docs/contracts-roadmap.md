@@ -89,21 +89,29 @@ Sequence chosen by *leverage per migration* and *fidelity tier*. Land high-fidel
 
 ### 1. #5a Credentials — boundary parse (high fidelity)
 
+**Status:** code path landed for current credential readers. `decrypt_or_raw` and `decrypt_if_needed` are removed; Gmail, Graph, JMAP, and IMAP consume `StoredSecret`. The external-construction check is pinned by the `StoredSecret` rustdoc `compile_fail` example.
+
 **Inventory:** `crates/gmail/src/client.rs:122`, `crates/graph/src/client.rs:122`, `crates/common/src/crypto.rs:123-132`, `crates/common/src/crypto.rs:137-147`.
 
-**Design sketch.** `StoredSecret::parse(raw: &str) -> StoredSecret` handles both encrypted format (`base64:base64`) and legacy plaintext at the parse boundary. Returns a single typed value that downstream code consumes. Readers see only the parsed type.
+**Design sketch.** `StoredSecret::parse(raw: String) -> StoredSecret` handles both encrypted format (`base64:base64`) and legacy plaintext at the parse boundary. Parsing is an infallible classification step; decryption is the fallible operation. Returns a single typed value that downstream code consumes. Readers see only the parsed type.
 
 ```rust
 pub struct StoredSecret(/* private: bytes + format discriminator */);
 
 impl StoredSecret {
-    pub fn parse(raw: &str) -> Result<StoredSecret, ParseError> {
+    pub fn parse(raw: String) -> StoredSecret {
         // tolerant: accepts encrypted (base64:base64) OR legacy plaintext;
         // returns typed value with format discriminator stored internally.
     }
 
-    pub fn decrypt(&self, key: &SecretKey) -> Result<String, DecryptError> {
+    pub fn decrypt(&self, key: &[u8; 32]) -> Result<String, DecryptError> {
         // typed reader; per-format dispatch happens internally; callers cannot fall through to raw.
+    }
+
+    pub fn decrypt_optional(raw: Option<String>, key: &[u8; 32])
+        -> Result<Option<String>, DecryptError>
+    {
+        // Optionality stays orthogonal to the storage format.
     }
 }
 ```

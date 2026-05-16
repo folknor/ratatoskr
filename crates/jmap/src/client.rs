@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use bifrost_jmap::client::{Client, Credentials};
 use tokio::sync::RwLock;
 
-use common::crypto::{decrypt_if_needed, encrypt_value};
+use common::crypto::{StoredSecret, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
 use db::db::ReadDbState;
@@ -183,7 +183,7 @@ async fn refresh_token_in_db_if_expired(
 
     if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
         // Another task refreshed - return the fresh access token.
-        let access_token = decrypt_if_needed(key, fresh_access)?
+        let access_token = StoredSecret::decrypt_optional(fresh_access, key)?
             .filter(|v| !v.is_empty())
             .ok_or_else(|| {
                 format!("JMAP token re-check: missing access token for {account_id}")
@@ -192,13 +192,13 @@ async fn refresh_token_in_db_if_expired(
     }
 
     // Need to actually refresh.
-    let refresh_token = decrypt_if_needed(key, fresh_refresh)?
+    let refresh_token = StoredSecret::decrypt_optional(fresh_refresh, key)?
         .filter(|v| !v.is_empty())
         .ok_or_else(|| format!("JMAP OAuth account {account_id} has no refresh token"))?;
     let client_id = oauth_client_id
         .filter(|v| !v.is_empty())
         .ok_or_else(|| format!("JMAP OAuth account {account_id} has no client ID"))?;
-    let client_secret = decrypt_if_needed(key, oauth_client_secret)?;
+    let client_secret = StoredSecret::decrypt_optional(oauth_client_secret, key)?;
     let provider = oauth_provider.unwrap_or_default();
     let token_url = oauth_token_endpoint(&provider, oauth_token_url.as_deref())?;
 
@@ -409,8 +409,8 @@ fn read_jmap_credentials(
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| email.clone());
 
-    let password = decrypt_if_needed(key, enc_password)?;
-    let access_token = decrypt_if_needed(key, enc_access_token)?;
+    let password = StoredSecret::decrypt_optional(enc_password, key)?;
+    let access_token = StoredSecret::decrypt_optional(enc_access_token, key)?;
 
     Ok(JmapCredentials {
         jmap_url,
@@ -443,24 +443,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decrypt_if_needed_passes_through_plaintext() {
+    fn stored_secret_passes_through_plaintext() {
         let key = [0u8; 32];
-        let result = decrypt_if_needed(&key, Some("plain-value".to_string()));
+        let result = StoredSecret::decrypt_optional(Some("plain-value".to_string()), &key);
         assert_eq!(result.unwrap(), Some("plain-value".to_string()));
     }
 
     #[test]
-    fn decrypt_if_needed_returns_none_for_none() {
-        let key = [0u8; 32];
-        let result = decrypt_if_needed(&key, None);
-        assert_eq!(result.unwrap(), None);
+    fn stored_secret_returns_none_for_none() {
+        let result = StoredSecret::parse_optional(None);
+        assert_eq!(result, None);
     }
 
     #[test]
-    fn decrypt_if_needed_returns_err_for_bad_encrypted() {
+    fn stored_secret_returns_err_for_bad_encrypted() {
         let key = [7u8; 32];
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
-        let err = decrypt_if_needed(&key, encrypted_like).expect_err("expected decrypt failure");
+        let err = StoredSecret::decrypt_optional(encrypted_like, &key)
+            .expect_err("expected decrypt failure");
         assert!(err.contains("decrypt credential"));
     }
 

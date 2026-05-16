@@ -117,31 +117,116 @@ pub fn is_encrypted(value: &str) -> bool {
     iv.len() == 12 && STANDARD.decode(ct_part).is_ok()
 }
 
-/// Try to decrypt a value, falling back to the raw string for pre-encryption data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StoredSecretFormat {
+    Encrypted,
+    LegacyPlaintext,
+}
+
+/// Parsed credential value loaded from storage.
 ///
-/// Used by Gmail and Graph where the value is always present (non-Option).
-pub fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
-    if is_encrypted(value) {
-        decrypt_value(key, value).unwrap_or_else(|e| {
-            log::warn!("Decryption failed for encrypted value - returning raw. Key may be corrupted or rotated: {e}");
-            value.to_string()
-        })
-    } else {
-        value.to_string()
+/// Older account rows may still contain plaintext. The parse boundary records
+/// which storage format was found, so callers decrypt through one typed path
+/// instead of choosing between raw-string helpers.
+///
+/// Private fields prevent callers from skipping the parse boundary:
+///
+/// ```compile_fail
+/// use common::crypto::StoredSecret;
+///
+/// let _secret = StoredSecret {
+///     raw: String::new(),
+///     format: unreachable!(),
+/// };
+/// ```
+///
+/// Raw strings also do not satisfy APIs that require a parsed secret:
+///
+/// ```compile_fail
+/// use common::crypto::StoredSecret;
+///
+/// fn takes_secret(_secret: StoredSecret) {}
+///
+/// takes_secret(String::new());
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredSecret {
+    raw: String,
+    format: StoredSecretFormat,
+}
+
+impl StoredSecret {
+    pub fn parse(raw: String) -> Self {
+        let format = if is_encrypted(&raw) {
+            StoredSecretFormat::Encrypted
+        } else {
+            StoredSecretFormat::LegacyPlaintext
+        };
+
+        Self { raw, format }
+    }
+
+    pub fn parse_optional(raw: Option<String>) -> Option<Self> {
+        raw.map(Self::parse)
+    }
+
+    pub fn decrypt_optional(raw: Option<String>, key: &[u8; 32]) -> Result<Option<String>, String> {
+        raw.map(Self::parse)
+            .map(|secret| secret.decrypt(key))
+            .transpose()
+    }
+
+    pub fn decrypt(&self, key: &[u8; 32]) -> Result<String, String> {
+        match self.format {
+            StoredSecretFormat::Encrypted => {
+                decrypt_value(key, &self.raw).map_err(|e| format!("decrypt credential: {e}"))
+            }
+            StoredSecretFormat::LegacyPlaintext => Ok(self.raw.clone()),
+        }
     }
 }
 
-/// Decrypt an `Option<String>` if it looks encrypted, pass through otherwise.
-///
-/// Used by JMAP and IMAP where credentials may be `None`.
-pub fn decrypt_if_needed(key: &[u8; 32], value: Option<String>) -> Result<Option<String>, String> {
-    value
-        .map(|raw| {
-            if is_encrypted(&raw) {
-                decrypt_value(key, &raw).map_err(|e| format!("decrypt credential: {e}"))
-            } else {
-                Ok(raw)
-            }
-        })
-        .transpose()
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::{StoredSecret, encrypt_value};
+
+    #[test]
+    fn stored_secret_passes_through_legacy_plaintext() {
+        let key = [0u8; 32];
+        let secret = StoredSecret::parse("plain-value".to_string());
+
+        assert_eq!(secret.decrypt(&key).unwrap(), "plain-value");
+    }
+
+    #[test]
+    fn stored_secret_optional_none_stays_none() {
+        assert_eq!(StoredSecret::parse_optional(None), None);
+    }
+
+    #[test]
+    fn stored_secret_decrypts_encrypted_value() {
+        let key = [3u8; 32];
+        let encrypted = encrypt_value(&key, "token-value").unwrap();
+        let secret = StoredSecret::parse(encrypted);
+
+        assert_eq!(secret.decrypt(&key).unwrap(), "token-value");
+    }
+
+    #[test]
+    fn stored_secret_returns_err_for_bad_encrypted_value() {
+        let key = [7u8; 32];
+        let secret = StoredSecret::parse("AAAAAAAAAAAAAAAA:AAAA".to_string());
+        let err = secret.decrypt(&key).expect_err("expected decrypt failure");
+
+        assert!(err.contains("decrypt credential"));
+    }
+
+    #[test]
+    fn stored_secret_decrypt_optional_collapses_parse_and_decrypt() {
+        let key = [0u8; 32];
+        let decrypted = StoredSecret::decrypt_optional(Some("plain-value".to_string()), &key);
+
+        assert_eq!(decrypted.unwrap(), Some("plain-value".to_string()));
+    }
 }

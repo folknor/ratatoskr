@@ -230,17 +230,7 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
 ### Shape 5 — Format-tolerant accessor
 
-- `crates/gmail/src/client.rs:122` *(slice 6)* — `decrypt_or_raw(key, &enc_access)` called on `access_token`. Current convention: token storage layer uses `decrypt_or_raw` which accepts both encrypted (base64:base64 format) and raw plaintext. Earlier versions stored tokens unencrypted; any token written before encryption was enabled flows through silently as plaintext. Same pattern in `crates/graph/src/client.rs:122` for Graph tokens.
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=token storage is encrypted; legacy plaintext is migrated, not silently tolerated.
-
-- `crates/common/src/crypto.rs:123-132` *(slice 9)* — `decrypt_or_raw(key, value)` accepts both encrypted (`base64:base64` format) and raw plaintext. Current convention: token storage layers use `decrypt_or_raw` which masks writers that skipped processing. Earlier versions stored tokens unencrypted; any token written before encryption was enabled flows through silently as plaintext. (This is the canonical implementation referenced by slice 6's gmail/graph call sites.)
-
-  Tags: contracts=validated-domain; enforcement=boundary-parse; promise=token storage is encrypted; legacy plaintext is migrated, not silently tolerated.
-
-- `crates/common/src/crypto.rs:137-147` *(deep slice: stores + crypto-key + common)* — `decrypt_if_needed(key, value)` handles `Option<String>`, whereas `decrypt_or_raw` handles non-Option `&str`. Current convention: JMAP/IMAP credentials use `decrypt_if_needed`, Gmail/Graph use `decrypt_or_raw` (per comment lines 121-122). The divergence is intentional (JMAP may have `None` creds) but creates two entry points for the same semantic operation ("accept either encrypted or raw"). If a new provider needs optional credentials, it must remember to use `decrypt_if_needed` instead of mapping `decrypt_or_raw` over an Option, or the plaintext path will be taken incorrectly.
-
-  Tags: contracts=validated-domain,canonical-entry; enforcement=boundary-parse; promise=credential decryption has one entry point that handles encryption and optionality orthogonally.
+Credential accessor entries resolved by contract #5a: `common::crypto::StoredSecret` is now the only raw storage parser, `decrypt_or_raw` and `decrypt_if_needed` are deleted, and Gmail, Graph, JMAP, and IMAP decrypt through the typed parse product. Legacy plaintext remains accepted only inside `StoredSecret`; the strict rejection or one-shot migration decision remains open in `docs/contracts-roadmap.md`.
 
 - `crates/label-colors/src/lib.rs:40-58` *(deep slice: core + seen + label-colors)* — `resolve_label_color()` accepts both complete user-color pairs `Option<(&str, &str)>` and partial synced colors `Option<&str>, Option<&str>` as separate arguments. The function enforces that both `server_color_bg` AND `server_color_fg` are present together (line 49: `(None, Some(bg), Some(fg))`), but does not validate that if either is present, the other is also present. Current convention: callers must ensure synced colors are always paired. No type prevents a call site from passing `Some(bg)` with `None` for `fg`, which would silently fall through to the hash fallback despite a synced value being partially available.
 

@@ -1,6 +1,6 @@
 use rusqlite::OptionalExtension;
 
-use common::crypto::{decrypt_if_needed, encrypt_value};
+use common::crypto::{StoredSecret, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
 use db::db::ReadDbState;
@@ -146,7 +146,7 @@ async fn ensure_oauth_access_token(
         .as_deref()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no client ID"))?;
-    let access_token = decrypt_if_needed(encryption_key, record.access_token.clone())?
+    let access_token = StoredSecret::decrypt_optional(record.access_token.clone(), encryption_key)?
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no access token"))?;
     let expires_at = record.token_expires_at.unwrap_or_default();
@@ -179,15 +179,16 @@ async fn ensure_oauth_access_token(
         .await?;
 
     if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
-        return decrypt_if_needed(encryption_key, fresh_access)?
+        return StoredSecret::decrypt_optional(fresh_access, encryption_key)?
             .filter(|v| !v.is_empty())
             .ok_or_else(|| format!("IMAP token re-check: missing access token for {account_id}"));
     }
 
-    let refresh_token = decrypt_if_needed(encryption_key, fresh_refresh)?
+    let refresh_token = StoredSecret::decrypt_optional(fresh_refresh, encryption_key)?
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no refresh token"))?;
-    let client_secret = decrypt_if_needed(encryption_key, record.oauth_client_secret.clone())?;
+    let client_secret =
+        StoredSecret::decrypt_optional(record.oauth_client_secret.clone(), encryption_key)?;
     let token_url = oauth_token_endpoint(oauth_provider, record.oauth_token_url.as_deref())?;
     let refreshed = refresh_oauth_token(
         shared_http_client(),
@@ -217,7 +218,8 @@ async fn resolve_account_password(
     if record.auth_method == "oauth2" {
         ensure_oauth_access_token(db, account_id, encryption_key, record).await
     } else {
-        Ok(decrypt_if_needed(encryption_key, record.imap_password.clone())?.unwrap_or_default())
+        Ok(StoredSecret::decrypt_optional(record.imap_password.clone(), encryption_key)?
+            .unwrap_or_default())
     }
 }
 
@@ -343,13 +345,13 @@ pub async fn load_both_configs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::crypto::decrypt_if_needed;
 
     #[test]
     fn decrypt_failure_returns_err() {
         let key = [7_u8; 32];
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
-        let err = decrypt_if_needed(&key, encrypted_like).expect_err("expected decrypt failure");
+        let err = StoredSecret::decrypt_optional(encrypted_like, &key)
+            .expect_err("expected decrypt failure");
         assert!(err.contains("decrypt credential"));
     }
 

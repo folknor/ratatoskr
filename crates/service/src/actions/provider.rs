@@ -60,6 +60,7 @@ pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
         || lower.contains("queryreturnednorows")
         || lower.contains("not found")
         || lower.contains("missing account")
+        || lower.contains("decrypt credential")
     {
         RemoteFailureKind::Permanent
     } else if lower.contains("timeout")
@@ -363,6 +364,10 @@ mod tests {
         assert_eq!(
             classify_provider_error("network error: connection refused"),
             RemoteFailureKind::Transient,
+        );
+        assert_eq!(
+            classify_provider_error("decrypt credential: Decryption failed"),
+            RemoteFailureKind::Permanent,
         );
         assert_eq!(
             classify_provider_error("provider returned an odd response"),
