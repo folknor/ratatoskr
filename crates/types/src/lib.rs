@@ -6,8 +6,8 @@ mod typed_ids;
 
 pub use date_bound::DateBound;
 pub use folder_label::{
-    CategoryName, FolderKind, GmailLabelId, GraphGuid, ImapPath, ImportanceLevel, JmapId,
-    KeywordName, LabelKind, MailLocator, Namespace, SystemFolderId,
+    CategoryName, FolderKind, GmailLabelId, GmailSystemLabelId, GraphGuid, ImapPath,
+    ImportanceLevel, JmapId, KeywordName, LabelKind, MailLocator, Namespace, SystemFolderId,
 };
 pub use mail_provider::MailProviderKind;
 pub use sidebar_selection::{Bundle, FeatureView, SidebarSelection, SystemFolder, VirtualView};

@@ -309,9 +309,8 @@ pub async fn imap_delta_sync(
         let aid = account_id.to_string();
         let tg = thread_groups.clone();
         let m = all_meta.clone();
-        let l = labels_by_rfc_id.clone();
         let s = skipped;
-        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &m, &l, &s))
+        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &m, &s))
             .await?
     };
 

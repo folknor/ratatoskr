@@ -48,7 +48,7 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             &f.name,
             is_active,
             widgets::NavSize::Compact,
-            Some(f.unread_count),
+            f.universal_unread_count().map(widgets::NavBadge::Universal),
             SidebarMessage::Select(sel),
         );
         let query_prefix = build_search_here_folder_prefix(&f.name, sidebar);

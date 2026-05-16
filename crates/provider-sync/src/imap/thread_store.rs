@@ -7,12 +7,18 @@ use sync::types::MessageMeta;
 const THREAD_BATCH_SIZE: usize = 100;
 
 /// Store IMAP thread groups and update message thread IDs.
+///
+/// IMAP thread membership is fully derived from per-message ground truth:
+/// `messages.imap_folder` for folders (each IMAP message lives in exactly
+/// one folder) and `message_keywords` for keyword labels. The
+/// `reassign_messages_and_repair_threads` call below owns the recompute
+/// of `thread_folders` and `thread_labels` from those sources, so no
+/// separate thread-scope replace is performed here.
 pub(super) fn store_threads(
     conn: &Connection,
     account_id: &str,
     thread_groups: &[ThreadGroup],
     all_meta: &HashMap<String, MessageMeta>,
-    labels_by_rfc_id: &HashMap<String, HashSet<String>>,
     skipped_thread_ids: &HashSet<String>,
 ) -> Result<Vec<String>, String> {
     log::debug!(
@@ -46,15 +52,6 @@ pub(super) fn store_threads(
 
             messages.sort_by_key(|m| m.date);
 
-            let mut all_folder_ids = HashSet::new();
-            let mut all_label_ids = HashSet::new();
-            for msg in &messages {
-                partition_imap_memberships(&msg.label_ids, &mut all_folder_ids, &mut all_label_ids);
-                if let Some(extra) = labels_by_rfc_id.get(&msg.rfc_message_id) {
-                    partition_imap_memberships(extra, &mut all_folder_ids, &mut all_label_ids);
-                }
-            }
-
             let message_ids: Vec<&str> = messages.iter().map(|m| m.id.as_str()).collect();
             let aggregate_messages: Vec<db::db::queries_extra::NonReactionMessage> = messages
                 .iter()
@@ -84,18 +81,6 @@ pub(super) fn store_threads(
                 Some(false),
                 None,
             )?;
-            replace_full_thread_folders(
-                &tx,
-                account_id,
-                &group.thread_id,
-                all_folder_ids.iter().map(String::as_str),
-            )?;
-            replace_full_thread_labels(
-                &tx,
-                account_id,
-                &group.thread_id,
-                all_label_ids.iter().map(String::as_str),
-            )?;
             db::db::queries_extra::reassign_messages_and_repair_threads(
                 &tx,
                 account_id,
@@ -116,43 +101,4 @@ pub(super) fn store_threads(
         affected_thread_ids.len()
     );
     Ok(affected_thread_ids)
-}
-
-fn replace_full_thread_folders<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    folder_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
-    db::db::queries_extra::delete_thread_folder_rows(tx, account_id, thread_id)?;
-    db::db::queries_extra::insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
-}
-
-fn replace_full_thread_labels<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    label_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
-    db::db::queries_extra::delete_thread_label_rows(tx, account_id, thread_id)?;
-    db::db::queries_extra::insert_thread_label_rows(tx, account_id, thread_id, label_ids)?;
-    db::db::queries_extra::finalize_provider_truth_label_membership(tx, account_id, thread_id)
-}
-
-fn partition_imap_memberships<'a>(
-    labels: impl IntoIterator<Item = &'a String>,
-    all_folder_ids: &mut HashSet<String>,
-    all_label_ids: &mut HashSet<String>,
-) {
-    for label_id in labels {
-        // IMAP-only pipeline: provider folder IDs are folder-shaped and
-        // user-visible keywords are the only label-shaped memberships here.
-        if label_id.starts_with("kw:") {
-            all_label_ids.insert(label_id.clone());
-        } else {
-            all_folder_ids.insert(label_id.clone());
-        }
-    }
 }

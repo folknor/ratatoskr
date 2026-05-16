@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use db::db::queries_extra::{
-    LabelWriteRow, finalize_provider_truth_label_membership, upsert_labels,
-};
+use db::db::queries_extra::{LabelWriteRow, recompute_thread_labels_from_messages, upsert_labels};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum KeywordProvider {
@@ -66,24 +64,8 @@ pub(crate) fn recompute_thread_keyword_labels(
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
-    tx.execute(
-        "DELETE FROM thread_labels \
-         WHERE account_id = ?1 AND thread_id = ?2",
-        rusqlite::params![account_id, thread_id],
-    )
-    .map_err(|e| format!("delete {} thread keyword labels: {e}", provider.name()))?;
-
-    tx.execute(
-        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-         SELECT DISTINCT m.account_id, m.thread_id, mk.label_id \
-         FROM messages m \
-         JOIN message_keywords mk ON mk.account_id = m.account_id AND mk.message_id = m.id \
-         WHERE m.account_id = ?1 AND m.thread_id = ?2",
-        rusqlite::params![account_id, thread_id],
-    )
-    .map_err(|e| format!("insert {} thread keyword labels: {e}", provider.name()))?;
-
-    finalize_provider_truth_label_membership(tx, account_id, thread_id)
+    recompute_thread_labels_from_messages(tx, account_id, thread_id)
+        .map_err(|e| format!("recompute {} thread keyword labels: {e}", provider.name()))
 }
 
 fn upsert_keyword_labels(

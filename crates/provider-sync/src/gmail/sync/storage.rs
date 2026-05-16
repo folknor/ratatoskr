@@ -1,9 +1,9 @@
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
-    upsert_labels, delete_thread_folder_rows, delete_thread_label_rows, insert_thread_folder_rows,
-    insert_thread_label_rows, finalize_provider_truth_label_membership,
+    upsert_labels,
 };
+use common::types::{FolderKind, LabelKind, MailProviderKind};
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use store::inline_image_store::InlineImage;
@@ -11,6 +11,7 @@ use store::inline_image_store::InlineImage;
 use super::super::client::GmailClient;
 use super::super::parse::{ParsedGmailMessage, parse_gmail_message};
 use crate::persistence as sync_persistence;
+use crate::thread_membership::replace_thread_membership_from_full_coverage;
 
 // ---------------------------------------------------------------------------
 // Single-thread fetch + store
@@ -133,18 +134,29 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
-    let mut folder_ids = Vec::new();
-    let mut label_ids = Vec::new();
+    // BTreeSet keyed on the canonical storage id keeps the write order
+    // deterministic across runs (HashSet ordering is randomized), which
+    // matters for harness/log diffing even though INSERT OR IGNORE itself
+    // is order-insensitive.
+    let mut folders_by_id = std::collections::BTreeMap::new();
+    let mut labels_by_id = std::collections::BTreeMap::new();
     for label_id in messages
         .iter()
         .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
     {
+        if common::folder_roles::is_message_state_label_id(label_id) {
+            continue;
+        }
         if common::folder_roles::is_gmail_system_folder_label_id(label_id) {
-            folder_ids.push(label_id);
+            let folder = FolderKind::parse(label_id, MailProviderKind::Gmail)?;
+            folders_by_id.insert(folder.storage_id(), folder);
         } else {
-            label_ids.push(label_id);
+            let label = LabelKind::parse(label_id, MailProviderKind::Gmail)?;
+            labels_by_id.insert(label.storage_id(), label);
         }
     }
+    let folders: Vec<_> = folders_by_id.into_values().collect();
+    let labels: Vec<_> = labels_by_id.into_values().collect();
 
     // Pre-create `labels` rows for any user-label IDs referenced by these
     // messages. Thread-label replacement inserts FK-constrained rows; a
@@ -154,50 +166,29 @@ fn set_thread_labels(
     // and colour on its next cycle. See
     // `docs/labels-unification/redesign.md` "Action pipeline integration"
     // (the same pattern handles label observation between master-list pulls).
-    let placeholder_rows: Vec<LabelWriteRow> = label_ids
+    let placeholder_rows: Vec<LabelWriteRow> = labels
         .iter()
-        .map(|id| LabelWriteRow {
-            id: (*id).to_string(),
-            account_id: account_id.to_string(),
-            name: (*id).to_string(),
-            visible: None,
-            sort_order: None,
-            server_color_bg: None,
-            server_color_fg: None,
-            user_color_bg: None,
-            user_color_fg: None,
-            is_undeletable: false,
+        .map(|label| {
+            let id = label.storage_id();
+            LabelWriteRow {
+                id: id.clone(),
+                account_id: account_id.to_string(),
+                name: id,
+                visible: None,
+                sort_order: None,
+                server_color_bg: None,
+                server_color_fg: None,
+                user_color_bg: None,
+                user_color_fg: None,
+                is_undeletable: false,
+            }
         })
         .collect();
     if !placeholder_rows.is_empty() {
         upsert_labels(tx, &placeholder_rows)?;
     }
 
-    replace_full_thread_folders(tx, account_id, thread_id, folder_ids)?;
-    replace_full_thread_labels(tx, account_id, thread_id, label_ids)
-}
-
-fn replace_full_thread_folders<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    folder_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
-    delete_thread_folder_rows(tx, account_id, thread_id)?;
-    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
-}
-
-fn replace_full_thread_labels<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    label_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
-    delete_thread_label_rows(tx, account_id, thread_id)?;
-    insert_thread_label_rows(tx, account_id, thread_id, label_ids)?;
-    finalize_provider_truth_label_membership(tx, account_id, thread_id)
+    replace_thread_membership_from_full_coverage(tx, account_id, thread_id, &folders, &labels)
 }
 
 fn upsert_messages(

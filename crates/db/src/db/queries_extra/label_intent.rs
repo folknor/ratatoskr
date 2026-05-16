@@ -249,12 +249,24 @@ pub fn finalize_provider_truth_label_membership(
 }
 
 /// Apply a confirmed provider-truth delta inside the caller's
-/// transaction: each `Add` upserts a `thread_labels` row, each `Remove`
-/// deletes one, and then `finalize_provider_truth_label_membership`
-/// bumps the per-thread generation and clears any pending intents the
-/// resulting truth satisfies. The caller owns the `Transaction` so this
-/// helper can be composed with other writes in the same atomic step
-/// without surprise nesting.
+/// transaction. Each `Add` stamps the label on `thread_labels` and on
+/// `message_labels` for every current message in the thread; each
+/// `Remove` deletes from both, plus from `message_keywords` when the
+/// label is keyword-shaped (`kw:<keyword>`).
+///
+/// The per-message writes are load-bearing under cure D: the recompute
+/// paths (`recompute_thread_labels_from_messages` and friends) derive
+/// `thread_labels` from `message_labels ∪ message_keywords`, so a
+/// thread-only write would be silently wiped by any later recompute
+/// (for example, a sibling-message delta on Graph). Writing both halves
+/// here keeps `confirmed_provider_label_intents` idempotent with the
+/// recompute and removes the design-window the discrepancies doc named
+/// in the cross-client move entry.
+///
+/// `finalize_provider_truth_label_membership` then bumps the per-thread
+/// generation and clears any pending intents the resulting truth
+/// satisfies. The caller owns the `Transaction` so this helper can be
+/// composed with other writes in the same atomic step.
 pub fn confirmed_provider_label_intents<'a>(
     tx: &Transaction,
     account_id: &str,
@@ -269,7 +281,15 @@ pub fn confirmed_provider_label_intents<'a>(
                      VALUES (?1, ?2, ?3)",
                     params![account_id, thread_id, intent.label_id],
                 )
-                .map_err(|e| format!("confirm add label intent: {e}"))?;
+                .map_err(|e| format!("confirm add label intent (thread): {e}"))?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO message_labels (account_id, message_id, label_id) \
+                     SELECT m.account_id, m.id, ?3 \
+                     FROM messages m \
+                     WHERE m.account_id = ?1 AND m.thread_id = ?2",
+                    params![account_id, thread_id, intent.label_id],
+                )
+                .map_err(|e| format!("confirm add label intent (per-message): {e}"))?;
             }
             PendingLabelIntentOp::Remove => {
                 tx.execute(
@@ -277,7 +297,31 @@ pub fn confirmed_provider_label_intents<'a>(
                      WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
                     params![account_id, thread_id, intent.label_id],
                 )
-                .map_err(|e| format!("confirm remove label intent: {e}"))?;
+                .map_err(|e| format!("confirm remove label intent (thread): {e}"))?;
+                tx.execute(
+                    "DELETE FROM message_labels \
+                     WHERE account_id = ?1 \
+                       AND label_id = ?3 \
+                       AND message_id IN ( \
+                         SELECT id FROM messages \
+                         WHERE account_id = ?1 AND thread_id = ?2 \
+                       )",
+                    params![account_id, thread_id, intent.label_id],
+                )
+                .map_err(|e| format!("confirm remove label intent (per-message): {e}"))?;
+                if let Some(keyword) = intent.label_id.strip_prefix("kw:") {
+                    tx.execute(
+                        "DELETE FROM message_keywords \
+                         WHERE account_id = ?1 \
+                           AND keyword = ?3 \
+                           AND message_id IN ( \
+                             SELECT id FROM messages \
+                             WHERE account_id = ?1 AND thread_id = ?2 \
+                           )",
+                        params![account_id, thread_id, keyword],
+                    )
+                    .map_err(|e| format!("confirm remove label intent (keyword): {e}"))?;
+                }
             }
         }
     }
@@ -345,11 +389,30 @@ mod tests {
                id TEXT NOT NULL,
                PRIMARY KEY (account_id, id)
              );
+             CREATE TABLE messages (
+               account_id TEXT NOT NULL,
+               id TEXT NOT NULL,
+               thread_id TEXT NOT NULL,
+               PRIMARY KEY (account_id, id)
+             );
              CREATE TABLE thread_labels (
                account_id TEXT NOT NULL,
                thread_id TEXT NOT NULL,
                label_id TEXT NOT NULL,
                PRIMARY KEY (account_id, thread_id, label_id)
+             );
+             CREATE TABLE message_labels (
+               account_id TEXT NOT NULL,
+               message_id TEXT NOT NULL,
+               label_id TEXT NOT NULL,
+               PRIMARY KEY (account_id, message_id, label_id)
+             );
+             CREATE TABLE message_keywords (
+               account_id TEXT NOT NULL,
+               message_id TEXT NOT NULL,
+               keyword TEXT NOT NULL,
+               label_id TEXT NOT NULL,
+               PRIMARY KEY (account_id, message_id, keyword)
              );
              CREATE TABLE pending_thread_label_intents (
                account_id TEXT NOT NULL,
@@ -375,6 +438,16 @@ mod tests {
         .unwrap();
         conn.execute("INSERT INTO labels (account_id, id) VALUES ('acc', 'lab')", [])
             .unwrap();
+        conn.execute(
+            "INSERT INTO messages (account_id, id, thread_id) VALUES ('acc', 'm1', 'thr')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (account_id, id, thread_id) VALUES ('acc', 'm2', 'thr')",
+            [],
+        )
+        .unwrap();
         conn
     }
 
@@ -454,6 +527,128 @@ mod tests {
             })
             .unwrap();
         assert_eq!(op, "Remove");
+    }
+
+    #[test]
+    fn confirmed_add_stamps_per_message_rows_so_recompute_preserves_truth() {
+        // Regression: under cure D the recompute paths derive `thread_labels`
+        // from `message_labels ∪ message_keywords`. If `confirmed_provider_
+        // label_intents` only wrote `thread_labels`, a subsequent recompute
+        // (delete-sibling, JWZ rethread, etc.) would silently wipe the
+        // label. This test simulates that recompute against the schema
+        // confirmed-intent writes to, and asserts truth survives.
+        let mut conn = conn();
+        let tx = conn.transaction().unwrap();
+        confirmed_provider_label_intents(
+            &tx,
+            "acc",
+            "thr",
+            [PendingLabelIntent {
+                label_id: "lab",
+                op: PendingLabelIntentOp::Add,
+            }],
+        )
+        .unwrap();
+        // Recompute analogue: delete thread_labels and rebuild from
+        // message_labels. If confirm hadn't stamped per-message rows, the
+        // INSERT below would find nothing and the label would vanish.
+        tx.execute(
+            "DELETE FROM thread_labels WHERE account_id = 'acc' AND thread_id = 'thr'",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+             SELECT DISTINCT m.account_id, m.thread_id, ml.label_id \
+             FROM messages m \
+             JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id \
+             WHERE m.account_id = 'acc' AND m.thread_id = 'thr'",
+            [],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let label_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM thread_labels WHERE label_id = 'lab'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(label_count, 1, "label should survive recompute");
+
+        let per_message: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_labels WHERE label_id = 'lab'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(per_message, 2, "every current message should carry the label");
+    }
+
+    #[test]
+    fn confirmed_remove_clears_per_message_and_keyword_rows() {
+        let mut conn = conn();
+        // Seed both per-message tables as if the label had been added previously.
+        conn.execute(
+            "INSERT INTO message_labels (account_id, message_id, label_id) VALUES ('acc', 'm1', 'kw:todo')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_labels (account_id, message_id, label_id) VALUES ('acc', 'm2', 'kw:todo')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_keywords (account_id, message_id, keyword, label_id) VALUES ('acc', 'm1', 'todo', 'kw:todo')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('acc', 'thr', 'kw:todo')",
+            [],
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        confirmed_provider_label_intents(
+            &tx,
+            "acc",
+            "thr",
+            [PendingLabelIntent {
+                label_id: "kw:todo",
+                op: PendingLabelIntentOp::Remove,
+            }],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let per_message: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_labels WHERE label_id = 'kw:todo'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(per_message, 0);
+        let keyword_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_keywords WHERE keyword = 'todo'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(keyword_rows, 0);
+        let thread_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM thread_labels WHERE label_id = 'kw:todo'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(thread_rows, 0);
     }
 
     #[test]

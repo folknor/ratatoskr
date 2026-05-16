@@ -550,6 +550,7 @@ pub fn delete_messages_and_cleanup_threads(
     }
 
     for id in message_ids {
+        super::message_membership::delete_message_membership_rows(tx, account_id, id.as_ref())?;
         tx.execute(
             "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
             rusqlite::params![account_id, id.as_ref()],
@@ -592,6 +593,12 @@ pub fn delete_messages_and_cleanup_threads(
         } else {
             let aggregate = compute_thread_aggregate(tx, account_id, tid)?;
             upsert_thread_aggregate(tx, account_id, tid, &aggregate, None, None)?;
+            super::message_membership::recompute_thread_folders_from_messages(
+                tx, account_id, tid,
+            )?;
+            super::message_membership::recompute_thread_labels_from_messages(
+                tx, account_id, tid,
+            )?;
 
             tx.execute(
                 "DELETE FROM thread_participants WHERE account_id = ?1 AND thread_id = ?2",
@@ -694,10 +701,26 @@ pub fn reassign_messages_and_repair_threads(
 
     for old_tid in &old_thread_ids {
         repair_thread_after_message_reassignment(tx, account_id, old_tid, user_emails)?;
+        super::message_membership::recompute_thread_folders_from_messages(
+            tx, account_id, old_tid,
+        )?;
+        super::message_membership::recompute_thread_labels_from_messages(
+            tx, account_id, old_tid,
+        )?;
     }
 
     rebuild_thread_participants(tx, account_id, new_thread_id)?;
     maybe_update_chat_state(tx, account_id, new_thread_id, user_emails)?;
+    super::message_membership::recompute_thread_folders_from_messages(
+        tx,
+        account_id,
+        new_thread_id,
+    )?;
+    super::message_membership::recompute_thread_labels_from_messages(
+        tx,
+        account_id,
+        new_thread_id,
+    )?;
     Ok(())
 }
 

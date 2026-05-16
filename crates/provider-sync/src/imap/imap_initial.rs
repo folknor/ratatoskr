@@ -285,9 +285,8 @@ pub async fn imap_initial_sync(
         let aid = account_id.to_string();
         let tg = thread_groups.clone();
         let meta = all_meta.clone();
-        let lbr = labels_by_rfc_id.clone();
         let sk = skipped;
-        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &meta, &lbr, &sk))
+        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &meta, &sk))
             .await?
     };
 

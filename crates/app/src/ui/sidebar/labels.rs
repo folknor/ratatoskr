@@ -47,7 +47,7 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 &folder.id,
                 paint,
                 is_active,
-                folder.unread_count,
+                folder.unread_count(),
                 SidebarMessage::Select(SidebarSelection::LabelGroup(group_id)),
             );
             let query_prefix = build_search_here_prefix(&folder.name, sidebar);

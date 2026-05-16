@@ -227,10 +227,10 @@ fn folder_row<'a>(
     };
     item_row = item_row.push(text(&folder.name).size(TEXT_MD).style(lbl_style));
 
-    if folder.unread_count > 0 {
+    if folder.unread_count() > 0 {
         item_row = item_row
             .push(Space::new().width(Length::Fill))
-            .push(widgets::count_badge(folder.unread_count));
+            .push(widgets::count_badge(folder.unread_count()));
     }
 
     let label_btn: Element<'_, SidebarMessage> = button(

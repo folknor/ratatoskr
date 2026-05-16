@@ -2,7 +2,10 @@ use rusqlite::Connection;
 
 use crate::db::FromRow;
 use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use crate::db::types::{AccountScope, DbThread, FolderAccountUnreadCount, FolderUnreadCount};
+use crate::db::types::{
+    AccountScope, DbThread, DraftTotalCount, FolderAccountUnreadCount, FolderUnreadCount,
+    UniversalUnreadCount,
+};
 
 /// Build the WHERE clause fragment and collect parameter values for an `AccountScope`.
 ///
@@ -374,7 +377,7 @@ pub fn get_unread_counts_by_folder(
     // sent/archive/spam" view; the INBOX-label-based row that's currently
     // in `results` undercounts it.
     if matches!(scope, AccountScope::All) {
-        let broad = broad_inbox_unread_count(conn, scope)?;
+        let broad = UniversalUnreadCount::from_synced_thread_count(broad_inbox_unread_count(conn, scope)?);
         if let Some(row) = results.iter_mut().find(|r| r.folder_id == "INBOX") {
             row.unread_count = broad;
         } else {
@@ -464,7 +467,7 @@ fn get_flag_folder_unread_count(
 
     Ok(FolderUnreadCount {
         folder_id: folder_id.to_owned(),
-        unread_count: count,
+        unread_count: UniversalUnreadCount::from_synced_thread_count(count),
     })
 }
 
@@ -486,7 +489,7 @@ fn get_all_mail_unread_count(
         .map_err(|e| e.to_string())?;
     Ok(FolderUnreadCount {
         folder_id: "all-mail".to_owned(),
-        unread_count: count,
+        unread_count: UniversalUnreadCount::from_synced_thread_count(count),
     })
 }
 
@@ -550,7 +553,7 @@ fn get_flag_folder_unread_by_account(
         Ok(FolderAccountUnreadCount {
             folder_id: folder_id.to_owned(),
             account_id: row.get("account_id")?,
-            unread_count: row.get("unread_count")?,
+            unread_count: UniversalUnreadCount::from_synced_thread_count(row.get("unread_count")?),
         })
     })
     .map_err(|e| e.to_string())?
@@ -577,7 +580,7 @@ fn get_all_mail_unread_by_account(
         Ok(FolderAccountUnreadCount {
             folder_id: "all-mail".to_owned(),
             account_id: row.get("account_id")?,
-            unread_count: row.get("unread_count")?,
+            unread_count: UniversalUnreadCount::from_synced_thread_count(row.get("unread_count")?),
         })
     })
     .map_err(|e| e.to_string())?
@@ -716,14 +719,17 @@ fn flag_column(folder_id: &str) -> &'static str {
 /// This helper exists for callers that want the total (pane headers,
 /// compose-pane indicators). Rationale: `docs/glossary/drafts.md`
 /// § "Count semantics."
-pub fn get_draft_count_with_local(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
+pub fn get_draft_count_with_local(
+    conn: &Connection,
+    scope: &AccountScope,
+) -> Result<DraftTotalCount, String> {
     // Count server-synced drafts (threads with DRAFT label)
     let synced = get_thread_count_scoped(conn, scope, Some("DRAFT"))?;
 
     // Count local-only drafts (pending or new, not yet synced to a thread)
     let local = count_local_drafts(conn, scope)?;
 
-    Ok(synced + local)
+    Ok(DraftTotalCount::from_synced_and_local_count(synced + local))
 }
 
 /// Local draft summary for display in the thread list.

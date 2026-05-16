@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, MessageInsertRow, delete_message_reaction, insert_attachments,
-    insert_messages, insert_thread_folder_rows, insert_thread_label_rows, upsert_message_reaction,
-    upsert_message_reaction_update_type, LabelWriteRow, upsert_labels,
+    insert_messages, upsert_message_reaction, upsert_message_reaction_update_type, LabelWriteRow,
+    upsert_labels,
 };
-use common::types::{ImportanceLevel, LabelKind};
+use common::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind};
 
 use super::super::client::GraphClient;
 use super::super::parse::ParsedGraphMessage;
@@ -16,6 +16,7 @@ use super::super::types::{
 use super::SyncCtx;
 use super::stores::{index_messages, store_bodies, store_inline_images};
 use crate::persistence as sync_persistence;
+use crate::thread_membership::replace_message_membership_and_recompute;
 
 // ---------------------------------------------------------------------------
 // DB persistence (mirrors jmap/sync.rs patterns)
@@ -193,43 +194,29 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
-    // Graph delta pages contain only changed messages. Merge labels so an
-    // update to one message does not drop aggregate labels from siblings.
-    let mut folder_ids = Vec::new();
-    let mut label_ids = Vec::new();
-    for label_id in messages
-        .iter()
-        .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
-    {
-        if common::folder_roles::is_graph_tag_id(label_id) {
-            label_ids.push(label_id);
-        } else {
-            folder_ids.push(label_id);
+    // Graph delta pages contain only changed messages. Replace membership at
+    // the message grain, then recompute the thread aggregate from the
+    // per-message union so removals observed by other clients are visible.
+    for message in messages {
+        let mut folders = Vec::new();
+        let mut labels = Vec::new();
+        for label_id in message.base.label_ids.iter().map(String::as_str) {
+            if common::folder_roles::is_graph_tag_id(label_id) {
+                labels.push(LabelKind::parse(label_id, MailProviderKind::Graph)?);
+            } else {
+                folders.push(FolderKind::parse(label_id, MailProviderKind::Graph)?);
+            }
         }
+        replace_message_membership_and_recompute(
+            tx,
+            account_id,
+            thread_id,
+            &message.base.id,
+            &folders,
+            &labels,
+        )?;
     }
-    merge_partial_delta_folders(tx, account_id, thread_id, folder_ids)?;
-    merge_partial_delta_labels(tx, account_id, thread_id, label_ids)
-}
-
-fn merge_partial_delta_folders<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    folder_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
-    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
-}
-
-fn merge_partial_delta_labels<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    label_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
-    insert_thread_label_rows(tx, account_id, thread_id, label_ids)?;
-    db::db::queries_extra::finalize_provider_truth_label_membership(tx, account_id, thread_id)
+    Ok(())
 }
 
 fn upsert_graph_label_rows(

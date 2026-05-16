@@ -9,7 +9,8 @@ use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
 use crate::db::from_row::FromRow;
 
-use crate::db::queries_extra::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
+use crate::db::queries_extra::scoped_queries::get_unread_counts_by_folder;
+use crate::db::types::UniversalUnreadCount;
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ pub struct NavigationFolder {
     pub id: String,
     pub name: String,
     pub folder_kind: FolderKind,
-    pub unread_count: i64,
+    unread_count: NavigationUnreadCount,
     pub account_id: Option<String>,
     /// Parent folder ID for tree rendering. `None` means top-level.
     pub parent_id: Option<String>,
@@ -76,6 +77,39 @@ pub struct NavigationFolder {
     /// Resolved foreground color, paired with `color_bg`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_fg: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NavigationUnreadCount {
+    Universal(UniversalUnreadCount),
+    General(i64),
+}
+
+impl NavigationUnreadCount {
+    pub fn as_i64(&self) -> i64 {
+        match self {
+            Self::Universal(count) => count.as_i64(),
+            Self::General(count) => *count,
+        }
+    }
+
+    pub fn as_universal(&self) -> Option<UniversalUnreadCount> {
+        match self {
+            Self::Universal(count) => Some(*count),
+            Self::General(_) => None,
+        }
+    }
+}
+
+impl NavigationFolder {
+    pub fn unread_count(&self) -> i64 {
+        self.unread_count.as_i64()
+    }
+
+    pub fn universal_unread_count(&self) -> Option<UniversalUnreadCount> {
+        self.unread_count.as_universal()
+    }
 }
 
 /// The complete navigation state returned to the frontend.
@@ -168,25 +202,20 @@ fn build_universal_folders(
     scope: &AccountScope,
 ) -> Result<Vec<NavigationFolder>, String> {
     let counts = get_unread_counts_by_folder(conn, scope)?;
-    let draft_count = get_draft_count_with_local(conn, scope)?;
 
     let folders = SIDEBAR_UNIVERSAL_FOLDERS
         .iter()
         .map(|(id, name)| {
-            let unread = if *id == "DRAFT" {
-                draft_count
-            } else {
-                counts
-                    .iter()
-                    .find(|c| c.folder_id == *id)
-                    .map_or(0, |c| c.unread_count)
-            };
+            let unread = counts
+                .iter()
+                .find(|c| c.folder_id == *id)
+                .map_or_else(UniversalUnreadCount::default, |c| c.unread_count);
 
             NavigationFolder {
                 id: (*id).to_owned(),
                 name: (*name).to_owned(),
                 folder_kind: FolderKind::Universal,
-                unread_count: unread,
+                unread_count: NavigationUnreadCount::Universal(unread),
                 account_id: None,
                 parent_id: None,
                 query: None,
@@ -224,7 +253,7 @@ fn build_smart_folders(
                 id: sf.id,
                 name: sf.name,
                 folder_kind: FolderKind::SmartFolder,
-                unread_count,
+                unread_count: NavigationUnreadCount::General(unread_count),
                 account_id: sf.account_id,
                 parent_id: None,
                 query: Some(sf.query),
@@ -284,7 +313,7 @@ fn build_account_folders(
                 id: folder.id,
                 name: folder.name,
                 folder_kind: FolderKind::AccountFolder,
-                unread_count,
+                unread_count: NavigationUnreadCount::General(unread_count),
                 account_id: Some(folder.account_id),
                 parent_id,
                 query: None,
@@ -336,7 +365,9 @@ fn build_label_groups_from_counts(
             id: id.to_string(),
             name,
             folder_kind: FolderKind::LabelGroup,
-            unread_count: unread_by_group.get(&id).copied().unwrap_or(0),
+            unread_count: NavigationUnreadCount::General(
+                unread_by_group.get(&id).copied().unwrap_or(0),
+            ),
             account_id: None,
             parent_id: None,
             query: None,
@@ -539,7 +570,7 @@ pub fn get_shared_mailbox_navigation(
                 id: (*id).to_owned(),
                 name: (*name).to_owned(),
                 folder_kind: FolderKind::Universal,
-                unread_count: unread,
+                unread_count: NavigationUnreadCount::Universal(UniversalUnreadCount::from_synced_thread_count(unread)),
                 account_id: None,
                 parent_id: None,
                 query: None,
@@ -566,7 +597,7 @@ pub fn get_shared_mailbox_navigation(
                 id: folder.id,
                 name: folder.name,
                 folder_kind: FolderKind::AccountFolder,
-                unread_count: unread,
+                unread_count: NavigationUnreadCount::General(unread),
                 account_id: Some(folder.account_id),
                 parent_id,
                 query: None,
@@ -713,6 +744,62 @@ pub fn get_pinned_public_folders_sync(
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::{FolderKind, get_navigation_state};
+    use crate::db::migrations;
+    use crate::db::types::AccountScope;
+
+    #[test]
+    fn drafts_universal_pill_uses_unread_synced_threads_only() {
+        let conn = crate::db::Connection::open_in_memory().unwrap();
+        migrations::run_all(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', 'graph')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders (id, account_id, name) VALUES ('DRAFT', 'acc', 'Drafts')",
+            [],
+        )
+        .unwrap();
+        for (thread_id, is_read) in [("read-draft", 1), ("unread-draft", 0)] {
+            conn.execute(
+                "INSERT INTO threads (id, account_id, subject, snippet, last_message_at, \
+                 message_count, is_read) VALUES (?1, 'acc', 'draft', 'draft', 1, 1, ?2)",
+                crate::db::params![thread_id, is_read],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO thread_folders (account_id, thread_id, folder_id) \
+                 VALUES ('acc', ?1, 'DRAFT')",
+                crate::db::params![thread_id],
+            )
+            .unwrap();
+        }
+        for id in ["local-1", "local-2", "local-3"] {
+            conn.execute(
+                "INSERT INTO local_drafts (id, account_id, subject, updated_at, sync_status) \
+                 VALUES (?1, 'acc', 'local draft', 1, 'pending')",
+                crate::db::params![id],
+            )
+            .unwrap();
+        }
+
+        let nav = get_navigation_state(&conn, &AccountScope::Single("acc".to_string())).unwrap();
+        let drafts = nav
+            .folders
+            .iter()
+            .find(|folder| matches!(folder.folder_kind, FolderKind::Universal) && folder.id == "DRAFT")
+            .unwrap();
+
+        assert_eq!(drafts.unread_count(), 1);
+        assert_eq!(drafts.universal_unread_count().unwrap().as_i64(), 1);
+    }
 }
 
 // ── Operator typeahead queries ─────────────────────────────

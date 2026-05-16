@@ -865,9 +865,6 @@ pub fn remove_deleted_messages(
 
     let affected_threads =
         persistence::delete_messages_and_cleanup_threads(&tx, account_id, deleted_message_ids)?;
-    for thread_id in &affected_threads {
-        recompute_thread_keyword_labels(&tx, KeywordProvider::Imap, account_id, thread_id)?;
-    }
 
     tx.commit().map_err(|e| format!("deletion commit: {e}"))?;
 

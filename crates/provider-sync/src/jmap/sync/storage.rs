@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use db::db::queries_extra::{
     AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages,
-    insert_thread_folder_rows,
 };
+use common::types::{FolderKind, MailProviderKind};
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
@@ -14,6 +14,7 @@ use crate::keyword_membership::{
     KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
 };
 use crate::persistence as sync_persistence;
+use crate::thread_membership::replace_message_folders_and_recompute;
 
 // ---------------------------------------------------------------------------
 // DB persistence
@@ -92,11 +93,7 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            let affected_threads =
-                sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
-            for thread_id in &affected_threads {
-                recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, &aid, thread_id)?;
-            }
+            sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
         })
@@ -191,26 +188,29 @@ fn set_thread_labels(
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
     // JMAP Email/changes returns changed messages, not full thread state.
-    // Merge here so partial pages do not erase aggregate folders from other
-    // messages in the same thread.
-    merge_partial_delta_folders(
-        tx,
-        account_id,
-        thread_id,
-        messages
+    // Replace folder membership at the message grain, then recompute the
+    // thread aggregate from the per-message union.
+    //
+    // Non-keyword labels do not exist for JMAP after the typed boundary in
+    // `LabelKind::parse(_, Jmap)`, so `message_labels` is never written
+    // here. Keyword labels flow through `recompute_thread_keyword_labels`
+    // via `sync_keyword_labels` and land in `message_keywords` instead.
+    for message in messages {
+        let folders = message
+            .base
+            .label_ids
             .iter()
-            .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
-    )
-}
-
-fn merge_partial_delta_folders<'a>(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-    folder_ids: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
-    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
+            .map(|id| FolderKind::parse(id, MailProviderKind::Jmap))
+            .collect::<Result<Vec<_>, _>>()?;
+        replace_message_folders_and_recompute(
+            tx,
+            account_id,
+            thread_id,
+            &message.base.id,
+            &folders,
+        )?;
+    }
+    Ok(())
 }
 
 fn upsert_messages(

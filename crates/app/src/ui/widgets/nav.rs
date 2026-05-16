@@ -2,6 +2,7 @@
 
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length, Theme};
+use rtsk::db::types::UniversalUnreadCount;
 
 use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{
@@ -21,6 +22,30 @@ pub enum NavSize {
     Regular,
 }
 
+/// Count to render alongside a `nav_button`. Universal sidebar entries
+/// (Inbox, Drafts, Sent, ...) must pass `Universal(UniversalUnreadCount)`
+/// so the discrepancies-doc invariant - "the universal-pill widget is
+/// fed only by the unread-count question" - is checked at the widget
+/// boundary. A future contributor who tried to route
+/// `DraftTotalCount` (synced + local) through the universal pill cannot
+/// reach `Universal`, because the only constructor for
+/// `UniversalUnreadCount` is `from_synced_thread_count`. Non-universal
+/// entries (smart folders, label groups, settings tabs) use `General`.
+#[derive(Debug, Clone, Copy)]
+pub enum NavBadge {
+    Universal(UniversalUnreadCount),
+    General(i64),
+}
+
+impl NavBadge {
+    fn as_i64(self) -> i64 {
+        match self {
+            Self::Universal(count) => count.as_i64(),
+            Self::General(count) => count,
+        }
+    }
+}
+
 /// Generic navigation button used in both the sidebar and settings.
 /// Accepts data only - builds its own two-slot (icon + label) structure.
 /// Generic over message type so settings can use it with SettingsMessage.
@@ -29,7 +54,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
     label: &'a str,
     active: bool,
     size: NavSize,
-    badge: Option<i64>,
+    badge: Option<NavBadge>,
     on_press: M,
 ) -> Element<'a, M> {
     let label_style: fn(&Theme) -> text::Style = if active {
@@ -67,7 +92,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
             .align_y(Alignment::Center),
     );
 
-    if let Some(count) = badge
+    if let Some(count) = badge.map(NavBadge::as_i64)
         && count > 0
     {
         content = content
@@ -104,7 +129,7 @@ pub fn nav_group<'a, M: Clone + 'a>(
             item.label,
             is_active,
             NavSize::Compact,
-            Some(item.unread),
+            Some(NavBadge::General(item.unread)),
             on_press,
         ));
     }

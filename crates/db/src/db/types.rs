@@ -715,11 +715,47 @@ pub struct DbTaskTag {
 
 // ── Folder Unread Count ─────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct UniversalUnreadCount(i64);
+
+impl UniversalUnreadCount {
+    pub fn from_synced_thread_count(count: i64) -> Self {
+        Self(count)
+    }
+
+    pub fn as_i64(&self) -> i64 {
+        self.0
+    }
+}
+
+impl rusqlite::types::FromSql for UniversalUnreadCount {
+    fn column_result(
+        value: rusqlite::types::ValueRef<'_>,
+    ) -> rusqlite::types::FromSqlResult<Self> {
+        <i64 as rusqlite::types::FromSql>::column_result(value).map(Self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DraftTotalCount(i64);
+
+impl DraftTotalCount {
+    pub fn from_synced_and_local_count(count: i64) -> Self {
+        Self(count)
+    }
+
+    pub fn as_i64(&self) -> i64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderUnreadCount {
     pub folder_id: String,
-    pub unread_count: i64,
+    pub unread_count: UniversalUnreadCount,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -727,7 +763,7 @@ pub struct FolderUnreadCount {
 pub struct FolderAccountUnreadCount {
     pub folder_id: String,
     pub account_id: String,
-    pub unread_count: i64,
+    pub unread_count: UniversalUnreadCount,
 }
 
 // ── Snoozed thread ─────────────────────────────────────────

@@ -60,6 +60,16 @@ pub struct ImapPath(String);
 #[serde(transparent)]
 pub struct GmailLabelId(String);
 
+/// Validated Gmail non-role system folder label ID (`CHAT`, `CATEGORY_*`).
+///
+/// ```compile_fail
+/// use types::GmailSystemLabelId;
+/// let _ = GmailSystemLabelId("CHAT".to_string());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GmailSystemLabelId(String);
+
 /// Validated JMAP mailbox ID.
 ///
 /// ```compile_fail
@@ -84,6 +94,7 @@ pub enum SystemFolderId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FolderKind {
     System(SystemFolderId),
+    GmailSystem(GmailSystemLabelId),
     GraphUser(GraphGuid),
     JmapUser(JmapId),
     ImapUser(ImapPath),
@@ -232,6 +243,22 @@ impl GmailLabelId {
     }
 }
 
+impl GmailSystemLabelId {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        validate_component("gmail system label id", raw)?;
+        if raw == "CHAT" || raw.starts_with("CATEGORY_") {
+            return Ok(Self(raw.to_string()));
+        }
+        Err(format!(
+            "Gmail system folder id `{raw}` is not a non-role system folder"
+        ))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 impl JmapId {
     pub fn parse(raw: &str) -> Result<Self, String> {
         validate_component("jmap mailbox id", raw)?;
@@ -305,13 +332,15 @@ impl FolderKind {
         }
 
         match provider {
-            MailProviderKind::Gmail => Err(format!(
-                "Gmail folder id `{raw}` is not a canonical system folder"
-            )),
+            MailProviderKind::Gmail => GmailSystemLabelId::parse(raw).map(Self::GmailSystem),
             MailProviderKind::Graph => GraphGuid::parse_storage_id(raw).map(Self::GraphUser),
             MailProviderKind::Jmap => JmapId::parse_storage_id(raw).map(Self::JmapUser),
             MailProviderKind::Imap => ImapPath::parse_storage_id(raw).map(Self::ImapUser),
         }
+    }
+
+    pub fn gmail_system(raw: &str) -> Result<Self, String> {
+        GmailSystemLabelId::parse(raw).map(Self::GmailSystem)
     }
 
     pub fn graph_user(raw_graph_id: &str) -> Result<Self, String> {
@@ -329,6 +358,7 @@ impl FolderKind {
     pub fn storage_id(&self) -> String {
         match self {
             Self::System(system) => system.as_str().to_string(),
+            Self::GmailSystem(id) => id.as_str().to_string(),
             Self::GraphUser(id) => id.storage_id(),
             Self::JmapUser(id) => id.storage_id(),
             Self::ImapUser(path) => path.storage_id(),
@@ -543,6 +573,11 @@ mod tests {
             FolderKind::parse("folder-Projects", MailProviderKind::Imap).unwrap(),
             FolderKind::ImapUser(_),
         ));
+        assert!(matches!(
+            FolderKind::parse("CATEGORY_PROMOTIONS", MailProviderKind::Gmail).unwrap(),
+            FolderKind::GmailSystem(_),
+        ));
+        assert!(FolderKind::parse("STARRED", MailProviderKind::Gmail).is_err());
     }
 
     #[test]
@@ -590,6 +625,10 @@ mod tests {
             (FolderKind::imap_user("INBOX/Work").unwrap(), MailProviderKind::Imap),
             (FolderKind::System(SystemFolderId::Inbox), MailProviderKind::Imap),
             (FolderKind::System(SystemFolderId::Archive), MailProviderKind::Gmail),
+            (
+                FolderKind::gmail_system("CHAT").unwrap(),
+                MailProviderKind::Gmail,
+            ),
         ];
         for (folder, provider) in cases {
             let id = folder.storage_id();

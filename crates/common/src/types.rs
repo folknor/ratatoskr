@@ -3,7 +3,9 @@ use serde::Serialize;
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 
-pub use ::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind, SystemFolderId};
+pub use ::types::{
+    FolderKind, GmailSystemLabelId, ImportanceLevel, LabelKind, MailProviderKind, SystemFolderId,
+};
 
 /// How a send relates to an existing message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
