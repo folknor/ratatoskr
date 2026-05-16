@@ -31,8 +31,9 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
                     weight: iced::font::Weight::Bold,
                     ..crate::font::text()
                 }),
-            text("Labels apply to messages on every account that supports them. \
-                  Renaming or recoloring is cross-account.")
+            text("Per-account label. Edits affect only this account's label \
+                  row; the cross-account sidebar entry is a Label Group that \
+                  collects per-account members.")
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         ]

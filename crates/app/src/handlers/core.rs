@@ -666,7 +666,7 @@ impl ReadyApp {
                 return Task::none();
             }
             handlers::LabelOp::Loaded(Err(e)) => {
-                log::error!("Failed to load cross-account labels: {e}");
+                log::error!("Failed to load per-account labels: {e}");
                 return Task::none();
             }
             handlers::LabelOp::CreatedAck(Err(ref e))

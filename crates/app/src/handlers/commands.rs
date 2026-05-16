@@ -1245,37 +1245,43 @@ impl ReadyApp {
 // ── Command argument helpers ─────────────────────────────────────────
 
 /// Build `CommandArgs` from a palette option selection.
+///
+/// Group-targeting commands (EmailAddLabel, EmailRemoveLabel,
+/// NavigateToLabel) expect `item.id` to be a stringified
+/// `label_groups.id` (i64). The only palette producer for these commands
+/// is `get_label_groups_for_palette`, which always emits
+/// `i64::to_string()`, so a non-numeric id reaching here is a
+/// programmer error rather than user input - logged loudly so a future
+/// palette entry that surfaces non-group items can't silently drop.
 pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<CommandArgs> {
+    fn group_id_from(item: &OptionItem, ctx: &str) -> Option<LabelGroupId> {
+        match item.id.parse::<i64>() {
+            Ok(id) => Some(LabelGroupId::from(id)),
+            Err(e) => {
+                log::warn!(
+                    "{ctx}: non-numeric palette item id `{}` (label group ids must be i64): {e}",
+                    item.id
+                );
+                None
+            }
+        }
+    }
     match command_id {
         CommandId::EmailMoveToFolder => Some(CommandArgs::MoveToFolder {
             folder_id: item.id.clone().into(),
         }),
-        CommandId::EmailAddLabel => item
-            .id
-            .parse::<i64>()
-            .ok()
-            .map(|id| CommandArgs::AddLabel {
-                group_id: LabelGroupId::from(id),
-            }),
-        CommandId::EmailRemoveLabel => item
-            .id
-            .parse::<i64>()
-            .ok()
-            .map(|id| CommandArgs::RemoveLabel {
-                group_id: LabelGroupId::from(id),
-            }),
+        CommandId::EmailAddLabel => {
+            group_id_from(item, "EmailAddLabel").map(|group_id| CommandArgs::AddLabel { group_id })
+        }
+        CommandId::EmailRemoveLabel => group_id_from(item, "EmailRemoveLabel")
+            .map(|group_id| CommandArgs::RemoveLabel { group_id }),
         CommandId::EmailSnooze => item
             .id
             .parse::<i64>()
             .ok()
             .map(|ts| CommandArgs::Snooze { until: ts }),
-        CommandId::NavigateToLabel => item
-            .id
-            .parse::<i64>()
-            .ok()
-            .map(|id| CommandArgs::NavigateToLabel {
-                group_id: LabelGroupId::from(id),
-            }),
+        CommandId::NavigateToLabel => group_id_from(item, "NavigateToLabel")
+            .map(|group_id| CommandArgs::NavigateToLabel { group_id }),
         _ => None,
     }
 }

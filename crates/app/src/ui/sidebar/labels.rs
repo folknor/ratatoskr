@@ -24,31 +24,30 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 
     let children: Vec<Element<'_, SidebarMessage>> = label_groups
         .into_iter()
-        .filter_map(|f| {
-            let group_id = f.id.parse::<i64>().ok()?;
-            Some((f, LabelGroupId::from(group_id)))
+        .filter_map(|folder| {
+            let group_id = folder.id.parse::<i64>().ok()?;
+            Some((folder, LabelGroupId::from(group_id)))
         })
-        .map(|f| {
+        .map(|(folder, group_id)| {
             let is_active = sidebar.active_pinned_search.is_none()
                 && matches!(
                     &sidebar.selection,
-                    SidebarSelection::LabelGroup(group_id) if *group_id == f.1
+                    SidebarSelection::LabelGroup(active) if *active == group_id
                 );
-            let dot_color = f
-                .0
+            let dot_color = folder
                 .color_bg
                 .as_deref()
                 .map(theme::hex_to_color)
-                .unwrap_or_else(|| theme::avatar_color(&f.0.name));
+                .unwrap_or_else(|| theme::avatar_color(&folder.name));
             let item = widgets::label_nav_item(
-                &f.0.name,
-                &f.0.id,
+                &folder.name,
+                &folder.id,
                 dot_color,
                 is_active,
-                f.0.unread_count,
-                SidebarMessage::Select(SidebarSelection::LabelGroup(f.1)),
+                folder.unread_count,
+                SidebarMessage::Select(SidebarSelection::LabelGroup(group_id)),
             );
-            let query_prefix = build_search_here_prefix(&f.0.name, sidebar);
+            let query_prefix = build_search_here_prefix(&folder.name, sidebar);
             mouse_area(item)
                 .on_right_press(SidebarMessage::SearchHere(query_prefix))
                 .into()

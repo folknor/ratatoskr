@@ -3,18 +3,22 @@
 //! Read path lives here. Writes (create / delete / rename / recolor) are
 //! scaffolded as stub Tasks until the action service grows the matching
 //! `label.create`, `label.delete`, `label.recolor`, `label.rename` actions.
+//! Per the labels-unification redesign, every per-account label is keyed
+//! on `(account_id, label_id)`; the pre-split `normalized_name` collapse
+//! is gone (see `docs/labels-unification/redesign.md` "Reversal 2").
 
 use std::sync::Arc;
 
 use iced::Task;
+use types::LabelId;
 
 use crate::db::Db;
 
 use super::LabelOp;
 
 /// Load all raw provider labels grouped by account, sorted alphabetically.
-/// Sidebar section 4 is driven by explicit label groups, not this settings
-/// view.
+/// The sidebar's LABELS section renders explicit `label_groups`, not the
+/// per-account rows this settings view exposes.
 pub fn load_visible_labels_async(db: &Arc<Db>) -> Task<LabelOp> {
     let db = Arc::clone(db);
     Task::perform(
@@ -46,24 +50,26 @@ pub fn load_visible_labels_async(db: &Arc<Db>) -> Task<LabelOp> {
 // Service IPC once the action handlers land.
 
 #[allow(dead_code)] // wired in tier-2; kept for the call-site shape
-pub fn create_label_async(normalized_name: &str) -> Task<LabelOp> {
-    log::warn!("create_label not implemented yet: {normalized_name}");
+pub fn create_label_async(account_id: &str, name: &str) -> Task<LabelOp> {
+    log::warn!("create_label not implemented yet: account={account_id} name={name}");
     Task::done(LabelOp::CreatedAck(Err(
         "label creation not yet implemented".to_owned(),
     )))
 }
 
 #[allow(dead_code)]
-pub fn delete_label_async(normalized_name: &str) -> Task<LabelOp> {
-    log::warn!("delete_label not implemented yet: {normalized_name}");
+pub fn delete_label_async(account_id: &str, label_id: &LabelId) -> Task<LabelOp> {
+    log::warn!("delete_label not implemented yet: account={account_id} label={label_id}");
     Task::done(LabelOp::DeletedAck(Err(
         "label deletion not yet implemented".to_owned(),
     )))
 }
 
 #[allow(dead_code)]
-pub fn rename_label_async(from: &str, to: &str) -> Task<LabelOp> {
-    log::warn!("rename_label not implemented yet: {from} -> {to}");
+pub fn rename_label_async(account_id: &str, label_id: &LabelId, new_name: &str) -> Task<LabelOp> {
+    log::warn!(
+        "rename_label not implemented yet: account={account_id} label={label_id} -> {new_name}"
+    );
     Task::done(LabelOp::RenamedAck(Err(
         "label rename not yet implemented".to_owned(),
     )))
@@ -71,12 +77,13 @@ pub fn rename_label_async(from: &str, to: &str) -> Task<LabelOp> {
 
 #[allow(dead_code)]
 pub fn recolor_label_async(
-    normalized_name: &str,
+    account_id: &str,
+    label_id: &LabelId,
     color_bg: &str,
     color_fg: &str,
 ) -> Task<LabelOp> {
     log::warn!(
-        "recolor_label not implemented yet: {normalized_name} -> ({color_bg}, {color_fg})"
+        "recolor_label not implemented yet: account={account_id} label={label_id} -> ({color_bg}, {color_fg})"
     );
     Task::done(LabelOp::RecoloredAck(Err(
         "label recolor not yet implemented".to_owned(),

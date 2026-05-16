@@ -135,53 +135,53 @@ Deferred:
 
 ## Slice 5 - UI + command palette
 
-### CRITICAL
+RESOLVED in this branch (partial; see "Deferred" below).
 
-**Reading-pane pill rendering dropped the discriminator filter, so non-group rows now render as pills.** `crates/app/src/ui/reading_pane.rs:744-765`. The pre-split code filtered `labels.iter().filter(|l| l.label_kind == "tag")`; post-split it iterates every entry. The slice intends `ResolvedLabel` to be a group-only stream (per the comment "Label group pills" and `db/threads.rs:21` "Label group color info resolved from core's ThreadLabel"). But `ResolvedLabel.label_kind` is "Compatibility discriminator for existing display code" (`db/threads.rs:28-29`) and slice 2's `ThreadLabel.label_kind` is hard-coded `"group"` (`crates/db/src/db/queries_extra/thread_detail.rs:563-572` per slice 2). Today every row IS a group, so the symptom is silent - but the filter is the only message-UI gate codifying redesign:231-238's invariant ("A pill for group G renders on thread T if [either UNION condition]"). The moment a future caller funnels raw `thread_labels` rows through the same struct (this is exactly what the slice-2 MEDIUM about the lying `label_kind` discriminator warned), every raw label will render as a pill. Either drop the `label_kind` field entirely (it has no remaining read site) or restore an explicit `kind == "group"` filter so the invariant is enforced at the boundary the spec names.
+- Reading-pane CRITICAL is closed structurally by slice 2's removal of
+  `label_kind` from `ResolvedLabel` / `ThreadLabel`. There is no
+  compatibility-discriminator field left to mislead a future raw-label
+  writer.
+- Remove-Label picker scope: `get_thread_label_groups_sync` returns
+  every group the thread renders. The composite already removes from
+  BOTH paths symmetrically (the local helper reads
+  `thread_labels` rows whose member labels belong to the group and
+  dispatches per-member RemoveLabel, then deletes any local TLG row).
+  No picker change needed; the original audit assumed
+  `RemoveLabelGroup` only touched TLG, which is not what the composite
+  does.
+- `handlers/labels.rs` write stubs retyped to `(account_id, label_id)`
+  + display-name variants; the pre-split `normalized_name` parameter
+  is gone, and log lines name both axes.
+- Settings "Add Label" copy rewritten to reflect per-account scope.
+- `handle_label_op` log line renamed from "cross-account labels" to
+  "per-account labels".
+- `build_command_args` for `EmailAddLabel` / `EmailRemoveLabel` /
+  `NavigateToLabel` logs a warning when `item.id` is non-numeric (the
+  only producer always emits `i64::to_string()`, so a non-numeric id
+  is a programmer error worth surfacing).
+- Dead `(NavigateToLabel, CommandArgs::NavigateToFolder)` dispatch arm
+  removed; `CommandArgs::NavigateToFolder` variant deleted - nothing
+  in the palette pipeline produced it post-split.
+- Sidebar labels: tuple binding renamed `(folder, group_id)`,
+  `has_account_labels` variable renamed `has_label_groups`.
+- `MailActionIntent::AddLabel` / `RemoveLabel` doc-comment names the
+  Settings/undo-only contract (slice 4 addition reaffirms this).
 
-### HIGH
-
-**`get_thread_label_groups_for_palette` is wired to the Remove-Label picker but it returns ALL rendered groups for the thread, not the groups the user can locally remove.** `crates/app/src/command_resolver.rs:39-50` + `crates/core/src/command_palette_queries.rs:26-34`. The picker is built from `get_thread_label_groups_sync`, which (per redesign:232-238) UNIONs `thread_label_groups` with `thread_labels`-via-members. A group rendered solely via the `thread_labels` path has no `thread_label_groups` row - `RemoveLabelGroup` (`service/src/actions/label_group.rs`) on it will succeed locally (idempotent TLG delete) but the pill will re-render on the next decoration pass because the underlying member labels are still attached. From the user's perspective "Remove Label Work" did nothing. The picker should restrict to groups with a present TLG row, or the Remove action should dispatch member `RemoveLabel`s for the `thread_labels`-rendered case. Spec line: redesign:280-284 describes Remove as deleting the TLG row AND dispatching `RemoveLabel` for each member's `thread_labels` row - that's symmetric, so the picker scope is the real bug: it surfaces groups for which no local removal is meaningful.
-
-**Add-Label picker uses a global label-group list with no account context, but `ApplyLabelGroup` is account-scoped.** `crates/app/src/command_resolver.rs:36-38` calls `get_label_groups_for_palette()` (no account argument); the command_palette query returns every group regardless of whether the active account has any member labels. Selecting a group whose only members live on a different account dispatches `ApplyLabelGroup` against the selected thread's account; the composite at `label_group.rs` inserts a TLG row but step 2's "Reads `label_group_members` for G filtered to `account_id = A`" (redesign:273) finds nothing and the operation succeeds as local-intent-only. That is spec-correct (redesign:276 "If no member is on account A, step 2 has nothing to dispatch and the operation succeeds purely from local intent."), so the picker is technically defensible. But the user experience is "this group attached but doesn't visibly behave like the others" with no provider write - the picker should at minimum annotate which groups are member-bearing for the active account.
-
-**`build_command_args` for `NavigateToLabel` parses `item.id` as `i64` and silently drops anything else.** `crates/app/src/handlers/commands.rs:1272-1278`. The pre-split code accepted `"account_id:kind:item_id"` and routed folder targets to `NavigateToFolder` and label targets to `NavigateToLabel`. Post-split, only the label-group path remains: the resolver only ever passes the palette `get_label_groups_for_palette` (group IDs are integers as text - `command_palette_queries.rs:21` `r.id.to_string()`), so the integer path is the only live path. But `command_dispatch.rs:551-560` retains a `(NavigateToLabel, CommandArgs::NavigateToFolder { folder_id, account_id })` dispatch arm that is now unreachable because nothing in the palette pipeline produces `CommandArgs::NavigateToFolder` for the `NavigateToLabel` command. Dead arm + dead `account_id` field on `CommandArgs::NavigateToFolder` for that path - flag and remove or convert to a route used by another command.
-
-**`handlers/labels.rs` write stubs claim "per-account" but are still keyed on `normalized_name`.** `crates/app/src/handlers/labels.rs:48-84`. The doc comment switched to "Per-account raw labels"; the function signatures still take `normalized_name: &str` (a pre-split auto-collapse concept) for create/delete/rename, and the log lines say `normalized_name`. Post-split, per-account label CRUD is keyed on `(account_id, label_id)` (per `redesign.md:389` "Per-label rename, recolour ... and delete affordances"). All four stubs return `Err` so it's not load-bearing yet, but the call-site shape is wrong: when the action service grows `label.create`/`label.delete`/`label.rename` they need typed `(AccountId, LabelId)`, not a name. The slice-1 carryover "Cross-account label creation / deletion UI without action" remains unresolved here; the stubs were renamed but not retyped.
-
-**`label_color_overrides` write path missing (carryover from pre-landing audit).** Per the historical section: "superseded; per-row `user_color_bg/fg` columns replace it. Re-verify wiring in slice 5." Verification: the `recolor_label_async` stub at `handlers/labels.rs:73-84` still returns `Err("label recolor not yet implemented")` and the comment at `handlers/mod.rs:42` correctly says "writes per-label `user_color_*`", but there is no implementation. The `LabelEditorState` carries `color_bg` / `color_fg` and `has_override`, and the editor UI exposes a color preview row (`settings/tabs/labels.rs:61-113`), but `LabelEditorColorChanged` (`settings/update/mod.rs:792`) writes only to in-memory editor state - there is no save path. Recolour is unwired end-to-end; redesign:389 ("recolour (writes `user_color_*`)") is unsatisfied.
-
-### MEDIUM
-
-**Settings UI has no "Label Groups" view at all.** `redesign.md:386-393` describes TWO views: (1) "Per-account labels" - which `settings/tabs/mail_rules.rs:21` partially implements via `labels_by_account` - and (2) "Label groups: list of all `label_groups`. Each group expands to show members. Add/remove members via a picker that reads from the labels-per-account view and enforces member-incompatibility rules." There is no `groups`-anything in `Settings` (`ui/settings/types/mod.rs` has no field for groups, no editor sheet for groups, no message variants for group CRUD). The sidebar renders groups (good) and the action pipeline applies/removes them (good), but the user has no UI to create a group, add a member, set member-incompatibility (`importance:high` / `importance:low` per redesign:240-244), or rename/recolour a group. The whole group-lifecycle surface from redesign:334-368 is missing from this slice.
-
-**Settings "Add Label" / label-editor copy still says cross-account.** `crates/app/src/ui/settings/tabs/labels.rs:34-35` reads "Labels apply to messages on every account that supports them. Renaming or recoloring is cross-account." That is the pre-split auto-collapse contract. Post-split, a label is per-account (one `labels` row, one `(account_id, label_id)`) and cross-account-ness lives only in `label_groups`. The editor opens against one specific `(account_id, label_id)` (`LabelEditorState::from_row`), so the cross-account copy actively misleads. `LabelEditorState` doc comment at `types/mod.rs:142-145` is the same regression: "Create mode leaves both blank and writes the new label to every account on save (cross-account fan-out happens at the action layer, not here)." Per redesign there is no cross-account fan-out at the action layer for label create - only group create, which this UI does not surface.
-
-**`mail_rules.rs` "Add Label" button opens the per-account label editor in create mode with empty `account_id`.** `crates/app/src/ui/settings/tabs/labels.rs:225-228`. Empty `account_id` lands as `account_id: String::new()` in `LabelEditorState::new_create()`. A per-account label cannot be created without choosing an account first; the editor has no account picker. The button is decoration until the create path knows which account to write to. Closely related to the missing group UI: redesign explicitly puts label-creation under per-account control, so the picker needs an account dropdown.
-
-**`build_command_args` for `EmailAddLabel` / `EmailRemoveLabel` silently returns `None` when `item.id` is non-numeric.** `crates/app/src/handlers/commands.rs:1253-1266`. Group IDs are `i64` so any non-numeric ID is a programmer error, not a user error. Today the only producer is `get_label_groups_for_palette` which always returns `i64::to_string()`. But a future palette entry that surfaces a non-group "label" (e.g. a per-account label for the Settings-style picker) will silently drop. Either log a warning or change the picker contract so this is unreachable. Defence-in-depth.
-
-**`fire_navigation_load` does not bump nav generation on its own and depends on the caller to do so.** `crates/app/src/helpers.rs:25-59`. Not new in slice 5, but `load_threads_for_label_group_view` (slice-5 addition at `helpers.rs:202-217`) goes through `load_threads_for_current_view`, which is invoked from `load_navigation_and_threads` (which DOES bump the token) and from `fire_navigation_load` callers. The pattern is consistent with the existing `load_threads_scoped` arm; flag as a one-line note that the new branch inherits the existing convention and is fine.
-
-**`thread_query_label_for_selection` now returns `None` for `SidebarSelection::LabelGroup`.** `helpers.rs:219-227`. Correct routing: the group branch hits `load_threads_for_label_group_view` in the caller before this function runs. But the comment over the function still only documents the AllMail case; a maintainer adding a third virtual could miss the LabelGroup arm. Extend the doc comment.
-
-### LOW
-
-**`load_visible_labels_async` doc comment still references "Sidebar section 4".** `crates/app/src/handlers/labels.rs:15-17`. The sidebar LABELS section is no longer numbered "section 4" - the section header is "LABELS" (`ui/sidebar/labels.rs:60`). Stale reference. Same file's module doc says "sidebar section 4" too.
-
-**`db/threads.rs:21` doc says "Label group color info" but the struct is `ResolvedLabel`.** Struct name lies vs comment; either rename the struct to `ResolvedLabelGroup` (preserve `label_id` -> `group_id` rename) or keep the name and drop the misleading "Label group" wording. Same struct's `label_kind: String` doc is "Compatibility discriminator for existing display code" - given the reading_pane CRITICAL above, this "compatibility" field is exactly the trap. Cleanup or retire.
-
-**`handle_label_op` in `handlers/core.rs:669` logs "Failed to load cross-account labels".** Post-split this is per-account label data; rename the log line.
-
-**`labels.rs` sidebar item uses a tuple `(f, LabelGroupId)` and refers to fields via `f.0`/`f.1`.** `crates/app/src/ui/sidebar/labels.rs:25-50`. Readability nit - name the binding `(folder, group_id)` in the `.map` closure so `folder.name` etc. read clearly.
-
-**Sidebar section-toggle gate uses `has_account_labels` as the variable name.** `crates/app/src/ui/sidebar/mod.rs:372-376`. The body now checks `FolderKind::LabelGroup`, so the variable is misnamed - rename to `has_label_groups`.
-
-**`palette.rs:8` comment box dropped the doc ascii rule and switched to a one-line `// Palette query methods.`** - consistent with other recent files in the slice (`handlers/labels.rs:42`); flag only as observation, not a defect.
-
----
-
-**Verdict.** The plumbing for the new `ApplyLabelGroup` / `RemoveLabelGroup` pipeline from palette through command_dispatch to action_resolve is correct, and sidebar routing through `get_label_group_unread_counts` matches redesign:329. Two things keep slice 5 from being a clean landing: (1) the reading-pane pill filter was removed without an explicit gate that funnels only groups through the existing struct, so the spec invariant survives only because every current writer happens to set `kind = "group"` - a regression waiting for the first raw-label writer; (2) the Settings UI has no label-groups surface at all - no create-group, no member picker, no member-incompatibility enforcement. Slice cannot claim "user can manage groups" until the second is built; the first must be either gated explicitly or have the `label_kind` field excised so the trap can't fire.
+Deferred (real product/UI work):
+- Settings "Label Groups" view (create-group, member picker,
+  member-incompatibility enforcement for `importance:*` pairs).
+  Requires new types in `ui/settings/types`, new editor sheet, new
+  message variants, and Service IPC for group CRUD. Tracked as the
+  primary outstanding piece of the labels-unification rollout.
+- Per-account "Add Label" account picker dropdown - depends on the
+  same Service IPC surface as group CRUD.
+- `label.recolor` / `label.rename` / `label.delete` action-service
+  handlers + the corresponding `recolor_label_async` save-path wiring.
+  Current stubs preserve the call-site shape; `LabelEditorState`
+  carries the editor data but no Service IPC ferries it across yet.
+- Add-Label picker annotation showing which groups have members on
+  the active account (defensible UX gap, not a correctness bug; the
+  composite handles the no-member case as spec-correct local intent).
 
 ---
 

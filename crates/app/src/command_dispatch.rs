@@ -553,16 +553,6 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {
             Some(Message::EmailAction(MailActionIntent::Snooze { until }))
         }
-        (
-            CommandId::NavigateToLabel,
-            CommandArgs::NavigateToFolder {
-                folder_id,
-                account_id,
-            },
-        ) => Some(Message::NavigateTo(NavigationTarget::Sidebar {
-            selection: SidebarSelection::ProviderFolder(folder_id),
-            account_id: Some(account_id),
-        })),
         (CommandId::NavigateToLabel, CommandArgs::NavigateToLabel { group_id }) => {
             Some(Message::NavigateTo(NavigationTarget::Sidebar {
                 selection: SidebarSelection::LabelGroup(group_id),

@@ -1,5 +1,12 @@
 use types::{FolderId, LabelGroupId};
 
+// `NavigateToFolder { folder_id, account_id }` previously existed here as
+// the dispatch arg for cross-account folder navigation. Removed in the
+// labels-unification slice 5 cleanup: nothing in the palette pipeline
+// produces it post-split, and the `NavigateToLabel` dispatch arm that
+// consumed it became unreachable. Restore both ends together if a
+// future palette entry surfaces cross-account folder targets.
+
 /// Typed execution payload for parameterized commands.
 ///
 /// Each variant carries exactly the fields that command needs.
@@ -15,12 +22,6 @@ pub enum CommandArgs {
     RemoveLabel { group_id: LabelGroupId },
     /// EmailSnooze -- unix timestamp from DateTime picker
     Snooze { until: i64 },
-    /// Navigate to a provider folder. Includes account_id because
-    /// cross-account navigation needs to scope the sidebar.
-    NavigateToFolder {
-        folder_id: FolderId,
-        account_id: String,
-    },
     /// Navigate to a label group.
     NavigateToLabel { group_id: LabelGroupId },
     /// SmartFolderSave -- name from Text input
