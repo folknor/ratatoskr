@@ -148,7 +148,10 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=canonical-entry,completion-state; enforcement=sealed-constructor,capability-token; promise=Drafts list rows have a single value shape regardless of sync state.
 
-- `crates/label-colors/src/lib.rs:40-50` *(slice 4)* - `resolve_label_color` is the single entry point that returns `(bg_hex, fg_hex)` tuples with priority: user_color > server_color > hash fallback via `color_for_label`. Current convention: callers must invoke this one resolver; the type system does not prevent a hypothetical call site from re-deriving color via `color_for_label` alone and ignoring synced values.
+Label color resolver entry resolved by contract #5b: `resolve_label_color`
+is the public label-color resolution path. The hash fallback helper
+`color_for_label` is private to `label-colors`, so external crates cannot
+derive fallback-only label colors while ignoring user/server color pairs.
 
   Tags: contracts=canonical-entry,validated-domain; enforcement=sealed-constructor,boundary-parse; promise=label rendering consults the synced color before falling back to hash.
 
@@ -164,9 +167,13 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
   Tags: contracts=completion-state; enforcement=sealed-constructor; promise=thread values across views have a single derivation.
 
-- `crates/search/src/lib.rs:915` *(deep slice: smart-folder + search)* - `MatchKind::Body` hardcoded as default in `collect_results`. Tantivy-path search results all default to `Body` unless `enrich_match_kinds` (lines 952-1063) is called. Current convention: `crates/core/src/search_pipeline.rs:305` calls `enrich_match_kinds` only in Tantivy-with-free-text paths (lines 155, 204). SQL-only search (lines 72, 135-141) never calls enrichment, leaving all results as `MatchKind::Body` regardless of which field actually matched. The canonical match-kind determination lives in `enrich_match_kinds`'s per-field snippet generation (lines 1017-1061); SQL-only results silently bypass it.
+Search attribution entry resolved by contract #3 completion-state:
+`UnifiedSearchResult::match_kind` is now `Option<MatchKind>`. Tantivy free-text
+paths still populate `Some(...)` via `enrich_match_kinds`; SQL-only and degraded
+SQL rows use `None` instead of a fake `MatchKind::Body`. Operator-only SQL
+search therefore no longer presents an unattributed filter match as a body hit.
 
-  Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor; promise=search results report which field actually matched.
+  Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor; promise=search results report which field actually matched, or explicitly report that attribution is unavailable.
 
 - `crates/core/src/search_pipeline.rs` *(resolved by contract #3 completion-state)* - Tantivy-only search now fetches thread metadata from SQL and runs `enrich_from_sql` before returning rows. Stale index hits with no matching thread row are dropped, so `is_read` and `is_starred` placeholders no longer reach the renderer in the full-index text path.
 
@@ -346,7 +353,7 @@ again the union of `message_keywords` for the thread's surviving messages.
 
 ### Shape 12 - Partial-enrichment contract mismatch
 
-- `crates/core/src/search_pipeline.rs` *(partially resolved by contract #3 and #2)*: Tantivy-only and combined paths now both enrich from SQL before returning rows, so thread flags and counts are not placeholder state in full-index search results. SQL-only and degraded SQL fallback still use `db_thread_to_unified()` with `match_kind: MatchKind::Body` and empty `also_matched`; that remaining attribution gap is visible through `SearchResults::Degraded` only for fallback, while operator-only SQL search remains an open completion-state issue.
+- `crates/core/src/search_pipeline.rs` *(resolved by contract #3 and #2)*: Tantivy-only and combined paths both enrich from SQL before returning rows, so thread flags and counts are not placeholder state in full-index search results. SQL-only and degraded SQL fallback now return `match_kind: None`, making unavailable attribution explicit instead of leaking `MatchKind::Body` placeholders.
 
   Tags: contracts=completion-state,canonical-entry; enforcement=sealed-constructor,capability-token; promise=a `UnifiedSearchResult` reaching the renderer is fully enriched, regardless of which internal path produced it.
 

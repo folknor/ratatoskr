@@ -33,10 +33,10 @@ pub struct UnifiedSearchResult {
     pub message_count: Option<i64>,
     /// BM25 score from Tantivy, or 0.0 for SQL-only results.
     pub rank: f32,
-    /// Phase 7-8: which field carried the primary match. Defaults to
-    /// `MatchKind::Body` for SQL paths and for Tantivy paths with
-    /// no free-text query (where attribution is meaningless).
-    pub match_kind: MatchKind,
+    /// Phase 7-8: which field carried the primary match.
+    /// `None` means this result came from a path where attribution is
+    /// unavailable or meaningless, such as operator-only SQL.
+    pub match_kind: Option<MatchKind>,
     /// Phase 7-8: secondary matches above the 50%-of-top-score
     /// threshold, score-descending. Empty for SQL paths.
     pub also_matched: Vec<MatchKind>,
@@ -148,7 +148,7 @@ fn search_sql_fallback(
                 is_starred: r.is_starred,
                 message_count: Some(r.message_count),
                 rank: 0.0,
-                match_kind: MatchKind::Body,
+                match_kind: None,
                 also_matched: Vec::new(),
             })
             .collect())
@@ -402,8 +402,7 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
         is_starred: t.is_starred,
         message_count: Some(t.message_count),
         rank: 0.0,
-        // SQL paths don't compute per-field attribution.
-        match_kind: MatchKind::Body,
+        match_kind: None,
         also_matched: Vec::new(),
     }
 }
@@ -486,7 +485,7 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
         is_starred: false,
         message_count: None,
         rank: r.rank,
-        match_kind: r.match_kind.clone(),
+        match_kind: Some(r.match_kind.clone()),
         also_matched: r.also_matched.clone(),
     }
 }
@@ -631,6 +630,7 @@ mod tests {
         assert!(!result.is_starred);
         assert_eq!(result.message_count, Some(3));
         assert_eq!(result.rank, 0.0);
+        assert!(result.match_kind.is_none());
     }
 
     // -- group_by_thread --
@@ -690,6 +690,7 @@ mod tests {
         let t1 = t1.expect("t1 should exist");
         assert_eq!(t1.rank, 5.0);
         assert_eq!(t1.subject.as_deref(), Some("B"));
+        assert!(matches!(t1.match_kind, Some(search::MatchKind::Body)));
 
         let t2 = t2.expect("t2 should exist");
         assert_eq!(t2.rank, 1.0);
@@ -729,7 +730,7 @@ mod tests {
             is_starred: false,
             message_count: None,
             rank: 3.5,
-            match_kind: MatchKind::Body,
+            match_kind: Some(MatchKind::Body),
             also_matched: Vec::new(),
         };
 

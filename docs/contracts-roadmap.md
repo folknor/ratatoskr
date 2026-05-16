@@ -262,7 +262,7 @@ impl DateBound {
 
 ### 4. #3 Completion State - sealed constructor (high fidelity within crate)
 
-**Status:** search enrichment and app-thread constructor slices landed. Tantivy-only search now fetches thread metadata from SQL and applies `enrich_from_sql` before returning, dropping stale index hits that no longer have a thread row. This removes the `is_read: false` / `is_starred: false` placeholder leak for full-index free-text search. App `Thread` conversion defaults now live on associated constructors for DB threads, local drafts, public folder items, and search results. The broader partial/enriched type split remains open.
+**Status:** search enrichment and app-thread constructor slices landed. Tantivy-only search now fetches thread metadata from SQL and applies `enrich_from_sql` before returning, dropping stale index hits that no longer have a thread row. This removes the `is_read: false` / `is_starred: false` placeholder leak for full-index free-text search. SQL-only and degraded SQL rows now carry `match_kind: None` instead of a fake `MatchKind::Body`, so missing attribution is explicit at the renderer boundary. App `Thread` conversion defaults now live on associated constructors for DB threads, local drafts, public folder items, and search results. The broader partial/enriched type split remains open.
 
 **Inventory:** Shape 2 entries (Thread converters, `MatchKind::Body` hardcoded, `is_read: false` hardcoded in Tantivy), Shape 12 (partial enrichment).
 
@@ -321,7 +321,7 @@ Same shape for the `Thread` constructors: four near-identical converters (`db_th
 
 **Migration scope.**
 
-- `crates/search/src/lib.rs` - `PartialSearchHit` defined here; `collect_results` returns it. `MatchKind::Body` is no longer a default.
+- `crates/search/src/lib.rs` and `crates/core/src/search_pipeline.rs` - Tantivy hits keep their internal `MatchKind::Body` default only until `enrich_match_kinds` runs; `UnifiedSearchResult` exposes attribution as `Option<MatchKind>`, so SQL paths cannot masquerade as body hits.
 - `crates/core/src/search_pipeline.rs` - `EnrichedSearchHit` and `SearchResults` defined here; `from_partial` is the sole transition.
 - `crates/app/src/helpers.rs`, `crates/app/src/db/pinned_searches.rs`, `crates/app/src/handlers/search.rs` - four Thread converters → associated constructors on `app::db::types::Thread`.
 
@@ -329,7 +329,7 @@ Same shape for the `Thread` constructors: four near-identical converters (`db_th
 
 ### 5. #5b LabelStyle - sealed constructor + crate-boundary split (high fidelity)
 
-**Status:** landed for the documented surfaces. `label-colors::LabelStyleHex` is a complete `(bg, fg)` pair, `resolve_label_color` accepts only complete pairs, label write APIs reject partial DB pairs, and the labels schema has matching complete-or-missing CHECK constraints. The app UI now has `LabelPaint` with private fields; reading-pane label pills, thread-list label markers, sidebar label rows, and Settings label rows construct it from `LabelStyleHex` and pass `LabelPaint` to label-shaped widgets.
+**Status:** landed for the documented surfaces. `label-colors::LabelStyleHex` is a complete `(bg, fg)` pair, `resolve_label_color` accepts only complete pairs, label write APIs reject partial DB pairs, and the labels schema has matching complete-or-missing CHECK constraints. The hash fallback helper is private to `label-colors`, so synced/user colors cannot be bypassed from another crate. The app UI now has `LabelPaint` with private fields; reading-pane label pills, thread-list markers, sidebar label rows, and Settings label rows construct it from `LabelStyleHex` and pass `LabelPaint` to label-shaped widgets.
 
 **Inventory:** Shape 5's `resolve_label_color` partial-pair entry, Shape 2's label-color resolver entry.
 

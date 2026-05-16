@@ -16,7 +16,7 @@ use preset_colors::all_presets;
 /// colors if desired, but can be set to `""` for global consistency.
 ///
 /// Returns `(bg_hex, fg_hex)`.
-pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'static str) {
+fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'static str) {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     namespace.hash(&mut hasher);
