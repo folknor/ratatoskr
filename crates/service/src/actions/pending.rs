@@ -288,12 +288,14 @@ async fn dispatch_pending_op(
         "applyLabelGroup" => {
             let group_id =
                 common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
-            super::label_group::apply_label_group(ctx, account_id, resource_id, group_id).await
+            super::label_group::apply_label_group_retry(ctx, account_id, resource_id, group_id)
+                .await
         }
         "removeLabelGroup" => {
             let group_id =
                 common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
-            super::label_group::remove_label_group(ctx, account_id, resource_id, group_id).await
+            super::label_group::remove_label_group_retry(ctx, account_id, resource_id, group_id)
+                .await
         }
         other => {
             log::warn!("[pending_ops] Unknown operation type: {other}");
@@ -401,7 +403,7 @@ async fn dispatch_pending_op_with_provider(
         "applyLabelGroup" => {
             let group_id =
                 common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
-            super::label_group::apply_label_group_with_provider(
+            super::label_group::apply_label_group_with_provider_retry(
                 ctx,
                 provider,
                 account_id,
@@ -413,7 +415,7 @@ async fn dispatch_pending_op_with_provider(
         "removeLabelGroup" => {
             let group_id =
                 common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
-            super::label_group::remove_label_group_with_provider(
+            super::label_group::remove_label_group_with_provider_retry(
                 ctx,
                 provider,
                 account_id,

@@ -377,8 +377,16 @@ async fn set_keyword_batched(
     flag_op: &str,
 ) -> Result<(), ProviderError> {
     let Some(keyword) = label_id.strip_prefix("kw:") else {
-        log::debug!("IMAP: keyword op is a no-op for non-keyword label {label_id}");
-        return Ok(());
+        // IMAP only ever stores `kw:*` labels - cat:, importance:* and
+        // Gmail-native label ids cannot land on an IMAP account at ingest.
+        // If one arrives here it is a programmer error elsewhere (likely
+        // the label-group composite dispatching a cross-provider member);
+        // surface it as a hard failure rather than a silent success so
+        // the composite sees the breakage instead of marking a no-op
+        // member as Success.
+        return Err(ProviderError::Client(format!(
+            "IMAP keyword op received non-keyword label id `{label_id}`"
+        )));
     };
 
     let account_id = ctx.account_id.to_string();

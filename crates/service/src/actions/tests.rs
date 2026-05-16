@@ -590,3 +590,186 @@ fn action_outcome_helpers() {
     };
     assert!(failed.is_failed());
 }
+
+// ── label_group composite tests ────────────────────────────────────
+
+fn insert_label_group(ctx: &ActionContext, group_id: i64, name: &str) {
+    let conn = ctx.db.conn();
+    let conn = conn.lock().expect("lock");
+    conn.execute(
+        "INSERT INTO label_groups (id, name, color_bg, color_fg) VALUES (?1, ?2, '#000', '#fff')",
+        params![group_id, name],
+    )
+    .expect("insert label group");
+}
+
+fn insert_label(ctx: &ActionContext, account_id: &str, label_id: &str, name: &str) {
+    let conn = ctx.db.conn();
+    let conn = conn.lock().expect("lock");
+    conn.execute(
+        "INSERT INTO labels (account_id, id, name) VALUES (?1, ?2, ?3)",
+        params![account_id, label_id, name],
+    )
+    .expect("insert label");
+}
+
+fn insert_group_member(ctx: &ActionContext, group_id: i64, account_id: &str, label_id: &str) {
+    let conn = ctx.db.conn();
+    let conn = conn.lock().expect("lock");
+    conn.execute(
+        "INSERT INTO label_group_members (group_id, account_id, label_id) VALUES (?1, ?2, ?3)",
+        params![group_id, account_id, label_id],
+    )
+    .expect("insert member");
+}
+
+fn has_thread_label_group(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    group_id: i64,
+) -> bool {
+    let conn = ctx.db.conn();
+    let conn = conn.lock().expect("lock");
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM thread_label_groups \
+             WHERE account_id = ?1 AND thread_id = ?2 AND group_id = ?3",
+            params![account_id, thread_id, group_id],
+            |row| row.get(0),
+        )
+        .expect("query");
+    count > 0
+}
+
+#[tokio::test]
+async fn apply_label_group_local_initial_inserts_tlg_row() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_label_group(&ctx, 1, "Work");
+
+    let r = super::label_group::apply_label_group_local_initial(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(1),
+    )
+    .await;
+    assert!(r.is_ok(), "{r:?}");
+    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+}
+
+#[tokio::test]
+async fn apply_label_group_local_initial_zero_members_still_succeeds() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_label_group(&ctx, 1, "Work");
+    // No members - per redesign.md a zero-member group is valid and the
+    // composite resolves locally.
+    let r = super::label_group::apply_label_group_local_initial(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(1),
+    )
+    .await;
+    assert!(r.is_ok());
+    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+}
+
+#[tokio::test]
+async fn apply_label_group_local_initial_unknown_group_errors() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    let r = super::label_group::apply_label_group_local_initial(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(99),
+    )
+    .await;
+    assert!(r.is_err());
+}
+
+#[tokio::test]
+async fn remove_label_group_local_initial_deletes_tlg_row() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_label_group(&ctx, 1, "Work");
+    super::label_group::apply_label_group_local_initial(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(1),
+    )
+    .await
+    .expect("apply");
+    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+
+    super::label_group::remove_label_group_local_initial(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(1),
+    )
+    .await
+    .expect("remove");
+    assert!(!has_thread_label_group(&ctx, "acc1", "t1", 1));
+}
+
+#[tokio::test]
+async fn remove_label_group_with_no_attachment_succeeds() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_label_group(&ctx, 1, "Work");
+    // Never applied - remove must still resolve cleanly (idempotent).
+    let outcome = super::label_group::remove_label_group(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(1),
+    )
+    .await;
+    assert!(outcome.is_local_only() || outcome.is_success());
+    assert!(!has_thread_label_group(&ctx, "acc1", "t1", 1));
+}
+
+#[tokio::test]
+async fn apply_label_group_handles_member_label() {
+    // Initial dispatch through the public path; no provider available
+    // (no oauth setup), so it falls through the LocalOnly enqueue branch.
+    // We assert the local mutation lands.
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_label_group(&ctx, 1, "Work");
+    insert_label(&ctx, "acc1", "labelA", "Label A");
+    insert_group_member(&ctx, 1, "acc1", "labelA");
+
+    let outcome = super::label_group::apply_label_group(
+        &ctx,
+        "acc1",
+        "t1",
+        common::typed_ids::LabelGroupId(1),
+    )
+    .await;
+    // Provider construction will fail for this fake account; expect
+    // LocalOnly with the composite-typed retry enqueued (NOT per-member
+    // rows - that bypasses the preflight contract).
+    assert!(outcome.is_local_only() || outcome.is_success());
+    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+    // Composite type enqueued, not raw addLabel.
+    let composite_count = count_pending_ops(&ctx, "acc1", "t1", "applyLabelGroup");
+    let raw_count = count_pending_ops(&ctx, "acc1", "t1", "addLabel");
+    assert!(
+        composite_count > 0 || raw_count == 0,
+        "expect composite-typed retry rather than raw addLabel rows: \
+         composite={composite_count}, raw={raw_count}"
+    );
+    assert_eq!(raw_count, 0, "no per-member rows allowed in pending_operations");
+}

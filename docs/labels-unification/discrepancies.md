@@ -86,45 +86,50 @@ Carryover (not directly addressed by the landing commit):
 
 ## Slice 4 - action pipeline + label_group composite
 
-### CRITICAL
+RESOLVED in this branch.
 
-**Retry preflight is unreachable on the normal failure path.** `crates/service/src/actions/label_group.rs:200-229` + `crates/service/src/actions/label.rs:82-121, 213-255`. `redesign.md:286-292` mandates a preflight on `applyLabelGroup` / `removeLabelGroup` retries: skip member dispatch if the user has since reversed intent on `thread_label_groups(T, G)`. The composite `dispatch_member_ops` calls `add_label_with_provider` / `remove_label_with_provider` for each member; each of THOSE functions calls `enqueue_if_retryable` with `operation_type = "addLabel"` / `"removeLabel"` against the resource_id of the THREAD. So a provider failure inside the composite enqueues per-member `addLabel` rows in `pending_operations`, NEVER a composite `applyLabelGroup` row. The drainer in `pending.rs:288-296` then re-dispatches them as raw `add_label` / `remove_label`, which has no preflight. The preflight code path (`apply_label_group_local` / `remove_label_group_local` invoked via the composite enqueue path) only fires when provider CREATION fails outright (`label_group.rs:113-134`) - which is rare relative to per-call provider rejection. Net: stale per-member retries can resurrect or re-clear pills against current user intent for the entire pending-ops TTL after the user has long since reversed course. Fix shape: either swallow per-member enqueues inside the composite (pass a flag through `ActionContext` like `suppress_pending_enqueue`) and enqueue ONE `applyLabelGroup` / `removeLabelGroup` row for the failed members, or have the composite report a single `LocalOnly` and enqueue itself, suppressing the inner `addLabel` writes the way retry-dispatch suppresses re-enqueue at `pending.rs:108-109`.
+- Composite retry preflight is reachable: `apply_label_group_with_kind` /
+  `remove_label_group_with_kind` take a `DispatchKind` (Initial vs Retry).
+  The pending-ops drainer dispatches via `_retry` variants. On a Retry,
+  the local helper consults `thread_label_groups(T, G)` and returns
+  `LocalStep::Skip` if user intent has reversed since enqueue; the
+  composite resolves as `Success` without dispatching member writes.
+- Per-member dispatches inside `dispatch_member_ops` run against a
+  clone of the context with `suppress_pending_enqueue = true`. The
+  underlying `add_label_with_provider` / `remove_label_with_provider`
+  still go through their normal enqueue helper, which is a no-op under
+  the suppress flag. Composite caller enqueues a single
+  `applyLabelGroup` / `removeLabelGroup` row covering the failed
+  members via `enqueue_composite_if_local_only`. The drainer never sees
+  raw `addLabel` retries from a composite.
+- `dispatch_member_ops` continues past per-member `Failed` outcomes so
+  a single hard error does not abandon the rest. LocalOnly takes
+  precedence over Failed in the aggregate so the composite-retry path
+  activates whenever any member is retryable.
+- `ensure_prefixed_tag_label` uses `INSERT ... ON CONFLICT ... DO
+  UPDATE SET is_undeletable = OR-merge`, repairing a stale
+  `importance:*` row whose flag was cleared by a pre-invariant sync.
+- `set_keyword_batched` returns `ProviderError::Client` for a
+  non-`kw:` label id rather than silently succeeding. With the
+  composite calling per-member, that surfaces a real provider failure
+  instead of marking the member Success.
+- `MailActionIntent::AddLabel` / `RemoveLabel` doc-comment names the
+  Settings/undo-only contract so a future contributor cannot wire a
+  context-menu item to the per-account variant by accident.
+- Tests added: local-step initial insert/delete, unknown-group error,
+  zero-member apply, public composite under no-provider path asserts a
+  composite-typed retry row is enqueued and no per-member raw
+  addLabel/removeLabel rows leak into `pending_operations`.
 
-**`apply_label_group_local` and `remove_label_group_local` have no retry preflight even on the composite-retry path.** `crates/service/src/actions/label_group.rs:11-46, 48-74`. Even when the composite-level retry DOES fire (provider-creation-failure path), `apply_label_group_local` unconditionally `INSERT OR IGNORE`s the TLG row. `redesign.md:290`: "Apply retry: if `thread_label_groups(T, G)` no longer exists, the user has since removed the group. The retry skips all queued member `AddLabel` dispatches and resolves successfully." Current code re-inserts and re-dispatches. Symmetric for `remove_label_group_local`: no check that `thread_label_groups(T, G)` exists again (user re-applied). The two functions are shared between the initial dispatch (where pre-flight is a no-op because TLG was just written by the user click) and the retry path (where pre-flight is load-bearing); they have no signal to distinguish. Add a `RetryContext` parameter or a separate `_retry` entry point that runs the spec's preflight and short-circuits to `Success` / `NoOp`.
-
-### HIGH
-
-**Composite outcome leaks per-member outcomes as separate planner notifications.** `crates/service/src/actions/label_group.rs:200-229` does internally return a single `ActionOutcome`, satisfying redesign:299 at the composite-function boundary. But because the per-member `add_label_with_provider` writes ALSO call `enqueue_if_retryable` (`label.rs:110-118, 244-252`), and pending-op drains turn into their own `OperationOutcome` notifications, the planner DOES eventually see one-per-member outcomes via the retry stream. The composite-as-single-op contract is honoured for the synchronous return value only, not for the lifetime of the operation. Coupled with the CRITICAL above.
-
-**No tests for `apply_label_group` / `remove_label_group`.** `crates/service/src/actions/tests.rs` has zero coverage for the new composite action - no apply, no remove, no fan-out, no zero-member case, no preflight. The slice ships the most-complex new code path in the action pipeline without a single unit test. The mod.rs change at `actions/mod.rs:14` lists the new module but no test module references it. Lands the architecture-checklist surface (variant, wire arms, completion behavior, undo pairing, batch routing) without exercising the runtime invariants the spec is most specific about.
-
-**`ensure_prefixed_tag_label` uses `INSERT OR IGNORE`, so a pre-existing `importance:*` row with the wrong flag is never repaired.** `crates/service/src/actions/label.rs:69-78`. The new writer correctly sets `is_undeletable = true` for `importance:high` / `importance:low` (lines 61-64), satisfying the invariant for fresh rows. But `INSERT OR IGNORE` is no-op on conflict, so if a row with `is_undeletable = 0` already exists (e.g., synced before the invariant was added, or written by a sync path before slice 2's clobber-fix lands - see slice 2 HIGH on `upsert_labels`), the action-side writer can't repair it. The invariant at `redesign.md:165` reads "any `importance:*` row in `labels` carries `is_undeletable = 1`, regardless of which writer produced it" - current code satisfies the writer-side guarantee but lets stale rows persist. Combine with a one-time `UPDATE labels SET is_undeletable = 1 WHERE id IN ('importance:high','importance:low') AND is_undeletable = 0` at boot or accept that the sync upsert (slice 2) needs the `is_undeletable = labels.is_undeletable OR excluded.is_undeletable` fix to backfill.
-
-**`MailActionIntent::AddLabel` / `RemoveLabel` survive as live variants with no message-UI builders, but they're still resolved into raw `MailOperation::AddLabel` / `RemoveLabel`.** `crates/app/src/action_resolve.rs:27-28, 689-696`. `redesign.md:248`: "The message UI never operates on per-account labels directly. Apply/remove targets `MailActionIntent::ApplyLabelGroup` / `RemoveLabelGroup` only; there is no equivalent intent for raw `AddLabel`/`RemoveLabel` from the message-level UI. Per-account label create/rename/delete affordances live in Settings only." The variants exist for the Settings-side dispatch (slice 5) and for undo round-trip. Today they are dead from the message UI side (`grep` confirms no UI constructor). Worth a doc comment naming the contract so a future contributor doesn't wire a context-menu item to them.
-
-### MEDIUM
-
-**`set_keyword_batched` silently no-ops for `cat:`, `importance:*`, and any non-`kw:` IDs on IMAP.** `crates/imap/src/ops.rs:379-382`. Returns `Ok(())` for any label_id without the `kw:` prefix. The composite `dispatch_member_ops` treats `Ok(())` as Success, so an IMAP account containing an `importance:high` member (synthetic, shouldn't happen on IMAP, but the composite has no provider-shape check) silently reports success. With redesign:248's "members are per-account labels" - `importance:*` only lives on Graph accounts, so the cross-pollination case is constrained - but the silent-success-on-no-op pattern should at minimum log at debug (the existing `log::debug!` call is fine; the concern is more the lack of an action-side guard).
-
-**`supports_keywords` action-service gate still missing (carryover from slice 1).** Re-confirmed. `crates/db/src/db/queries_extra/account_sync_writes.rs:90-104` writes the flag during IMAP discovery; nothing in `crates/service/src/actions/label.rs` or `label_group.rs` consults it. An `AddLabel` against an IMAP account whose server doesn't support `PERMANENTFLAGS \*` will reach `set_keyword_batched` and dispatch a STORE that the server rejects, producing a `LocalOnly` retry that will fail forever. The user sees a pill that won't stick. Spec line for the gate exists implicitly in `folders-labels.md:107` ("when `PERMANENTFLAGS \*` is supported"). Move the gate up to either the resolver (reject the intent and surface a settings-level explanation) or to the composite (filter members whose account-provider-pair can't support them).
-
-**Label dispatch thread-level vs per-message (carryover).** Resolved at the provider layer for IMAP: `set_keyword_batched` (`crates/imap/src/ops.rs:372-412`) calls `get_thread_message_refs`, groups by folder, and fans out per-UID via `imap_client::set_keyword_batch_if_supported`. The carryover concern is closed for IMAP. JMAP `email_set` is per-message but takes a multi-id update, and Graph `categories` patches per-message - verify those provider impls handle the full thread the same way; not in slice 4's diff.
-
-**`dispatch_member_ops` short-circuits on the first `Failed`, abandoning later members.** `crates/service/src/actions/label_group.rs:218`. Per-member loop returns `ActionOutcome::Failed { error }` on the first hard failure, leaving subsequent members un-dispatched. `redesign.md:296-299` describes failure semantics for "Provider AddLabel / RemoveLabel dispatches" as per-member retry, but only talks about LocalOnly. A genuine `Failed` (e.g., `NotFound` from `add_label_local` for a member whose label was deleted between member-read and dispatch) skips remaining members. With `label_group_members.UNIQUE(account_id, label_id)` and `ON DELETE CASCADE`, a member can disappear between `read_group_member_labels` (line 41) and the for-loop (line 209). Either continue past `Failed` or re-read members atomically inside the loop.
-
-**`apply_label_group_local` does not commit step 1 (TLG insert) and step 2 (per-member `thread_labels` inserts) atomically.** `redesign.md:297`: "local writes from steps 1 and 2 stay committed regardless of provider outcomes." Current shape: step 1 commits in `apply_label_group_local`'s `spawn_blocking` (line 35-40), then control returns to async, then per-member `add_label_local` calls run in their own `spawn_blocking` per member (`label.rs:24`), each acquiring the connection lock independently. Between step 1 and each step-2 call, a concurrent sync could insert/delete `thread_labels` rows that interfere. Probably not load-bearing because both writes are `INSERT OR IGNORE` on the same junction, but the spec reads as a single local commit before any provider dispatch, and the implementation splits it across N+1 transactions interleaved with await points.
-
-### LOW
-
-**Comment lies in `action_resolve.rs:388-389`.** Both `MailUndoPayload::ApplyLabelGroup` and `RemoveLabelGroup` produce description "Applied label" / "Removed label" - fine for user-facing strings, but the variant names suggest group-level affordances; the descriptions don't distinguish "label" (per-account) from "label group" (composite). Either acceptable or a missed opportunity for clarity; leaving stylistic.
-
-**`enqueue_params` for label group ops encodes `group_id` as integer JSON; the wire side encodes it as `WireLabelGroupId(i64)`.** Round-trip-safe. The JSON encoding under `{"groupId": <i64>}` matches `pending.rs:289-295` decoding. No bug; flagging because the format is non-self-describing (no kind tag) and silently swaps to `unwrap_or(0)` on parse failure, which would silently apply/remove group_id 0 (no row, returns `not_found`). Defensible since pending-ops payloads are internal, but a malformed payload returns `not_found` rather than `invalid_state` - a minor classification miss.
-
-**Undo pairing for `ApplyLabelGroup` / `RemoveLabelGroup` is symmetric in wire and dispatch, but the local-DB semantics aren't quite inverse.** `commands.rs:1105-1124`. Undo of Apply dispatches Remove (and vice versa). The composite reads the *current* member set from `label_group_members` at dispatch time, so undoing Apply will dispatch RemoveLabel for whatever members are in the group NOW - not whatever members were active at the time of the original Apply. If the user added a member to the group between Apply and Undo, Undo will RemoveLabel that newly-added member, surprising the user. Spec leaves this open. Flag for awareness; the redesign's "groups are user-authored, member changes are local" makes it tolerable but not perfectly invertible.
-
----
-
-**Verdict.** Composite plumbing, wire mirrors, completion behavior, undo pairing, and batch routing are all wired correctly through the architecture checklist. The fatal gap is the retry preflight: the spec's load-bearing contract that stale composite retries don't fight current user intent is bypassed entirely on the normal provider-failure path, because per-member dispatches enqueue per-member retries rather than composite retries. Slice cannot ship without addressing the two CRITICALs.
+Deferred:
+- `supports_keywords` action-service gate (still missing; needs the
+  resolver-level filter that requires UI work alongside).
+- Strict atomicity of TLG-insert + per-member `thread_labels` inserts
+  (current shape is N+1 transactions; the journal + composite-retry
+  contract above tolerates partial-failure mid-fanout).
+- Undo of Apply uses the CURRENT member set rather than the historical
+  one. Documented as a known trade-off in `architecture.md` "Composite
+  operations".
 
 ---
 

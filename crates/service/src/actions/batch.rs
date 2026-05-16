@@ -395,14 +395,14 @@ async fn op_local(
                 .map(|()| true)
         }
         MailOperation::ApplyLabelGroup { group_id } => {
-            label_group::apply_label_group_local(ctx, account_id, thread_id, *group_id)
+            label_group::apply_label_group_local_initial(ctx, account_id, thread_id, *group_id)
                 .await
-                .map(|_| true)
+                .map(|()| true)
         }
         MailOperation::RemoveLabelGroup { group_id } => {
-            label_group::remove_label_group_local(ctx, account_id, thread_id, *group_id)
+            label_group::remove_label_group_local_initial(ctx, account_id, thread_id, *group_id)
                 .await
-                .map(|_| true)
+                .map(|()| true)
         }
         MailOperation::SetPinned { to } => {
             // Local-only action in degraded path - call the action directly

@@ -66,11 +66,18 @@ fn ensure_prefixed_tag_label(
         return None;
     };
 
+    // ON CONFLICT with OR semantics on is_undeletable repairs a pre-existing
+    // row that was synced before the invariant landed (e.g. an `importance:*`
+    // row written by an older sync pass with the flag cleared). This matches
+    // the OR rule in `upsert_labels` so the invariant from redesign.md
+    // "is_undeletable" holds regardless of writer.
     Some(
         conn.execute(
-            "INSERT OR IGNORE INTO labels \
+            "INSERT INTO labels \
              (id, account_id, name, sort_order, is_undeletable) \
-             VALUES (?1, ?2, ?3, COALESCE(?4, 0), ?5)",
+             VALUES (?1, ?2, ?3, COALESCE(?4, 0), ?5) \
+             ON CONFLICT(account_id, id) DO UPDATE SET \
+               is_undeletable = (labels.is_undeletable OR excluded.is_undeletable)",
             rusqlite::params![label_id, account_id, name, sort_order, is_undeletable],
         )
         .map(|_| ())
@@ -94,18 +101,13 @@ async fn add_label_dispatch(
         db: &ctx.db,
         progress: &NoopProgressReporter,
     };
-
     let result = provider.add_label(&provider_ctx, thread_id, label_id).await;
-
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(msg),
-                retryable: true,
-            }
-        }
+        Err(e) => ActionOutcome::LocalOnly {
+            reason: ActionError::remote(e.to_string()),
+            retryable: true,
+        },
     };
     enqueue_if_retryable(
         ctx,
@@ -226,20 +228,15 @@ async fn remove_label_dispatch(
         db: &ctx.db,
         progress: &NoopProgressReporter,
     };
-
     let result = provider
         .remove_label(&provider_ctx, thread_id, label_id)
         .await;
-
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(msg),
-                retryable: true,
-            }
-        }
+        Err(e) => ActionOutcome::LocalOnly {
+            reason: ActionError::remote(e.to_string()),
+            retryable: true,
+        },
     };
     enqueue_if_retryable(
         ctx,
