@@ -9,12 +9,12 @@ use crate::provider::crypto::{decrypt_value, is_encrypted};
 
 // Re-export everything from db::queries so existing callers keep working.
 pub use db::db::queries::{
-    add_thread_label, delete_label, delete_thread, get_attachments_for_message,
-    get_bundle_unread_counts, get_categories_for_threads, get_contact_by_email, get_labels,
-    get_provider_type, get_setting, get_thread_by_id, get_thread_count, get_thread_label_ids,
-    get_threads, get_threads_for_bundle, get_unread_count, remove_thread_label, search_contacts,
-    set_setting, set_thread_muted, set_thread_pinned, set_thread_read, set_thread_starred,
-    upsert_label,
+    add_thread_folder, add_thread_label, delete_label, delete_thread, get_attachments_for_message,
+    get_bundle_unread_counts, get_categories_for_threads, get_contact_by_email, get_folders,
+    get_labels, get_provider_type, get_setting, get_thread_by_id, get_thread_count,
+    get_thread_folder_ids, get_thread_label_ids, get_threads, get_threads_for_bundle,
+    get_unread_count, remove_thread_folder, remove_thread_label, search_contacts, set_setting,
+    set_thread_muted, set_thread_pinned, set_thread_read, set_thread_starred, upsert_label,
 };
 // Re-export FTS5/LIKE helpers.
 pub use db::db::sql_fragments::{build_fts_query, make_like_pattern};

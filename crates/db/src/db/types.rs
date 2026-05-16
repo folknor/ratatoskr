@@ -118,25 +118,19 @@ pub struct DbMessage {
     pub imap_folder: Option<String>,
 }
 
-// ── Label ────────────────────────────────────────────────────
+// ── Folder / label ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbLabel {
+pub struct DbFolder {
     pub id: String,
     pub account_id: String,
     pub name: String,
-    #[serde(rename = "type")]
-    pub label_type: Option<String>,
-    /// Whether this label is a container (folder/mailbox) or a tag (category/keyword).
-    /// Values: "container" or "tag".
-    pub label_kind: String,
-    pub color_bg: Option<String>,
-    pub color_fg: Option<String>,
     pub visible: bool,
     pub sort_order: i64,
     pub imap_folder_path: Option<String>,
     pub imap_special_use: Option<String>,
-    pub parent_label_id: Option<String>,
+    pub namespace_type: Option<String>,
+    pub parent_id: Option<String>,
     // ── Mailbox rights (JMAP Sharing / IMAP ACL) ────────────
     // None = unknown/not applicable. Some(true) = permitted, Some(false) = denied.
     pub right_read: Option<bool>,
@@ -151,6 +145,21 @@ pub struct DbLabel {
     // ── Subscription state (JMAP Sharing) ───────────────────
     // None = unknown/not applicable. Some(true) = subscribed.
     pub is_subscribed: Option<bool>,
+    pub is_undeletable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbLabel {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub visible: bool,
+    pub sort_order: i64,
+    pub server_color_bg: Option<String>,
+    pub server_color_fg: Option<String>,
+    pub user_color_bg: Option<String>,
+    pub user_color_fg: Option<String>,
+    pub is_undeletable: bool,
 }
 
 // ── Setting ──────────────────────────────────────────────────

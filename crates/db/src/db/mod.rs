@@ -17,6 +17,7 @@ pub use rusqlite::Error as SqlError;
 pub use rusqlite::OptionalExtension;
 pub use rusqlite::Row;
 pub use rusqlite::params;
+pub use rusqlite::types::ToSql;
 
 /// Default row limit for queries (contact lists, search results, thread
 /// batches) when the caller doesn't specify an explicit limit.

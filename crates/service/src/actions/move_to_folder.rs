@@ -7,7 +7,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use db::db::queries_extra::{insert_label, remove_label};
+use db::db::queries_extra::{insert_folder, remove_folder};
 use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for move-to-folder (idempotent).
@@ -27,9 +27,9 @@ pub(crate) async fn move_local(
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         if let Some(ref src) = source {
-            remove_label(&conn, &aid, &tid, src)?;
+            remove_folder(&conn, &aid, &tid, src)?;
         }
-        insert_label(&conn, &aid, &tid, &fid).map(|_| ())
+        insert_folder(&conn, &aid, &tid, &fid).map(|_| ())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

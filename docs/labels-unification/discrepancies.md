@@ -2,6 +2,8 @@
 
 Audit date: 2026-05-15 (supersedes 2026-03-30 audit).
 
+Superseded by `docs/labels-unification/redesign.md` for the storage split and explicit label-group model. This file is retained as historical context for the auto-collapse design it audited.
+
 Items are ordered by suggested working order: most-user-visible-with-no-open-design-questions first, cleanup and spec drift last, resolved items at the bottom for the historical record.
 
 ---
@@ -60,7 +62,7 @@ Gate removed from `command_resolver.rs` (this was prior audit's #1). Function st
 
 ### Label dispatch is thread-level, not per-message
 
-Spec § "Applying and Removing Labels" describes per-message dispatch with per-message provider resolution. Code dispatches at thread level: `crates/service/src/actions/label.rs:109` calls `provider.add_label(thread_id, label_id)`. Provider implementations (`crates/gmail/src/ops.rs:124-148`, `crates/imap/src/ops.rs`) accept `thread_id`. Functionally correct today because threads are single-account; would break if threads ever span accounts. Either bring code into line with stated design intent, or amend the spec to commit to thread-level dispatch.
+Spec section "Applying and Removing Labels" describes per-message dispatch with per-message provider resolution. Code dispatches at thread level: `crates/service/src/actions/label.rs:109` calls `provider.add_label(thread_id, label_id)`. Provider implementations (`crates/gmail/src/ops.rs:124-148`, `crates/imap/src/ops.rs`) accept `thread_id`. Functionally correct today because threads are single-account; would break if threads ever span accounts. Either bring code into line with stated design intent, or amend the spec to commit to thread-level dispatch.
 
 ### Spec text drift: `add_tag`/`remove_tag` vs `add_label`/`remove_label`
 
@@ -68,7 +70,7 @@ Spec § "Applying and Removing Labels" describes per-message dispatch with per-m
 
 ### Spec text drift: stale `apply_category`/`remove_category` references
 
-Phase 6 removed these methods from ProviderOps, but `problem-statement.md` § Outgoing sync (line ~222) and § Phase 4 description (line ~284) still describe dispatch through them.
+Phase 6 removed these methods from ProviderOps, but `problem-statement.md` section Outgoing sync (line ~222) and section Phase 4 description (line ~284) still describe dispatch through them.
 
 ---
 

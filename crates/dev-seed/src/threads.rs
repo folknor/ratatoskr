@@ -526,25 +526,14 @@ pub fn generate_threads(
         )
         .map_err(|e| format!("update thread: {e}"))?;
 
-        // Thread labels: folder label
+        // Thread folders: primary folder only. All Mail is a virtual no-filter view.
         if let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == folder_name) {
             conn.execute(
-                "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                "INSERT OR IGNORE INTO thread_folders (thread_id, account_id, folder_id)
                  VALUES (?1, ?2, ?3)",
                 rusqlite::params![thread_id, acc.id, label_id],
             )
-            .map_err(|e| format!("insert thread_label (folder): {e}"))?;
-        }
-
-        if !matches!(folder_name, "Trash" | "Spam" | "Drafts")
-            && let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == "All Mail")
-        {
-            conn.execute(
-                "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
-                 VALUES (?1, ?2, ?3)",
-                rusqlite::params![thread_id, acc.id, label_id],
-            )
-            .map_err(|e| format!("insert thread_label (all mail): {e}"))?;
+            .map_err(|e| format!("insert thread_folder: {e}"))?;
         }
 
         // Thread labels: user label based on category

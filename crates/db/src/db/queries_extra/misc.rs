@@ -166,7 +166,7 @@ pub async fn db_find_special_folder(
     db.with_conn(move |conn| {
         let result: Option<SpecialFolderRow> = conn
             .query_row(
-                "SELECT imap_folder_path, name FROM labels WHERE account_id = ?1 AND imap_special_use = ?2 LIMIT 1",
+                "SELECT imap_folder_path, name FROM folders WHERE account_id = ?1 AND imap_special_use = ?2 LIMIT 1",
                 params![account_id, special_use],
                 SpecialFolderRow::from_row,
             )
@@ -177,7 +177,7 @@ pub async fn db_find_special_folder(
         if let Some(label_id) = fallback_label_id {
             let fallback: Option<SpecialFolderRow> = conn
                 .query_row(
-                    "SELECT imap_folder_path, name FROM labels WHERE account_id = ?1 AND id = ?2 AND imap_folder_path IS NOT NULL LIMIT 1",
+                    "SELECT imap_folder_path, name FROM folders WHERE account_id = ?1 AND id = ?2 AND imap_folder_path IS NOT NULL LIMIT 1",
                     params![account_id, label_id],
                     SpecialFolderRow::from_row,
                 )
@@ -238,10 +238,10 @@ pub async fn db_get_inbox_threads_for_backfill(
                         m.from_address, m.from_name,
                         m.to_addresses, t.has_attachments, m.id
                  FROM threads t
-                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+                 INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
                  LEFT JOIN ({LATEST_MESSAGE_BACKFILL_SUBQUERY}
                  ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
+                 WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX'
                  ORDER BY t.last_message_at DESC
                  LIMIT ?2 OFFSET ?3"
         );

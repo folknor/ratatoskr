@@ -99,14 +99,6 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
         imap_name_aliases: &[],
     },
     SystemFolderRole {
-        label_id: "all-mail",
-        label_name: "All Mail",
-        jmap_role: None,
-        graph_alias: None,
-        imap_special_use: Some("\\All"),
-        imap_name_aliases: &["all mail", "[gmail]/all mail"],
-    },
-    SystemFolderRole {
         label_id: "IMPORTANT",
         label_name: "Important",
         jmap_role: Some("important"),
@@ -137,6 +129,16 @@ pub fn graph_well_known_aliases() -> Vec<(&'static str, &'static str, &'static s
                 .map(|alias| (alias, entry.label_id, entry.label_name))
         })
         .collect()
+}
+
+pub fn is_system_folder_id(label_id: &str) -> bool {
+    SYSTEM_FOLDER_ROLES
+        .iter()
+        .any(|entry| entry.label_id == label_id && entry.label_id != "STARRED")
+}
+
+pub fn is_gmail_system_folder_label_id(label_id: &str) -> bool {
+    is_system_folder_id(label_id) || label_id == "CHAT" || label_id.starts_with("CATEGORY_")
 }
 
 pub fn system_folder_by_imap_special_use(special_use: &str) -> Option<&'static SystemFolderRole> {
@@ -207,7 +209,6 @@ mod tests {
 
     #[test]
     fn maps_imap_name_aliases() {
-        assert_eq!(imap_name_to_special_use("[gmail]/all mail"), Some("\\All"));
         assert_eq!(imap_name_to_special_use("spam"), Some("\\Junk"));
     }
 

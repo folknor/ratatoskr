@@ -7,14 +7,14 @@ This document tracks a class of bug, not a single bug: code paths "for the same 
 
 The eventual fix is **compile-time enforced**: the type system must make it impossible to compose a list-and-count pair that disagree on what they're filtering, and impossible to render a property without consulting its canonical source of truth. This is not an "audit-and-fix" item - auditing keeps drifting back to broken six months later. The goal is that "I meant thread-aggregate" and "I meant message-level" are distinct types, and that "the color of a label" has exactly one entry point.
 
-## The motivating example
+## The motivating example (fixed by the folders / labels split)
 
 `crates/smart-folder/src/sql_builder.rs` builds two queries from one `ParsedQuery`:
 
 - `query_threads` (the list view) - `sql_builder.rs:14-43`
 - `count_matching` (the sidebar pill) - `sql_builder.rs:46-68`
 
-`count_smart_folder_unread` (`crates/smart-folder/src/lib.rs:41-54`) sets `parsed.is_unread = Some(true)` before calling `count_matching`. `build_read_clauses` (`sql_builder.rs:217-227`) translates that to `m.is_read = 0`, pushed onto `msg_clauses`. The shared SQL skeleton (`build_thread_select_sql` / `build_count_sql`, `sql_builder.rs:468-499`) puts `msg_clauses` *inside* the inner-join messages subquery:
+Before the fix, `count_smart_folder_unread` set `parsed.is_unread = Some(true)` before calling `count_matching`. The old read/starred clause builder translated that to `m.is_read = 0`, pushed onto `msg_clauses`. The shared SQL skeleton (`build_thread_select_sql` / `build_count_sql`) puts `msg_clauses` *inside* the inner-join messages subquery:
 
 ```sql
 SELECT ... FROM threads t
@@ -26,9 +26,11 @@ INNER JOIN (
 WHERE 1=1 {thread_flag_where}
 ```
 
-So the pill counts "threads where there exists a message satisfying *every* filter simultaneously, including being unread." The list does not enforce unread at all - it just shows whatever the saved query matched and lets the thread-list UI render bold/unread state from `t.is_read` (the thread-aggregate).
+So the pill counted "threads where there exists a message satisfying *every* filter simultaneously, including being unread." The list did not enforce unread at all - it just showed whatever the saved query matched and let the thread-list UI render bold/unread state from `t.is_read` (the thread aggregate).
 
-The dev-seed symptom: "Starred This Week" (`is:starred after:-7`) shows 24 unread threads when opened and a 0 pill, because the threads have an older unread message and a newer read message. The thread is unread at the aggregate level, satisfies the list query (a recent message exists), but doesn't satisfy the pill (no single message is both recent and unread). Per-glossary aggregate semantics are documented in `docs/glossary/folders-labels.md:118-128`.
+The dev-seed symptom was: "Starred This Week" (`is:starred after:-7`) showed 24 unread threads when opened and a 0 pill, because the threads had an older unread message and a newer read message. The thread was unread at the aggregate level, satisfied the list query (a recent message exists), but did not satisfy the pill (no single message is both recent and unread).
+
+Current status: `crates/smart-folder/src/sql_builder.rs::build_thread_state_clauses` emits read, unread, and starred predicates against `threads` (`t.is_read`, `t.is_starred`) through `thread_flag_clauses`. The list and count builders consume the same thread-flag clause set. Per-glossary aggregate semantics are documented in `docs/glossary/folders-labels.md`.
 
 ## Axes of the discrepancy
 
@@ -36,17 +38,17 @@ Confirmed via grep:
 
 | Axis | Message-level | Thread-aggregate | Status |
 |---|---|---|---|
-| `is_read` | `m.is_read` (`sql_builder.rs:219, 222`) | `t.is_read` (no current call site in smart-folder; thread-list UI reads it directly) | **Broken.** Pill forces `m.is_read = 0` inside matched-message subquery. |
-| `is_starred` | `m.is_starred = 1` (`sql_builder.rs:225` - applies when `parsed.is_starred = Some(true)`) | `t.is_starred = 1` (`sql_builder.rs:133`, via `IN_FLAG_SHORTHANDS` shorthand `is:starred`) | **Two paths, one operator.** The parser routes `is:starred` to the shorthand (thread-level), but the same `parsed.is_starred` field also feeds `build_read_clauses` (message-level). Whichever fires depends on parsing path, not user intent. |
-| `date` (`before:` / `after:`) | `m.date < ?` / `m.date > ?` (`sql_builder.rs:230-237`) | `t.last_message_at` (not used in smart-folder) | **Semantically muddy.** "Thread that had recent activity" vs "thread whose latest message is recent" are different questions, conflated. |
-| `has:attachment` | `EXISTS … FROM attachments a WHERE a.message_id = m.id` (`sql_builder.rs:207-215`) | (no thread-aggregate column) | **Probably correct as message-level**, but worth confirming - the predicate "thread has any attached message" is what users mean. |
+| `is_read` | `m.is_read` still exists as provider-derived message state. | `t.is_read` via `build_thread_state_clauses`. | **Fixed in smart-folder.** Query list and count now share the thread aggregate. |
+| `is_starred` | `m.is_starred` still exists as provider-derived message state. | `t.is_starred` via `build_thread_state_clauses` and `in:starred`. | **Fixed in smart-folder.** Both parser paths now land on the thread aggregate. |
+| `date` (`before:` / `after:`) | `m.date < ?` / `m.date > ?`. | `t.last_message_at` (not used in smart-folder). | **Still semantically muddy.** "Thread that had recent activity" vs "thread whose latest message is recent" are different questions, conflated. |
+| `has:attachment` | `EXISTS ... FROM attachments a WHERE a.message_id = m.id`. | (no thread-aggregate column) | **Probably correct as message-level**, but worth confirming - the predicate "thread has any attached message" is what users mean. |
 
 Suspected but not yet grepped for divergent call sites:
 
 | Axis | Notes |
 |---|---|
 | `is_replied` / `is_forwarded` | Stored on `messages` only (per glossary `folders-labels.md:244-248`); no `threads.*` column exists. Thread-level rendering ORs across messages at read time. Any predicate that wants "thread that has been replied to" needs an explicit `EXISTS` against messages - easy to get wrong, easy to get inconsistent across builders. |
-| Folder/label membership | `thread_labels` is already thread-aggregate by construction, so most call sites are consistent. The provider-side merge-vs-replace inconsistency for Graph/JMAP partial-delta sync (`folders-labels.md:119-127`) is a separate issue. |
+| Folder/label membership | `thread_folders`, `thread_labels`, and `thread_label_groups` are thread aggregates by construction. The provider-side merge-vs-replace inconsistency for Graph/JMAP partial-delta sync remains a separate issue. |
 | `is_snoozed`, `is_pinned`, `is_muted` | Stored only on `threads` (no message-level analogue). These can't suffer the discrepancy; included only to note the asymmetry - the read/starred axes have message-level columns precisely because they were ported from per-message provider primitives. |
 | Free-text / `from:` / `to:` | Message-level by nature (each message has its own envelope). The question is whether the matched-message subquery's join semantics introduce surprising count behavior when combined with a thread-aggregate filter elsewhere in the same query. |
 
@@ -55,10 +57,10 @@ Suspected but not yet grepped for divergent call sites:
 The audit needs to cover everywhere a thread list or a count is computed:
 
 - `crates/smart-folder/src/sql_builder.rs` - done; this is the motivating example.
-- `crates/db/src/db/queries_extra/scoped_queries.rs` - universal-folder unread counts (`get_unread_counts_by_folder`, `get_system_folder_unread_counts`, `get_flag_folder_unread_count`, `broad_inbox_unread_count`, draft count) and per-label unread counts (`get_label_unread_counts`, the source of the sidebar LABELS-section pills). These use `t.is_read = 0` directly against `threads`. Spot-checked consistent with the thread-aggregate side, but the same call sites would silently regress if a future change inner-joined `messages` for "in this folder" / "with this label" and applied `is_read` against `m` - the type system does not prevent this today.
+- `crates/db/src/db/queries_extra/scoped_queries.rs` - universal-folder unread counts (`get_unread_counts_by_folder`, `get_system_folder_unread_counts`, `get_flag_folder_unread_count`, `broad_inbox_unread_count`, draft count) and label-group unread counts (`get_label_group_unread_counts`, the source of the sidebar LABELS-section pills). These use `t.is_read = 0` directly against `threads`. Spot-checked consistent with the thread-aggregate side, but the same call sites would silently regress if a future change inner-joined `messages` for "in this folder" / "with this label group" and applied `is_read` against `m` - the type system does not prevent this today.
 - `crates/db/src/db/queries_extra/thread_detail.rs` - `recompute_thread_read_starred` and `query_thread_state_decorations` are the canonical helpers per glossary. These are the *source* of `t.is_read` and `t.is_starred`; any divergence here is a separate (worse) bug because it desyncs the aggregate from the underlying messages.
 - `crates/db/src/db/queries_extra/navigation.rs` - composes the above into `NavigationState`. The current Drafts special case (also tracked separately in `TODO.md`) is part of this surface area.
-- Per-provider sync (Gmail/IMAP `store_thread_groups_to_db`, Graph/JMAP `merge_thread_labels`) - these write `thread_labels` and `t.is_read`/`t.is_starred`; their consistency with the read-side query builders is what makes the aggregates trustworthy.
+- Per-provider sync (Gmail/IMAP `store_thread_groups_to_db`, Graph/JMAP merge helpers) - these write `thread_folders`, `thread_labels`, and `t.is_read`/`t.is_starred`; their consistency with the read-side query builders is what makes the aggregates trustworthy.
 - App-side thread list rendering - anywhere that decides "is this row bold" needs to read the same column the pill counted from. Currently the thread list reads `t.is_read`; any future drift to per-message rendering needs to be paired with a matching pill change.
 
 Each call site needs a written answer to: "is this predicate on a thread or on a message, and is the join structure consistent with that answer?"
@@ -89,7 +91,9 @@ The right design depends on how invasive the change should be (smart-folder-loca
 
 Before the fix, `crates/app/src/ui/sidebar/labels.rs` rendered the label dot via `theme::avatar_color(&f.name)` - a separate hash over just the name, using a different palette baked into `crates/app/src/ui/theme/avatar.rs:16`. Stored colors were silently ignored. Users with seeded "Personal" labels saw avatar-palette colors with no relationship to the configured `color_bg`.
 
-Fix: `NavigationFolder` now carries `color_bg` / `color_fg`; `build_account_labels` populates them via `label_colors::resolve_label_color` (synced or preset); sidebar parses `f.color_bg` with `theme::hex_to_color`. `theme::avatar_color` remains in place as a defensive fallback if `color_bg` is unexpectedly `None`, but the resolver always returns `Some` for `AccountLabel` rows.
+Fix before the storage split: `NavigationFolder` carried `color_bg` / `color_fg`; the account-label builder populated them via `label_colors::resolve_label_color` (synced or preset); sidebar parsed `f.color_bg` with `theme::hex_to_color`.
+
+Current model after the split: sidebar label rows are `label_groups`, so the group colour stored on `label_groups` is the display source of truth. Raw per-account label colours remain in `labels.server_color_*` / `labels.user_color_*` for Settings and member-picking surfaces.
 
 Compile-time goal: any iced widget that draws a label-shaped surface (sidebar dot, reading-pane chip, thread-list chip, picker swatch) should take a typed `LabelStyle { bg: Color, fg: Color }` produced exclusively by one constructor that consults the resolver. Other inputs (a raw name, a raw hex string) should not type-check as a label color. Today the relevant call sites (`reading_pane.rs:746-747`, `widgets/pickers.rs:213`, `thread_list.rs:661`, `sidebar/labels.rs`) each parse hex independently, so the discipline is by convention only.
 
@@ -103,27 +107,24 @@ This is the same shape as the thread-vs-message bugs: the canonical answer to "w
 
 Compile-time goal: there should be one entry point that returns "everything that belongs in the Drafts list for this scope," with the merge done where the data is - i.e. at the query layer, returning a typed `DraftItem` that the app projects into its `Thread`. Direct access to the synced-only path should require an explicit opt-in (different function name, or a marker type) so it can't be reached by autocomplete-driven mistake.
 
-### Per-account vs cross-account label aggregation (labels-unification)
+### Per-account vs cross-account label aggregation (retired by label groups)
 
-The labels-unification spec (`docs/labels-unification/problem-statement.md`) requires section 4 of the sidebar to be a cross-account view: all tag-type labels from all accounts, grouped by normalized name (`LOWER(TRIM(l.name))`), with unread counts summed across accounts. The actual builder does it per-account.
+The labels-unification auto-collapse design (`docs/labels-unification/problem-statement.md`) required section 4 of the sidebar to be a cross-account view: all tag-type labels from all accounts, grouped by normalized name (`LOWER(TRIM(l.name))`), with unread counts summed across accounts. That design is superseded by `docs/labels-unification/redesign.md`.
 
-- `get_navigation_state` (`crates/core/src/db/queries_extra/navigation.rs:122-131`) calls `build_account_labels` only in `AccountScope::Single`. In `AccountScope::All`, no tag-type labels are built at all - section 4 is empty.
-- `get_label_unread_counts` (`navigation.rs:345-373`) groups by `tl.label_id`, never by name; cross-account sum is not computed anywhere.
-- `search_labels_for_typeahead_sync` (`navigation.rs:624-632`) does case-insensitive comparison via `COLLATE NOCASE` but not whitespace trim, so `"Work"` and `"Work "` produce two entries.
+Current model: the sidebar LABELS section renders explicit `label_groups`, not raw labels grouped by name. Counts come from `get_label_group_unread_counts`, which unions `thread_label_groups` with raw `thread_labels` reached through `label_group_members`. Raw provider labels remain visible in Settings.
 
-This is the same shape as the Drafts-list bug: the question "what labels exist for this scope" has one answer in the per-account branch and a different (missing) answer in the cross-account branch. The per-account builder is the only entry point, so anyone querying labels for a unified view will either get nothing or have to re-implement the cross-account aggregation locally. The compile-time goal: a single `query_visible_labels(scope) -> Vec<Label>` function that returns the same logical set regardless of scope, with cross-account grouping baked in. The current `AccountScope::All` arm not calling any label builder is a class of bug the type system could prevent (exhaustive match returning the same type, instead of returning early with an empty set when scope is All).
+The remaining compile-time goal is narrower: message-level UI should be unable to target a raw `(account_id, label_id)` directly. User-facing apply/remove paths should accept only `LabelGroupId`; Settings-only raw label management should use a separate API surface.
 
-### Label color override schema vs resolver shape mismatch
+### Label color override schema vs resolver shape mismatch (fixed by schema split)
 
-`label_color_overrides` (`crates/db/src/db/schema/02_mail.sql:31-34`) stores `(label_name COLLATE NOCASE, color_bg)` - background only. `resolve_label_color` (`crates/label-colors/src/lib.rs:35-51`) returns `(bg, fg)` pairs. Two consequences:
+The old `label_color_overrides` table stored `(label_name COLLATE NOCASE, color_bg)` - background only. `resolve_label_color` returned `(bg, fg)` pairs. Two consequences:
 
-1. Even if override lookups were wired in (they are not - see labels-unification discrepancies "label_color_overrides is write-never, read-never"), an override would supply `color_bg` but `color_fg` would come from the hash fallback, producing a coherence break: the user picked the bg, the fg is a stable-but-unrelated palette pick.
+1. Even if override lookups had been wired in, an override would have supplied `color_bg` but `color_fg` would have come from the hash fallback, producing a coherence break: the user picked the bg, the fg was a stable-but-unrelated palette pick.
 2. The override key is normalized by `COLLATE NOCASE` only, not `TRIM`. The labels-unification spec requires both. `"Work"` and `"Work "` would be different overrides.
 
-Compile-time goal: the override store should return a typed `LabelStyle { bg: Color, fg: Color }` matching what the resolver and renderers consume. A `Bg`-only override should not type-check as a complete label style.
+Current model: `label_color_overrides` is gone. Raw labels carry `server_color_*` and `user_color_*`; user-visible groups carry their complete `color_bg` / `color_fg` pair. The compile-time goal still stands: a background-only override should not type-check as a complete label style.
 
 ## Out of scope for this document
 
-- Fixing the motivating bug. The "Starred This Week" pill discrepancy is real and shippable as a one-line fix (move the forced unread from `msg_clauses` to `thread_flag_clauses`), but doing so without the systemic fix just hides the next instance.
 - The Drafts pill semantics question (total-vs-unread contract). Tracked separately in `TODO.md`. That is a product decision about what the pill *should* count; this document is about ensuring the count means what the matching list says it means, whatever the product answer is.
-- Provider-side merge-vs-replace inconsistencies on `thread_labels`. Tracked in `TODO.md` under "cross-client folder/label moves."
+- Provider-side merge-vs-replace inconsistencies on `thread_folders` and `thread_labels`. Tracked in `TODO.md` under "cross-client folder/label moves."

@@ -4,14 +4,12 @@ use iced::Element;
 use crate::ui::theme;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
-use types::{SidebarSelection, LabelId};
+use types::{LabelGroupId, SidebarSelection};
 
 use super::search_here::build_search_here_prefix;
 use super::{Sidebar, SidebarMessage};
 
-/// LABELS section: account-scoped labels only (Gmail user labels,
-/// Exchange categories, IMAP/JMAP keywords). Folders moved to the
-/// universal section - see `folders::render_account_folders`.
+/// LABELS section: explicit user-created label groups.
 pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let folders = sidebar
         .nav_state
@@ -19,33 +17,38 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .map(|ns| &ns.folders[..])
         .unwrap_or(&[]);
 
-    let account_labels: Vec<&NavigationFolder> = folders
+    let label_groups: Vec<&NavigationFolder> = folders
         .iter()
-        .filter(|f| matches!(f.folder_kind, FolderKind::AccountLabel))
+        .filter(|f| matches!(f.folder_kind, FolderKind::LabelGroup))
         .collect();
 
-    let children: Vec<Element<'_, SidebarMessage>> = account_labels
-        .iter()
+    let children: Vec<Element<'_, SidebarMessage>> = label_groups
+        .into_iter()
+        .filter_map(|f| {
+            let group_id = f.id.parse::<i64>().ok()?;
+            Some((f, LabelGroupId::from(group_id)))
+        })
         .map(|f| {
             let is_active = sidebar.active_pinned_search.is_none()
                 && matches!(
                     &sidebar.selection,
-                    SidebarSelection::Label(lid) if lid.as_str() == f.id
+                    SidebarSelection::LabelGroup(group_id) if *group_id == f.1
                 );
             let dot_color = f
+                .0
                 .color_bg
                 .as_deref()
                 .map(theme::hex_to_color)
-                .unwrap_or_else(|| theme::avatar_color(&f.name));
+                .unwrap_or_else(|| theme::avatar_color(&f.0.name));
             let item = widgets::label_nav_item(
-                &f.name,
-                &f.id,
+                &f.0.name,
+                &f.0.id,
                 dot_color,
                 is_active,
-                f.unread_count,
-                SidebarMessage::Select(SidebarSelection::Label(LabelId::from(f.id.clone()))),
+                f.0.unread_count,
+                SidebarMessage::Select(SidebarSelection::LabelGroup(f.1)),
             );
-            let query_prefix = build_search_here_prefix(&f.name, sidebar);
+            let query_prefix = build_search_here_prefix(&f.0.name, sidebar);
             mouse_area(item)
                 .on_right_press(SidebarMessage::SearchHere(query_prefix))
                 .into()

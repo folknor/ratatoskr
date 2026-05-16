@@ -18,14 +18,14 @@ use store::inline_image_store::InlineImageStoreReadState;
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
 
-/// Label color info resolved from core's ThreadLabel.
+/// Label group color info resolved from core's ThreadLabel.
 #[derive(Debug, Clone)]
 pub struct ResolvedLabel {
     pub label_id: String,
     pub name: String,
     pub color_bg: String,
     pub color_fg: String,
-    /// "container" (folder/mailbox) or "tag" (category/keyword).
+    /// Compatibility discriminator for existing display code.
     pub label_kind: String,
 }
 

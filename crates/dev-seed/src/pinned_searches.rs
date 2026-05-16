@@ -134,10 +134,10 @@ fn load_account_inbox_snapshot(
         .prepare(
             "SELECT t.id, t.account_id
              FROM threads t
-             INNER JOIN thread_labels tl
-               ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_folders tf
+               ON tf.account_id = t.account_id AND tf.thread_id = t.id
              WHERE t.account_id = ?1
-               AND tl.label_id = 'INBOX'
+               AND tf.folder_id = 'INBOX'
                AND t.shared_mailbox_id IS NULL
                AND t.is_chat_thread = 0
              ORDER BY t.last_message_at DESC

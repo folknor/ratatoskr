@@ -1,4 +1,4 @@
-use types::{FolderId, LabelId};
+use types::{FolderId, LabelGroupId};
 
 /// Typed execution payload for parameterized commands.
 ///
@@ -9,10 +9,10 @@ use types::{FolderId, LabelId};
 pub enum CommandArgs {
     /// EmailMoveToFolder -- folder_id from ListPicker selection
     MoveToFolder { folder_id: FolderId },
-    /// EmailAddLabel -- label_id from ListPicker selection
-    AddLabel { label_id: LabelId },
-    /// EmailRemoveLabel -- label_id from ListPicker selection
-    RemoveLabel { label_id: LabelId },
+    /// EmailAddLabel -- label group id from ListPicker selection
+    AddLabel { group_id: LabelGroupId },
+    /// EmailRemoveLabel -- label group id from ListPicker selection
+    RemoveLabel { group_id: LabelGroupId },
     /// EmailSnooze -- unix timestamp from DateTime picker
     Snooze { until: i64 },
     /// Navigate to a provider folder. Includes account_id because
@@ -21,9 +21,8 @@ pub enum CommandArgs {
         folder_id: FolderId,
         account_id: String,
     },
-    /// Navigate to a label. Includes account_id because
-    /// cross-account navigation needs to scope the sidebar.
-    NavigateToLabel { label_id: LabelId, account_id: String },
+    /// Navigate to a label group.
+    NavigateToLabel { group_id: LabelGroupId },
     /// SmartFolderSave -- name from Text input
     SmartFolderSave { name: String },
 }

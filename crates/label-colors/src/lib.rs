@@ -1,8 +1,8 @@
 //! Deterministic label color resolution.
 //!
-//! Labels synced from Gmail have explicit `color_bg`/`color_fg`. All other
-//! providers store `None`. This module provides a hash-based fallback that
-//! assigns a stable color from the 25-preset palette to any label.
+//! Labels may carry `user_color_*` or provider-synced `server_color_*`.
+//! Labels without either pair get a hash-based fallback from the 25-preset
+//! palette.
 
 pub mod preset_colors;
 
@@ -30,22 +30,21 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
 
 /// Resolve display colors for a label.
 ///
-/// Resolution priority (per docs/labels-unification/problem-statement.md):
-/// 1. User override (from `label_color_overrides`, keyed by normalized name).
-/// 2. Synced color (`color_bg`/`color_fg` from the label row).
+/// Resolution priority:
+/// 1. User-selected color (`user_color_bg`/`user_color_fg` from the label row).
+/// 2. Synced color (`server_color_bg`/`server_color_fg` from the label row).
 /// 3. Hash fallback from the preset palette.
 ///
-/// The `override_color` argument is the looked-up override for this label's
-/// normalized name (`LOWER(TRIM(name))`). Callers that haven't loaded the
-/// override map pass `None` and get tier-2/tier-3 behavior.
+/// The `user_color` argument is the current row's user-selected color pair.
+/// Callers pass `None` when no complete user pair is set.
 pub fn resolve_label_color<'a>(
     name: &'a str,
     account_id: &'a str,
-    override_color: Option<(&'a str, &'a str)>,
-    color_bg: Option<&'a str>,
-    color_fg: Option<&'a str>,
+    user_color: Option<(&'a str, &'a str)>,
+    server_color_bg: Option<&'a str>,
+    server_color_fg: Option<&'a str>,
 ) -> (&'a str, &'a str) {
-    let result = match (override_color, color_bg, color_fg) {
+    let result = match (user_color, server_color_bg, server_color_fg) {
         (Some((bg, fg)), _, _) => (bg, fg),
         (None, Some(bg), Some(fg)) => (bg, fg),
         _ => color_for_label(name, account_id),
@@ -102,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn override_wins_over_synced() {
+    fn user_color_wins_over_synced() {
         let (bg, fg) = resolve_label_color(
             "Important",
             "acc-1",

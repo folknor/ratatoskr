@@ -29,7 +29,8 @@ pub use action::{
     ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, JobStatusResponse,
     MarkChatReadAck, OperationId, OperationOutcome, OperationResult, PlanId, PlanSummary,
     RemoteFailure, SendAck, SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage,
-    SendWireRequest, SyncProgress, WireFolderId, WireJobStatus, WireMailOperation, WireLabelId,
+    SendWireRequest, SyncProgress, WireFolderId, WireJobStatus, WireLabelGroupId,
+    WireMailOperation, WireLabelId,
 };
 pub use client_notification::{ClientNotification, JsonRpcClientNotification};
 pub use draft_wal::{

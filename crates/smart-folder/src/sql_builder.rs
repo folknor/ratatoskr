@@ -117,8 +117,8 @@ impl QueryContext {
 
 // ── In-folder shorthand mappings ─────────────────────────────
 
-/// Shorthands that map to label_id joins on thread_labels.
-const IN_LABEL_SHORTHANDS: &[(&str, &str)] = &[
+/// Shorthands that map to folder_id joins on thread_folders.
+const IN_FOLDER_SHORTHANDS: &[(&str, &str)] = &[
     ("inbox", "INBOX"),
     ("sent", "SENT"),
     ("drafts", "DRAFT"),
@@ -142,10 +142,9 @@ fn build_message_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     build_from_clause(ctx, parsed);
     build_to_clause(ctx, parsed);
     build_attachment_clause(ctx, parsed);
-    build_read_clauses(ctx, parsed);
     build_date_clauses(ctx, parsed);
     build_folder_clause(ctx, parsed);
-    build_in_folder_label_clauses(ctx, parsed);
+    build_in_folder_clauses(ctx, parsed);
     build_attachment_type_clause(ctx, parsed);
     build_has_contact_clause(ctx, parsed);
 }
@@ -211,18 +210,6 @@ fn build_attachment_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
              WHERE a.account_id = m.account_id AND a.message_id = m.id)"
                 .to_owned(),
         );
-    }
-}
-
-fn build_read_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    if parsed.is_unread == Some(true) {
-        ctx.msg_clauses.push("m.is_read = 0".to_owned());
-    }
-    if parsed.is_read == Some(true) {
-        ctx.msg_clauses.push("m.is_read = 1".to_owned());
-    }
-    if parsed.is_starred == Some(true) {
-        ctx.msg_clauses.push("m.is_starred = 1".to_owned());
     }
 }
 
@@ -292,7 +279,7 @@ fn build_account_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
-/// Build `folder:` clause - match label name or IMAP folder path.
+/// Build `folder:` clause - match folder name or IMAP folder path.
 fn build_folder_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.folder.is_empty() {
         return;
@@ -303,46 +290,45 @@ fn build_folder_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
         .map(|folder| {
             let idx = ctx.push_param(Box::new(folder.clone()));
             format!(
-                "EXISTS (SELECT 1 FROM thread_labels tl \
-                 JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
-                 WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id \
-                 AND l.label_kind = 'container' \
-                 AND (l.name LIKE '%' || ?{idx} || '%' \
-                   OR l.imap_folder_path LIKE '%' || ?{idx} || '%'))"
+                "EXISTS (SELECT 1 FROM thread_folders tf \
+                 JOIN folders f ON f.account_id = tf.account_id AND f.id = tf.folder_id \
+                 WHERE tf.account_id = m.account_id AND tf.thread_id = m.thread_id \
+                 AND (f.name LIKE '%' || ?{idx} || '%' \
+                   OR f.imap_folder_path LIKE '%' || ?{idx} || '%'))"
             )
         })
         .collect();
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
-/// Build `in:` label-based clauses (inbox, sent, drafts, trash, spam, etc.).
+/// Build `in:` folder-based clauses (inbox, sent, drafts, trash, spam, etc.).
 /// Flag-based shorthands (starred, snoozed) are handled in `build_thread_flag_clauses`.
-fn build_in_folder_label_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    let label_values: Vec<&str> = parsed
+fn build_in_folder_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
+    let folder_values: Vec<&str> = parsed
         .in_folder
         .iter()
         .filter_map(|v| {
             let lower = v.to_ascii_lowercase();
-            IN_LABEL_SHORTHANDS
+            IN_FOLDER_SHORTHANDS
                 .iter()
                 .find(|(name, _)| *name == lower)
-                .map(|(_, label_id)| *label_id)
+                .map(|(_, folder_id)| *folder_id)
         })
         .collect();
 
-    if label_values.is_empty() {
+    if folder_values.is_empty() {
         return;
     }
 
-    let parts: Vec<String> = label_values
+    let parts: Vec<String> = folder_values
         .iter()
-        .map(|label_id| {
-            let idx = ctx.push_param(Box::new(label_id.to_string()));
+        .map(|folder_id| {
+            let idx = ctx.push_param(Box::new(folder_id.to_string()));
             format!(
-                "EXISTS (SELECT 1 FROM thread_labels tl \
-                 WHERE tl.account_id = m.account_id \
-                 AND tl.thread_id = m.thread_id \
-                 AND tl.label_id = ?{idx})"
+                "EXISTS (SELECT 1 FROM thread_folders tf \
+                 WHERE tf.account_id = m.account_id \
+                 AND tf.thread_id = m.thread_id \
+                 AND tf.folder_id = ?{idx})"
             )
         })
         .collect();
@@ -394,6 +380,7 @@ fn build_has_contact_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 /// Add thread-level flag clauses (snoozed, pinned, muted, tagged).
 /// Also handles `in:starred` and `in:snoozed` shorthands.
 fn build_thread_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
+    build_thread_state_clauses(ctx, parsed);
     if parsed.is_snoozed == Some(true) {
         ctx.thread_flag_clauses.push("t.is_snoozed = 1".to_owned());
     }
@@ -409,13 +396,28 @@ fn build_thread_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     build_in_folder_flag_clauses(ctx, parsed);
 }
 
-/// Build `is:tagged` clause - thread has at least one label.
+/// Build thread-aggregate state predicates.
+fn build_thread_state_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
+    if parsed.is_unread == Some(true) {
+        ctx.thread_flag_clauses.push("t.is_read = 0".to_owned());
+    }
+    if parsed.is_read == Some(true) {
+        ctx.thread_flag_clauses.push("t.is_read = 1".to_owned());
+    }
+    if parsed.is_starred == Some(true) {
+        ctx.thread_flag_clauses.push("t.is_starred = 1".to_owned());
+    }
+}
+
+/// Build `is:tagged` clause - thread renders at least one label group.
 fn build_is_tagged_clause(ctx: &mut QueryContext) {
     ctx.thread_flag_clauses.push(
-        "EXISTS (SELECT 1 FROM thread_labels tl2 \
-         JOIN labels l2 ON l2.account_id = tl2.account_id AND l2.id = tl2.label_id \
-         WHERE tl2.thread_id = t.id AND tl2.account_id = t.account_id \
-         AND l2.label_kind = 'tag')"
+        "(EXISTS (SELECT 1 FROM thread_label_groups tlg \
+          WHERE tlg.thread_id = t.id AND tlg.account_id = t.account_id) \
+         OR EXISTS (SELECT 1 FROM thread_labels tl2 \
+          JOIN label_group_members lgm \
+            ON lgm.account_id = tl2.account_id AND lgm.label_id = tl2.label_id \
+          WHERE tl2.thread_id = t.id AND tl2.account_id = t.account_id))"
             .to_owned(),
     );
 }
@@ -439,7 +441,7 @@ fn build_in_folder_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     }
 }
 
-/// Add label clause via EXISTS subquery on thread_labels.
+/// Add label clause via explicit label groups.
 fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.label.is_empty() {
         return;
@@ -450,11 +452,19 @@ fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
         .map(|label| {
             let idx = ctx.push_param(Box::new(label.clone()));
             format!(
-                "EXISTS (SELECT 1 FROM thread_labels tl \
-                 JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
-                 WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id \
-                 AND l.label_kind = 'tag' \
-                 AND LOWER(l.name) = LOWER(?{idx}))"
+                "EXISTS (SELECT 1 FROM label_groups lg \
+                 WHERE LOWER(lg.name) = LOWER(?{idx}) \
+                 AND (EXISTS (SELECT 1 FROM thread_label_groups tlg \
+                   WHERE tlg.account_id = m.account_id \
+                     AND tlg.thread_id = m.thread_id \
+                     AND tlg.group_id = lg.id) \
+                   OR EXISTS (SELECT 1 FROM thread_labels tl \
+                     JOIN label_group_members lgm \
+                       ON lgm.account_id = tl.account_id \
+                      AND lgm.label_id = tl.label_id \
+                      AND lgm.group_id = lg.id \
+                     WHERE tl.account_id = m.account_id \
+                       AND tl.thread_id = m.thread_id)))"
             )
         })
         .collect();
@@ -536,7 +546,7 @@ mod tests {
         seed_accounts(conn);
         seed_threads(conn);
         seed_messages(conn);
-        seed_labels_and_thread_labels(conn);
+        seed_folders_labels_and_groups(conn);
         seed_attachments(conn);
         seed_contacts(conn);
     }
@@ -579,28 +589,50 @@ mod tests {
         .expect("seed messages");
     }
 
-    fn seed_labels_and_thread_labels(conn: &Connection) {
+    fn seed_split_thread_state_fixture(conn: &Connection) {
         conn.execute_batch(
-            "INSERT INTO labels (id, account_id, name, type)
-             VALUES ('INBOX', 'acc1', 'Inbox', 'system');
-             INSERT INTO labels (id, account_id, name, type)
-             VALUES ('SENT', 'acc1', 'Sent', 'system');
-             INSERT INTO labels (id, account_id, name, type, label_kind)
-             VALUES ('custom1', 'acc1', 'Projects', 'user', 'tag');
-             INSERT INTO labels (id, account_id, name, type, label_kind)
-             VALUES ('folder1', 'acc1', 'Receipts', 'user', 'container');
-             INSERT INTO labels (id, account_id, name, type, imap_folder_path)
-             VALUES ('INBOX', 'acc2', 'Inbox', 'system', 'INBOX');
-             INSERT INTO thread_labels (thread_id, account_id, label_id)
+            "INSERT INTO threads (id, account_id, subject, snippet, last_message_at,
+                message_count, is_read, is_starred, is_important, has_attachments,
+                is_snoozed, is_pinned, is_muted)
+             VALUES ('t3', 'acc1', 'Split State', 'recent activity', 3000, 2, 0, 1, 0, 0, 0, 0, 0);
+             INSERT INTO messages (id, account_id, thread_id, from_address, from_name,
+                to_addresses, subject, snippet, date, is_read, is_starred)
+             VALUES ('m3-old-unread-starred', 'acc1', 't3', 'old@example.com', 'Old Sender',
+                'alice@work.com', 'Split State', 'old unread starred', 1000, 0, 1);
+             INSERT INTO messages (id, account_id, thread_id, from_address, from_name,
+                to_addresses, subject, snippet, date, is_read, is_starred)
+             VALUES ('m3-recent-read', 'acc1', 't3', 'recent@example.com', 'Recent Sender',
+                'alice@work.com', 'Split State', 'recent read', 3000, 1, 0);",
+        )
+        .expect("seed split thread state fixture");
+    }
+
+    fn seed_folders_labels_and_groups(conn: &Connection) {
+        conn.execute_batch(
+            "INSERT INTO folders (id, account_id, name)
+             VALUES ('INBOX', 'acc1', 'Inbox');
+             INSERT INTO folders (id, account_id, name)
+             VALUES ('SENT', 'acc1', 'Sent');
+             INSERT INTO folders (id, account_id, name)
+             VALUES ('folder1', 'acc1', 'Receipts');
+             INSERT INTO folders (id, account_id, name, imap_folder_path)
+             VALUES ('INBOX', 'acc2', 'Inbox', 'INBOX');
+             INSERT INTO labels (id, account_id, name)
+             VALUES ('custom1', 'acc1', 'Projects');
+             INSERT INTO label_groups (id, name, color_bg, color_fg)
+             VALUES (1, 'Projects', '#4285f4', '#ffffff');
+             INSERT INTO label_group_members (group_id, account_id, label_id)
+             VALUES (1, 'acc1', 'custom1');
+             INSERT INTO thread_folders (thread_id, account_id, folder_id)
              VALUES ('t1', 'acc1', 'INBOX');
              INSERT INTO thread_labels (thread_id, account_id, label_id)
              VALUES ('t1', 'acc1', 'custom1');
-             INSERT INTO thread_labels (thread_id, account_id, label_id)
+             INSERT INTO thread_folders (thread_id, account_id, folder_id)
              VALUES ('t1', 'acc1', 'folder1');
-             INSERT INTO thread_labels (thread_id, account_id, label_id)
+             INSERT INTO thread_folders (thread_id, account_id, folder_id)
              VALUES ('t2', 'acc2', 'INBOX');",
         )
-        .expect("seed labels");
+        .expect("seed folders labels and groups");
     }
 
     fn seed_attachments(conn: &Connection) {
@@ -660,9 +692,8 @@ mod tests {
     #[test]
     fn folder_filters_by_folder_name() {
         let conn = setup_test_db();
-        // "Receipts" is a container-kind label on acc1; "Projects" (custom1) is
-        // a tag-kind label and must NOT match `folder:` per the
-        // folders-labels glossary.
+        // "Receipts" is a folder on acc1. "Projects" is a tag label and label
+        // group, so it must not match `folder:`.
         let parsed = parse_query("folder:Receipts");
         let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
@@ -671,7 +702,7 @@ mod tests {
         let projects = parse_query("folder:Projects");
         let no_threads =
             query_threads(&conn, &projects, &AccountScope::All, None, None).expect("query");
-        assert!(no_threads.is_empty(), "tag-kind labels must not match folder:");
+        assert!(no_threads.is_empty(), "tag labels must not match folder:");
     }
 
     // -- in: operator --
@@ -693,6 +724,19 @@ mod tests {
         assert!(threads[0].is_starred);
     }
 
+    #[test]
+    fn is_starred_uses_thread_aggregate_with_message_date_filters() {
+        let conn = setup_test_db();
+        seed_split_thread_state_fixture(&conn);
+
+        let mut parsed = parse_query("is:starred");
+        parsed.after = Some(2500);
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "t3");
+    }
+
     // -- is:tagged --
 
     #[test]
@@ -700,9 +744,19 @@ mod tests {
         let conn = setup_test_db();
         let parsed = parse_query("is:tagged");
         let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
-        // Only t1 carries a tag-kind label (custom1 / "Projects"); t2's only
-        // membership is INBOX, which is a container row and does not count
-        // as "tagged" per the folders-labels glossary.
+        // Only t1 renders the Projects label group through its member tag.
+        // t2's only membership is INBOX, which is a folder and does not count.
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "t1");
+    }
+
+    // -- label: operator --
+
+    #[test]
+    fn label_filters_by_label_group_name() {
+        let conn = setup_test_db();
+        let parsed = parse_query("label:Projects");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -766,5 +820,18 @@ mod tests {
         let parsed = parse_query("in:inbox");
         let count = count_matching(&conn, &parsed, &AccountScope::All).expect("count");
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn count_matching_forced_unread_uses_thread_aggregate() {
+        let conn = setup_test_db();
+        seed_split_thread_state_fixture(&conn);
+
+        let mut parsed = parse_query("is:starred");
+        parsed.after = Some(2500);
+        parsed.is_unread = Some(true);
+        let count = count_matching(&conn, &parsed, &AccountScope::All).expect("count");
+
+        assert_eq!(count, 1);
     }
 }

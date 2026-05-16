@@ -19,9 +19,9 @@
 use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
 use service_api::{
     ActionWireOperation, ActionWirePlan, OperationId, OperationResult, PlanId, RemoteFailure,
-    WireFolderId, WireMailOperation, WireLabelId,
+    WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId,
 };
-use types::{FolderId, LabelId};
+use types::{FolderId, LabelGroupId, LabelId};
 
 use crate::action_resolve::ActionExecutionPlan;
 
@@ -75,6 +75,12 @@ pub fn to_wire_op(op: &MailOperation) -> WireMailOperation {
         MailOperation::RemoveLabel { label_id } => WireMailOperation::RemoveLabel {
             label_id: label_to_wire(label_id),
         },
+        MailOperation::ApplyLabelGroup { group_id } => WireMailOperation::ApplyLabelGroup {
+            group_id: label_group_to_wire(group_id),
+        },
+        MailOperation::RemoveLabelGroup { group_id } => WireMailOperation::RemoveLabelGroup {
+            group_id: label_group_to_wire(group_id),
+        },
         MailOperation::Snooze { until } => WireMailOperation::Snooze { until: *until },
         MailOperation::Unsnooze => WireMailOperation::Unsnooze,
     }
@@ -86,6 +92,10 @@ fn folder_to_wire(f: &FolderId) -> WireFolderId {
 
 fn label_to_wire(t: &LabelId) -> WireLabelId {
     WireLabelId(t.0.clone())
+}
+
+fn label_group_to_wire(t: &LabelGroupId) -> WireLabelGroupId {
+    WireLabelGroupId(t.0)
 }
 
 /// Reverse direction: turn a wire `OperationResult` into the
@@ -160,6 +170,12 @@ mod tests {
             },
             MailOperation::RemoveLabel {
                 label_id: LabelId("personal".into()),
+            },
+            MailOperation::ApplyLabelGroup {
+                group_id: LabelGroupId(7),
+            },
+            MailOperation::RemoveLabelGroup {
+                group_id: LabelGroupId(7),
             },
             MailOperation::Snooze { until: 1_700_000_000 },
             MailOperation::Unsnooze,

@@ -16,6 +16,11 @@ pub struct FolderId(pub String);
 #[serde(transparent)]
 pub struct LabelId(pub String);
 
+/// A user-created cross-account label group ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct LabelGroupId(pub i64);
+
 impl FolderId {
     pub fn as_str(&self) -> &str {
         &self.0
@@ -25,6 +30,12 @@ impl FolderId {
 impl LabelId {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl LabelGroupId {
+    pub fn as_i64(self) -> i64 {
+        self.0
     }
 }
 
@@ -64,6 +75,12 @@ impl From<&str> for LabelId {
     }
 }
 
+impl From<i64> for LabelGroupId {
+    fn from(id: i64) -> Self {
+        Self(id)
+    }
+}
+
 impl std::fmt::Display for FolderId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -73,5 +90,11 @@ impl std::fmt::Display for FolderId {
 impl std::fmt::Display for LabelId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for LabelGroupId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

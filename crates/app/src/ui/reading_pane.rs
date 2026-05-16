@@ -741,8 +741,8 @@ fn thread_header<'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    // Label pills - only show label rows.
-    for label in labels.iter().filter(|l| l.label_kind == "tag") {
+    // Label group pills.
+    for label in labels {
         let bg = theme::hex_to_color(&label.color_bg);
         let fg = theme::hex_to_color(&label.color_fg);
         info_row = info_row.push(

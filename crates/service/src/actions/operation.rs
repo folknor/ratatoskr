@@ -4,7 +4,7 @@
 //! no undo provenance, no completion behavior. The app layer resolves
 //! user intent into a `MailOperation` before dispatching to core.
 
-use common::typed_ids::{FolderId, LabelId};
+use common::typed_ids::{FolderId, LabelGroupId, LabelId};
 
 /// A fully resolved, unambiguous mail operation.
 ///
@@ -44,6 +44,12 @@ pub enum MailOperation {
     },
     RemoveLabel {
         label_id: LabelId,
+    },
+    ApplyLabelGroup {
+        group_id: LabelGroupId,
+    },
+    RemoveLabelGroup {
+        group_id: LabelGroupId,
     },
     Snooze {
         until: i64,

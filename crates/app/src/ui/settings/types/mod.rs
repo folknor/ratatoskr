@@ -156,7 +156,7 @@ pub struct LabelEditorState {
     pub color_bg: String,
     /// User-selected foreground color hex (or the resolved current).
     pub color_fg: String,
-    /// True if `color_bg`/`color_fg` came from an existing override.
+    /// True if `color_bg`/`color_fg` came from an existing user color.
     pub has_override: bool,
     /// Show the destructive delete confirmation modal.
     pub show_delete_confirmation: bool,
@@ -251,8 +251,8 @@ pub struct Settings {
     pub hovered_help: Option<String>,
     // Editable lists
     pub drag_state: Option<DragState>,
-    // Mail Rules > Labels (cross-account grouped tag-type labels).
-    // Loaded from `query_visible_labels` on boot and after any label mutation.
+    // Mail Rules > Labels (raw per-account provider labels).
+    // Loaded from `query_labels_by_account` on boot and after any label mutation.
     pub labels_by_account: Vec<rtsk::db::queries_extra::navigation::AccountLabelsGroup>,
     /// Label editor sheet state (Mail Rules > Labels).
     pub editing_label: Option<LabelEditorState>,

@@ -4,6 +4,7 @@ pub use db::db::ReadWriteDb;
 pub use db::db::Connection;
 pub use db::db::Row;
 pub use db::db::SqlError;
+pub use db::db::ToSql;
 pub use db::db::OptionalExtension;
 pub use db::db::params;
 pub use db::db::from_row;

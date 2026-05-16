@@ -1,7 +1,7 @@
 -- description: Graph master category list imports as cat:<displayName> tag labels with preset colours
 -- @covers: architecture.folder_vs_label_semantics_are_explicit
 -- @covers: glossary.folders_labels.label_rows_are_tags
--- @covers: glossary.folders_labels.labels_table_discriminates_folders_and_labels
+-- @covers: glossary.folders_labels.storage_splits_folders_labels_and_groups
 -- @covers: glossary.folders_labels.non_system_ids_keep_provider_prefixes
 -- @covers: glossary.folders_labels.provider_terms_translate_to_folder_label_semantics
 -- expected: pass

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use db::db::queries_extra::{LabelWriteRow, upsert_labels};
+use db::db::queries_extra::{FolderWriteRow, insert_folders_batch};
 use bifrost_jmap::email::EmailGet;
 use bifrost_jmap::mailbox::{MailboxGet, MailboxRights, Role};
 
@@ -12,7 +12,7 @@ use super::SyncCtx;
 // Mailbox sync helpers
 // ---------------------------------------------------------------------------
 
-/// A mailbox row to be persisted into the `labels` table, including optional rights.
+/// A mailbox row to be persisted into the `folders` table, including optional rights.
 struct MailboxFolderRow {
     id: String,
     account_id: String,
@@ -94,13 +94,13 @@ pub(crate) async fn sync_mailboxes(
         });
     }
 
-    // Persist labels to DB
+    // Persist folders to DB
     ctx.db
         .with_conn(move |conn| {
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            let rows: Vec<LabelWriteRow> = folder_rows
+            let rows: Vec<FolderWriteRow> = folder_rows
                 .iter()
                 .map(|row| {
                     let (
@@ -114,18 +114,16 @@ pub(crate) async fn sync_mailboxes(
                         r_del,
                         r_submit,
                     ) = rights_to_ints(row.rights.as_ref());
-                    LabelWriteRow {
+                    FolderWriteRow {
                         id: row.id.clone(),
                         account_id: row.account_id.clone(),
                         name: row.name.clone(),
-                        label_type: row.folder_type.clone(),
-                        label_kind: "container".to_string(),
-                        color_bg: None,
-                        color_fg: None,
+                        visible: None,
                         sort_order: None,
                         imap_folder_path: None,
                         imap_special_use: None,
-                        parent_label_id: row.parent_folder_id.clone(),
+                        namespace_type: None,
+                        parent_id: row.parent_folder_id.clone(),
                         right_read: r_read,
                         right_add: r_add,
                         right_remove: r_remove,
@@ -136,10 +134,11 @@ pub(crate) async fn sync_mailboxes(
                         right_delete: r_del,
                         right_submit: r_submit,
                         is_subscribed: row.is_subscribed.map(i64::from),
+                        is_undeletable: row.folder_type == "system",
                     }
                 })
                 .collect();
-            upsert_labels(&tx, &rows)?;
+            insert_folders_batch(&tx, &rows)?;
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())
         })

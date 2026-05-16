@@ -1,4 +1,4 @@
-//! Raw label/account queries for command palette population.
+//! Folder and label-group queries for command palette population.
 //!
 //! Returns simple row structs. OptionItem mapping stays in core (avoids
 //! db depending on cmdk).
@@ -11,13 +11,10 @@ pub struct LabelRow {
     pub name: String,
 }
 
-/// A label row with account context for cross-account display.
-pub struct CrossAccountLabelRow {
-    pub account_id: String,
-    pub account_name: String,
-    pub label_id: String,
-    pub label_name: String,
-    pub label_kind: String,
+/// A label group row: id + name.
+pub struct LabelGroupRow {
+    pub id: i64,
+    pub name: String,
 }
 
 /// User-visible folders for an account, excluding system folders.
@@ -27,35 +24,9 @@ pub fn get_user_folders_for_account_sync(
 ) -> Result<Vec<LabelRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, name FROM labels
-             WHERE account_id = ?1 AND type != 'system' AND visible = 1
-               AND label_kind = 'container'
-             ORDER BY sort_order ASC, name ASC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    stmt.query_map(params![account_id], |row| {
-        Ok(LabelRow {
-            id: row.get("id")?,
-            name: row.get("name")?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
-}
-
-/// User-visible labels for an account, excluding folders.
-pub fn get_user_labels_for_account_sync(
-    conn: &Connection,
-    account_id: &str,
-) -> Result<Vec<LabelRow>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name FROM labels
+            "SELECT id, name FROM folders
              WHERE account_id = ?1 AND visible = 1
-               AND label_kind = 'tag'
-               AND id NOT IN ('UNREAD', 'STARRED')
+               AND is_undeletable = 0
              ORDER BY sort_order ASC, name ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -71,61 +42,19 @@ pub fn get_user_labels_for_account_sync(
     .map_err(|e| e.to_string())
 }
 
-/// Labels currently applied to a specific thread.
-pub fn get_thread_labels_sync(
-    conn: &Connection,
-    account_id: &str,
-    thread_id: &str,
-) -> Result<Vec<LabelRow>, String> {
+/// User-visible label groups.
+pub fn get_label_groups_for_palette_sync(conn: &Connection) -> Result<Vec<LabelGroupRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT l.id, l.name FROM labels l
-             INNER JOIN thread_labels tl
-               ON tl.account_id = l.account_id AND tl.label_id = l.id
-             WHERE tl.account_id = ?1 AND tl.thread_id = ?2
-               AND l.label_kind = 'tag' AND l.visible = 1
-               AND l.id NOT IN ('UNREAD', 'STARRED')
-             ORDER BY l.sort_order ASC, l.name ASC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    stmt.query_map(params![account_id, thread_id], |row| {
-        Ok(LabelRow {
-            id: row.get("id")?,
-            name: row.get("name")?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
-}
-
-/// All user labels across all active accounts with account context.
-pub fn get_all_labels_cross_account_sync(
-    conn: &Connection,
-) -> Result<Vec<CrossAccountLabelRow>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.id AS account_id,
-                    COALESCE(a.display_name, a.email) AS account_name,
-                    l.id AS label_id,
-                    l.name AS label_name,
-                    l.label_kind
-             FROM labels l
-             INNER JOIN accounts a ON a.id = l.account_id
-             WHERE l.type != 'system' AND l.visible = 1 AND a.is_active = 1
-               AND l.id NOT IN ('UNREAD', 'STARRED')
-             ORDER BY a.email ASC, l.sort_order ASC, l.name ASC",
+            "SELECT id, name FROM label_groups
+             ORDER BY name COLLATE NOCASE ASC",
         )
         .map_err(|e| e.to_string())?;
 
     stmt.query_map([], |row| {
-        Ok(CrossAccountLabelRow {
-            account_id: row.get("account_id")?,
-            account_name: row.get("account_name")?,
-            label_id: row.get("label_id")?,
-            label_name: row.get("label_name")?,
-            label_kind: row.get("label_kind")?,
+        Ok(LabelGroupRow {
+            id: row.get("id")?,
+            name: row.get("name")?,
         })
     })
     .map_err(|e| e.to_string())?
@@ -133,17 +62,39 @@ pub fn get_all_labels_cross_account_sync(
     .map_err(|e| e.to_string())
 }
 
-/// Check whether an account uses folder-based semantics.
-pub fn is_folder_based_provider_sync(
+/// Label groups currently rendered for a specific thread.
+pub fn get_thread_label_groups_sync(
     conn: &Connection,
     account_id: &str,
-) -> Result<bool, String> {
-    let provider: String = conn
-        .query_row(
-            "SELECT provider FROM accounts WHERE id = ?1",
-            params![account_id],
-            |row| row.get(0),
+    thread_id: &str,
+) -> Result<Vec<LabelGroupRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT group_id, name
+             FROM (
+               SELECT lg.id AS group_id, lg.name
+               FROM thread_label_groups tlg
+               INNER JOIN label_groups lg ON lg.id = tlg.group_id
+               WHERE tlg.account_id = ?1 AND tlg.thread_id = ?2
+               UNION
+               SELECT lg.id AS group_id, lg.name
+               FROM thread_labels tl
+               INNER JOIN label_group_members lgm
+                 ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
+               INNER JOIN label_groups lg ON lg.id = lgm.group_id
+               WHERE tl.account_id = ?1 AND tl.thread_id = ?2
+             )
+             ORDER BY name COLLATE NOCASE ASC",
         )
         .map_err(|e| e.to_string())?;
-    Ok(provider != "gmail_api")
+
+    stmt.query_map(params![account_id, thread_id], |row| {
+        Ok(LabelGroupRow {
+            id: row.get("group_id")?,
+            name: row.get("name")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }

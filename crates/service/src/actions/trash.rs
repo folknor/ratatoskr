@@ -16,7 +16,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use db::db::queries_extra::{insert_label, remove_label};
+use db::db::queries_extra::{insert_folder, remove_folder};
 use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for trash (idempotent).
@@ -31,8 +31,8 @@ pub(crate) async fn trash_local(
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        remove_label(&conn, &aid, &tid, "INBOX")?;
-        insert_label(&conn, &aid, &tid, "TRASH").map(|_| ())
+        remove_folder(&conn, &aid, &tid, "INBOX")?;
+        insert_folder(&conn, &aid, &tid, "TRASH").map(|_| ())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

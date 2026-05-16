@@ -18,7 +18,7 @@ pub async fn snooze(
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        db::db::queries_extra::remove_label(&conn, &aid, &tid, "INBOX")?;
+        db::db::queries_extra::remove_folder(&conn, &aid, &tid, "INBOX")?;
         db::db::queries_extra::action_helpers::snooze_thread_sync(&conn, &aid, &tid, until)?;
         Ok(())
     })
@@ -45,7 +45,7 @@ pub async fn unsnooze(ctx: &ActionContext, account_id: &str, thread_id: &str) ->
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        db::db::queries_extra::insert_label(&conn, &aid, &tid, "INBOX")?;
+        db::db::queries_extra::insert_folder(&conn, &aid, &tid, "INBOX")?;
         db::db::queries_extra::action_helpers::unsnooze_thread_sync(&conn, &aid, &tid)?;
         Ok(())
     })

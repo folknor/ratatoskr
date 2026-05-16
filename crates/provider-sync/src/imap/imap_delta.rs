@@ -72,7 +72,7 @@ pub async fn imap_delta_sync(
         let fowned: Vec<_> = syncable_folders.iter().map(|f| (*f).clone()).collect();
         db.with_conn(move |conn| {
             let refs: Vec<_> = fowned.iter().collect();
-            sync_pipeline::sync_folders_to_labels(conn, &aid, &refs)
+            sync_pipeline::sync_folders_to_folders(conn, &aid, &refs)
         })
         .await?;
     }

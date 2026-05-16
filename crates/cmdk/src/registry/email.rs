@@ -136,7 +136,7 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
             },
         )),
         "Add Label",
-        "Apply a label to the selected thread. Labels are synced to the provider.",
+        "Apply a label group to the selected thread.",
     ));
     out.push(with_docs(
         undoable(parameterized(
@@ -150,7 +150,7 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
             },
         )),
         "Remove Label",
-        "Remove a label from the selected thread.",
+        "Remove a label group from the selected thread.",
     ));
     out.push(with_docs(
         undoable(parameterized(

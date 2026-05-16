@@ -1,1 +1,1 @@
-pub use types::{FolderId, LabelId};
+pub use types::{FolderId, LabelGroupId, LabelId};

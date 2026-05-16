@@ -19,7 +19,7 @@ fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> Provid
     }
 }
 
-/// Create a folder on the provider, then insert it into the local `labels` table.
+/// Create a folder on the provider, then insert it into the local `folders` table.
 ///
 /// Provider-first: the provider assigns the folder ID, path, and metadata.
 /// The local DB is updated best-effort - if it fails, the action still returns
@@ -84,7 +84,7 @@ pub async fn create_folder(
     mlog.set_local_id(&mutation.id);
     mlog.set_remote_id(&mutation.id);
 
-    // 2. Local DB - insert the new folder into labels (best-effort)
+    // 2. Local DB - insert the new folder into folders (best-effort)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let m = mutation.clone();
@@ -100,8 +100,6 @@ pub async fn create_folder(
             &aid,
             &m.name,
             &m.folder_type,
-            m.color_bg.as_deref(),
-            m.color_fg.as_deref(),
             Some(m.path.as_str()),
             m.special_use.as_deref(),
             parent_id_for_db.as_deref(),
@@ -124,11 +122,11 @@ pub async fn create_folder(
     (outcome, Some(mutation))
 }
 
-/// Rename a folder on the provider, then update the local `labels` row.
+/// Rename a folder on the provider, then update the local `folders` row.
 ///
 /// Provider-first, same pattern and limitations as `create_folder`.
 /// All provider-returned metadata is persisted locally (name, type,
-/// colors, path, special_use). IMAP: returns `Failed` (not supported).
+/// path and special_use). IMAP: returns `Failed` (not supported).
 pub async fn rename_folder(
     ctx: &ActionContext,
     account_id: &str,
@@ -189,8 +187,6 @@ pub async fn rename_folder(
             &aid,
             &m.name,
             &m.folder_type,
-            m.color_bg.as_deref(),
-            m.color_fg.as_deref(),
             Some(m.path.as_str()),
             m.special_use.as_deref(),
             None, // parent folder is not changed in rename
@@ -214,8 +210,7 @@ pub async fn rename_folder(
 /// Delete a folder on the provider, then remove it from the local DB.
 ///
 /// Provider-first, same limitations as `create_folder` re: local DB failure.
-/// `thread_labels` rows for this folder are explicitly cleaned up (there is
-/// no FK cascade from `labels` to `thread_labels`).
+/// `thread_folders` rows for this folder are explicitly cleaned up.
 /// IMAP: returns `Failed` (not supported).
 pub async fn delete_folder(
     ctx: &ActionContext,
@@ -255,7 +250,6 @@ pub async fn delete_folder(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        // Delete thread_labels first - no FK cascade from labels to thread_labels.
         db::db::queries_extra::action_helpers::delete_folder_sync(&conn, &aid, &fid)
             .map_err(ActionError::db)?;
         Ok(())

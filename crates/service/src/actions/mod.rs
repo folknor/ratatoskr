@@ -11,6 +11,7 @@ pub mod contacts;
 mod context;
 mod folder;
 mod label;
+mod label_group;
 mod log;
 mod mark_read;
 mod mdn_send;
@@ -45,7 +46,7 @@ pub use label::{add_label, remove_label};
 pub use mark_read::mark_read;
 // Re-export send types so callers import from actions, not crate::send directly.
 pub use crate::send::{SendAttachment, SendIntent, SendRequest};
-pub use common::typed_ids::{FolderId, LabelId};
+pub use common::typed_ids::{FolderId, LabelGroupId, LabelId};
 pub use log::MutationLog;
 pub use move_to_folder::move_to_folder;
 pub use mute::mute;

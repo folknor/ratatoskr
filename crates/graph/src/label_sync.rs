@@ -23,7 +23,7 @@ struct CategoryListResponse {
 /// labels system.
 ///
 /// Fetches `GET /me/outlook/masterCategories` and upserts into the `labels`
-/// table as `label_kind = 'tag'` entries with a `cat:` ID prefix.
+/// table entries with a `cat:` ID prefix.
 pub async fn graph_label_sync(
     client: &GraphClient,
     account_id: &str,
@@ -60,24 +60,13 @@ pub async fn graph_label_sync(
                     id: format!("cat:{}", cat.display_name),
                     account_id: aid.clone(),
                     name: cat.display_name.clone(),
-                    label_type: "user".to_string(),
-                    label_kind: "tag".to_string(),
-                    color_bg,
-                    color_fg,
+                    visible: None,
                     sort_order: Some(i64::try_from(i).unwrap_or(0)),
-                    imap_folder_path: None,
-                    imap_special_use: None,
-                    parent_label_id: None,
-                    right_read: None,
-                    right_add: None,
-                    right_remove: None,
-                    right_set_seen: None,
-                    right_set_keywords: None,
-                    right_create_child: None,
-                    right_rename: None,
-                    right_delete: None,
-                    right_submit: None,
-                    is_subscribed: None,
+                    server_color_bg: color_bg,
+                    server_color_fg: color_fg,
+                    user_color_bg: None,
+                    user_color_fg: None,
+                    is_undeletable: false,
                 }
             })
             .collect();
@@ -102,24 +91,13 @@ fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
         id: id.to_string(),
         account_id: account_id.to_string(),
         name: name.to_string(),
-        label_type: "system".to_string(),
-        label_kind: "tag".to_string(),
-        color_bg: None,
-        color_fg: None,
+        visible: None,
         sort_order: Some(sort_order),
-        imap_folder_path: None,
-        imap_special_use: None,
-        parent_label_id: None,
-        right_read: None,
-        right_add: None,
-        right_remove: None,
-        right_set_seen: None,
-        right_set_keywords: None,
-        right_create_child: None,
-        right_rename: None,
-        right_delete: None,
-        right_submit: None,
-        is_subscribed: None,
+        server_color_bg: None,
+        server_color_fg: None,
+        user_color_bg: None,
+        user_color_fg: None,
+        is_undeletable: true,
     })
     .collect()
 }

@@ -39,7 +39,7 @@ pub enum LabelOp {
     CreatedAck(Result<String, String>),
     /// `label.delete` ack for one `(account_id, label_id)`.
     DeletedAck(Result<(), String>),
-    /// `label.recolor` ack (writes to `label_color_overrides`).
+    /// `label.recolor` ack (writes per-label `user_color_*`).
     RecoloredAck(Result<(), String>),
     /// `label.rename` ack for one `(account_id, label_id)`.
     RenamedAck(Result<(), String>),

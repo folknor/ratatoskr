@@ -17,7 +17,7 @@ const SCHEMA_V100: &str = concat!(
     // accounts, settings (+ defaults INSERT)
     include_str!("schema/01_core.sql"),
     "\n",
-    // labels, label_color_overrides, threads, thread_labels, thread_bundles,
+    // folders, labels, label groups, threads, folder/label junctions, thread_bundles,
     // messages, attachments, cloud_attachments, thread_ui_state
     include_str!("schema/02_mail.sql"),
     "\n",

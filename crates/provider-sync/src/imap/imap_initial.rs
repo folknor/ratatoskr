@@ -97,7 +97,7 @@ pub async fn imap_initial_sync(
         let folders_owned: Vec<_> = syncable_folders.iter().map(|f| (*f).clone()).collect();
         db.with_conn(move |conn| {
             let refs: Vec<&super::types::ImapFolder> = folders_owned.iter().collect();
-            sync_pipeline::sync_folders_to_labels(conn, &account_id, &refs)
+            sync_pipeline::sync_folders_to_folders(conn, &account_id, &refs)
         })
         .await?;
     }

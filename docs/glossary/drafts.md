@@ -24,7 +24,7 @@ A local draft is **deleted** from `local_drafts` once it has been sent (not just
 
 ### Server-synced draft
 
-A draft that exists on the provider as a message with the `DRAFT` system folder membership. Modelled as a normal `DbThread` row (in `threads`) with a `thread_labels` row pointing at the `DRAFT` label, plus message rows in `messages`. Indistinguishable from any other thread except for the `DRAFT` label membership.
+A draft that exists on the provider as a message with the `DRAFT` system folder membership. Modelled as a normal `DbThread` row (in `threads`) with a `thread_folders` row pointing at the `DRAFT` folder, plus message rows in `messages`. Indistinguishable from any other thread except for the `DRAFT` folder membership.
 
 Folder semantics for `DRAFT` are documented in `docs/glossary/folders-labels.md`: it's a container, not a tag. Per-provider mapping: Gmail `DRAFT` label, Graph `drafts` well-known folder, JMAP drafts-role mailbox, IMAP `\Drafts` special-use mailbox.
 
@@ -53,7 +53,7 @@ The sidebar's Drafts view must show local drafts and server-synced drafts togeth
 - `message_count: 1` - a draft is a single composition; the card's multi-message indicator is suppressed.
 - `is_local_draft: true` - the discriminator.
 
-These are sensible defaults for a not-yet-synced composition, but they're a second source of truth for "what a `Thread` looks like" parallel to the canonical `db_thread_to_app_thread`. Any new field on `Thread` that needs a meaningful local-draft value has to be updated in both places by hand. See `docs/glossary/discrepancies.md` § "Mixed drafts list merged at the app layer" for the broader pattern.
+These are sensible defaults for a not-yet-synced composition, but they're a second source of truth for "what a `Thread` looks like" parallel to the canonical `db_thread_to_app_thread`. Any new field on `Thread` that needs a meaningful local-draft value has to be updated in both places by hand. See `docs/glossary/discrepancies.md` section "Mixed drafts list merged at the app layer" for the broader pattern.
 
 ## Click semantics
 

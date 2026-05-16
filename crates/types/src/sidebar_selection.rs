@@ -1,4 +1,4 @@
-use crate::{FolderId, LabelId};
+use crate::{FolderId, LabelGroupId};
 
 /// What the sidebar is currently showing / the user has selected.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -15,8 +15,8 @@ pub enum SidebarSelection {
     SmartFolder { id: String },
     /// A provider-specific container folder (Exchange folder, IMAP mailbox, etc.).
     ProviderFolder(FolderId),
-    /// A user-visible label (Gmail user label, Exchange category, IMAP keyword, etc.).
-    Label(LabelId),
+    /// A user-created label group.
+    LabelGroup(LabelGroupId),
 }
 
 /// System folders that exist on every email account.
@@ -99,7 +99,7 @@ impl SidebarSelection {
             Self::Folder(f) => Some(f.as_folder_id_str().to_string()),
             Self::SmartFolder { id } => Some(id.clone()),
             Self::ProviderFolder(fid) => Some(fid.0.clone()),
-            Self::Label(lid) => Some(lid.0.clone()),
+            Self::LabelGroup(group_id) => Some(group_id.to_string()),
         }
     }
 
@@ -112,8 +112,10 @@ impl SidebarSelection {
             Self::Inbox => Some("INBOX".to_string()),
             Self::Folder(f) => Some(f.as_folder_id_str().to_string()),
             Self::ProviderFolder(fid) => Some(fid.0.clone()),
-            Self::Label(lid) => Some(lid.0.clone()),
-            Self::SmartFolder { .. } | Self::Bundle(_) | Self::FeatureView(_) => None,
+            Self::SmartFolder { .. }
+            | Self::Bundle(_)
+            | Self::FeatureView(_)
+            | Self::LabelGroup(_) => None,
         }
     }
 
@@ -124,9 +126,10 @@ impl SidebarSelection {
             Self::Inbox => Some(FolderId::from("INBOX")),
             Self::Folder(f) => Some(FolderId::from(f.as_folder_id_str())),
             Self::ProviderFolder(fid) => Some(fid.clone()),
-            Self::SmartFolder { .. } | Self::Bundle(_) | Self::FeatureView(_) | Self::Label(_) => {
-                None
-            }
+            Self::SmartFolder { .. }
+            | Self::Bundle(_)
+            | Self::FeatureView(_)
+            | Self::LabelGroup(_) => None,
         }
     }
 

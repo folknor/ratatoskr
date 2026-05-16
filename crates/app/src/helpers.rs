@@ -7,8 +7,9 @@ use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
-    get_active_account_ids_sync, get_public_folder_items, get_threads_for_shared_mailbox,
-    get_snoozed_threads, get_starred_threads, get_threads_scoped, query_thread_list_decorations,
+    get_active_account_ids_sync, get_public_folder_items, get_snoozed_threads, get_starred_threads,
+    get_threads_for_label_group, get_threads_for_shared_mailbox,
+    get_threads_for_shared_mailbox_label_group, get_threads_scoped, query_thread_list_decorations,
 };
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{ChatList, GenerationToken, Nav};
@@ -74,8 +75,21 @@ impl ReadyApp {
                     } => {
                         let aid = account_id.clone();
                         let mid = mailbox_id.clone();
-                        let label_id = thread_query_label_for_selection(&selection);
-                        load_shared_mailbox_threads(db, aid, mid, label_id).await
+                        match &selection {
+                            SidebarSelection::LabelGroup(group_id) => {
+                                load_shared_mailbox_label_group_threads(
+                                    db,
+                                    aid,
+                                    mid,
+                                    group_id.as_i64(),
+                                )
+                                .await
+                            }
+                            _ => {
+                                let label_id = thread_query_label_for_selection(&selection);
+                                load_shared_mailbox_threads(db, aid, mid, label_id).await
+                            }
+                        }
                     }
                     ViewScope::PublicFolder {
                         account_id,
@@ -93,6 +107,10 @@ impl ReadyApp {
                             }
                             SidebarSelection::FeatureView(feature) => {
                                 load_threads_for_feature_view(*feature).await
+                            }
+                            SidebarSelection::LabelGroup(group_id) => {
+                                load_threads_for_label_group_view(db, scope, group_id.as_i64())
+                                    .await
                             }
                             _ => {
                                 let label_id = thread_query_label_for_selection(&selection);
@@ -180,11 +198,30 @@ async fn load_threads_scoped(
     .await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+async fn load_threads_for_label_group_view(
+    db: Arc<Db>,
+    scope: AccountScope,
+    group_id: i64,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_threads_for_label_group(conn, &scope, group_id, Some(1000), None)?;
+        let mut threads: Vec<Thread> = db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
+    })
+    .await
+}
+
 fn thread_query_label_for_selection(selection: &SidebarSelection) -> Option<String> {
     match selection {
         // Single-account All Mail is the full scoped thread set, so it must
         // deliberately avoid the thread_labels path.
         SidebarSelection::Folder(SystemFolder::AllMail) => None,
+        SidebarSelection::LabelGroup(_) => None,
         _ => selection.folder_id_for_thread_query(),
     }
 }
@@ -255,6 +292,31 @@ async fn load_shared_mailbox_threads(
             &account_id,
             &mailbox_id,
             label_id.as_deref(),
+            Some(1000),
+        )?;
+        let mut threads: Vec<Thread> = db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect();
+        apply_thread_decorations(conn, &mut threads)?;
+        Ok(threads)
+    })
+    .await
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+async fn load_shared_mailbox_label_group_threads(
+    db: Arc<Db>,
+    account_id: String,
+    mailbox_id: String,
+    group_id: i64,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_threads_for_shared_mailbox_label_group(
+            conn,
+            &account_id,
+            &mailbox_id,
+            group_id,
             Some(1000),
         )?;
         let mut threads: Vec<Thread> = db_threads

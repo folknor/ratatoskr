@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use common::types::ProviderCtx;
 use db::db::ReadDbState;
-use db::db::queries_extra::{LabelWriteRow, upsert_labels};
+use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 
 use crate::client::GraphClient;
 use crate::folder_mapper::FolderMap;
@@ -37,28 +37,26 @@ async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<Fol
 
     let all_folders = fetch_all_folders(client, ctx.db).await?;
     let folder_map = FolderMap::build(&resolved, &all_folders);
-    persist_labels(ctx, &folder_map).await?;
+    persist_folders(ctx, &folder_map).await?;
     Ok(folder_map)
 }
 
-async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
+async fn persist_folders(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
 
-    let mut label_rows: Vec<LabelWriteRow> = folder_map
+    let folder_rows: Vec<FolderWriteRow> = folder_map
         .all_mappings()
         .map(|m| {
-            LabelWriteRow {
+            FolderWriteRow {
                 id: m.folder_id.clone(),
                 account_id: aid.clone(),
                 name: m.folder_name.clone(),
-                label_type: m.folder_type.to_string(),
-                label_kind: "container".to_string(),
-                color_bg: None,
-                color_fg: None,
+                visible: None,
                 sort_order: None,
                 imap_folder_path: None,
                 imap_special_use: None,
-                parent_label_id: m.parent_folder_id.clone(),
+                namespace_type: None,
+                parent_id: m.parent_folder_id.clone(),
                 right_read: None,
                 right_add: None,
                 right_remove: None,
@@ -69,16 +67,18 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
                 right_delete: None,
                 right_submit: None,
                 is_subscribed: None,
+                is_undeletable: m.folder_type == "system",
             }
         })
         .collect();
-    label_rows.extend(importance_label_rows(&aid));
+    let label_rows = importance_label_rows(&aid);
 
     ctx.db
         .with_conn(move |conn| {
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
+            insert_folders_batch(&tx, &folder_rows)?;
             upsert_labels(&tx, &label_rows)?;
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())
@@ -96,24 +96,13 @@ fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
         id: id.to_string(),
         account_id: account_id.to_string(),
         name: name.to_string(),
-        label_type: "system".to_string(),
-        label_kind: "tag".to_string(),
-        color_bg: None,
-        color_fg: None,
+        visible: None,
         sort_order: Some(sort_order),
-        imap_folder_path: None,
-        imap_special_use: None,
-        parent_label_id: None,
-        right_read: None,
-        right_add: None,
-        right_remove: None,
-        right_set_seen: None,
-        right_set_keywords: None,
-        right_create_child: None,
-        right_rename: None,
-        right_delete: None,
-        right_submit: None,
-        is_subscribed: None,
+        server_color_bg: None,
+        server_color_fg: None,
+        user_color_bg: None,
+        user_color_fg: None,
+        is_undeletable: true,
     })
     .collect()
 }

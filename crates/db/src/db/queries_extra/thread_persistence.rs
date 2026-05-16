@@ -459,6 +459,11 @@ pub fn delete_messages_and_cleanup_threads(
             )
             .map_err(|e| format!("delete orphan thread: {e}"))?;
             tx.execute(
+                "DELETE FROM thread_folders WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan thread folders: {e}"))?;
+            tx.execute(
                 "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
                 rusqlite::params![tid, account_id],
             )
@@ -497,6 +502,32 @@ pub fn delete_messages_and_cleanup_threads(
     Ok(affected_threads.into_iter().collect())
 }
 
+pub fn replace_thread_folders<'a>(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folders: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let unique_folders = filtered_thread_labels(folders);
+
+    tx.execute(
+        "DELETE FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2",
+        rusqlite::params![account_id, thread_id],
+    )
+    .map_err(|e| format!("delete thread folders: {e}"))?;
+
+    for folder_id in unique_folders {
+        tx.execute(
+            "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) \
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, thread_id, folder_id],
+        )
+        .map_err(|e| format!("insert thread folder: {e}"))?;
+    }
+
+    Ok(())
+}
+
 pub fn replace_thread_labels<'a>(
     tx: &Transaction,
     account_id: &str,
@@ -518,6 +549,26 @@ pub fn replace_thread_labels<'a>(
             rusqlite::params![account_id, thread_id, label_id],
         )
         .map_err(|e| format!("insert thread label: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Add folders observed from a partial provider update without deleting the
+/// thread's existing aggregate.
+pub fn merge_thread_folders<'a>(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folders: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    for folder_id in filtered_thread_labels(folders) {
+        tx.execute(
+            "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) \
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, thread_id, folder_id],
+        )
+        .map_err(|e| format!("merge thread folder: {e}"))?;
     }
 
     Ok(())

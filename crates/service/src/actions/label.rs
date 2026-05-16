@@ -9,10 +9,8 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use db::progress::NoopProgressReporter;
 
-/// Local DB mutation for add-label: validate label exists and is a label row, then
-/// insert into `thread_labels` (idempotent).
-///
-/// Folder rows are rejected - they use move operations, not add/remove.
+/// Local DB mutation for add-label: validate label exists, then insert into
+/// `thread_labels` (idempotent).
 pub(crate) async fn add_label_local(
     ctx: &ActionContext,
     account_id: &str,
@@ -29,22 +27,13 @@ pub(crate) async fn add_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind = match db::db::queries_extra::action_helpers::get_label_kind_sync(
-            &conn, &lid, &aid,
-        )
-        .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
-        {
-            Some(kind) => kind,
-            None => ensure_prefixed_tag_label(&conn, &aid, &lid)
+        let exists = db::db::queries_extra::action_helpers::label_exists_sync(&conn, &lid, &aid)
+            .map_err(|e| ActionError::db(format!("label lookup: {e}")))?;
+        if !exists {
+            ensure_prefixed_tag_label(&conn, &aid, &lid)
                 .transpose()
                 .map_err(ActionError::db)?
-                .ok_or_else(|| ActionError::not_found("label not found for this account"))?,
-        };
-
-        if label_kind != "tag" {
-            return Err(ActionError::invalid_state(
-                "folder rows use move operations, not add/remove",
-            ));
+                .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
         }
 
         if let Some(opposite) = opposite_importance_label(&lid) {
@@ -64,15 +53,15 @@ fn ensure_prefixed_tag_label(
     conn: &rusqlite::Connection,
     account_id: &str,
     label_id: &str,
-) -> Option<Result<String, String>> {
-    let (name, label_type, sort_order) = if let Some(keyword) = label_id.strip_prefix("kw:") {
-        (keyword.to_string(), "user", None)
+) -> Option<Result<(), String>> {
+    let (name, sort_order, is_undeletable) = if let Some(keyword) = label_id.strip_prefix("kw:") {
+        (keyword.to_string(), None, false)
     } else if let Some(category) = label_id.strip_prefix("cat:") {
-        (category.to_string(), "user", None)
+        (category.to_string(), None, false)
     } else if label_id == "importance:high" {
-        ("High importance".to_string(), "system", Some(10_000))
+        ("High importance".to_string(), Some(10_000), true)
     } else if label_id == "importance:low" {
-        ("Low importance".to_string(), "system", Some(10_001))
+        ("Low importance".to_string(), Some(10_001), true)
     } else {
         return None;
     };
@@ -80,11 +69,11 @@ fn ensure_prefixed_tag_label(
     Some(
         conn.execute(
             "INSERT OR IGNORE INTO labels \
-             (id, account_id, name, type, label_kind, sort_order) \
-             VALUES (?1, ?2, ?3, ?4, 'tag', COALESCE(?5, 0))",
-            rusqlite::params![label_id, account_id, name, label_type, sort_order],
+             (id, account_id, name, sort_order, is_undeletable) \
+             VALUES (?1, ?2, ?3, COALESCE(?4, 0), ?5)",
+            rusqlite::params![label_id, account_id, name, sort_order, is_undeletable],
         )
-        .map(|_| "tag".to_string())
+        .map(|_| ())
         .map_err(|e| format!("ensure prefixed tag label: {e}")),
     )
 }
@@ -188,10 +177,8 @@ pub(crate) async fn add_label_with_provider(
     add_label_dispatch(ctx, provider, account_id, thread_id, label_id).await
 }
 
-/// Local DB mutation for remove-label: validate label exists and is a label row, then
-/// delete from `thread_labels` (idempotent).
-///
-/// Container labels (folders) are rejected - they use move operations, not add/remove.
+/// Local DB mutation for remove-label: validate label exists, then delete from
+/// `thread_labels` (idempotent).
 pub(crate) async fn remove_label_local(
     ctx: &ActionContext,
     account_id: &str,
@@ -208,16 +195,10 @@ pub(crate) async fn remove_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind = db::db::queries_extra::action_helpers::get_label_kind_sync(
-            &conn, &lid, &aid,
-        )
-        .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
-        .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
-
-        if label_kind != "tag" {
-            return Err(ActionError::invalid_state(
-                "folder rows use move operations, not add/remove",
-            ));
+        let exists = db::db::queries_extra::action_helpers::label_exists_sync(&conn, &lid, &aid)
+            .map_err(|e| ActionError::db(format!("label lookup: {e}")))?;
+        if !exists {
+            return Err(ActionError::not_found("label not found for this account"));
         }
 
         db::db::queries_extra::remove_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;

@@ -184,9 +184,9 @@ fn set_thread_labels(
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
     // JMAP Email/changes returns changed messages, not full thread state.
-    // Merge here so partial pages do not erase aggregate labels from other
+    // Merge here so partial pages do not erase aggregate folders from other
     // messages in the same thread.
-    sync_persistence::merge_thread_labels(
+    sync_persistence::merge_thread_folders(
         tx,
         account_id,
         thread_id,
@@ -279,10 +279,10 @@ fn upsert_attachments(
 // Keyword -> category sync
 // ---------------------------------------------------------------------------
 
-/// Ensure non-system JMAP keywords exist in the unified labels system.
+/// Ensure non-system JMAP keywords exist in the labels table.
 ///
-/// Upserts each keyword as a `label_kind = 'tag'` label with a `kw:` prefix
-/// and links it to the thread via `thread_labels`.
+/// Upserts each keyword as a label with a `kw:` prefix and links it to the
+/// thread via `thread_labels`.
 fn sync_keyword_labels(
     tx: &rusqlite::Transaction,
     account_id: &str,
@@ -308,24 +308,13 @@ fn sync_keyword_labels(
                 id: label_id.clone(),
                 account_id: account_id.to_string(),
                 name: keyword.clone(),
-                label_type: "user".to_string(),
-                label_kind: "tag".to_string(),
-                color_bg: None,
-                color_fg: None,
+                visible: None,
                 sort_order: None,
-                imap_folder_path: None,
-                imap_special_use: None,
-                parent_label_id: None,
-                right_read: None,
-                right_add: None,
-                right_remove: None,
-                right_set_seen: None,
-                right_set_keywords: None,
-                right_create_child: None,
-                right_rename: None,
-                right_delete: None,
-                right_submit: None,
-                is_subscribed: None,
+                server_color_bg: None,
+                server_color_fg: None,
+                user_color_bg: None,
+                user_color_fg: None,
+                is_undeletable: false,
             }],
         )?;
         tx.execute(

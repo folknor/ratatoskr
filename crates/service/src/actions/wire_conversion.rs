@@ -13,8 +13,8 @@
 //! error, which is the regression guard the static-mirror contract
 //! requires.
 
-use common::typed_ids::{FolderId, LabelId};
-use service_api::{WireFolderId, WireMailOperation, WireLabelId};
+use common::typed_ids::{FolderId, LabelGroupId, LabelId};
+use service_api::{WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId};
 
 use super::operation::MailOperation;
 
@@ -40,6 +40,12 @@ pub(crate) fn wire_to_mail(op: WireMailOperation) -> MailOperation {
         },
         WireMailOperation::RemoveLabel { label_id } => MailOperation::RemoveLabel {
             label_id: wire_label_to_label(label_id),
+        },
+        WireMailOperation::ApplyLabelGroup { group_id } => MailOperation::ApplyLabelGroup {
+            group_id: wire_label_group_to_label_group(group_id),
+        },
+        WireMailOperation::RemoveLabelGroup { group_id } => MailOperation::RemoveLabelGroup {
+            group_id: wire_label_group_to_label_group(group_id),
         },
         WireMailOperation::Snooze { until } => MailOperation::Snooze { until },
         WireMailOperation::Unsnooze => MailOperation::Unsnooze,
@@ -82,6 +88,12 @@ pub(crate) fn mail_to_wire(op: MailOperation) -> WireMailOperation {
         MailOperation::RemoveLabel { label_id } => WireMailOperation::RemoveLabel {
             label_id: label_to_wire(label_id),
         },
+        MailOperation::ApplyLabelGroup { group_id } => WireMailOperation::ApplyLabelGroup {
+            group_id: label_group_to_wire(group_id),
+        },
+        MailOperation::RemoveLabelGroup { group_id } => WireMailOperation::RemoveLabelGroup {
+            group_id: label_group_to_wire(group_id),
+        },
         MailOperation::Snooze { until } => WireMailOperation::Snooze { until },
         MailOperation::Unsnooze => WireMailOperation::Unsnooze,
     }
@@ -101,6 +113,14 @@ fn wire_label_to_label(w: WireLabelId) -> LabelId {
 
 fn label_to_wire(t: LabelId) -> WireLabelId {
     WireLabelId(t.0)
+}
+
+fn wire_label_group_to_label_group(w: WireLabelGroupId) -> LabelGroupId {
+    LabelGroupId(w.0)
+}
+
+fn label_group_to_wire(t: LabelGroupId) -> WireLabelGroupId {
+    WireLabelGroupId(t.0)
 }
 
 #[cfg(test)]
@@ -137,6 +157,12 @@ mod tests {
             },
             WireMailOperation::RemoveLabel {
                 label_id: WireLabelId("work".into()),
+            },
+            WireMailOperation::ApplyLabelGroup {
+                group_id: WireLabelGroupId(7),
+            },
+            WireMailOperation::RemoveLabelGroup {
+                group_id: WireLabelGroupId(7),
             },
             WireMailOperation::Snooze { until: 1_700_000_000 },
             WireMailOperation::Unsnooze,
@@ -177,6 +203,12 @@ mod tests {
             MailOperation::RemoveLabel {
                 label_id: LabelId("work".into()),
             },
+            MailOperation::ApplyLabelGroup {
+                group_id: LabelGroupId(7),
+            },
+            MailOperation::RemoveLabelGroup {
+                group_id: LabelGroupId(7),
+            },
             MailOperation::Snooze { until: 1_700_000_000 },
             MailOperation::Unsnooze,
         ];
@@ -196,6 +228,8 @@ mod tests {
                 MailOperation::MoveToFolder { .. } => "MoveToFolder",
                 MailOperation::AddLabel { .. } => "AddLabel",
                 MailOperation::RemoveLabel { .. } => "RemoveLabel",
+                MailOperation::ApplyLabelGroup { .. } => "ApplyLabelGroup",
+                MailOperation::RemoveLabelGroup { .. } => "RemoveLabelGroup",
                 MailOperation::Snooze { .. } => "Snooze",
                 MailOperation::Unsnooze => "Unsnooze",
             };

@@ -372,7 +372,7 @@ impl Component for Sidebar {
         let has_account_labels = self.nav_state.as_ref().is_some_and(|ns| {
             ns.folders
                 .iter()
-                .any(|f| matches!(f.folder_kind, FolderKind::AccountLabel))
+                .any(|f| matches!(f.folder_kind, FolderKind::LabelGroup))
         });
         if show_labels && has_account_labels {
             scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());

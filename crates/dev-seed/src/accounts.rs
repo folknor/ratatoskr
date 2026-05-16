@@ -251,12 +251,6 @@ static SYSTEM_LABELS: &[SystemLabel] = &[
         special: "junk",
         sort: 5,
     },
-    SystemLabel {
-        id: "all-mail",
-        name: "All Mail",
-        special: "all",
-        sort: 6,
-    },
 ];
 
 fn seeded_user_label_id(provider: &str, name: &str) -> String {
@@ -276,7 +270,7 @@ pub struct Account {
     pub account_name: String,
     pub provider: String,
     pub color: String,
-    /// Map from label name -> label id
+    /// Map from folder or tag label name to provider id.
     pub labels: Vec<(String, String)>,
     pub category_labels: CategoryLabels,
 }
@@ -315,21 +309,21 @@ pub fn seed_accounts(
 
         for sl in SYSTEM_LABELS {
             conn.execute(
-                "INSERT INTO labels (id, account_id, name, type, visible, sort_order, \
-                 imap_special_use, imap_folder_path, label_kind) \
-                 VALUES (?1, ?2, ?3, 'system', 1, ?4, ?5, ?3, 'container')",
+                "INSERT INTO folders (id, account_id, name, visible, sort_order, \
+                 imap_special_use, imap_folder_path, is_undeletable) \
+                 VALUES (?1, ?2, ?3, 1, ?4, ?5, ?3, 1)",
                 rusqlite::params![sl.id, account_id, sl.name, sl.sort, sl.special],
             )
-            .map_err(|e| format!("insert system label: {e}"))?;
+            .map_err(|e| format!("insert system folder: {e}"))?;
             labels.push((sl.name.to_string(), sl.id.to_string()));
         }
 
         for (i, ul) in preset.user_labels.iter().enumerate() {
             let label_id = seeded_user_label_id(preset.provider, ul.name);
             conn.execute(
-                "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, \
-                 visible, sort_order, label_kind) \
-                 VALUES (?1, ?2, ?3, 'user', ?4, ?5, 1, ?6, 'tag')",
+                "INSERT INTO labels (id, account_id, name, server_color_bg, server_color_fg, \
+                 visible, sort_order, is_undeletable) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, 0)",
                 rusqlite::params![
                     label_id,
                     account_id,

@@ -20,22 +20,19 @@ pub fn thread_exists_sync(
     .map_err(|e| e.to_string())
 }
 
-/// Get the label_kind for a label ("tag" or "container"). Returns None if not found.
-pub fn get_label_kind_sync(
+/// Check whether a tag label exists for an account.
+pub fn label_exists_sync(
     conn: &Connection,
     label_id: &str,
     account_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<bool, String> {
     conn.query_row(
-        "SELECT label_kind FROM labels WHERE id = ?1 AND account_id = ?2 LIMIT 1",
+        "SELECT COUNT(*) FROM labels WHERE id = ?1 AND account_id = ?2",
         params![label_id, account_id],
-        |row| row.get(0),
+        |row| row.get::<_, i64>(0),
     )
-    .map(Some)
-    .or_else(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Ok(None),
-        _ => Err(e.to_string()),
-    })
+    .map(|n| n > 0)
+    .map_err(|e| e.to_string())
 }
 
 /// Identity fields needed to route a contact mutation through the right provider.
@@ -99,31 +96,32 @@ pub fn unsnooze_thread_sync(
     Ok(())
 }
 
-/// Upsert a folder/label row from a provider mutation result.
+/// Upsert a folder row from a provider mutation result.
 #[allow(clippy::too_many_arguments)]
 pub fn upsert_folder_from_mutation_sync(
     conn: &Connection,
-    label_id: &str,
+    folder_id: &str,
     account_id: &str,
     name: &str,
     folder_type: &str,
-    color_bg: Option<&str>,
-    color_fg: Option<&str>,
     path: Option<&str>,
     special_use: Option<&str>,
-    parent_label_id: Option<&str>,
+    parent_id: Option<&str>,
 ) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, \
-         imap_folder_path, imap_special_use, parent_label_id, label_kind) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'container') \
+        "INSERT INTO folders (id, account_id, name, imap_folder_path, imap_special_use, parent_id, is_undeletable) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
          ON CONFLICT(account_id, id) DO UPDATE SET \
-           name = ?3, type = ?4, color_bg = ?5, color_fg = ?6, \
-           imap_folder_path = ?7, imap_special_use = ?8, \
-           parent_label_id = ?9, label_kind = 'container'",
+           name = ?3, imap_folder_path = ?4, imap_special_use = ?5, \
+           parent_id = ?6, is_undeletable = ?7",
         params![
-            label_id, account_id, name, folder_type, color_bg, color_fg, path, special_use,
-            parent_label_id,
+            folder_id,
+            account_id,
+            name,
+            path,
+            special_use,
+            parent_id,
+            folder_type == "system",
         ],
     )
     .map_err(|e| format!("upsert folder: {e}"))?;
@@ -157,21 +155,21 @@ pub fn delete_threads_for_account_sync(
     Ok(())
 }
 
-/// Delete a folder/label and its thread_labels associations.
+/// Delete a folder and its thread_folders associations.
 pub fn delete_folder_sync(
     conn: &Connection,
     account_id: &str,
-    label_id: &str,
+    folder_id: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "DELETE FROM thread_labels WHERE account_id = ?1 AND label_id = ?2",
-        params![account_id, label_id],
+        "DELETE FROM thread_folders WHERE account_id = ?1 AND folder_id = ?2",
+        params![account_id, folder_id],
     )
-    .map_err(|e| format!("delete folder thread_labels: {e}"))?;
+    .map_err(|e| format!("delete folder thread_folders: {e}"))?;
     conn.execute(
-        "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
-        params![account_id, label_id],
+        "DELETE FROM folders WHERE account_id = ?1 AND id = ?2",
+        params![account_id, folder_id],
     )
-    .map_err(|e| format!("delete folder label: {e}"))?;
+    .map_err(|e| format!("delete folder: {e}"))?;
     Ok(())
 }

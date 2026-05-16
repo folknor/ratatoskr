@@ -54,7 +54,9 @@ pub fn selection_to_view_type(sel: &SidebarSelection) -> (ViewType, Option<Strin
         }
         SidebarSelection::SmartFolder { id } => (ViewType::SmartFolder, Some(id.clone())),
         SidebarSelection::ProviderFolder(fid) => (ViewType::SidebarItem, Some(fid.0.clone())),
-        SidebarSelection::Label(lid) => (ViewType::SidebarItem, Some(lid.0.clone())),
+        SidebarSelection::LabelGroup(group_id) => {
+            (ViewType::SidebarItem, Some(group_id.to_string()))
+        }
     }
 }
 
@@ -533,14 +535,14 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
                 folder_id,
             }))
         }
-        (CommandId::EmailAddLabel, CommandArgs::AddLabel { label_id }) => {
-            Some(Message::EmailAction(MailActionIntent::AddLabel {
-                label_id,
+        (CommandId::EmailAddLabel, CommandArgs::AddLabel { group_id }) => {
+            Some(Message::EmailAction(MailActionIntent::ApplyLabelGroup {
+                group_id,
             }))
         }
-        (CommandId::EmailRemoveLabel, CommandArgs::RemoveLabel { label_id }) => {
-            Some(Message::EmailAction(MailActionIntent::RemoveLabel {
-                label_id,
+        (CommandId::EmailRemoveLabel, CommandArgs::RemoveLabel { group_id }) => {
+            Some(Message::EmailAction(MailActionIntent::RemoveLabelGroup {
+                group_id,
             }))
         }
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {
@@ -556,10 +558,10 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
             selection: SidebarSelection::ProviderFolder(folder_id),
             account_id: Some(account_id),
         })),
-        (CommandId::NavigateToLabel, CommandArgs::NavigateToLabel { label_id, account_id }) => {
+        (CommandId::NavigateToLabel, CommandArgs::NavigateToLabel { group_id }) => {
             Some(Message::NavigateTo(NavigationTarget::Sidebar {
-                selection: SidebarSelection::Label(label_id),
-                account_id: Some(account_id),
+                selection: SidebarSelection::LabelGroup(group_id),
+                account_id: None,
             }))
         }
         (CommandId::SmartFolderSave, CommandArgs::SmartFolderSave { name }) => {

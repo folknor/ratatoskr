@@ -1,19 +1,15 @@
--- ── Labels ──────────────────────────────────────────────────
+-- ── Folders / labels ────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS labels (
-    id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS folders (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
     name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    color_bg TEXT,
-    color_fg TEXT,
-    visible INTEGER DEFAULT 1,
-    sort_order INTEGER DEFAULT 0,
+    visible INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     imap_folder_path TEXT,
     imap_special_use TEXT,
     namespace_type TEXT,
-    parent_label_id TEXT,
-    label_kind TEXT NOT NULL DEFAULT 'container',
+    parent_id TEXT,
     right_read INTEGER,
     right_add INTEGER,
     right_remove INTEGER,
@@ -24,14 +20,43 @@ CREATE TABLE IF NOT EXISTS labels (
     right_delete INTEGER,
     right_submit INTEGER,
     is_subscribed INTEGER,
+    is_undeletable INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, id),
+    FOREIGN KEY (account_id, parent_id) REFERENCES folders(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS folders_parent ON folders(account_id, parent_id);
+
+CREATE TABLE IF NOT EXISTS labels (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    visible INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    server_color_bg TEXT,
+    server_color_fg TEXT,
+    user_color_bg TEXT,
+    user_color_fg TEXT,
+    is_undeletable INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, id)
 );
-CREATE INDEX IF NOT EXISTS idx_labels_account ON labels(account_id);
+CREATE INDEX IF NOT EXISTS labels_account ON labels(account_id);
 
-CREATE TABLE IF NOT EXISTS label_color_overrides (
-    label_name TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+CREATE TABLE IF NOT EXISTS label_groups (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
     color_bg TEXT NOT NULL,
-    color_fg TEXT NOT NULL
+    color_fg TEXT NOT NULL,
+    UNIQUE (name COLLATE NOCASE)
+);
+
+CREATE TABLE IF NOT EXISTS label_group_members (
+    group_id INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    label_id TEXT NOT NULL,
+    PRIMARY KEY (group_id, account_id, label_id),
+    UNIQUE (account_id, label_id),
+    FOREIGN KEY (group_id) REFERENCES label_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id, label_id) REFERENCES labels(account_id, id) ON DELETE CASCADE
 );
 
 -- ── Threads ─────────────────────────────────────────────────
@@ -62,14 +87,35 @@ CREATE INDEX IF NOT EXISTS idx_threads_muted ON threads(account_id, is_muted);
 CREATE INDEX IF NOT EXISTS idx_threads_shared_mailbox ON threads(account_id, shared_mailbox_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_threads_chat ON threads(account_id, is_chat_thread) WHERE is_chat_thread = 1;
 
+CREATE TABLE IF NOT EXISTS thread_folders (
+    thread_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    folder_id TEXT NOT NULL,
+    PRIMARY KEY (account_id, thread_id, folder_id),
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id, folder_id) REFERENCES folders(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS thread_folders_by_folder ON thread_folders(account_id, folder_id, thread_id);
+
 CREATE TABLE IF NOT EXISTS thread_labels (
     thread_id TEXT NOT NULL,
     account_id TEXT NOT NULL,
     label_id TEXT NOT NULL,
     PRIMARY KEY (account_id, thread_id, label_id),
-    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id, label_id) REFERENCES labels(account_id, id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_thread_labels_label ON thread_labels(account_id, label_id);
+CREATE INDEX IF NOT EXISTS thread_labels_by_label ON thread_labels(account_id, label_id, thread_id);
+
+CREATE TABLE IF NOT EXISTS thread_label_groups (
+    account_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    group_id INTEGER NOT NULL,
+    PRIMARY KEY (account_id, thread_id, group_id),
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES label_groups(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS thread_label_groups_by_group ON thread_label_groups(group_id);
 
 CREATE TABLE IF NOT EXISTS thread_bundles (
     account_id TEXT NOT NULL,

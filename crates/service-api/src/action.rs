@@ -75,6 +75,10 @@ pub struct WireFolderId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WireLabelId(pub String);
 
+/// Wire-side label group identifier. Mirrors `common::typed_ids::LabelGroupId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WireLabelGroupId(pub i64);
+
 // ---------------------------------------------------------------------------
 // MailOperation wire mirror
 // ---------------------------------------------------------------------------
@@ -101,6 +105,8 @@ pub enum WireMailOperation {
     },
     AddLabel { label_id: WireLabelId },
     RemoveLabel { label_id: WireLabelId },
+    ApplyLabelGroup { group_id: WireLabelGroupId },
+    RemoveLabelGroup { group_id: WireLabelGroupId },
     Snooze { until: i64 },
     Unsnooze,
 }
@@ -531,6 +537,12 @@ mod tests {
             },
             WireMailOperation::RemoveLabel {
                 label_id: WireLabelId("personal".into()),
+            },
+            WireMailOperation::ApplyLabelGroup {
+                group_id: WireLabelGroupId(7),
+            },
+            WireMailOperation::RemoveLabelGroup {
+                group_id: WireLabelGroupId(7),
             },
             WireMailOperation::Snooze { until: 1_700_000_000 },
         ];

@@ -16,16 +16,34 @@ pub async fn db_upsert_label_coalesce(
     imap_special_use: Option<String>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, imap_folder_path, imap_special_use)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(account_id, id) DO UPDATE SET
-                   name = ?3, type = ?4, color_bg = ?5, color_fg = ?6,
-                   imap_folder_path = COALESCE(?7, imap_folder_path),
-                   imap_special_use = COALESCE(?8, imap_special_use)",
-            params![id, account_id, name, label_type, color_bg, color_fg, imap_folder_path, imap_special_use],
-        )
-        .map_err(|e| e.to_string())?;
+        let is_folder = imap_folder_path.is_some()
+            || imap_special_use.is_some()
+            || matches!(label_type.as_str(), "folder" | "container" | "system");
+
+        if is_folder {
+            conn.execute(
+                "INSERT INTO folders (id, account_id, name, imap_folder_path, imap_special_use, is_undeletable)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(account_id, id) DO UPDATE SET
+                       name = ?3,
+                       imap_folder_path = COALESCE(?4, imap_folder_path),
+                       imap_special_use = COALESCE(?5, imap_special_use),
+                       is_undeletable = ?6",
+                params![id, account_id, name, imap_folder_path, imap_special_use, label_type == "system"],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            conn.execute(
+                "INSERT INTO labels (id, account_id, name, server_color_bg, server_color_fg, is_undeletable)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 0)
+                     ON CONFLICT(account_id, id) DO UPDATE SET
+                       name = ?3,
+                       server_color_bg = ?4,
+                       server_color_fg = ?5",
+                params![id, account_id, name, color_bg, color_fg],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(())
     })
     .await
@@ -33,11 +51,12 @@ pub async fn db_upsert_label_coalesce(
 
 pub async fn db_delete_labels_for_account(db: &ReadDbState, account_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "DELETE FROM labels WHERE account_id = ?1",
-            params![account_id],
-        )
-        .map_err(|e| e.to_string())?;
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM labels WHERE account_id = ?1", params![account_id])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM folders WHERE account_id = ?1", params![account_id])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     })
     .await
@@ -53,6 +72,11 @@ pub async fn db_update_label_sort_order(
         for item in &label_orders {
             tx.execute(
                 "UPDATE labels SET sort_order = ?1 WHERE account_id = ?2 AND id = ?3",
+                params![item.sort_order, account_id, item.id],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "UPDATE folders SET sort_order = ?1 WHERE account_id = ?2 AND id = ?3",
                 params![item.sort_order, account_id, item.id],
             )
             .map_err(|e| e.to_string())?;

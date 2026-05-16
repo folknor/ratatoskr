@@ -6,7 +6,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use db::db::queries_extra::remove_inbox_label;
+use db::db::queries_extra::remove_inbox_folder;
 use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for archive. Returns true if state changed.
@@ -24,7 +24,7 @@ pub(crate) async fn archive_local(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        remove_inbox_label(&conn, &aid, &tid)
+        remove_inbox_folder(&conn, &aid, &tid)
             .map(|n| n > 0)
             .map_err(ActionError::db)
     })

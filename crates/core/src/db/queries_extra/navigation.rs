@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::db::{Connection, OptionalExtension, params};
+use crate::db::{Connection, OptionalExtension, ToSql, params};
 use serde::{Deserialize, Serialize};
 
-use crate::db::queries::get_labels;
-use crate::db::types::{AccountScope, DbSmartFolder};
+use crate::db::queries::get_folders;
+use crate::db::types::{AccountScope, DbFolder, DbSmartFolder};
 use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
 use crate::db::from_row::FromRow;
@@ -20,12 +20,10 @@ pub enum FolderKind {
     Universal,
     /// A user-defined smart folder backed by a saved query.
     SmartFolder,
-    /// A user-created provider folder specific to one account
-    /// (container semantics - `label_kind = 'container'` in the DB).
+    /// A user-created provider folder specific to one account.
     AccountFolder,
-    /// A user-visible label - Exchange category, IMAP keyword, JMAP keyword,
-    /// or Gmail user label (`label_kind = 'tag'` in the DB).
-    AccountLabel,
+    /// A user-created cross-account label group.
+    LabelGroup,
 }
 
 /// Mailbox rights for permission gating in the UI.
@@ -72,12 +70,10 @@ pub struct NavigationFolder {
     /// JMAP subscription state. `None` for non-JMAP providers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_subscribed: Option<bool>,
-    /// Resolved background color for the label dot/chip. `None` for non-label rows.
-    /// Always set for `AccountLabel`: either the synced `color_bg` or a deterministic
-    /// fallback from the preset palette via `label_colors::resolve_label_color`.
+    /// Resolved background color for the label-group dot/chip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_bg: Option<String>,
-    /// Resolved foreground color, paired with `color_bg`. `None` for non-label rows.
+    /// Resolved foreground color, paired with `color_bg`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_fg: Option<String>,
 }
@@ -90,10 +86,10 @@ pub struct NavigationState {
     pub folders: Vec<NavigationFolder>,
 }
 
-// ── System label IDs to filter out from account labels ──────
+// ── System folder IDs to filter out from account folders ────
 
-/// Collect all label IDs from `SYSTEM_FOLDER_ROLES` that should be hidden
-/// when listing an account's custom labels.
+/// Collect all folder IDs from `SYSTEM_FOLDER_ROLES` that should be hidden
+/// when listing an account's custom folders.
 fn system_label_ids() -> Vec<&'static str> {
     SYSTEM_FOLDER_ROLES.iter().map(|r| r.label_id).collect()
 }
@@ -118,14 +114,14 @@ pub fn get_navigation_state(
         log::error!("Failed to build smart folders: {e}");
         e
     })?);
+    folders.extend(build_label_groups(conn, scope).map_err(|e| {
+        log::error!("Failed to build label groups: {e}");
+        e
+    })?);
 
     if let AccountScope::Single(account_id) = scope {
         folders.extend(build_account_folders(conn, account_id).map_err(|e| {
             log::error!("Failed to build account folders for {account_id}: {e}");
-            e
-        })?);
-        folders.extend(build_account_labels(conn, account_id).map_err(|e| {
-            log::error!("Failed to build account labels for {account_id}: {e}");
             e
         })?);
     }
@@ -259,38 +255,35 @@ fn build_account_folders(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<NavigationFolder>, String> {
-    let all_labels = get_labels(conn, account_id)?;
+    let all_folders = get_folders(conn, account_id)?;
     let system_ids = system_label_ids();
-    let unread_by_label = get_label_unread_counts(conn, account_id)?;
+    let unread_by_folder = get_folder_unread_counts(conn, account_id)?;
 
-    Ok(all_labels
+    Ok(all_folders
         .into_iter()
-        .filter(|label| !system_ids.contains(&label.id.as_str()))
-        .filter(|label| label.visible)
-        // Only container-type rows here. Labels come from
-        // build_account_labels() to avoid duplication.
-        .filter(|label| label.label_kind != "tag")
-        .map(|label| {
-            let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
+        .filter(|folder| !system_ids.contains(&folder.id.as_str()))
+        .filter(|folder| folder.visible)
+        .map(|folder| {
+            let unread_count = unread_by_folder.get(&folder.id).copied().unwrap_or(0);
 
-            let rights = rights_from_label(&label);
+            let rights = rights_from_folder(&folder);
 
             // If parent is a system folder (INBOX, SENT, etc.), treat as
             // root - system folders are rendered in the universal section,
-            // not in the label tree. Without this, children of system
+            // not in the folder tree. Without this, children of system
             // folders become orphans in the tree and get promoted to
             // depth-0 by the orphan recovery path.
-            let parent_id = label
-                .parent_label_id
+            let parent_id = folder
+                .parent_id
                 .filter(|pid| !system_ids.contains(&pid.as_str()));
 
             NavigationFolder {
-                is_subscribed: label.is_subscribed,
-                id: label.id,
-                name: label.name,
+                is_subscribed: folder.is_subscribed,
+                id: folder.id,
+                name: folder.name,
                 folder_kind: FolderKind::AccountFolder,
                 unread_count,
-                account_id: Some(label.account_id),
+                account_id: Some(folder.account_id),
                 parent_id,
                 query: None,
                 rights,
@@ -301,61 +294,72 @@ fn build_account_folders(
         .collect())
 }
 
-/// Account-specific labels.
-fn build_account_labels(conn: &Connection, account_id: &str) -> Result<Vec<NavigationFolder>, String> {
-    let all_labels = get_labels(conn, account_id)?;
-    let unread_by_label = get_label_unread_counts(conn, account_id)?;
-
-    Ok(all_labels
-        .into_iter()
-        .filter(|label| label.visible)
-        .filter(|label| label.label_kind == "tag")
-        .map(|label| {
-            let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
-            let rights = rights_from_label(&label);
-            let (bg, fg) = label_colors::resolve_label_color(
-                &label.name,
-                &label.account_id,
-                None,
-                label.color_bg.as_deref(),
-                label.color_fg.as_deref(),
-            );
-            let bg = bg.to_owned();
-            let fg = fg.to_owned();
-
-            NavigationFolder {
-                is_subscribed: label.is_subscribed,
-                id: label.id,
-                name: label.name,
-                folder_kind: FolderKind::AccountLabel,
-                unread_count,
-                account_id: Some(label.account_id),
-                parent_id: None,
-                query: None,
-                rights,
-                color_bg: Some(bg),
-                color_fg: Some(fg),
-            }
-        })
-        .collect())
+/// Explicit label groups for the sidebar LABELS section.
+fn build_label_groups(
+    conn: &Connection,
+    scope: &AccountScope,
+) -> Result<Vec<NavigationFolder>, String> {
+    let unread_by_group = load_label_group_unread_counts(conn, scope)?;
+    build_label_groups_from_counts(conn, &unread_by_group)
 }
 
-/// Batch-fetch unread thread counts for all labels belonging to an account.
-///
-/// Uses a single GROUP BY query regardless of label count.
-fn get_label_unread_counts(
+fn build_label_groups_from_counts(
+    conn: &Connection,
+    unread_by_group: &HashMap<i64, i64>,
+) -> Result<Vec<NavigationFolder>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, color_bg, color_fg
+             FROM label_groups
+             ORDER BY name COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>("id")?,
+                row.get::<_, String>("name")?,
+                row.get::<_, String>("color_bg")?,
+                row.get::<_, String>("color_fg")?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut groups = Vec::new();
+    for row in rows {
+        let (id, name, color_bg, color_fg) = row.map_err(|e| e.to_string())?;
+        groups.push(NavigationFolder {
+            is_subscribed: None,
+            id: id.to_string(),
+            name,
+            folder_kind: FolderKind::LabelGroup,
+            unread_count: unread_by_group.get(&id).copied().unwrap_or(0),
+            account_id: None,
+            parent_id: None,
+            query: None,
+            rights: None,
+            color_bg: Some(color_bg),
+            color_fg: Some(color_fg),
+        });
+    }
+    Ok(groups)
+}
+
+/// Batch-fetch unread thread counts for all folders belonging to an account.
+fn get_folder_unread_counts(
     conn: &Connection,
     account_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT tl.label_id, COUNT(*) AS unread_count
+            "SELECT tf.folder_id, COUNT(*) AS unread_count
              FROM threads t
-             INNER JOIN thread_labels tl
-               ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_folders tf
+               ON tf.account_id = t.account_id AND tf.thread_id = t.id
              WHERE t.account_id = ?1 AND t.is_read = 0
                AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
-             GROUP BY tl.label_id",
+             GROUP BY tf.folder_id",
         )
         .map_err(|e| e.to_string())?;
 
@@ -367,8 +371,127 @@ fn get_label_unread_counts(
 
     let mut counts = HashMap::new();
     for row in rows {
-        let (label_id, count) = row.map_err(|e| e.to_string())?;
-        counts.insert(label_id, count);
+        let (folder_id, count) = row.map_err(|e| e.to_string())?;
+        counts.insert(folder_id, count);
+    }
+    Ok(counts)
+}
+
+fn scope_clause_for_threads(
+    scope: &AccountScope,
+    base_idx: usize,
+) -> (String, Vec<Box<dyn ToSql>>) {
+    match scope {
+        AccountScope::Single(id) => (
+            format!("t.account_id = ?{base_idx}"),
+            vec![Box::new(id.clone())],
+        ),
+        AccountScope::Multiple(ids) => {
+            if ids.is_empty() {
+                return ("0=1".to_owned(), Vec::new());
+            }
+            let placeholders: Vec<String> = ids
+                .iter()
+                .enumerate()
+                .map(|(idx, _)| format!("?{}", base_idx + idx))
+                .collect();
+            let params: Vec<Box<dyn ToSql>> =
+                ids.iter().map(|id| Box::new(id.clone()) as _).collect();
+            (format!("t.account_id IN ({})", placeholders.join(", ")), params)
+        }
+        AccountScope::All => ("1=1".to_owned(), Vec::new()),
+    }
+}
+
+fn load_label_group_unread_counts(
+    conn: &Connection,
+    scope: &AccountScope,
+) -> Result<HashMap<i64, i64>, String> {
+    let (scope_clause, scope_params) = scope_clause_for_threads(scope, 1);
+    let sql = format!(
+        "SELECT group_id, COUNT(*) AS unread_count
+         FROM (
+           SELECT t.account_id, t.id AS thread_id, tlg.group_id
+           FROM threads t
+           INNER JOIN thread_label_groups tlg
+             ON tlg.account_id = t.account_id AND tlg.thread_id = t.id
+           WHERE {scope_clause}
+             AND t.is_read = 0
+             AND t.shared_mailbox_id IS NULL
+             AND t.is_chat_thread = 0
+           UNION
+           SELECT t.account_id, t.id AS thread_id, lgm.group_id
+           FROM threads t
+           INNER JOIN thread_labels tl
+             ON tl.account_id = t.account_id AND tl.thread_id = t.id
+           INNER JOIN label_group_members lgm
+             ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
+           WHERE {scope_clause}
+             AND t.is_read = 0
+             AND t.shared_mailbox_id IS NULL
+             AND t.is_chat_thread = 0
+         )
+         GROUP BY group_id"
+    );
+    let params: Vec<&dyn ToSql> =
+        scope_params.iter().map(AsRef::as_ref).collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (group_id, count) = row.map_err(|e| e.to_string())?;
+        counts.insert(group_id, count);
+    }
+    Ok(counts)
+}
+
+fn load_label_group_unread_counts_for_shared_mailbox(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<HashMap<i64, i64>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT group_id, COUNT(*) AS unread_count
+             FROM (
+               SELECT t.account_id, t.id AS thread_id, tlg.group_id
+               FROM threads t
+               INNER JOIN thread_label_groups tlg
+                 ON tlg.account_id = t.account_id AND tlg.thread_id = t.id
+               WHERE t.account_id = ?1
+                 AND t.shared_mailbox_id = ?2
+                 AND t.is_read = 0
+                 AND t.is_chat_thread = 0
+               UNION
+               SELECT t.account_id, t.id AS thread_id, lgm.group_id
+               FROM threads t
+               INNER JOIN thread_labels tl
+                 ON tl.account_id = t.account_id AND tl.thread_id = t.id
+               INNER JOIN label_group_members lgm
+                 ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
+               WHERE t.account_id = ?1
+                 AND t.shared_mailbox_id = ?2
+                 AND t.is_read = 0
+                 AND t.is_chat_thread = 0
+             )
+             GROUP BY group_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![account_id, mailbox_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (group_id, count) = row.map_err(|e| e.to_string())?;
+        counts.insert(group_id, count);
     }
     Ok(counts)
 }
@@ -383,22 +506,22 @@ pub fn get_shared_mailbox_navigation(
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<NavigationState, String> {
-    let all_labels = get_labels(conn, account_id)?;
+    let all_folders = get_folders(conn, account_id)?;
     let system_ids = system_label_ids();
 
-    // Unread counts for labels, scoped to this shared mailbox
-    let mut unread_stmt = conn
+    // Unread counts for folders, scoped to this shared mailbox.
+    let mut folder_unread_stmt = conn
         .prepare(
-            "SELECT tl.label_id, COUNT(*) AS unread_count
+            "SELECT tf.folder_id, COUNT(*) AS unread_count
              FROM threads t
-             INNER JOIN thread_labels tl
-               ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_folders tf
+               ON tf.account_id = t.account_id AND tf.thread_id = t.id
              WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
                AND t.is_read = 0
-             GROUP BY tl.label_id",
+             GROUP BY tf.folder_id",
         )
         .map_err(|e| e.to_string())?;
-    let unread_by_label: HashMap<String, i64> = unread_stmt
+    let unread_by_folder: HashMap<String, i64> = folder_unread_stmt
         .query_map(params![account_id, mailbox_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })
@@ -406,11 +529,14 @@ pub fn get_shared_mailbox_navigation(
         .filter_map(Result::ok)
         .collect();
 
+    let unread_by_label_group =
+        load_label_group_unread_counts_for_shared_mailbox(conn, account_id, mailbox_id)?;
+
     // Universal folders with shared-mailbox-scoped unread counts
     let mut folders: Vec<NavigationFolder> = SIDEBAR_UNIVERSAL_FOLDERS
         .iter()
         .map(|(id, name)| {
-            let unread = unread_by_label.get(*id).copied().unwrap_or(0);
+            let unread = unread_by_folder.get(*id).copied().unwrap_or(0);
             NavigationFolder {
                 id: (*id).to_owned(),
                 name: (*name).to_owned(),
@@ -427,49 +553,37 @@ pub fn get_shared_mailbox_navigation(
         })
         .collect();
 
-    // Account labels (non-system, visible) with shared-mailbox-scoped counts
-    let label_folders: Vec<NavigationFolder> = all_labels
+    // Account folders (non-system, visible) with shared-mailbox-scoped counts.
+    let account_folders: Vec<NavigationFolder> = all_folders
         .into_iter()
-        .filter(|l| !system_ids.contains(&l.id.as_str()) && l.visible)
-        .map(|label| {
-            let unread = unread_by_label.get(&label.id).copied().unwrap_or(0);
-            let rights = rights_from_label(&label);
-            let parent_id = label
-                .parent_label_id
+        .filter(|f| !system_ids.contains(&f.id.as_str()) && f.visible)
+        .map(|folder| {
+            let unread = unread_by_folder.get(&folder.id).copied().unwrap_or(0);
+            let rights = rights_from_folder(&folder);
+            let parent_id = folder
+                .parent_id
                 .filter(|pid| !system_ids.contains(&pid.as_str()));
-            let kind = if label.label_kind == "tag" {
-                FolderKind::AccountLabel
-            } else {
-                FolderKind::AccountFolder
-            };
-            let (color_bg, color_fg) = if matches!(kind, FolderKind::AccountLabel) {
-                let (bg, fg) = label_colors::resolve_label_color(
-                    &label.name,
-                    &label.account_id,
-                    None,
-                    label.color_bg.as_deref(),
-                    label.color_fg.as_deref(),
-                );
-                (Some(bg.to_owned()), Some(fg.to_owned()))
-            } else {
-                (None, None)
-            };
             NavigationFolder {
-                is_subscribed: label.is_subscribed,
-                id: label.id,
-                name: label.name,
-                folder_kind: kind,
+                is_subscribed: folder.is_subscribed,
+                id: folder.id,
+                name: folder.name,
+                folder_kind: FolderKind::AccountFolder,
                 unread_count: unread,
-                account_id: Some(label.account_id),
+                account_id: Some(folder.account_id),
                 parent_id,
                 query: None,
                 rights,
-                color_bg,
-                color_fg,
+                color_bg: None,
+                color_fg: None,
             }
         })
         .collect();
-    folders.extend(label_folders);
+    folders.extend(account_folders);
+
+    folders.extend(build_label_groups_from_counts(
+        conn,
+        &unread_by_label_group,
+    )?);
 
     Ok(NavigationState {
         scope: AccountScope::Single(account_id.to_string()),
@@ -477,22 +591,22 @@ pub fn get_shared_mailbox_navigation(
     })
 }
 
-/// Extract mailbox rights from a `DbLabel` into a `MailboxRightsInfo`.
+/// Extract mailbox rights from a `DbFolder` into a `MailboxRightsInfo`.
 ///
 /// Returns `None` if no rights are set (all fields are `None`), meaning
-/// the provider doesn't supply rights data for this label.
-fn rights_from_label(label: &crate::db::types::DbLabel) -> Option<MailboxRightsInfo> {
-    label.right_read?;
+/// the provider doesn't supply rights data for this folder.
+fn rights_from_folder(folder: &DbFolder) -> Option<MailboxRightsInfo> {
+    folder.right_read?;
     Some(MailboxRightsInfo {
-        may_read_items: label.right_read,
-        may_add_items: label.right_add,
-        may_remove_items: label.right_remove,
-        may_set_seen: label.right_set_seen,
-        may_set_keywords: label.right_set_keywords,
-        may_create_child: label.right_create_child,
-        may_rename: label.right_rename,
-        may_delete: label.right_delete,
-        may_submit: label.right_submit,
+        may_read_items: folder.right_read,
+        may_add_items: folder.right_add,
+        may_remove_items: folder.right_remove,
+        may_set_seen: folder.right_set_seen,
+        may_set_keywords: folder.right_set_keywords,
+        may_create_child: folder.right_create_child,
+        may_rename: folder.right_rename,
+        may_delete: folder.right_delete,
+        may_submit: folder.right_submit,
     })
 }
 
@@ -720,9 +834,9 @@ pub fn search_accounts_for_typeahead_sync(
     .map_err(|e| e.to_string())
 }
 
-// ── Cross-account labels (settings + sidebar section 4) ─────
+// ── Labels settings and explicit sidebar label groups ───────
 
-/// A single row in the per-account backing list of a cross-account label.
+/// A single raw per-account label that belongs to an explicit label group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabelBacking {
@@ -731,24 +845,21 @@ pub struct LabelBacking {
     pub display_name: String,
 }
 
-/// A label as the user sees it: one normalized name, optionally backed by
-/// rows on multiple accounts. The canonical entry point for sidebar
-/// section 4 and the Mail Rules > Labels settings list.
+/// A user-created label group with optional raw provider-label members.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CrossAccountLabel {
-    /// `LOWER(TRIM(name))`. The grouping key and the override-table key.
+    /// Compatibility key for older callers; this is the group ID as text.
     pub normalized_name: String,
-    /// Whatever display form the user typed. If backings disagree on
-    /// casing or whitespace, we pick the first row's display name.
+    /// Group display name.
     pub display_name: String,
     pub color_bg: String,
     pub color_fg: String,
-    /// True if this label's color came from `label_color_overrides`.
+    /// Groups own their color directly.
     pub has_color_override: bool,
-    /// Per-account rows that contribute to this label.
+    /// Per-account labels that are members of this group.
     pub backing: Vec<LabelBacking>,
-    /// Sum of unread thread counts across all backings.
+    /// Unread threads rendering this group in the all-accounts scope.
     pub unread_count: i64,
 }
 
@@ -769,8 +880,7 @@ pub struct AccountLabelRow {
 }
 
 /// Per-account section of the settings label list. Header text is the
-/// account's display name; rows are that account's tag-type labels in
-/// sort_order.
+/// account's display name; rows are that account's raw labels in sort_order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountLabelsGroup {
@@ -783,13 +893,11 @@ pub struct AccountLabelsGroup {
     pub labels: Vec<AccountLabelRow>,
 }
 
-/// Return all tag-type labels grouped by account, in account `sort_order`
+/// Return all raw labels grouped by account, in account `sort_order`
 /// then label `sort_order`. Drives the Mail Rules > Labels settings list.
 pub fn query_labels_by_account(
     conn: &Connection,
 ) -> Result<Vec<AccountLabelsGroup>, String> {
-    let overrides = load_label_color_overrides(conn)?;
-
     let mut acc_stmt = conn
         .prepare(
             "SELECT id, COALESCE(account_name, email) AS name, \
@@ -822,10 +930,11 @@ pub fn query_labels_by_account(
 
     let mut lbl_stmt = conn
         .prepare(
-            "SELECT id, account_id, name, color_bg, color_fg, \
+            "SELECT id, account_id, name, server_color_bg, server_color_fg, \
+                    user_color_bg, user_color_fg, \
                     COALESCE(sort_order, 0) AS sort_order \
              FROM labels \
-             WHERE label_kind = 'tag' AND COALESCE(visible, 1) = 1 \
+             WHERE COALESCE(visible, 1) = 1 \
              ORDER BY account_id, sort_order, name",
         )
         .map_err(|e| e.to_string())?;
@@ -835,29 +944,28 @@ pub fn query_labels_by_account(
                 row.get::<_, String>("id")?,
                 row.get::<_, String>("account_id")?,
                 row.get::<_, String>("name")?,
-                row.get::<_, Option<String>>("color_bg")?,
-                row.get::<_, Option<String>>("color_fg")?,
+                row.get::<_, Option<String>>("server_color_bg")?,
+                row.get::<_, Option<String>>("server_color_fg")?,
+                row.get::<_, Option<String>>("user_color_bg")?,
+                row.get::<_, Option<String>>("user_color_fg")?,
                 row.get::<_, i64>("sort_order")?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     for r in lbl_rows {
-        let (label_id, account_id, name, color_bg, color_fg, sort_order) =
+        let (label_id, account_id, name, server_color_bg, server_color_fg, user_color_bg, user_color_fg, sort_order) =
             r.map_err(|e| e.to_string())?;
 
-        let normalized = name.trim().to_lowercase();
-        let override_pair = overrides
-            .get(&normalized)
-            .map(|(b, f)| (b.as_str(), f.as_str()));
-        let has_color_override = override_pair.is_some();
+        let user_pair = user_color_bg.as_deref().zip(user_color_fg.as_deref());
+        let has_color_override = user_pair.is_some();
 
         let (bg, fg) = label_colors::resolve_label_color(
             &name,
             &account_id,
-            override_pair,
-            color_bg.as_deref(),
-            color_fg.as_deref(),
+            user_pair,
+            server_color_bg.as_deref(),
+            server_color_fg.as_deref(),
         );
         let bg = bg.to_owned();
         let fg = fg.to_owned();
@@ -881,173 +989,65 @@ pub fn query_labels_by_account(
     Ok(groups)
 }
 
-/// Return all tag-type labels grouped by normalized name across all accounts,
-/// sorted alphabetically. Used by sidebar section 4 and the settings tab.
-///
-/// Resolution rules per `docs/labels-unification/problem-statement.md`:
-/// - Grouping key is `LOWER(TRIM(name))`.
-/// - Color: override > synced consensus (exactly one non-null pair across
-///   backings) > hash fallback.
-/// - Unread count: SUM across backings of threads with `is_read = 0`.
+/// Return explicit label groups with their member backing rows.
 pub fn query_visible_labels(conn: &Connection) -> Result<Vec<CrossAccountLabel>, String> {
-    let overrides = load_label_color_overrides(conn)?;
-    let unread = load_cross_account_unread_by_normalized_name(conn)?;
-
+    let unread = load_label_group_unread_counts(conn, &AccountScope::All)?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, account_id, name, color_bg, color_fg, \
-             LOWER(TRIM(name)) AS normalized \
-             FROM labels \
-             WHERE label_kind = 'tag' AND COALESCE(visible, 1) = 1 \
-             ORDER BY normalized, account_id",
+            "SELECT lg.id AS group_id,
+                    lg.name AS group_name,
+                    lg.color_bg,
+                    lg.color_fg,
+                    lgm.account_id,
+                    lgm.label_id,
+                    l.name AS label_name
+             FROM label_groups lg
+             LEFT JOIN label_group_members lgm ON lgm.group_id = lg.id
+             LEFT JOIN labels l
+               ON l.account_id = lgm.account_id AND l.id = lgm.label_id
+             ORDER BY lg.name COLLATE NOCASE, lgm.account_id, l.sort_order, l.name",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
-                row.get::<_, String>("id")?,
-                row.get::<_, String>("account_id")?,
-                row.get::<_, String>("name")?,
-                row.get::<_, Option<String>>("color_bg")?,
-                row.get::<_, Option<String>>("color_fg")?,
-                row.get::<_, String>("normalized")?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut groups: HashMap<String, CrossAccountLabel> = HashMap::new();
-    let mut order: Vec<String> = Vec::new();
-    let mut synced_pairs: HashMap<String, Vec<(String, String)>> = HashMap::new();
-
-    for r in rows {
-        let (label_id, account_id, name, color_bg, color_fg, normalized) =
-            r.map_err(|e| e.to_string())?;
-
-        if !groups.contains_key(&normalized) {
-            order.push(normalized.clone());
-            groups.insert(
-                normalized.clone(),
-                CrossAccountLabel {
-                    normalized_name: normalized.clone(),
-                    display_name: name.clone(),
-                    color_bg: String::new(),
-                    color_fg: String::new(),
-                    has_color_override: false,
-                    backing: Vec::new(),
-                    unread_count: *unread.get(&normalized).unwrap_or(&0),
-                },
-            );
-        }
-
-        let group = groups.get_mut(&normalized).expect("just inserted");
-        group.backing.push(LabelBacking {
-            account_id: account_id.clone(),
-            label_id,
-            display_name: name.clone(),
-        });
-
-        if let (Some(bg), Some(fg)) = (color_bg, color_fg) {
-            synced_pairs
-                .entry(normalized.clone())
-                .or_default()
-                .push((bg, fg));
-        }
-    }
-
-    for normalized in &order {
-        let group = groups.get_mut(normalized).expect("in order");
-        let override_pair = overrides
-            .get(normalized)
-            .map(|(b, f)| (b.as_str(), f.as_str()));
-
-        let synced = synced_pairs.get(normalized).and_then(|pairs| {
-            let mut distinct: Vec<&(String, String)> = Vec::new();
-            for p in pairs {
-                if !distinct.contains(&p) {
-                    distinct.push(p);
-                }
-            }
-            (distinct.len() == 1).then(|| distinct[0].clone())
-        });
-
-        let synced_ref = synced.as_ref().map(|(b, f)| (b.as_str(), f.as_str()));
-
-        let (bg, fg) = label_colors::resolve_label_color(
-            &group.display_name,
-            "", // namespace empty -> grouping is by name, not per-account
-            override_pair,
-            synced_ref.map(|(b, _)| b),
-            synced_ref.map(|(_, f)| f),
-        );
-        group.color_bg = bg.to_owned();
-        group.color_fg = fg.to_owned();
-        group.has_color_override = override_pair.is_some();
-    }
-
-    Ok(order
-        .into_iter()
-        .map(|n| groups.remove(&n).expect("present"))
-        .collect())
-}
-
-fn load_label_color_overrides(
-    conn: &Connection,
-) -> Result<HashMap<String, (String, String)>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT LOWER(TRIM(label_name)) AS normalized, color_bg, color_fg \
-             FROM label_color_overrides",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>("normalized")?,
+                row.get::<_, i64>("group_id")?,
+                row.get::<_, String>("group_name")?,
                 row.get::<_, String>("color_bg")?,
                 row.get::<_, String>("color_fg")?,
+                row.get::<_, Option<String>>("account_id")?,
+                row.get::<_, Option<String>>("label_id")?,
+                row.get::<_, Option<String>>("label_name")?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
-    let mut map = HashMap::new();
-    for r in rows {
-        let (norm, bg, fg) = r.map_err(|e| e.to_string())?;
-        map.insert(norm, (bg, fg));
+    let mut groups = Vec::new();
+    let mut by_id: HashMap<i64, usize> = HashMap::new();
+    for row in rows {
+        let (group_id, group_name, color_bg, color_fg, account_id, label_id, label_name) =
+            row.map_err(|e| e.to_string())?;
+        let idx = *by_id.entry(group_id).or_insert_with(|| {
+            groups.push(CrossAccountLabel {
+                normalized_name: group_id.to_string(),
+                display_name: group_name,
+                color_bg,
+                color_fg,
+                has_color_override: false,
+                backing: Vec::new(),
+                unread_count: unread.get(&group_id).copied().unwrap_or(0),
+            });
+            groups.len() - 1
+        });
+        if let (Some(account_id), Some(label_id), Some(display_name)) =
+            (account_id, label_id, label_name)
+        {
+            groups[idx].backing.push(LabelBacking {
+                account_id,
+                label_id,
+                display_name,
+            });
+        }
     }
-    Ok(map)
-}
-
-fn load_cross_account_unread_by_normalized_name(
-    conn: &Connection,
-) -> Result<HashMap<String, i64>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT LOWER(TRIM(l.name)) AS normalized, \
-                    COUNT(DISTINCT t.account_id || ':' || t.id) AS unread \
-             FROM threads t \
-             INNER JOIN thread_labels tl \
-               ON tl.account_id = t.account_id AND tl.thread_id = t.id \
-             INNER JOIN labels l \
-               ON l.account_id = tl.account_id AND l.id = tl.label_id \
-             WHERE l.label_kind = 'tag' \
-               AND COALESCE(l.visible, 1) = 1 \
-               AND t.is_read = 0 \
-             GROUP BY normalized",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>("normalized")?,
-                row.get::<_, i64>("unread")?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut map = HashMap::new();
-    for r in rows {
-        let (norm, count) = r.map_err(|e| e.to_string())?;
-        map.insert(norm, count);
-    }
-    Ok(map)
+    Ok(groups)
 }

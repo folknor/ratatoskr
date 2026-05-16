@@ -68,7 +68,7 @@ pub async fn db_get_bundle_summaries(
         let count_sql = format!(
             "SELECT tc.bundle, COUNT(DISTINCT t.id) as count
                  FROM threads t
-                 JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
+                 JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id AND tf.folder_id = 'INBOX'
                  JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.bundle IN ({placeholders})
                  WHERE t.account_id = ?1
                  GROUP BY tc.bundle"
@@ -85,7 +85,7 @@ pub async fn db_get_bundle_summaries(
         let latest_sql = format!(
             "SELECT tc.bundle, t.subject, m.from_name
                  FROM threads t
-                 JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
+                 JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id AND tf.folder_id = 'INBOX'
                  JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.bundle IN ({placeholders})
                  JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
                  WHERE t.account_id = ?1
@@ -278,7 +278,7 @@ pub async fn db_get_bundle_summary(
             .query_row(
                 "SELECT COUNT(DISTINCT t.id) AS cnt
                      FROM threads t
-                     JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
+                     JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id AND tf.folder_id = 'INBOX'
                      JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.bundle = ?2
                      WHERE t.account_id = ?1",
                 params![account_id, bundle],
@@ -289,7 +289,7 @@ pub async fn db_get_bundle_summary(
             .query_row(
                 "SELECT t.subject, m.from_name
                      FROM threads t
-                     JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
+                     JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id AND tf.folder_id = 'INBOX'
                      JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.bundle = ?2
                      JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
                      WHERE t.account_id = ?1
@@ -399,11 +399,11 @@ pub async fn db_get_unbundled_inbox_thread_ids(
         let sql = format!(
             "SELECT t.id, t.subject, t.snippet, m.from_address
                  FROM threads t
-                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+                 INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
                  LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
                  ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                  LEFT JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.thread_id IS NULL
+                 WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX' AND tc.thread_id IS NULL
                  ORDER BY t.last_message_at DESC
                  LIMIT ?2"
         );

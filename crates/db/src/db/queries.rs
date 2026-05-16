@@ -5,7 +5,8 @@ use super::sql_fragments::{
     LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR, validate_thread_bool_column,
 };
 use super::types::{
-    CategoryCount, DbAttachment, DbContact, DbLabel, DbThread, ThreadCategoryRow, ThreadInfoRow,
+    CategoryCount, DbAttachment, DbContact, DbFolder, DbLabel, DbThread, ThreadCategoryRow,
+    ThreadInfoRow,
 };
 use super::ReadDbState;
 
@@ -40,13 +41,23 @@ pub fn persist_refreshed_token(
     Ok(())
 }
 
+/// Get all folders for an account, ordered by sort_order then name.
+pub fn get_folders(conn: &Connection, account_id: &str) -> Result<Vec<DbFolder>, String> {
+    query_as::<DbFolder>(
+        conn,
+        "SELECT * FROM folders
+         WHERE account_id = ?1
+         ORDER BY sort_order ASC, name ASC",
+        &[&account_id],
+    )
+}
+
 /// Get all labels for an account, ordered by sort_order then name.
 pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
     query_as::<DbLabel>(
         conn,
         "SELECT * FROM labels
          WHERE account_id = ?1
-           AND id NOT IN ('UNREAD', 'STARRED', '$Forwarded', '$MDNSent', '$Junk', '$NotJunk', '$Phishing')
          ORDER BY sort_order ASC, name ASC",
         &[&account_id],
     )
@@ -70,10 +81,10 @@ pub fn get_threads(
     if let Some(lid) = label_id {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
-             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND tl.label_id = ?2
+             WHERE t.account_id = ?1 AND tf.folder_id = ?2
                AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -107,11 +118,11 @@ pub fn get_threads_for_bundle(
     if category == "Primary" {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
-             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
              LEFT JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
+             WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX'
                AND (tc.bundle IS NULL OR tc.bundle = 'Primary')
                AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
@@ -122,11 +133,11 @@ pub fn get_threads_for_bundle(
     } else {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
-             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
              INNER JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.bundle = ?2
+             WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX' AND tc.bundle = ?2
                AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -163,6 +174,23 @@ pub fn get_thread_label_ids(
 
     stmt.query_map(params![account_id, thread_id], |row| {
         row.get::<_, String>("label_id")
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+pub fn get_thread_folder_ids(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT folder_id FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2")
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![account_id, thread_id], |row| {
+        row.get::<_, String>("folder_id")
     })
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
@@ -251,6 +279,20 @@ pub fn add_thread_label(
     Ok(())
 }
 
+pub fn add_thread_folder(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) VALUES (?1, ?2, ?3)",
+        params![account_id, thread_id, folder_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn remove_thread_label(
     conn: &Connection,
     account_id: &str,
@@ -265,36 +307,48 @@ pub fn remove_thread_label(
     Ok(())
 }
 
+pub fn remove_thread_folder(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2 AND folder_id = ?3",
+        params![account_id, thread_id, folder_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Label queries
 // ---------------------------------------------------------------------------
 
 pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO labels (account_id, id, name, type, label_kind, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "INSERT INTO labels (account_id, id, name, visible, sort_order, server_color_bg, server_color_fg, user_color_bg, user_color_fg, is_undeletable)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(account_id, id) DO UPDATE SET
            name = excluded.name,
-           type = excluded.type,
-           label_kind = excluded.label_kind,
-           color_bg = excluded.color_bg,
-           color_fg = excluded.color_fg,
            visible = excluded.visible,
            sort_order = excluded.sort_order,
-           imap_folder_path = excluded.imap_folder_path,
-           imap_special_use = excluded.imap_special_use",
+           server_color_bg = excluded.server_color_bg,
+           server_color_fg = excluded.server_color_fg,
+           user_color_bg = excluded.user_color_bg,
+           user_color_fg = excluded.user_color_fg,
+           is_undeletable = excluded.is_undeletable",
         params![
             label.account_id,
             label.id,
             label.name,
-            label.label_type,
-            label.label_kind,
-            label.color_bg,
-            label.color_fg,
             label.visible,
             label.sort_order,
-            label.imap_folder_path,
-            label.imap_special_use
+            label.server_color_bg,
+            label.server_color_fg,
+            label.user_color_bg,
+            label.user_color_fg,
+            label.is_undeletable,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -336,9 +390,9 @@ pub fn get_bundle_unread_counts(
         conn,
         "SELECT tc.bundle, COUNT(*) as count
          FROM threads t
-         INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+         INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
          LEFT JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-         WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND t.is_read = 0
+         WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX' AND t.is_read = 0
          GROUP BY tc.bundle",
         &[&account_id],
     )
@@ -512,8 +566,8 @@ pub fn get_thread_count(
     if let Some(label_id) = label_id {
         conn.query_row(
             "SELECT COUNT(DISTINCT t.id) AS cnt FROM threads t
-             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-             WHERE t.account_id = ?1 AND tl.label_id = ?2
+             INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
+             WHERE t.account_id = ?1 AND tf.folder_id = ?2
                AND t.is_chat_thread = 0",
             params![account_id, label_id],
             |row| row.get::<_, i64>("cnt"),
@@ -545,8 +599,8 @@ pub async fn get_provider_type(db: &ReadDbState, account_id: &str) -> Result<Str
 pub fn get_unread_count(conn: &Connection, account_id: &str) -> Result<i64, String> {
     conn.query_row(
         "SELECT COUNT(*) AS cnt FROM threads t
-         INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-         WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND t.is_read = 0
+         INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
+         WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX' AND t.is_read = 0
            AND t.is_chat_thread = 0",
         params![account_id],
         |row| row.get::<_, i64>("cnt"),
@@ -566,11 +620,11 @@ pub fn load_recent_rule_bundled_threads(
     let sql = format!(
         "SELECT t.id, t.subject, t.snippet, m.from_address
          FROM threads t
-         INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+         INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
          INNER JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-         WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0
+         WHERE t.account_id = ?1 AND tf.folder_id = 'INBOX' AND tc.is_manual = 0
          ORDER BY t.last_message_at DESC
          LIMIT ?2"
     );

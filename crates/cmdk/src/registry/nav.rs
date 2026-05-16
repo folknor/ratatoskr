@@ -145,7 +145,7 @@ pub(super) fn register_navigation(out: &mut Vec<CommandDescriptor>) {
             },
         ),
         "Go to Label",
-        "Navigate to a specific label or folder by name.",
+        "Navigate to a specific label group by name.",
     ));
     register_navigation_categories(out);
 }

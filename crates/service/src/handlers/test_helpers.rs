@@ -695,10 +695,10 @@ fn insert_harness_account_rows(
     for (sort_order, role) in db::db::folder_roles::SYSTEM_FOLDER_ROLES.iter().enumerate() {
         let changed = conn
             .execute(
-                "INSERT INTO labels (
-                    id, account_id, name, type, visible, sort_order,
-                    imap_folder_path, imap_special_use, label_kind
-                ) VALUES (?1, ?2, ?3, 'system', 1, ?4, ?3, ?5, 'container')
+                "INSERT INTO folders (
+                    id, account_id, name, visible, sort_order,
+                    imap_folder_path, imap_special_use, is_undeletable
+                ) VALUES (?1, ?2, ?3, 1, ?4, ?3, ?5, 1)
                 ON CONFLICT(account_id, id) DO NOTHING",
                 params![
                     role.label_id,
@@ -708,15 +708,15 @@ fn insert_harness_account_rows(
                     role.imap_special_use,
                 ],
             )
-            .map_err(|e| format!("insert system label {}: {e}", role.label_id))?;
+            .map_err(|e| format!("insert system folder {}: {e}", role.label_id))?;
         label_count = add_changed_rows(label_count, changed)?;
     }
 
     let changed = conn
         .execute(
             "INSERT INTO labels (
-                id, account_id, name, type, visible, sort_order, label_kind
-            ) VALUES ('harness-label', ?1, 'Harness', 'user', 1, 1000, 'tag')
+                id, account_id, name, visible, sort_order
+            ) VALUES ('harness-label', ?1, 'Harness', 1, 1000)
             ON CONFLICT(account_id, id) DO NOTHING",
             params![account_id],
         )
@@ -804,13 +804,27 @@ fn insert_harness_thread(
         params![params.account_id, thread_id],
     )
     .map_err(|e| format!("clear thread labels: {e}"))?;
+    tx.execute(
+        "DELETE FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2",
+        params![params.account_id, thread_id],
+    )
+    .map_err(|e| format!("clear thread folders: {e}"))?;
     for label_id in label_ids {
-        tx.execute(
-            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id)
-             VALUES (?1, ?2, ?3)",
-            params![params.account_id, thread_id, label_id],
-        )
-        .map_err(|e| format!("insert thread label: {e}"))?;
+        if db::db::folder_roles::is_gmail_system_folder_label_id(label_id.as_str()) {
+            tx.execute(
+                "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id)
+                 VALUES (?1, ?2, ?3)",
+                params![params.account_id, thread_id, label_id],
+            )
+            .map_err(|e| format!("insert thread folder: {e}"))?;
+        } else {
+            tx.execute(
+                "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id)
+                 VALUES (?1, ?2, ?3)",
+                params![params.account_id, thread_id, label_id],
+            )
+            .map_err(|e| format!("insert thread label: {e}"))?;
+        }
     }
 
     tx.execute(
@@ -1265,10 +1279,22 @@ fn read_harness_labels(
         Some(account_id) => {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, account_id, name, type, label_kind,
-                            parent_label_id, imap_folder_path, imap_special_use,
+                    "SELECT id, account_id, name,
+                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
+                            'container' AS label_kind,
+                            parent_id, imap_folder_path, imap_special_use,
                             sort_order, visible, is_subscribed,
-                            color_bg, color_fg
+                            NULL AS color_bg, NULL AS color_fg
+                     FROM folders
+                     WHERE account_id = ?1
+                     UNION ALL
+                     SELECT id, account_id, name,
+                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
+                            'tag' AS label_kind,
+                            NULL AS parent_id, NULL AS imap_folder_path, NULL AS imap_special_use,
+                            sort_order, visible, NULL AS is_subscribed,
+                            COALESCE(user_color_bg, server_color_bg) AS color_bg,
+                            COALESCE(user_color_fg, server_color_fg) AS color_fg
                      FROM labels
                      WHERE account_id = ?1
                      ORDER BY account_id ASC, id ASC",
@@ -1282,10 +1308,21 @@ fn read_harness_labels(
         None => {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, account_id, name, type, label_kind,
-                            parent_label_id, imap_folder_path, imap_special_use,
+                    "SELECT id, account_id, name,
+                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
+                            'container' AS label_kind,
+                            parent_id, imap_folder_path, imap_special_use,
                             sort_order, visible, is_subscribed,
-                            color_bg, color_fg
+                            NULL AS color_bg, NULL AS color_fg
+                     FROM folders
+                     UNION ALL
+                     SELECT id, account_id, name,
+                            CASE WHEN is_undeletable != 0 THEN 'system' ELSE 'user' END AS type,
+                            'tag' AS label_kind,
+                            NULL AS parent_id, NULL AS imap_folder_path, NULL AS imap_special_use,
+                            sort_order, visible, NULL AS is_subscribed,
+                            COALESCE(user_color_bg, server_color_bg) AS color_bg,
+                            COALESCE(user_color_fg, server_color_fg) AS color_fg
                      FROM labels
                      ORDER BY account_id ASC, id ASC",
                 )

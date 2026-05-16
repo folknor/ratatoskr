@@ -7,7 +7,7 @@ use crate::threading::ThreadGroup;
 use crate::types::MessageMeta;
 use db::db::queries_extra::{
     ThreadAggregate, query_user_emails, reassign_messages_and_repair_threads,
-    replace_thread_labels, upsert_thread_aggregate,
+    replace_thread_folders, replace_thread_labels, upsert_thread_aggregate,
 };
 
 // ---------------------------------------------------------------------------
@@ -68,15 +68,24 @@ pub fn store_threads(
             let first = messages[0];
             let last = messages[messages.len() - 1];
 
-            // Collect all label IDs including cross-folder copies
+            // Collect all folder and label IDs including cross-folder copies.
+            let mut all_folder_ids = HashSet::new();
             let mut all_label_ids = HashSet::new();
             for msg in &messages {
                 for lid in &msg.label_ids {
-                    all_label_ids.insert(lid.clone());
+                    if lid.starts_with("kw:") {
+                        all_label_ids.insert(lid.clone());
+                    } else {
+                        all_folder_ids.insert(lid.clone());
+                    }
                 }
                 if let Some(extra) = labels_by_rfc_id.get(&msg.rfc_message_id) {
                     for lid in extra {
-                        all_label_ids.insert(lid.clone());
+                        if lid.starts_with("kw:") {
+                            all_label_ids.insert(lid.clone());
+                        } else {
+                            all_folder_ids.insert(lid.clone());
+                        }
                     }
                 }
             }
@@ -96,6 +105,7 @@ pub fn store_threads(
                 has_attachments,
             };
             upsert_thread_aggregate(&tx, account_id, &group.thread_id, &aggregate, Some(false), None)?;
+            replace_thread_folders(&tx, account_id, &group.thread_id, all_folder_ids.iter().map(String::as_str))?;
             replace_thread_labels(&tx, account_id, &group.thread_id, all_label_ids.iter().map(String::as_str))?;
             reassign_messages_and_repair_threads(
                 &tx,

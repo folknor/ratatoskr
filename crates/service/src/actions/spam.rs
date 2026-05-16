@@ -6,7 +6,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use db::db::queries_extra::{insert_label, remove_label};
+use db::db::queries_extra::{insert_folder, remove_folder};
 use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for spam (idempotent).
@@ -23,11 +23,11 @@ pub(crate) async fn spam_local(
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         if is_spam {
-            remove_label(&conn, &aid, &tid, "INBOX")?;
-            insert_label(&conn, &aid, &tid, "SPAM").map(|_| ())
+            remove_folder(&conn, &aid, &tid, "INBOX")?;
+            insert_folder(&conn, &aid, &tid, "SPAM").map(|_| ())
         } else {
-            remove_label(&conn, &aid, &tid, "SPAM")?;
-            insert_label(&conn, &aid, &tid, "INBOX").map(|_| ())
+            remove_folder(&conn, &aid, &tid, "SPAM")?;
+            insert_folder(&conn, &aid, &tid, "INBOX").map(|_| ())
         }
     })
     .await

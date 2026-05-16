@@ -145,21 +145,6 @@ fn store_thread_to_db(
     }
     sync_persistence::maybe_update_chat_state(tx, account_id, thread_id, user_emails)?;
 
-    // Add category-backed labels to thread_labels for the unified labels system.
-    let mut seen_cats = std::collections::HashSet::new();
-    for msg in messages {
-        for cat in &msg.categories {
-            if seen_cats.insert(cat.as_str()) {
-                let label_id = format!("cat:{cat}");
-                tx.execute(
-                    "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-                     VALUES (?1, ?2, ?3)",
-                    rusqlite::params![account_id, thread_id, label_id],
-                )
-                .map_err(|e| format!("insert category thread_label: {e}"))?;
-            }
-        }
-    }
     Ok(())
 }
 
@@ -209,14 +194,29 @@ fn set_thread_labels(
 ) -> Result<(), String> {
     // Graph delta pages contain only changed messages. Merge labels so an
     // update to one message does not drop aggregate labels from siblings.
+    let mut folder_ids = Vec::new();
+    let mut label_ids = Vec::new();
+    for label_id in messages
+        .iter()
+        .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
+    {
+        if is_graph_tag_id(label_id) {
+            label_ids.push(label_id);
+        } else {
+            folder_ids.push(label_id);
+        }
+    }
+    sync_persistence::merge_thread_folders(tx, account_id, thread_id, folder_ids)?;
     sync_persistence::merge_thread_labels(
         tx,
         account_id,
         thread_id,
-        messages
-            .iter()
-            .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
+        label_ids,
     )
+}
+
+fn is_graph_tag_id(label_id: &str) -> bool {
+    label_id.starts_with("cat:") || label_id.starts_with("importance:")
 }
 
 fn upsert_graph_label_rows(
@@ -235,24 +235,13 @@ fn upsert_graph_label_rows(
                     id: label_id,
                     account_id: account_id.to_string(),
                     name: category.clone(),
-                    label_type: "user".to_string(),
-                    label_kind: "tag".to_string(),
-                    color_bg: None,
-                    color_fg: None,
+                    visible: None,
                     sort_order: None,
-                    imap_folder_path: None,
-                    imap_special_use: None,
-                    parent_label_id: None,
-                    right_read: None,
-                    right_add: None,
-                    right_remove: None,
-                    right_set_seen: None,
-                    right_set_keywords: None,
-                    right_create_child: None,
-                    right_rename: None,
-                    right_delete: None,
-                    right_submit: None,
-                    is_subscribed: None,
+                    server_color_bg: None,
+                    server_color_fg: None,
+                    user_color_bg: None,
+                    user_color_fg: None,
+                    is_undeletable: false,
                 });
             }
         }
@@ -266,24 +255,13 @@ fn upsert_graph_label_rows(
                     id: id.to_string(),
                     account_id: account_id.to_string(),
                     name: name.to_string(),
-                    label_type: "system".to_string(),
-                    label_kind: "tag".to_string(),
-                    color_bg: None,
-                    color_fg: None,
+                    visible: None,
                     sort_order: Some(sort_order),
-                    imap_folder_path: None,
-                    imap_special_use: None,
-                    parent_label_id: None,
-                    right_read: None,
-                    right_add: None,
-                    right_remove: None,
-                    right_set_seen: None,
-                    right_set_keywords: None,
-                    right_create_child: None,
-                    right_rename: None,
-                    right_delete: None,
-                    right_submit: None,
-                    is_subscribed: None,
+                    server_color_bg: None,
+                    server_color_fg: None,
+                    user_color_bg: None,
+                    user_color_fg: None,
+                    is_undeletable: true,
                 });
             }
         }

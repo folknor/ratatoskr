@@ -495,23 +495,15 @@ pub fn seed_chats(
                 .map_err(|e| format!("insert thread_participants: {e}"))?;
             }
 
-            // INBOX label and All Mail label - mirrors the convention in
+            // INBOX folder rows mirror the convention in
             // threads::generate_threads for INBOX threads.
             if let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == "INBOX") {
                 conn.execute(
-                    "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                    "INSERT OR IGNORE INTO thread_folders (thread_id, account_id, folder_id)
                      VALUES (?1, ?2, ?3)",
                     rusqlite::params![thread_id, acc.id, label_id],
                 )
-                .map_err(|e| format!("insert chat thread INBOX label: {e}"))?;
-            }
-            if let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == "All Mail") {
-                conn.execute(
-                    "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
-                     VALUES (?1, ?2, ?3)",
-                    rusqlite::params![thread_id, acc.id, label_id],
-                )
-                .map_err(|e| format!("insert chat thread All Mail label: {e}"))?;
+                .map_err(|e| format!("insert chat thread INBOX folder: {e}"))?;
             }
 
             if latest_date > contact_latest_date {

@@ -1,4 +1,4 @@
-//! Cross-account labels (settings > Mail Rules > Labels, sidebar section 4).
+//! Per-account raw labels (settings > Mail Rules > Labels).
 //!
 //! Read path lives here. Writes (create / delete / rename / recolor) are
 //! scaffolded as stub Tasks until the action service grows the matching
@@ -12,9 +12,9 @@ use crate::db::Db;
 
 use super::LabelOp;
 
-/// Load all cross-account labels (`label_kind = 'tag'`) grouped by
-/// normalized name, sorted alphabetically. Drives both the settings tab
-/// and sidebar section 4.
+/// Load all raw provider labels grouped by account, sorted alphabetically.
+/// Sidebar section 4 is driven by explicit label groups, not this settings
+/// view.
 pub fn load_visible_labels_async(db: &Arc<Db>) -> Task<LabelOp> {
     let db = Arc::clone(db);
     Task::perform(
@@ -39,7 +39,7 @@ pub fn load_visible_labels_async(db: &Arc<Db>) -> Task<LabelOp> {
     )
 }
 
-// ── Write stubs ─────────────────────────────────────────────
+// Write stubs.
 //
 // These return Task::done synthesising an Err result for now so the UI
 // can surface "not yet implemented" without crashing. Replace with real

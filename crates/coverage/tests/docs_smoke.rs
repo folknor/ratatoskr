@@ -29,7 +29,7 @@ fn repository_docs_catalog_is_clean() {
         "architecture.adding_a_new_email_action",
         "glossary.folders_labels.folder_rows_are_containers",
         "glossary.folders_labels.label_rows_are_tags",
-        "glossary.folders_labels.labels_table_discriminates_folders_and_labels",
+        "glossary.folders_labels.storage_splits_folders_labels_and_groups",
         "glossary.folders_labels.label_identity_is_account_scoped",
         "glossary.folders_labels.system_folder_ids_are_canonical",
         "glossary.folders_labels.non_system_ids_keep_provider_prefixes",

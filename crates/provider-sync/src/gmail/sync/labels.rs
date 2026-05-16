@@ -4,7 +4,7 @@ use super::super::client::GmailClient;
 use super::super::types::{GmailLabel, GmailSendAs};
 use super::SyncCtx;
 use db::db::ReadDbState;
-use db::db::queries_extra::{LabelWriteRow, upsert_labels};
+use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 
 // ---------------------------------------------------------------------------
 // Label sync
@@ -28,31 +28,25 @@ fn persist_labels(
         .unchecked_transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
-    let rows: Vec<LabelWriteRow> = labels
+    let mut folder_rows = Vec::new();
+    let mut label_rows = Vec::new();
+
+    for label in labels
         .iter()
         .filter(|label| !common::folder_roles::is_message_state_label_id(&label.id))
-        .map(|label| {
-            let color_bg = label.color.as_ref().map(|c| c.background_color.clone());
-            let color_fg = label.color.as_ref().map(|c| c.text_color.clone());
-            let label_type = label.label_type.as_deref().unwrap_or("user");
-            let label_kind = if label_type == "system" {
-                "container"
-            } else {
-                "tag"
-            };
-
-            LabelWriteRow {
+    {
+        let label_type = label.label_type.as_deref().unwrap_or("user");
+        if label_type == "system" {
+            folder_rows.push(FolderWriteRow {
                 id: label.id.clone(),
                 account_id: account_id.to_string(),
                 name: label.name.clone(),
-                label_type: label_type.to_string(),
-                label_kind: label_kind.to_string(),
-                color_bg,
-                color_fg,
+                visible: None,
                 sort_order: None,
                 imap_folder_path: None,
                 imap_special_use: None,
-                parent_label_id: None,
+                namespace_type: None,
+                parent_id: None,
                 right_read: None,
                 right_add: None,
                 right_remove: None,
@@ -63,11 +57,26 @@ fn persist_labels(
                 right_delete: None,
                 right_submit: None,
                 is_subscribed: None,
-            }
-        })
-        .collect();
+                is_undeletable: true,
+            });
+        } else {
+            label_rows.push(LabelWriteRow {
+                id: label.id.clone(),
+                account_id: account_id.to_string(),
+                name: label.name.clone(),
+                visible: None,
+                sort_order: None,
+                server_color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
+                server_color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
+                user_color_bg: None,
+                user_color_fg: None,
+                is_undeletable: false,
+            });
+        }
+    }
 
-    upsert_labels(&tx, &rows)?;
+    insert_folders_batch(&tx, &folder_rows)?;
+    upsert_labels(&tx, &label_rows)?;
     tx.commit().map_err(|e| format!("commit labels: {e}"))?;
     Ok(())
 }

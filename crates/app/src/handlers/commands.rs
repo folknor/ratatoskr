@@ -5,7 +5,7 @@ use iced::Task;
 use crate::command_dispatch;
 use crate::{APP_DATA_DIR, Message, ReadyApp};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use service::actions::{ActionOutcome, LabelId};
+use service::actions::{ActionOutcome, LabelGroupId, LabelId};
 use rtsk::scope::ViewScope;
 
 #[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
@@ -1102,6 +1102,26 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
+        MailUndoPayload::ApplyLabelGroup { account_id, thread_ids, group_id } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
+                    account_id.clone(),
+                    tid.clone(),
+                    MailOperation::RemoveLabelGroup { group_id: *group_id },
+                )
+            })
+            .collect(),
+        MailUndoPayload::RemoveLabelGroup { account_id, thread_ids, group_id } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
+                    account_id.clone(),
+                    tid.clone(),
+                    MailOperation::ApplyLabelGroup { group_id: *group_id },
+                )
+            })
+            .collect(),
         MailUndoPayload::Snooze { account_id, thread_ids } => thread_ids
             .iter()
             .map(|tid| {
@@ -1143,6 +1163,12 @@ fn undo_cancel_targets(
         }
         MailUndoPayload::RemoveLabel { account_id, thread_ids, .. } => {
             (account_id, thread_ids, "removeLabel")
+        }
+        MailUndoPayload::ApplyLabelGroup { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "applyLabelGroup")
+        }
+        MailUndoPayload::RemoveLabelGroup { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "removeLabelGroup")
         }
         // Pin/Mute/Snooze are local-only: they never enqueue into
         // pending_operations, so there is nothing to cancel.
@@ -1224,31 +1250,32 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
         CommandId::EmailMoveToFolder => Some(CommandArgs::MoveToFolder {
             folder_id: item.id.clone().into(),
         }),
-        CommandId::EmailAddLabel => Some(CommandArgs::AddLabel {
-            label_id: item.id.clone().into(),
-        }),
-        CommandId::EmailRemoveLabel => Some(CommandArgs::RemoveLabel {
-            label_id: item.id.clone().into(),
-        }),
+        CommandId::EmailAddLabel => item
+            .id
+            .parse::<i64>()
+            .ok()
+            .map(|id| CommandArgs::AddLabel {
+                group_id: LabelGroupId::from(id),
+            }),
+        CommandId::EmailRemoveLabel => item
+            .id
+            .parse::<i64>()
+            .ok()
+            .map(|id| CommandArgs::RemoveLabel {
+                group_id: LabelGroupId::from(id),
+            }),
         CommandId::EmailSnooze => item
             .id
             .parse::<i64>()
             .ok()
             .map(|ts| CommandArgs::Snooze { until: ts }),
-        CommandId::NavigateToLabel => {
-            let (account_id, is_label, label_id) = split_cross_account_id(&item.id)?;
-            if is_label {
-                Some(CommandArgs::NavigateToLabel {
-                    label_id: label_id.into(),
-                    account_id,
-                })
-            } else {
-                Some(CommandArgs::NavigateToFolder {
-                    folder_id: label_id.into(),
-                    account_id,
-                })
-            }
-        }
+        CommandId::NavigateToLabel => item
+            .id
+            .parse::<i64>()
+            .ok()
+            .map(|id| CommandArgs::NavigateToLabel {
+                group_id: LabelGroupId::from(id),
+            }),
         _ => None,
     }
 }
@@ -1265,17 +1292,4 @@ pub(crate) fn build_command_args_from_text(
         }),
         _ => None,
     }
-}
-
-/// Split a cross-account encoded ID ("account_id:kind:item_id") into its parts.
-/// `kind` is "l" for label, "f" for folder.
-fn split_cross_account_id(encoded: &str) -> Option<(String, bool, String)> {
-    let mut parts = encoded.splitn(3, ':');
-    let account_id = parts.next()?.to_string();
-    let kind = parts.next()?;
-    let label_id = parts.next()?.to_string();
-    if account_id.is_empty() || label_id.is_empty() {
-        return None;
-    }
-    Some((account_id, kind == "l", label_id))
 }

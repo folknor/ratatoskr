@@ -74,21 +74,18 @@ impl_from_row!(DbThread {
     from_address,
 });
 
-// ── Label ───────────────────────────────────────────────────
+// ── Folder / label ──────────────────────────────────────────
 
-impl_from_row!(DbLabel {
+impl_from_row!(DbFolder {
     id,
     account_id,
     name,
-    label_type as "type",
-    label_kind,
-    color_bg,
-    color_fg,
     bool visible,
     sort_order,
     imap_folder_path,
     imap_special_use,
-    parent_label_id,
+    namespace_type,
+    parent_id,
     optbool right_read,
     optbool right_add,
     optbool right_remove,
@@ -99,6 +96,20 @@ impl_from_row!(DbLabel {
     optbool right_delete,
     optbool right_submit,
     optbool is_subscribed,
+    bool is_undeletable,
+});
+
+impl_from_row!(DbLabel {
+    id,
+    account_id,
+    name,
+    bool visible,
+    sort_order,
+    server_color_bg,
+    server_color_fg,
+    user_color_bg,
+    user_color_fg,
+    bool is_undeletable,
 });
 
 // ── Contact ─────────────────────────────────────────────────

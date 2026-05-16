@@ -4,9 +4,9 @@ use rusqlite::{Connection, OptionalExtension};
 
 use db::db::ReadDbState;
 use db::db::queries_extra::{
-    AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
-    recompute_thread_read_starred, set_message_imap_flags, sync_thread_read_starred_labels,
-    upsert_labels,
+    AttachmentInsertRow, FolderWriteRow, LabelWriteRow, MessageInsertRow, insert_attachments,
+    insert_folders_batch, insert_messages, recompute_thread_read_starred, set_message_imap_flags,
+    sync_thread_read_starred_labels, upsert_labels,
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
@@ -274,24 +274,13 @@ fn upsert_imap_keyword_labels(
             id: label_id.clone(),
             account_id: account_id.to_string(),
             name: keyword.clone(),
-            label_type: "user".to_string(),
-            label_kind: "tag".to_string(),
-            color_bg: None,
-            color_fg: None,
+            visible: None,
             sort_order: None,
-            imap_folder_path: None,
-            imap_special_use: None,
-            parent_label_id: None,
-            right_read: None,
-            right_add: None,
-            right_remove: None,
-            right_set_seen: None,
-            right_set_keywords: None,
-            right_create_child: None,
-            right_rename: None,
-            right_delete: None,
-            right_submit: None,
-            is_subscribed: None,
+            server_color_bg: None,
+            server_color_fg: None,
+            user_color_bg: None,
+            user_color_fg: None,
+            is_undeletable: false,
         })
         .collect();
     upsert_labels(tx, &rows)?;
@@ -557,7 +546,7 @@ pub async fn index_messages(
 // ---------------------------------------------------------------------------
 
 /// Sync IMAP folders to the labels table.
-pub fn sync_folders_to_labels(
+pub fn sync_folders_to_folders(
     conn: &Connection,
     account_id: &str,
     folders: &[&ImapFolder],
@@ -575,25 +564,23 @@ pub fn sync_folders_to_labels(
         })
         .collect();
 
-    let rows: Vec<LabelWriteRow> = folders
+    let rows: Vec<FolderWriteRow> = folders
         .iter()
         .map(|folder| {
             let mapping = map_folder_to_folder(folder);
-            let parent_label_id =
-                derive_imap_parent_label_id(&folder.path, &folder.delimiter, &path_to_folder_id);
+            let parent_id =
+                derive_imap_parent_folder_id(&folder.path, &folder.delimiter, &path_to_folder_id);
 
-            LabelWriteRow {
+            FolderWriteRow {
                 id: mapping.folder_id,
                 account_id: account_id.to_string(),
                 name: mapping.folder_name,
-                label_type: mapping.folder_type,
-                label_kind: "container".to_string(),
-                color_bg: None,
-                color_fg: None,
+                visible: None,
                 sort_order: None,
                 imap_folder_path: Some(folder.raw_path.clone()),
                 imap_special_use: folder.special_use.clone(),
-                parent_label_id,
+                namespace_type: None,
+                parent_id,
                 right_read: None,
                 right_add: None,
                 right_remove: None,
@@ -604,22 +591,23 @@ pub fn sync_folders_to_labels(
                 right_delete: None,
                 right_submit: None,
                 is_subscribed: None,
+                is_undeletable: mapping.folder_type == "system",
             }
         })
         .collect();
 
-    upsert_labels(&tx, &rows)?;
+    insert_folders_batch(&tx, &rows)?;
     tx.commit().map_err(|e| format!("commit labels: {e}"))?;
     Ok(())
 }
 
-/// Derive a parent label ID for an IMAP folder by splitting its path on the
-/// hierarchy delimiter and looking up the parent path in the path-to-label map.
+/// Derive a parent folder ID for an IMAP folder by splitting its path on the
+/// hierarchy delimiter and looking up the parent path in the path-to-folder map.
 ///
 /// For example, with delimiter `/` and path `Work/Projects/Active`, the parent
-/// path is `Work/Projects`. If that path exists in the map, its label ID is
+/// path is `Work/Projects`. If that path exists in the map, its folder ID is
 /// returned.
-fn derive_imap_parent_label_id(
+fn derive_imap_parent_folder_id(
     path: &str,
     delimiter: &str,
     path_to_folder_id: &std::collections::HashMap<&str, String>,

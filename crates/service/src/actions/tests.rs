@@ -50,6 +50,14 @@ fn insert_test_account(ctx: &ActionContext, account_id: &str) {
         params![account_id, format!("{account_id}@test.com"), "gmail_api"],
     )
     .expect("insert account");
+    for (folder_id, name) in [("INBOX", "Inbox"), ("TRASH", "Trash"), ("SPAM", "Spam")] {
+        conn.execute(
+            "INSERT OR IGNORE INTO folders (account_id, id, name, is_undeletable)
+             VALUES (?1, ?2, ?3, 1)",
+            params![account_id, folder_id, name],
+        )
+        .expect("insert folder");
+    }
 }
 
 /// Insert a test thread row.
@@ -65,32 +73,32 @@ fn insert_test_thread(ctx: &ActionContext, account_id: &str, thread_id: &str) {
     .expect("insert thread");
 }
 
-/// Insert a thread_labels row (e.g., to put a thread in INBOX).
-fn insert_thread_label(ctx: &ActionContext, account_id: &str, thread_id: &str, label_id: &str) {
+/// Insert a thread_folders row.
+fn insert_thread_folder(ctx: &ActionContext, account_id: &str, thread_id: &str, folder_id: &str) {
     let db = ctx.db.clone();
     let conn = db.conn();
     let conn = conn.lock().expect("lock");
     conn.execute(
-        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?1, ?2, ?3)",
-        params![account_id, thread_id, label_id],
+        "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) VALUES (?1, ?2, ?3)",
+        params![account_id, thread_id, folder_id],
     )
-    .expect("insert thread_label");
+    .expect("insert thread_folder");
 }
 
-/// Check if a thread_labels row exists.
-fn has_thread_label(
+/// Check if a thread_folders row exists.
+fn has_thread_folder(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    folder_id: &str,
 ) -> bool {
     let db = ctx.db.clone();
     let conn = db.conn();
     let conn = conn.lock().expect("lock");
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
-            params![account_id, thread_id, label_id],
+            "SELECT COUNT(*) FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2 AND folder_id = ?3",
+            params![account_id, thread_id, folder_id],
             |row| row.get(0),
         )
         .expect("query");
@@ -183,12 +191,12 @@ async fn archive_local_removes_inbox_label() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
-    insert_thread_label(&ctx, "acc1", "t1", "INBOX");
-    assert!(has_thread_label(&ctx, "acc1", "t1", "INBOX"));
+    insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
+    assert!(has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
 
     let result = super::archive::archive_local(&ctx, "acc1", "t1").await;
     assert!(result.is_ok());
-    assert!(!has_thread_label(&ctx, "acc1", "t1", "INBOX"));
+    assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
 }
 
 #[tokio::test]
@@ -223,12 +231,12 @@ async fn trash_local_removes_inbox_adds_trash() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
-    insert_thread_label(&ctx, "acc1", "t1", "INBOX");
+    insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
 
     let result = super::trash::trash_local(&ctx, "acc1", "t1").await;
     assert!(result.is_ok());
-    assert!(!has_thread_label(&ctx, "acc1", "t1", "INBOX"));
-    assert!(has_thread_label(&ctx, "acc1", "t1", "TRASH"));
+    assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
+    assert!(has_thread_folder(&ctx, "acc1", "t1", "TRASH"));
 }
 
 // ── Public action tests (no provider → LocalOnly) ───────────────────
@@ -259,11 +267,11 @@ async fn snooze_sets_state_and_removes_inbox() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
-    insert_thread_label(&ctx, "acc1", "t1", "INBOX");
+    insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
 
     let outcome = super::snooze::snooze(&ctx, "acc1", "t1", 1234567890).await;
     assert!(outcome.is_success());
-    assert!(!has_thread_label(&ctx, "acc1", "t1", "INBOX"));
+    assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
 
     // Check snooze fields
     let db = ctx.db.clone();
@@ -292,7 +300,7 @@ async fn unsnooze_restores_inbox() {
     // Unsnooze
     let outcome = super::snooze::unsnooze(&ctx, "acc1", "t1").await;
     assert!(outcome.is_success());
-    assert!(has_thread_label(&ctx, "acc1", "t1", "INBOX"));
+    assert!(has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
 }
 
 // ── Pending-ops dedup tests ─────────────────────────────────────────

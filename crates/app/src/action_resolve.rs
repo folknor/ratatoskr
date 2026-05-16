@@ -8,7 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
-use service::actions::{ActionOutcome, FolderId, MailOperation, LabelId};
+use service::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation};
 
 // ── Intent ──────────────────────────────────────────────
 
@@ -26,6 +26,8 @@ pub enum MailActionIntent {
     MoveToFolder { folder_id: FolderId },
     AddLabel { label_id: LabelId },
     RemoveLabel { label_id: LabelId },
+    ApplyLabelGroup { group_id: LabelGroupId },
+    RemoveLabelGroup { group_id: LabelGroupId },
     Snooze { until: i64 },
     Unsubscribe,
 }
@@ -239,6 +241,18 @@ pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
             undo: UndoBehavior::Reversible,
             success_label: "Label removed",
         },
+        MailOperation::ApplyLabelGroup { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Label applied",
+        },
+        MailOperation::RemoveLabelGroup { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Label removed",
+        },
         MailOperation::Snooze { .. } => CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
@@ -314,6 +328,16 @@ pub enum MailUndoPayload {
         thread_ids: Vec<String>,
         label_id: LabelId,
     },
+    ApplyLabelGroup {
+        account_id: String,
+        thread_ids: Vec<String>,
+        group_id: LabelGroupId,
+    },
+    RemoveLabelGroup {
+        account_id: String,
+        thread_ids: Vec<String>,
+        group_id: LabelGroupId,
+    },
     Snooze {
         account_id: String,
         thread_ids: Vec<String>,
@@ -361,6 +385,8 @@ pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
         }
         MailUndoPayload::AddLabel { .. } => "Added label".to_string(),
         MailUndoPayload::RemoveLabel { .. } => "Removed label".to_string(),
+        MailUndoPayload::ApplyLabelGroup { .. } => "Applied label".to_string(),
+        MailUndoPayload::RemoveLabelGroup { .. } => "Removed label".to_string(),
         MailUndoPayload::Snooze { .. } => "Snoozed".to_string(),
     }
 }
@@ -559,6 +585,20 @@ fn build_standard_undo_payloads(
                     thread_ids,
                     label_id: label_id.clone(),
                 }),
+                MailOperation::ApplyLabelGroup { group_id } => {
+                    Some(MailUndoPayload::ApplyLabelGroup {
+                        account_id,
+                        thread_ids,
+                        group_id: *group_id,
+                    })
+                }
+                MailOperation::RemoveLabelGroup { group_id } => {
+                    Some(MailUndoPayload::RemoveLabelGroup {
+                        account_id,
+                        thread_ids,
+                        group_id: *group_id,
+                    })
+                }
                 MailOperation::Snooze { .. } => Some(MailUndoPayload::Snooze {
                     account_id,
                     thread_ids,
@@ -654,6 +694,18 @@ pub fn resolve_intent(intent: MailActionIntent, ctx: &UiContext) -> ResolveOutco
             operation: MailOperation::RemoveLabel { label_id },
             compensation: CompensationContext::None,
         }),
+        MailActionIntent::ApplyLabelGroup { group_id } => {
+            ResolveOutcome::Resolved(ResolvedIntent {
+                operation: MailOperation::ApplyLabelGroup { group_id },
+                compensation: CompensationContext::None,
+            })
+        }
+        MailActionIntent::RemoveLabelGroup { group_id } => {
+            ResolveOutcome::Resolved(ResolvedIntent {
+                operation: MailOperation::RemoveLabelGroup { group_id },
+                compensation: CompensationContext::None,
+            })
+        }
         MailActionIntent::Snooze { until } => ResolveOutcome::Resolved(ResolvedIntent {
             operation: MailOperation::Snooze { until },
             compensation: CompensationContext::None,

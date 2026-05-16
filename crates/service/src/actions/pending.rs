@@ -27,7 +27,9 @@ fn retry_policy(operation_type: &str) -> RetryPolicy {
         "archive" | "trash" | "spam" | "moveToFolder" | "permanentDelete" => {
             RetryPolicy { max_retries: 10 }
         }
-        "addLabel" | "removeLabel" => RetryPolicy { max_retries: 7 },
+        "addLabel" | "removeLabel" | "applyLabelGroup" | "removeLabelGroup" => {
+            RetryPolicy { max_retries: 7 }
+        }
         "star" | "markRead" => RetryPolicy { max_retries: 5 },
         _ => RetryPolicy { max_retries: 5 },
     }
@@ -283,6 +285,16 @@ async fn dispatch_pending_op(
             );
             super::label::remove_label(ctx, account_id, resource_id, &label_id).await
         }
+        "applyLabelGroup" => {
+            let group_id =
+                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            super::label_group::apply_label_group(ctx, account_id, resource_id, group_id).await
+        }
+        "removeLabelGroup" => {
+            let group_id =
+                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            super::label_group::remove_label_group(ctx, account_id, resource_id, group_id).await
+        }
         other => {
             log::warn!("[pending_ops] Unknown operation type: {other}");
             ActionOutcome::Failed {
@@ -383,6 +395,30 @@ async fn dispatch_pending_op_with_provider(
                 account_id,
                 resource_id,
                 &label_id,
+            )
+            .await
+        }
+        "applyLabelGroup" => {
+            let group_id =
+                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            super::label_group::apply_label_group_with_provider(
+                ctx,
+                provider,
+                account_id,
+                resource_id,
+                group_id,
+            )
+            .await
+        }
+        "removeLabelGroup" => {
+            let group_id =
+                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            super::label_group::remove_label_group_with_provider(
+                ctx,
+                provider,
+                account_id,
+                resource_id,
+                group_id,
             )
             .await
         }

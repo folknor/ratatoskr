@@ -14,8 +14,8 @@ use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::provider::{classify_provider_error, create_provider};
 use super::{
-    archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, snooze, spam, star,
-    trash,
+    archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
+    spam, star, trash,
 };
 
 /// Maximum consecutive remote failures before short-circuiting to degraded mode.
@@ -331,6 +331,18 @@ async fn dispatch_with_provider(
         MailOperation::RemoveLabel { label_id } => {
             label::remove_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
         }
+        MailOperation::ApplyLabelGroup { group_id } => {
+            label_group::apply_label_group_with_provider(
+                ctx, provider, account_id, thread_id, *group_id,
+            )
+            .await
+        }
+        MailOperation::RemoveLabelGroup { group_id } => {
+            label_group::remove_label_group_with_provider(
+                ctx, provider, account_id, thread_id, *group_id,
+            )
+            .await
+        }
         // Local-only ops routed through provider path in mixed batches
         op @ (MailOperation::SetPinned { .. }
         | MailOperation::SetMuted { .. }
@@ -381,6 +393,16 @@ async fn op_local(
             label::remove_label_local(ctx, account_id, thread_id, label_id)
                 .await
                 .map(|()| true)
+        }
+        MailOperation::ApplyLabelGroup { group_id } => {
+            label_group::apply_label_group_local(ctx, account_id, thread_id, *group_id)
+                .await
+                .map(|_| true)
+        }
+        MailOperation::RemoveLabelGroup { group_id } => {
+            label_group::remove_label_group_local(ctx, account_id, thread_id, *group_id)
+                .await
+                .map(|_| true)
         }
         MailOperation::SetPinned { to } => {
             // Local-only action in degraded path - call the action directly
@@ -439,6 +461,14 @@ fn enqueue_params(op: &MailOperation) -> (&'static str, String) {
             "removeLabel",
             serde_json::json!({"labelId": label_id}).to_string(),
         ),
+        MailOperation::ApplyLabelGroup { group_id } => (
+            "applyLabelGroup",
+            serde_json::json!({"groupId": group_id.as_i64()}).to_string(),
+        ),
+        MailOperation::RemoveLabelGroup { group_id } => (
+            "removeLabelGroup",
+            serde_json::json!({"groupId": group_id.as_i64()}).to_string(),
+        ),
         MailOperation::SetPinned { .. }
         | MailOperation::SetMuted { .. }
         | MailOperation::Snooze { .. }
@@ -460,6 +490,8 @@ fn op_name(op: &MailOperation) -> &'static str {
         MailOperation::PermanentDelete => "permanent_delete",
         MailOperation::AddLabel { .. } => "add_label",
         MailOperation::RemoveLabel { .. } => "remove_label",
+        MailOperation::ApplyLabelGroup { .. } => "apply_label_group",
+        MailOperation::RemoveLabelGroup { .. } => "remove_label_group",
         MailOperation::SetPinned { .. } => "pin",
         MailOperation::SetMuted { .. } => "mute",
         MailOperation::Snooze { .. } => "snooze",

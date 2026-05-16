@@ -129,13 +129,25 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
+    let mut folder_ids = Vec::new();
+    let mut label_ids = Vec::new();
+    for label_id in messages
+        .iter()
+        .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
+    {
+        if common::folder_roles::is_gmail_system_folder_label_id(label_id) {
+            folder_ids.push(label_id);
+        } else {
+            label_ids.push(label_id);
+        }
+    }
+
+    sync_persistence::replace_thread_folders(tx, account_id, thread_id, folder_ids)?;
     sync_persistence::replace_thread_labels(
         tx,
         account_id,
         thread_id,
-        messages
-            .iter()
-            .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
+        label_ids,
     )
 }
 

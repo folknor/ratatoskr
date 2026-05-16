@@ -278,9 +278,9 @@ fn imap_message_to_provider_message(
     }
 }
 
-/// Look up a special-use IMAP folder path from the labels table.
+/// Look up a special-use IMAP folder path from the folders table.
 ///
-/// First checks `imap_special_use`, then falls back to well-known label IDs
+/// First checks `imap_special_use`, then falls back to well-known folder IDs
 /// (e.g., "TRASH", "SPAM") when the server didn't advertise special-use flags.
 fn find_special_folder(
     conn: &Connection,
@@ -290,7 +290,7 @@ fn find_special_folder(
     // Primary: look up by imap_special_use
     let path: Option<String> = conn
         .query_row(
-            "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM labels \
+            "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM folders \
              WHERE account_id = ?1 AND imap_special_use = ?2 LIMIT 1",
             rusqlite::params![account_id, special_use],
             |row| row.get("folder_path"),
@@ -302,13 +302,13 @@ fn find_special_folder(
         return Ok(path);
     }
 
-    // Fallback: map special-use to well-known label ID
-    let label_id = imap_special_use_to_label_id(special_use);
+    // Fallback: map special-use to well-known folder ID.
+    let folder_id = imap_special_use_to_label_id(special_use);
 
-    if let Some(lid) = label_id {
+    if let Some(lid) = folder_id {
         let fallback: Option<String> = conn
             .query_row(
-                "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM labels \
+                "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM folders \
                  WHERE account_id = ?1 AND id = ?2 AND imap_folder_path IS NOT NULL LIMIT 1",
                 rusqlite::params![account_id, lid],
                 |row| row.get("folder_path"),
@@ -331,7 +331,7 @@ fn resolve_folder_path(
 ) -> Result<String, String> {
     let path: Option<String> = conn
         .query_row(
-            "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM labels \
+            "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM folders \
              WHERE account_id = ?1 AND id = ?2 LIMIT 1",
             rusqlite::params![account_id, folder_id],
             |row| row.get("folder_path"),
@@ -344,7 +344,7 @@ fn resolve_folder_path(
     folder_id
         .strip_prefix("folder-")
         .map(str::to_string)
-        .ok_or_else(|| format!("No IMAP folder path found for label id {folder_id:?}"))
+        .ok_or_else(|| format!("No IMAP folder path found for folder id {folder_id:?}"))
 }
 
 /// Connect, run an IMAP session body, then logout - mirroring the

@@ -468,10 +468,10 @@ There are four result types in play. Their roles are distinct:
 
 - **`UnifiedSearchResult`** (`crates/core/src/search_pipeline.rs`) - the core pipeline's output. Carries thread-level search results with relevance scores. This is the authoritative search contract.
 - **`Thread`** (`crates/app/src/db.rs`) - the app's display type for the thread list. The thread card widget renders these. Search results are converted to `Thread` before reaching the UI.
-- **`DbThread`** (`crates/db/src/db/types.rs`) - the raw DB row type. Smart folder execution historically returned these. The migration adapter converts `UnifiedSearchResult` → `DbThread` for backward compatibility with sidebar unread-count code.
+- **`DbThread`** (`crates/db/src/db/types.rs`) - the raw DB row type. Smart folder execution historically returned these. The migration adapter converts `UnifiedSearchResult` to `DbThread` for backward compatibility with sidebar unread-count code.
 - **`SearchResult`** (`docs/search/problem-statement.md`) - the product-level contract. `UnifiedSearchResult` is the implementation of this contract.
 
-The conversion flow is: `search()` → `Vec<UnifiedSearchResult>` → `unified_to_app_thread()` → `Vec<Thread>` → thread list. Smart folder compatibility: `UnifiedSearchResult` → `unified_to_db_thread()` → `Vec<DbThread>`. Long-term, per the search implementation spec, these should converge into a unified thread-presentation type.
+The conversion flow is: `search()` -> `Vec<UnifiedSearchResult>` -> `unified_to_app_thread()` -> `Vec<Thread>` -> thread list. Smart folder compatibility: `UnifiedSearchResult` -> `unified_to_db_thread()` -> `Vec<DbThread>`. Long-term, per the search implementation spec, these should converge into a unified thread-presentation type.
 
 #### UnifiedSearchResult to Thread conversion
 
@@ -936,8 +936,8 @@ pub struct TypeaheadItem {
 | `from:` | `SELECT display_name, email FROM contacts WHERE display_name LIKE ? OR email LIKE ? LIMIT 10` | Contact name + email |
 | `to:` | Same as `from:` | Contact name + email |
 | `account:` | `SELECT display_name, email FROM accounts WHERE display_name LIKE ? OR email LIKE ? LIMIT 10` | Account name |
-| `label:` | `SELECT DISTINCT name FROM labels WHERE name LIKE ? AND account_id IN (?) LIMIT 10` | Label names, scoped by `account:` if present |
-| `folder:` | `SELECT DISTINCT name FROM labels WHERE (name LIKE ? OR imap_folder_path LIKE ?) AND account_id IN (?) LIMIT 10` | Folder names, scoped by `account:` |
+| `label:` | `SELECT name FROM label_groups WHERE name LIKE ? LIMIT 10` | Label group names |
+| `folder:` | `SELECT DISTINCT name FROM folders WHERE (name LIKE ? OR imap_folder_path LIKE ?) AND account_id IN (?) LIMIT 10` | Folder names, scoped by `account:` |
 | `in:` | Static list: `inbox`, `sent`, `drafts`, `trash`, `spam`, `starred`, `snoozed` | Universal folder names |
 | `is:` | Static list: `unread`, `read`, `starred`, `snoozed`, `pinned`, `muted`, `tagged` | Flag names |
 | `has:` | Static list: `attachment`, `pdf`, `image`, `excel`, `word`, `document`, `archive`, `video`, `audio`, `calendar`, `contact` | Has values |

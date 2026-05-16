@@ -25,7 +25,7 @@ use service_api::{
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
     TestSeedRemoteAttachmentParams, TestSearchIndexParams, TestSeedThreadParams,
     TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
-    WireFolderId, WireMailOperation, WireLabelId,
+    WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId,
 };
 use std::collections::HashMap;
 use std::io::{BufWriter, Write as _};
@@ -3443,6 +3443,20 @@ fn parse_wire_mail_operation(
                 .ok_or_else(|| lua_error_message("RemoveLabel requires label_id"))?;
             Ok(WireMailOperation::RemoveLabel {
                 label_id: WireLabelId(label_id),
+            })
+        }
+        "applylabelgroup" => {
+            let group_id = get_number_field(state, op_idx, "group_id")?
+                .ok_or_else(|| lua_error_message("ApplyLabelGroup requires group_id"))?;
+            Ok(WireMailOperation::ApplyLabelGroup {
+                group_id: WireLabelGroupId(group_id as i64),
+            })
+        }
+        "removelabelgroup" => {
+            let group_id = get_number_field(state, op_idx, "group_id")?
+                .ok_or_else(|| lua_error_message("RemoveLabelGroup requires group_id"))?;
+            Ok(WireMailOperation::RemoveLabelGroup {
+                group_id: WireLabelGroupId(group_id as i64),
             })
         }
         "snooze" => {

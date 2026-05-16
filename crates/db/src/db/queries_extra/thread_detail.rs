@@ -9,8 +9,6 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use super::thread_ui_state::get_attachments_collapsed;
-use label_colors::resolve_label_color;
-use super::super::folder_roles::SYSTEM_FOLDER_ROLES;
 
 // ── Return types ────────────────────────────────────────────
 
@@ -51,7 +49,7 @@ pub struct ThreadDetailMessage {
     pub collapsed_summary: Option<String>,
 }
 
-/// Labels with resolved colors, for the thread header label toggles
+/// Label groups with resolved colors, for the thread header pills
 /// and thread card label dots.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,7 +58,7 @@ pub struct ThreadLabel {
     pub name: String,
     pub color_bg: String,
     pub color_fg: String,
-    /// "container" (folder/mailbox) or "tag" (category/keyword).
+    /// Compatibility discriminator for existing app display types.
     pub label_kind: String,
 }
 
@@ -189,14 +187,23 @@ fn query_thread_label_decorations(
     }
     let placeholders = placeholders(thread_ids.len(), 2);
     let sql = format!(
-        "SELECT tl.thread_id, l.name, l.color_bg, l.color_fg, l.account_id
-         FROM thread_labels tl
-         INNER JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id
-         WHERE tl.account_id = ?1
-           AND tl.thread_id IN ({placeholders})
-           AND l.label_kind = 'tag'
-           AND l.id NOT IN ('UNREAD', 'STARRED')
-         ORDER BY l.sort_order ASC, l.name ASC"
+        "SELECT thread_id, name, color_bg
+         FROM (
+           SELECT tlg.thread_id, lg.id AS group_id, lg.name, lg.color_bg
+           FROM thread_label_groups tlg
+           INNER JOIN label_groups lg ON lg.id = tlg.group_id
+           WHERE tlg.account_id = ?1
+             AND tlg.thread_id IN ({placeholders})
+           UNION
+           SELECT tl.thread_id, lg.id AS group_id, lg.name, lg.color_bg
+           FROM thread_labels tl
+           INNER JOIN label_group_members lgm
+             ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
+           INNER JOIN label_groups lg ON lg.id = lgm.group_id
+           WHERE tl.account_id = ?1
+             AND tl.thread_id IN ({placeholders})
+         )
+         ORDER BY name ASC"
     );
     let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(thread_ids.len() + 1);
     params.push(&account_id);
@@ -209,18 +216,10 @@ fn query_thread_label_decorations(
         .map_err(|e| format!("prepare thread label decorations: {e}"))?;
     let rows = stmt
         .query_map(params.as_slice(), |row| {
-            let name: String = row.get("name")?;
-            let color_bg: Option<String> = row.get("color_bg")?;
-            let color_fg: Option<String> = row.get("color_fg")?;
-            let label_account_id: String = row.get("account_id")?;
-            let (resolved_bg, _) = resolve_label_color(
-                &name,
-                &label_account_id,
-                None,
-                color_bg.as_deref(),
-                color_fg.as_deref(),
-            );
-            Ok((row.get::<_, String>("thread_id")?, resolved_bg.to_string()))
+            Ok((
+                row.get::<_, String>("thread_id")?,
+                row.get::<_, String>("color_bg")?,
+            ))
         })
         .map_err(|e| format!("query thread label decorations: {e}"))?;
 
@@ -539,34 +538,40 @@ fn truncate_summary(text: &str) -> String {
     format!("{truncated}...")
 }
 
-// ── Labels with resolved colors ─────────────────────────────
+// ── Label groups with resolved colors ───────────────────────
 
 fn query_thread_labels(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<ThreadLabel>, String> {
-    let system_ids: HashSet<&str> = SYSTEM_FOLDER_ROLES.iter().map(|r| r.label_id).collect();
-
     let mut stmt = conn
         .prepare(
-            "SELECT l.id, l.name, l.color_bg, l.color_fg, l.account_id, l.label_kind \
-             FROM thread_labels tl \
-             JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
-             WHERE tl.account_id = ?1 AND tl.thread_id = ?2 \
-             ORDER BY l.sort_order ASC, l.name ASC",
+            "SELECT group_id, name, color_bg, color_fg \
+             FROM ( \
+               SELECT lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg \
+               FROM thread_label_groups tlg \
+               INNER JOIN label_groups lg ON lg.id = tlg.group_id \
+               WHERE tlg.account_id = ?1 AND tlg.thread_id = ?2 \
+               UNION \
+               SELECT lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg \
+               FROM thread_labels tl \
+               INNER JOIN label_group_members lgm \
+                 ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id \
+               INNER JOIN label_groups lg ON lg.id = lgm.group_id \
+               WHERE tl.account_id = ?1 AND tl.thread_id = ?2 \
+             ) \
+             ORDER BY name ASC",
         )
         .map_err(|e| format!("prepare thread labels: {e}"))?;
 
     let rows = stmt
         .query_map(params![account_id, thread_id], |row| {
-            Ok(LabelRow {
-                id: row.get("id")?,
+            Ok(LabelGroupRow {
+                id: row.get::<_, i64>("group_id")?,
                 name: row.get("name")?,
                 color_bg: row.get("color_bg")?,
                 color_fg: row.get("color_fg")?,
-                account_id: row.get("account_id")?,
-                label_kind: row.get("label_kind")?,
             })
         })
         .map_err(|e| format!("query thread labels: {e}"))?;
@@ -574,41 +579,24 @@ fn query_thread_labels(
     let mut labels = Vec::new();
     for row in rows {
         let lr = row.map_err(|e| format!("map label row: {e}"))?;
-
-        // Filter out system labels
-        if system_ids.contains(lr.id.as_str()) {
-            continue;
-        }
-
-        let (bg, fg) = resolve_label_color(
-            &lr.name,
-            &lr.account_id,
-            None,
-            lr.color_bg.as_deref(),
-            lr.color_fg.as_deref(),
-        );
-        let color_bg = bg.to_string();
-        let color_fg = fg.to_string();
         labels.push(ThreadLabel {
-            label_id: lr.id,
+            label_id: lr.id.to_string(),
             name: lr.name,
-            color_bg,
-            color_fg,
-            label_kind: lr.label_kind,
+            color_bg: lr.color_bg,
+            color_fg: lr.color_fg,
+            label_kind: "group".to_owned(),
         });
     }
 
     Ok(labels)
 }
 
-/// Intermediate row for label queries.
-struct LabelRow {
-    id: String,
+/// Intermediate row for label group queries.
+struct LabelGroupRow {
+    id: i64,
     name: String,
-    color_bg: Option<String>,
-    color_fg: Option<String>,
-    account_id: String,
-    label_kind: String,
+    color_bg: String,
+    color_fg: String,
 }
 
 // ── Attachments with message context ────────────────────────
