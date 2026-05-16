@@ -1,3 +1,5 @@
+use crate::ui::label_paint::LabelPaint;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateDisplay {
     /// Absolute date + relative offset from first message ("+14d")
@@ -72,7 +74,7 @@ pub struct Thread {
     pub is_pinned: bool,
     pub is_muted: bool,
     pub has_attachments: bool,
-    pub label_color_bgs: Vec<String>,
+    pub label_paints: Vec<LabelPaint>,
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     /// Whether this is a local-only draft (not yet synced to server).
@@ -104,7 +106,7 @@ impl Thread {
             is_pinned: t.is_pinned,
             is_muted: t.is_muted,
             has_attachments: t.has_attachments,
-            label_color_bgs: Vec::new(),
+            label_paints: Vec::new(),
             from_name: t.from_name,
             from_address: t.from_address,
             is_local_draft: false,
@@ -128,7 +130,7 @@ impl Thread {
             is_pinned: false,
             is_muted: false,
             has_attachments: false,
-            label_color_bgs: Vec::new(),
+            label_paints: Vec::new(),
             from_name: None,
             from_address: d.from_email,
             is_local_draft: true,
@@ -152,7 +154,7 @@ impl Thread {
             is_pinned: false,
             is_muted: false,
             has_attachments: false,
-            label_color_bgs: Vec::new(),
+            label_paints: Vec::new(),
             from_name: item.sender_name,
             from_address: item.sender_email,
             is_local_draft: false,
@@ -176,7 +178,7 @@ impl Thread {
             is_pinned: false,
             is_muted: false,
             has_attachments: false,
-            label_color_bgs: Vec::new(),
+            label_paints: Vec::new(),
             from_name: r.from_name,
             from_address: r.from_address,
             is_local_draft: false,

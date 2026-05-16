@@ -66,12 +66,18 @@ pub struct ThreadLabel {
 }
 
 #[derive(Debug, Clone)]
+pub struct ThreadListLabelColor {
+    pub color_bg: String,
+    pub color_fg: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ThreadListDecoration {
     pub account_id: String,
     pub thread_id: String,
     pub is_replied: bool,
     pub is_forwarded: bool,
-    pub label_color_bgs: Vec<String>,
+    pub label_colors: Vec<ThreadListLabelColor>,
 }
 
 /// Attachments grouped for the conversation view's attachment panel.
@@ -106,7 +112,7 @@ pub fn query_thread_list_decorations(
                 thread_id: thread_id.clone(),
                 is_replied: false,
                 is_forwarded: false,
-                label_color_bgs: Vec::new(),
+                label_colors: Vec::new(),
             });
     }
 
@@ -198,15 +204,15 @@ fn query_thread_label_decorations(
     // own name and color as the display source of truth.
     // See `docs/labels-unification/redesign.md` "Message pill rendering".
     let sql = format!(
-        "SELECT thread_id, MAX(name) AS name, MAX(color_bg) AS color_bg
+        "SELECT thread_id, MAX(name) AS name, MAX(color_bg) AS color_bg, MAX(color_fg) AS color_fg
          FROM (
-           SELECT tlg.thread_id, lg.id AS group_id, lg.name, lg.color_bg
+           SELECT tlg.thread_id, lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg
            FROM thread_label_groups tlg
            INNER JOIN label_groups lg ON lg.id = tlg.group_id
            WHERE tlg.account_id = ?1
              AND tlg.thread_id IN ({placeholders})
            UNION ALL
-           SELECT tl.thread_id, lg.id AS group_id, lg.name, lg.color_bg
+           SELECT tl.thread_id, lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg
            FROM thread_labels tl
            INNER JOIN label_group_members lgm
              ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
@@ -231,15 +237,18 @@ fn query_thread_label_decorations(
             Ok((
                 row.get::<_, String>("thread_id")?,
                 row.get::<_, String>("color_bg")?,
+                row.get::<_, String>("color_fg")?,
             ))
         })
         .map_err(|e| format!("query thread label decorations: {e}"))?;
 
     for row in rows {
-        let (thread_id, color_bg) =
+        let (thread_id, color_bg, color_fg) =
             row.map_err(|e| format!("map thread label decorations: {e}"))?;
         if let Some(decoration) = by_key.get_mut(&(account_id.to_string(), thread_id)) {
-            decoration.label_color_bgs.push(color_bg);
+            decoration
+                .label_colors
+                .push(ThreadListLabelColor { color_bg, color_fg });
         }
     }
     Ok(())

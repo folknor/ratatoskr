@@ -3,11 +3,12 @@
 use std::path::Path;
 
 use iced::widget::{Space, button, column, container, row, text};
-use iced::{Alignment, Color, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme};
 
 use crate::db::{DateDisplay, Thread, ThreadMessage};
 use crate::font;
 use crate::icon;
+use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{
     AVATAR_MESSAGE_CARD, AVATAR_THREAD_CARD, ICON_SM, ICON_XS, PAD_BADGE, PAD_BODY, PAD_CARD,
     PAD_ICON_BTN, PAD_THREAD_CARD, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_LG, TEXT_MD,
@@ -24,7 +25,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
     thread: &'a Thread,
     index: usize,
     selected: bool,
-    label_colors: &[(Color,)],
+    label_paints: &[LabelPaint],
     bimi_logo: Option<&Path>,
     on_select: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
@@ -88,8 +89,8 @@ pub fn thread_card<'a, M: Clone + 'a>(
             .style(theme::ContainerClass::KeyBadge.style()),
         );
     }
-    for &(color,) in label_colors {
-        indicators = indicators.push(label_dot(color));
+    for &paint in label_paints {
+        indicators = indicators.push(label_dot(paint));
     }
     if thread.is_replied {
         indicators = indicators.push(

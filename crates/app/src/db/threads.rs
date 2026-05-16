@@ -17,6 +17,7 @@ use store::inline_image_store::InlineImageStoreReadState;
 
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
+use crate::ui::label_paint::LabelPaint;
 
 /// A label-group pill resolved for the reading-pane display. Every entry
 /// is a `label_groups` row by construction - raw provider labels never
@@ -26,8 +27,7 @@ use super::types::{ThreadAttachment, ThreadMessage};
 pub struct ResolvedLabel {
     pub label_id: String,
     pub name: String,
-    pub color_bg: String,
-    pub color_fg: String,
+    pub paint: LabelPaint,
 }
 
 /// Full thread detail data for the reading pane.
@@ -55,8 +55,7 @@ fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
         .map(|l| ResolvedLabel {
             label_id: l.label_id,
             name: l.name,
-            color_bg: l.color_bg,
-            color_fg: l.color_fg,
+            paint: LabelPaint::from_hex_pair(&l.color_bg, &l.color_fg),
         })
         .collect();
 

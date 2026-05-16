@@ -1,15 +1,16 @@
 #![allow(dead_code)]
 
 use iced::widget::{Space, button, column, container, row, text};
-use iced::{Alignment, Color, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme};
 
+use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{
     ICON_MD, ICON_XL, PAD_ICON_BTN, PAD_NAV_ITEM, PAD_SETTINGS_ROW, SPACE_XS, SPACE_XXS, TEXT_LG,
     TEXT_MD,
 };
 use crate::ui::theme;
 
-use super::avatars::color_dot;
+use super::avatars::label_color_dot;
 use super::layout::count_badge;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +114,7 @@ pub fn nav_group<'a, M: Clone + 'a>(
 pub fn label_nav_item<'a, M: Clone + 'a>(
     name: &'a str,
     _id: &'a str,
-    color: Color,
+    paint: LabelPaint,
     active: bool,
     unread: i64,
     on_press: M,
@@ -125,7 +126,7 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
     };
 
     let mut content = row![
-        color_dot(color),
+        label_color_dot(paint),
         container(text(name).size(TEXT_MD).style(lbl_style)).align_y(Alignment::Center),
     ]
     .spacing(SPACE_XS)

@@ -4,6 +4,7 @@ use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length};
 
 use crate::ui::layout::*;
+use crate::ui::label_paint::LabelPaint;
 use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
@@ -61,11 +62,12 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
 
 fn color_preview_row<'a>(editor: &'a LabelEditorState) -> RowBuilder<'a> {
     let color_bg = editor.color_bg.clone();
+    let color_fg = editor.color_fg.clone();
     let display_name = editor.name.clone();
     let has_override = editor.has_override;
     Box::new(move |position| {
-        let bg = theme::hex_to_color(&color_bg);
-        let dot = widgets::color_dot::<SettingsMessage>(bg);
+        let paint = LabelPaint::from_hex_pair(&color_bg, &color_fg);
+        let dot = widgets::label_color_dot::<SettingsMessage>(paint);
 
         let descriptor = if has_override {
             "User color (override)"

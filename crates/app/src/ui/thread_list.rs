@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
-use iced::{Color, Element, Length, Padding, Task};
+use iced::{Element, Length, Padding, Task};
 
 use crate::component::Component;
 use crate::db::Thread;
@@ -655,11 +655,6 @@ fn thread_list_header<'a>(
 fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {
-        let label_colors: Vec<(Color,)> = thread
-            .label_color_bgs
-            .iter()
-            .map(|color| (theme::hex_to_color(color),))
-            .collect();
         // Look up BIMI logo for the sender's domain.
         let bimi_logo = thread
             .from_address
@@ -677,7 +672,7 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             thread,
             i,
             state.is_selected(i),
-            &label_colors,
+            &thread.label_paints,
             bimi_logo.as_deref(),
             ThreadListMessage::SelectThread,
         ));

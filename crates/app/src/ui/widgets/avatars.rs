@@ -6,6 +6,7 @@ use iced::widget::{Canvas, Space, canvas, container, image, text};
 use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse};
 
 use crate::font;
+use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{DOT_SIZE, LABEL_DOT_SIZE, RADIO_CIRCLE_SIZE};
 use crate::ui::theme;
 
@@ -88,8 +89,17 @@ pub fn color_dot_sized<'a, M: 'a>(color: Color, size: f32) -> Element<'a, M> {
     container(dot).center_y(Length::Shrink).into()
 }
 
-pub fn label_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
-    let dot = Canvas::new(DotPainter { color })
+// Label dots render only `paint.bg()` - a single-color disc has no
+// foreground channel to paint - but the signature takes the complete
+// `LabelPaint` so every label-shaped surface goes through the same
+// sealed-pair boundary as pills and rows. Don't "simplify" these to take
+// a bare `Color`: that would let raw label hex bypass `LabelStyleHex`.
+pub fn label_color_dot<'a, M: 'a>(paint: LabelPaint) -> Element<'a, M> {
+    color_dot(paint.bg())
+}
+
+pub fn label_dot<'a, M: 'a>(paint: LabelPaint) -> Element<'a, M> {
+    let dot = Canvas::new(DotPainter { color: paint.bg() })
         .width(LABEL_DOT_SIZE)
         .height(LABEL_DOT_SIZE);
     container(dot).center_y(Length::Shrink).into()

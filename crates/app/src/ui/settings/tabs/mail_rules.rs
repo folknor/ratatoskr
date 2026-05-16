@@ -2,6 +2,7 @@ use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::icon;
+use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
@@ -154,9 +155,9 @@ fn label_row_element<'a>(
 
     let pill = container(Space::new().width(28.0).height(16.0))
         .style({
-            let bg = theme::hex_to_color(&lbl.color_bg);
+            let paint = LabelPaint::from_hex_pair(&lbl.color_bg, &lbl.color_fg);
             move |_theme: &iced::Theme| iced::widget::container::Style {
-                background: Some(bg.into()),
+                background: Some(paint.bg().into()),
                 border: iced::Border {
                     radius: RADIUS_LG.into(),
                     ..Default::default()

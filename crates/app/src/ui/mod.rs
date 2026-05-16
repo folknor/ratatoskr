@@ -8,6 +8,7 @@ pub mod chat_timeline;
 pub mod dialog;
 pub mod emoji_picker;
 pub mod html_render;
+pub mod label_paint;
 pub mod layout;
 pub mod modal_overlay;
 pub mod palette;

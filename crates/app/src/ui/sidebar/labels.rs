@@ -1,7 +1,7 @@
 use iced::widget::mouse_area;
 use iced::Element;
 
-use crate::ui::theme;
+use crate::ui::label_paint::LabelPaint;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
 use types::{LabelGroupId, SidebarSelection};
@@ -34,15 +34,18 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     &sidebar.selection,
                     SidebarSelection::LabelGroup(active) if *active == group_id
                 );
-            let dot_color = folder
-                .color_bg
-                .as_deref()
-                .map(theme::hex_to_color)
-                .unwrap_or_else(|| theme::avatar_color(&folder.name));
+            let paint = label_colors::LabelStyleHex::from_optional_pair(
+                folder.color_bg.as_deref(),
+                folder.color_fg.as_deref(),
+            )
+            .ok()
+            .flatten()
+            .map(LabelPaint::from_hex)
+            .unwrap_or_else(|| LabelPaint::hashed_from_name(&folder.name));
             let item = widgets::label_nav_item(
                 &folder.name,
                 &folder.id,
-                dot_color,
+                paint,
                 is_active,
                 folder.unread_count,
                 SidebarMessage::Select(SidebarSelection::LabelGroup(group_id)),

@@ -41,6 +41,7 @@ mod update;
 mod window_state;
 
 pub use app::{App, AppMode, Divider, ReadyApp};
+pub use ui::label_paint::LabelPaint;
 pub(crate) use app::PendingChord;
 pub(crate) use helpers::load_accounts;
 pub use message::Message;

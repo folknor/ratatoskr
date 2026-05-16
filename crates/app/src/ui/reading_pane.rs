@@ -743,10 +743,9 @@ fn thread_header<'a>(
 
     // Label group pills.
     for label in labels {
-        let bg = theme::hex_to_color(&label.color_bg);
-        let fg = theme::hex_to_color(&label.color_fg);
+        let paint = label.paint;
         info_row = info_row.push(
-            container(text(&label.name).size(TEXT_XS).color(fg))
+            container(text(&label.name).size(TEXT_XS).color(paint.fg()))
                 .padding(Padding {
                     top: 2.0,
                     right: 6.0,
@@ -754,7 +753,7 @@ fn thread_header<'a>(
                     left: 6.0,
                 })
                 .style(move |_theme: &iced::Theme| container::Style {
-                    background: Some(bg.into()),
+                    background: Some(paint.bg().into()),
                     border: iced::Border {
                         radius: RADIUS_LG.into(),
                         ..Default::default()

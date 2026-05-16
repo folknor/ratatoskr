@@ -232,7 +232,7 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
 Credential accessor entries resolved by contract #5a: `common::crypto::StoredSecret` is now the only raw storage parser, `decrypt_or_raw` and `decrypt_if_needed` are deleted, and Gmail, Graph, JMAP, and IMAP decrypt through the typed parse product. Legacy plaintext remains accepted only inside `StoredSecret`; the strict rejection or one-shot migration decision remains open in `docs/contracts-roadmap.md`.
 
-Label color pair entry resolved by contract #5b low-level slice: `label-colors::LabelStyleHex` is now a complete pair, `resolve_label_color` no longer accepts separate optional foreground/background arguments, and partial DB pairs are rejected by label write APIs plus schema CHECK constraints instead of falling through to hash fallback.
+Label color pair entry resolved by contract #5b: `label-colors::LabelStyleHex` is now a complete pair, `resolve_label_color` no longer accepts separate optional foreground/background arguments, and partial DB pairs are rejected by label write APIs plus schema CHECK constraints instead of falling through to hash fallback. App label-shaped widgets now accept `LabelPaint`, constructed from `LabelStyleHex`, so reading-pane pills, thread-list markers, sidebar label rows, and Settings label rows no longer parse raw label hex at the render boundary.
 
 ### Shape 6 - Kind-encoded-in-string
 

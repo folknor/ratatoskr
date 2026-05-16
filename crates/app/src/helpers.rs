@@ -1,6 +1,7 @@
 use crate::app::ReadyApp;
 use crate::db::{self, Db, Thread};
 use crate::message::Message;
+use crate::ui::label_paint::LabelPaint;
 use iced::Task;
 use rtsk::db::queries::get_threads_for_bundle;
 use rtsk::db::queries_extra::navigation::{
@@ -468,7 +469,11 @@ pub(crate) fn apply_thread_decorations(
         if let Some(decoration) = by_key.get(&(thread.account_id.clone(), thread.id.clone())) {
             thread.is_replied = decoration.is_replied;
             thread.is_forwarded = decoration.is_forwarded;
-            thread.label_color_bgs = decoration.label_color_bgs.clone();
+            thread.label_paints = decoration
+                .label_colors
+                .iter()
+                .map(|color| LabelPaint::from_hex_pair(&color.color_bg, &color.color_fg))
+                .collect();
         }
     }
     Ok(())

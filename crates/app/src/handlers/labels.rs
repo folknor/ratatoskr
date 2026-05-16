@@ -79,11 +79,12 @@ pub fn rename_label_async(account_id: &str, label_id: &LabelId, new_name: &str) 
 pub fn recolor_label_async(
     account_id: &str,
     label_id: &LabelId,
-    color_bg: &str,
-    color_fg: &str,
+    color: label_colors::LabelStyleHex<'_>,
 ) -> Task<LabelOp> {
     log::warn!(
-        "recolor_label not implemented yet: account={account_id} label={label_id} -> ({color_bg}, {color_fg})"
+        "recolor_label not implemented yet: account={account_id} label={label_id} -> ({}, {})",
+        color.bg(),
+        color.fg(),
     );
     Task::done(LabelOp::RecoloredAck(Err(
         "label recolor not yet implemented".to_owned(),

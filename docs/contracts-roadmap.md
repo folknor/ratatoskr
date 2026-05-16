@@ -329,7 +329,7 @@ Same shape for the `Thread` constructors: four near-identical converters (`db_th
 
 ### 5. #5b LabelStyle - sealed constructor + crate-boundary split (high fidelity)
 
-**Status:** low-level resolver slice landed. `label-colors::LabelStyleHex` is a complete `(bg, fg)` pair, `resolve_label_color` accepts only complete pairs, label write APIs reject partial DB pairs, and the labels schema has matching complete-or-missing CHECK constraints. The UI-side `LabelPaint` migration remains open.
+**Status:** landed for the documented surfaces. `label-colors::LabelStyleHex` is a complete `(bg, fg)` pair, `resolve_label_color` accepts only complete pairs, label write APIs reject partial DB pairs, and the labels schema has matching complete-or-missing CHECK constraints. The app UI now has `LabelPaint` with private fields; reading-pane label pills, thread-list label markers, sidebar label rows, and Settings label rows construct it from `LabelStyleHex` and pass `LabelPaint` to label-shaped widgets.
 
 **Inventory:** Shape 5's `resolve_label_color` partial-pair entry, Shape 2's label-color resolver entry.
 
