@@ -708,12 +708,14 @@ fn flag_column(folder_id: &str) -> &'static str {
     }
 }
 
-/// Count of all drafts (server-synced thread drafts + local-only drafts),
-/// scoped by `AccountScope`.
+/// Total count of all drafts (server-synced thread drafts + local-only
+/// drafts), scoped by `AccountScope`.
 ///
-/// This is the correct count for the sidebar's "Drafts" folder, per the
-/// documented requirement that draft counts include local-only drafts
-/// (docs/sidebar/problem-statement.md).
+/// Not used by the sidebar pill - the pill counts the `is_read = 0`
+/// subset of synced drafts, uniform with every other universal folder.
+/// This helper exists for callers that want the total (pane headers,
+/// compose-pane indicators). Rationale: `docs/glossary/drafts.md`
+/// § "Count semantics."
 pub fn get_draft_count_with_local(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
     // Count server-synced drafts (threads with DRAFT label)
     let synced = get_thread_count_scoped(conn, scope, Some("DRAFT"))?;

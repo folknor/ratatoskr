@@ -117,28 +117,161 @@ Every universal-folder pill in the sidebar shows an `is_read = 0` count via `get
 
 The Promise Rule violation: pill counts across the sidebar use the same visual shape (a number with no qualifier) and silently answer different membership questions. A user reading the Inbox pill and the Drafts pill cannot tell that one is "unread" and the other is "total."
 
-Unread is a weak concept for Drafts, and arguably for Sent, Trash, Spam, and Archive too. Two directions to choose between:
+The pill and the list answer two distinct questions, and the cure is to name them as such:
 
-- Collapse to one rule, all pills = unread. Accept that Drafts (and similar folders) will rarely show a pill.
-- Per-folder semantics (Inbox/Starred/Snoozed = unread; Drafts/Sent/Trash/Spam/Archive = total) with a visual distinction (different pill style) so users can tell which count they're looking at.
+- **Universal unread-pill question.** "How many synced threads in this folder are unread?" Uniform across every universal folder, including Drafts. The pill is the `is_read = 0` count over `thread_folders` membership. Drafts, Sent, Trash, Spam, and Archive will rarely show a number under this question; that is the accepted cost of a single legible rule, and the alternative (per-folder predicates with per-folder pill styling) is not pursued.
+- **Drafts-list question.** "What compositional artifacts are pending my attention?" Synced draft threads plus local-only drafts (the `local_drafts` table - pre-sync compositions with no message-id, no thread, and no `is_read` column). Local drafts are not in the read/unread state space at all; they belong to a different question, not to the pill's question with a carve-out.
 
-The product decision determines which membership predicate the pill represents. The contract failure is that list query and count query can carry different predicates without the type system noticing - and the canonical-entry pair is what enforces single-predicate-per-folder regardless of which predicate is chosen. `get_drafts_view` and `get_draft_count_with_local` (and any equivalent pairs for other affected folders) migrate together; that pairing is type-level. The predicate they carry is product-level.
+The discrepancy was the collision: both questions render with the same visual shape (a number in the same pill widget), and the field is named `unread_count` everywhere, which suggests they answer the same question with the same predicate. They do not.
 
-Tags: contracts=canonical-entry; enforcement=capability-token; promise=list query and count query for a given folder answer the same membership question, with a single declared predicate per folder.
+**Cure: two distinct count types, neither assignable to the other.** Branch removal in `build_universal_folders` is necessary but not sufficient - both counts are `i64` today, so a future reroute can regress silently (the existing inline comments already documented the unread-only direction while `navigation.rs:170` kept calling `get_draft_count_with_local`; documentation alone is not enforcement). The enforcement skin is wrapper types:
+
+```rust
+// crates/db/src/db/queries_extra/scoped_queries.rs
+pub struct UniversalUnreadCount(i64);   // is_read = 0 subset of thread_folders membership
+pub struct DraftTotalCount(i64);        // synced drafts + local drafts
+
+pub fn get_unread_counts_by_folder(...) -> Result<Vec<(FolderId, UniversalUnreadCount)>, String>;
+pub fn get_draft_count_with_local(...) -> Result<DraftTotalCount, String>;
+
+// crates/app/src/ui/widgets/nav.rs
+pub fn nav_button<'a, M: Clone + 'a>(
+    ico: Option<iced::widget::Text<'a>>,
+    label: &'a str,
+    active: bool,
+    size: NavSize,
+    badge: Option<UniversalUnreadCount>,   // not i64
+    on_press: M,
+) -> Element<'a, M>;
+```
+
+`get_draft_count_with_local` continues to exist for callers that legitimately want the total (pane headers, compose-pane indicators), but `DraftTotalCount` is not assignable to `UniversalUnreadCount`, so it cannot reach `nav_button`. A future contributor who removes the `if *id == "DRAFT"` branch and later re-introduces a "fix" that routes total back into the pill produces a type error, not a silent regression. The wrapper types live in `db` alongside the count queries; this is a within-crate sealing concern, not cross-crate. The `Thread::from_local_draft` constructor (`crates/app/src/db/threads.rs`) continues to stamp `is_read: true` for rendering, which is correct under the new framing - local drafts are outside the read/unread space, and `true` is the rendering-neutral default.
+
+Tags: contracts=canonical-entry; enforcement=sealed-constructor,capability-token; promise=the universal-pill widget is fed only by the unread-count question (`is_read = 0` over `thread_folders` membership), structurally; the Drafts-list and total-count questions are typed disjointly from the pill question and cannot be confused at compile time.
 
 ### Cross-Client Folder/Label Move Reconciliation
 
-Graph delta-sync persistence (`crates/provider-sync/src/graph/sync/persistence.rs:210-211`) calls both `merge_partial_delta_folders` and `merge_partial_delta_labels` for `thread_folders` and `thread_labels`; JMAP delta-sync persistence (`crates/provider-sync/src/jmap/sync/storage.rs:196`) calls `merge_partial_delta_folders` for `thread_folders` only (JMAP keyword-shaped labels flow through `recompute_thread_keyword_labels` separately). Partial-delta pages no longer wipe sibling-message rows. The trade-off is asymmetric: when another client moves a thread (Inbox to Archive, say), the new `thread_folders` row gets added but the old one is never removed, because the delta only reports what the changed message *is* in, not what it's no longer in. Same-client moves are fine - the action service updates `thread_folders` locally before dispatching, so the source row is removed in the same transaction.
+The failure case is the *same account* observed by *two clients of the same provider*. Outlook-on-the-web moves a thread Inbox → Archive on a Microsoft 365 account; Ratatoskr (Graph delta sync) picks up the change and ends up with the thread in *both* folders, because the delta reports what the changed message is in now but not what it is no longer in. Cross-provider moves are out of scope - Ratatoskr never moves anything between providers.
 
-The Promise Rule violation: Gmail full-thread sync and Graph/JMAP partial-delta sync both claim to answer "what folders does this thread currently live in." Gmail's answer is correct (full replace); Graph and JMAP under-remove, carrying stale `thread_folders` rows after cross-client moves. The same shape applies to Graph's `thread_labels` partial-delta path, since `merge_partial_delta_labels` is the same merge semantics applied to a different table.
+`thread_folders` and `thread_labels` are written by two structurally different kinds of writer, against the same target rows. The Promise Rule violation is that both writer kinds claim to answer "what folders/labels does this thread currently live in," but only one of them can answer correctly.
 
-Not a type-system fix. The cure is data-model: a per-message folder/category membership table analogous to the existing `message_keywords` table that the IMAP/JMAP keyword-membership slice already uses. Thread folder/label membership is recomputed from the per-message union on every persist, the same way `kw:*` rows are recomputed from `message_keywords`. The keyword-membership slice (`crates/provider-sync/src/keyword_membership.rs`) is the existing partial implementation of this pattern; broadening it to folders is an architectural slice, not a type-level migration.
+**Full-coverage writers.** Gmail (`crates/provider-sync/src/gmail/sync/storage.rs:176-201`) and IMAP (`crates/provider-sync/src/imap/thread_store.rs:87-98, 121-142`) both call `replace_full_thread_folders` / `replace_full_thread_labels`, which `delete_thread_*_rows` then `insert_thread_*_rows` from the union of all messages' label IDs. The destructive replace is sound because the message set the helper sees is the complete current truth: Gmail's `threads.get` returns every message; IMAP's `thread_store` rebuilds aggregate state from all cached per-folder per-message rows (each IMAP message lives in exactly one folder, so `messages.imap_folder` is already per-message ground truth).
 
-Until that pattern is extended to folders and labels broadly, stale rows are an accepted artifact of the cross-client move case. A periodic full-thread reconciler that prunes against the per-message union is the lighter-weight alternative if the per-message table is deferred.
+**Partial-coverage writers.** Graph delta (`crates/provider-sync/src/graph/sync/persistence.rs:190-233`) and JMAP delta (`crates/provider-sync/src/jmap/sync/storage.rs:187-214`) only see changed messages. They cannot destructively replace - doing so would erase rows contributed by the N-1 sibling messages they did not fetch this page. They therefore call `merge_partial_delta_*` helpers that are `INSERT OR IGNORE` only (`crates/db/src/db/queries_extra/thread_persistence.rs:632, 663`), never `delete_thread_*`. The merge can add a new folder/label row but cannot remove a stale one.
 
-Severity note: post-labels-unification, a stale `thread_labels` row on a member-bearing label now renders the whole group pill via the `thread_labels` JOIN `label_group_members` rendering path (`docs/labels-unification/redesign.md` § "Message pill rendering"). Before that work, a stale row only surfaced as a per-account label the message UI did not foreground. After the unification, the same stale row shapes like a deliberate user "apply group" action and users who never used a group can see it attached to threads they did not touch. This raises the priority of either the per-message membership store or the periodic reconciler.
+**Per-table state of the broken paths.** Graph leaks stale rows in *both* `thread_folders` (line 210) and `thread_labels` (line 211). JMAP leaks stale rows only in `thread_folders` (line 196): JMAP keyword-shaped labels flow through `recompute_thread_keyword_labels` (`crates/provider-sync/src/keyword_membership.rs:63`), which derives `thread_labels` from the `message_keywords` per-message table and *is* the cure pattern, just applied today only to keywords. Graph categories and Graph user-style labels (Importance, etc.) currently flow into `thread_labels` via the same broken merge as folders.
 
-Tags: contracts=mutation-capability,completion-state; enforcement=sealed-constructor; promise=thread folder/label membership reflects current provider truth across all sync paths, including partial-delta after cross-client mutation.
+**Same-client moves are fine** because the action service mutates `thread_folders` locally before dispatching the provider call (`crates/db/src/db/queries_extra/email_actions.rs`: `remove_folder` does `DELETE FROM thread_folders WHERE folder_id = ?`, `insert_folder` does `INSERT OR IGNORE`). The source row is gone in the same transaction; the subsequent provider echo idempotently re-inserts the destination row. Label-side same-client moves go through `pending_thread_label_intents` (`docs/optimistic-label-intent.md`) and have their own settling story.
+
+**Severity, post-labels-unification.** A stale `thread_labels` row on a member-bearing label now renders the whole group pill via the `thread_labels JOIN label_group_members` path (`docs/labels-unification/redesign.md` § "Message pill rendering"). Before unification, a stale row was a per-account label the message UI did not foreground; now it shapes like a deliberate "apply group" action, and users who never used a group see it attached to threads they did not touch.
+
+**Why no type-level cure prevents the underlying bug.** Capability tokens around `merge_partial_delta_*` cannot manufacture information the partial delta does not carry. The fix has to land in the data model: partial-delta writers need a per-message scope where destructive replace *is* safe (because we know the full current state of *that one message*), and the thread aggregate becomes a recomputed view over the per-message union. The keyword-membership slice already implements this pattern in miniature.
+
+This is also a #3 completion-state failure, not only a #4 mutation-capability failure. A `thread_folders` row set produced by additive merge from a partial delta is observationally equal to one produced by full-coverage replace: both are sets of `(account_id, thread_id, folder_id)` rows. Downstream renderers cannot distinguish a complete aggregate from a partial one carrying stale carryover. The cure makes the completion step (per-message recompute) the only path to a value that downstream code accepts; partial aggregates do not type-check where complete aggregates are required.
+
+#### Cure alternatives, ranked by enforcement strength
+
+The goal stated for this work is architectural protection of future selves: a contributor should not be able to write the wrong shape without the compiler stopping them. That is what ranks the options.
+
+**A. Per-message membership tables + provider-sync-owned high-level helpers, aligned with roadmap option 4.** The architectural cure, with the enforcement skin that the option-4 layering already buys.
+
+Schema additions in `db` (analogous to the existing `message_keywords`, `crates/db/src/db/schema/02_mail.sql:223`):
+
+- `message_folders (account_id, message_id, folder_id, PRIMARY KEY (account_id, message_id, folder_id))` for Graph and JMAP folder membership. IMAP needs no new table because `messages.imap_folder` already carries the per-message ground truth (each IMAP message instance lives in exactly one folder).
+- `message_labels (account_id, message_id, label_id, PRIMARY KEY (account_id, message_id, label_id))` for all non-keyword label-shaped membership: Graph categories (`cat:*`), Graph importance (`importance:*`), and any future user-label shapes. One table, kind discriminated by the `label_id` prefix as parsed by `LabelKind`. The doc previously sketched separate `message_categories` and `message_labels` tables; categories do not need a separate table because their kind is already encoded in the prefix of a validated `label_id`. `message_keywords` stays separate because it carries the raw provider keyword text for round-trip preservation; future unification with `message_labels` is a follow-on decision, not blocking.
+
+Raw row primitives in `db` (option 4: boring, batch-shaped, no delta-awareness):
+
+```rust
+// crates/db/src/db/queries_extra/message_membership.rs (new)
+pub fn replace_message_folder_rows(tx: &Transaction, account_id: &str, message_id: &str,
+                                   folders: &[&FolderKind]) -> Result<(), String>;
+pub fn replace_message_label_rows(tx: &Transaction, account_id: &str, message_id: &str,
+                                  labels: &[&LabelKind]) -> Result<(), String>;
+pub fn delete_message_membership_rows(tx: &Transaction, account_id: &str, message_id: &str)
+    -> Result<(), String>;
+
+// crates/db/src/db/queries_extra/thread_persistence.rs (existing, with additions)
+pub fn recompute_thread_folders_from_messages(tx: &Transaction, account_id: &str, thread_id: &str)
+    -> Result<(), String>;
+pub fn recompute_thread_labels_from_messages(tx: &Transaction, account_id: &str, thread_id: &str)
+    -> Result<(), String>;
+```
+
+`replace_message_*_rows` is the scoped operation: `DELETE WHERE account_id = ? AND message_id = ?` then `INSERT OR IGNORE` the current set, safe because the partial delta knows the full current state of *that one message*. `recompute_thread_*_from_messages` is destructive at thread scope but safe because the source it reads from (`message_folders` ∪ `messages.imap_folder` / `message_labels` ∪ `message_keywords`) is the complete per-message ground truth.
+
+High-level helpers in `provider-sync` (option 4: provider-semantic orchestration where the provider knowledge lives). One transaction-scoped helper per coverage shape - each helper owns its full operation, so there is no "replace per-message rows" step separable from "recompute aggregate":
+
+```rust
+// crates/provider-sync/src/thread_membership.rs
+
+/// Full-coverage replace. Used by Gmail full-thread sync and IMAP full-thread
+/// rebuild. The caller is asserting it has every message of the thread.
+pub fn replace_thread_membership_from_full_coverage(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folders: &HashSet<&FolderKind>,
+    labels: &HashSet<&LabelKind>,
+) -> Result<(), String>;
+
+/// Per-message replace + aggregate recompute, atomic in one helper. Used by
+/// Graph delta and JMAP delta. The caller knows the full current state of
+/// `message_id` only; the helper owns the recompute that derives thread truth
+/// from the per-message union, so the recompute cannot be forgotten.
+pub fn replace_message_membership_and_recompute(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    message_id: &str,
+    folders: &HashSet<&FolderKind>,
+    labels: &HashSet<&LabelKind>,
+) -> Result<(), String>;
+```
+
+Neither helper has a constructor / writer split. There is no `ThreadMembershipUpdate` payload object to construct then pass somewhere. Each helper does the full transaction-scoped work and returns. A future contributor cannot land per-message rows and then forget the recompute, because the only entry point is the helper that runs both.
+
+A new provider integration calls one of these two helpers. The raw `db` primitives remain `pub` per option 4 - cross-crate enforcement is partial, not absolute - but the typed inputs (`FolderKind`, `LabelKind` after #5c lands) and the two named entry points make the right path obvious and the wrong shape (calling `delete_thread_folder_rows` then `insert_thread_folder_rows` ad-hoc from a delta site) visibly off-pattern in code review. This is the fidelity ceiling the roadmap accepts for #4.
+
+**Deletion and rethreading hooks.** The per-message tables must stay coherent through message deletes, message reassignment (JWZ rethreading reassigns messages to a different thread), and tombstones - the same hook points the existing `message_keywords` recompute already wires. `db::queries_extra::delete_messages_and_cleanup_threads` and the JWZ rethread paths must call `delete_message_membership_rows` for the affected message-ids and then `recompute_thread_*_from_messages` for every affected `thread_id` (both the old thread the message left and the new thread it joined, if applicable). Same shape as the existing keyword path; the cure does not introduce new hook points, only new rows that share them.
+
+**Cost.** Schema migration; write-path changes in Graph (`set_thread_labels` becomes one call to `replace_message_membership_and_recompute` per changed message), JMAP (same shape; the existing `recompute_thread_keyword_labels` call survives and runs alongside the new `recompute_thread_labels_from_messages`, or the two recomputes unify in a follow-on); Gmail and IMAP switch their existing replace helpers to call `replace_thread_membership_from_full_coverage`. Deletion and rethreading paths gain the per-message-membership cleanup call.
+
+**Action-service writes are a separate follow-on slice.** The action service does not have full per-thread coverage at action time - a "move to Archive" mutation is a single-folder delta, not a complete folder-set rewrite - so it fits neither helper. The plausible answer mirrors `pending_thread_label_intents` (`docs/optimistic-label-intent.md`): a `pending_thread_folder_intents` table that the action service writes, with the read path overlaying intent on provider truth, and `threads.folder_membership_generation` bumped on confirmed provider truth so satisfied intents can be cleared. This is plausible enough to name but not designed enough to implement. Open questions for the design slice:
+
+- Generation counter shape (one per thread, or per (thread, folder)?). The label-intent slice uses one `label_membership_generation` per thread.
+- Add/Remove merge algebra when the user issues two moves before the first echo lands (e.g. Inbox → Archive, then Archive → Trash).
+- Clear-on-provider-truth: which provider event clears a pending intent, given that Graph/JMAP partial deltas may arrive for unrelated messages of the same thread.
+- Overlay-aware read shape: every list/count query that joins `thread_folders` needs to know to consult the intent table. The label-intent slice landed this via `user_visible_label_exists_fragment`; the folder version needs the analogous fragment and every reader audited.
+- Whether `email_actions::insert_folder` / `remove_folder` remove direct `thread_folders` writes entirely or keep them as a faster-than-overlay first pass.
+
+**B. Capability-token gate alone, no per-message tables.** A `FullThreadCoverage` zero-size witness lives in `provider-sync::thread_membership`, produced only by helpers called from Gmail/IMAP full-thread paths. A single high-level entry point in `provider-sync` (`replace_thread_membership_from_full_coverage`) requires the witness; delta paths cannot synthesize one.
+
+Enforces: a future contributor cannot add a destructive thread-scope replace to a partial-delta path - the entry point that does the destructive replace requires a witness the delta path cannot construct.
+
+Does not fix: Graph/JMAP delta still leaks stale rows. The witness only blocks *making it worse*. It is an enforcement-only option, suitable as a stopgap that locks the current state and prevents regression, not as a complete fix.
+
+**C. Periodic full-thread reconciler.** A background job picks threads with stale `last_full_resync_at`, fetches full provider truth (Graph's `messages` for a conversation, JMAP's `Email/get` over thread membership), and applies the equivalent of `replace_full_thread_*`.
+
+Enforces: nothing. The wrong write paths remain reachable and the next contributor can write more of them. Reduces user-visible drift latency to "reconciler interval" but does not close it.
+
+Suitable as a *transitional* measure under (A): turn it on while the per-message tables are being rolled out, then turn it off once the per-message paths cover all four providers. Not suitable as the end state.
+
+**D. (A) + the option-4 layering - recommended.** The data-model fix from A makes the partial-delta paths correct. The option-4 layering (provider-semantic high-level helpers in `provider-sync`, raw row primitives in `db`) is the same enforcement skin (B) would have delivered standalone: the only sanctioned destructive thread-scope replace is `replace_thread_membership_from_full_coverage`, named for its precondition; the only partial-coverage entry is `replace_message_membership_and_recompute`, which owns both halves of the per-message → aggregate write atomically. The reconciler from C optionally runs during migration. This is the only option that delivers both correctness and architectural enforcement at the fidelity ceiling option 4 accepts.
+
+#### What enforcement specifically prevents
+
+Wrong-by-construction outcomes that the recommended cure eliminates or makes visibly off-pattern:
+
+- A per-message write path forgets to call the recompute - structurally impossible, since the only sanctioned entry point (`replace_message_membership_and_recompute`) does both halves atomically. There is no separable "write rows" step.
+- A delta path is "optimized" by switching to destructive thread-scope replace - the only thread-scope-replace entry point (`replace_thread_membership_from_full_coverage`) is named for the precondition. A delta-site caller invoking it from a partial page is visibly wrong in code review and contradicts the type name; under #5c (typed `FolderKind` / `LabelKind`) the inputs would also have to be assembled from non-existent full-thread truth.
+- A future Gmail refactor moves Gmail to delta-first and silently keeps using `replace_thread_membership_from_full_coverage` - same precondition check; the call site that hands the helper an incomplete folder set is the same line that documents itself as wrong.
+- A new provider integration composes `delete_thread_folder_rows` + `insert_thread_folder_rows` ad-hoc from a delta path - technically reachable per option 4 (the raw helpers stay `pub` in `db`), but visibly off-pattern: every other provider's delta path calls one of the two `provider-sync::thread_membership` helpers. A reviewer who sees ad-hoc raw-row composition in a delta site knows to push back.
+- Per-message rows go stale through message deletion or rethreading - the deletion/rethreading hooks call `delete_message_membership_rows` and the per-thread recompute, mirroring the existing `message_keywords` path. The hook points are shared, so forgetting one for the new tables means also forgetting it for the existing keyword table, which the suite already catches.
+
+Cross-crate enforcement under option 4 is partial, not absolute. The roadmap accepts this trade as the high-fidelity option for #4 because the raw `db` primitives are small, batch-shaped, and have no delta semantics - the wrong shape is identifiable by what a delta-site caller is *composing*, not by what they're *allowed to call*. The two `provider-sync::thread_membership` entry points carry the semantic information that raw row helpers do not.
+
+Tags: contracts=mutation-capability,completion-state; enforcement=sealed-constructor,capability-token; promise=thread folder/label membership reflects current provider truth across all sync paths; partial-coverage write paths can only land per-message rows + recompute aggregate, structurally, and the destructive thread-scope replace is named for the full-coverage precondition.
 
 ## Parking Lot
 

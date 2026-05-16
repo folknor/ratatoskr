@@ -464,16 +464,29 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
   // public: the only externally-callable Drafts list entry.
   pub fn get_drafts_view(...) -> Result<DraftsView, String> { ... }
 
-  // public: the only externally-callable Drafts count entry.
-  pub fn get_draft_count_with_local(...) -> Result<i64, String> { ... }
+  // public: returns the typed unread count for every universal folder,
+  // including DRAFT. Sidebar pill widget accepts only UniversalUnreadCount,
+  // so a future reroute through get_draft_count_with_local does not
+  // type-check against the pill. See docs/glossary/discrepancies.md
+  // § "Drafts Pill Semantics".
+  pub fn get_unread_counts_by_folder(...)
+      -> Result<Vec<(FolderId, UniversalUnreadCount)>, String> { ... }
+
+  // public: total-count entry for callers that want synced + local
+  // (pane headers, compose-pane indicators). DraftTotalCount is not
+  // assignable to UniversalUnreadCount, so this cannot reach the pill.
+  pub fn get_draft_count_with_local(...) -> Result<DraftTotalCount, String> { ... }
 
   // pub(crate): synced-only path. Visible to db's internal merge; not callable
   // from app, core, or anywhere else.
   pub(crate) fn get_draft_threads_synced(...) -> Result<Vec<Thread>, String> { ... }
 
   pub(crate) fn count_local_drafts(...) -> Result<i64, String> { ... }
+
+  pub struct UniversalUnreadCount(i64);   // is_read = 0 over thread_folders membership
+  pub struct DraftTotalCount(i64);        // synced drafts + local drafts
   ```
-  `DraftsView` is a private-fielded type - external callers consume it through accessors and cannot forge it.
+  `DraftsView` is a private-fielded type - external callers consume it through accessors and cannot forge it. `UniversalUnreadCount` and `DraftTotalCount` are disjoint newtypes; the universal-pill widget signature takes `Option<UniversalUnreadCount>`, so the wrong count cannot be passed to the pill.
 
 - **Search (within `core/search_pipeline`):**
   ```rust

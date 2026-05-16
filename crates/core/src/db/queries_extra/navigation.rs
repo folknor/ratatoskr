@@ -158,9 +158,11 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
 
 /// Universal folders with their unread counts.
 ///
-/// For Drafts, the count includes local-only drafts (from `local_drafts`
-/// table) in addition to server-synced draft threads, per the documented
-/// requirement in docs/sidebar/problem-statement.md.
+/// Every universal pill - Drafts included - counts the `is_read = 0`
+/// subset of the folder's synced thread membership. Rationale and the
+/// local-drafts carve-out: `docs/glossary/discrepancies.md`
+/// § "Drafts Pill Semantics" and `docs/glossary/drafts.md` § "Count
+/// semantics."
 fn build_universal_folders(
     conn: &Connection,
     scope: &AccountScope,
