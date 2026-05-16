@@ -42,8 +42,8 @@ Options 2 and 3 raise the floor but do not reach the same compile-time guarantee
 
 The architecture-doc rule "shared-table SQL belongs to `db`" remains intact. What option 4 does is *clarify* the layering:
 
-- **`db` keeps schema, migrations, and the raw row-level SQL primitives.** Operations like `db::raw::delete_thread_label_rows(tx, key)` and `db::raw::insert_thread_label_rows(tx, key, labels)` - boring, batch-shaped, no delta-awareness - stay in `db`. The SQL strings still live in `db`. The schema migration story is unchanged.
-- **`provider-sync` owns the delta-semantic orchestration.** Whether a particular thread write is a full-snapshot replace or a partial-delta merge is *provider knowledge* - only the provider's sync code knows which delta semantics it's operating under. The capability-gated helpers `replace_thread_labels(input: ReplaceInput<…>, …)` and `merge_thread_labels(input: MergeInput<…>, …)` live where that knowledge lives, calling `db::raw` underneath.
+- **`db` keeps schema, migrations, and the raw row-level SQL primitives.** Operations like `db::queries_extra::delete_thread_label_rows(tx, key)` and `db::queries_extra::insert_thread_label_rows(tx, key, labels)` - boring, batch-shaped, no delta-awareness - stay in `db`. The SQL strings still live in `db`. The schema migration story is unchanged.
+- **`provider-sync` owns the delta-semantic orchestration.** Whether a particular thread write is a full-snapshot replace or a partial-delta merge is *provider knowledge* - only the provider's sync code knows which delta semantics it's operating under. Provider-local wrappers live where that knowledge lives, calling raw `db` row primitives underneath.
 - **Validation that mixes raw IDs with semantic decisions moves with the orchestration.** `filtered_membership_ids` - which today drops message-state label IDs and reserved IMAP system keywords before writing - is provider-semantic, not raw. It moves to `provider-sync`. Under #5c (typed `LabelKind`), most of what that filter does becomes structurally unrepresentable anyway; the filter's role during transition is defensive cleanup of legacy string IDs.
 
 The rule isn't weakened. The clarification is: *provider-delta-aware orchestration of shared-table writes lives where the provider knowledge is*, and that is one layer up from `db`.
@@ -52,7 +52,7 @@ The rule isn't weakened. The clarification is: *provider-delta-aware orchestrati
 
 The following questions were open in the previous version of this doc; they are now resolved:
 
-- **Cross-crate capability option for #4:** option 4. Verified cheap - the four helper bodies in `db::queries_extra::thread_persistence` are 15-25 lines each, comprised of DELETE-then-INSERT-OR-IGNORE loops; `db::raw` is a clean row-operation layer with no leaky internals.
+- **Cross-crate capability option for #4:** option 4. Verified cheap - the raw helper bodies in `db::queries_extra::thread_persistence` are small DELETE or INSERT-OR-IGNORE row primitives with no delta semantics.
 - **Cross-crate capability option for #2:** not applicable - neither sub-case is cross-crate. Drafts orchestration is internal to `db`; search unification is internal to `core/search_pipeline`.
 - **Staged-migration shape for option 4:** single-landing per atomic move, per the migration ground rules. The `sync::pipeline::store_threads` persistence half moves up to `provider-sync` because both of its current callers (`provider-sync/imap/imap_initial.rs`, `provider-sync/imap/imap_delta.rs`) live there. Threading (JWZ algorithm + `MessageMeta` types) stays in `sync`.
 
@@ -74,7 +74,7 @@ Sequence chosen by *leverage per migration* and *fidelity tier*. Land high-fidel
 3. **#1 grain.vertical** - high-fidelity sealed-constructor in `db`, highest leverage in the inventory.
 4. **#3 Completion State** - same technique, contained in `search` (partial type) and `core/search_pipeline` (enriched type + result-set enum).
 5. **#5b LabelStyle** - rides with #3's pattern (partial-to-complete transition). High fidelity, contained in `label-colors` and `app`.
-6. **#4 Mutation Capability** - option 4 from §Fidelity. Raw row primitives stay in `db::raw`; capability-gated helpers and the `store_threads` persistence half move to `provider-sync`.
+6. **#4 Mutation Capability** - option 4 from §Fidelity. Raw row primitives stay in `db::queries_extra::thread_persistence`; provider-local membership wrappers and the `store_threads` persistence half move to `provider-sync`.
 7. **#2 Canonical Answer** - high-fidelity within owning crates (`db` for Drafts, `core/search_pipeline` for search).
 8. **#1 grain.scope** - refactor, no new types, easy after the vocabulary is settled.
 9. **#5c FolderKind + LabelKind** - the broad migration. `MailLocator` as parse-product only; operation APIs stay narrow.
@@ -373,15 +373,15 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 ### 6. #4 Mutation Capability - capability token (high fidelity, option 4)
 
-**Status:** composite no-enqueue slice landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Keyword-membership slice also landed: provider-sync now has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; the broader merge-vs-replace capability migration remains open.
+**Status:** composite no-enqueue, keyword-membership, and merge-vs-replace membership slices landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Provider-sync has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. Provider-sync also owns thread folder/label membership orchestration: full-thread paths call provider-local replace wrappers, partial-delta paths call provider-local merge wrappers, and `db` exposes only raw row insert/delete primitives. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; optimistic local-label intent while provider echo is pending remains a follow-up design point.
 
 **Inventory:** Shape 4 entries (merge vs replace helpers, JMAP keyword path), Shape 7 (composite suppress flag), Shape 10 (partial-delta keyword loss as a #4 instance).
 
 **Design sketch.** Option 4 from §Fidelity. The layering:
 
-- **`db` keeps raw row primitives.** A small `db::raw` module exposes batch-shaped operations with no delta-awareness:
+- **`db` keeps raw row primitives.** Batch-shaped operations with no delta-awareness live in `thread_persistence`:
   ```rust
-  // crates/db/src/db/raw/thread_membership.rs (new)
+  // crates/db/src/db/queries_extra/thread_persistence.rs
   pub fn delete_thread_label_rows(tx: &Transaction, key: ThreadKey) -> Result<(), String> { ... }
   pub fn insert_thread_label_rows(tx: &Transaction, key: ThreadKey, labels: &[&LabelKind]) -> Result<(), String> { ... }
   pub fn delete_thread_folder_rows(tx: &Transaction, key: ThreadKey) -> Result<(), String> { ... }
@@ -389,46 +389,32 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
   ```
   These are intentionally boring. They know table names and column names; they do not know "is this a full snapshot or a delta page."
 
-- **`provider-sync` owns the typed inputs and the high-level helpers.**
+- **`provider-sync` owns the path-specific high-level helpers.**
   ```rust
-  // crates/provider-sync/src/thread_writes.rs (new)
-
-  pub struct ReplaceInput<T> { /* private fields; full-thread coverage */ }
-  pub struct MergeInput<T>   { /* private fields; partial-delta */ }
-
-  impl<T> ReplaceInput<T> {
-      /// Constructor takes typed evidence of full-thread coverage. Evidence types
-      /// live in the same crate; only Gmail full-thread sync and the moved
-      /// store_threads path can produce them.
-      pub fn from_full_thread(evidence: FullThreadFetch, items: Vec<T>) -> ReplaceInput<T> { ... }
-  }
-
-  impl<T> MergeInput<T> {
-      pub fn from_partial_delta(evidence: PartialDeltaPage, items: Vec<T>) -> MergeInput<T> { ... }
-  }
-
-  pub fn replace_thread_labels(tx: &Transaction, key: ThreadKey, input: ReplaceInput<LabelKind>)
+  // crates/provider-sync/src/gmail/sync/storage.rs
+  fn replace_full_thread_labels(tx: &Transaction, key: ThreadKey, labels: impl Iterator<Item = &str>)
       -> Result<(), String>
   {
-      let labels = filtered_membership_ids(input.items());  // defensive cleanup, see below
-      db::raw::delete_thread_label_rows(tx, key)?;
-      db::raw::insert_thread_label_rows(tx, key, &labels)?;
+      let labels = thread_membership::filtered_membership_ids(labels);
+      db::queries_extra::delete_thread_label_rows(tx, key)?;
+      db::queries_extra::insert_thread_label_rows(tx, key, &labels)?;
       Ok(())
   }
 
-  pub fn merge_thread_labels(tx: &Transaction, key: ThreadKey, input: MergeInput<LabelKind>)
+  // crates/provider-sync/src/graph/sync/persistence.rs
+  fn merge_partial_delta_labels(tx: &Transaction, key: ThreadKey, labels: impl Iterator<Item = &str>)
       -> Result<(), String>
   {
-      let labels = filtered_membership_ids(input.items());
-      db::raw::insert_thread_label_rows(tx, key, &labels)?;
+      let labels = thread_membership::filtered_membership_ids(labels);
+      db::queries_extra::insert_thread_label_rows(tx, key, &labels)?;
       Ok(())
   }
   ```
-  `FullThreadFetch` and `PartialDeltaPage` are typed evidence; only legitimate caller sites within `provider-sync` can produce them.
+  The replace helpers are private to the Gmail/IMAP paths that have full-thread coverage. The merge helpers are private to the Graph/JMAP paths that receive partial deltas. `thread_membership.rs` owns only shared filtering.
 
 - **`filtered_membership_ids` moves with the orchestration.** Today it drops message-state label IDs and reserved IMAP system keywords before writing - provider-semantic decisions, not row-level concerns. It lives in `provider-sync`. Under #5c (typed `LabelKind`), most of what it filters becomes structurally unrepresentable; during transition it stays as defensive cleanup over legacy `String` IDs.
 
-- **`sync::pipeline::store_threads` persistence half moves up.** The function is currently called only from `provider-sync/imap/imap_initial.rs` and `provider-sync/imap/imap_delta.rs`. The JWZ-threading half (computing `ThreadGroup` values, the `MessageMeta` types) stays in `sync`; the persistence half (the per-thread aggregate + replace_thread_folders/labels calls) moves to `provider-sync`. After the move, the two IMAP callers compose: `let groups = sync::compute_thread_groups(...); provider_sync::store_thread_groups(groups, ...);`.
+- **`sync::pipeline::store_threads` persistence half moves up.** The function was called only from `provider-sync/imap/imap_initial.rs` and `provider-sync/imap/imap_delta.rs`. The JWZ-threading half (computing `ThreadGroup` values, the `MessageMeta` types) stays in `sync`; the persistence half (the per-thread aggregate plus provider-local membership replacement) moved to `provider-sync`.
 
 **Composite per-member dispatch (independent of cross-crate structure).** The per-member dispatch goes through `_no_enqueue` entry points typed as such. The public entry point that enqueues is `add_label(...)`; the composite-callable entry point is `add_label_no_enqueue(...) -> ActionOutcome`. The composite holds an `ActionContext` that does not include an `EnqueueCapability` token; the public `add_label` requires the token. `suppress_pending_enqueue: bool` disappears.
 
@@ -436,21 +422,19 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 **Migration scope.**
 
-- New: `crates/db/src/db/raw/thread_membership.rs` (boring row ops).
-- New: `crates/provider-sync/src/thread_writes.rs` (`ReplaceInput`, `MergeInput`, `replace_thread_labels`, `merge_thread_labels`, evidence types, `filtered_membership_ids`).
-- New: `crates/provider-sync/src/store_threads.rs` (persistence half lifted from `sync::pipeline`).
-- `crates/db/src/db/queries_extra/thread_persistence.rs` - `replace_thread_*` / `merge_thread_*` deleted (or downgraded to private helpers if any internal caller still needs them).
-- `crates/sync/src/pipeline.rs` - `store_threads` keeps JWZ-threading logic but stops calling `replace_thread_*`; persistence half is gone.
-- `crates/provider-sync/src/imap/imap_initial.rs`, `imap_delta.rs` - compose the split: `sync::compute_thread_groups` + `provider_sync::store_thread_groups`.
-- `crates/provider-sync/src/gmail/sync/storage.rs`, `graph/sync/persistence.rs`, `jmap/sync/storage.rs` - re-import from `provider_sync::thread_writes`. JMAP keyword rows are already handled by the shared per-message keyword recompute helper; any future non-keyword JMAP label membership must enter through the typed merge/replace helper rather than a raw `thread_labels` write.
-- `crates/service/src/actions/label.rs` - split `add_label` into `add_label_no_enqueue` + `add_label` requiring `EnqueueCapability`.
-- `crates/service/src/actions/label_group.rs` - composite calls only `_no_enqueue` entry points. `ActionContext.suppress_pending_enqueue` is deleted.
+- Landed: `crates/db/src/db/queries_extra/thread_persistence.rs` now exposes boring row ops (`delete_thread_*_rows`, `insert_thread_*_rows`) and no longer exposes provider-semantic replace/merge helpers.
+- Landed: `crates/provider-sync/src/thread_membership.rs` owns shared provider-side filtering. Provider-local modules own the private replace/merge wrappers for their coverage shape.
+- Landed: `crates/provider-sync/src/imap/thread_store.rs` owns the IMAP persistence half that was previously `sync::pipeline::store_threads`; `sync` keeps threading and remaining account/folder sync utilities.
+- Landed: `crates/provider-sync/src/imap/imap_initial.rs`, `imap_delta.rs` call the provider-sync IMAP thread-store pass after `sync::threading::build_threads`.
+- Landed: `crates/provider-sync/src/gmail/sync/storage.rs`, `graph/sync/persistence.rs`, `jmap/sync/storage.rs` call provider-sync thread-membership helpers. JMAP keyword rows are handled by the shared per-message keyword recompute helper; any future non-keyword JMAP label membership must enter through the typed merge/replace helper rather than a raw `thread_labels` write.
+- Landed: `crates/service/src/actions/label.rs` exposes no-enqueue member helpers for composite dispatch while retaining the normal enqueueing entry point.
+- Landed: `crates/service/src/actions/label_group.rs` calls only `_no_enqueue` entry points for member fan-out. `ActionContext.suppress_pending_enqueue` remains for the pending-op retry loop, which is a separate suppression case.
 
 Per the migration ground rules, the move is a single-landing atomic PR. No source-level relocation shims. If the scope is too large for one landing, re-scope by helper-and-its-callers, with the corresponding type moving alongside the first helper.
 
 **Resolved question.** JMAP user mailboxes are folder-shaped, and JMAP label actions are keyword-only after the #5c typed label boundary. Shape 10 is resolved by applying the IMAP-style per-message keyword recompute pattern to JMAP. If future JMAP non-keyword labels are introduced, they need a typed membership helper before entering `thread_labels`.
 
-**Success criteria.** Shape 4 inventory entries either resolve (`// resolved by contract #4`) or move to a "verified consistent under #4" note. Shape 7's composite preflight bug is structurally impossible: a compile-fail test attempts to call the enqueueing variant from inside a composite and fails. A compile-fail test attempts to construct a `ReplaceInput` from `provider-sync/graph` (which has only partial-delta evidence) and fails.
+**Success criteria.** Shape 4 inventory entries either resolve (`// resolved by contract #4`) or move to a "verified consistent under #4" note. Shape 7's composite preflight bug is structurally impossible: a compile-fail test attempts to call the enqueueing variant from inside a composite and fails. Merge-vs-replace helper selection is structurally separated by provider-local private wrappers; the remaining test-hardening question is whether a UI/service optimistic-intent witness is needed for local rows that predate provider echo.
 
 ### 7. #2 Canonical Answer - sealed within owning crates (high fidelity)
 
@@ -675,5 +659,5 @@ These apply to every contract migration.
 ## Cross-references
 
 - `docs/glossary/discrepancies.md` - the tagged inventory each contract resolves.
-- `docs/architecture.md` - the guiding principles and existing settled patterns. The composite-operations section is the de-facto pre-existing spec for contract #4. The "shared-table SQL belongs to `db`" rule is *clarified* by #4's row-primitives-vs-orchestration split, not weakened - raw SQL stays in `db::raw`.
+- `docs/architecture.md` - the guiding principles and existing settled patterns. The composite-operations section is the de-facto pre-existing spec for contract #4. The "shared-table SQL belongs to `db`" rule is *clarified* by #4's row-primitives-vs-orchestration split, not weakened - raw SQL stays in `db::queries_extra::thread_persistence`.
 - `docs/glossary/folders-labels.md` - the binding rules contracts #1, #3, #4, and #5c encode into types. Note the per-field reducer rule for thread aggregates.

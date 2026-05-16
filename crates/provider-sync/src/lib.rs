@@ -24,6 +24,7 @@ mod graph_impl;
 mod imap_impl;
 mod jmap_impl;
 mod keyword_membership;
+mod thread_membership;
 pub mod gmail;
 pub mod graph;
 pub mod imap;

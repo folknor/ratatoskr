@@ -1,7 +1,8 @@
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
-    upsert_labels,
+    upsert_labels, delete_thread_folder_rows, delete_thread_label_rows, insert_thread_folder_rows,
+    insert_thread_label_rows,
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
@@ -146,7 +147,7 @@ fn set_thread_labels(
     }
 
     // Pre-create `labels` rows for any user-label IDs referenced by these
-    // messages. `replace_thread_labels` inserts FK-constrained rows; a
+    // messages. Thread-label replacement inserts FK-constrained rows; a
     // user label observed on a message before the next `sync_labels` pass
     // would otherwise FK-fail the whole transaction. Placeholder name is
     // the label id - sync_labels overwrites it with the real display name
@@ -172,13 +173,30 @@ fn set_thread_labels(
         upsert_labels(tx, &placeholder_rows)?;
     }
 
-    sync_persistence::replace_thread_folders(tx, account_id, thread_id, folder_ids)?;
-    sync_persistence::replace_thread_labels(
-        tx,
-        account_id,
-        thread_id,
-        label_ids,
-    )
+    replace_full_thread_folders(tx, account_id, thread_id, folder_ids)?;
+    replace_full_thread_labels(tx, account_id, thread_id, label_ids)
+}
+
+fn replace_full_thread_folders<'a>(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folder_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
+    delete_thread_folder_rows(tx, account_id, thread_id)?;
+    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
+}
+
+fn replace_full_thread_labels<'a>(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+    label_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
+    delete_thread_label_rows(tx, account_id, thread_id)?;
+    insert_thread_label_rows(tx, account_id, thread_id, label_ids)
 }
 
 fn upsert_messages(

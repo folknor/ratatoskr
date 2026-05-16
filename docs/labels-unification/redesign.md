@@ -147,7 +147,7 @@ The per-message keyword store (`crates/db/src/db/schema/02_mail.sql`) keeps its 
 
 ### Junction-helper duplication
 
-Before the split, two helpers maintained `thread_labels`: `replace_thread_labels` (full-thread replace, used by Gmail and IMAP via `crates/sync/src/pipeline.rs::store_thread_groups_to_db`) and `merge_thread_labels` (partial-delta merge, used by Graph and JMAP). Post-split, four helpers exist: `replace_thread_folders`, `merge_thread_folders`, `replace_thread_labels`, `merge_thread_labels`. Each owns one junction.
+Before the split, two helpers maintained `thread_labels`: full-thread replacement for Gmail/IMAP and partial-delta merge for Graph/JMAP. After the contract #4 refactor, `db::queries_extra::thread_persistence` exposes only raw row insert/delete primitives, while provider-local wrappers in `provider-sync` own the replace-vs-merge decision for their coverage shape.
 
 Mechanical duplication, no genericisation. The two junctions have different FK targets, different prefix vocabularies, and different downstream consumers; generics here obscure more than they save. Provider-sync code already has to bifurcate incoming label sets into "this one is a folder" / "this one is a label" at parse time, so call sites typically invoke folder-side and label-side helpers in the same transaction.
 

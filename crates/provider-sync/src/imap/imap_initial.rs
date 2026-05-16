@@ -19,6 +19,7 @@ use super::convert::convert_imap_message;
 use super::folder_mapper::{get_syncable_folders, map_folder_to_folder};
 use super::sync_pipeline;
 use super::sync_pipeline::{CHUNK_SIZE, store_chunk};
+use super::thread_store;
 use super::types::ImapConfig;
 
 // ---------------------------------------------------------------------------
@@ -286,7 +287,7 @@ pub async fn imap_initial_sync(
         let meta = all_meta.clone();
         let lbr = labels_by_rfc_id.clone();
         let sk = skipped;
-        db.with_conn(move |conn| pipeline::store_threads(conn, &aid, &tg, &meta, &lbr, &sk))
+        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &meta, &lbr, &sk))
             .await?
     };
 

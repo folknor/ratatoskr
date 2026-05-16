@@ -4,6 +4,7 @@ pub mod imap_delta;
 pub mod imap_delta_janitor;
 pub mod imap_initial;
 pub mod sync_pipeline;
+mod thread_store;
 
 pub(crate) fn is_connection_error(err: &str) -> bool {
     let lower = err.to_lowercase();

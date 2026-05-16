@@ -8,7 +8,6 @@ use db::db::ReadDbState;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
-use sync::pipeline;
 use sync::threading;
 use sync::types::{ImapSyncResult, MessageMeta};
 use tokio_util::sync::CancellationToken;
@@ -19,6 +18,7 @@ use super::convert::{ConvertedMessage, convert_imap_message};
 use super::folder_mapper::{get_syncable_folders, map_folder_to_folder};
 use super::sync_pipeline;
 use super::sync_pipeline::{CHUNK_SIZE, store_chunk};
+use super::thread_store;
 use super::types::{DeltaCheckRequest, DeltaCheckResult, ImapConfig};
 
 const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
@@ -311,7 +311,7 @@ pub async fn imap_delta_sync(
         let m = all_meta.clone();
         let l = labels_by_rfc_id.clone();
         let s = skipped;
-        db.with_conn(move |conn| pipeline::store_threads(conn, &aid, &tg, &m, &l, &s))
+        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &m, &l, &s))
             .await?
     };
 

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use db::db::queries_extra::{
     AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages,
+    insert_thread_folder_rows,
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
@@ -192,7 +193,7 @@ fn set_thread_labels(
     // JMAP Email/changes returns changed messages, not full thread state.
     // Merge here so partial pages do not erase aggregate folders from other
     // messages in the same thread.
-    sync_persistence::merge_thread_folders(
+    merge_partial_delta_folders(
         tx,
         account_id,
         thread_id,
@@ -200,6 +201,16 @@ fn set_thread_labels(
             .iter()
             .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
     )
+}
+
+fn merge_partial_delta_folders<'a>(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folder_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
+    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
 }
 
 fn upsert_messages(

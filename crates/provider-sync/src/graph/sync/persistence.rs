@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use db::db::ReadDbState;
 use db::db::queries_extra::{
-    AttachmentInsertRow, MessageInsertRow, delete_message_reaction,
-    insert_attachments, insert_messages, upsert_message_reaction,
+    AttachmentInsertRow, MessageInsertRow, delete_message_reaction, insert_attachments,
+    insert_messages, insert_thread_folder_rows, insert_thread_label_rows, upsert_message_reaction,
     upsert_message_reaction_update_type, LabelWriteRow, upsert_labels,
 };
 use common::types::{ImportanceLevel, LabelKind};
@@ -207,13 +207,28 @@ fn set_thread_labels(
             folder_ids.push(label_id);
         }
     }
-    sync_persistence::merge_thread_folders(tx, account_id, thread_id, folder_ids)?;
-    sync_persistence::merge_thread_labels(
-        tx,
-        account_id,
-        thread_id,
-        label_ids,
-    )
+    merge_partial_delta_folders(tx, account_id, thread_id, folder_ids)?;
+    merge_partial_delta_labels(tx, account_id, thread_id, label_ids)
+}
+
+fn merge_partial_delta_folders<'a>(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folder_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let folder_ids = crate::thread_membership::filtered_membership_ids(folder_ids);
+    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids)
+}
+
+fn merge_partial_delta_labels<'a>(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+    label_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
+    insert_thread_label_rows(tx, account_id, thread_id, label_ids)
 }
 
 fn upsert_graph_label_rows(

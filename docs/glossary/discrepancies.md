@@ -39,11 +39,11 @@ The cure is two types - `PartialSearchHit` and `EnrichedSearchHit`, `Unvalidated
 
 ### 4. Mutation Capability Untyped
 
-Whether a write operation has full coverage of the entity (replace) or partial coverage (merge) is a *capability* of the input, not a helper choice. Gmail full-thread sync has full coverage and calls `replace_thread_labels`; Graph/JMAP partial delta has partial coverage and calls `merge_thread_labels`. Today the choice is by convention: a future JMAP path that calls `replace_thread_labels` instead of merging would compile and silently drop labels.
+Whether a write operation has full coverage of the entity (replace) or partial coverage (merge) is a *capability* of the provider path, not a helper choice. Gmail full-thread sync has full coverage and calls a provider-local replace wrapper; Graph/JMAP partial delta has partial coverage and calls provider-local merge wrappers. The remaining risk is not helper selection but how optimistic local intent is represented while provider echo is pending.
 
 Composite operations and per-member operations are similarly capability-distinguished. A composite must not enqueue per-member retries (the composite's own preflight covers the retry); a non-composite member call must enqueue. Today the distinction is a `suppress_pending_enqueue: bool` flag stashed on `ActionContext` that the composite remembers to set. A new composite that forgets re-introduces the bug.
 
-The cure is capability-encoded inputs and entry points. `MergeInput` accepts partial-delta and only `merge_*` helpers take it; `ReplaceInput` requires full-thread coverage and only `replace_*` helpers take it. Per-member dispatch goes through a `_no_enqueue` entry point that composites use; the public entry point that enqueues is structurally unreachable from inside a composite.
+The cure is capability-encoded entry points. Full-thread replace wrappers live inside the Gmail/IMAP provider paths that have complete coverage; partial-delta merge wrappers live inside the Graph/JMAP provider paths that do not. Per-member dispatch goes through a `_no_enqueue` entry point that composites use; the public entry point that enqueues is structurally unreachable from inside a composite.
 
 ### 5. Validated Domain Type Missing
 
@@ -69,7 +69,7 @@ Covers **#1 (grain)** and **#3 (completion state)**. The grain type is sealed; t
 
 ### Capability Tokens
 
-A function signature requires a witness that the caller has the right capability. `replace_thread_labels(input: ReplaceInput, ...)` cannot be called without a `ReplaceInput`, and `ReplaceInput` is only built by code paths that have full-thread coverage. Similarly, the public `drafts_list()` returns a `DraftsView` that is the unique type accepted by the renderer; the synced-only function returns a `SyncedDraftsOnly` that does not satisfy that signature.
+A function signature or module boundary requires a witness that the caller has the right capability. For thread membership, the public crate-wide API exposes only raw row primitives and shared filtering; replace and merge wrappers are private to the provider paths with the right coverage. Similarly, the public `drafts_list()` returns a `DraftsView` that is the unique type accepted by the renderer; the synced-only function returns a `SyncedDraftsOnly` that does not satisfy that signature.
 
 Covers **#2 (canonical answer)** and **#4 (mutation capability)**. Phantom types, zero-size witnesses, and newtype wrappers are all valid implementations.
 
@@ -204,9 +204,15 @@ Findings from a slice-by-slice audit. Each entry preserves the auditing agent's 
 
 ### Shape 4 - Merge-vs-replace asymmetry
 
-- `crates/db/src/db/queries_extra/thread_persistence.rs:505-555` *(slice 2)* - Dual helper families `replace_thread_labels` / `merge_thread_labels` exist with no type-level enforcement of which call site uses which. `crates/provider-sync/src/gmail/sync/storage.rs` and `crates/sync/src/pipeline.rs` call `replace_thread_labels` (Gmail + full-thread sync); `crates/provider-sync/src/graph/sync/persistence.rs` calls `merge_thread_labels` (Graph partial-delta). JMAP calls `merge_thread_folders` but the equivalent label path does not use an explicit helper - the label IDs are mixed into the `merge_thread_folders` call directly (labels_attachments.rs:209-215 in Graph). No type prevents a provider from picking the wrong helper; a future JMAP label sync that calls `replace_thread_labels` instead of merging would silently drop existing labels.
-
-  Tags: contracts=mutation-capability; enforcement=capability-token; promise=providers use the merge/replace helper that matches their delta semantics.
+Thread membership helper selection resolved by contract #4 slice:
+`db::queries_extra::thread_persistence` now exposes only raw row primitives
+(`delete_thread_*_rows`, `insert_thread_*_rows`). Provider-delta semantics live
+behind provider-local private wrappers: Gmail storage and the IMAP thread-store
+pass have replace wrappers, while Graph and JMAP sync modules have merge
+wrappers. `crates/provider-sync/src/thread_membership.rs` only owns shared
+provider-side membership filtering, not a crate-wide replace/merge API. JMAP
+keyword membership is handled by the per-message keyword recompute helper
+instead of an INSERT-only thread-label path.
 
 - `crates/db/src/db/queries_extra/bundles.rs:85-106` *(slice 3)* - `db_get_bundle_summaries()` at line 85 (latest query): uses `JOIN messages m` without deduplication on per-bundle row, then groups by `tc.bundle` and selects via `HAVING t.last_message_at = MAX(t.last_message_at)`. The count query at line 68 uses `COUNT(DISTINCT t.id)` and `GROUP BY tc.bundle`. Pattern suggests bundle aggregate (per-thread summary) but aggregate-vs-message-query divergence on whether the latest sender/subject come from the message that matches the max timestamp per bundle or an arbitrary message-group combination. Current convention: raw SQL without intermediate summary table.
 
@@ -236,9 +242,12 @@ exchange for removing orphaned keyword rows deterministically. The future
 merge-vs-replace capability slice should decide how optimistic local intent is
 represented while provider echo is pending.
 
-- `crates/provider-sync/src/gmail/sync/storage.rs` (implicit via call to sync_persistence) *(slice 6)* - Gmail calls `replace_thread_folders` + `replace_thread_labels` (per glossary § 175-177). JMAP (crates/provider-sync/src/jmap/sync/storage.rs:189-196) calls `merge_thread_folders` + no explicit label-merge call documented. Graph (crates/provider-sync/src/graph/sync/persistence.rs:209-215) calls `merge_thread_folders` + `merge_thread_labels`. Current convention: Gmail full-sync = replace; JMAP/Graph partial-delta = merge. No type prevents a provider from picking wrong helper if calling sync_persistence directly (though provider-sync crates own the call sites). (1 more elided)
-
-  Tags: contracts=mutation-capability; enforcement=capability-token; promise=providers use the merge/replace helper that matches their delta semantics.
+Provider sync membership call sites verified under contract #4: Gmail full-thread
+storage and the IMAP thread-store pass call provider-local replace wrappers;
+Graph and JMAP partial-delta paths call provider-local merge wrappers;
+`sync::pipeline` no longer owns the thread-membership persistence half. The
+stale-cross-client-move tradeoff for partial deltas remains a product/data-model
+question, not a raw helper-selection bug.
 
 ### Shape 5 - Format-tolerant accessor
 

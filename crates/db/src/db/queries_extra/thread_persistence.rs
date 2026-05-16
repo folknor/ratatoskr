@@ -616,21 +616,26 @@ pub fn delete_messages_and_cleanup_threads(
     Ok(affected_threads.into_iter().collect())
 }
 
-pub fn replace_thread_folders<'a>(
+pub fn delete_thread_folder_rows(
     tx: &Transaction,
     account_id: &str,
     thread_id: &str,
-    folders: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    let unique_folders = filtered_membership_ids(folders);
-
     tx.execute(
         "DELETE FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2",
         rusqlite::params![account_id, thread_id],
     )
     .map_err(|e| format!("delete thread folders: {e}"))?;
+    Ok(())
+}
 
-    for folder_id in unique_folders {
+pub fn insert_thread_folder_rows<'a>(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    folders: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    for folder_id in folders {
         tx.execute(
             "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) \
              VALUES (?1, ?2, ?3)",
@@ -642,21 +647,26 @@ pub fn replace_thread_folders<'a>(
     Ok(())
 }
 
-pub fn replace_thread_labels<'a>(
+pub fn delete_thread_label_rows(
     tx: &Transaction,
     account_id: &str,
     thread_id: &str,
-    labels: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
-    let unique_labels = filtered_membership_ids(labels);
-
     tx.execute(
         "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
         rusqlite::params![account_id, thread_id],
     )
     .map_err(|e| format!("delete thread labels: {e}"))?;
+    Ok(())
+}
 
-    for label_id in unique_labels {
+pub fn insert_thread_label_rows<'a>(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    labels: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    for label_id in labels {
         tx.execute(
             "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
              VALUES (?1, ?2, ?3)",
@@ -666,59 +676,6 @@ pub fn replace_thread_labels<'a>(
     }
 
     Ok(())
-}
-
-/// Add folders observed from a partial provider update without deleting the
-/// thread's existing aggregate.
-pub fn merge_thread_folders<'a>(
-    tx: &Transaction,
-    account_id: &str,
-    thread_id: &str,
-    folders: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    for folder_id in filtered_membership_ids(folders) {
-        tx.execute(
-            "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) \
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![account_id, thread_id, folder_id],
-        )
-        .map_err(|e| format!("merge thread folder: {e}"))?;
-    }
-
-    Ok(())
-}
-
-/// Add labels observed from a partial provider update without deleting the
-/// thread's existing aggregate. Providers that persist message deltas use this
-/// because the DB does not store per-message label membership.
-pub fn merge_thread_labels<'a>(
-    tx: &Transaction,
-    account_id: &str,
-    thread_id: &str,
-    labels: impl IntoIterator<Item = &'a str>,
-) -> Result<(), String> {
-    for label_id in filtered_membership_ids(labels) {
-        tx.execute(
-            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![account_id, thread_id, label_id],
-        )
-        .map_err(|e| format!("merge thread label: {e}"))?;
-    }
-
-    Ok(())
-}
-
-fn filtered_membership_ids<'a>(
-    labels: impl IntoIterator<Item = &'a str>,
-) -> HashSet<&'a str> {
-    use crate::db::folder_roles::{is_message_state_label_id, is_reserved_imap_system_keyword};
-
-    labels
-        .into_iter()
-        .filter(|label_id| !is_message_state_label_id(label_id))
-        .filter(|label_id| !is_reserved_imap_system_keyword(label_id))
-        .collect()
 }
 
 pub fn reassign_messages_and_repair_threads(
