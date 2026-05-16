@@ -72,24 +72,23 @@ pub fn get_thread_label_groups_sync(
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<LabelGroupRow>, String> {
+    let group_fragment = super::user_visible_label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        "lg.id = lg_outer.id",
+    );
+    let sql = format!(
+        "SELECT lg_outer.id AS group_id, lg_outer.name
+         FROM threads t
+         INNER JOIN label_groups lg_outer
+         WHERE t.account_id = ?1
+           AND t.id = ?2
+           AND {group_fragment}
+         GROUP BY lg_outer.id
+         ORDER BY lg_outer.name COLLATE NOCASE ASC"
+    );
     let mut stmt = conn
-        .prepare(
-            "SELECT group_id, name
-             FROM (
-               SELECT lg.id AS group_id, lg.name
-               FROM thread_label_groups tlg
-               INNER JOIN label_groups lg ON lg.id = tlg.group_id
-               WHERE tlg.account_id = ?1 AND tlg.thread_id = ?2
-               UNION
-               SELECT lg.id AS group_id, lg.name
-               FROM thread_labels tl
-               INNER JOIN label_group_members lgm
-                 ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
-               INNER JOIN label_groups lg ON lg.id = lgm.group_id
-               WHERE tl.account_id = ?1 AND tl.thread_id = ?2
-             )
-             ORDER BY name COLLATE NOCASE ASC",
-        )
+        .prepare(&sql)
         .map_err(|e| e.to_string())?;
 
     stmt.query_map(params![account_id, thread_id], |row| {

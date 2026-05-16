@@ -63,6 +63,7 @@ pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
         || lower.contains("queryreturnednorows")
         || lower.contains("not found")
         || lower.contains("missing account")
+        || lower.contains("malformed stored secret")
         || lower.contains("decrypt credential")
     {
         RemoteFailureKind::Permanent

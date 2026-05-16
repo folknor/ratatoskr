@@ -427,11 +427,10 @@ impl LabelGroupRenderGrain {
 /// (e.g. `"1=1"` for "any group", or `"LOWER(lg.name) = LOWER(?N)"` for a
 /// named group).
 ///
-/// Both rendering paths from `docs/labels-unification/redesign.md`
-/// "Message pill rendering" are unioned: a local `thread_label_groups`
-/// row OR a `thread_labels` row whose `(account_id, label_id)` is in
-/// the group's member set. Any future change to the rendering rule
-/// must update this one helper rather than each call site.
+/// Label-group rendering derives from the user-visible label set:
+/// provider truth in `thread_labels` merged with pending local label
+/// intent. The old `thread_label_groups` shortcut is intentionally not
+/// consulted; group composites now fan out to per-member label intent.
 fn label_group_rendered_fragment(
     grain: LabelGroupRenderGrain,
     group_predicate: &str,
@@ -439,19 +438,10 @@ fn label_group_rendered_fragment(
     let account_column = grain.account_column();
     let thread_column = grain.thread_column();
 
-    format!(
-        "(EXISTS (SELECT 1 FROM thread_label_groups tlg \
-            JOIN label_groups lg ON lg.id = tlg.group_id \
-            WHERE tlg.account_id = {account_column} \
-              AND tlg.thread_id = {thread_column} \
-              AND {group_predicate}) \
-          OR EXISTS (SELECT 1 FROM thread_labels tl \
-            JOIN label_group_members lgm \
-              ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id \
-            JOIN label_groups lg ON lg.id = lgm.group_id \
-            WHERE tl.account_id = {account_column} \
-              AND tl.thread_id = {thread_column} \
-              AND {group_predicate}))"
+    db::db::queries_extra::user_visible_label_group_rendered_fragment(
+        account_column,
+        thread_column,
+        group_predicate,
     )
 }
 
@@ -773,13 +763,15 @@ mod tests {
     fn label_group_rendered_fragment_uses_named_grains() {
         let thread_fragment =
             label_group_rendered_fragment(LabelGroupRenderGrain::Thread, "1=1");
-        assert!(thread_fragment.contains("tlg.account_id = t.account_id"));
-        assert!(thread_fragment.contains("tlg.thread_id = t.id"));
+        assert!(thread_fragment.contains("tl.account_id = t.account_id"));
+        assert!(thread_fragment.contains("tl.thread_id = t.id"));
+        assert!(thread_fragment.contains("pli_add.account_id = t.account_id"));
 
         let message_fragment =
             label_group_rendered_fragment(LabelGroupRenderGrain::Message, "1=1");
-        assert!(message_fragment.contains("tlg.account_id = m.account_id"));
-        assert!(message_fragment.contains("tlg.thread_id = m.thread_id"));
+        assert!(message_fragment.contains("tl.account_id = m.account_id"));
+        assert!(message_fragment.contains("tl.thread_id = m.thread_id"));
+        assert!(message_fragment.contains("pli_add.account_id = m.account_id"));
     }
 
     #[test]

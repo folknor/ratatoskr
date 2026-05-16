@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use db::db::queries_extra::{LabelWriteRow, upsert_labels};
+use db::db::queries_extra::{
+    LabelWriteRow, finalize_provider_truth_label_membership, upsert_labels,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum KeywordProvider {
@@ -81,7 +83,7 @@ pub(crate) fn recompute_thread_keyword_labels(
     )
     .map_err(|e| format!("insert {} thread keyword labels: {e}", provider.name()))?;
 
-    Ok(())
+    finalize_provider_truth_label_membership(tx, account_id, thread_id)
 }
 
 fn upsert_keyword_labels(

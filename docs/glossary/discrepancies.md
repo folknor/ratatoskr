@@ -41,7 +41,7 @@ The cure is two types - `PartialSearchHit` and `EnrichedSearchHit`, `Unvalidated
 
 ### 4. Mutation Capability Untyped
 
-Whether a write operation has full coverage of the entity (replace) or partial coverage (merge) is a *capability* of the provider path, not a helper choice. Gmail full-thread sync has full coverage and calls a provider-local replace wrapper; Graph/JMAP partial delta has partial coverage and calls provider-local merge wrappers. The remaining risk is not helper selection but how optimistic local intent is represented while provider echo is pending, and how partial-delta sync reconstructs full membership when the delta cannot.
+Whether a write operation has full coverage of the entity (replace) or partial coverage (merge) is a *capability* of the provider path, not a helper choice. Gmail full-thread sync has full coverage and calls a provider-local replace wrapper; Graph/JMAP partial delta has partial coverage and calls provider-local merge wrappers. Optimistic same-client label intent lives in `pending_thread_label_intents`; the remaining risk is partial-delta sync reconstructing full membership when the delta cannot.
 
 Composite operations and per-member operations are similarly capability-distinguished. A composite must not enqueue per-member retries (the composite's own preflight covers the retry); a non-composite member call must enqueue. The current shape is structural: composites call `_no_enqueue` entry points; the public enqueueing entry point is unreachable from inside a composite.
 
@@ -51,7 +51,7 @@ The cure is capability-encoded entry points. Full-thread replace wrappers live i
 
 The type allows representations that should be impossible. `kw:keyword` / `cat:category` / `importance:high` are domain values modeled as `String` with prefix conventions - a `LabelId` of `"keyword"` (missing the `kw:` prefix) or `"importance:medium"` (not a valid importance) type-checks. `decrypt_or_raw(value)` accepts both encrypted and plaintext at the same call site, so a writer that forgot to encrypt looks identical to a reader that handles legacy. A color override stored as `(Some(bg), None)` for the foreground is half a value; the resolver falls back to hash even though a partial value was supplied.
 
-The cure is parse-at-the-boundary, total types inward. `LabelKind` is an enum whose variants take validated payload types (`Keyword(KeywordName)`, `Category(CategoryName)`, `Importance(ImportanceLevel)`, `GmailUser(GmailLabelId)`, ...) - the payload types are themselves private-fielded and can only be built by their own validating parsers, so the enum is sealed by inclusion. `StoredSecret` is a parsed type - legacy plaintext rows go through an explicit migration boundary, not a tolerant accessor. `LabelStyle { bg, fg }` is a complete pair; partial values do not exist.
+The cure is parse-at-the-boundary, total types inward. `LabelKind` is an enum whose variants take validated payload types (`Keyword(KeywordName)`, `Category(CategoryName)`, `Importance(ImportanceLevel)`, `GmailUser(GmailLabelId)`, ...) - the payload types are themselves private-fielded and can only be built by their own validating parsers, so the enum is sealed by inclusion. `StoredSecret` is a parsed type - plaintext credential rows are rejected instead of flowing through a tolerant accessor. `LabelStyle { bg, fg }` is a complete pair; partial values do not exist.
 
 ## Enforcement Techniques
 
@@ -73,7 +73,7 @@ Cross-crate enforcement of capability-token contracts is not perfect in Rust - t
 
 ### Boundary Parsing
 
-External input - protocol payloads, on-disk values, user strings - is parsed into a total domain type at the boundary. Inward code never sees the raw form. `LabelKind::parse(raw: &str, provider: MailProviderKind) -> Result<LabelKind, ParseError>` is the only constructor from raw external values; `LabelKind` itself is an enum whose variants are sealed by their payload types (validated newtypes that have their own boundary parsers). `StoredSecret::parse(raw: &str)` handles both new and legacy formats but returns a single typed value; readers see only the parsed type.
+External input - protocol payloads, on-disk values, user strings - is parsed into a total domain type at the boundary. Inward code never sees the raw form. `LabelKind::parse(raw: &str, provider: MailProviderKind) -> Result<LabelKind, ParseError>` is the only constructor from raw external values; `LabelKind` itself is an enum whose variants are sealed by their payload types (validated newtypes that have their own boundary parsers). `StoredSecret::parse(raw: &str)` accepts only the encrypted storage shape; readers see only the parsed type.
 
 Covers **#5 (validated domain)**.
 
@@ -109,25 +109,7 @@ This is the worked example for **#1 (grain.vertical)**. The framework above gene
 
 ## Inventory
 
-Three issues remain in active inventory. Each names the shared promise, the contract failure(s) being violated, and the cure shape. Resolution work for each is sequenced in `docs/contracts-roadmap.md` or in a dedicated design slice.
-
-### Optimistic Local Label Intent
-
-Local label actions write directly to `thread_labels` (and `thread_label_groups` for group composites) before the provider echoes the change. Any provider-truth path that DELETE+INSERTs `thread_labels` for that thread before the local action has been echoed can erase the optimistic row. The erase surfaces today are:
-
-- `crates/provider-sync/src/keyword_membership.rs::recompute_thread_keyword_labels` (IMAP and JMAP keyword paths).
-- `crates/provider-sync/src/imap/thread_store.rs::replace_full_thread_labels` (IMAP `imap_initial` and `imap_delta`).
-- `crates/provider-sync/src/gmail/sync/storage.rs` full-thread replace (Gmail).
-
-The window is small but user-visible: a label flickers off and back on as the destructive replace and the action queue race.
-
-Two paths answer the same domain question - "what labels are currently on this thread, as far as the user is concerned" - and give different answers. The local UI sees the optimistic state immediately after the action; sync sees provider truth and overwrites the optimistic row on the next persist.
-
-The cure is a small local overlay (table or queue-derived projection) that holds pending intent until the provider echoes or the action fails permanently. User-facing label-membership reads merge provider truth with the overlay; sync recompute paths never observe the overlay. A persisted per-thread generation counter advances on every provider-truth membership write and drives clearance for async-echo provider paths.
-
-Detailed design and three-stage implementation plan: `docs/optimistic-label-intent.md`.
-
-Tags: contracts=mutation-capability,grain.vertical; enforcement=capability-token,sealed-constructor; promise=optimistic local label state stays visible to user-facing queries until provider echo or permanent failure, and sync recompute paths never observe optimistic intent.
+Two issues remain in active inventory. Each names the shared promise, the contract failure(s) being violated, and the cure shape. Resolution work for each is sequenced in `docs/contracts-roadmap.md` or in a dedicated design slice.
 
 ### Drafts Pill Semantics
 

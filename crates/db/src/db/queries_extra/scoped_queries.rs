@@ -213,6 +213,11 @@ pub fn get_threads_for_label_group(
     let off = offset.unwrap_or(0);
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     let group_idx = scope_params.len() + 1;
+    let group_fragment = super::user_visible_label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        &format!("lg.id = ?{group_idx}"),
+    );
     let sql = format!(
         "SELECT t.*, m.from_name, m.from_address FROM threads t
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
@@ -220,23 +225,7 @@ pub fn get_threads_for_label_group(
          WHERE {scope_clause}
            AND t.shared_mailbox_id IS NULL
            AND t.is_chat_thread = 0
-           AND (
-             EXISTS (
-               SELECT 1 FROM thread_label_groups tlg
-               WHERE tlg.account_id = t.account_id
-                 AND tlg.thread_id = t.id
-                 AND tlg.group_id = ?{group_idx}
-             )
-             OR EXISTS (
-               SELECT 1 FROM thread_labels tl
-               INNER JOIN label_group_members lgm
-                 ON lgm.account_id = tl.account_id
-                AND lgm.label_id = tl.label_id
-                AND lgm.group_id = ?{group_idx}
-               WHERE tl.account_id = t.account_id
-                 AND tl.thread_id = t.id
-             )
-           )
+           AND {group_fragment}
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
         limit_idx = group_idx + 1,
@@ -997,45 +986,33 @@ pub fn get_threads_for_shared_mailbox_label_group(
     limit: Option<i64>,
 ) -> Result<Vec<DbThread>, String> {
     let lim = limit.unwrap_or(200);
-    let sql = "WITH mb_threads AS (
-                 SELECT id FROM threads
-                 WHERE account_id = ?1 AND shared_mailbox_id = ?2
-               )
-               SELECT t.*, m.from_name, m.from_address FROM threads t
-               LEFT JOIN (
-                 SELECT id, account_id, thread_id, from_name, from_address FROM (
-                   SELECT id, account_id, thread_id, from_name, from_address,
-                          ROW_NUMBER() OVER (
-                            PARTITION BY account_id, thread_id
-                            ORDER BY date DESC, id DESC
-                          ) AS rn
-                   FROM messages
-                   WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
-                 ) WHERE rn = 1
-               ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-               WHERE t.account_id = ?1
-                 AND t.shared_mailbox_id = ?2
-                 AND t.is_chat_thread = 0
-                 AND (
-                   EXISTS (
-                     SELECT 1 FROM thread_label_groups tlg
-                     WHERE tlg.account_id = t.account_id
-                       AND tlg.thread_id = t.id
-                       AND tlg.group_id = ?3
-                   )
-                   OR EXISTS (
-                     SELECT 1 FROM thread_labels tl
-                     INNER JOIN label_group_members lgm
-                       ON lgm.account_id = tl.account_id
-                      AND lgm.label_id = tl.label_id
-                      AND lgm.group_id = ?3
-                     WHERE tl.account_id = t.account_id
-                       AND tl.thread_id = t.id
-                   )
-                 )
-               ORDER BY t.is_pinned DESC, t.last_message_at DESC
-               LIMIT ?4";
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let group_fragment =
+        super::user_visible_label_group_rendered_fragment("t.account_id", "t.id", "lg.id = ?3");
+    let sql = format!(
+        "WITH mb_threads AS (
+           SELECT id FROM threads
+           WHERE account_id = ?1 AND shared_mailbox_id = ?2
+         )
+         SELECT t.*, m.from_name, m.from_address FROM threads t
+         LEFT JOIN (
+           SELECT id, account_id, thread_id, from_name, from_address FROM (
+             SELECT id, account_id, thread_id, from_name, from_address,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY account_id, thread_id
+                      ORDER BY date DESC, id DESC
+                    ) AS rn
+             FROM messages
+             WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
+           ) WHERE rn = 1
+         ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+         WHERE t.account_id = ?1
+           AND t.shared_mailbox_id = ?2
+           AND t.is_chat_thread = 0
+           AND {group_fragment}
+         ORDER BY t.is_pinned DESC, t.last_message_at DESC
+         LIMIT ?4"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     stmt.query_map(
         rusqlite::params![account_id, mailbox_id, group_id, lim],
         DbThread::from_row,

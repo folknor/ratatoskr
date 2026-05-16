@@ -408,28 +408,27 @@ fn load_label_group_unread_counts(
     scope: &AccountScope,
 ) -> Result<HashMap<i64, i64>, String> {
     let (scope_clause, scope_params) = scope_clause_for_threads(scope, 1);
+    let group_fragment = crate::db::queries_extra::user_visible_label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        "lg.id = lg_outer.id",
+    );
+    // Cross-join threads × label_groups: the per-pair EXISTS in
+    // `group_fragment` is the membership filter, so every (thread, group)
+    // pair is tested independently. The inner GROUP BY collapses any
+    // duplicate row that the merge algebra would otherwise produce.
     let sql = format!(
         "SELECT group_id, COUNT(*) AS unread_count
          FROM (
-           SELECT t.account_id, t.id AS thread_id, tlg.group_id
+           SELECT t.account_id, t.id AS thread_id, lg_outer.id AS group_id
            FROM threads t
-           INNER JOIN thread_label_groups tlg
-             ON tlg.account_id = t.account_id AND tlg.thread_id = t.id
+           INNER JOIN label_groups lg_outer
            WHERE {scope_clause}
              AND t.is_read = 0
              AND t.shared_mailbox_id IS NULL
              AND t.is_chat_thread = 0
-           UNION
-           SELECT t.account_id, t.id AS thread_id, lgm.group_id
-           FROM threads t
-           INNER JOIN thread_labels tl
-             ON tl.account_id = t.account_id AND tl.thread_id = t.id
-           INNER JOIN label_group_members lgm
-             ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
-           WHERE {scope_clause}
-             AND t.is_read = 0
-             AND t.shared_mailbox_id IS NULL
-             AND t.is_chat_thread = 0
+             AND {group_fragment}
+           GROUP BY t.account_id, t.id, lg_outer.id
          )
          GROUP BY group_id"
     );
@@ -455,32 +454,29 @@ fn load_label_group_unread_counts_for_shared_mailbox(
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<HashMap<i64, i64>, String> {
+    let group_fragment = crate::db::queries_extra::user_visible_label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        "lg.id = lg_outer.id",
+    );
+    // See `load_label_group_unread_counts` for the cross-join shape.
+    let sql = format!(
+        "SELECT group_id, COUNT(*) AS unread_count
+         FROM (
+           SELECT t.account_id, t.id AS thread_id, lg_outer.id AS group_id
+           FROM threads t
+           INNER JOIN label_groups lg_outer
+           WHERE t.account_id = ?1
+             AND t.shared_mailbox_id = ?2
+             AND t.is_read = 0
+             AND t.is_chat_thread = 0
+             AND {group_fragment}
+           GROUP BY t.account_id, t.id, lg_outer.id
+         )
+         GROUP BY group_id"
+    );
     let mut stmt = conn
-        .prepare(
-            "SELECT group_id, COUNT(*) AS unread_count
-             FROM (
-               SELECT t.account_id, t.id AS thread_id, tlg.group_id
-               FROM threads t
-               INNER JOIN thread_label_groups tlg
-                 ON tlg.account_id = t.account_id AND tlg.thread_id = t.id
-               WHERE t.account_id = ?1
-                 AND t.shared_mailbox_id = ?2
-                 AND t.is_read = 0
-                 AND t.is_chat_thread = 0
-               UNION
-               SELECT t.account_id, t.id AS thread_id, lgm.group_id
-               FROM threads t
-               INNER JOIN thread_labels tl
-                 ON tl.account_id = t.account_id AND tl.thread_id = t.id
-               INNER JOIN label_group_members lgm
-                 ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
-               WHERE t.account_id = ?1
-                 AND t.shared_mailbox_id = ?2
-                 AND t.is_read = 0
-                 AND t.is_chat_thread = 0
-             )
-             GROUP BY group_id",
-        )
+        .prepare(&sql)
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![account_id, mailbox_id], |row| {

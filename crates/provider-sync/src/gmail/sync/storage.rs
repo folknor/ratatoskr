@@ -2,7 +2,7 @@ use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels, delete_thread_folder_rows, delete_thread_label_rows, insert_thread_folder_rows,
-    insert_thread_label_rows,
+    insert_thread_label_rows, finalize_provider_truth_label_membership,
 };
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
@@ -196,7 +196,8 @@ fn replace_full_thread_labels<'a>(
 ) -> Result<(), String> {
     let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
     delete_thread_label_rows(tx, account_id, thread_id)?;
-    insert_thread_label_rows(tx, account_id, thread_id, label_ids)
+    insert_thread_label_rows(tx, account_id, thread_id, label_ids)?;
+    finalize_provider_truth_label_membership(tx, account_id, thread_id)
 }
 
 fn upsert_messages(

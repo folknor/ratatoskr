@@ -228,7 +228,8 @@ fn merge_partial_delta_labels<'a>(
     label_ids: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), String> {
     let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
-    insert_thread_label_rows(tx, account_id, thread_id, label_ids)
+    insert_thread_label_rows(tx, account_id, thread_id, label_ids)?;
+    db::db::queries_extra::finalize_provider_truth_label_membership(tx, account_id, thread_id)
 }
 
 fn upsert_graph_label_rows(

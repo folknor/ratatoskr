@@ -1,9 +1,8 @@
 //! Dev-seed for the labels-unification rollout: a couple of explicit
 //! `label_groups`, member rows for matching per-account labels, and a
-//! sample of `thread_label_groups` rows so the sidebar's LABELS section,
-//! the `is:tagged` smart-folder operator, the message-pill decoration,
-//! and the `get_label_group_unread_counts` UNION all exercise both
-//! rendering paths from `docs/labels-unification/redesign.md`.
+//! sample member-label attachments so the sidebar's LABELS section,
+//! the `is:tagged` smart-folder operator, message-pill decoration,
+//! and label-group counts exercise the post-overlay rendering path.
 //!
 //! Per the redesign, a fresh install starts empty: groups are explicit
 //! user creations. Dev-seed ships them as demo state, separate from
@@ -63,18 +62,24 @@ pub fn seed_label_groups(
         }
     }
 
-    // Attach a sample of threads via the local-intent path
-    // (`thread_label_groups`) so the union side renders even on threads
-    // without any member raw-label attachment.
+    // Attach a sample of threads through member raw-label rows. The
+    // action-service-only `thread_label_groups` shortcut has been retired;
+    // rendered group state derives from `thread_labels` plus pending intent.
     for acc in accounts {
-        let group_id: Option<i64> = conn
+        let label_id: Option<String> = conn
             .query_row(
-                "SELECT id FROM label_groups WHERE name = 'Important' COLLATE NOCASE",
-                [],
+                "SELECT lgm.label_id
+                 FROM label_groups lg
+                 INNER JOIN label_group_members lgm ON lgm.group_id = lg.id
+                 WHERE lg.name = 'Important' COLLATE NOCASE
+                   AND lgm.account_id = ?1
+                 ORDER BY lgm.label_id
+                 LIMIT 1",
+                rusqlite::params![acc.id],
                 |row| row.get(0),
             )
             .ok();
-        let Some(group_id) = group_id else { continue };
+        let Some(label_id) = label_id else { continue };
         let mut stmt = conn
             .prepare(
                 "SELECT id FROM threads \
@@ -90,12 +95,12 @@ pub fn seed_label_groups(
         for thread_id in thread_ids {
             if rng.random::<f64>() < 0.1 {
                 conn.execute(
-                    "INSERT OR IGNORE INTO thread_label_groups \
-                       (account_id, thread_id, group_id) \
+                    "INSERT OR IGNORE INTO thread_labels \
+                       (account_id, thread_id, label_id) \
                      VALUES (?1, ?2, ?3)",
-                    rusqlite::params![acc.id, thread_id, group_id],
+                    rusqlite::params![acc.id, thread_id, label_id],
                 )
-                .map_err(|e| format!("insert thread_label_group: {e}"))?;
+                .map_err(|e| format!("insert dev-seed group member label: {e}"))?;
             }
         }
     }

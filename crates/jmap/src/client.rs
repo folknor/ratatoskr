@@ -443,25 +443,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stored_secret_passes_through_plaintext() {
+    fn stored_secret_rejects_plaintext() {
         let key = [0u8; 32];
         let result = StoredSecret::decrypt_optional(Some("plain-value".to_string()), &key);
-        assert_eq!(result.unwrap(), Some("plain-value".to_string()));
+        assert!(result.unwrap_err().contains("malformed stored secret"));
     }
 
     #[test]
     fn stored_secret_returns_none_for_none() {
         let result = StoredSecret::parse_optional(None);
-        assert_eq!(result, None);
+        assert_eq!(result.unwrap(), None);
     }
 
     #[test]
-    fn stored_secret_returns_err_for_bad_encrypted() {
+    fn stored_secret_returns_err_for_malformed_encrypted() {
         let key = [7u8; 32];
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
         let err = StoredSecret::decrypt_optional(encrypted_like, &key)
             .expect_err("expected decrypt failure");
-        assert!(err.contains("decrypt credential"));
+        assert!(err.contains("malformed stored secret"));
     }
 
     #[test]

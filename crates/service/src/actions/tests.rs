@@ -623,19 +623,20 @@ fn insert_group_member(ctx: &ActionContext, group_id: i64, account_id: &str, lab
     .expect("insert member");
 }
 
-fn has_thread_label_group(
+fn has_pending_label_intent(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    group_id: i64,
+    label_id: &str,
+    op: &str,
 ) -> bool {
     let conn = ctx.db.conn();
     let conn = conn.lock().expect("lock");
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM thread_label_groups \
-             WHERE account_id = ?1 AND thread_id = ?2 AND group_id = ?3",
-            params![account_id, thread_id, group_id],
+            "SELECT COUNT(*) FROM pending_thread_label_intents \
+             WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3 AND op = ?4",
+            params![account_id, thread_id, label_id, op],
             |row| row.get(0),
         )
         .expect("query");
@@ -643,11 +644,13 @@ fn has_thread_label_group(
 }
 
 #[tokio::test]
-async fn apply_label_group_local_initial_inserts_tlg_row() {
+async fn apply_label_group_local_initial_writes_member_intent() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
     insert_label_group(&ctx, 1, "Work");
+    insert_label(&ctx, "acc1", "labelA", "Label A");
+    insert_group_member(&ctx, 1, "acc1", "labelA");
 
     let r = super::label_group::apply_label_group_local_initial(
         &ctx,
@@ -657,7 +660,7 @@ async fn apply_label_group_local_initial_inserts_tlg_row() {
     )
     .await;
     assert!(r.is_ok(), "{r:?}");
-    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
 }
 
 #[tokio::test]
@@ -676,7 +679,7 @@ async fn apply_label_group_local_initial_zero_members_still_succeeds() {
     )
     .await;
     assert!(r.is_ok());
-    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+    assert!(!has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
 }
 
 #[tokio::test]
@@ -695,11 +698,13 @@ async fn apply_label_group_local_initial_unknown_group_errors() {
 }
 
 #[tokio::test]
-async fn remove_label_group_local_initial_deletes_tlg_row() {
+async fn remove_label_group_local_initial_writes_remove_intent() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
     insert_label_group(&ctx, 1, "Work");
+    insert_label(&ctx, "acc1", "labelA", "Label A");
+    insert_group_member(&ctx, 1, "acc1", "labelA");
     super::label_group::apply_label_group_local_initial(
         &ctx,
         "acc1",
@@ -708,7 +713,7 @@ async fn remove_label_group_local_initial_deletes_tlg_row() {
     )
     .await
     .expect("apply");
-    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
 
     super::label_group::remove_label_group_local_initial(
         &ctx,
@@ -718,7 +723,7 @@ async fn remove_label_group_local_initial_deletes_tlg_row() {
     )
     .await
     .expect("remove");
-    assert!(!has_thread_label_group(&ctx, "acc1", "t1", 1));
+    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Remove"));
 }
 
 #[tokio::test]
@@ -736,7 +741,7 @@ async fn remove_label_group_with_no_attachment_succeeds() {
     )
     .await;
     assert!(outcome.is_local_only() || outcome.is_success());
-    assert!(!has_thread_label_group(&ctx, "acc1", "t1", 1));
+    assert!(!has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Remove"));
 }
 
 #[tokio::test]
@@ -762,7 +767,7 @@ async fn apply_label_group_handles_member_label() {
     // LocalOnly with the composite-typed retry enqueued (NOT per-member
     // rows - that bypasses the preflight contract).
     assert!(outcome.is_local_only() || outcome.is_success());
-    assert!(has_thread_label_group(&ctx, "acc1", "t1", 1));
+    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
     // Composite type enqueued, not raw addLabel.
     let composite_count = count_pending_ops(&ctx, "acc1", "t1", "applyLabelGroup");
     let raw_count = count_pending_ops(&ctx, "acc1", "t1", "addLabel");

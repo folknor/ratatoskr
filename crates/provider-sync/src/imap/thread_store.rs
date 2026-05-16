@@ -137,7 +137,8 @@ fn replace_full_thread_labels<'a>(
 ) -> Result<(), String> {
     let label_ids = crate::thread_membership::filtered_membership_ids(label_ids);
     db::db::queries_extra::delete_thread_label_rows(tx, account_id, thread_id)?;
-    db::db::queries_extra::insert_thread_label_rows(tx, account_id, thread_id, label_ids)
+    db::db::queries_extra::insert_thread_label_rows(tx, account_id, thread_id, label_ids)?;
+    db::db::queries_extra::finalize_provider_truth_label_membership(tx, account_id, thread_id)
 }
 
 fn partition_imap_memberships<'a>(

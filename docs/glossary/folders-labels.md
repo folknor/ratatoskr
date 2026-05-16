@@ -22,12 +22,12 @@ Stored in the `folders` table. Thread membership is stored in `thread_folders`. 
 
 An additive annotation. A thread carries any number of labels independently of which folder(s) it lives in. Operations are **apply** and **remove**, never "move". Raw provider labels are stored in the `labels` table and thread membership is stored in `thread_labels`.
 
-User-visible sidebar labels are explicit `label_groups`, not automatic name-collapsed provider labels. A group has its own name and colour. It renders when a thread has a local `thread_label_groups` row for the group or has a `thread_labels` row whose `(account_id, label_id)` is a member of the group. The sidebar LABELS section starts empty until the user creates groups.
+User-visible sidebar labels are explicit `label_groups`, not automatic name-collapsed provider labels. A group has its own name and colour. It renders from the user-visible label set: provider truth in `thread_labels` plus pending local intent in `pending_thread_label_intents`, joined through `label_group_members`. The sidebar LABELS section starts empty until the user creates groups.
 
 ### Storage split
 <!-- coverage: glossary.folders_labels.storage_splits_folders_labels_and_groups enforcement=lua-harness -->
 
-Folders and labels are separate storage-layer concepts. `folders` contains provider folders and system folder roles. `labels` contains only provider labels, categories, and keywords. `thread_folders` records folder membership. `thread_labels` records raw provider-label membership. `label_groups`, `label_group_members`, and `thread_label_groups` record the user-visible grouped label model.
+Folders and labels are separate storage-layer concepts. `folders` contains provider folders and system folder roles. `labels` contains only provider labels, categories, and keywords. `thread_folders` records folder membership. `thread_labels` records raw provider-label membership. `label_groups` and `label_group_members` record the user-visible grouped label model. `pending_thread_label_intents` records optimistic local label intent while provider truth is pending.
 
 ### Code identifier rule
 
@@ -131,7 +131,7 @@ Thread-level state has two sources of truth, depending on what is being aggregat
     The reducer for each field is fixed. Adding a per-message boolean means: schema column + parser extraction + naming the reducer explicitly. Do not assume the reducer matches its neighbours; `is_read` is the only MIN, the others are ANY.
 
     The `query_thread_state_decorations` helper (`crates/db/src/db/queries_extra/thread_detail.rs`) computes thread-level decorations on read; the `recompute_thread_read_starred` helper writes the `threads` aggregates. Both helpers must apply the `is_reaction = 0` filter and the correct per-field reducer.
-- **Folder / label memberships** are thread-level aggregates. Folder membership lives in `thread_folders`. Raw provider label membership lives in `thread_labels`. Local user-visible group intent lives in `thread_label_groups`.
+- **Folder / label memberships** are thread-level aggregates. Folder membership lives in `thread_folders`. Raw provider label membership lives in `thread_labels`. Pending same-client label intent lives in `pending_thread_label_intents` and is merged only by user-facing reads.
     - **Gmail and IMAP** sync the entire thread's message metadata before writing the aggregate. Gmail storage and the IMAP thread-store pass call provider-local private replace wrappers after collecting the full folder/label union. Safe destructive replace because the input is the full union.
     - **Graph and JMAP** receive partial delta pages (only changed messages, not the full thread). Their sync modules call provider-local private merge wrappers, which insert new memberships but never remove. This preserves sibling-message memberships that the delta page does not mention. Trade-off: when another client moves the thread (so the source folder is gone from every message but the delta only tells us what folder the message is in *now*), the stale source-folder row is not cleaned up. Tracked in `TODO.md` as the "cross-client folder/label moves" item.
 
@@ -205,7 +205,7 @@ Archive, trash, spam, and move-to-folder are all moves. Not all moves remove fro
 
 ### Apply / Remove (label operation)
 
-Adding or removing a user-visible label group. Local DB: insert or delete a row in `thread_label_groups`. Provider dispatch fans out to the group's raw provider-label members for the thread's account: IMAP STORE +FLAGS, Graph PATCH `categories`, JMAP keyword set, Gmail label modify. Successful provider-observable writes are reflected in `thread_labels`. Does not affect folder membership.
+Adding or removing a user-visible label group. Local DB: upsert per-member rows in `pending_thread_label_intents`. Provider dispatch fans out to the group's raw provider-label members for the thread's account: IMAP STORE +FLAGS, Graph PATCH `categories`, JMAP keyword set, Gmail label modify. Successful provider-observable writes are reflected in `thread_labels` as confirmed provider truth and clear matching pending intents. Does not affect folder membership.
 
 Raw provider-label apply/remove exists for sync, Settings, and the composite group fan-out path. The message UI operates on `label_groups`, not raw `(account_id, label_id)` rows.
 
@@ -259,9 +259,9 @@ Junction: `(account_id, thread_id, folder_id)`. A row means "this thread is in t
 
 Junction: `(account_id, thread_id, label_id)`. A row means "this thread has this raw provider label." This is a thread-level aggregate: a row exists when at least one message in the thread carries the membership.
 
-### `label_groups`, `label_group_members`, `thread_label_groups`
+### `label_groups`, `label_group_members`, `pending_thread_label_intents`
 
-User-visible label groups. `label_groups` stores the group name and colour. `label_group_members` maps raw provider labels into at most one group. `thread_label_groups` stores local user intent to apply a group to a thread, independent of provider-observable raw labels.
+User-visible label groups. `label_groups` stores the group name and colour. `label_group_members` maps raw provider labels into at most one group. `pending_thread_label_intents` stores local add/remove intent per `(account_id, thread_id, label_id)` while provider truth is pending; group rendering derives from that overlay plus `thread_labels`.
 
 ### `message_keywords` table
 

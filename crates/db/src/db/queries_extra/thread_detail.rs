@@ -195,33 +195,23 @@ fn query_thread_label_decorations(
         return Ok(());
     }
     let placeholders = placeholders(thread_ids.len(), 2);
-    // Dedup is by `(thread_id, group_id)`: a thread can satisfy both
-    // rendering paths (local intent in `thread_label_groups` AND a member
-    // raw label in `thread_labels`) for the same group, and the pill must
-    // not render twice. UNION over the full row would dedup only when name
-    // and color match exactly - any future variance there would return two
-    // rows. The outer query collapses by `group_id` and picks the group's
-    // own name and color as the display source of truth.
-    // See `docs/labels-unification/redesign.md` "Message pill rendering".
+    let group_fragment = super::user_visible_label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        "lg.id = lg_outer.id",
+    );
+    // The cross-join `threads × label_groups` is filtered per pair by
+    // `group_fragment` (an EXISTS over overlay-aware membership), so the
+    // result already has at most one row per (thread, group). No outer
+    // aggregation is required.
     let sql = format!(
-        "SELECT thread_id, MAX(name) AS name, MAX(color_bg) AS color_bg, MAX(color_fg) AS color_fg
-         FROM (
-           SELECT tlg.thread_id, lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg
-           FROM thread_label_groups tlg
-           INNER JOIN label_groups lg ON lg.id = tlg.group_id
-           WHERE tlg.account_id = ?1
-             AND tlg.thread_id IN ({placeholders})
-           UNION ALL
-           SELECT tl.thread_id, lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg
-           FROM thread_labels tl
-           INNER JOIN label_group_members lgm
-             ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
-           INNER JOIN label_groups lg ON lg.id = lgm.group_id
-           WHERE tl.account_id = ?1
-             AND tl.thread_id IN ({placeholders})
-         )
-         GROUP BY thread_id, group_id
-         ORDER BY name ASC"
+        "SELECT t.id AS thread_id, lg_outer.name, lg_outer.color_bg, lg_outer.color_fg
+         FROM threads t
+         INNER JOIN label_groups lg_outer
+         WHERE t.account_id = ?1
+           AND t.id IN ({placeholders})
+           AND {group_fragment}
+         ORDER BY lg_outer.name ASC"
     );
     let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(thread_ids.len() + 1);
     params.push(&account_id);
@@ -567,23 +557,21 @@ fn query_thread_labels(
     thread_id: &str,
 ) -> Result<Vec<ThreadLabel>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT group_id, name, color_bg, color_fg \
-             FROM ( \
-               SELECT lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg \
-               FROM thread_label_groups tlg \
-               INNER JOIN label_groups lg ON lg.id = tlg.group_id \
-               WHERE tlg.account_id = ?1 AND tlg.thread_id = ?2 \
-               UNION \
-               SELECT lg.id AS group_id, lg.name, lg.color_bg, lg.color_fg \
-               FROM thread_labels tl \
-               INNER JOIN label_group_members lgm \
-                 ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id \
-               INNER JOIN label_groups lg ON lg.id = lgm.group_id \
-               WHERE tl.account_id = ?1 AND tl.thread_id = ?2 \
-             ) \
-             ORDER BY name ASC",
-        )
+        .prepare(&format!(
+            "SELECT lg_outer.id AS group_id, lg_outer.name, lg_outer.color_bg, lg_outer.color_fg \
+             FROM threads t \
+             INNER JOIN label_groups lg_outer \
+             WHERE t.account_id = ?1 \
+               AND t.id = ?2 \
+               AND {} \
+             GROUP BY lg_outer.id \
+             ORDER BY lg_outer.name ASC",
+            super::user_visible_label_group_rendered_fragment(
+                "t.account_id",
+                "t.id",
+                "lg.id = lg_outer.id",
+            )
+        ))
         .map_err(|e| format!("prepare thread labels: {e}"))?;
 
     let rows = stmt

@@ -210,6 +210,9 @@ pub async fn db_pending_ops_increment_retry(db: &ReadDbState, id: String) -> Res
                 params![new_count, id],
             )
             .map_err(|e| format!("mark failed: {e}"))?;
+            crate::db::queries_extra::delete_pending_thread_label_intents_for_action(
+                conn, &id,
+            )?;
             log::warn!(
                 "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
                  {new_count}/{max_retries} - left for sync reconciliation"

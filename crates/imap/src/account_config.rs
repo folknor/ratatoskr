@@ -347,12 +347,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decrypt_failure_returns_err() {
+    fn malformed_secret_returns_err() {
         let key = [7_u8; 32];
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
         let err = StoredSecret::decrypt_optional(encrypted_like, &key)
             .expect_err("expected decrypt failure");
-        assert!(err.contains("decrypt credential"));
+        assert!(err.contains("malformed stored secret"));
     }
 
     #[test]

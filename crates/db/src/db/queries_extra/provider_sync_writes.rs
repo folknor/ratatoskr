@@ -98,6 +98,11 @@ pub fn recompute_thread_read_starred(
 }
 
 /// Remove legacy synthetic message-state rows from `thread_labels`.
+///
+/// No generation bump: `UNREAD` / `STARRED` are reserved message-state
+/// label IDs that the user cannot apply or remove, so they cannot appear
+/// as `pending_thread_label_intents` rows. Skipping the bump avoids
+/// clearing unrelated overlay rows on threads where this cleanup fires.
 pub fn sync_thread_read_starred_labels(
     conn: &Connection,
     account_id: &str,

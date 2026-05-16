@@ -2,7 +2,7 @@
 
 Implementation arc for landing the compile-time enforcement named in `docs/glossary/discrepancies.md`. That doc is the *what is broken* doc - the contract failures, the evidence, the tags. This doc is the *what we do about it* doc: which contract to land first, why, what the design surface looks like, what success looks like, and what fidelity each contract reaches in Rust.
 
-This is not a product roadmap. It does not name dates. It names sequencing, the type-design sketch for each contract, the migration scope, and the open design questions that need to be answered before a contract's type lands. The migrations themselves will get their own PR-shaped tracking when the design questions are answered.
+This is not a product roadmap. It does not name dates. It names sequencing, the type-design sketch for each contract, the migration scope, and the design decisions that were answered before each contract's type landed.
 
 ## Reading list
 
@@ -56,13 +56,13 @@ The following questions were open in the previous version of this doc; they are 
 - **Cross-crate capability option for #2:** not applicable - neither sub-case is cross-crate. Drafts orchestration is internal to `db`; search unification is internal to `core/search_pipeline`.
 - **Staged-migration shape for option 4:** single-landing per atomic move, per the migration ground rules. The `sync::pipeline::store_threads` persistence half moves up to `provider-sync` because both of its current callers (`provider-sync/imap/imap_initial.rs`, `provider-sync/imap/imap_delta.rs`) live there. Threading (JWZ algorithm + `MessageMeta` types) stays in `sync`.
 
-### Remaining open questions
+### Resolved questions
 
 - **Inclusive vs exclusive `DateBound`?** Resolved: `DateBound` emits exclusive bounds for both SQL and Tantivy.
 - **JMAP non-keyword labels - possible or not?** Resolved: JMAP user mailboxes are folder-shaped, and JMAP label actions are keyword-only after the #5c typed label boundary. Shape 10 is fully resolved by the shared IMAP/JMAP keyword recompute helper.
-- **Legacy plaintext credentials - still load-bearing?** Resolved: no. There are no existing users; legacy plaintext rows do not need to be preserved. The next credentials patch makes `StoredSecret::parse` strict (encrypted wire shape only) after a one-pass writer audit that confirms every credential-producing path encrypts; the `EncryptedSecret` rename is sequenced as an optional follow-up mechanical patch.
-- **`#5c` on-disk format:** boundary adapter at the DB read/write boundary (recommended) vs DB restructure (cleaner, larger).
-- **`#5c` IPC wire format:** serde `#[serde(tag, content)]` on `FolderKind` / `LabelKind` (cleaner) vs `String` on the wire with parse-at-IPC-boundary (smaller migration).
+- **Legacy plaintext credentials - still load-bearing?** Resolved and landed: no. There are no existing users; legacy plaintext rows are not preserved. `StoredSecret::parse` is strict (encrypted wire shape only) after the writer audit confirmed credential-producing paths encrypt before storage. The optional `EncryptedSecret` rename is left as a mechanical follow-up.
+- **`#5c` on-disk format:** resolved: canonical string IDs stay on disk, and DB readers/writers parse at the boundary when provider semantics are needed. No schema split is required for the contract.
+- **`#5c` IPC wire format:** resolved: wire and storage edges remain string-shaped where they are real boundaries; action resolution and provider dispatch parse into narrow `FolderKind` / `LabelKind` before semantic decisions.
 
 ## Sequencing
 
@@ -89,7 +89,7 @@ Sequence chosen by *leverage per migration* and *fidelity tier*. Land high-fidel
 
 ### 1. #5a Credentials - boundary parse (high fidelity)
 
-**Status:** code path landed for current credential readers. `decrypt_or_raw` and `decrypt_if_needed` are removed; Gmail, Graph, JMAP, and IMAP consume `StoredSecret`. The external-construction check is pinned by the `StoredSecret` rustdoc `compile_fail` example. The strict-vs-tolerant disposition has resolved to strict (see Remaining open questions); the next credentials patch flips `StoredSecret::parse` to encrypted-only after the writer audit confirms every credential-producing path encrypts.
+**Status:** landed. `decrypt_or_raw` and `decrypt_if_needed` are removed; Gmail, Graph, JMAP, IMAP, OAuth reauth readers, and account OAuth settings readers consume strict `StoredSecret`. `StoredSecret::parse` rejects non-encrypted shapes before decryption. The external-construction and raw-String call-boundary checks are pinned by `StoredSecret` rustdoc `compile_fail` examples, and plaintext rejection is covered by unit tests.
 
 **Design sketch.** `StoredSecret::parse(raw: String) -> Result<StoredSecret, ParseError>` accepts only the encrypted wire shape (`base64:base64` with valid base64 and IV/tag length classification at the parse boundary). Parsing is a classification step that distinguishes malformed from well-formed-but-undecryptable; decryption is a separate fallible operation. Readers see only the parsed type.
 
@@ -127,7 +127,7 @@ The `Option<String>` case (JMAP/IMAP credentials) becomes `Option<StoredSecret>`
 
 ### 2. #5-pre MailProviderKind - boundary parse (high fidelity)
 
-**Status:** in progress. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers (the `saehrimnir`-driven mock provider variants exercised by `brokkr service-test` / `service-suite`; see `docs/glossary/harness.md`) still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, cloud-upload support is keyed by `MailProviderKind`, and command-context provider availability now parses DB provider strings through `MailProviderKind` before adapting to the command palette's wire enum. The full workspace migration is still open.
+**Status:** landed. `types::MailProviderKind` exists with boundary parsing and serde-as-canonical-string. The central service provider dispatch parses normal account `provider` rows into the enum before matching, while the harness-only providers (the `saehrimnir`-driven mock provider variants exercised by `brokkr service-test` / `service-suite`; see `docs/glossary/harness.md`) still use an explicit raw lookup before that boundary. The generic account-provider lookup returns `MailProviderKind`, cloud-upload support is keyed by `MailProviderKind`, GAL refresh dispatch is exhaustive on the enum, and command-context provider availability parses DB provider strings through `MailProviderKind` before adapting to the command palette's wire enum. Remaining raw strings are real boundaries or adjacent provider axes, not mail-provider dispatch decisions.
 
 **Inventory:** No direct entries (this is prereq infrastructure for #5c). Implicitly addressed by every Shape 6 entry where a provider-identity string flows alongside a label string.
 
@@ -266,7 +266,7 @@ impl DateBound {
 
 ### 4. #3 Completion State - sealed constructor (high fidelity within crate)
 
-**Status:** search enrichment and app-thread constructor slices landed. Tantivy-only search now fetches thread metadata from SQL and applies `enrich_from_sql` before returning, dropping stale index hits that no longer have a thread row. This removes the `is_read: false` / `is_starred: false` placeholder leak for full-index free-text search. SQL-only and degraded SQL rows now carry `match_kind: None` instead of a fake `MatchKind::Body`, so missing attribution is explicit at the renderer boundary. App `Thread` conversion defaults now live on associated constructors for DB threads, local drafts, public folder items, and search results. The broader partial/enriched type split remains open.
+**Status:** search enrichment and app-thread constructor slices landed. Tantivy-only search now fetches thread metadata from SQL and applies `enrich_from_sql` before returning, dropping stale index hits that no longer have a thread row. This removes the `is_read: false` / `is_starred: false` placeholder leak for full-index free-text search. SQL-only and degraded SQL rows now carry `match_kind: None` instead of a fake `MatchKind::Body`, so missing attribution is explicit at the renderer boundary. App `Thread` conversion defaults now live on associated constructors for DB threads, local drafts, public folder items, and search results.
 
 **Inventory:** Shape 2 entries (Thread converters, `MatchKind::Body` hardcoded, `is_read: false` hardcoded in Tantivy), Shape 12 (partial enrichment).
 
@@ -380,7 +380,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
 
 ### 6. #4 Mutation Capability - capability token (high fidelity, option 4)
 
-**Status:** composite no-enqueue, keyword-membership, and merge-vs-replace membership slices landed. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Provider-sync has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. Provider-sync also owns thread folder/label membership orchestration: full-thread paths call provider-local replace wrappers, partial-delta paths call provider-local merge wrappers, and `db` exposes only raw row insert/delete primitives. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression; optimistic local-label intent while provider echo is pending is sequenced as a separate design slice (see `docs/optimistic-label-intent.md`).
+**Status:** landed, including the optimistic-intent follow-up. Label-group member dispatch now calls explicit `add_label_with_provider_no_enqueue` / `remove_label_with_provider_no_enqueue` helpers, so composite retries no longer depend on mutating `ActionContext::suppress_pending_enqueue` in `dispatch_member_ops`. Provider-sync has a shared IMAP/JMAP helper that replaces per-message `message_keywords` rows and recomputes thread-level `kw:*` labels from the full per-message union after message changes and deletions. Provider-sync also owns thread folder/label membership orchestration: full-thread paths call provider-local replace wrappers, partial-delta paths call provider-local merge wrappers, and `db` exposes only raw row insert/delete primitives. The pending-op retry worker still uses `suppress_pending_enqueue` for normal retry-loop suppression. Local label actions no longer write optimistic rows into `thread_labels` or `thread_label_groups`; they upsert `pending_thread_label_intents`, user-facing label-group reads merge provider truth with that overlay, provider-truth writes bump `threads.label_membership_generation`, and satisfied intents are cleared when confirmed provider truth matches.
 
 **Inventory:** Shape 4 entries (merge vs replace helpers, JMAP keyword path), Shape 7 (composite suppress flag), Shape 10 (partial-delta keyword loss as a #4 instance).
 
@@ -400,7 +400,7 @@ Partial values (`Some(bg), None`) cannot be constructed at either level. The res
   ```rust
   // crates/provider-sync/src/gmail/sync/storage.rs (illustrative signature;
   // the real functions take `account_id: &str, thread_id: &str` as
-  // separate parameters — no `ThreadKey` type exists today).
+  // separate parameters - no `ThreadKey` type exists today).
   fn replace_full_thread_labels(tx: &Transaction, account_id: &str, thread_id: &str,
                                 labels: impl Iterator<Item = &str>)
       -> Result<(), String>
@@ -445,7 +445,7 @@ Per the migration ground rules, the move is a single-landing atomic PR. No sourc
 
 **Resolved question.** JMAP user mailboxes are folder-shaped, and JMAP label actions are keyword-only after the #5c typed label boundary. Shape 10 is resolved by applying the IMAP-style per-message keyword recompute pattern to JMAP. If future JMAP non-keyword labels are introduced, they need a typed membership helper before entering `thread_labels`.
 
-**Success criteria.** Shape 4 inventory entries either resolve (`// resolved by contract #4`) or move to a "verified consistent under #4" note. Shape 7's composite preflight bug is structurally impossible: a compile-fail test attempts to call the enqueueing variant from inside a composite and fails. Merge-vs-replace helper selection is structurally separated by provider-local private wrappers; the remaining test-hardening question is whether a UI/service optimistic-intent witness is needed for local rows that predate provider echo.
+**Success criteria.** Shape 4 inventory entries either resolve (`// resolved by contract #4`) or move to a "verified consistent under #4" note. Shape 7's composite preflight bug is structurally impossible: composites call only no-enqueue member helpers. Merge-vs-replace helper selection is structurally separated by provider-local private wrappers. The optimistic local-label window is closed by `pending_thread_label_intents`, overlay-aware read helpers, provider-truth generation bumps, and action-success confirmation writes that apply confirmed provider truth before clearing matching intents.
 
 ### 7. #2 Canonical Answer - sealed within owning crates (high fidelity)
 
@@ -529,7 +529,7 @@ Today the dispatch is spread across `crates/app/src/helpers.rs::load_threads_sco
 
 ### 9. #5c FolderKind + LabelKind - boundary parse, separate types
 
-**Status:** label/provider-dispatch slice landed. `types::LabelKind`, `FolderKind`, `SystemFolderId`, `MailLocator`, and private-field payload newtypes own provider-specific storage encodings. Provider label dispatch now accepts `LabelKind`; Gmail, Graph, JMAP, and IMAP match typed variants instead of string prefixes. Sync/dev-seed label synthesis and smart-folder system-folder shorthands construct through the typed boundary. Raw action/DB/wire IDs remain string-shaped at the outer boundary, and folder operation APIs remain transitional.
+**Status:** landed. `types::LabelKind`, `FolderKind`, `SystemFolderId`, `MailLocator`, and private-field payload newtypes own provider-specific storage encodings. Provider label dispatch accepts `LabelKind`; Gmail, Graph, JMAP, and IMAP match typed variants instead of string prefixes. Sync/dev-seed label synthesis and smart-folder system-folder shorthands construct through the typed boundary. Raw action/DB/wire IDs remain string-shaped only at real boundaries, and the transitional IMAP/provider-sync string filters are documented as defensive cleanup around provider wire IDs.
 
 **Inventory:** Shape 6 entries (every `kw:` / `cat:` / `importance:` prefix call site), the system-folder-shorthand entry, parts of Shape 5 (validated domain).
 
@@ -644,12 +644,12 @@ A folder cannot accidentally be passed where a label is expected. `MailLocator` 
 - `crates/smart-folder/src/sql_builder.rs::IN_FOLDER_SHORTHANDS` is replaced by a `SystemFolderId` enum and exhaustive parse.
 - **`filtered_membership_ids` in `provider-sync` (introduced in #4) shrinks.** Once `LabelKind` is the inward representation, message-state IDs and reserved IMAP keywords cannot be constructed as `LabelKind` values at all; the defensive filter only needs to handle the remaining transitional string-typed edges. After #5c lands, the filter likely disappears entirely.
 
-**Remaining open design questions.**
+**Settled boundary decisions.**
 
-- **On-disk format:** boundary adapter (recommended) vs DB restructure (cleaner, larger).
-- **IPC wire format:** serde `#[serde(tag, content)]` round-trip vs string-on-the-wire with parse-at-IPC-boundary.
+- **On-disk format:** canonical string IDs remain on disk. Code that needs semantics parses at the DB edge into `FolderKind` / `LabelKind`; raw row primitives stay string-shaped.
+- **IPC wire format:** string-on-the-wire with parse-at-resolution-boundary. `MailLocator` is a parse product, not an operation type.
 
-**Success criteria.** Every `strip_prefix("kw:")` / `strip_prefix("cat:")` / `strip_prefix("importance:")` call site is gone. Every `format!("kw:{}", ...)` is gone. `LabelKind::parse`, `FolderKind::parse`, and the payload-type `parse` functions are the only places that know about the prefix and shape encodings. Gmail INBOX appears nowhere as a provider-specific `FolderKind` variant; it parses to `FolderKind::System(SystemFolderId::Inbox)`.
+**Success criteria.** Provider dispatch and action resolution never sniff `kw:` / `cat:` / `importance:` directly; they consume `LabelKind` and `FolderKind`. `LabelKind::parse`, `FolderKind::parse`, and payload constructors own the prefix and shape encodings for semantic code. Remaining raw prefix checks are restricted to provider-sync defensive filtering and provider wire/bootstrap code, where raw IDs are still the external format. Gmail INBOX appears nowhere as a provider-specific `FolderKind` variant; it parses to `FolderKind::System(SystemFolderId::Inbox)`.
 
 ## Migration Ground Rules
 
@@ -670,6 +670,6 @@ These apply to every contract migration.
 ## Cross-references
 
 - `docs/glossary/discrepancies.md` - the tagged inventory each contract resolves.
-- `docs/optimistic-label-intent.md` - design slice for the contract #4 follow-up (optimistic local-label intent while provider echo is pending). Three-stage implementation plan.
+- `docs/optimistic-label-intent.md` - landed design slice for the contract #4 follow-up (optimistic local-label intent while provider echo is pending).
 - `docs/architecture.md` - the guiding principles and existing settled patterns. The composite-operations section is the de-facto pre-existing spec for contract #4. The "shared-table SQL belongs to `db`" rule is *clarified* by #4's row-primitives-vs-orchestration split, not weakened - raw SQL stays in `db::queries_extra::thread_persistence`.
 - `docs/glossary/folders-labels.md` - the binding rules contracts #1, #3, #4, and #5c encode into types. Note the per-field reducer rule for thread aggregates.

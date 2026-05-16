@@ -11,6 +11,8 @@ use db::db::pending_ops::{
     db_pending_ops_increment_retry, db_pending_ops_recover_executing, db_pending_ops_update_status,
 };
 
+const STALE_LABEL_INTENT_AGE_SECS: i64 = 48 * 60 * 60;
+
 /// Per-action-type retry policy.
 struct RetryPolicy {
     max_retries: i64,
@@ -52,9 +54,28 @@ pub async fn enqueue_if_retryable(
     resource_id: &str,
     params_json: &str,
 ) {
+    let _ = enqueue_if_retryable_with_id(
+        ctx,
+        outcome,
+        account_id,
+        operation_type,
+        resource_id,
+        params_json,
+    )
+    .await;
+}
+
+pub async fn enqueue_if_retryable_with_id(
+    ctx: &ActionContext,
+    outcome: &ActionOutcome,
+    account_id: &str,
+    operation_type: &str,
+    resource_id: &str,
+    params_json: &str,
+) -> Option<String> {
     // Suppressed during retry dispatch to prevent duplicate enqueue.
     if ctx.suppress_pending_enqueue {
-        return;
+        return None;
     }
 
     if let ActionOutcome::LocalOnly {
@@ -63,14 +84,14 @@ pub async fn enqueue_if_retryable(
     } = outcome
     {
         if !reason.is_retryable() {
-            return;
+            return None;
         }
 
         let policy = retry_policy(operation_type);
         let op_id = uuid::Uuid::new_v4().to_string();
         if let Err(e) = db_pending_ops_enqueue(
             &ctx.db,
-            op_id,
+            op_id.clone(),
             account_id.to_string(),
             operation_type.to_string(),
             resource_id.to_string(),
@@ -80,7 +101,11 @@ pub async fn enqueue_if_retryable(
         .await
         {
             log::warn!("[pending_ops] Failed to enqueue {operation_type} for {resource_id}: {e}");
+            return None;
         }
+        Some(op_id)
+    } else {
+        None
     }
 }
 
@@ -97,6 +122,8 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
             return;
         }
     };
+
+    sweep_stale_label_intents(ctx).await;
 
     if ops.is_empty() {
         return;
@@ -117,6 +144,32 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
     // Process sequentially across account groups
     for (account_id, account_ops) in groups {
         process_account_group(ctx, &retry_ctx, &account_id, account_ops).await;
+    }
+}
+
+async fn sweep_stale_label_intents(ctx: &ActionContext) {
+    let db = ctx.db.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        db::db::queries_extra::delete_stale_pending_thread_label_intents(
+            &conn,
+            STALE_LABEL_INTENT_AGE_SECS,
+        )
+    })
+    .await;
+
+    match result {
+        Ok(Ok(count)) if count > 0 => {
+            log::warn!("[pending_ops] Cleared {count} stale pending label intents");
+        }
+        Ok(Err(e)) => {
+            log::warn!("[pending_ops] Failed to clear stale pending label intents: {e}");
+        }
+        Err(e) => {
+            log::warn!("[pending_ops] stale label intent cleanup failed: {e}");
+        }
+        _ => {}
     }
 }
 
@@ -447,6 +500,8 @@ pub async fn recover_on_boot(ctx: &ActionContext) {
         }
         _ => {}
     }
+
+    sweep_stale_label_intents(ctx).await;
 
     // 2. Resurface stale 'sending' drafts as 'failed'
     let db = ctx.db.clone();

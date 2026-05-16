@@ -8,7 +8,7 @@ use crate::db::queries_extra::{
     insert_graph_account_sync, insert_imap_oauth_account_sync, update_gmail_reauth_tokens_sync,
     update_graph_reauth_tokens_sync,
 };
-use crate::provider::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use crate::provider::crypto::{StoredSecret, encrypt_value};
 
 /// Derive an account name from an email address.
 /// "alice@corp.com" → "Corp", "bob@gmail.com" → "Gmail"
@@ -239,22 +239,11 @@ pub fn resolve_gmail_reauth_credentials(
         let cid = creds.oauth_client_id.filter(|s| !s.is_empty()).ok_or_else(|| {
             "Account has no stored OAuth credentials. Provide client_id to reauthorize.".to_string()
         })?;
-        let cid = if is_encrypted(&cid) {
-            decrypt_value(encryption_key, &cid).unwrap_or(cid)
-        } else {
-            cid
+        let cid = StoredSecret::parse(cid)?.decrypt(encryption_key)?;
+        let cs = match creds.oauth_client_secret.filter(|s| !s.is_empty()) {
+            Some(secret) => StoredSecret::parse(secret)?.decrypt(encryption_key)?,
+            None => String::new(),
         };
-        let cs = creds
-            .oauth_client_secret
-            .filter(|s| !s.is_empty())
-            .map(|s| {
-                if is_encrypted(&s) {
-                    decrypt_value(encryption_key, &s).unwrap_or(s)
-                } else {
-                    s
-                }
-            })
-            .unwrap_or_default();
         Ok((cid, cs))
     })
 }
@@ -267,16 +256,10 @@ pub fn resolve_graph_reauth_client_id(
     encryption_key: &[u8; 32],
     default_client_id: &str,
 ) -> Result<String, String> {
-    get_stored_graph_client_id_sync(conn, account_id).map(|cid| match cid.filter(|s| !s.is_empty()) {
-        Some(encrypted) => {
-            if is_encrypted(&encrypted) {
-                decrypt_value(encryption_key, &encrypted).unwrap_or(encrypted)
-            } else {
-                encrypted
-            }
-        }
-        None => default_client_id.to_string(),
-    })
+    match get_stored_graph_client_id_sync(conn, account_id)?.filter(|s| !s.is_empty()) {
+        Some(encrypted) => StoredSecret::parse(encrypted)?.decrypt(encryption_key),
+        None => Ok(default_client_id.to_string()),
+    }
 }
 
 /// Encrypt OAuth tokens for storage. Returns `(encrypted_access, encrypted_refresh, expires_at)`.

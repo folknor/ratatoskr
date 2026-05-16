@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS threads (
     is_muted INTEGER DEFAULT 0,
     shared_mailbox_id TEXT,
     is_chat_thread INTEGER NOT NULL DEFAULT 0,
+    label_membership_generation INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (account_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_threads_date ON threads(account_id, last_message_at DESC);
@@ -131,6 +132,24 @@ CREATE TABLE IF NOT EXISTS thread_label_groups (
     FOREIGN KEY (group_id) REFERENCES label_groups(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS thread_label_groups_by_group ON thread_label_groups(group_id);
+
+CREATE TABLE IF NOT EXISTS pending_thread_label_intents (
+    account_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    label_id TEXT NOT NULL,
+    op TEXT NOT NULL CHECK (op IN ('Add', 'Remove')),
+    generation_seen INTEGER NOT NULL,
+    action_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (account_id, thread_id, label_id),
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id, label_id) REFERENCES labels(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pending_intents_action_id
+    ON pending_thread_label_intents(action_id);
+CREATE INDEX IF NOT EXISTS idx_pending_intents_updated_at
+    ON pending_thread_label_intents(updated_at);
 
 CREATE TABLE IF NOT EXISTS thread_bundles (
     account_id TEXT NOT NULL,

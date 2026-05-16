@@ -4,9 +4,10 @@ use common::typed_ids::{LabelGroupId, LabelId};
 use super::context::ActionContext;
 use super::label;
 use super::log::MutationLog;
-use super::outcome::{ActionError, ActionOutcome};
-use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+use super::pending::enqueue_if_retryable_with_id;
+use super::provider::{classify_provider_error, create_provider};
+use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
 
 /// Distinguishes initial dispatch from a pending-ops drain retry. The
 /// preflight (per `docs/labels-unification/redesign.md` "Retry preflight")
@@ -21,9 +22,14 @@ pub(crate) enum DispatchKind {
 /// Result of the local-DB step of a composite group write. `Skip` signals
 /// that the user reversed intent between the original action and a retry
 /// drain - the caller resolves to `Success` without dispatching any
-/// per-member writes.
+/// per-member writes. The `Proceed` payload carries the composite-captured
+/// `generation_seen` so the per-member dispatchers and the composite
+/// attach / clear paths all key against the same intent snapshot.
 enum LocalStep {
-    Proceed(Vec<LabelId>),
+    Proceed {
+        labels: Vec<LabelId>,
+        generation_seen: i64,
+    },
     Skip,
 }
 
@@ -78,29 +84,18 @@ async fn apply_label_group_local(
         if kind == DispatchKind::Retry {
             // User reversed intent: queued `applyLabelGroup` is no longer
             // current. Skip member dispatch and resolve as success.
-            let attached: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM thread_label_groups \
-                     WHERE account_id = ?1 AND thread_id = ?2 AND group_id = ?3",
-                    rusqlite::params![aid, tid, group_id.as_i64()],
-                    |row| row.get(0),
-                )
-                .map_err(|e| {
-                    ActionError::db(format!("retry preflight thread_label_groups: {e}"))
-                })?;
-            if attached == 0 {
+            if !thread_renders_group_for_user(&conn, &aid, &tid, group_id)? {
                 return Ok(LocalStep::Skip);
             }
         }
 
-        conn.execute(
-            "INSERT OR IGNORE INTO thread_label_groups (account_id, thread_id, group_id)
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![aid, tid, group_id.as_i64()],
-        )
-        .map_err(|e| ActionError::db(format!("insert thread label group: {e}")))?;
         let labels = read_group_member_labels(&conn, &aid, group_id)?;
-        Ok(LocalStep::Proceed(labels))
+        let generation_seen =
+            upsert_group_intents(&conn, &aid, &tid, &labels, PendingLabelIntentOp::Add)?;
+        Ok(LocalStep::Proceed {
+            labels,
+            generation_seen,
+        })
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
@@ -126,33 +121,70 @@ async fn remove_label_group_local(
         if kind == DispatchKind::Retry {
             // User re-applied the group after the queued `removeLabelGroup`.
             // Skip member RemoveLabel dispatches.
-            let attached: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM thread_label_groups \
-                     WHERE account_id = ?1 AND thread_id = ?2 AND group_id = ?3",
-                    rusqlite::params![aid, tid, group_id.as_i64()],
-                    |row| row.get(0),
-                )
-                .map_err(|e| {
-                    ActionError::db(format!("retry preflight thread_label_groups: {e}"))
-                })?;
-            if attached > 0 {
+            if thread_renders_group_for_user(&conn, &aid, &tid, group_id)? {
                 return Ok(LocalStep::Skip);
             }
         }
 
         let labels = read_applied_group_member_labels(&conn, &aid, &tid, group_id)?;
-        conn.execute(
-            "DELETE FROM thread_label_groups
-             WHERE account_id = ?1 AND thread_id = ?2 AND group_id = ?3",
-            rusqlite::params![aid, tid, group_id.as_i64()],
-        )
-        .map_err(|e| ActionError::db(format!("delete thread label group: {e}")))?;
-        Ok(LocalStep::Proceed(labels))
+        let generation_seen =
+            upsert_group_intents(&conn, &aid, &tid, &labels, PendingLabelIntentOp::Remove)?;
+        Ok(LocalStep::Proceed {
+            labels,
+            generation_seen,
+        })
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r)
+}
+
+fn thread_renders_group_for_user(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    thread_id: &str,
+    group_id: LabelGroupId,
+) -> Result<bool, ActionError> {
+    let fragment = db::db::queries_extra::user_visible_label_group_rendered_fragment(
+        "t.account_id",
+        "t.id",
+        "lg.id = ?3",
+    );
+    let sql = format!(
+        "SELECT EXISTS (
+           SELECT 1 FROM threads t
+           WHERE t.account_id = ?1
+             AND t.id = ?2
+             AND {fragment}
+         )"
+    );
+    conn.query_row(
+        &sql,
+        rusqlite::params![account_id, thread_id, group_id.as_i64()],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value != 0)
+    .map_err(|e| ActionError::db(format!("group render preflight: {e}")))
+}
+
+fn upsert_group_intents(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    thread_id: &str,
+    labels: &[LabelId],
+    op: PendingLabelIntentOp,
+) -> Result<i64, ActionError> {
+    db::db::queries_extra::upsert_pending_thread_label_intents(
+        conn,
+        account_id,
+        thread_id,
+        labels.iter().map(|label_id| PendingLabelIntent {
+            label_id: label_id.as_str(),
+            op,
+        }),
+        None,
+    )
+    .map_err(ActionError::db)
 }
 
 pub(crate) async fn apply_label_group_with_provider(
@@ -200,21 +232,44 @@ async fn apply_label_group_with_provider_kind(
     kind: DispatchKind,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("apply_label_group", account_id, thread_id);
-    let labels = match apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-        Ok(LocalStep::Proceed(labels)) => labels,
-        Ok(LocalStep::Skip) => {
-            let outcome = ActionOutcome::Success;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-    let outcome = dispatch_member_ops(ctx, provider, account_id, thread_id, labels, true).await;
-    enqueue_composite_if_local_only(ctx, &outcome, account_id, thread_id, group_id, true).await;
+    let (labels, generation_seen) =
+        match apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
+            Ok(LocalStep::Proceed {
+                labels,
+                generation_seen,
+            }) => (labels, generation_seen),
+            Ok(LocalStep::Skip) => {
+                let outcome = ActionOutcome::Success;
+                mlog.emit(&outcome);
+                return outcome;
+            }
+            Err(e) => {
+                let outcome = ActionOutcome::Failed { error: e };
+                mlog.emit(&outcome);
+                return outcome;
+            }
+        };
+    let outcome = dispatch_member_ops(
+        ctx,
+        provider,
+        account_id,
+        thread_id,
+        labels.clone(),
+        generation_seen,
+        true,
+    )
+    .await;
+    finalize_composite_outcome(
+        ctx,
+        &outcome,
+        account_id,
+        thread_id,
+        group_id,
+        true,
+        &labels,
+        generation_seen,
+    )
+    .await;
     mlog.emit(&outcome);
     outcome
 }
@@ -267,13 +322,25 @@ async fn apply_label_group_with_kind(
                     mlog.emit(&outcome);
                     outcome
                 }
-                Ok(LocalStep::Proceed(_)) => {
+                Ok(LocalStep::Proceed {
+                    labels,
+                    generation_seen,
+                }) => {
                     let outcome = ActionOutcome::LocalOnly {
-                        reason: ActionError::remote(e),
-                        retryable: true,
+                        reason: ActionError::remote(e.clone()),
+                        retryable: composite_retryability(&e),
                     };
-                    enqueue_composite(ctx, account_id, thread_id, "applyLabelGroup", group_id)
-                        .await;
+                    finalize_composite_outcome(
+                        ctx,
+                        &outcome,
+                        account_id,
+                        thread_id,
+                        group_id,
+                        true,
+                        &labels,
+                        generation_seen,
+                    )
+                    .await;
                     mlog.emit(&outcome);
                     outcome
                 }
@@ -332,21 +399,44 @@ async fn remove_label_group_with_provider_kind(
     kind: DispatchKind,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label_group", account_id, thread_id);
-    let labels = match remove_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-        Ok(LocalStep::Proceed(labels)) => labels,
-        Ok(LocalStep::Skip) => {
-            let outcome = ActionOutcome::Success;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-    let outcome = dispatch_member_ops(ctx, provider, account_id, thread_id, labels, false).await;
-    enqueue_composite_if_local_only(ctx, &outcome, account_id, thread_id, group_id, false).await;
+    let (labels, generation_seen) =
+        match remove_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
+            Ok(LocalStep::Proceed {
+                labels,
+                generation_seen,
+            }) => (labels, generation_seen),
+            Ok(LocalStep::Skip) => {
+                let outcome = ActionOutcome::Success;
+                mlog.emit(&outcome);
+                return outcome;
+            }
+            Err(e) => {
+                let outcome = ActionOutcome::Failed { error: e };
+                mlog.emit(&outcome);
+                return outcome;
+            }
+        };
+    let outcome = dispatch_member_ops(
+        ctx,
+        provider,
+        account_id,
+        thread_id,
+        labels.clone(),
+        generation_seen,
+        false,
+    )
+    .await;
+    finalize_composite_outcome(
+        ctx,
+        &outcome,
+        account_id,
+        thread_id,
+        group_id,
+        false,
+        &labels,
+        generation_seen,
+    )
+    .await;
     mlog.emit(&outcome);
     outcome
 }
@@ -399,13 +489,25 @@ async fn remove_label_group_with_kind(
                     mlog.emit(&outcome);
                     outcome
                 }
-                Ok(LocalStep::Proceed(_)) => {
+                Ok(LocalStep::Proceed {
+                    labels,
+                    generation_seen,
+                }) => {
                     let outcome = ActionOutcome::LocalOnly {
-                        reason: ActionError::remote(e),
-                        retryable: true,
+                        reason: ActionError::remote(e.clone()),
+                        retryable: composite_retryability(&e),
                     };
-                    enqueue_composite(ctx, account_id, thread_id, "removeLabelGroup", group_id)
-                        .await;
+                    finalize_composite_outcome(
+                        ctx,
+                        &outcome,
+                        account_id,
+                        thread_id,
+                        group_id,
+                        false,
+                        &labels,
+                        generation_seen,
+                    )
+                    .await;
                     mlog.emit(&outcome);
                     outcome
                 }
@@ -417,6 +519,13 @@ async fn remove_label_group_with_kind(
             }
         }
     }
+}
+
+fn composite_retryability(error: &str) -> bool {
+    !matches!(
+        classify_provider_error(error),
+        RemoteFailureKind::Permanent,
+    )
 }
 
 /// Per-member provider dispatch. Runs each member write through an explicit
@@ -437,6 +546,7 @@ async fn dispatch_member_ops(
     account_id: &str,
     thread_id: &str,
     labels: Vec<LabelId>,
+    generation_seen: i64,
     apply: bool,
 ) -> ActionOutcome {
     let mut saw_local_only = false;
@@ -444,18 +554,33 @@ async fn dispatch_member_ops(
     for label_id in labels {
         let outcome = if apply {
             label::add_label_with_provider_no_enqueue(
-                ctx, provider, account_id, thread_id, &label_id,
+                ctx,
+                provider,
+                account_id,
+                thread_id,
+                &label_id,
+                generation_seen,
             )
             .await
         } else {
             label::remove_label_with_provider_no_enqueue(
-                ctx, provider, account_id, thread_id, &label_id,
+                ctx,
+                provider,
+                account_id,
+                thread_id,
+                &label_id,
+                generation_seen,
             )
             .await
         };
         match outcome {
             ActionOutcome::Success | ActionOutcome::NoOp => {}
-            ActionOutcome::LocalOnly { .. } => saw_local_only = true,
+            ActionOutcome::LocalOnly { retryable: true, .. } => saw_local_only = true,
+            ActionOutcome::LocalOnly { retryable: false, reason } => {
+                // Member dispatcher already cleared its own intent for the
+                // permanent failure; the composite surfaces it as Failed.
+                last_failed = Some(reason);
+            }
             ActionOutcome::Failed { error } => last_failed = Some(error),
         }
     }
@@ -471,17 +596,91 @@ async fn dispatch_member_ops(
     }
 }
 
-async fn enqueue_composite_if_local_only(
+#[allow(clippy::too_many_arguments)]
+async fn finalize_composite_outcome(
     ctx: &ActionContext,
     outcome: &ActionOutcome,
     account_id: &str,
     thread_id: &str,
     group_id: LabelGroupId,
     apply: bool,
+    labels: &[LabelId],
+    generation_seen: i64,
 ) {
-    if matches!(outcome, ActionOutcome::LocalOnly { .. }) {
-        let op = if apply { "applyLabelGroup" } else { "removeLabelGroup" };
-        enqueue_composite(ctx, account_id, thread_id, op, group_id).await;
+    match outcome {
+        ActionOutcome::LocalOnly { retryable: true, .. } => {
+            let op_name = if apply { "applyLabelGroup" } else { "removeLabelGroup" };
+            let intent_op = if apply {
+                PendingLabelIntentOp::Add
+            } else {
+                PendingLabelIntentOp::Remove
+            };
+            if let Some(action_id) =
+                enqueue_composite(ctx, account_id, thread_id, op_name, group_id).await
+            {
+                attach_group_action_id(
+                    ctx,
+                    account_id,
+                    thread_id,
+                    labels,
+                    intent_op,
+                    generation_seen,
+                    action_id,
+                )
+                .await;
+            }
+        }
+        ActionOutcome::LocalOnly { retryable: false, .. } => {
+            // Composite-level permanent failure (e.g. permanent
+            // create_provider error): tear down every member intent
+            // the local step wrote rather than waiting for the stale
+            // sweep.
+            clear_group_intents_immediate(ctx, account_id, thread_id, labels, generation_seen, apply)
+                .await;
+        }
+        ActionOutcome::Success | ActionOutcome::NoOp | ActionOutcome::Failed { .. } => {}
+    }
+}
+
+async fn clear_group_intents_immediate(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    labels: &[LabelId],
+    generation_seen: i64,
+    apply: bool,
+) {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    let label_ids: Vec<String> = labels
+        .iter()
+        .map(|label_id| label_id.as_str().to_string())
+        .collect();
+    let op = if apply {
+        PendingLabelIntentOp::Add
+    } else {
+        PendingLabelIntentOp::Remove
+    };
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
+            &conn,
+            &aid,
+            &tid,
+            label_ids.iter().map(|label_id| PendingLabelIntent {
+                label_id,
+                op,
+            }),
+            generation_seen,
+        )
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))
+    .and_then(|r| r)
+    {
+        log::warn!("[actions] clear composite intents on permanent fail: {e}");
     }
 }
 
@@ -491,13 +690,13 @@ async fn enqueue_composite(
     thread_id: &str,
     operation_type: &str,
     group_id: LabelGroupId,
-) {
+) -> Option<String> {
     let params_json = serde_json::json!({"groupId": group_id.as_i64()}).to_string();
     let outcome = ActionOutcome::LocalOnly {
         reason: ActionError::remote("composite retry"),
         retryable: true,
     };
-    enqueue_if_retryable(
+    enqueue_if_retryable_with_id(
         ctx,
         &outcome,
         account_id,
@@ -505,7 +704,46 @@ async fn enqueue_composite(
         thread_id,
         &params_json,
     )
-    .await;
+    .await
+}
+
+async fn attach_group_action_id(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    labels: &[LabelId],
+    op: PendingLabelIntentOp,
+    generation_seen: i64,
+    action_id: String,
+) {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    let label_ids: Vec<String> = labels
+        .iter()
+        .map(|label_id| label_id.as_str().to_string())
+        .collect();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
+            &conn,
+            &aid,
+            &tid,
+            label_ids.iter().map(|label_id| PendingLabelIntent {
+                label_id,
+                op,
+            }),
+            generation_seen,
+            &action_id,
+        )
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))
+    .and_then(|r| r)
+    {
+        log::warn!("[actions] attach composite label intent action id failed: {e}");
+    }
 }
 
 fn read_group_member_labels(
@@ -534,17 +772,20 @@ fn read_applied_group_member_labels(
     thread_id: &str,
     group_id: LabelGroupId,
 ) -> Result<Vec<LabelId>, ActionError> {
+    let visible_label = db::db::queries_extra::user_visible_label_exists_fragment(
+        "?1",
+        "?2",
+        "lgm.label_id",
+    );
     let mut stmt = conn
-        .prepare(
-            "SELECT tl.label_id
-             FROM thread_labels tl
-             INNER JOIN label_group_members lgm
-               ON lgm.account_id = tl.account_id AND lgm.label_id = tl.label_id
-             WHERE tl.account_id = ?1
-               AND tl.thread_id = ?2
+        .prepare(&format!(
+            "SELECT lgm.label_id
+             FROM label_group_members lgm
+             WHERE lgm.account_id = ?1
                AND lgm.group_id = ?3
-             ORDER BY tl.label_id",
-        )
+               AND {visible_label}
+             ORDER BY lgm.label_id"
+        ))
         .map_err(|e| ActionError::db(format!("prepare applied group labels: {e}")))?;
     stmt.query_map(
         rusqlite::params![account_id, thread_id, group_id.as_i64()],

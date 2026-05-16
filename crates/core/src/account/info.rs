@@ -1,7 +1,7 @@
 use crate::db::Connection;
 use crate::db::queries_extra::{get_account_sync, get_all_accounts_sync};
 use crate::db::types::DbAccount;
-use crate::provider::crypto::{decrypt_value, is_encrypted};
+use crate::provider::crypto::{StoredSecret, decrypt_value, is_encrypted};
 use crate::sync::config;
 
 use super::types::{
@@ -99,39 +99,30 @@ pub fn get_oauth_credentials(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<AccountOAuthCredentials>, String> {
-    get_account_sync(conn, account_id).map(|account| {
-        account.and_then(|account| {
-            if account.provider != "gmail_api" && account.provider != "graph" {
-                return None;
-            }
+    let Some(account) = get_account_sync(conn, account_id)? else {
+        return Ok(None);
+    };
+    if account.provider != "gmail_api" && account.provider != "graph" {
+        return Ok(None);
+    }
 
-            let client_id = account
-                .oauth_client_id
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| {
-                    if is_encrypted(&value) {
-                        decrypt_value(encryption_key, &value).unwrap_or(value)
-                    } else {
-                        value
-                    }
-                })?;
-            let client_secret = account
-                .oauth_client_secret
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| {
-                    if is_encrypted(&value) {
-                        decrypt_value(encryption_key, &value).unwrap_or(value)
-                    } else {
-                        value
-                    }
-                });
+    let Some(client_id) = account
+        .oauth_client_id
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let client_id = StoredSecret::parse(client_id)?.decrypt(encryption_key)?;
+    let client_secret = account
+        .oauth_client_secret
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| StoredSecret::parse(value)?.decrypt(encryption_key))
+        .transpose()?;
 
-            Some(AccountOAuthCredentials {
-                client_id,
-                client_secret,
-            })
-        })
-    })
+    Ok(Some(AccountOAuthCredentials {
+        client_id,
+        client_secret,
+    }))
 }
 
 fn map_basic_info(account: DbAccount) -> AccountBasicInfo {

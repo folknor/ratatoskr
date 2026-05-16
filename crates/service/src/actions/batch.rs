@@ -384,16 +384,16 @@ async fn op_local(
                 .await
                 .map(|()| true)
         }
-        MailOperation::AddLabel { label_id } => {
-            label::add_label_local(ctx, account_id, thread_id, label_id)
-                .await
-                .map(|()| true)
-        }
-        MailOperation::RemoveLabel { label_id } => {
-            label::remove_label_local(ctx, account_id, thread_id, label_id)
-                .await
-                .map(|()| true)
-        }
+        MailOperation::AddLabel { label_id } => label::add_label_local(
+            ctx, account_id, thread_id, label_id,
+        )
+        .await
+        .map(|_| true),
+        MailOperation::RemoveLabel { label_id } => label::remove_label_local(
+            ctx, account_id, thread_id, label_id,
+        )
+        .await
+        .map(|_| true),
         MailOperation::ApplyLabelGroup { group_id } => {
             label_group::apply_label_group_local_initial(ctx, account_id, thread_id, *group_id)
                 .await

@@ -226,7 +226,7 @@ Workflow state is authoritative for lifecycle meaning and identity. The editor s
 
 Ratatoskr has exactly two persisted sidebar concepts:
 - folders: provider containers stored in `folders`, with thread membership in `thread_folders`.
-- label groups: user-visible grouped labels stored in `label_groups`, with local thread intent in `thread_label_groups`.
+- label groups: user-visible grouped labels stored in `label_groups`, with pending local thread intent in `pending_thread_label_intents`.
 
 Raw provider labels are a storage concept, not a sidebar concept. They live in `labels`, with provider-observable thread membership in `thread_labels`. Provider-native concepts must be normalized into either folders or raw labels before persistence. System folders use canonical Ratatoskr IDs (`INBOX`, `SENT`, `TRASH`, etc.), not provider-native IDs.
 
@@ -259,7 +259,7 @@ A composite operation is a single planner-level `MailOperation` that fans out in
 
 Composites change three things relative to a regular action and getting any one of them wrong reproduces the failure shape that landed in the labels-unification refactor:
 
-1. **Retry preflight is load-bearing.** When the pending-ops drainer re-runs a composite retry, the service-side function MUST re-read its local-intent state (`thread_label_groups` for the label-group composite) before dispatching any member writes. If the user has reversed intent in the meantime - removed the group after an Apply enqueued, re-applied after a Remove enqueued - the queued member writes will resurrect or re-clear a pill against current intent for the entire retry-queue TTL. The preflight skips the queued member dispatches and resolves the retry as `Success`.
+1. **Retry preflight is load-bearing.** When the pending-ops drainer re-runs a composite retry, the service-side function MUST re-read the overlay-aware rendered group state before dispatching any member writes. If the user has reversed intent in the meantime - removed the group after an Apply enqueued, re-applied after a Remove enqueued - the queued member writes will resurrect or re-clear a pill against current intent for the entire retry-queue TTL. The preflight skips the queued member dispatches and resolves the retry as `Success`.
 
 2. **Per-member dispatches must not enqueue per-member retries.** The composite's preflight contract only fires when the *composite* op type lands in `pending_operations`. If the inner member dispatches call the standard `enqueue_if_retryable` and enqueue raw `addLabel` / `removeLabel` rows, the drainer will re-run those per-member ops directly, with no preflight, and the contract above is bypassed. Either thread a "suppress per-member enqueue" flag through `ActionContext` so the composite enqueues a single composite-typed row covering the failed members, or factor out a `_no_enqueue` helper that the composite calls and that the per-member entry points wrap.
 

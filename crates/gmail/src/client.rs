@@ -432,14 +432,14 @@ fn read_account_tokens(
     let enc_refresh = row.1.ok_or("No refresh_token for account")?;
     let expires_at = row.2.unwrap_or(0);
 
-    let access_token = crypto::StoredSecret::parse(enc_access).decrypt(key)?;
-    let refresh_token = crypto::StoredSecret::parse(enc_refresh).decrypt(key)?;
+    let access_token = crypto::StoredSecret::parse(enc_access)?.decrypt(key)?;
+    let refresh_token = crypto::StoredSecret::parse(enc_refresh)?.decrypt(key)?;
 
     let enc_client_id = row
         .3
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "Account missing OAuth credentials - reauthorize to fix".to_string())?;
-    let client_id = crypto::StoredSecret::parse(enc_client_id).decrypt(key)?;
+    let client_id = crypto::StoredSecret::parse(enc_client_id)?.decrypt(key)?;
 
     let client_secret = crypto::StoredSecret::decrypt_optional(row.4.filter(|s| !s.is_empty()), key)?;
 
