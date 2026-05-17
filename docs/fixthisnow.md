@@ -151,7 +151,7 @@ check returning `Err`, plus a regression test).
   `MailOperation`, `RemoteFailureKind`, `SendAttachment`,
   `SendIntent`, `SendRequest`. Typed IDs (`FolderId`, `LabelId`,
   `LabelGroupId`) come from the existing `types` crate (lightweight,
-  serde-only deps), not from `common` — `common` directly depends on
+  serde-only deps), not from `common` - `common` directly depends on
   `rusqlite` and `db`, so re-exporting from it would transitively
   pull writer-side deps into `service-api`. The typed IDs already
   live in `crates/types/src/typed_ids.rs:11` (PR 0 verifies this
@@ -165,7 +165,7 @@ check returning `Err`, plus a regression test).
   re-exports from `service-api` so service-side code keeps its
   current import paths. Depends on `service-api`, `db`,
   `service-state`, `store`, `search`.
-- `rtsk`, for **DB access**, depends on `db-read` only — no `db`,
+- `rtsk`, for **DB access**, depends on `db-read` only - no `db`,
   no `rusqlite`, no `service-state`. Re-exports the read surface
   explicitly. No glob re-exports. (`rtsk` retains its many other
   direct deps unrelated to this discipline: `store`, `common`,
@@ -359,7 +359,7 @@ Those are writer-side operations and **stay in `db`**, not move to
   and runs nothing else. Both Service and app construct their read
   handles this way **after** the Service has signalled `boot.ready`.
 
-**Single reader vs. pool — explicit deferral.** The proposed
+**Single reader vs. pool - explicit deferral.** The proposed
 `ReadDbState` holds `Arc<Mutex<rusqlite::Connection>>` (singular),
 which is what the code does today. With WAL + `SQLITE_OPEN_READ_ONLY`,
 SQLite supports multiple concurrent readers, so an `r2d2`-style pool
@@ -684,14 +684,14 @@ imports and fully-qualified `service::actions::*` paths sprinkled
 throughout. The complete set the implementer must rewrite (audit
 with `grep -rn 'service::' crates/app/src/` before starting):
 
-- `crates/app/src/action_wire.rs:19` — `use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind}`.
-- `crates/app/src/action_resolve.rs:11` — `use service::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation}`.
-- `crates/app/src/handlers/commands.rs:8` — `use service::actions::{ActionOutcome, FolderId, LabelGroupId}`.
-- `crates/app/src/handlers/pop_out/compose_send.rs:10` — `use service::actions::{SendAttachment, SendIntent}`.
+- `crates/app/src/action_wire.rs:19` - `use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind}`.
+- `crates/app/src/action_resolve.rs:11` - `use service::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation}`.
+- `crates/app/src/handlers/commands.rs:8` - `use service::actions::{ActionOutcome, FolderId, LabelGroupId}`.
+- `crates/app/src/handlers/pop_out/compose_send.rs:10` - `use service::actions::{SendAttachment, SendIntent}`.
 - `crates/app/src/message.rs:226`, `crates/app/src/update.rs:862`,
   `crates/app/src/app.rs:251`, plus fully-qualified paths at
   `crates/app/src/handlers/pop_out/compose_send.rs:83` and
-  `crates/app/src/handlers/commands.rs:330` — these reference
+  `crates/app/src/handlers/commands.rs:330` - these reference
   `service::actions::*` types without `use` statements. All must
   flip to `service_api::*`.
 
@@ -720,7 +720,7 @@ Steps:
    (`crates/types/src/lib.rs:5` keeps the `typed_ids` module
    private and re-exports the IDs at the crate root at line 14, so
    `types::FolderId` is the public path, not `types::typed_ids::FolderId`.)
-   **Do not** have `service-api` re-export from `common` —
+   **Do not** have `service-api` re-export from `common` -
    `common` directly depends on `rusqlite` and `db`, which would
    put writer-side crates back into `service-api`'s graph and into
    `app`'s via `app -> service-api -> common -> db`. The
@@ -892,7 +892,7 @@ helpers). The app holds no writable connection.
      connection **before** the app opens its read handle. The
      existing `boot.ready` signal enforces this ordering.
    - `apply_reader_pragmas(&Connection)` lives **alongside
-     `ReadDbState::open_existing`** — in `db` in PR 1, then moves
+     `ReadDbState::open_existing`** - in `db` in PR 1, then moves
      to `db-read` in PR 2 along with `ReadDbState`. It is never a
      public function called across the crate boundary; it is an
      implementation detail of `ReadDbState::open_existing`. This
@@ -1034,7 +1034,7 @@ Goal: make the type discipline impossible to subvert by re-export.
    `smart_folder::count_smart_folder_unread(conn, ...)`, and
    `smart-folder` depends on `db`. After PR 2's move, `rtsk` would
    need `db-read`, which would need `smart-folder`, which depends on
-   `db` — a cycle through the wrong layers. Resolve by **moving**
+   `db` - a cycle through the wrong layers. Resolve by **moving**
    `count_smart_folder_unread` (and its supporting query glue) into
    `db-read` rather than carving a duplicate helper. If `smart-folder`
    still needs to expose the function for other callers, it
@@ -1105,7 +1105,7 @@ source fails to resolve at `cargo check` time.
 
 This catches direct-dependency violations only. Transitive paths
 (e.g. `rtsk -> db-read -> rusqlite`) are expected and not blocked
-by either Cargo or by brokkr — the brokkr `forbid` rules below
+by either Cargo or by brokkr - the brokkr `forbid` rules below
 also check direct edges only. The protection still holds: a
 transitive path does not put symbols in scope, so `use rusqlite::...`
 in `rtsk` fails to resolve regardless of the dep graph below.
@@ -1215,7 +1215,7 @@ have a `lockdown` subcommand, add one that runs the trybuild crate,
 the `db-read::tests` stepping regressions, and the
 `service-state/tests/lockdown.rs` transitive check together). The
 existing CI must invoke this gate, not just `brokkr check`.
-Otherwise the trybuild assertions are advisory — they catch
+Otherwise the trybuild assertions are advisory - they catch
 regressions only when someone remembers to run them. The acceptance
 criteria below name the gate explicitly.
 
@@ -1262,7 +1262,7 @@ check scans every file under `crates/db-read/src/` other than
 `rusqlite::CachedStatement`, `.execute(`, `.execute_batch(`,
 `unchecked_transaction`, `.transaction(`, `pragma_update`. Without
 this, a `db-read`-internal helper could take `&rusqlite::Connection`
-directly and bypass the read discipline — the type system alone
+directly and bypass the read discipline - the type system alone
 cannot stop it, because `db-read` necessarily depends on `rusqlite`.
 
 Both grep checks live in (or are invoked by) the lockdown crate so
@@ -1463,7 +1463,7 @@ After landing, the failure modes split cleanly:
   symbols), type checking (no write methods on `ReadConn`), and the
   trybuild lockdown crate.
 - **Mutating SQL strings through read methods** (e.g.
-  `query_row("UPDATE ... RETURNING ...", ...)`) **do compile** —
+  `query_row("UPDATE ... RETURNING ...", ...)`) **do compile** -
   this is a runtime check, not a compile-time one. They fail at
   prepare time via `Statement::readonly()`, surfaced as
   `Error::NotReadOnly`, and are pinned by regression tests in

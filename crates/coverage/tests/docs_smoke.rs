@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 #[test]
 fn repository_docs_catalog_is_clean() {
-    let catalog = coverage::load_docs(workspace_root().join("docs"));
+    let catalog = coverage::load_docs(workspace_root().join("reference"));
 
     if !catalog.diagnostics.is_empty() {
         let diagnostics = catalog
@@ -52,7 +52,7 @@ fn folders_labels_pilot_area_has_no_gaps() {
         root.join("crates/app/tests/service-harness"),
         root.join("crates/app/tests/sync-harness"),
     ];
-    let report = coverage::CoverageReport::build(root.join("docs"), &lua_roots);
+    let report = coverage::CoverageReport::build(root.join("reference"), &lua_roots);
     let area = "glossary.folders_labels";
 
     let uncovered = report
