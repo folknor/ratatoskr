@@ -351,7 +351,7 @@ pub fn seed_accounts(
 
         // Graph accounts: bootstrap synthesised importance:* labels.
         // Invariant: is_undeletable = 1, no server colour. See
-        // `docs/glossary/folders-labels.md`.
+        // `reference/glossary/folders-labels.md`.
         if MailProviderKind::parse(preset.provider) == Ok(MailProviderKind::Graph) {
             for level in ImportanceLevel::ALL {
                 conn.execute(

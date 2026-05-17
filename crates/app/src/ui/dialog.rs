@@ -1,7 +1,7 @@
 //! Modal dialog content primitives.
 //!
 //! These build the *contents* of a `Modal` semantic surface (per
-//! `docs/glossary/overlay-surfaces.md`). The `modal_overlay()` primitive
+//! `reference/glossary/overlay-surfaces.md`). The `modal_overlay()` primitive
 //! handles backdrop and stacking; this module owns the card, title, body,
 //! and action row, so every confirmation / form dialog in the app reads as
 //! a single visual family.

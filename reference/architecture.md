@@ -147,7 +147,7 @@ libtest. The runtime lives in `app`'s harness module, embeds the
 (`brokkr service-test`, `service-suite`, `sync-bench`). Tests are
 `.lua` scripts; failure preserves a self-contained artefact directory
 with frames, events, step trace, `/proc` snapshot, and a copy of the
-data dir. See `docs/glossary/harness.md`.
+data dir. See `reference/glossary/harness.md`.
 
 ### Cross-store crash consistency
 

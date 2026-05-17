@@ -84,7 +84,7 @@ As a general rule, TODO.md items are **removed** when completed.
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
 
-### Labels Unification - `docs/glossary/folders-labels.md`
+### Labels Unification - `reference/glossary/folders-labels.md`
 
 Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
 
@@ -172,7 +172,7 @@ All 6 backend phases complete (discovery, sync, rights, subscription, notificati
 
 - [ ] **Subscription toggle in sidebar** - `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
 
-### Labels - `docs/glossary/folders-labels.md`
+### Labels - `reference/glossary/folders-labels.md`
 
 - [ ] **Label picker UI** - Overlay for applying/removing tag-type labels from messages. Triggered from reading pane or command palette. Lists all available labels with colors. Provider dispatch via `add_tag()`/`remove_tag()`.
 
@@ -253,7 +253,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Test Harness
 
-Architecture and design rationale stay in `docs/glossary/harness.md`. The milestone roadmap is retired - remaining work is captured here.
+Architecture and design rationale stay in `reference/glossary/harness.md`. The milestone roadmap is retired - remaining work is captured here.
 
 ### Tests unlocked by saehrimnir 45bf850..28017e7
 
@@ -461,4 +461,4 @@ Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` o
 
 ## Cross-Cutting Architecture Patterns
 
-See `docs/architecture.md` § "Settled Patterns" for the living reference.
+See `reference/architecture.md` § "Settled Patterns" for the living reference.

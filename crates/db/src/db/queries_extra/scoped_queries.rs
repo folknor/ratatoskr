@@ -717,7 +717,7 @@ fn flag_column(folder_id: &str) -> &'static str {
 /// Not used by the sidebar pill - the pill counts the `is_read = 0`
 /// subset of synced drafts, uniform with every other universal folder.
 /// This helper exists for callers that want the total (pane headers,
-/// compose-pane indicators). Rationale: `docs/glossary/drafts.md`
+/// compose-pane indicators). Rationale: `reference/glossary/drafts.md`
 /// § "Count semantics."
 pub fn get_draft_count_with_local(
     conn: &Connection,

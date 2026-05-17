@@ -13,7 +13,7 @@ The foundational decision. The marker scheme is what makes a doc section a regis
 - A marker scheme that is visible in rendered markdown without breaking reading flow, carries a stable ID, survives doc reorganization, and is greppable from a tool.
 - A parser that walks `docs/` and returns the set of `(file, section, contract_id)` triples plus any associated metadata (status, enforcement hint).
 - A lint that rejects duplicate IDs, malformed markers, invalid metadata, orphaned markers (a marker with no surrounding section), and misplaced markers.
-- A smoke catalog: mark up three to five sections in `docs/architecture.md` to validate the scheme before committing to it. Examples: action service as mutation gate, generation counters for async safety, folder-vs-label semantics.
+- A smoke catalog: mark up three to five sections in `reference/architecture.md` to validate the scheme before committing to it. Examples: action service as mutation gate, generation counters for async safety, folder-vs-label semantics.
 
 **Design decisions to resolve in this slice:**
 
@@ -26,7 +26,7 @@ The foundational decision. The marker scheme is what makes a doc section a regis
 **Current implementation notes:**
 
 - The initial parser lives in `crates/coverage/` and exposes a `ratatoskr-coverage` process entrypoint. This keeps Ratatoskr independent of brokkr's source while leaving a concrete command brokkr can wrap later.
-- The smoke catalog currently marks five sections in `docs/architecture.md`: action service gate, provider trait abstraction, generation counters, folder-vs-label semantics, and adding a new email action.
+- The smoke catalog currently marks five sections in `reference/architecture.md`: action service gate, provider trait abstraction, generation counters, folder-vs-label semantics, and adding a new email action.
 - The parser ignores fenced code blocks so docs can show marker examples without registering duplicate contracts.
 
 **Out of scope for this slice:**
@@ -47,7 +47,7 @@ The other foundational decision. The Lua harness loader already parses frontmatt
 - A read-only parser that scans `crates/app/tests/sync-harness/` and `crates/app/tests/service-harness/` for claims.
 - A later update to the existing harness loader to parse and reject malformed pilot-area claims when strict mode is enabled.
 - Validation that IDs are syntactically valid (matches the grammar from slice 1). Existence-check against the registry is reported by the read-only tool.
-- A short author-facing note in the harness doc (`docs/glossary/harness.md`) describing the format.
+- A short author-facing note in the harness doc (`reference/glossary/harness.md`) describing the format.
 
 **Design decisions to resolve in this slice:**
 
@@ -104,7 +104,7 @@ The first real use of the system. Pick one bounded area, bring its contracts to 
 **What needs to be built:**
 
 - Pick a pilot area. The leading candidate is provider sync coverage, because the architectural contracts are concentrated in a small set of doc sections and the existing Lua sync harness already covers many of them. An alternative pilot is the email action recipe, which is one procedural contract with multi-site enforcement and a small footprint.
-- Mark every behavioral contract in the pilot area's docs with the slice 1 marker scheme. This means walking the relevant sections of `docs/architecture.md` and any related subsystem docs and adding markers.
+- Mark every behavioral contract in the pilot area's docs with the slice 1 marker scheme. This means walking the relevant sections of `reference/architecture.md` and any related subsystem docs and adding markers.
 - Add `covers` claims to every Lua harness script in the pilot area.
 - Run `brokkr coverage` and triage each remaining gap as one of: write the missing test now, register as known gap with a tracking issue, or retire the contract.
 - Document the pilot outcome in this roadmap (what worked, what the marker scheme had to absorb, what the Lua format had to absorb).
@@ -116,7 +116,7 @@ The first real use of the system. Pick one bounded area, bring its contracts to 
 
 **Current implementation notes:**
 
-- Pilot area chosen: folders-labels semantics. The pilot contracts live in `docs/glossary/folders-labels.md`, backed by focused sync-harness claims for Graph categories as tag labels, JMAP mailboxes as container folders, account-scoped Gmail label identity, canonical system IDs, and provider-prefixed non-system IDs.
+- Pilot area chosen: folders-labels semantics. The pilot contracts live in `reference/glossary/folders-labels.md`, backed by focused sync-harness claims for Graph categories as tag labels, JMAP mailboxes as container folders, account-scoped Gmail label identity, canonical system IDs, and provider-prefixed non-system IDs.
 - `ratatoskr-coverage report --area glossary.folders_labels` is the narrow report loop for this pilot. `ratatoskr-coverage report --area architecture` shows the architecture-level smoke catalog.
 - `brokkr check -p coverage` now enforces the pilot report shape through a repository smoke test: `glossary.folders_labels` must have no uncovered contracts and no unknown Lua claims.
 
@@ -184,11 +184,11 @@ Repeat the pilot pattern across the rest of the tree. Mark every architectural b
 
 This is the largest slice by volume. It is likely subdivided into commits per doc area:
 
-- `docs/architecture.md` boundaries.
+- `reference/architecture.md` boundaries.
 - `docs/command-palette/` Core Requirements and Decisions.
-- `docs/glossary/folders-labels.md` semantics.
-- `docs/glossary/overlay-surfaces.md` invariants.
-- `docs/glossary/harness.md` (harness contracts, including the action recipe).
+- `reference/glossary/folders-labels.md` semantics.
+- `reference/glossary/overlay-surfaces.md` invariants.
+- `reference/glossary/harness.md` (harness contracts, including the action recipe).
 - Any other subsystem problem-statements that surface during the work.
 
 **What needs to be built:**

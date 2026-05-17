@@ -194,7 +194,7 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
 ///
 /// Every universal pill - Drafts included - counts the `is_read = 0`
 /// subset of the folder's synced thread membership. Rationale and the
-/// local-drafts carve-out: `docs/glossary/drafts.md` § "Count semantics."
+/// local-drafts carve-out: `reference/glossary/drafts.md` § "Count semantics."
 fn build_universal_folders(
     conn: &Connection,
     scope: &AccountScope,

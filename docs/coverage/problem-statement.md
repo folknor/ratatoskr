@@ -34,13 +34,13 @@ The catalog must be enforced, not advisory. A test without a `covers` claim is m
 
 The catalog must be expensive to violate, not cheap. Adding a contract requires registering it. Removing a test requires either retiring its contract or finding another test that still claims it. The friction is the point. It is the same friction `CommandId` imposes today: adding a user-facing action is intentional work, because the compiler insists on it.
 
-The catalog must live where engineers already look. Contracts are doc sections in `docs/architecture.md`, in subsystem problem-statements like `docs/command-palette/problem-statement.md`, and in procedural recipes like "Adding a New Email Action". The doc is the registry. There is no parallel TOML or YAML catalog.
+The catalog must live where engineers already look. Contracts are doc sections in `reference/architecture.md`, in subsystem problem-statements like `docs/command-palette/problem-statement.md`, and in procedural recipes like "Adding a New Email Action". The doc is the registry. There is no parallel TOML or YAML catalog.
 
 ## Current State
 
 What exists today:
 
-- Architectural boundary sections in `docs/architecture.md` with `Enforcement:` paragraphs naming compile-time mechanisms, Rust integration tests, or harness scripts in prose.
+- Architectural boundary sections in `reference/architecture.md` with `Enforcement:` paragraphs naming compile-time mechanisms, Rust integration tests, or harness scripts in prose.
 - Subsystem problem-statements with numbered Core Requirements (e.g. `docs/command-palette/problem-statement.md` sections 1 through 9).
 - Procedural recipes scattered through the architecture doc (the email-action checklist is the canonical example).
 - A growing Lua harness under `crates/app/tests/service-harness/` and `crates/app/tests/sync-harness/` with execution-metadata frontmatter (fixture, ceiling, expected, cohort).
@@ -189,7 +189,7 @@ The backfill is staged by doc area so it does not block on a single giant commit
 
 The coverage system is working when:
 
-- Every architectural boundary section in `docs/architecture.md` has a stable ContractId.
+- Every architectural boundary section in `reference/architecture.md` has a stable ContractId.
 - Every numbered Core Requirement in subsystem problem-statements has a stable ContractId.
 - Every Lua harness script claims at least one ContractId.
 - Every Rust integration test that backs a contract claims at least one ContractId.

@@ -5,7 +5,7 @@
 //! `label.create`, `label.delete`, `label.recolor`, `label.rename` actions.
 //! Every per-account label is keyed on `(account_id, label_id)`; cross-
 //! account labels are explicit user-created groups (`label_groups`), not
-//! auto-collapse by normalised name. See `docs/glossary/folders-labels.md`.
+//! auto-collapse by normalised name. See `reference/glossary/folders-labels.md`.
 
 use std::sync::Arc;
 

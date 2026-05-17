@@ -17,7 +17,7 @@ pub struct FolderId(pub String);
 /// (`kw:{keyword}`), and synthesised Graph importance (`importance:high`
 /// / `importance:low`). Gmail system labels (INBOX, SENT, CATEGORY_*,
 /// CHAT, etc.) are folders and flow through `FolderId`. See
-/// `docs/glossary/folders-labels.md`.
+/// `reference/glossary/folders-labels.md`.
 ///
 /// Used with `add_label`, `remove_label`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

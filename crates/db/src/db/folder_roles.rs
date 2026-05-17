@@ -124,7 +124,7 @@ pub fn graph_well_known_aliases() -> Vec<(&'static str, &'static str, &'static s
 pub fn is_system_folder_id(label_id: &str) -> bool {
     // `STARRED` is intentionally absent from `SYSTEM_FOLDER_ROLES`: it is a
     // virtual navigation handle backed by `threads.is_starred`, not a real
-    // folder row. See `docs/glossary/folders-labels.md` "Identity".
+    // folder row. See `reference/glossary/folders-labels.md` "Identity".
     SYSTEM_FOLDER_ROLES
         .iter()
         .any(|entry| entry.label_id == label_id)
@@ -137,7 +137,7 @@ pub fn is_gmail_system_folder_label_id(label_id: &str) -> bool {
 /// Graph IDs that the provider exposes as tag-shaped (Exchange categories
 /// and synthesised importance labels). Used at sync ingest to partition
 /// per-message label IDs into folder writes vs label writes; see the ID
-/// encoding tables in `docs/glossary/folders-labels.md`.
+/// encoding tables in `reference/glossary/folders-labels.md`.
 ///
 /// Backed by `types::LabelKind::parse(_, Graph)` so the predicate matches
 /// exactly the inputs the typed boundary accepts as a Graph label - i.e.

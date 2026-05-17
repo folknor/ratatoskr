@@ -9,7 +9,7 @@ use tokio::sync::{Notify, OnceCell};
 /// writes the `clean_shutdown` sentinel: only `GracefulRequest` does, so
 /// every other exit path triggers the recovery scan on the next
 /// boot. This matches the cross-store crash-consistency contract in
-/// `docs/architecture.md` modulo the simplification that we collapse
+/// `reference/architecture.md` modulo the simplification that we collapse
 /// parent-death, external
 /// SIGTERM, and plain stdin EOF into one `Unrequested` arm - the
 /// distinction between them does not change Phase 1.5 behavior, and

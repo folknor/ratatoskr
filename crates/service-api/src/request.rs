@@ -323,7 +323,7 @@ pub struct TestDbFolderRow {
 /// labels exclusively (Gmail user labels, Exchange categories
 /// `cat:{name}`, IMAP/JMAP keywords `kw:{keyword}`, synthesised Graph
 /// importance `importance:high` / `importance:low`). Folders live in the
-/// separate `folders` table; see `docs/glossary/folders-labels.md`.
+/// separate `folders` table; see `reference/glossary/folders-labels.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestDbLabelRow {
     pub id: String,

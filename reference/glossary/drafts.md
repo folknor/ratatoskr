@@ -26,7 +26,7 @@ A local draft is **deleted** from `local_drafts` once it has been sent (not just
 
 A draft that exists on the provider as a message with the `DRAFT` system folder membership. Modelled as a normal `DbThread` row (in `threads`) with a `thread_folders` row pointing at the `DRAFT` folder, plus message rows in `messages`. Indistinguishable from any other thread except for the `DRAFT` folder membership.
 
-Folder semantics for `DRAFT` are documented in `docs/glossary/folders-labels.md`: it's a container, not a tag. Per-provider mapping: Gmail `DRAFT` label, Graph `drafts` well-known folder, JMAP drafts-role mailbox, IMAP `\Drafts` special-use mailbox.
+Folder semantics for `DRAFT` are documented in `reference/glossary/folders-labels.md`: it's a container, not a tag. Per-provider mapping: Gmail `DRAFT` label, Graph `drafts` well-known folder, JMAP drafts-role mailbox, IMAP `\Drafts` special-use mailbox.
 
 ### Why the split
 
