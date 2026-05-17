@@ -40,6 +40,52 @@ defense at all.
 
 This doc specifies the structural fix.
 
+## Status
+
+As of 2026-05-17, PR 0a (action DTOs to `service-api`, typed IDs via
+`types`), PR 0b (`runner` binary, `app` library), PR 1 (type split:
+`WriteConn`/`WriteTxn`/`WriteStatement`/`ReadConn`/`ReadStatement`/
+`ReadCachedStatement`/`WriterPool`/`ReadDbState`, `ReadWriteDb`
+deletion, `SQLITE_OPEN_READ_ONLY` + `apply_reader_pragmas`), and the
+mechanical parts of PR 2 (the `db-read` crate exists, the
+`db-read-lockdown` trybuild crate exists, the brokkr
+`core-no-writer-db` / `app-no-db-internals` /
+`service-api-is-pure-leaf` rules are in place) have landed.
+
+What remains is the strict end-state shape this doc actually
+specifies. Three structural debts:
+
+1. **`db-read` is a facade.** `ReadConn` / `ReadStatement` /
+   `ReadCachedStatement` / `ReadDbState` source lives in
+   `writer_db::db` and `db-read/src/lib.rs` re-exports them. The
+   plan's topology has `db -> db-read`; today it is `db-read -> db`.
+   The original `raw.rs` was deleted during the type-consolidation
+   pass that fixed an earlier two-struct mismatch; the strict design
+   wants the consolidation but with the source parked in `db-read`,
+   not `db`.
+2. **`from_arc` escape hatches on all three state types.**
+   `ReadDbState::from_arc`, `WriterPool::from_arc`, and
+   `WriteDbState::from_arc` all take `Arc<Mutex<Connection>>` and
+   bypass the opaque-pool design. Two are `#[doc(hidden)]` but all
+   are `pub`. Plan calls for `open_existing` / `open_writer_pool` as
+   the only constructors with the inner Arc `pub(crate)`.
+3. **Untyped `with_conn{,_mapped,_sync}` on `WriterPool` and
+   `WriteDbState`.** The migrated action fanout uses these instead
+   of `with_write`, so the closures take raw `&Connection` rather
+   than `&WriteConn`. The boundary is enforced by call-site
+   convention, not by the type system.
+
+The Remaining migration section below covers them as PR 3, PR 4,
+and PR 5 (the deferred peripheral crates from the Scope section).
+The PR 0 / PR 1 / PR 2 sections have been removed from this doc;
+their content is in the git history (start at `729eabe4 db boundary:
+complete the slice + fix review blockers` on `main`).
+
+Per-file bugs surfaced during the in-flight migration live in
+`docs/discrepancies.md`. That doc tracks concrete file:line items
+that are correctness/cleanup follow-ups; this doc tracks the
+structural shape.
+
 ## Root cause
 
 Three leaks compound:
@@ -654,443 +700,163 @@ crates from depending on `db` and that force writer crates to take
 `&WriteConn` instead of `&Connection`. That work is out of scope
 here; this doc fixes the load-bearing `rtsk`/`app` boundary first.
 
-## Migration plan
+## Remaining migration
 
-Land this in **three PRs**, in order. Doing them at once means every
-call-site change conflicts with every crate-move change in review.
+Three PRs in order. PR 3 is the structural flip and the load-bearing
+one; PR 4 ratchets the type discipline closed; PR 5 carries it into
+the deferred peripheral crates. Land them sequentially to keep each
+review tractable.
 
-PR 0 (Prerequisite, in two parts) removes the load-bearing
-`app -> service` dependency: 0a relocates action DTOs and typed IDs;
-0b extracts the `runner` binary crate. PR 1 splits the type surface
-inside `db`. PR 2 extracts `db-read` and locks the rule in. PR 1 alone is **not** a full
-enforcement of the read-crate rule: while it lands, `rtsk` still
-depends on `db` and therefore can still name `db::WriteConn`. The
-honest framing of PR 1 is "narrow the type surface and remove the
-obvious leaks." Full enforcement requires PR 2. Keep the gap short
-(same week if possible) and, if PR 2 is delayed, add a temporary
-`brokkr.toml` rule forbidding `WriteConn` mentions in `rtsk` source
-via a simple grep-style check.
+The original PR 0 / PR 1 / PR 2 step lists used to live here. They
+have been removed now that they are landed; their content is in the
+git history under the commits that closed them (`729eabe4 db
+boundary: complete the slice + fix review blockers` and `db boundary:
+route calendar sync + pending retry through writer pool`).
 
-### PR 0: relocate action DTOs and extract `runner` crate
+### PR 3: db-read owns the read types
 
-Goal: remove `app -> service` so the app process does not have a
-writer-side crate in its direct Cargo graph at all. Two distinct
-deliverables; commit them in this order.
+Goal: the strict end-state topology where `db` depends on `db-read`.
+Eliminates `db-read`'s facade-over-`writer_db` shape and gives
+`db-read` the single private `raw.rs` module the plan originally
+specified.
 
-#### PR 0a: DTOs to `service-api`, typed IDs to `types`
+1. Create `crates/db-read/src/raw.rs` as a `pub(crate)` module
+   containing the canonical definitions of `ReadConn`,
+   `ReadStatement`, `ReadCachedStatement`, `ReadError`, `ReadDbState`,
+   `open_reader_pool`, `apply_reader_pragmas`. Move the source from
+   `crates/db/src/db/mod.rs` (and any helper files) verbatim; do
+   not change semantics in this PR.
+2. `crates/db-read/src/lib.rs` re-exports the new types from `raw`.
+   No `writer_db::*` re-exports. Audit each entry in the current
+   `db-read/src/lib.rs` `pub mod queries` / `pub mod queries_extra`
+   blocks:
+   - Items that take `&ReadConn` move into `db-read` proper, retyped
+     where needed.
+   - Items that still take `&Connection` get retyped to `&ReadConn`
+     as part of the move.
+   - Items that turn out to be reachable only from writer-side code
+     get deleted from `db-read`'s surface; their callers can name
+     them through `db` directly post-flip.
+3. Flip the Cargo direction. `crates/db-read/Cargo.toml` removes its
+   `writer_db = ...` (aka `db = ...`) dep. `crates/db/Cargo.toml`
+   adds `db-read = { path = "../db-read" }`. `db::WriteConn::as_read()`
+   returns `db_read::ReadConn` (not `db::ReadConn`).
+4. Delete the orphaned read-side types from `crates/db/src/db/`:
+   `ReadConn`, `ReadStatement`, `ReadCachedStatement`, `ReadError`,
+   `ReadDbState`, `apply_reader_pragmas`, `open_reader_pool`. Their
+   single home is `db-read`.
+5. Make the `db-read` internal-quarantine grep real (the
+   `db_read_raw_rusqlite_access_is_quarantined` lockdown test
+   already exempts `raw.rs`; today the exemption is dead because the
+   file does not exist). Land the grep that scans
+   `crates/db-read/src/` excluding `raw.rs` for `rusqlite::Connection`,
+   `rusqlite::Transaction`, `rusqlite::CachedStatement`, `.execute(`,
+   `.execute_batch(`, `unchecked_transaction`, `.transaction(`,
+   `pragma_update`.
+6. Walk every `rtsk` and `app` consumer that named a type through
+   the old facade path. The compile errors are the worklist.
 
-Today `crates/app/src/` has both direct `use service::actions::*`
-imports and fully-qualified `service::actions::*` paths sprinkled
-throughout. The complete set the implementer must rewrite (audit
-with `grep -rn 'service::' crates/app/src/` before starting):
+Acceptance: `cargo tree -p db-read` lists `rusqlite` but not `db`.
+`cargo tree -p db` lists `db-read` as a direct dep. The
+single-source-of-truth for `ReadConn` is `db-read::raw`.
 
-- `crates/app/src/action_wire.rs:19` - `use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind}`.
-- `crates/app/src/action_resolve.rs:11` - `use service::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation}`.
-- `crates/app/src/handlers/commands.rs:8` - `use service::actions::{ActionOutcome, FolderId, LabelGroupId}`.
-- `crates/app/src/handlers/pop_out/compose_send.rs:10` - `use service::actions::{SendAttachment, SendIntent}`.
-- `crates/app/src/message.rs:226`, `crates/app/src/update.rs:862`,
-  `crates/app/src/app.rs:251`, plus fully-qualified paths at
-  `crates/app/src/handlers/pop_out/compose_send.rs:83` and
-  `crates/app/src/handlers/commands.rs:330` - these reference
-  `service::actions::*` types without `use` statements. All must
-  flip to `service_api::*`.
+### PR 4: delete the escape hatches
 
-Run the grep before the migration and again after; the post-grep
-should return zero hits for `service::` in `crates/app/src/`.
+Goal: make the type discipline impossible to subvert by construction.
+Removes the `from_arc` constructors, makes the writer-pool Arc
+non-escaping, and retires the untyped `with_conn*` shims.
 
-Steps:
+1. Delete `ReadDbState::from_arc(Arc<Mutex<Connection>>)`. The only
+   constructor is `open_existing(&Path)`. Test fixtures that built
+   a `ReadDbState` from a shared writer conn (boot.rs tests at
+   `crates/service/src/boot.rs:1817,1851` are the known ones) open
+   a separate read-only handle via `open_existing` instead.
+2. Delete `WriterPool::from_arc(Arc<Mutex<Connection>>)`.
+   `WriterPool`'s only constructor is `open_writer_pool(&Path)`.
+   Mark the inner `Arc<Mutex<Connection>>` `pub(crate)`.
+3. Delete `WriteDbState::from_arc(Arc<Mutex<Connection>>)` from
+   `service-state`. The only constructor is
+   `WriteDbState::from_pool(WriterPool)`. Boot constructs the pool
+   via `db::open_writer_pool` and hands it to
+   `WriteDbState::from_pool`.
+4. Delete `WriterPool::with_conn{,_mapped,_sync}` and
+   `WriteDbState::with_conn{,_mapped,_sync}`. The remaining writer
+   surface is `with_write{,_mapped,_sync}(|&WriteConn| ...)`. For
+   reads from the writer side (rare; typically a read inside the
+   same scope as a planned write) use the existing
+   `with_read{,_sync}(|&ReadConn| ...)`.
+5. The compile errors land as the call-site worklist. Retype each
+   closure to `&WriteConn` and use the typed `WriteConn::execute` /
+   `WriteConn::prepare` / `WriteConn::transaction` methods.
+   - The action fanout (`crates/service/src/actions/*`) is the bulk
+     of the work. Every `db.with_conn(move |conn| ...)` becomes
+     `db.with_write(move |conn| ...)`.
+   - The pending-ops `_sync` helpers
+     (`crates/db/src/db/pending_ops.rs`) have their `&Connection`
+     signatures retyped to `&WriteConn`. The async wrappers that
+     take `&ReadDbState` and execute writes (already callerless;
+     see `docs/discrepancies.md`) get deleted at the same time.
+   - The contact-groups / message-reactions / seen-address helpers
+     in `crates/db/src/db/queries_extra/calendar_contacts_writes.rs`
+     (the rest of the boundary work in `docs/discrepancies.md`)
+     get retyped here.
+6. Tighten the transitive
+   `crates/service-state/tests/lockdown.rs` check to assert that
+   `app` cannot reach `service-state` through any path at all (the
+   PR 0 work removed the `except through service` carve-out's
+   justification).
 
-1. Move the type definitions from `crates/service/src/actions/`
-   (`ActionError`, `ActionOutcome`, `MailOperation`,
-   `RemoteFailureKind`, `SendAttachment`, `SendIntent`, `SendRequest`)
-   into `crates/service-api/`. Restructure into
-   `service-api::actions` for DTOs and `service-api::wire` for the
-   existing IPC envelopes. `SendRequest` was missing from earlier
-   drafts of this list; it is used by `compose_send` and must move.
-2. **Verify** the typed-ID home, do not move. The definitions are
-   already in `crates/types/src/typed_ids.rs:11` (`FolderId`,
-   `LabelId`, `LabelGroupId`); `crates/common/src/typed_ids.rs:1`
-   is already a re-export shim from `types`. Add
-   `service-api`'s `Cargo.toml` dep on `types` (if not already
-   present) and re-export the typed IDs from `service-api`:
-   ```rust
-   // service-api
-   pub use types::{FolderId, LabelId, LabelGroupId};
-   ```
-   (`crates/types/src/lib.rs:5` keeps the `typed_ids` module
-   private and re-exports the IDs at the crate root at line 14, so
-   `types::FolderId` is the public path, not `types::typed_ids::FolderId`.)
-   **Do not** have `service-api` re-export from `common` -
-   `common` directly depends on `rusqlite` and `db`, which would
-   put writer-side crates back into `service-api`'s graph and into
-   `app`'s via `app -> service-api -> common -> db`. The
-   `service-api-is-pure-leaf` brokkr rule forbids the dep.
-3. Have `service::actions::*` re-export from `service_api::actions`
-   so existing service-side import paths keep working. The existing
-   writer-side `action-types` crate similarly re-exports from
-   `service-api` (`action-types` keeps the writer-side
-   `ActionContext`/`CalendarActionContext`/`MutationLog` types and
-   layers them on top of the wire DTOs from `service-api`).
-4. Rewrite every `service::actions::*` reference in `crates/app/src/`
-   to `service_api::actions::*` (or the appropriate sub-path). Use
-   the grep above as the worklist; verify zero hits afterwards.
-5. Remove `service = { path = "../service" }` from
-   `crates/app/Cargo.toml`. Verify `cargo tree -p app --depth 1`
-   does not list `service`.
-6. Add the brokkr rules (see Lockdown below) that forbid
-   `app -> service`, `service-api -> common`, etc. Without these,
-   the deps can drift back in.
+Acceptance: a grep for `from_arc` across `crates/db/`,
+`crates/db-read/`, and `crates/service-state/` returns zero hits.
+A grep for `Arc<Mutex<Connection>>` in those crates returns hits
+only inside the opaque pool's private storage. No untyped
+`with_conn*` exists on `WriterPool` or `WriteDbState`. Every closure
+that writes the main DB takes `&WriteConn`, not `&Connection`.
 
-`service-api` after PR 0a holds both IPC envelopes and action DTOs
-but remains a pure leaf: no `db`, `db-read`, `rusqlite`,
-`service-state`, `store`, `search`, `common`, `service`, or
-`action-types` deps. If a type pulled in from `service::actions`
-transitively requires one of those, it belongs in `action-types`
-(writer-side), not `service-api`, and the app does not need it.
+### PR 5: migrate the deferred peripheral crates
 
-#### PR 0b: extract the `runner` binary crate
+Goal: extend the boundary into the long-tail crates the original
+Scope section deferred. Classify each crate by mutation behavior,
+then retype its function signatures.
 
-`crates/app/src/main.rs:5` currently calls
-`service::run_service_blocking()` when launched with `--service`,
-and `crates/app/src/service_client.rs:2927` spawns the current
-executable with `--service` to start the service process. The
-single binary serves two roles. Removing `app -> service` requires
-moving the dispatch out of `app`.
+**Writer-side (convert `&Connection` to `&WriteConn`):**
+- `crates/sync/`
+- `crates/provider-sync/`
+- `crates/import/` (if present at migration time)
+- `crates/dev-seed/` stays writer-side; the production-build
+  exemption documented in Scope is what gates it, not the type
+  discipline.
 
-Steps:
+**Reader-side (convert `&Connection` to `&ReadConn`):**
+- `crates/smart-folder/` (after `count_smart_folder_unread` and
+  similar helpers move into `db-read`; this was originally PR 2
+  step 1 and is still pending)
+- `crates/seen/`
+- The read paths inside `crates/search/`
+- The read paths inside `crates/calendar/` (the write paths went
+  through `WriteDbState` in the most recent slice)
 
-1. Create `crates/runner/`. `Cargo.toml`:
-   ```toml
-   [package]
-   name = "runner"
-   ...
-   [[bin]]
-   name = "ratatoskr"   # whatever the current binary name is
-   path = "src/main.rs"
+**Own separate SQLite databases (same discipline, separate work
+item):**
+- `crates/stores/` owns `bodies.db`, the inline image store, and
+  the attachment file cache. Each gets its own `WriteConn` /
+  `ReadConn` pair against its own connection.
 
-   [dependencies]
-   # Disable app's default features. app currently has
-   # default = ["dev-seed"]; runner must opt in explicitly so the
-   # production binary does not pull dev-seed by default.
-   app = { path = "../app", default-features = false }
-   service = { path = "../service", default-features = false }
+**Audit-only:**
+- `crates/common/` keeps `rusqlite` for helpers that take typed
+  connections passed in by callers. Whether to fold its DB helpers
+  into `db` or `db-read` is a separate call; until it loses the
+  direct `rusqlite` / `db` deps, the brokkr
+  `service-api-is-pure-leaf` rule continues to forbid
+  `service-api -> common`, and typed IDs stay in the `types` crate.
 
-   [features]
-   default = []
-   # Development build: enables dev-seed wiping/reseeding on launch.
-   dev-seed = ["app/dev-seed"]
-   # If hotpath is wanted in the runner, forward it the same way:
-   # hotpath = ["app/hotpath", "service/hotpath"]
-   ```
-   Production builds use `cargo build -p runner` (no features).
-   Development builds use `cargo build -p runner --features dev-seed`.
-   Update any local launch scripts or aliases that previously ran
-   `cargo run -p app` (per `AGENTS.md`) to `cargo run -p runner --features dev-seed`.
-2. `crates/runner/src/main.rs` is the new entry point:
-   ```rust
-   fn main() {
-       if std::env::args().any(|a| a == "--service") {
-           service::run_service_blocking();
-       } else {
-           app::run_app_blocking();
-       }
-   }
-   ```
-3. Convert `crates/app/` to a library crate: remove the product
-   `[[bin]]` target (or `src/main.rs`), expose `app::run_app_blocking()`
-   (or whatever name fits) from `lib.rs`. The function body is
-   whatever `app/src/main.rs` previously did in the non-`--service`
-   branch.
+For each migrated crate, add a matching `dependency_rule` to
+`brokkr.toml`: writer-side crates may depend on `db`, reader-side
+crates may depend on `db-read` only.
 
-   **Handle `crates/app/src/bin/parent_death_helper.rs` explicitly.**
-   Cargo auto-discovers files under `src/bin/` as binary targets,
-   and the harness expects this sibling binary
-   (`crates/app/src/harness/mod.rs:472`). Pick one:
-   - Move `parent_death_helper.rs` into `crates/runner/src/bin/`
-     so it lives next to the product binary. Update the harness
-     reference. Cleanest.
-   - Or keep it in `crates/app/src/bin/` and add
-     `autobins = false` + an explicit `[[bin]]` entry to
-     `crates/app/Cargo.toml` that names only
-     `parent_death_helper`. Documents the intent that this is a
-     test/harness helper, not a product binary.
-   Pick the first unless there is a reason to keep
-   `parent_death_helper` co-located with app source.
-4. `crates/app/src/service_client.rs` continues to spawn
-   `current_exe()` with `--service`. The spawned process is now
-   the `runner` binary, and its `main` dispatches to
-   `service::run_service_blocking`. No change to the spawn
-   mechanism itself; just the dispatch target.
-5. Add `runner` to the workspace `members` in `Cargo.toml`.
-6. Update `brokkr.toml`. The current `[ratatoskr.harness]` section
-   at `brokkr.toml:87` sets `package = "app"`; change it to
-   `package = "runner"` (and adjust the spawned `binary` setting if
-   it names `app` explicitly). Without this, `brokkr service-test`
-   and `brokkr service-suite` will build and spawn the wrong
-   target and the boot harness will silently bypass the runner
-   dispatch.
-7. Confirm `cargo build -p runner` produces a single executable
-   that behaves identically to today's `app` binary in both modes.
-   Run the existing harness suite (`brokkr service-suite`) to
-   verify nothing in the boot path regressed.
-
-### PR 1: type split inside the existing `db` crate
-
-Goal: every `&Connection` parameter in `rtsk` and `app` becomes
-`&ReadConn`. Every `&Connection` parameter in `db` and `service`
-becomes `&WriteConn` (for writes) or `&ReadConn` (for read-only
-helpers). The app holds no writable connection.
-
-1. Add `ReadConn<'a>`, `ReadStatement<'a, 'b>`, `WriteConn<'a>`,
-   `WriteTxn<'t>` to `crates/db/src/db/`. Initially they wrap
-   `rusqlite::Connection` and forward to it. Include the
-   `Statement::readonly()` validation in `ReadConn::prepare`/
-   `prepare_cached`.
-2. Add `db::db::WriteConn::from_raw` as `pub(crate)` in `db`
-   (callable only from `db::WriterPool::with_write` and `WriteTxn`
-   internals). Add `db::db::ReadConn::from_raw` as `pub` +
-   `#[doc(hidden)]` for symmetry with the eventual cross-crate
-   `db -> db-read` boundary. In PR 1, `ReadConn` still lives in
-   `db`, so `WriteConn::as_read()` returns `db::ReadConn`; PR 2
-   moves `ReadConn` to `db-read` and the return type becomes
-   `db_read::ReadConn` without changing the call shape. Both
-   constructors rely on the brokkr `*-no-rusqlite` rules for
-   protection from `rtsk` and `app`.
-3. Retype `ReadDbState::with_conn*` to `ReadDbState::with_read*`,
-   handing out `&ReadConn`. Retype
-   `service_state::WriteDbState` to hold a `db::WriterPool` (not an
-   `Arc<Mutex<Connection>>`) and delegate
-   `WriteDbState::with_write(|&db::WriteConn| ...)` to
-   `WriterPool::with_write`. Keep the old `with_conn*` methods alive
-   but `#[deprecated]` for the transition; remove at the end.
-
-   Delete the existing escape hatches on `WriteDbState`:
-   - Delete `WriteDbState::conn() -> Arc<Mutex<Connection>>`
-     (`crates/service-state/src/lib.rs:80`-ish). Callers that drive
-     their own `spawn_blocking + lock` shape must route through
-     `with_write` instead. The calendar action helpers that lean on
-     this (per the docstring at `crates/service-state/src/lib.rs:71-79`)
-     are the main consumers and need to be migrated as part of PR 1.
-   - Delete `WriteDbState::to_read_state()` outright. Today it hands
-     out a `ReadDbState` backed by the **writer** connection
-     (`crates/service-state/src/lib.rs:66-68`), which silently
-     bypasses the OS-level `SQLITE_OPEN_READ_ONLY` flag the reader
-     pool will have. Service code that needs both reads and writes
-     holds both `ReadDbState` (over the reader pool) and
-     `WriteDbState` (over the writer pool) directly. They are
-     separate handles backed by separate connections, as
-     `db::open_reader_pool` and `db::open_writer_pool` produce.
-4. Split `apply_standard_pragmas` into a writer path and a reader
-   path, and place each next to the code that calls it.
-   `crates/db/src/db/mod.rs:103` currently sets
-   `PRAGMA journal_mode = WAL` for both connections; that is
-   writer-side setup and will fail on a connection opened with
-   `SQLITE_OPEN_READ_ONLY`. Refactor:
-   - `apply_writer_pragmas(&Connection)` in `db`: `journal_mode = WAL`,
-     `foreign_keys = ON`, `synchronous = NORMAL`, etc. Called by
-     `db::open_writer_pool`. Service boot calls this on the writer
-     connection **before** the app opens its read handle. The
-     existing `boot.ready` signal enforces this ordering.
-   - `apply_reader_pragmas(&Connection)` lives **alongside
-     `ReadDbState::open_existing`** - in `db` in PR 1, then moves
-     to `db-read` in PR 2 along with `ReadDbState`. It is never a
-     public function called across the crate boundary; it is an
-     implementation detail of `ReadDbState::open_existing`. This
-     keeps `db-read` from needing to depend on `db` after PR 2
-     (which would reverse the topology). Reader-safe pragmas only:
-     `busy_timeout` (the reader needs to wait on writer-held
-     transactions under WAL; without this the reader errors out
-     instead of blocking briefly), `query_only = ON` (a
-     belt-and-braces SQL-level read gate that survives even if the
-     OS-level `SQLITE_OPEN_READ_ONLY` flag is somehow lost),
-     `foreign_keys = ON`, and `temp_store`. Does not touch
-     `journal_mode` (a database-wide setting persisted by the
-     writer).
-   `ReadDbState::open_existing` opens the connection with
-   `Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)`
-   and applies `apply_reader_pragmas` internally. `db::open_reader_pool`
-   is a thin wrapper that just calls `ReadDbState::open_existing`.
-   The writer side continues to open with full read-write flags and
-   `apply_writer_pragmas`. The doc's claim that the app opens
-   read-only must match runtime behavior (today it does not; see
-   `crates/db/src/db/mod.rs:239,246`).
-5. Remove `ReadWriteDb` entirely. Returning a
-   `service_state::WriteDbState` from `db::ReadWriteDb::write()`
-   would create a `db -> service-state -> db` cycle. Replace
-   `ReadWriteDb` with two free constructors in `db`, each returning
-   an **opaque** pool type (no raw `Arc<Mutex<Connection>>`
-   escaping):
-   - `db::open_writer_pool(app_data_dir) -> Result<db::WriterPool, String>`
-     opens the writer connection, runs rename reconciliation,
-     migrations, applies `apply_writer_pragmas`. The returned
-     `db::WriterPool` exposes only `with_write(|&WriteConn| ...)`;
-     its inner `Arc<Mutex<Connection>>` is `pub(crate)` and never
-     escapes. Service calls this once during boot.
-   - `db::open_reader_pool(app_data_dir) -> Result<db::ReadDbState, String>`
-     opens a fresh connection with `SQLITE_OPEN_READ_ONLY` and
-     applies `apply_reader_pragmas`. `db::ReadDbState` is opaque:
-     only `with_read(|&ReadConn| ...)` exposes the wrapped
-     connection. Both Service and app call this after writer setup
-     completes. (PR 2 moves `ReadDbState` to `db-read` and the
-     return type becomes `db_read::ReadDbState`; callers are
-     unchanged because the read surface is identical.)
-
-   Service composes a `db::ReadDbState` and a
-   `service_state::WriteDbState::from_pool(writer_pool)` where
-   `from_pool` takes the opaque `db::WriterPool` (not a raw
-   `Arc<Mutex<Connection>>`). App does not depend on `db` directly
-   and therefore calls `rtsk::open_reader_pool(app_data_dir)`.
-
-   In PR 1 (`rtsk` still depends on `db`), this is a thin re-export
-   of `db::open_reader_pool`.
-
-   In PR 2 (`rtsk` depends on `db-read`, not `db`), it becomes an
-   explicit wrapper:
-   ```rust
-   // rtsk, after PR 2
-   pub fn open_reader_pool(app_data_dir: &Path) -> Result<db_read::ReadDbState, String> {
-       db_read::ReadDbState::open_existing(&app_data_dir.join("ratatoskr.db"))
-   }
-   ```
-   The app-facing call site stays
-   `rtsk::open_reader_pool(app_data_dir)` across both PRs;
-   the body changes type and source.
-
-   App never calls `open_writer_pool`. The writable connection is
-   never wrapped in a `ReadDbState` and never enters the app
-   process. (A future "I need migrations to have run" shortcut
-   from app code must instead wait on the Service's existing
-   `boot.ready` signal, as it does today.)
-6. Walk `rtsk` and `app`: convert every `&Connection` parameter and
-   every `with_conn(|c| ...)` closure to take `&ReadConn`. The compile
-   errors land as a worklist.
-
-   Watch out for `query_row_and_then` call sites. The closure returns
-   `Result<T, E>` where `E` is often `String` or a domain-specific
-   error type. `ReadConn::query_row_and_then` routes through
-   `prepare`, which means the closure's `E` must accept the new
-   `NotReadOnly` failure variant. In PR 1 this variant lives on
-   `db::Error` (or wherever `db` already exposes its error type);
-   in PR 2 it moves to `db_read::Error`. Three migration shapes:
-   - If `E = db::Error` (PR 1) / `db_read::Error` (PR 2), no work
-     needed.
-   - If `E: From<db::Error>` (PR 1) / `From<db_read::Error>` (PR 2),
-     no work needed at the call site, but the domain error needs
-     the `From` impl.
-   - If `E = String` (common today), the wrapper either calls
-     `err.to_string()` internally or exposes a sibling
-     `query_row_and_then_string` for ergonomics. Pick one shape and
-     document it before mass conversion; flipping mid-migration will
-     churn every call site twice.
-7. Update the in-flight write helper at
-   `crates/db/src/db/queries_extra/label_groups.rs` to take
-   `&WriteConn`. Update the Service handler call site at
-   `crates/service/src/handlers/label.rs:17`.
-8. Convert remaining write helpers in `db` to `&WriteConn`. Convert
-   read helpers in `db` (if any are called from `core`/`app`) to
-   `&ReadConn`.
-9. Delete `pub use db::db::Connection` from
-   `crates/core/src/db/mod.rs:4`. Delete `pub use db::db::ReadWriteDb`
-   from `crates/core/src/db/mod.rs:3` (`rtsk` should not surface the
-   read/write opener at all). Also delete the
-   `pub use rusqlite::Connection;` inside the `db` crate at
-   `crates/db/src/db/mod.rs:15`: leaving it alive invites a future
-   "I'll just re-export it for convenience" PR that silently
-   reintroduces the symbol to anyone depending on `db`. Writer-side
-   crates that need `Connection` should `use rusqlite::Connection;`
-   directly.
-
-   Add `rtsk` re-exports so `app` can construct its read handle
-   without depending on `db` directly. In PR 1 these are direct
-   re-exports of `db`'s symbols (`pub use db::open_reader_pool;` and
-   `pub use db::ReadDbState;` in `crates/core/src/db/mod.rs`); PR 2
-   replaces them with the explicit wrapper described in PR 1 step 5
-   and a re-export of `db_read::ReadDbState`. `app::Db::open` calls
-   `rtsk::open_reader_pool(app_data_dir)` across both PRs.
-10. Delete `pub use db::db::queries_extra::*` from
-    `crates/core/src/db/queries_extra.rs:2`. Replace with explicit
-    re-exports of the read modules `rtsk` actually surfaces.
-11. Change `crates/app/src/db/connection.rs`: hold `ReadDbState`,
-    not `ReadWriteDb`. Drop `with_conn`/`with_conn_sync` returning
-    `&Connection`. Add `with_read`/`with_read_sync` returning
-    `&ReadConn`. The app process must not hold a writable connection,
-    even one it never uses.
-12. Run `brokkr check`. Resolve any remaining call sites.
-
-At the end of PR 1: type discipline holds for reads inside `rtsk` and
-`app`. The app holds no writable connection. The doc and runtime
-behavior agree about the read-only flag. Writer surface is still
-reachable from `rtsk` through its transitive `db` dependency; that is
-PR 2's job.
-
-### PR 2: crate extraction (`db-read`) and dependency lockdown
-
-Goal: make the type discipline impossible to subvert by re-export.
-
-1. **Break the `navigation.rs` cycle first.** This is the only
-   non-mechanical work in PR 2 and should be the first commit, not
-   buried inside the crate move.
-   `crates/core/src/db/queries_extra/navigation.rs:247` calls
-   `smart_folder::count_smart_folder_unread(conn, ...)`, and
-   `smart-folder` depends on `db`. After PR 2's move, `rtsk` would
-   need `db-read`, which would need `smart-folder`, which depends on
-   `db` - a cycle through the wrong layers. Resolve by **moving**
-   `count_smart_folder_unread` (and its supporting query glue) into
-   `db-read` rather than carving a duplicate helper. If `smart-folder`
-   still needs to expose the function for other callers, it
-   re-exports from `db-read`. The invariant after this commit:
-   `count_smart_folder_unread` lives in `db-read`, takes a
-   `&ReadConn`, and is reachable from both `navigation.rs` and
-   `smart-folder` without either pulling in `db`. Land as its own
-   commit so the rest of PR 2 stays mechanical.
-2. Create `crates/db-read/` with its own `Cargo.toml`. Add it to the
-   workspace members list in `Cargo.toml`. Depends on `rusqlite`.
-3. Move `ReadConn`, `ReadStatement`, `ReadCachedStatement`,
-   `ReadDbState` (with `open_existing` and `with_read*` only), and
-   read queries from `db` (and any read queries still in `rtsk`)
-   into `db-read`. **Do not** move directory creation, rename
-   reconciliation, or the migration runner: those stay in `db` as
-   part of `open_writer_pool`. `db-read::ReadDbState` is opaque: its
-   only public constructor is `open_existing(&Path)`; there is no
-   `from_arc`, no `conn()`, no way to extract or re-wrap the inner
-   `Arc<Mutex<Connection>>`.
-4. `db` adds `db-read` as a dependency. `WriteConn::as_read` returns
-   `db_read::ReadConn`. `db::open_reader_pool`'s return type changes
-   from `db::ReadDbState` (PR 1) to `db_read::ReadDbState` (PR 2);
-   callers are unchanged because both expose the same `with_read*`
-   surface.
-5. Remove `db = { path = "../db" }` from `crates/core/Cargo.toml`.
-   Add `db-read = { path = "../db-read" }`. Confirm `rtsk` no longer
-   needs anything from `db`.
-6. `rtsk` re-exports the read surface explicitly. No globs.
-   `open_reader_pool` becomes a function in `rtsk` (not a re-export
-   of `db::open_reader_pool`, since `rtsk` no longer depends on
-   `db`):
-   ```rust
-   pub use db_read::{ReadConn, ReadDbState};
-   pub mod queries_extra {
-       pub use db_read::queries_extra::navigation;
-       pub use db_read::queries_extra::thread_detail;
-       pub use db_read::queries_extra::scoped_queries;
-       // ... one line per read module, no globs.
-   }
-
-   pub fn open_reader_pool(app_data_dir: &Path) -> Result<db_read::ReadDbState, String> {
-       db_read::ReadDbState::open_existing(&app_data_dir.join("ratatoskr.db"))
-   }
-   ```
-   The app-facing call site stays `rtsk::open_reader_pool(app_data_dir)`.
-7. `app`'s direct deps for this discipline are `rtsk` (for DB read
-   access) and `service-api` (for IPC envelopes and action DTOs).
-   It never names `db-read` or `db` directly. Confirm by inspecting
-   `crates/app/Cargo.toml`: no `db`, no `db-read`, no `rusqlite`, no
-   `service-state`, no `service`, no `action-types`, no `common`.
-   `rtsk` and `service-api` (and the other allowed deps unrelated
-   to this discipline, e.g. `iced`, `types`, `store`) remain.
-8. Add `brokkr.toml` `dependency_rule` entries (see Lockdown below).
-9. Add the trybuild lockdown crate (see Lockdown below).
-10. Delete the deprecated `with_conn`/`with_conn_sync` bridges from
-    PR 1.
+Acceptance: `cargo tree -p <crate> --depth 1` for each reader-side
+crate does not list `db`. The brokkr rules for each crate are
+listed in `brokkr.toml` and the gate passes.
 
 ## Lockdown tests
 
@@ -1347,114 +1113,83 @@ cheap and still useful against bugs we have not imagined yet.
 
 ## Acceptance criteria
 
-The change is done when all of the following hold:
+Status markers: **LANDED** for criteria already met as of the most
+recent commit; **OPEN** for criteria still outstanding. PR
+cross-references point to the Remaining migration section above.
 
-1. `crates/core/src/db/mod.rs` does not contain `pub use ... Connection`
-   or any glob re-export of writer modules.
-2. `crates/core/src/db/queries_extra.rs` does not contain
-   `pub use db::db::queries_extra::*`.
-3. `crates/app/src/db/connection.rs` does not name `Connection`,
-   `ReadWriteDb`, or `WriteConn`. Its `Db` holds `ReadDbState`. Its
-   closures take `&ReadConn<'_>`.
-4. `cargo tree -p rtsk --depth 1` does not list `db`, `rusqlite`,
-   or `service-state`. (Transitive `rtsk -> db-read -> rusqlite` is
-   expected and allowed.)
-5. `cargo tree -p app --depth 1` does not list `db`, `db-read`,
-   `rusqlite`, `service-state`, `service`, `action-types`, or
-   `common`.
-6. `brokkr check` passes with the new `core-no-writer-db` and
-   `app-no-db-internals` `dependency_rule` entries in place. The
-   existing `core-no-rusqlite` and `app-no-rusqlite` rules remain
-   in `brokkr.toml`.
-7. The trybuild lockdown crate exists at `crates/db-read-lockdown/`
-   and all its compile-fail cases compile-fail; all its positive
-   cases compile.
-8. `crates/db-read/tests/` includes the stepping-bypass regression
-   tests for `UPDATE ... RETURNING` and `INSERT ... RETURNING`, and
-   they pass.
-9. The Service still services `label_group.reorder` (and every other
-   write) end to end. `brokkr service-suite` is green.
-10. The app's read connection is opened with
-    `SQLITE_OPEN_READ_ONLY` (not just `PRAGMA query_only = ON`).
-    `crates/db/src/db/mod.rs` no longer uses bare `Connection::open`
-    for the read handle.
-11. For the main `ratatoskr.db` connection only: the app process
-    holds no writable `rusqlite::Connection` and no `WriteDbState`.
-    `ReadWriteDb` is deleted. The writer-side pool is constructed
-    via `db::open_writer_pool` (Service only). The reader-side pool
-    is constructed by Service via `db::open_reader_pool` and by app
-    via `rtsk::open_reader_pool` (a thin re-export of the same
-    function; app does not depend on `db` directly).
-    `apply_writer_pragmas` is called only on the writer connection;
-    `apply_reader_pragmas` is called only on reader connections.
-    (Body store / inline image store / attachment cache connections
-    in `crates/stores/` are out of scope for this PR pair; their own
-    read/write split is the follow-up.)
-12. `service_state::WriteDbState::with_*` methods hand out
-    `&db::WriteConn<'_>` in their closures, not
-    `&rusqlite::Connection`. `WriteDbState` holds a `db::WriterPool`
-    (not `Arc<Mutex<Connection>>`). `WriteDbState::conn()` is
-    deleted. `WriteDbState::to_read_state()` is deleted. Service
-    code that needs both reads and writes holds both a
-    `db_read::ReadDbState` (over the reader pool) and a
-    `WriteDbState` (over the writer pool) as separate handles.
-    `db::WriterPool` exposes only `with_write(|&WriteConn| ...)`;
-    its inner `Arc<Mutex<Connection>>` is `pub(crate)` and never
-    escapes. `db_read::ReadDbState` exposes only
-    `open_existing(&Path)` and `with_read*(|&ReadConn| ...)`; no
-    `from_arc`, no `conn()`.
-13. No `pub use rusqlite::Connection;` (or analogous re-exports of
-    mutating rusqlite types) anywhere in `db-read`'s public surface.
-    The lockdown grep check passes.
-14. `crates/db/src/db/mod.rs` no longer contains
-    `pub use rusqlite::Connection;`. Writer-side crates name the
-    type directly via `use rusqlite::Connection;`.
-15. `store`'s app-facing API surface does not hand out
-    `&rusqlite::Connection` or `Arc<Mutex<Connection>>` for the main
-    DB. (Audit only in PR 1; deeper restructuring of `store`'s own
-    SQLite databases is the follow-up.)
-16. `crates/app/Cargo.toml` does not list `service` as a direct
-    dependency. `cargo tree -p app --depth 1` does not include
-    `service` or `action-types`. `grep -rn 'service::' crates/app/src/`
-    returns zero hits. All previously-`service::actions::*` imports
-    in app now resolve through `service_api::*`.
-17. `service-api` lists no writer-side or heavy-dep crates as deps.
-    Specifically its `Cargo.toml` does not include `db`, `db-read`,
-    `rusqlite`, `service-state`, `store`, `search`, `service`,
-    `action-types`, or `common`. Typed IDs (`FolderId`, `LabelId`,
-    `LabelGroupId`) come from the `types` crate, which `service-api`
-    depends on.
-18. `crates/runner/` exists, owns the Ratatoskr app/service product
-    binary (other workspace bins in `squeeze` and `coverage` are
-    unrelated tools and unaffected), depends on `app` and `service`
-    as libraries, and contains the `--service`-vs-app dispatch in
-    `main`. `crates/app/` is a library crate (no `[[bin]]`, exposes
-    a `run_app_blocking` or equivalent entry function).
-    `brokkr.toml`'s `[ratatoskr.harness]` section names `runner` as
-    the package/binary, not `app`. The harness suite
-    (`brokkr service-suite`) passes against the new `runner`
-    binary.
-19. `db-read`'s public surface does not name `rusqlite::Connection`,
-    `rusqlite::Transaction`, or `rusqlite::CachedStatement` outside
-    its single private `raw` module. The grep-based internal
-    quarantine check (see Lockdown) passes: no file under
-    `crates/db-read/src/` other than `raw.rs` matches
-    `rusqlite::Connection|rusqlite::Transaction|rusqlite::CachedStatement|\.execute\(|\.execute_batch\(|unchecked_transaction|\.transaction\(|pragma_update`.
-20. `dev-seed` is exempt from these criteria by design (development
-    feature only). The runner gates it behind a `dev-seed` feature;
-    production builds use `cargo build -p runner` (no features),
-    development builds use `cargo build -p runner --features dev-seed`.
-    A CI step verifies that the production runner dep graph excludes
-    `dev-seed`: `cargo tree -p runner` (no `--features`) does not
-    list `dev-seed`. The exemption is recorded in `brokkr.toml`.
-21. The lockdown CI gate (`brokkr test -p db-read-lockdown` or
-    equivalent named command) runs the trybuild compile-fail crate,
-    the `db-read` stepping regression tests, the `db-read` internal
-    raw-rusqlite quarantine grep, and the updated
-    `service-state/tests/lockdown.rs` transitive check. CI fails on
-    any of them. Running it is not optional.
+1. **LANDED.** `crates/core/src/db/mod.rs` does not contain
+   `pub use ... Connection` or any glob re-export of writer modules.
+2. **LANDED.** `crates/core/src/db/queries_extra.rs` does not
+   contain `pub use db::db::queries_extra::*`.
+3. **LANDED.** `crates/app/src/db/connection.rs` does not name
+   `Connection`, `ReadWriteDb`, or `WriteConn`. Its `Db` holds
+   `ReadDbState`. Its closures take `&ReadConn<'_>`.
+4. **OPEN (PR 3).** `cargo tree -p rtsk --depth 1` does not list
+   `db`, `rusqlite`, or `service-state`. Today `rtsk` depends on
+   `db-read`, which depends on `db`. PR 3 flips this so
+   `db -> db-read`.
+5. **LANDED.** `cargo tree -p app --depth 1` does not list `db`,
+   `db-read`, `rusqlite`, `service-state`, `service`,
+   `action-types`, or `common`.
+6. **LANDED.** `brokkr check` passes with `core-no-writer-db`,
+   `app-no-db-internals`, and `service-api-is-pure-leaf` in place.
+7. **LANDED.** The `db-read-lockdown` crate exists with passing
+   compile-fail and positive cases.
+8. **LANDED.** The stepping-bypass regression tests in
+   `crates/db-read/tests/` pass.
+9. **LANDED.** `brokkr service-suite` is green for the migrated
+   write surface.
+10. **LANDED.** The app's read connection is opened with
+    `SQLITE_OPEN_READ_ONLY` and `apply_reader_pragmas`.
+11. **OPEN (PR 4).** The app process holds no writable
+    `rusqlite::Connection` and no `WriteDbState`. Holds for app
+    today, but `WriteDbState::from_arc` and `WriterPool::from_arc`
+    are publicly constructible from any crate that can name
+    `Arc<Mutex<Connection>>`. PR 4 deletes them.
+12. **OPEN (PR 4).** `WriteDbState::with_*` methods hand out
+    `&db::WriteConn<'_>`. Today both typed (`with_write*`) and
+    untyped (`with_conn*`) variants are exposed; the untyped ones
+    pass raw `&Connection`. PR 4 deletes the untyped surface.
+13. **LANDED.** `db-read` does not `pub use rusqlite::Connection`
+    on its public surface.
+14. **LANDED.** `crates/db/src/db/mod.rs` no longer
+    `pub use rusqlite::Connection;`.
+15. **OPEN (audit, PR 5).** `store`'s app-facing API does not hand
+    out `&rusqlite::Connection` for the main DB.
+16. **LANDED.** `crates/app/Cargo.toml` has no `service` dep;
+    `grep -rn 'service::' crates/app/src/` returns zero hits.
+17. **LANDED.** `service-api` has no writer-side or heavy-dep
+    crates as deps.
+18. **LANDED.** `crates/runner/` exists, harness suite passes
+    against it.
+19. **OPEN (PR 3).** `db-read`'s internal raw-rusqlite quarantine:
+    `raw.rs` exists and the grep check scans every other file.
+    Today neither holds: no `raw.rs`, dead exemption in the
+    lockdown test.
+20. **LANDED.** `dev-seed` exemption documented in `brokkr.toml`;
+    production runner build excludes it.
+21. **PARTIAL.** Lockdown CI gate runs the trybuild crate and the
+    stepping regressions today. PR 3 adds the internal quarantine
+    grep; PR 4 tightens the transitive
+    `service-state/tests/lockdown.rs` check (the `except through
+    service` carve-out is no longer needed post-PR-0).
+22. **OPEN (PR 3).** `ReadConn`/`ReadStatement`/
+    `ReadCachedStatement`/`ReadDbState` source lives in
+    `crates/db-read/src/raw.rs`, not in `writer_db::db`.
+    `cargo tree -p db-read` does not list `db`; `cargo tree -p db`
+    lists `db-read`.
+23. **OPEN (PR 4).** No `from_arc` constructor exists on
+    `ReadDbState`, `WriterPool`, or `WriteDbState`. No untyped
+    `with_conn*` exists on `WriterPool` or `WriteDbState`. Every
+    closure that writes the main DB takes `&WriteConn`, not
+    `&Connection`.
+24. **OPEN (PR 5).** The peripheral crates from the Scope section
+    (`sync`, `provider-sync`, `import`, `smart-folder`, `seen`,
+    parts of `search` and `calendar`) take `&WriteConn` or
+    `&ReadConn`, not `&Connection`. Matching `dependency_rule`
+    entries are in `brokkr.toml`.
 
-After landing, the failure modes split cleanly:
+After all three PRs land, the failure modes split cleanly:
 
 - **Method-level writes from the read crate or app** (calling
   `.execute()`, `.transaction()`, `.unchecked_transaction()`, etc.)
