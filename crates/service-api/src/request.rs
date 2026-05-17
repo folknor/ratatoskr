@@ -27,6 +27,7 @@ use crate::pinned_search::{
     PinnedSearchUpdateParams,
 };
 use crate::settings::SettingsSetParams;
+use crate::label::LabelGroupReorderParams;
 use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
@@ -716,6 +717,10 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     SignatureReorder { params: SignatureReorderParams },
+    /// Phase 6a: persist a new ordering for `label_groups`. Conditional
+    /// idempotency - replays just re-write the same sort_order. One
+    /// bounded transaction; 5 s timeout.
+    LabelGroupReorder { params: LabelGroupReorderParams },
     /// Phase 6a: UPSERT a contact group + replace its member email
     /// list. The plan's original split (group_create / group_update)
     /// collapsed to one method because today's underlying DB function
@@ -990,6 +995,7 @@ impl RequestParams {
             Self::SignatureUpdate { .. } => "signature.update",
             Self::SignatureDelete { .. } => "signature.delete",
             Self::SignatureReorder { .. } => "signature.reorder",
+            Self::LabelGroupReorder { .. } => "label_group.reorder",
             Self::PinnedSearchCreateOrUpdate { .. } => "pinned_search.create_or_update",
             Self::PinnedSearchUpdate { .. } => "pinned_search.update",
             Self::PinnedSearchDelete { .. } => "pinned_search.delete",
@@ -1101,6 +1107,7 @@ impl RequestParams {
             | Self::SignatureUpdate { .. }
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
+            | Self::LabelGroupReorder { .. }
             | Self::ContactsGroupSave { .. }
             | Self::ContactsGroupDelete { .. }
             | Self::ContactsContactSave { .. }
@@ -1246,6 +1253,7 @@ impl RequestParams {
             | Self::SignatureUpdate { .. }
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
+            | Self::LabelGroupReorder { .. }
             | Self::PinnedSearchUpdate { .. }
             | Self::PinnedSearchDelete { .. }
             | Self::PinnedSearchDeleteAll { .. }
@@ -1337,6 +1345,7 @@ impl RequestParams {
             Self::SignatureUpdate { params } => serde_json::json!({ "params": params }),
             Self::SignatureDelete { params } => serde_json::json!({ "params": params }),
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
+            Self::LabelGroupReorder { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchCreateOrUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchDelete { params } => serde_json::json!({ "params": params }),
@@ -1557,6 +1566,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("signature.reorder params: {e}"))?;
                 Ok(Self::SignatureReorder { params: p.params })
+            }
+            "label_group.reorder" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: LabelGroupReorderParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("label_group.reorder params: {e}"))?;
+                Ok(Self::LabelGroupReorder { params: p.params })
             }
             "contacts.group_save" => {
                 #[derive(Deserialize)]

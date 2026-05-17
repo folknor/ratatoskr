@@ -22,6 +22,7 @@ use service_api::{
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
+    LabelGroupReorderAck, LabelGroupReorderParams,
     SignatureUpdateAck, SignatureUpdateParams, SmartFolderCreateAck, SmartFolderCreateParams,
     SyncCancelAccountParams, SyncCancelAck,
     SyncCompleted, SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck,
@@ -1424,6 +1425,21 @@ impl ServiceClient {
         let _ack: SignatureReorderAck = self
             .request(RequestParams::SignatureReorder {
                 params: SignatureReorderParams { ordered_ids },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: persist label-group order via `label_group.reorder`.
+    /// Pairs are `(label_groups.id, sort_order)`; the Service writes
+    /// the whole batch in one transaction.
+    pub async fn reorder_label_groups(
+        &self,
+        orders: Vec<(i64, i64)>,
+    ) -> Result<(), ClientError> {
+        let _ack: LabelGroupReorderAck = self
+            .request(RequestParams::LabelGroupReorder {
+                params: LabelGroupReorderParams { orders },
             })
             .await?;
         Ok(())

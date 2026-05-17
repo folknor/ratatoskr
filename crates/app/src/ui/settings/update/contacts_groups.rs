@@ -50,6 +50,22 @@ impl Settings {
     }
 
     pub(super) fn handle_contact_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        self.persist_contact_editor(true)
+    }
+
+    /// Auto-save variant for keystroke-driven persistence on existing
+    /// local contacts. Same write as the explicit Save button, but
+    /// leaves the editor sheet open so the user can keep typing.
+    pub(super) fn handle_contact_autosave(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        self.persist_contact_editor(false)
+    }
+
+    fn persist_contact_editor(
+        &mut self,
+        close_sheet: bool,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let Some(ref editor) = self.contact_editor else {
             return (Task::none(), None);
         };
@@ -74,9 +90,11 @@ impl Settings {
             source: editor.source.clone().or_else(|| Some("user".to_string())),
             server_id: editor.server_id.clone(),
         };
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, Instant::now());
-        self.contact_editor = None;
+        if close_sheet {
+            self.active_sheet = None;
+            self.sheet_anim.go_mut(false, Instant::now());
+            self.contact_editor = None;
+        }
         (Task::none(), Some(SettingsEvent::SaveContact(entry)))
     }
 

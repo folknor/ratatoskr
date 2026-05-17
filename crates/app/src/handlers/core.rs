@@ -606,10 +606,7 @@ impl ReadyApp {
             SettingsEvent::LoadLabelGroupMembers(group_id) => {
                 handlers::labels::load_label_group_members_async(&self.db, group_id)
             }
-            SettingsEvent::ReorderLabelGroups(orders) => {
-                handlers::labels::reorder_label_groups_async(&self.db, orders)
-                    .map(Message::LabelOp)
-            }
+            SettingsEvent::ReorderLabelGroups(orders) => self.handle_reorder_label_groups(orders),
             SettingsEvent::ExecuteContactImport {
                 prepared,
                 account_id,
@@ -685,8 +682,13 @@ impl ReadyApp {
                 return Task::none();
             }
             handlers::LabelOp::ReorderAck(Ok(())) => {
-                return handlers::labels::load_label_groups_async(&self.db)
-                    .map(Message::LabelOp);
+                // Refresh both the settings list and the sidebar so the
+                // new order shows up everywhere it's rendered.
+                return Task::batch([
+                    handlers::labels::load_label_groups_async(&self.db)
+                        .map(Message::LabelOp),
+                    self.load_navigation_and_threads(),
+                ]);
             }
             handlers::LabelOp::ReorderAck(Err(e)) => {
                 log::error!("Failed to persist label group order: {e}");
@@ -826,6 +828,25 @@ impl ReadyApp {
                     .map_err(|e| e.to_string())
             },
             Message::AccountUpdated,
+        )
+    }
+
+    pub(crate) fn handle_reorder_label_groups(
+        &mut self,
+        orders: Vec<(i64, i64)>,
+    ) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("label_group.reorder: no ServiceClient yet; ignoring reorder");
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                client
+                    .reorder_label_groups(orders)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            |result| Message::LabelOp(handlers::LabelOp::ReorderAck(result)),
         )
     }
 

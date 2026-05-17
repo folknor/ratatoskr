@@ -13,6 +13,7 @@ mod attachment;
 mod contacts;
 pub(crate) mod extract;
 mod internal;
+mod label;
 mod oauth;
 mod pinned_search;
 mod settings;
@@ -90,6 +91,9 @@ pub(crate) async fn dispatch(
         }
         RequestParams::SignatureReorder { params } => {
             signature::handle_reorder(&boot_state, params).await
+        }
+        RequestParams::LabelGroupReorder { params } => {
+            label::handle_reorder(&boot_state, params).await
         }
         RequestParams::ContactsGroupSave { params } => {
             contacts::handle_group_save(&boot_state, params).await

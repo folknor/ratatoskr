@@ -325,6 +325,7 @@ pub enum SelectField {
     UndoDelay,
     MarkAsRead,
     SignatureAccount,
+    ContactAccount,
     AiProvider,
     AiModel,
     DateDisplay,

@@ -5,6 +5,13 @@ use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
+use crate::ui::widgets;
+
+/// Sentinel value used by the account picker to represent "Local" (no
+/// account). Outside the picker the absence is `Option<String>::None`;
+/// we round-trip through the select widget which only deals in `String`
+/// values.
+const CONTACT_LOCAL_VALUE: &str = "";
 
 pub(super) fn contact_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let Some(ref editor) = state.contact_editor else {
@@ -33,7 +40,12 @@ pub(super) fn contact_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
             }),
     );
 
-    col = col.push(contact_account_selector(editor, &state.managed_accounts));
+    let picker_open = state.open_select == Some(SelectField::ContactAccount);
+    col = col.push(section_untitled(vec![contact_account_selector(
+        editor,
+        &state.managed_accounts,
+        picker_open,
+    )]));
 
     col = col.push(contact_editor_fields(editor));
     col = col.push(contact_editor_buttons(
@@ -47,50 +59,58 @@ pub(super) fn contact_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
 fn contact_account_selector<'a>(
     editor: &'a ContactEditorState,
     accounts: &'a [ManagedAccount],
-) -> Element<'a, SettingsMessage> {
-    let selected_id = editor.account_id.as_deref();
-
-    let mut btn_row = row![].spacing(SPACE_XS).align_y(Alignment::Center);
-
-    let is_local = selected_id.is_none();
-    let local_style = if is_local {
-        theme::ButtonClass::Primary
-    } else {
-        theme::ButtonClass::Ghost
+    open: bool,
+) -> RowBuilder<'a> {
+    let selected_value = match editor.account_id.as_deref() {
+        Some(id) => id,
+        None => CONTACT_LOCAL_VALUE,
     };
-    btn_row = btn_row.push(
-        button(text("Local").size(TEXT_SM))
-            .style(local_style.style())
-            .on_press(SettingsMessage::ContactEditorAccountChanged(None))
-            .padding(PAD_ICON_BTN),
-    );
 
+    let mut options: Vec<widgets::SelectOption<'a>> = Vec::with_capacity(accounts.len() + 1);
+    options.push(widgets::SelectOption {
+        value: CONTACT_LOCAL_VALUE.to_owned(),
+        label: "Local",
+        icon: None,
+    });
     for account in accounts {
-        let is_selected = selected_id == Some(account.id.as_str());
-        let style = if is_selected {
-            theme::ButtonClass::Primary
-        } else {
-            theme::ButtonClass::Ghost
-        };
-        let aid = Some(account.id.clone());
-        btn_row = btn_row.push(
-            button(text(&account.email).size(TEXT_SM))
-                .style(style.style())
-                .on_press(SettingsMessage::ContactEditorAccountChanged(aid))
-                .padding(PAD_ICON_BTN),
-        );
+        let label = account
+            .account_name
+            .as_deref()
+            .or(account.display_name.as_deref())
+            .unwrap_or(&account.email);
+        let icon = account
+            .account_color
+            .as_deref()
+            .map(|hex| widgets::SelectIcon::ColorDot(theme::hex_to_color(hex)));
+        options.push(widgets::SelectOption {
+            value: account.id.clone(),
+            label,
+            icon,
+        });
     }
 
-    container(column![
-        text("Account")
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
-        Space::new().height(SPACE_XXXS),
-        btn_row,
-    ])
-    .padding(PAD_SETTINGS_ROW)
-    .width(Length::Fill)
-    .into()
+    let dropdown = widgets::select_with_icons(
+        options,
+        Some(selected_value),
+        open,
+        true,
+        "Choose account",
+        SettingsMessage::ToggleSelect(SelectField::ContactAccount),
+        |value| {
+            SettingsMessage::ContactEditorAccountChanged(if value == CONTACT_LOCAL_VALUE {
+                None
+            } else {
+                Some(value)
+            })
+        },
+    );
+
+    setting_row_with_description(
+        "Account",
+        Some("Choose the account that owns this contact. Local contacts are stored only in Ratatoskr and are not synced to any provider."),
+        dropdown,
+        SettingsMessage::ToggleSelect(SelectField::ContactAccount),
+    )
 }
 
 fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMessage> {

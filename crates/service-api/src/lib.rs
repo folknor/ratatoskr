@@ -16,6 +16,7 @@ mod account;
 mod attachment;
 mod contacts;
 mod internal;
+mod label;
 mod oauth;
 mod pinned_search;
 mod settings;
@@ -59,6 +60,7 @@ pub use contacts::{
     ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck, ContactSaveParams,
     ContactSaveWithWritebackAck, WritebackOutcome,
 };
+pub use label::{LabelGroupReorderAck, LabelGroupReorderParams};
 pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,

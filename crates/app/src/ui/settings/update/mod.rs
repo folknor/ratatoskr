@@ -166,7 +166,7 @@ impl Component for Settings {
                 if let Some(ref editor) = self.contact_editor {
                     let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
                     if is_local && editor.contact_id.is_some() {
-                        return self.handle_contact_save();
+                        return self.handle_contact_autosave();
                     }
                 }
                 return (Task::none(), None);

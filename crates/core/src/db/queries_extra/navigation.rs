@@ -340,7 +340,7 @@ fn build_label_groups_from_counts(
         .prepare(
             "SELECT id, name, color_bg, color_fg
              FROM label_groups
-             ORDER BY name COLLATE NOCASE",
+             ORDER BY sort_order ASC, name COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
 
