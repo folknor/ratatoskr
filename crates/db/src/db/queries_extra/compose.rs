@@ -572,7 +572,7 @@ const SAVE_LOCAL_DRAFT_SQL: &str = "INSERT INTO local_drafts (id, account_id, to
        updated_at = unixepoch(), sync_status = 'pending'";
 
 fn exec_save_local_draft(
-    conn: &crate::db::Connection,
+    conn: &rusqlite::Connection,
     p: &SaveLocalDraftParams,
 ) -> Result<(), String> {
     conn.execute(
@@ -607,13 +607,13 @@ pub async fn db_save_local_draft(
 }
 
 pub fn db_save_local_draft_sync(
-    conn: &crate::db::Connection,
+    conn: &rusqlite::Connection,
     params: &SaveLocalDraftParams,
 ) -> Result<(), String> {
     exec_save_local_draft(conn, params)
 }
 
-pub fn db_mark_queued_drafts_failed_sync(conn: &crate::db::Connection) -> Result<usize, String> {
+pub fn db_mark_queued_drafts_failed_sync(conn: &rusqlite::Connection) -> Result<usize, String> {
     conn.execute(
         "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'",
         [],

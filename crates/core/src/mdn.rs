@@ -3,12 +3,6 @@
 //! Policy lookup and sent-flag tracking live in `db::queries_extra::mdn`.
 //! This module keeps MIME message building and IMAP/JMAP protocol calls.
 
-// Re-export storage functions and types.
-pub use crate::db::queries_extra::{
-    ReadReceiptPolicy, is_mdn_already_sent, is_mdn_requested_graph, mark_mdn_sent_local,
-    resolve_read_receipt_policy,
-};
-
 // ---------------------------------------------------------------------------
 // MDN message builder (RFC 8098)
 // ---------------------------------------------------------------------------

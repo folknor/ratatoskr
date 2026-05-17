@@ -58,7 +58,7 @@ const PER_ACCOUNT_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result<(), String> {
     let _guard = GAL_HANDLER_LOCK.lock().await;
 
-    let Some(conn) = boot_state.db_conn() else {
+    let Some(read_db) = boot_state.read_db_state() else {
         log::debug!("gal.kick received before db_conn available; ignoring");
         return Ok(());
     };
@@ -66,10 +66,9 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
         log::debug!("gal.kick received before encryption_key available; ignoring");
         return Ok(());
     };
-    let read_db = db::db::ReadDbState::from_arc(conn);
 
     let account_ids = read_db
-        .with_conn(db::db::queries_extra::list_all_account_ids_sync)
+        .with_read(db::db::queries_extra::list_all_account_ids_sync)
         .await?;
     if account_ids.is_empty() {
         return Ok(());
@@ -109,4 +108,3 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
 
     Ok(())
 }
-

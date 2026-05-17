@@ -30,7 +30,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     //    that take `&ReadDbState`. Inside spawn_blocking we already hold the Mutex
     //    lock, so we inline the equivalent SQL rather than calling the async
     //    helpers. The validation logic is identical.
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let draft_id = request.draft_id.clone();
     let account_id = request.account_id.clone();
     let thread_id = request.thread_id.clone();
@@ -41,17 +41,12 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     let account_id_outer = account_id.clone();
     let thread_id_outer = thread_id.clone();
     let source_message_id_outer = source_message_id.clone();
-    let local_result = tokio::task::spawn_blocking(move || {
+    let local_result = db.with_conn_mapped(move |conn| {
         let mime_base64url = build_mime_message_base64url(&request)
             .map_err(|e| ActionError::build(format!("{e}")))?;
 
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-
         db::db::queries_extra::draft_lifecycle::persist_draft_pending_sync(
-            &conn,
+            conn,
             &draft_id,
             &account_id,
             &request.to.join(", "),
@@ -67,7 +62,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         .map_err(ActionError::db)?;
 
         let transitioned =
-            db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(&conn, &draft_id)
+            db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)
                 .map_err(ActionError::db)?;
         if !transitioned {
             return Err(ActionError::invalid_state(format!(
@@ -76,10 +71,8 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         }
 
         Ok(mime_base64url)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    }, ActionError::db)
+    .await;
 
     let mime_base64url = match local_result {
         Ok(mime) => mime,
@@ -161,26 +154,19 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
     let mlog = MutationLog::begin("delete_draft", account_id, draft_id);
 
     // 1. Look up remote_draft_id and delete locally in one spawn_blocking call
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let did = draft_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-
+    let local_result = db.with_conn_mapped(move |conn| {
         let remote_id =
-            db::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(&conn, &did)
+            db::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(conn, &did)
                 .map_err(ActionError::db)?;
 
-        db::db::queries_extra::draft_lifecycle::delete_draft_sync(&conn, &did)
+        db::db::queries_extra::draft_lifecycle::delete_draft_sync(conn, &did)
             .map_err(ActionError::db)?;
 
         Ok(remote_id)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    }, ActionError::db)
+    .await;
 
     let remote_id = match local_result {
         Ok(id) => id,

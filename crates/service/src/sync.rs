@@ -477,6 +477,7 @@ async fn run_sync(
 
     let result = crate::sync_dispatch::sync_for_account(
         &inner.db,
+        &inner.boot_state.read_db_state().expect("read db installed after boot.ready"),
         &account_id,
         encryption_key_bytes,
         &inner.body_write,

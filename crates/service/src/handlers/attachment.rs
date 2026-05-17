@@ -64,7 +64,12 @@ pub(crate) async fn handle_fetch(
         )
     })?;
     let write_db = boot_state.write_db_state()?;
-    let read_db = write_db.to_read_state();
+    let read_db = boot_state.read_db_state().ok_or_else(|| {
+        ServiceError::Internal(
+            "read db not loaded; UI must wait for boot.ready before calling attachment.fetch"
+                .into(),
+        )
+    })?;
 
     // Short-circuit if the account is being deleted. The prefetch
     // worker has this gate (see `account_is_cancelling_or_deleting`)

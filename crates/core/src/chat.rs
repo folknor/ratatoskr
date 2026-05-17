@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use db::db::ReadDbState;
+use db_read::db::ReadDbState;
 use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreReadState;
 
@@ -47,60 +47,9 @@ pub struct ChatInlineImage {
     pub bytes: Vec<u8>,
 }
 
-/// Designate an email address as a chat contact.
-///
-/// Inserts into `chat_contacts`, scans existing threads for 1:1 eligibility,
-/// sets `is_chat_thread` on qualifying threads, and computes initial summary.
-pub async fn designate_chat_contact(
-    db: &ReadDbState,
-    email: &str,
-    user_emails: &[String],
-) -> Result<(), String> {
-    let email = email.to_lowercase();
-    let user_emails: Vec<String> = user_emails.iter().map(|e| e.to_lowercase()).collect();
-
-    if user_emails.iter().any(|ue| ue == &email) {
-        return Err("Cannot designate your own email address as a chat contact".to_string());
-    }
-
-    db.with_conn(move |conn| {
-        crate::db::queries_extra::chat::designate_chat_contact_sync(conn, &email, &user_emails)
-    })
-    .await
-}
-
-/// Remove chat contact designation.
-///
-/// Clears `is_chat_thread` on all affected threads and deletes the contact row.
-pub async fn undesignate_chat_contact(db: &ReadDbState, email: &str) -> Result<(), String> {
-    let email = email.to_lowercase();
-
-    db.with_conn(move |conn| crate::db::queries_extra::chat::undesignate_chat_contact_sync(conn, &email))
-        .await
-}
-
-/// Mark every unread message in a contact's chat threads as read.
-///
-/// Single transaction: flips `messages.is_read`, mirrors on
-/// `threads.is_read`, and resets the denormalised
-/// `chat_contacts.unread_count`. Returns the `(account_id, thread_id)`
-/// pairs that had unread messages, so the caller can dispatch provider
-/// mark-read against each of them.
-pub async fn mark_chat_read_local(
-    db: &ReadDbState,
-    email: &str,
-) -> Result<Vec<(String, String)>, String> {
-    let email = email.to_lowercase();
-    db.with_conn(move |conn| {
-        crate::db::queries_extra::chat::mark_chat_read_local_sync(conn, &email)
-    })
-    .await
-}
-
-
 /// List all chat contacts with sidebar summary data.
 pub async fn get_chat_contacts(db: &ReadDbState) -> Result<Vec<ChatContactSummary>, String> {
-    db.with_conn(|conn| {
+    db.with_read(|conn| {
         crate::db::queries_extra::chat::get_chat_contacts_sync(conn).map(|rows| {
             rows.into_iter()
                 .map(|row| ChatContactSummary {
@@ -140,7 +89,7 @@ pub async fn get_chat_timeline(
     // Phase 1: messages + inline-image rows + user-signature texts from
     // main DB. The signatures power Layer-3 of the strip pipeline below.
     let (mut messages, inline_rows, user_signatures) = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let rows = crate::db::queries_extra::chat::get_chat_timeline_sync(
                 conn, &email, limit, before,
             )?;
@@ -207,7 +156,7 @@ pub async fn get_chat_timeline(
     }
 
     // Phase 3: inline image bytes from the inline_image store, batched by hash.
-    let mut by_message: HashMap<String, Vec<&db::db::queries_extra::chat::DbChatInlineImage>> =
+    let mut by_message: HashMap<String, Vec<&db_read::db::queries_extra::chat::DbChatInlineImage>> =
         HashMap::new();
     for row in &inline_rows {
         by_message.entry(row.message_id.clone()).or_default().push(row);

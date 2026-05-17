@@ -16,23 +16,20 @@ pub(crate) async fn spam_local(
     thread_id: &str,
     is_spam: bool,
 ) -> Result<(), ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.with_conn(move |conn| {
         if is_spam {
-            remove_folder(&conn, &aid, &tid, "INBOX")?;
-            insert_folder(&conn, &aid, &tid, "SPAM").map(|_| ())
+            remove_folder(conn, &aid, &tid, "INBOX")?;
+            insert_folder(conn, &aid, &tid, "SPAM").map(|_| ())
         } else {
-            remove_folder(&conn, &aid, &tid, "SPAM")?;
-            insert_folder(&conn, &aid, &tid, "INBOX").map(|_| ())
+            remove_folder(conn, &aid, &tid, "SPAM")?;
+            insert_folder(conn, &aid, &tid, "INBOX").map(|_| ())
         }
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db))
+    .map_err(ActionError::db)
 }
 
 /// Provider dispatch for spam (assumes local mutation already applied).

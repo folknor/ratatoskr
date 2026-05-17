@@ -18,22 +18,19 @@ pub(crate) async fn move_local(
     folder_id: &FolderId,
     source_folder_id: Option<&FolderId>,
 ) -> Result<(), ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let fid = folder_id.as_str().to_string();
     let source = source_folder_id.map(|s| s.as_str().to_string());
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.with_conn(move |conn| {
         if let Some(ref src) = source {
-            remove_folder(&conn, &aid, &tid, src)?;
+            remove_folder(conn, &aid, &tid, src)?;
         }
-        insert_folder(&conn, &aid, &tid, &fid).map(|_| ())
+        insert_folder(conn, &aid, &tid, &fid).map(|_| ())
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db))
+    .map_err(ActionError::db)
 }
 
 /// Provider dispatch for move-to-folder (assumes local mutation already applied).

@@ -28,8 +28,8 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use db::db::Connection;
-use rtsk::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
+use db::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use service_api::WAL_FILENAME;
@@ -120,7 +120,7 @@ pub(crate) fn drain(conn: &Connection, data_dir: &Path) -> Result<usize, String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use db::db::Connection;
+    use rusqlite::Connection;
     use std::io::Write;
 
     fn fresh_conn() -> Connection {

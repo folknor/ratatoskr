@@ -35,6 +35,7 @@ use crate::actions::provider::create_provider;
 #[allow(clippy::too_many_arguments)]
 pub async fn sync_for_account(
     write_db: &WriteDbState,
+    read_db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
     body_store: &BodyStoreWriteState,
@@ -55,11 +56,11 @@ pub async fn sync_for_account(
             .map_err(|e| format!("read initial_sync_completed: {e}"))
         })
         .await?;
-    let read_db: ReadDbState = write_db.to_read_state();
-    let provider = create_provider(&read_db, account_id, encryption_key).await?;
+    let provider = create_provider(read_db, account_id, encryption_key).await?;
     let ctx = SyncProviderCtx {
         account_id,
         db: write_db,
+        read_db,
         body_store,
         inline_images,
         search,
@@ -71,11 +72,9 @@ pub async fn sync_for_account(
     // backfill driver to find. Fallback to 365 if the setting is
     // missing or out of range; saturating cast keeps an absurd
     // pref value from underflowing.
-    let initial_window_days: i64 = {
-        let conn = write_db.conn();
-        let conn = conn.lock().expect("write_db conn poisoned");
-        sync::config::get_sync_period_days(&conn).max(1)
-    };
+    let initial_window_days: i64 = read_db
+        .with_conn_sync(|conn| Ok(sync::config::get_sync_period_days(conn).max(1)))
+        .unwrap_or(365);
     let result = if initial_sync_completed {
         provider.sync_delta(&ctx, None).await
     } else {

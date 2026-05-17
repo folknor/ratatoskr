@@ -76,26 +76,47 @@ pub async fn db_pending_ops_enqueue(
 ) -> Result<(), String> {
     db
         .with_conn(move |conn| {
-            // Replace any existing pending/executing op for this resource+type.
-            // This prevents duplicates AND ensures directional actions (spam,
-            // star, markRead) get their params updated to the latest intent.
-            conn.execute(
-                "DELETE FROM pending_operations \
-                 WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
-                   AND status IN ('pending', 'executing')",
-                params![account_id, resource_id, operation_type],
+            db_pending_ops_enqueue_sync(
+                conn,
+                &id,
+                &account_id,
+                &operation_type,
+                &resource_id,
+                &params_json,
+                max_retries,
             )
-            .map_err(|e| format!("replace pending op: {e}"))?;
-
-            conn.execute(
-                "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status, max_retries)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
-                params![id, account_id, operation_type, resource_id, params_json, max_retries],
-            )
-            .map_err(|e| format!("enqueue pending op: {e}"))?;
-            Ok(())
         })
         .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn db_pending_ops_enqueue_sync(
+    conn: &Connection,
+    id: &str,
+    account_id: &str,
+    operation_type: &str,
+    resource_id: &str,
+    params_json: &str,
+    max_retries: i64,
+) -> Result<(), String> {
+    // Replace any existing pending/executing op for this resource+type.
+    // This prevents duplicates AND ensures directional actions (spam,
+    // star, markRead) get their params updated to the latest intent.
+    conn.execute(
+        "DELETE FROM pending_operations \
+         WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+           AND status IN ('pending', 'executing')",
+        params![account_id, resource_id, operation_type],
+    )
+    .map_err(|e| format!("replace pending op: {e}"))?;
+
+    conn.execute(
+        "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status, max_retries)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+        params![id, account_id, operation_type, resource_id, params_json, max_retries],
+    )
+    .map_err(|e| format!("enqueue pending op: {e}"))?;
+    Ok(())
 }
 
 pub async fn db_pending_ops_get(
@@ -150,24 +171,33 @@ pub async fn db_pending_ops_update_status(
     status: String,
     error_message: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE pending_operations SET status = ?1, error_message = ?2 WHERE id = ?3",
-            params![status, error_message, id],
-        )
-        .map_err(|e| format!("update op status: {e}"))?;
-        Ok(())
-    })
+    db.with_conn(move |conn| db_pending_ops_update_status_sync(conn, &id, &status, error_message.as_deref()))
     .await
 }
 
+pub fn db_pending_ops_update_status_sync(
+    conn: &Connection,
+    id: &str,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE pending_operations SET status = ?1, error_message = ?2 WHERE id = ?3",
+        params![status, error_message, id],
+    )
+    .map_err(|e| format!("update op status: {e}"))?;
+    Ok(())
+}
+
 pub async fn db_pending_ops_delete(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
-            .map_err(|e| format!("delete op: {e}"))?;
-        Ok(())
-    })
+    db.with_conn(move |conn| db_pending_ops_delete_sync(conn, &id))
     .await
+}
+
+pub fn db_pending_ops_delete_sync(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete op: {e}"))?;
+    Ok(())
 }
 
 /// Cancel pending ops for a specific resource and operation type.
@@ -181,61 +211,78 @@ pub async fn db_pending_ops_cancel_for_resource(
     operation_type: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "DELETE FROM pending_operations \
-             WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
-               AND status IN ('pending', 'executing')",
-            params![account_id, resource_id, operation_type],
+        db_pending_ops_cancel_for_resource_sync(
+            conn,
+            &account_id,
+            &resource_id,
+            &operation_type,
         )
-        .map_err(|e| format!("cancel pending op: {e}"))?;
-        Ok(())
     })
     .await
 }
 
+/// Synchronous writer-side form used by the Service notification handler.
+pub fn db_pending_ops_cancel_for_resource_sync(
+    conn: &Connection,
+    account_id: &str,
+    resource_id: &str,
+    operation_type: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM pending_operations \
+         WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+           AND status IN ('pending', 'executing')",
+        params![account_id, resource_id, operation_type],
+    )
+    .map_err(|e| format!("cancel pending op: {e}"))?;
+    Ok(())
+}
+
 pub async fn db_pending_ops_increment_retry(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
-            .query_row(
-                "SELECT retry_count, max_retries, operation_type FROM pending_operations WHERE id = ?1",
-                params![id],
-                |row| Ok((row.get("retry_count")?, row.get("max_retries")?, row.get("operation_type")?)),
-            )
-            .map_err(|e| format!("get retry info: {e}"))?;
-
-        let new_count = retry_count + 1;
-        if new_count >= max_retries {
-            conn.execute(
-                "UPDATE pending_operations SET status = 'failed', retry_count = ?1 WHERE id = ?2",
-                params![new_count, id],
-            )
-            .map_err(|e| format!("mark failed: {e}"))?;
-            crate::db::queries_extra::delete_pending_thread_label_intents_for_action(
-                conn, &id,
-            )?;
-            log::warn!(
-                "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
-                 {new_count}/{max_retries} - left for sync reconciliation"
-            );
-            return Ok(());
-        }
-
-        let schedule = backoff_schedule(&operation_type);
-        let retry_idx = usize::try_from(new_count - 1)
-            .map_err(|_| format!("invalid retry count for pending op {id}: {new_count}"))?;
-        let backoff_idx = std::cmp::min(retry_idx, schedule.len() - 1);
-        let delay_sec = schedule[backoff_idx];
-        let now = now_epoch()?;
-        let next_retry_at = now + delay_sec;
-
-        conn.execute(
-            "UPDATE pending_operations SET retry_count = ?1, next_retry_at = ?2, status = 'pending' WHERE id = ?3",
-            params![new_count, next_retry_at, id],
-        )
-        .map_err(|e| format!("increment retry: {e}"))?;
-        Ok(())
-    })
+    db.with_conn(move |conn| db_pending_ops_increment_retry_sync(conn, &id))
     .await
+}
+
+pub fn db_pending_ops_increment_retry_sync(conn: &Connection, id: &str) -> Result<(), String> {
+    let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
+        .query_row(
+            "SELECT retry_count, max_retries, operation_type FROM pending_operations WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get("retry_count")?, row.get("max_retries")?, row.get("operation_type")?)),
+        )
+        .map_err(|e| format!("get retry info: {e}"))?;
+
+    let new_count = retry_count + 1;
+    if new_count >= max_retries {
+        conn.execute(
+            "UPDATE pending_operations SET status = 'failed', retry_count = ?1 WHERE id = ?2",
+            params![new_count, id],
+        )
+        .map_err(|e| format!("mark failed: {e}"))?;
+        crate::db::queries_extra::delete_pending_thread_label_intents_for_action(
+            conn, id,
+        )?;
+        log::warn!(
+            "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
+             {new_count}/{max_retries} - left for sync reconciliation"
+        );
+        return Ok(());
+    }
+
+    let schedule = backoff_schedule(&operation_type);
+    let retry_idx = usize::try_from(new_count - 1)
+        .map_err(|_| format!("invalid retry count for pending op {id}: {new_count}"))?;
+    let backoff_idx = std::cmp::min(retry_idx, schedule.len() - 1);
+    let delay_sec = schedule[backoff_idx];
+    let now = now_epoch()?;
+    let next_retry_at = now + delay_sec;
+
+    conn.execute(
+        "UPDATE pending_operations SET retry_count = ?1, next_retry_at = ?2, status = 'pending' WHERE id = ?3",
+        params![new_count, next_retry_at, id],
+    )
+    .map_err(|e| format!("increment retry: {e}"))?;
+    Ok(())
 }
 
 fn now_epoch() -> Result<i64, String> {
@@ -347,20 +394,22 @@ pub async fn db_pending_ops_clear_failed(
 /// Reset any operations stuck in 'executing' back to 'pending'.
 /// Called at startup to recover from crash/forced quit.
 pub async fn db_pending_ops_recover_executing(db: &ReadDbState) -> Result<i64, String> {
-    db.with_conn(move |conn| {
-        let count = conn
-            .execute(
-                "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
-                [],
-            )
-            .map_err(|e| format!("recover executing ops: {e}"))?;
-        let count = i64::try_from(count).map_err(|_| "row count exceeds i64 range".to_string())?;
-        if count > 0 {
-            log::warn!("[pending_ops] Recovered {count} stranded executing operations");
-        }
-        Ok(count)
-    })
+    db.with_conn(db_pending_ops_recover_executing_sync)
     .await
+}
+
+pub fn db_pending_ops_recover_executing_sync(conn: &Connection) -> Result<i64, String> {
+    let count = conn
+        .execute(
+            "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
+            [],
+        )
+        .map_err(|e| format!("recover executing ops: {e}"))?;
+    let count = i64::try_from(count).map_err(|_| "row count exceeds i64 range".to_string())?;
+    if count > 0 {
+        log::warn!("[pending_ops] Recovered {count} stranded executing operations");
+    }
+    Ok(count)
 }
 
 /// Synchronous DB-only boot recovery callable from the Service's
@@ -373,7 +422,7 @@ pub async fn db_pending_ops_recover_executing(db: &ReadDbState) -> Result<i64, S
 /// Phase 2's relocated periodic drainer continues to call against the
 /// `ActionContext`-shaped API.
 pub fn db_pending_ops_recover_on_boot_sync(
-    conn: &crate::db::Connection,
+    conn: &Connection,
 ) -> Result<(), String> {
     let pending_count = conn
         .execute(
@@ -569,7 +618,7 @@ fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, Str
 #[cfg(test)]
 mod boot_recovery_tests {
     use super::*;
-    use crate::db::Connection;
+    use rusqlite::Connection;
 
     fn make_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");

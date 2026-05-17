@@ -48,14 +48,14 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
 }
 
 pub async fn db_get_all_accounts(db: &ReadDbState) -> Result<Vec<DbAccount>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         get_all_accounts_sync(conn)
     })
     .await
 }
 
 pub async fn db_get_account(db: &ReadDbState, id: String) -> Result<Option<DbAccount>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         get_account_sync(conn, &id)
     })
     .await
@@ -65,7 +65,7 @@ pub async fn db_get_account_by_email(
     db: &ReadDbState,
     email: String,
 ) -> Result<Option<DbAccount>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         Ok(conn
             .query_row(
                 "SELECT * FROM accounts WHERE email = ?1",
@@ -77,7 +77,7 @@ pub async fn db_get_account_by_email(
     .await
 }
 
-pub fn get_account_sync(conn: &rusqlite::Connection, id: &str) -> Result<Option<DbAccount>, String> {
+pub fn get_account_sync(conn: &ReadConn<'_>, id: &str) -> Result<Option<DbAccount>, String> {
     Ok(conn
         .query_row(
             "SELECT * FROM accounts WHERE id = ?1",
@@ -87,7 +87,7 @@ pub fn get_account_sync(conn: &rusqlite::Connection, id: &str) -> Result<Option<
         .ok())
 }
 
-pub fn get_all_accounts_sync(conn: &rusqlite::Connection) -> Result<Vec<DbAccount>, String> {
+pub fn get_all_accounts_sync(conn: &ReadConn<'_>) -> Result<Vec<DbAccount>, String> {
     let mut stmt = conn
         .prepare("SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC")
         .map_err(|e| e.to_string())?;
@@ -111,7 +111,7 @@ pub fn get_active_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, S
 /// kick handler, which iterates all accounts and lets
 /// `refresh_gal_for_account` self-gate unsupported providers via
 /// `Ok(0)`.
-pub fn list_all_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+pub fn list_all_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT id FROM accounts ORDER BY sort_order")
         .map_err(|e| e.to_string())?;
@@ -132,7 +132,7 @@ pub fn list_all_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<Stri
 /// (any of `calendar_provider`, `provider == 'caldav'` with a configured
 /// url, or an explicit `calendar_provider = 'caldav'`), jmap -> JMAP.
 pub fn list_calendar_capable_account_ids_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare(
@@ -147,13 +147,4 @@ pub fn list_calendar_capable_account_ids_sync(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
-}
-
-pub async fn db_delete_account(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
 }

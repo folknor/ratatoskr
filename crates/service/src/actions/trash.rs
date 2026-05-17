@@ -25,18 +25,15 @@ pub(crate) async fn trash_local(
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        remove_folder(&conn, &aid, &tid, "INBOX")?;
-        insert_folder(&conn, &aid, &tid, "TRASH").map(|_| ())
+    db.with_conn(move |conn| {
+        remove_folder(conn, &aid, &tid, "INBOX")?;
+        insert_folder(conn, &aid, &tid, "TRASH").map(|_| ())
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db))
+    .map_err(ActionError::db)
 }
 
 /// Provider dispatch for trash (assumes local mutation already applied).

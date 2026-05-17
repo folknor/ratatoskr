@@ -6,8 +6,8 @@ pub use sql_builder::{count_matching, query_threads, query_threads_read};
 
 use rusqlite::Connection;
 
-use db::db::ReadConn;
-use db::db::types::{AccountScope, DbThread};
+use db_read::db::ReadConn;
+use db_read::db::types::{AccountScope, DbThread};
 
 /// Parameters for a smart folder query, packed to stay under the 7-arg limit.
 pub struct SmartFolderParams<'a> {

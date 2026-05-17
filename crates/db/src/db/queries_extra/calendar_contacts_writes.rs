@@ -6,10 +6,12 @@
 //! `crates/graph/src/sync/persistence.rs`, and
 //! `crates/gmail/src/contacts/other_contacts.rs` are routed through `db` APIs.
 //!
-//! Each function takes `&Connection` (sync); callers wrap in
-//! `ReadDbState::with_conn(...)` if they need async dispatch.
+//! Writer-side functions take `&WriteConn` or `&WriteTxn` so Service code
+//! cannot accidentally route calendar mutations through a read handle.
 
+use crate::db::{WriteConn, WriteTxn};
 use rusqlite::{Connection, OptionalExtension, params};
+pub use super::calendars::{CalendarAttendeeWriteRow, CalendarReminderWriteRow};
 
 // ---------------------------------------------------------------------------
 // `calendars` table helpers
@@ -19,7 +21,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 ///
 /// Returns `Ok(None)` when no matching calendar exists yet.
 pub fn get_calendar_id_by_remote_id(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     remote_id: &str,
 ) -> Result<Option<String>, String> {
@@ -38,7 +40,7 @@ pub struct DiscoveredCalendar<'a> {
     pub account_id: &'a str,
     pub provider: &'a str,
     pub remote_id: &'a str,
-    pub display_name: &'a str,
+    pub display_name: Option<&'a str>,
     pub color: Option<&'a str>,
     pub is_primary: bool,
     pub can_edit: bool,
@@ -49,7 +51,7 @@ pub struct DiscoveredCalendar<'a> {
 /// Generates a new UUID on first insert; on conflict updates metadata only
 /// (display_name, color, is_primary, can_edit) and returns the existing id.
 pub fn upsert_discovered_calendar(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     cal: &DiscoveredCalendar<'_>,
 ) -> Result<String, String> {
     let existing_id: Option<String> = conn
@@ -88,7 +90,7 @@ pub fn upsert_discovered_calendar(
 ///
 /// Uses `COALESCE` so a `None` value leaves the existing column unchanged.
 pub fn update_calendar_sync_token(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     calendar_id: &str,
     new_sync_token: Option<&str>,
     new_ctag: Option<&str>,
@@ -117,6 +119,9 @@ pub fn update_calendar_sync_token(
 pub struct CalendarEventRow {
     pub account_id: String,
     /// Provider-assigned event id (used as the unique key on conflict).
+    pub google_event_id: String,
+    /// Provider resource id. For CalDAV this is the resource URI, while
+    /// `google_event_id` may include a recurrence-id discriminator.
     pub remote_event_id: String,
     pub calendar_id: String,
     pub summary: Option<String>,
@@ -139,6 +144,7 @@ pub struct CalendarEventRow {
     pub rsvp_status: Option<String>,
     pub availability: Option<String>,
     pub visibility: Option<String>,
+    pub recurrence_id: Option<String>,
 }
 
 /// Upsert a calendar event row inside any connection (connection or transaction).
@@ -147,9 +153,9 @@ pub struct CalendarEventRow {
 /// `google_event_id` is stored as `remote_event_id` in the DTO.
 /// Generates a new UUID for the `id` column on first insert.
 pub fn upsert_calendar_event_row(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     row: &CalendarEventRow,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO calendar_events \
@@ -157,20 +163,20 @@ pub fn upsert_calendar_event_row(
           start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
           html_link, calendar_id, remote_event_id, etag, ical_data, uid, title, \
           timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
-          availability, visibility) \
+          availability, visibility, recurrence_id) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25) \
+                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25, ?26) \
          ON CONFLICT(account_id, google_event_id) DO UPDATE SET \
            summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8, \
            is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12, \
            html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16, \
            ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21, \
            organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25, \
-           updated_at = unixepoch()",
+           recurrence_id = ?26, updated_at = unixepoch()",
         params![
             id,
             row.account_id,
-            row.remote_event_id,  // stored in google_event_id column as the conflict key
+            row.google_event_id,
             row.summary,
             row.description,
             row.location,
@@ -193,15 +199,321 @@ pub fn upsert_calendar_event_row(
             row.rsvp_status,
             row.availability,
             row.visibility,
+            row.recurrence_id,
         ],
     )
     .map_err(|e| format!("upsert_calendar_event_row: {e}"))?;
+
+    conn.query_row(
+        "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
+        params![row.account_id, row.google_event_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("fetch calendar event id: {e}"))
+}
+
+pub fn replace_event_attendees(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    event_id: &str,
+    attendees: &[CalendarAttendeeWriteRow],
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
+        params![account_id, event_id],
+    )
+    .map_err(|e| format!("delete attendees: {e}"))?;
+
+    for attendee in attendees {
+        if attendee.email.is_empty() {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, event_id, email) DO UPDATE SET
+                   name = ?4, rsvp_status = ?5, is_organizer = ?6",
+            params![
+                event_id,
+                account_id,
+                attendee.email,
+                attendee.name,
+                attendee.rsvp_status,
+                attendee.is_organizer as i64
+            ],
+        )
+        .map_err(|e| format!("upsert attendee: {e}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn replace_event_reminders(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    event_id: &str,
+    reminders: &[CalendarReminderWriteRow],
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
+        params![account_id, event_id],
+    )
+    .map_err(|e| format!("delete reminders: {e}"))?;
+
+    for reminder in reminders {
+        conn.execute(
+            "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method)
+                 VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, account_id, reminder.minutes_before, reminder.method],
+        )
+        .map_err(|e| format!("insert reminder: {e}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn delete_event_by_account_remote_id(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    remote_event_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE event_id IN \
+         (SELECT id FROM calendar_events WHERE account_id = ?1 AND remote_event_id = ?2)",
+        params![account_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE event_id IN \
+         (SELECT id FROM calendar_events WHERE account_id = ?1 AND remote_event_id = ?2)",
+        params![account_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_events WHERE account_id = ?1 AND remote_event_id = ?2",
+        params![account_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A CalDAV attendee for persistence.
+#[derive(Debug, Clone)]
+pub struct CalDavAttendee {
+    pub email: String,
+    pub name: Option<String>,
+    pub partstat: Option<String>,
+    pub is_organizer: bool,
+}
+
+/// A CalDAV reminder for persistence.
+#[derive(Debug, Clone)]
+pub struct CalDavReminder {
+    pub minutes_before: i64,
+    pub method: Option<String>,
+}
+
+/// Delete events and their map entries for a calendar by remote_event_id.
+pub fn delete_caldav_events(
+    conn: &WriteConn<'_>,
+    calendar_id: &str,
+    uris: &[String],
+) -> Result<(), String> {
+    for uri in uris {
+        conn.execute(
+            "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
+            params![calendar_id, uri],
+        )
+        .map_err(|e| format!("delete caldav event: {e}"))?;
+
+        conn.execute(
+            "DELETE FROM caldav_event_map WHERE calendar_id = ?1 AND uri = ?2",
+            params![calendar_id, uri],
+        )
+        .map_err(|e| format!("delete caldav event map: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Upsert a URI to ETag mapping in the caldav_event_map.
+pub fn upsert_caldav_event_map(
+    conn: &WriteConn<'_>,
+    uri: &str,
+    calendar_id: &str,
+    event_uid: &str,
+    etag: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO caldav_event_map \
+         (uri, calendar_id, event_uid, etag) \
+         VALUES (?1, ?2, ?3, ?4)",
+        params![uri, calendar_id, event_uid, etag],
+    )
+    .map_err(|e| format!("upsert caldav event map: {e}"))?;
+    Ok(())
+}
+
+/// Sync attendees for a calendar event.
+pub fn sync_caldav_attendees(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    google_event_id: &str,
+    attendees: &[CalDavAttendee],
+    organizer_email: Option<&str>,
+    organizer_name: Option<&str>,
+) -> Result<(), String> {
+    let event_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
+            params![account_id, google_event_id],
+            |row| row.get("id"),
+        )
+        .optional()
+        .map_err(|e| format!("load caldav attendee event id: {e}"))?;
+
+    let Some(event_id) = event_id else {
+        return Ok(());
+    };
+
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
+        params![account_id, event_id],
+    )
+    .map_err(|e| format!("delete attendees: {e}"))?;
+
+    for att in attendees {
+        let rsvp = att.partstat.as_deref().map(str::to_lowercase);
+        conn.execute(
+            "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![event_id, account_id, att.email, att.name, rsvp, att.is_organizer as i64],
+        )
+        .map_err(|e| format!("insert attendee: {e}"))?;
+    }
+
+    if let Some(org_email) = organizer_email {
+        let org_lower = org_email.to_lowercase();
+        let already_present = attendees.iter().any(|a| a.email.to_lowercase() == org_lower);
+        if !already_present {
+            conn.execute(
+                "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                params![event_id, account_id, org_email, organizer_name, "accepted"],
+            )
+            .map_err(|e| format!("insert organizer attendee: {e}"))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Sync reminders for a calendar event.
+pub fn sync_caldav_reminders(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    google_event_id: &str,
+    reminders: &[CalDavReminder],
+) -> Result<(), String> {
+    let event_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
+            params![account_id, google_event_id],
+            |row| row.get("id"),
+        )
+        .optional()
+        .map_err(|e| format!("load caldav reminder event id: {e}"))?;
+
+    let Some(event_id) = event_id else {
+        return Ok(());
+    };
+
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
+        params![account_id, event_id],
+    )
+    .map_err(|e| format!("delete reminders: {e}"))?;
+
+    for rem in reminders {
+        conn.execute(
+            "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, account_id, rem.minutes_before, rem.method],
+        )
+        .map_err(|e| format!("insert reminder: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Drop calendar_event rows for a CalDAV resource whose storage key is not
+/// in the seen set, plus their attendees and reminders.
+pub fn reap_orphan_overrides(
+    conn: &WriteConn<'_>,
+    calendar_id: &str,
+    uri: &str,
+    seen_keys: &[String],
+) -> Result<(), String> {
+    if seen_keys.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = seen_keys
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 3))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let select_sql = format!(
+        "SELECT id FROM calendar_events \
+         WHERE calendar_id = ?1 AND remote_event_id = ?2 \
+           AND google_event_id NOT IN ({placeholders})"
+    );
+
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(seen_keys.len() + 2);
+    bind.push(Box::new(calendar_id.to_string()));
+    bind.push(Box::new(uri.to_string()));
+    for key in seen_keys {
+        bind.push(Box::new(key.clone()));
+    }
+    let bind_refs: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(AsRef::as_ref).collect();
+
+    let mut stmt = conn
+        .prepare(&select_sql)
+        .map_err(|e| format!("prepare reap-overrides: {e}"))?;
+    let orphan_ids: Vec<String> = stmt
+        .query_map(bind_refs.as_slice(), |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query orphan overrides: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect orphan ids: {e}"))?;
+
+    for id in &orphan_ids {
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE event_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("reap orphan attendees: {e}"))?;
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE event_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("reap orphan reminders: {e}"))?;
+        conn.execute("DELETE FROM calendar_events WHERE id = ?1", params![id])
+            .map_err(|e| format!("reap orphan event: {e}"))?;
+    }
+
+    if !orphan_ids.is_empty() {
+        log::debug!(
+            "CalDAV: reaped {} orphan override row(s) for resource {uri}",
+            orphan_ids.len()
+        );
+    }
+
     Ok(())
 }
 
 /// Delete a calendar event row identified by (calendar_id, remote_event_id).
 pub fn delete_calendar_event_by_remote_id(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     calendar_id: &str,
     remote_event_id: &str,
 ) -> Result<(), String> {
@@ -217,7 +529,7 @@ pub fn delete_calendar_event_by_remote_id(
 /// `google_event_id` is the historical cross-provider conflict key, so it is
 /// moved from the local provisional id to the provider id at the same time.
 pub fn set_calendar_event_remote_id_and_etag(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     event_id: &str,
     remote_event_id: &str,
     etag: Option<&str>,
@@ -234,7 +546,7 @@ pub fn set_calendar_event_remote_id_and_etag(
 
 /// Update only the `etag` on an existing calendar event (post-provider-update).
 pub fn set_calendar_event_etag(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     event_id: &str,
     etag: Option<&str>,
 ) -> Result<(), String> {
@@ -253,7 +565,7 @@ pub fn set_calendar_event_etag(
 /// Persist freshly discovered CalDAV principal / home URLs to the `accounts`
 /// table. Uses COALESCE so a `None` value leaves the column unchanged.
 pub fn set_account_caldav_discovered_urls(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     principal_url: Option<&str>,
     home_url: Option<&str>,
@@ -272,7 +584,7 @@ pub fn set_account_caldav_discovered_urls(
 /// Clear the persisted CalDAV principal / home URLs for an account, forcing
 /// full RFC 6764 discovery on the next sync.
 pub fn clear_account_caldav_urls(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
 ) -> Result<(), String> {
     conn.execute(

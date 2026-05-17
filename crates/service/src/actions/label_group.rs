@@ -65,14 +65,10 @@ async fn apply_label_group_local(
     group_id: LabelGroupId,
     kind: DispatchKind,
 ) -> Result<LocalStep, ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+    db.with_conn_mapped(move |conn| {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM label_groups WHERE id = ?1",
@@ -87,22 +83,20 @@ async fn apply_label_group_local(
         if kind == DispatchKind::Retry {
             // User reversed intent: queued `applyLabelGroup` is no longer
             // current. Skip member dispatch and resolve as success.
-            if !thread_renders_group_for_user(&conn, &aid, &tid, group_id)? {
+            if !thread_renders_group_for_user(conn, &aid, &tid, group_id)? {
                 return Ok(LocalStep::Skip);
             }
         }
 
-        let labels = read_group_member_labels(&conn, &aid, group_id)?;
+        let labels = read_group_member_labels(conn, &aid, group_id)?;
         let generation_seen =
-            upsert_group_intents(&conn, &aid, &tid, &labels, PendingLabelIntentOp::Add)?;
+            upsert_group_intents(conn, &aid, &tid, &labels, PendingLabelIntentOp::Add)?;
         Ok(LocalStep::Proceed {
             labels,
             generation_seen,
         })
-    })
+    }, ActionError::db)
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r)
 }
 
 async fn remove_label_group_local(
@@ -112,34 +106,27 @@ async fn remove_label_group_local(
     group_id: LabelGroupId,
     kind: DispatchKind,
 ) -> Result<LocalStep, ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-
+    db.with_conn_mapped(move |conn| {
         if kind == DispatchKind::Retry {
             // User re-applied the group after the queued `removeLabelGroup`.
             // Skip member RemoveLabel dispatches.
-            if thread_renders_group_for_user(&conn, &aid, &tid, group_id)? {
+            if thread_renders_group_for_user(conn, &aid, &tid, group_id)? {
                 return Ok(LocalStep::Skip);
             }
         }
 
-        let labels = read_applied_group_member_labels(&conn, &aid, &tid, group_id)?;
+        let labels = read_applied_group_member_labels(conn, &aid, &tid, group_id)?;
         let generation_seen =
-            upsert_group_intents(&conn, &aid, &tid, &labels, PendingLabelIntentOp::Remove)?;
+            upsert_group_intents(conn, &aid, &tid, &labels, PendingLabelIntentOp::Remove)?;
         Ok(LocalStep::Proceed {
             labels,
             generation_seen,
         })
-    })
+    }, ActionError::db)
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r)
 }
 
 fn thread_renders_group_for_user(
@@ -653,7 +640,7 @@ async fn clear_group_intents_immediate(
     generation_seen: i64,
     apply: bool,
 ) {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let label_ids: Vec<String> = labels
@@ -665,11 +652,9 @@ async fn clear_group_intents_immediate(
     } else {
         PendingLabelIntentOp::Remove
     };
-    if let Err(e) = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    if let Err(e) = db.with_conn(move |conn| {
         db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
-            &conn,
+            conn,
             &aid,
             &tid,
             label_ids.iter().map(|label_id| PendingLabelIntent {
@@ -680,8 +665,6 @@ async fn clear_group_intents_immediate(
         )
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r)
     {
         log::warn!("[actions] clear composite intents on permanent fail: {e}");
     }
@@ -719,18 +702,16 @@ async fn attach_group_action_id(
     generation_seen: i64,
     action_id: String,
 ) {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let label_ids: Vec<String> = labels
         .iter()
         .map(|label_id| label_id.as_str().to_string())
         .collect();
-    if let Err(e) = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    if let Err(e) = db.with_conn(move |conn| {
         db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
-            &conn,
+            conn,
             &aid,
             &tid,
             label_ids.iter().map(|label_id| PendingLabelIntent {
@@ -742,8 +723,6 @@ async fn attach_group_action_id(
         )
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r)
     {
         log::warn!("[actions] attach composite label intent action id failed: {e}");
     }

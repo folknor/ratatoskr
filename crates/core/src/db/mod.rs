@@ -1,23 +1,19 @@
 // Re-export foundation types from db
-pub use db::db::ReadDbState;
-pub use db::db::ReadConn;
-pub use db::db::ReadError;
-pub use db::db::open_reader_pool;
-pub use db::db::Row;
-pub use db::db::SqlError;
-pub use db::db::ToSql;
-pub use db::db::OptionalExtension;
-pub use db::db::params;
-pub use db::db::from_row;
-pub use db::db::from_row::{FromRow, query_as, query_one};
-pub use db::db::migrations;
-pub use db::db::pinned_searches;
-pub use db::db::sql_fragments;
-pub use db::db::types;
-pub use db::impl_from_row;
-
-// Re-export pending_ops from db crate
-pub use db::db::pending_ops;
+pub use db_read::db::ReadDbState;
+pub use db_read::db::ReadConn;
+pub use db_read::db::ReadError;
+pub use db_read::db::open_reader_pool;
+pub use db_read::db::Row;
+pub use db_read::db::SqlError;
+pub use db_read::db::ToSql;
+pub use db_read::db::OptionalExtension;
+pub use db_read::db::params;
+pub use db_read::db::from_row;
+pub use db_read::db::from_row::{FromRow, query_as, query_one};
+pub use db_read::db::pinned_searches;
+pub use db_read::db::sql_fragments;
+pub use db_read::db::types;
+pub use db_read::impl_from_row;
 
 // Core-specific DB modules (queries.rs stays in core due to body_store/crypto deps)
 pub mod queries;

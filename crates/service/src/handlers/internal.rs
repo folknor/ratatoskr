@@ -50,7 +50,7 @@ pub(crate) async fn handle_read_bootstrap_snapshots(
     let key = key_or_internal_error(boot_state)?;
     let write_db = boot_state.write_db_state()?;
     let (ui_value, settings_value) = write_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let ui = rtsk::db::queries::get_ui_bootstrap_snapshot(conn, &key)?;
             let settings = rtsk::db::queries::get_settings_bootstrap_snapshot(conn, &key)?;
             let ui_value = serde_json::to_value(&ui)

@@ -11,13 +11,16 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-db = { path = "../db" }
+db-read = { path = "../db-read" }
 types = { path = "../types" }
 rusqlite.workspace = true
 chrono.workspace = true
 log = "0.4"
 hotpath = { workspace = true, optional = true }
 
+[dev-dependencies]
+db = { path = "../db" }
+
 [features]
-hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath"]
-hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc"]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db-read/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db-read/hotpath-alloc"]

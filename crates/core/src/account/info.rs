@@ -1,8 +1,7 @@
-use ::db::db::Connection;
+use crate::db::ReadConn;
 use crate::db::queries_extra::{get_account_sync, get_all_accounts_sync};
 use crate::db::types::DbAccount;
 use crate::provider::crypto::{StoredSecret, decrypt_value, is_encrypted};
-use crate::sync::config;
 
 use super::types::{
     AccountBasicInfo, AccountCaldavSettingsInfo, AccountOAuthCredentials, CaldavConnectionInfo,
@@ -10,19 +9,35 @@ use super::types::{
 };
 
 pub fn get_calendar_provider_info(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Option<CalendarProviderInfo>, String> {
-    let account = config::get_account(conn, account_id)?;
-    Ok(
-        config::calendar_provider_kind(&account).map(|provider| CalendarProviderInfo {
-            provider: provider.to_string(),
-        }),
-    )
+    let Some(account) = get_account_sync(conn, account_id)? else {
+        return Ok(None);
+    };
+    let provider = if account.provider == "caldav" {
+        Some("caldav")
+    } else if account.provider == "gmail_api" {
+        Some("google_api")
+    } else if account.provider == "graph" {
+        Some("graph")
+    } else if account.calendar_provider.as_deref() == Some("caldav")
+        && account
+            .caldav_url
+            .as_ref()
+            .is_some_and(|url| !url.trim().is_empty())
+    {
+        Some("caldav")
+    } else {
+        None
+    };
+    Ok(provider.map(|provider| CalendarProviderInfo {
+        provider: provider.to_string(),
+    }))
 }
 
 pub fn get_caldav_connection_info(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<CaldavConnectionInfo>, String> {
@@ -57,18 +72,18 @@ pub fn get_caldav_connection_info(
 }
 
 pub fn get_basic_info(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Option<AccountBasicInfo>, String> {
     get_account_sync(conn, account_id).map(|account| account.map(map_basic_info))
 }
 
-pub fn list_basic_info(conn: &Connection) -> Result<Vec<AccountBasicInfo>, String> {
+pub fn list_basic_info(conn: &ReadConn<'_>) -> Result<Vec<AccountBasicInfo>, String> {
     get_all_accounts_sync(conn).map(|accounts| accounts.into_iter().map(map_basic_info).collect())
 }
 
 pub fn get_caldav_settings_info(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<AccountCaldavSettingsInfo>, String> {
@@ -95,7 +110,7 @@ pub fn get_caldav_settings_info(
 }
 
 pub fn get_oauth_credentials(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<AccountOAuthCredentials>, String> {

@@ -46,24 +46,16 @@ pub(super) async fn handle(
     state: &Arc<BootSharedState>,
     chat_email: String,
 ) -> Result<Value, ServiceError> {
-    let conn = state
-        .db_conn()
-        .ok_or_else(|| ServiceError::Internal("boot context not populated".into()))?;
+    let db = state.write_db_state()?;
 
     // 1. Local DB write (single transaction): flip messages.is_read,
     //    mirror on threads.is_read, reset chat_contacts.unread_count.
     //    Returns affected (account_id, thread_id) pairs.
-    let conn_for_local = Arc::clone(&conn);
     let email_for_local = chat_email.to_lowercase();
-    let affected: Vec<(String, String)> = tokio::task::spawn_blocking(move || {
-        let conn = conn_for_local
-            .lock()
-            .map_err(|error| format!("db lock poisoned: {error}"))?;
-        mark_chat_read_local_sync(&conn, &email_for_local)
-    })
-    .await
-    .map_err(|error| ServiceError::Internal(format!("spawn_blocking: {error}")))?
-    .map_err(ServiceError::Internal)?;
+    let affected: Vec<(String, String)> = db
+        .with_conn(move |conn| mark_chat_read_local_sync(conn, &email_for_local))
+        .await
+        .map_err(ServiceError::Internal)?;
 
     // 2. Journal a quiet job. The payload carries the affected list so
     //    the worker can run remote dispatch deterministically across
@@ -107,13 +99,9 @@ pub(super) async fn handle(
     let payload_blob = serde_json::to_vec(&payload)
         .map_err(|error| ServiceError::Internal(format!("serialize JournaledChatRead: {error}")))?;
 
-    let conn_for_journal = Arc::clone(&conn);
-    tokio::task::spawn_blocking(move || {
-        let conn = conn_for_journal
-            .lock()
-            .map_err(|error| format!("db lock poisoned: {error}"))?;
+    db.with_conn(move |conn| {
         insert_quiet_job(
-            &conn,
+            conn,
             &job_id_bytes,
             "mark_chat_read",
             &account_id_for_journal,
@@ -122,7 +110,6 @@ pub(super) async fn handle(
         .map(|_| ())
     })
     .await
-    .map_err(|error| ServiceError::Internal(format!("spawn_blocking: {error}")))?
     .map_err(ServiceError::Internal)?;
 
     // 3. Wake the worker so it picks up this job in its next pass.

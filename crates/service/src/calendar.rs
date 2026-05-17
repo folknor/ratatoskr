@@ -73,6 +73,7 @@ use crypto_key::SecretKey;
 use gmail::client::GmailState;
 use graph::client::GraphState;
 use jmap::client::JmapState;
+use db::db::ReadDbState;
 use service_api::{
     CalendarCancelAck, CalendarChanged, CalendarRunCompleted, CalendarRunId, CalendarStartAck,
     CalendarSyncResult, Notification,
@@ -109,6 +110,7 @@ pub(crate) struct CalendarRuntimeInner {
     /// would buy little; revisit if benchmarks surface a need.
     last_completed: Mutex<HashMap<String, Instant>>,
     pub(crate) db: WriteDbState,
+    pub(crate) read_db: ReadDbState,
     /// Per-runtime client registries for Gmail, Graph, and JMAP,
     /// constructed once at runtime construction so that clients inserted
     /// during one run can be reused on subsequent runs (the registries
@@ -138,6 +140,7 @@ pub struct CalendarRuntime {
 impl CalendarRuntime {
     pub fn new(
         db: WriteDbState,
+        read_db: ReadDbState,
         encryption_key: &SecretKey,
         notification_tx: NotificationSender,
         service_generation: u32,
@@ -154,6 +157,7 @@ impl CalendarRuntime {
                 accounts: Mutex::new(HashMap::new()),
                 last_completed: Mutex::new(HashMap::new()),
                 db,
+                read_db,
                 gmail,
                 graph,
                 jmap,
@@ -457,6 +461,7 @@ async fn run_calendar(
     let outcome = cal::sync::calendar_sync_account_impl(
         &account_id,
         &inner.db,
+        &inner.read_db,
         &inner.gmail,
         &inner.graph,
         &inner.jmap,
@@ -543,11 +548,12 @@ mod tests {
         let conn = StdArc::new(StdMutex::new(
             Connection::open_in_memory().expect("open in-memory db"),
         ));
+        let read = db::db::ReadDbState::from_arc(StdArc::clone(&conn));
         let db = WriteDbState::from_arc(conn);
         let key = SecretKey::from_bytes([0u8; 32]);
         let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
         let notification_tx = NotificationSender::new(tx);
-        let runtime = CalendarRuntime::new(db, &key, notification_tx, 1);
+        let runtime = CalendarRuntime::new(db, read, &key, notification_tx, 1);
         (runtime, rx)
     }
 

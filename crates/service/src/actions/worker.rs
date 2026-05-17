@@ -34,7 +34,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use db::db::action_journal::{
     JobTerminalStatus, LeasedOp, LeasedQuietJob, OpStatusCounts, OpTerminalStatus, PerOpJobKind,
@@ -97,7 +97,11 @@ async fn run(
         log::warn!("action worker: encryption_key missing post-boot");
         return;
     };
-    let action_ctx = match build_action_context(write_db, encryption_key, &app_data_dir) {
+    let Some(read_db) = boot_state.read_db_state() else {
+        log::warn!("action worker: read_db_state missing post-boot");
+        return;
+    };
+    let action_ctx = match build_action_context(write_db, read_db, encryption_key, &app_data_dir) {
         Ok(ctx) => ctx,
         Err(error) => {
             log::error!("action worker: failed to build ActionContext: {error}");
@@ -193,12 +197,12 @@ async fn drain_mark_chat_read_jobs(
                 conflicts: 0,
             };
             let summary_blob = serde_json::to_vec(&summary).unwrap_or_default();
-            let conn = ctx.db.conn();
             let job_id_bytes = job.job_id;
-            let _ = tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-                finalize_job(&conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
-            })
+            let write_db = ctx.write_db.clone();
+            let _ = write_db
+                .with_conn(move |conn| {
+                    finalize_job(conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
+                })
             .await;
         }
     }
@@ -209,14 +213,10 @@ async fn lease_next_quiet_job_via_blocking(
     kind: &'static str,
     owner: &[u8; 16],
 ) -> Result<Option<LeasedQuietJob>, String> {
-    let conn = ctx.db.conn();
     let owner = *owner;
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        lease_next_ready_quiet_job(&conn, kind, &owner, LEASE_DURATION_MS)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking: {e}"))?
+    ctx.write_db
+        .with_conn(move |conn| lease_next_ready_quiet_job(conn, kind, &owner, LEASE_DURATION_MS))
+        .await
 }
 
 async fn run_mark_chat_read(
@@ -244,14 +244,12 @@ async fn run_mark_chat_read(
     };
     let summary_blob =
         serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
-    let conn = ctx.db.conn();
     let job_id_bytes = job.job_id;
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        finalize_job(&conn, &job_id_bytes, JobTerminalStatus::Completed, &summary_blob)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking finalize_job: {e}"))??;
+    ctx.write_db
+        .with_conn(move |conn| {
+            finalize_job(conn, &job_id_bytes, JobTerminalStatus::Completed, &summary_blob)
+        })
+        .await?;
 
     let completion = ActionCompleted {
         plan_id: PlanId(uuid::Uuid::from_bytes(job.job_id)),
@@ -305,12 +303,12 @@ async fn drain_send_jobs(
                 conflicts: 0,
             };
             let summary_blob = serde_json::to_vec(&summary).unwrap_or_default();
-            let conn = ctx.db.conn();
             let job_id_bytes = job.job_id;
-            let _ = tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-                finalize_job(&conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
-            })
+            let write_db = ctx.write_db.clone();
+            let _ = write_db
+                .with_conn(move |conn| {
+                    finalize_job(conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
+                })
             .await;
 
             // Best-effort vault cleanup. If the deserialize failed we
@@ -376,14 +374,10 @@ async fn run_send(
 
     let summary_blob =
         serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
-    let conn = ctx.db.conn();
     let job_id_bytes = job.job_id;
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        finalize_job(&conn, &job_id_bytes, status, &summary_blob)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking finalize_job: {e}"))??;
+    ctx.write_db
+        .with_conn(move |conn| finalize_job(conn, &job_id_bytes, status, &summary_blob))
+        .await?;
 
     crate::send_vault::cleanup_vault_dir(app_data_dir, &send_id);
 
@@ -457,6 +451,7 @@ fn send_intent_from_wire(intent: service_api::SendIntent) -> crate::send::SendIn
 /// the action worker.
 pub(crate) fn build_action_context(
     write_db: service_state::WriteDbState,
+    db: db::db::ReadDbState,
     encryption_key: [u8; 32],
     app_data_dir: &std::path::Path,
 ) -> Result<ActionContext, String> {
@@ -466,7 +461,6 @@ pub(crate) fn build_action_context(
         .map_err(|e| format!("InlineImageStoreReadState::init: {e}"))?;
     let search = search::SearchReadState::init(app_data_dir)
         .map_err(|e| format!("SearchReadState::init: {e}"))?;
-    let db = write_db.to_read_state();
     Ok(ActionContext {
         db,
         write_db,
@@ -495,20 +489,14 @@ async fn drain_one_pass(
     // a crash in between leaves the job stranded at queued/leased.
     // lease_next_ready_op then returns None forever for that job, and
     // without this sweep maybe_finalize is never called again.
-    let conn = ctx.db.conn();
-    let stranded = match tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        unfinalized_per_op_plan_jobs(&conn)
-    })
-    .await
+    let stranded = match ctx
+        .write_db
+        .with_conn(unfinalized_per_op_plan_jobs)
+        .await
     {
-        Ok(Ok(ids)) => ids,
-        Ok(Err(error)) => {
-            log::warn!("action worker: unfinalized_per_op_plan_jobs failed: {error}");
-            Vec::new()
-        }
+        Ok(ids) => ids,
         Err(error) => {
-            log::warn!("action worker: spawn_blocking unfinalized_per_op_plan_jobs: {error}");
+            log::warn!("action worker: unfinalized_per_op_plan_jobs failed: {error}");
             Vec::new()
         }
     };
@@ -566,14 +554,10 @@ async fn lease_next_via_blocking(
     ctx: &ActionContext,
     owner: &[u8; 16],
 ) -> Result<Option<LeasedOp>, String> {
-    let conn = ctx.db.conn();
     let owner = *owner;
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        lease_next_ready_op(&conn, &owner, LEASE_DURATION_MS)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking: {e}"))?
+    ctx.write_db
+        .with_conn(move |conn| lease_next_ready_op(conn, &owner, LEASE_DURATION_MS))
+        .await
 }
 
 async fn run_one(
@@ -647,6 +631,7 @@ async fn run_one_calendar(
     // type system, no `WriteDbState::from_arc` end-run.
     let cal_ctx = action_types::CalendarActionContext {
         db: ctx.write_db.clone(),
+        read_db: ctx.db.clone(),
         encryption_key: ctx.encryption_key,
     };
     let cal_op = service_api::CalendarActionWireOperation {
@@ -668,16 +653,14 @@ async fn run_one_calendar(
     };
     let outcome_blob = serde_json::to_vec(&cal_result)
         .map_err(|e| format!("serialize CalendarOperationResult: {e}"))?;
-    let conn = ctx.db.conn();
     let plan_id = op.plan_id;
     let operation_id = op.operation_id;
     let blob_for_blocking = outcome_blob.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        mark_op_terminal(&conn, &plan_id, operation_id, status, &blob_for_blocking)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking mark_op_terminal: {e}"))??;
+    ctx.write_db
+        .with_conn(move |conn| {
+            mark_op_terminal(conn, &plan_id, operation_id, status, &blob_for_blocking)
+        })
+        .await?;
 
     if !op.quiet {
         let outcome = CalendarOperationOutcome {
@@ -704,16 +687,14 @@ async fn persist_and_emit(
 ) -> Result<(), String> {
     let outcome_blob = serde_json::to_vec(&result)
         .map_err(|e| format!("serialize OperationResult: {e}"))?;
-    let conn = ctx.db.conn();
     let plan_id = op.plan_id;
     let operation_id = op.operation_id;
     let blob_for_blocking = outcome_blob.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        mark_op_terminal(&conn, &plan_id, operation_id, status, &blob_for_blocking)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking mark_op_terminal: {e}"))??;
+    ctx.write_db
+        .with_conn(move |conn| {
+            mark_op_terminal(conn, &plan_id, operation_id, status, &blob_for_blocking)
+        })
+        .await?;
 
     if !op.quiet {
         let outcome = OperationOutcome {
@@ -733,14 +714,11 @@ async fn maybe_finalize(
     plan_id_bytes: &[u8; 16],
     kind: Option<PerOpJobKind>,
 ) -> Result<(), String> {
-    let conn = ctx.db.conn();
     let plan_id = *plan_id_bytes;
-    let counts: OpStatusCounts = tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        count_ops_by_status(&conn, &plan_id)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking count_ops_by_status: {e}"))??;
+    let counts: OpStatusCounts = ctx
+        .write_db
+        .with_conn(move |conn| count_ops_by_status(conn, &plan_id))
+        .await?;
     if counts.non_terminal() > 0 {
         return Ok(());
     }
@@ -760,14 +738,12 @@ async fn maybe_finalize(
     };
     let summary_blob =
         serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
-    let conn = ctx.db.conn();
     let plan_id_for_blocking = *plan_id_bytes;
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        finalize_job(&conn, &plan_id_for_blocking, terminal_status, &summary_blob)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking finalize_job: {e}"))??;
+    ctx.write_db
+        .with_conn(move |conn| {
+            finalize_job(conn, &plan_id_for_blocking, terminal_status, &summary_blob)
+        })
+        .await?;
 
     let plan_id_uuid = PlanId(uuid::Uuid::from_bytes(*plan_id_bytes));
     let mail_completion = || ActionCompleted {
@@ -785,14 +761,11 @@ async fn maybe_finalize(
     let needs_cal_completion =
         matches!(kind, Some(PerOpJobKind::CalendarPlan) | None);
     let cal_results = if needs_cal_completion {
-        let conn = ctx.db.conn();
         let plan_id_for_blocking = *plan_id_bytes;
-        let rows: Vec<(u32, Vec<u8>)> = tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-            terminal_ops_for_plan(&conn, &plan_id_for_blocking)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking terminal_ops_for_plan: {e}"))??;
+        let rows: Vec<(u32, Vec<u8>)> = ctx
+            .write_db
+            .with_conn(move |conn| terminal_ops_for_plan(conn, &plan_id_for_blocking))
+            .await?;
         let mut outcomes = Vec::with_capacity(rows.len());
         for (operation_id, blob) in rows {
             let result: service_api::CalendarOperationResult =
@@ -853,13 +826,8 @@ async fn maybe_finalize(
 }
 
 async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
-    let conn = ctx.db.conn();
-    let result: Result<Vec<ReplayableOp>, String> = tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
-        unemitted_terminal_ops(&conn)
-    })
-    .await
-    .unwrap_or_else(|e| Err(format!("spawn_blocking: {e}")));
+    let result: Result<Vec<ReplayableOp>, String> =
+        ctx.write_db.with_conn(unemitted_terminal_ops).await;
     let ops = match result {
         Ok(ops) => ops,
         Err(error) => {

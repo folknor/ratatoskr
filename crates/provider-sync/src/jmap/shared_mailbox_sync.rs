@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use bifrost_jmap::mailbox::MailboxChanges;
 
 use common::types::SyncResult;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
@@ -40,7 +41,8 @@ pub async fn sync_shared_account(
     client: &JmapClient,
     jmap_account_id: &str,
     account_id: &str,
-    db: &WriteDbState,
+    _db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -49,11 +51,10 @@ pub async fn sync_shared_account(
 ) -> Result<SyncResult, String> {
     super::sync::check_cancelled(cancellation_token)?;
 
-    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,
@@ -72,7 +73,7 @@ pub async fn sync_shared_account(
         match shared_initial_sync(&ctx).await {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db,
+                    read_db,
                     account_id,
                     jmap_account_id,
                     now,
@@ -84,7 +85,7 @@ pub async fn sync_shared_account(
             Err(e) => {
                 log::warn!("Shared JMAP account {jmap_account_id} initial sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db,
+                    read_db,
                     account_id,
                     jmap_account_id,
                     now,
@@ -99,7 +100,7 @@ pub async fn sync_shared_account(
         match shared_delta_sync(&ctx).await {
             Ok(sync_result) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db,
+                    read_db,
                     account_id,
                     jmap_account_id,
                     now,
@@ -111,7 +112,7 @@ pub async fn sync_shared_account(
             Err(e) => {
                 log::warn!("Shared JMAP account {jmap_account_id} delta sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db,
+                    read_db,
                     account_id,
                     jmap_account_id,
                     now,
@@ -132,14 +133,14 @@ pub async fn sync_all_shared_accounts(
     client: &JmapClient,
     account_id: &str,
     db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
     cancellation_token: &CancellationToken,
 ) -> Vec<(String, Result<SyncResult, String>)> {
-    let read_db = db.to_read_state();
-    let enabled = match sync_state::get_enabled_shared_mailboxes(&read_db, account_id).await {
+    let enabled = match sync_state::get_enabled_shared_mailboxes(read_db, account_id).await {
         Ok(list) => list,
         Err(e) => {
             log::warn!("Failed to load enabled shared JMAP accounts: {e}");
@@ -167,6 +168,7 @@ pub async fn sync_all_shared_accounts(
             &entry.mailbox_id,
             account_id,
             db,
+            read_db,
             body_store,
             inline_images,
             search,

@@ -15,6 +15,41 @@ use super::payload::{
     extract_reminder_rows, parse_jscalendar_times, resolve_calendar_id,
 };
 
+#[derive(Debug, Clone)]
+pub struct JmapCalendarAttendeeRecord {
+    pub email: String,
+    pub name: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub is_organizer: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct JmapCalendarReminderRecord {
+    pub minutes_before: i64,
+    pub method: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JmapCalendarEventRecord {
+    pub google_event_id: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: bool,
+    pub status: String,
+    pub organizer_email: Option<String>,
+    pub attendees_json: Option<String>,
+    pub calendar_id: Option<String>,
+    pub remote_event_id: String,
+    pub ical_data: Option<String>,
+    pub uid: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub attendees: Vec<JmapCalendarAttendeeRecord>,
+    pub reminders: Vec<JmapCalendarReminderRecord>,
+}
+
 /// Persist a JMAP CalendarEvent into the local database.
 ///
 /// Extracts JSCalendar properties and maps them to the DB schema.
@@ -24,73 +59,44 @@ pub(super) async fn persist_jmap_event(
     event: &CalendarEvent<Get>,
     cal_map: &HashMap<&str, &str>,
 ) -> Result<(), String> {
-    let event_id = match event.id() {
-        Some(id) => id,
-        None => return Ok(()),
+    let Some(record) = jmap_event_record(event, cal_map) else {
+        return Ok(());
     };
 
-    let uid = event.uid().map(String::from);
-    let title = event.title().map(String::from);
-    let description = event.description().map(String::from);
-    let status = event.status().unwrap_or("confirmed").to_string();
+    persist_jmap_event_record(db, account_id, record).await
+}
 
-    // Extract location from locations map
-    let location = extract_location(event);
-
-    // Resolve calendar_id from calendarIds map
-    let calendar_id = resolve_calendar_id(event, cal_map);
-
-    // Parse start/end times from JSCalendar format
-    let (start_time, end_time, is_all_day) = parse_jscalendar_times(event);
-
-    // Extract organizer email from participants
-    let organizer_email = extract_organizer_email(event);
-
-    // Extract attendees JSON
-    let attendees_json = extract_attendees_json(event);
-
-    // Recurrence rules as ical_data
-    let ical_data = event
-        .recurrence_rules()
-        .and_then(|rules| serde_json::to_string(rules).ok());
-    let recurrence_rule = event
-        .recurrence_rules()
-        .and_then(|rules| serde_json::to_value(rules).ok())
-        .and_then(|value| jmap_recurrence_rules_to_rrule(&value));
-
-    // Extract attendees and reminders BEFORE the closure (cannot send references)
-    let attendees = extract_attendee_rows(event);
-    let reminders = extract_reminder_rows(event);
-
-    // Use event_id as both google_event_id and remote_event_id for JMAP
+pub(super) async fn persist_jmap_event_record(
+    db: &ReadDbState,
+    account_id: &str,
+    record: JmapCalendarEventRecord,
+) -> Result<(), String> {
     let aid = account_id.to_string();
-    let eid = event_id.to_string();
-    let eid2 = eid.clone();
 
     db.with_conn(move |conn| {
         let local_event_id = upsert_calendar_event_sync(
             conn,
             &UpsertCalendarEventParams {
                 account_id: aid.clone(),
-                google_event_id: eid.clone(),
-                summary: title,
-                description,
-                location,
-                start_time,
-                end_time,
-                is_all_day,
-                status,
-                organizer_email,
-                attendees_json,
+                google_event_id: record.google_event_id.clone(),
+                summary: record.summary.clone(),
+                description: record.description.clone(),
+                location: record.location.clone(),
+                start_time: record.start_time,
+                end_time: record.end_time,
+                is_all_day: record.is_all_day,
+                status: record.status.clone(),
+                organizer_email: record.organizer_email.clone(),
+                attendees_json: record.attendees_json.clone(),
                 html_link: None,
-                calendar_id,
-                remote_event_id: Some(eid2),
+                calendar_id: record.calendar_id.clone(),
+                remote_event_id: Some(record.remote_event_id.clone()),
                 etag: None,
-                ical_data,
-                uid,
+                ical_data: record.ical_data.clone(),
+                uid: record.uid.clone(),
                 title: None,
                 timezone: None,
-                recurrence_rule,
+                recurrence_rule: record.recurrence_rule.clone(),
                 organizer_name: None,
                 rsvp_status: None,
                 availability: None,
@@ -103,7 +109,8 @@ pub(super) async fn persist_jmap_event(
             },
         )?;
 
-        let attendee_rows: Vec<CalendarAttendeeWriteRow> = attendees
+        let attendee_rows: Vec<CalendarAttendeeWriteRow> = record
+            .attendees
             .iter()
             .map(|att| CalendarAttendeeWriteRow {
                 email: att.email.clone(),
@@ -114,7 +121,8 @@ pub(super) async fn persist_jmap_event(
             .collect();
         replace_event_attendees_sync(conn, &aid, &local_event_id, &attendee_rows)?;
 
-        let reminder_rows: Vec<CalendarReminderWriteRow> = reminders
+        let reminder_rows: Vec<CalendarReminderWriteRow> = record
+            .reminders
             .iter()
             .map(|rem| CalendarReminderWriteRow {
                 minutes_before: rem.minutes_before,
@@ -125,6 +133,57 @@ pub(super) async fn persist_jmap_event(
         Ok(())
     })
     .await
+}
+
+pub fn jmap_event_record(
+    event: &CalendarEvent<Get>,
+    cal_map: &HashMap<&str, &str>,
+) -> Option<JmapCalendarEventRecord> {
+    let event_id = event.id()?;
+    let ical_data = event
+        .recurrence_rules()
+        .and_then(|rules| serde_json::to_string(rules).ok());
+    let recurrence_rule = event
+        .recurrence_rules()
+        .and_then(|rules| serde_json::to_value(rules).ok())
+        .and_then(|value| jmap_recurrence_rules_to_rrule(&value));
+    let (start_time, end_time, is_all_day) = parse_jscalendar_times(event);
+    let attendees = extract_attendee_rows(event)
+        .into_iter()
+        .map(|att| JmapCalendarAttendeeRecord {
+            email: att.email,
+            name: att.name,
+            rsvp_status: att.rsvp_status,
+            is_organizer: att.is_organizer,
+        })
+        .collect();
+    let reminders = extract_reminder_rows(event)
+        .into_iter()
+        .map(|rem| JmapCalendarReminderRecord {
+            minutes_before: rem.minutes_before,
+            method: rem.method,
+        })
+        .collect();
+
+    Some(JmapCalendarEventRecord {
+        google_event_id: event_id.to_string(),
+        summary: event.title().map(String::from),
+        description: event.description().map(String::from),
+        location: extract_location(event),
+        start_time,
+        end_time,
+        is_all_day,
+        status: event.status().unwrap_or("confirmed").to_string(),
+        organizer_email: extract_organizer_email(event),
+        attendees_json: extract_attendees_json(event),
+        calendar_id: resolve_calendar_id(event, cal_map),
+        remote_event_id: event_id.to_string(),
+        ical_data,
+        uid: event.uid().map(String::from),
+        recurrence_rule,
+        attendees,
+        reminders,
+    })
 }
 
 fn jmap_recurrence_rules_to_rrule(rules: &serde_json::Value) -> Option<String> {

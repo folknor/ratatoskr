@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use db::db::params;
+use rusqlite::Connection;
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -15,11 +16,11 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     // Main DB with full migrations
-    let conn = db::db::Connection::open_in_memory().expect("open in-memory db");
+    let conn = Connection::open_in_memory().expect("open in-memory db");
     db::db::migrations::run_all(&conn).expect("migrations");
     let conn_arc = Arc::new(Mutex::new(conn));
+    let db = db::db::ReadDbState::from_arc(Arc::clone(&conn_arc));
     let write_db = service_state::WriteDbState::from_arc(conn_arc);
-    let db = write_db.to_read_state();
 
     // Stores: tempdir-backed
     let body_store = store::body_store::BodyStoreReadState::init(tmp.path()).expect("body store");
@@ -40,49 +41,52 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     (ctx, tmp)
 }
 
+fn with_test_conn<T>(ctx: &ActionContext, f: impl FnOnce(&Connection) -> T) -> T {
+    ctx.db
+        .with_conn_sync(|conn| Ok(f(conn)))
+        .expect("test db access")
+}
+
 /// Insert a test account row (needed for FK constraints on pending_operations).
 fn insert_test_account(ctx: &ActionContext, account_id: &str) {
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.execute(
-        "INSERT INTO accounts (id, email, provider, is_active) VALUES (?1, ?2, ?3, 1)",
-        params![account_id, format!("{account_id}@test.com"), "gmail_api"],
-    )
-    .expect("insert account");
-    for (folder_id, name) in [("INBOX", "Inbox"), ("TRASH", "Trash"), ("SPAM", "Spam")] {
+    with_test_conn(ctx, |conn| {
         conn.execute(
-            "INSERT OR IGNORE INTO folders (account_id, id, name, is_undeletable)
-             VALUES (?1, ?2, ?3, 1)",
-            params![account_id, folder_id, name],
+            "INSERT INTO accounts (id, email, provider, is_active) VALUES (?1, ?2, ?3, 1)",
+            params![account_id, format!("{account_id}@test.com"), "gmail_api"],
         )
-        .expect("insert folder");
-    }
+        .expect("insert account");
+        for (folder_id, name) in [("INBOX", "Inbox"), ("TRASH", "Trash"), ("SPAM", "Spam")] {
+            conn.execute(
+                "INSERT OR IGNORE INTO folders (account_id, id, name, is_undeletable)
+                 VALUES (?1, ?2, ?3, 1)",
+                params![account_id, folder_id, name],
+            )
+            .expect("insert folder");
+        }
+    });
 }
 
 /// Insert a test thread row.
 fn insert_test_thread(ctx: &ActionContext, account_id: &str, thread_id: &str) {
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.execute(
-        "INSERT OR IGNORE INTO threads (id, account_id, subject, snippet, last_message_at, is_read, is_starred) \
-         VALUES (?1, ?2, 'test', '', 0, 0, 0)",
-        params![thread_id, account_id],
-    )
-    .expect("insert thread");
+    with_test_conn(ctx, |conn| {
+        conn.execute(
+            "INSERT OR IGNORE INTO threads (id, account_id, subject, snippet, last_message_at, is_read, is_starred) \
+             VALUES (?1, ?2, 'test', '', 0, 0, 0)",
+            params![thread_id, account_id],
+        )
+        .expect("insert thread");
+    });
 }
 
 /// Insert a thread_folders row.
 fn insert_thread_folder(ctx: &ActionContext, account_id: &str, thread_id: &str, folder_id: &str) {
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.execute(
-        "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) VALUES (?1, ?2, ?3)",
-        params![account_id, thread_id, folder_id],
-    )
-    .expect("insert thread_folder");
+    with_test_conn(ctx, |conn| {
+        conn.execute(
+            "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) VALUES (?1, ?2, ?3)",
+            params![account_id, thread_id, folder_id],
+        )
+        .expect("insert thread_folder");
+    });
 }
 
 /// Check if a thread_folders row exists.
@@ -92,30 +96,28 @@ fn has_thread_folder(
     thread_id: &str,
     folder_id: &str,
 ) -> bool {
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2 AND folder_id = ?3",
-            params![account_id, thread_id, folder_id],
-            |row| row.get(0),
-        )
-        .expect("query");
-    count > 0
+    with_test_conn(ctx, |conn| {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM thread_folders WHERE account_id = ?1 AND thread_id = ?2 AND folder_id = ?3",
+                params![account_id, thread_id, folder_id],
+                |row| row.get(0),
+            )
+            .expect("query");
+        count > 0
+    })
 }
 
 /// Get thread.is_starred value.
 fn get_thread_starred(ctx: &ActionContext, account_id: &str, thread_id: &str) -> bool {
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.query_row(
-        "SELECT is_starred FROM threads WHERE account_id = ?1 AND id = ?2",
-        params![account_id, thread_id],
-        |row| row.get::<_, bool>(0),
-    )
-    .expect("query")
+    with_test_conn(ctx, |conn| {
+        conn.query_row(
+            "SELECT is_starred FROM threads WHERE account_id = ?1 AND id = ?2",
+            params![account_id, thread_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("query")
+    })
 }
 
 /// Count pending ops for a resource.
@@ -125,17 +127,16 @@ fn count_pending_ops(
     resource_id: &str,
     op_type: &str,
 ) -> i64 {
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.query_row(
-        "SELECT COUNT(*) FROM pending_operations \
-         WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
-           AND status IN ('pending', 'executing')",
-        params![account_id, resource_id, op_type],
-        |row| row.get(0),
-    )
-    .expect("query")
+    with_test_conn(ctx, |conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM pending_operations \
+             WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+               AND status IN ('pending', 'executing')",
+            params![account_id, resource_id, op_type],
+            |row| row.get(0),
+        )
+        .expect("query")
+    })
 }
 
 // ── FlightGuard tests ───────────────────────────────────────────────
@@ -273,17 +274,14 @@ async fn snooze_sets_state_and_removes_inbox() {
     assert!(outcome.is_success());
     assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
 
-    // Check snooze fields
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    let (is_snoozed, snooze_until): (bool, i64) = conn
-        .query_row(
+    let (is_snoozed, snooze_until): (bool, i64) = with_test_conn(&ctx, |conn| {
+        conn.query_row(
             "SELECT is_snoozed, snooze_until FROM threads WHERE account_id = 'acc1' AND id = 't1'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("query");
+        .expect("query")
+    });
     assert!(is_snoozed);
     assert_eq!(snooze_until, 1234567890);
 }
@@ -339,16 +337,14 @@ async fn enqueue_replaces_existing_pending_op() {
     assert_eq!(count_pending_ops(&ctx, "acc1", "t1", "star"), 1);
 
     // Verify params were updated to the latest
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    let params: String = conn
-        .query_row(
+    let params: String = with_test_conn(&ctx, |conn| {
+        conn.query_row(
             "SELECT params FROM pending_operations WHERE account_id = 'acc1' AND resource_id = 't1' AND operation_type = 'star'",
             [],
             |row| row.get(0),
         )
-        .expect("query");
+        .expect("query")
+    });
     assert_eq!(params, r#"{"starred":false}"#);
 }
 
@@ -392,16 +388,14 @@ async fn folder_actions_get_10_max_retries() {
     };
     super::pending::enqueue_if_retryable(&ctx, &outcome, "acc1", "archive", "t1", "{}").await;
 
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    let max: i64 = conn
-        .query_row(
+    let max: i64 = with_test_conn(&ctx, |conn| {
+        conn.query_row(
             "SELECT max_retries FROM pending_operations WHERE resource_id = 't1'",
             [],
             |row| row.get(0),
         )
-        .expect("query");
+        .expect("query")
+    });
     assert_eq!(max, 10);
 }
 
@@ -416,16 +410,14 @@ async fn flag_actions_get_5_max_retries() {
     };
     super::pending::enqueue_if_retryable(&ctx, &outcome, "acc1", "star", "t1", "{}").await;
 
-    let db = ctx.db.clone();
-    let conn = db.conn();
-    let conn = conn.lock().expect("lock");
-    let max: i64 = conn
-        .query_row(
+    let max: i64 = with_test_conn(&ctx, |conn| {
+        conn.query_row(
             "SELECT max_retries FROM pending_operations WHERE resource_id = 't1'",
             [],
             |row| row.get(0),
         )
-        .expect("query");
+        .expect("query")
+    });
     assert_eq!(max, 5);
 }
 
@@ -594,33 +586,33 @@ fn action_outcome_helpers() {
 // ── label_group composite tests ────────────────────────────────────
 
 fn insert_label_group(ctx: &ActionContext, group_id: i64, name: &str) {
-    let conn = ctx.db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.execute(
-        "INSERT INTO label_groups (id, name, color_bg, color_fg) VALUES (?1, ?2, '#000', '#fff')",
-        params![group_id, name],
-    )
-    .expect("insert label group");
+    with_test_conn(ctx, |conn| {
+        conn.execute(
+            "INSERT INTO label_groups (id, name, color_bg, color_fg) VALUES (?1, ?2, '#000', '#fff')",
+            params![group_id, name],
+        )
+        .expect("insert label group");
+    });
 }
 
 fn insert_label(ctx: &ActionContext, account_id: &str, label_id: &str, name: &str) {
-    let conn = ctx.db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.execute(
-        "INSERT INTO labels (account_id, id, name) VALUES (?1, ?2, ?3)",
-        params![account_id, label_id, name],
-    )
-    .expect("insert label");
+    with_test_conn(ctx, |conn| {
+        conn.execute(
+            "INSERT INTO labels (account_id, id, name) VALUES (?1, ?2, ?3)",
+            params![account_id, label_id, name],
+        )
+        .expect("insert label");
+    });
 }
 
 fn insert_group_member(ctx: &ActionContext, group_id: i64, account_id: &str, label_id: &str) {
-    let conn = ctx.db.conn();
-    let conn = conn.lock().expect("lock");
-    conn.execute(
-        "INSERT INTO label_group_members (group_id, account_id, label_id) VALUES (?1, ?2, ?3)",
-        params![group_id, account_id, label_id],
-    )
-    .expect("insert member");
+    with_test_conn(ctx, |conn| {
+        conn.execute(
+            "INSERT INTO label_group_members (group_id, account_id, label_id) VALUES (?1, ?2, ?3)",
+            params![group_id, account_id, label_id],
+        )
+        .expect("insert member");
+    });
 }
 
 fn has_pending_label_intent(
@@ -630,17 +622,17 @@ fn has_pending_label_intent(
     label_id: &str,
     op: &str,
 ) -> bool {
-    let conn = ctx.db.conn();
-    let conn = conn.lock().expect("lock");
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pending_thread_label_intents \
-             WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3 AND op = ?4",
-            params![account_id, thread_id, label_id, op],
-            |row| row.get(0),
-        )
-        .expect("query");
-    count > 0
+    with_test_conn(ctx, |conn| {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_thread_label_intents \
+                 WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3 AND op = ?4",
+                params![account_id, thread_id, label_id, op],
+                |row| row.get(0),
+            )
+            .expect("query");
+        count > 0
+    })
 }
 
 #[tokio::test]

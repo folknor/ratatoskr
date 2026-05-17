@@ -7,6 +7,7 @@
 //! handled by the wrapper functions in `sync.rs`.
 
 use common::types::SyncResult;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
@@ -30,6 +31,7 @@ pub async fn sync_shared_mailbox(
     primary_client: &GraphClient,
     mailbox_id: &str,
     db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -39,10 +41,9 @@ pub async fn sync_shared_mailbox(
 ) -> Result<SyncResult, String> {
     let scoped_client = primary_client.for_shared_mailbox(mailbox_id.to_string());
 
-    let read_db = db.to_read_state();
     // Check if we have any delta tokens for this mailbox - if not, run initial sync.
     let tokens =
-        sync_state::load_shared_mailbox_delta_tokens(&read_db, account_id, mailbox_id).await?;
+        sync_state::load_shared_mailbox_delta_tokens(read_db, account_id, mailbox_id).await?;
 
     let now = chrono::Utc::now().timestamp();
 
@@ -52,6 +53,7 @@ pub async fn sync_shared_mailbox(
             &scoped_client,
             account_id,
             db,
+            read_db,
             body_store,
             inline_images,
             search,
@@ -63,7 +65,7 @@ pub async fn sync_shared_mailbox(
         {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db, account_id, mailbox_id, now, None,
+                    read_db, account_id, mailbox_id, now, None,
                 )
                 .await?;
                 Ok(SyncResult::default())
@@ -71,7 +73,7 @@ pub async fn sync_shared_mailbox(
             Err(e) => {
                 log::warn!("Shared mailbox {mailbox_id} initial sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db,
+                    read_db,
                     account_id,
                     mailbox_id,
                     now,
@@ -90,6 +92,7 @@ pub async fn sync_shared_mailbox(
             &scoped_client,
             account_id,
             db,
+            read_db,
             body_store,
             inline_images,
             search,
@@ -100,7 +103,7 @@ pub async fn sync_shared_mailbox(
         {
             Ok(sync_result) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db, account_id, mailbox_id, now, None,
+                    read_db, account_id, mailbox_id, now, None,
                 )
                 .await?;
                 Ok(sync_result)
@@ -108,7 +111,7 @@ pub async fn sync_shared_mailbox(
             Err(e) => {
                 log::warn!("Shared mailbox {mailbox_id} delta sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    &read_db,
+                    read_db,
                     account_id,
                     mailbox_id,
                     now,
@@ -129,6 +132,7 @@ pub async fn sync_shared_mailbox(
 pub async fn sync_all_shared_mailboxes(
     primary_client: &GraphClient,
     db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -136,8 +140,7 @@ pub async fn sync_all_shared_mailboxes(
     cancellation_token: &CancellationToken,
     account_id: &str,
 ) -> Vec<(String, Result<SyncResult, String>)> {
-    let read_db = db.to_read_state();
-    let enabled = match sync_state::get_enabled_shared_mailboxes(&read_db, account_id).await {
+    let enabled = match sync_state::get_enabled_shared_mailboxes(read_db, account_id).await {
         Ok(list) => list,
         Err(e) => {
             log::warn!("Failed to load enabled shared mailboxes: {e}");
@@ -164,6 +167,7 @@ pub async fn sync_all_shared_mailboxes(
             primary_client,
             &entry.mailbox_id,
             db,
+            read_db,
             body_store,
             inline_images,
             search,

@@ -74,8 +74,8 @@ pub(crate) async fn handle_rebuild(
 
     // Resolve the runtime dependencies. Errors here are programming
     // bugs (boot completes before any handler is dispatched).
-    let db_conn = boot_state.db_conn().ok_or_else(|| {
-        ServiceError::Internal("index.rebuild: db_conn missing post-boot.ready".into())
+    let db_state = boot_state.write_db_state().map_err(|e| {
+        ServiceError::Internal(format!("index.rebuild: db_conn missing post-boot.ready: {e}"))
     })?;
     let body_read =
         store::body_store::BodyStoreReadState::init(boot_state.app_data_dir()).map_err(|e| {
@@ -92,7 +92,6 @@ pub(crate) async fn handle_rebuild(
 
     match params.policy {
         service_api::RebuildPolicy::Wipe => {
-            let db_state = service_state::WriteDbState::from_arc(db_conn);
             let boot_state_for_task = Arc::clone(boot_state);
             let cancel_for_task = cancel.clone();
             let id_for_task = rebuild_id.clone();
@@ -119,7 +118,6 @@ pub(crate) async fn handle_rebuild(
             });
         }
         service_api::RebuildPolicy::PreserveExisting => {
-            let db_state = service_state::WriteDbState::from_arc(db_conn);
             let boot_state_for_task = Arc::clone(boot_state);
             let cancel_for_task = cancel.clone();
             let id_for_task = rebuild_id.clone();
@@ -176,11 +174,10 @@ pub(crate) async fn handle_backfill_kick(
         log::debug!("extract.backfill_kick: ExtractRuntime not installed, skipping");
         return Ok(());
     };
-    let Some(db_conn) = boot_state.db_conn() else {
+    let Ok(db) = boot_state.write_db_state() else {
         log::debug!("extract.backfill_kick: db_conn missing, skipping");
         return Ok(());
     };
-    let db = service_state::WriteDbState::from_arc(db_conn);
     let rows = db
         .with_conn(move |conn| {
             db::db::queries_extra::find_unindexed_cached_attachments(conn, BACKFILL_KICK_LIMIT)

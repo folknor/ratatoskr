@@ -913,9 +913,9 @@ async fn process_imap_batch(
     // (no write_db, no encryption key) are surfaced as
     // `InternalError`; LOGIN/SELECT/network failures use
     // `ProviderTransient` because IMAP servers do drop and recover.
-    let read_db = match inner.boot_state.write_db_state() {
-        Ok(w) => w.to_read_state(),
-        Err(_) => {
+    let read_db = match inner.boot_state.read_db_state() {
+        Some(db) => db,
+        None => {
             for item in items {
                 record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
             }
@@ -1072,9 +1072,10 @@ async fn run_item_pipeline(
 
     // Confirm the row still wants bytes (cache-hit by another path
     // would have populated `content_hash` between enqueue and now).
-    let read_db = inner.boot_state.write_db_state()
-        .map_err(|_| SkipReason::InternalError)?
-        .to_read_state();
+    let read_db = inner
+        .boot_state
+        .read_db_state()
+        .ok_or(SkipReason::InternalError)?;
     let lookup_account = item.account_id.clone();
     let lookup_message = item.message_id.clone();
     let lookup_attachment = item.attachment_id.clone();

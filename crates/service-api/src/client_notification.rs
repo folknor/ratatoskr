@@ -29,6 +29,15 @@ pub enum ClientNotification {
     /// UI-owned.
     #[serde(rename = "pending_ops.kick")]
     PendingOpsKick,
+    /// Best-effort cancellation of a retry-queue row before the UI
+    /// dispatches an undo inverse plan. The mutation belongs in the
+    /// Service process; the app only sends the intent.
+    #[serde(rename = "pending_ops.cancel_for_resource")]
+    PendingOpsCancelForResource {
+        account_id: String,
+        resource_id: String,
+        operation_type: String,
+    },
     /// Phase 5: "The UI's tick fired; please consider running calendar
     /// sync for any account whose `last_calendar_sync` is stale." The
     /// Service handler enumerates accounts and gates each on a 1 h
@@ -89,6 +98,7 @@ impl ClientNotification {
     pub fn method_name(&self) -> &'static str {
         match self {
             Self::PendingOpsKick => "pending_ops.kick",
+            Self::PendingOpsCancelForResource { .. } => "pending_ops.cancel_for_resource",
             Self::CalendarKick => "calendar.kick",
             Self::GalKick => "gal.kick",
             Self::PinnedSearchKick => "pinned_search.kick",
@@ -100,6 +110,15 @@ impl ClientNotification {
 
     pub fn params_value(&self) -> Value {
         match self {
+            Self::PendingOpsCancelForResource {
+                account_id,
+                resource_id,
+                operation_type,
+            } => serde_json::json!({
+                "account_id": account_id,
+                "resource_id": resource_id,
+                "operation_type": operation_type,
+            }),
             Self::PendingOpsKick
             | Self::CalendarKick
             | Self::GalKick
@@ -119,6 +138,7 @@ impl ClientNotification {
     pub fn class(&self) -> NotificationClass {
         match self {
             Self::PendingOpsKick
+            | Self::PendingOpsCancelForResource { .. }
             | Self::CalendarKick
             | Self::GalKick
             | Self::PinnedSearchKick
@@ -134,6 +154,24 @@ impl ClientNotification {
                 None | Some(Value::Null) => Ok(Self::PendingOpsKick),
                 Some(_) => Err("pending_ops.kick must have no params".to_string()),
             },
+            "pending_ops.cancel_for_resource" => {
+                #[derive(Deserialize)]
+                struct CancelParams {
+                    account_id: String,
+                    resource_id: String,
+                    operation_type: String,
+                }
+                let params = params
+                    .clone()
+                    .ok_or_else(|| "pending_ops.cancel_for_resource requires params".to_string())?;
+                let params: CancelParams = serde_json::from_value(params)
+                    .map_err(|e| format!("pending_ops.cancel_for_resource params: {e}"))?;
+                Ok(Self::PendingOpsCancelForResource {
+                    account_id: params.account_id,
+                    resource_id: params.resource_id,
+                    operation_type: params.operation_type,
+                })
+            }
             "calendar.kick" => match params {
                 None | Some(Value::Null) => Ok(Self::CalendarKick),
                 Some(_) => Err("calendar.kick must have no params".to_string()),

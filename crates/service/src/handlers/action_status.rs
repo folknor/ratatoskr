@@ -23,19 +23,14 @@ pub(super) async fn handle(
     state: &Arc<BootSharedState>,
     plan_id: PlanId,
 ) -> Result<Value, ServiceError> {
-    let conn = state
-        .db_conn()
+    let db = state
+        .read_db_state()
         .ok_or_else(|| ServiceError::Internal("boot context not populated".into()))?;
     let job_id_bytes = *plan_id.0.as_bytes();
 
-    let snapshot = tokio::task::spawn_blocking(move || {
-        let conn = conn
-            .lock()
-            .map_err(|error| format!("db lock poisoned: {error}"))?;
-        query_job_status(&conn, &job_id_bytes)
-    })
+    let snapshot = db
+        .with_conn(move |conn| query_job_status(conn, &job_id_bytes))
     .await
-    .map_err(|error| ServiceError::Internal(format!("spawn_blocking: {error}")))?
     .map_err(ServiceError::Internal)?;
 
     let response = match snapshot {

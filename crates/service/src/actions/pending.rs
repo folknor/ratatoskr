@@ -7,8 +7,9 @@
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome};
 use db::db::pending_ops::{
-    db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_get,
-    db_pending_ops_increment_retry, db_pending_ops_recover_executing, db_pending_ops_update_status,
+    db_pending_ops_delete_sync, db_pending_ops_enqueue_sync, db_pending_ops_get,
+    db_pending_ops_increment_retry_sync, db_pending_ops_recover_executing_sync,
+    db_pending_ops_update_status_sync,
 };
 
 const STALE_LABEL_INTENT_AGE_SECS: i64 = 48 * 60 * 60;
@@ -89,18 +90,30 @@ pub async fn enqueue_if_retryable_with_id(
 
         let policy = retry_policy(operation_type);
         let op_id = uuid::Uuid::new_v4().to_string();
-        if let Err(e) = db_pending_ops_enqueue(
-            &ctx.db,
-            op_id.clone(),
-            account_id.to_string(),
-            operation_type.to_string(),
-            resource_id.to_string(),
-            params_json.to_string(),
-            policy.max_retries,
-        )
-        .await
+        let write_db = ctx.write_db.clone();
+        let account_id = account_id.to_string();
+        let operation_type = operation_type.to_string();
+        let resource_id = resource_id.to_string();
+        let params_json = params_json.to_string();
+        let enqueue_result = write_db
+            .with_conn({
+                let op_id = op_id.clone();
+                move |conn| {
+                    db_pending_ops_enqueue_sync(
+                        conn,
+                        &op_id,
+                        &account_id,
+                        &operation_type,
+                        &resource_id,
+                        &params_json,
+                        policy.max_retries,
+                    )
+                }
+            })
+            .await;
+        if let Err(e) = enqueue_result
         {
-            log::warn!("[pending_ops] Failed to enqueue {operation_type} for {resource_id}: {e}");
+            log::warn!("[pending_ops] Failed to enqueue pending op: {e}");
             return None;
         }
         Some(op_id)
@@ -148,23 +161,19 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
 }
 
 async fn sweep_stale_label_intents(ctx: &ActionContext) {
-    let db = ctx.db.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        db::db::queries_extra::delete_stale_pending_thread_label_intents(
-            &conn,
-            STALE_LABEL_INTENT_AGE_SECS,
-        )
-    })
-    .await;
+    let db = ctx.write_db.clone();
+    let result = db
+        .with_conn(move |conn| {
+            db::db::queries_extra::delete_stale_pending_thread_label_intents(
+                conn,
+                STALE_LABEL_INTENT_AGE_SECS,
+            )
+        })
+        .await;
 
     match result {
-        Ok(Ok(count)) if count > 0 => {
+        Ok(count) if count > 0 => {
             log::warn!("[pending_ops] Cleared {count} stale pending label intents");
-        }
-        Ok(Err(e)) => {
-            log::warn!("[pending_ops] Failed to clear stale pending label intents: {e}");
         }
         Err(e) => {
             log::warn!("[pending_ops] stale label intent cleanup failed: {e}");
@@ -207,10 +216,14 @@ async fn process_account_group(
         };
 
         // Mark as executing
-        if let Err(e) =
-            db_pending_ops_update_status(&ctx.db, op.id.clone(), "executing".to_string(), None)
-                .await
-        {
+        let update_result = ctx
+            .write_db
+            .with_conn({
+                let op_id = op.id.clone();
+                move |conn| db_pending_ops_update_status_sync(conn, &op_id, "executing", None)
+            })
+            .await;
+        if let Err(e) = update_result {
             log::warn!("[pending_ops] Failed to mark op {} executing: {e}", op.id);
             continue;
         }
@@ -239,7 +252,13 @@ async fn process_account_group(
 
         match outcome {
             ActionOutcome::Success | ActionOutcome::NoOp => {
-                let _ = db_pending_ops_delete(&ctx.db, op.id.clone()).await;
+                let _ = ctx
+                    .write_db
+                    .with_conn({
+                        let op_id = op.id.clone();
+                        move |conn| db_pending_ops_delete_sync(conn, &op_id)
+                    })
+                    .await;
                 log::info!(
                     "[pending_ops] Completed {} for {}/{}",
                     op.operation_type,
@@ -254,7 +273,13 @@ async fn process_account_group(
                     op.account_id,
                     op.resource_id
                 );
-                let _ = db_pending_ops_increment_retry(&ctx.db, op.id.clone()).await;
+                let _ = ctx
+                    .write_db
+                    .with_conn({
+                        let op_id = op.id.clone();
+                        move |conn| db_pending_ops_increment_retry_sync(conn, &op_id)
+                    })
+                    .await;
             }
         }
     }
@@ -491,7 +516,11 @@ async fn dispatch_pending_op_with_provider(
 /// Call once at app boot.
 pub async fn recover_on_boot(ctx: &ActionContext) {
     // 1. Reset stranded executing operations
-    match db_pending_ops_recover_executing(&ctx.db).await {
+    match ctx
+        .write_db
+        .with_conn(db_pending_ops_recover_executing_sync)
+        .await
+    {
         Ok(count) if count > 0 => {
             log::info!("[pending_ops] Recovered {count} stranded operations on boot");
         }
@@ -504,23 +533,17 @@ pub async fn recover_on_boot(ctx: &ActionContext) {
     sweep_stale_label_intents(ctx).await;
 
     // 2. Resurface stale 'sending' drafts as 'failed'
-    let db = ctx.db.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        db::db::queries_extra::mark_sending_drafts_failed(&conn)
-    })
-    .await;
+    let db = ctx.write_db.clone();
+    let result = db
+        .with_conn(db::db::queries_extra::mark_sending_drafts_failed)
+        .await;
 
     match result {
-        Ok(Ok(count)) if count > 0 => {
+        Ok(count) if count > 0 => {
             log::info!("[pending_ops] Recovered {count} stale 'sending' drafts on boot");
         }
-        Ok(Err(e)) => {
-            log::warn!("[pending_ops] Failed to recover sending drafts: {e}");
-        }
         Err(e) => {
-            log::warn!("[pending_ops] spawn_blocking failed for draft recovery: {e}");
+            log::warn!("[pending_ops] Failed to recover sending drafts: {e}");
         }
         _ => {}
     }

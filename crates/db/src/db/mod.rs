@@ -12,8 +12,8 @@ pub mod sql_fragments;
 pub mod time;
 pub mod types;
 pub use from_row::{FromRow, query_as, query_one};
-pub use rusqlite::Connection;
 pub use rusqlite::Error as SqlError;
+use rusqlite::Connection;
 use rusqlite::OpenFlags;
 pub use rusqlite::OptionalExtension;
 pub use rusqlite::Row;
@@ -255,11 +255,6 @@ pub struct ReadDbState {
 }
 
 impl ReadDbState {
-    /// Access the underlying connection Arc for synchronous use.
-    pub fn conn(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
-    }
-
     /// Create a `ReadDbState` from an existing connection Arc.
     ///
     /// Useful for bridging between the app crate's `Db` connection and core
@@ -294,6 +289,25 @@ impl ReadDbState {
         })
         .await
         .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    pub async fn with_read_mapped<F, T, E, M>(&self, f: F, map_error: M) -> Result<T, E>
+    where
+        F: FnOnce(&ReadConn<'_>) -> Result<T, E> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+        M: Fn(String) -> E + Copy + Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| map_error(format!("db lock poisoned: {e}")))?;
+            let read = ReadConn::from_raw(&conn);
+            f(&read)
+        })
+        .await
+        .map_err(|e| map_error(format!("spawn_blocking: {e}")))?
     }
 
     pub fn with_read_sync<F, T>(&self, f: F) -> Result<T, String>
@@ -343,6 +357,54 @@ pub struct WriterPool {
 }
 
 impl WriterPool {
+    #[doc(hidden)]
+    pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
+        Self { conn }
+    }
+
+    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    pub async fn with_conn_mapped<F, T, E, M>(&self, f: F, map_error: M) -> Result<T, E>
+    where
+        F: FnOnce(&Connection) -> Result<T, E> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+        M: Fn(String) -> E + Copy + Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| map_error(format!("db lock poisoned: {e}")))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| map_error(format!("spawn_blocking: {e}")))?
+    }
+
+    pub fn with_conn_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned: {e}"))?;
+        f(&conn)
+    }
+
     pub async fn with_write<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&WriteConn<'_>) -> Result<T, String> + Send + 'static,
@@ -358,6 +420,25 @@ impl WriterPool {
         .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
+    pub async fn with_write_mapped<F, T, E, M>(&self, f: F, map_error: M) -> Result<T, E>
+    where
+        F: FnOnce(&WriteConn<'_>) -> Result<T, E> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+        M: Fn(String) -> E + Copy + Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| map_error(format!("db lock poisoned: {e}")))?;
+            let write = WriteConn::from_raw(&conn);
+            f(&write)
+        })
+        .await
+        .map_err(|e| map_error(format!("spawn_blocking: {e}")))?
+    }
+
     pub fn with_write_sync<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&WriteConn<'_>) -> Result<T, String>,
@@ -368,6 +449,33 @@ impl WriterPool {
             .map_err(|e| format!("db lock poisoned: {e}"))?;
         let write = WriteConn::from_raw(&conn);
         f(&write)
+    }
+
+    pub async fn with_read<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&ReadConn<'_>) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            let read = ReadConn::from_raw(&conn);
+            f(&read)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    pub fn with_read_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&ReadConn<'_>) -> Result<T, String>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned: {e}"))?;
+        let read = ReadConn::from_raw(&conn);
+        f(&read)
     }
 }
 
@@ -385,8 +493,10 @@ impl<'a> WriteConn<'a> {
         self.raw.execute(sql, params)
     }
 
-    pub fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<rusqlite::Statement<'b>> {
-        self.raw.prepare(sql)
+    pub fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<WriteStatement<'b>> {
+        Ok(WriteStatement {
+            raw: self.raw.prepare(sql)?,
+        })
     }
 
     pub fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> rusqlite::Result<T>
@@ -417,8 +527,18 @@ impl<'a> WriteTxn<'a> {
         self.raw.execute(sql, params)
     }
 
-    pub fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<rusqlite::Statement<'b>> {
-        self.raw.prepare(sql)
+    pub fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<WriteStatement<'b>> {
+        Ok(WriteStatement {
+            raw: self.raw.prepare(sql)?,
+        })
+    }
+
+    pub fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> rusqlite::Result<T>
+    where
+        P: rusqlite::Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        self.raw.query_row(sql, params, f)
     }
 
     pub fn commit(self) -> rusqlite::Result<()> {
@@ -427,6 +547,43 @@ impl<'a> WriteTxn<'a> {
 
     pub fn rollback(self) -> rusqlite::Result<()> {
         self.raw.rollback()
+    }
+}
+
+pub struct WriteStatement<'a> {
+    raw: rusqlite::Statement<'a>,
+}
+
+impl<'a> WriteStatement<'a> {
+    pub fn execute<P: rusqlite::Params>(&mut self, params: P) -> rusqlite::Result<usize> {
+        self.raw.execute(params)
+    }
+
+    pub fn query<P>(&mut self, params: P) -> rusqlite::Result<rusqlite::Rows<'_>>
+    where
+        P: rusqlite::Params,
+    {
+        self.raw.query(params)
+    }
+
+    pub fn query_map<T, P, F>(
+        &mut self,
+        params: P,
+        f: F,
+    ) -> rusqlite::Result<rusqlite::MappedRows<'_, F>>
+    where
+        P: rusqlite::Params,
+        F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        self.raw.query_map(params, f)
+    }
+
+    pub fn query_row<T, P, F>(&mut self, params: P, f: F) -> rusqlite::Result<T>
+    where
+        P: rusqlite::Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        self.raw.query_row(params, f)
     }
 }
 

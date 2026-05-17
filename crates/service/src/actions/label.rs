@@ -65,22 +65,18 @@ async fn label_local_step(
     label_id: &LabelId,
     op: PendingLabelIntentOp,
 ) -> Result<LocalLabelStep, ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let lid = label_id.as_str().to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+    db.with_conn_mapped(move |conn| {
         let label_kind =
-            label_kind_for_account_sync(&conn, &aid, &lid).map_err(ActionError::db)?;
+            label_kind_for_account_sync(conn, &aid, &lid).map_err(ActionError::db)?;
 
-        let exists = db::db::queries_extra::action_helpers::label_exists_sync(&conn, &lid, &aid)
+        let exists = db::db::queries_extra::action_helpers::label_exists_sync(conn, &lid, &aid)
             .map_err(|e| ActionError::db(format!("label lookup: {e}")))?;
         if !exists {
-            ensure_typed_tag_label(&conn, &aid, &label_kind)
+            ensure_typed_tag_label(conn, &aid, &label_kind)
                 .map_err(ActionError::db)?
                 .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
         }
@@ -89,10 +85,10 @@ async fn label_local_step(
             && let LabelKind::GraphImportance(level) = label_kind
         {
             let opposite = LabelKind::graph_importance(level.opposite());
-            ensure_typed_tag_label(&conn, &aid, &opposite).map_err(ActionError::db)?;
+            ensure_typed_tag_label(conn, &aid, &opposite).map_err(ActionError::db)?;
         }
         let intents = label_intents(&lid, &label_kind, op);
-        let generation_seen = upsert_pending_intents_sync(&conn, &aid, &tid, &intents, None)
+        let generation_seen = upsert_pending_intents_sync(conn, &aid, &tid, &intents, None)
             .map_err(ActionError::db)?;
 
         Ok(LocalLabelStep {
@@ -100,10 +96,8 @@ async fn label_local_step(
             intents,
             generation_seen,
         })
-    })
+    }, ActionError::db)
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r)
 }
 
 fn label_intents(
@@ -150,14 +144,12 @@ async fn attach_pending_action_id(
     generation_seen: i64,
     action_id: String,
 ) {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    if let Err(e) = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    if let Err(e) = db.with_conn(move |conn| {
         db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
-            &conn,
+            conn,
             &aid,
             &tid,
             intents.iter().map(|(label_id, op)| PendingLabelIntent {
@@ -169,8 +161,6 @@ async fn attach_pending_action_id(
         )
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r)
     {
         log::warn!("[actions] attach pending label intent action id failed: {e}");
     }
@@ -183,14 +173,12 @@ async fn clear_pending_intents_immediate(
     intents: Vec<(String, PendingLabelIntentOp)>,
     generation_seen: i64,
 ) {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    if let Err(e) = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    if let Err(e) = db.with_conn(move |conn| {
         db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
-            &conn,
+            conn,
             &aid,
             &tid,
             intents.iter().map(|(label_id, op)| PendingLabelIntent {
@@ -201,8 +189,6 @@ async fn clear_pending_intents_immediate(
         )
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r)
     {
         log::warn!("[actions] clear pending label intent on permanent fail: {e}");
     }
@@ -214,16 +200,12 @@ async fn confirm_provider_intents(
     thread_id: &str,
     intents: Vec<(String, PendingLabelIntentOp)>,
 ) -> Result<(), ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let mut conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+    db.with_conn_mapped(move |conn| {
         let tx = conn
-            .transaction()
+            .unchecked_transaction()
             .map_err(|e| ActionError::db(format!("begin confirm tx: {e}")))?;
         db::db::queries_extra::confirmed_provider_label_intents(
             &tx,
@@ -237,9 +219,8 @@ async fn confirm_provider_intents(
         .map_err(ActionError::db)?;
         tx.commit()
             .map_err(|e| ActionError::db(format!("commit confirm tx: {e}")))
-    })
+    }, ActionError::db)
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?
 }
 
 fn label_kind_for_account_sync(

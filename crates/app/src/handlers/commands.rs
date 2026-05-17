@@ -906,12 +906,10 @@ impl ReadyApp {
     /// `Irreversible` so the inverse plan does not push another undo
     /// entry (no redo support today).
     ///
-    /// `pending_operations` cancellation is still UI-side: when the
-    /// original action's retryable failure has parked it in the retry
-    /// queue, the inverse arriving Service-side would race the retry.
-    /// Cancel before dispatch so the inverse wins. This is a write
-    /// against `ReadDbState` (escape hatch); Phase 6's UI write-surface
-    /// lockdown removes it.
+    /// When the original action's retryable failure has parked it in
+    /// `pending_operations`, the inverse arriving Service-side would
+    /// race the retry. The UI sends best-effort Service notifications
+    /// to cancel those retry rows before dispatching the inverse plan.
     pub(crate) fn dispatch_undo(
         &mut self,
         entry: &cmdk::UndoEntry<crate::action_resolve::MailUndoPayload>,
@@ -930,21 +928,33 @@ impl ReadyApp {
             .iter()
             .flat_map(undo_cancel_targets)
             .collect();
-        if !cancel_targets.is_empty() {
-            let db = self.db.read_db_state();
-            tokio::spawn(async move {
-                use rtsk::db::pending_ops::db_pending_ops_cancel_for_resource;
-                for (account_id, resource_id, op_type) in cancel_targets {
-                    let _ = db_pending_ops_cancel_for_resource(
-                        &db,
-                        account_id,
-                        resource_id,
-                        op_type.to_string(),
-                    )
-                    .await;
-                }
-            });
-        }
+        let cancel_task = if !cancel_targets.is_empty() {
+            if let Some(client) = self.service_client.as_ref().cloned() {
+                Task::perform(
+                    async move {
+                        for (account_id, resource_id, op_type) in cancel_targets {
+                            let result = client
+                                .send_notification(
+                                    service_api::ClientNotification::PendingOpsCancelForResource {
+                                        account_id,
+                                        resource_id,
+                                        operation_type: op_type.to_string(),
+                                    },
+                                )
+                                .await;
+                            if let Err(error) = result {
+                                log::debug!("pending_ops.cancel_for_resource send failed: {error}");
+                            }
+                        }
+                    },
+                    |()| Message::Noop,
+                )
+            } else {
+                Task::none()
+            }
+        } else {
+            Task::none()
+        };
 
         // Build operations from the payload list. Each payload yields
         // one MailOperation per thread (uniform inverse). The plan's
@@ -975,7 +985,10 @@ impl ReadyApp {
             compensation: ar::CompensationContext::None,
             optimistic: Vec::new(),
         };
-        self.dispatch_plan_with_undo(plan, Some(entry.description.clone()))
+        Task::batch([
+            cancel_task,
+            self.dispatch_plan_with_undo(plan, Some(entry.description.clone())),
+        ])
     }
 }
 

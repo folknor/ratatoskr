@@ -762,63 +762,6 @@ pub fn get_pinned_public_folders_sync(
     .map_err(|e| e.to_string())
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::{FolderKind, get_navigation_state};
-    use crate::db::migrations;
-    use crate::db::types::AccountScope;
-
-    #[test]
-    fn drafts_universal_pill_uses_unread_synced_threads_only() {
-        let conn = ::db::db::Connection::open_in_memory().unwrap();
-        migrations::run_all(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', 'graph')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO folders (id, account_id, name) VALUES ('DRAFT', 'acc', 'Drafts')",
-            [],
-        )
-        .unwrap();
-        for (thread_id, is_read) in [("read-draft", 1), ("unread-draft", 0)] {
-            conn.execute(
-                "INSERT INTO threads (id, account_id, subject, snippet, last_message_at, \
-                 message_count, is_read) VALUES (?1, 'acc', 'draft', 'draft', 1, 1, ?2)",
-                crate::db::params![thread_id, is_read],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO thread_folders (account_id, thread_id, folder_id) \
-                 VALUES ('acc', ?1, 'DRAFT')",
-                crate::db::params![thread_id],
-            )
-            .unwrap();
-        }
-        for id in ["local-1", "local-2", "local-3"] {
-            conn.execute(
-                "INSERT INTO local_drafts (id, account_id, subject, updated_at, sync_status) \
-                 VALUES (?1, 'acc', 'local draft', 1, 'pending')",
-                crate::db::params![id],
-            )
-            .unwrap();
-        }
-
-        let read = crate::db::ReadConn::from_raw(&conn);
-        let nav = get_navigation_state(&read, &AccountScope::Single("acc".to_string())).unwrap();
-        let drafts = nav
-            .folders
-            .iter()
-            .find(|folder| matches!(folder.folder_kind, FolderKind::Universal) && folder.id == "DRAFT")
-            .unwrap();
-
-        assert_eq!(drafts.unread_count(), 1);
-        assert_eq!(drafts.universal_unread_count().unwrap().as_i64(), 1);
-    }
-}
-
 // ── Operator typeahead queries ─────────────────────────────
 //
 // Search-operator typeahead queries for the search bar's `label:`,

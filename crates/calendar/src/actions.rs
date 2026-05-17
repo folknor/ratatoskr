@@ -13,7 +13,7 @@
 //! `ActionContext` carrying `WriteDbState` instead of `ReadDbState`).
 //! The Service-side `service::cal_actions::batch_execute` (Phase 6c-6)
 //! is the only caller; the UI dispatches via the
-//! `cal_action.execute_plan` IPC. `db.conn().lock()` patterns are
+//! `cal_action.execute_plan` IPC. Direct connection-lock patterns are
 //! replaced with `ctx.db.with_conn(...)` so writes go through the
 //! writer-half exclusively.
 
@@ -21,8 +21,8 @@ use gmail::client::GmailClient;
 use graph::client::GraphClient;
 use jmap::client::JmapClient;
 use action_types::{ActionError, ActionOutcome, CalendarActionContext, MutationLog};
+use db::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
 use rtsk::db::ReadDbState;
-use rtsk::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
 use super::google::{
@@ -71,26 +71,24 @@ async fn create_calendar_provider(
     encryption_key: [u8; 32],
 ) -> Result<CalendarProvider, ActionError> {
     let aid = account_id.to_string();
-    let db_clone = db.clone();
-    let (provider, calendar_provider) = tokio::task::spawn_blocking(move || {
-        let conn = db_clone.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        conn.query_row(
-            "SELECT provider, calendar_provider FROM accounts WHERE id = ?1",
-            rusqlite::params![aid],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+    let (provider, calendar_provider) = db
+        .with_read_mapped(
+            move |conn| {
+                conn.query_row(
+                    "SELECT provider, calendar_provider FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .map_err(|e| match e {
+                    db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => {
+                        ActionError::not_found(format!("account lookup: {e}"))
+                    }
+                    other => ActionError::db(format!("account lookup: {other}")),
+                })
+            },
+            ActionError::db,
         )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                ActionError::not_found(format!("account lookup: {e}"))
-            }
-            other => ActionError::db(format!("account lookup: {other}")),
-        })
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))??;
+        .await?;
 
     let effective = calendar_provider.as_deref().unwrap_or(provider.as_str());
 
@@ -152,7 +150,7 @@ async fn dispatch_create(
     input: &CalendarEventInput,
 ) -> Result<CalendarEventDto, ActionError> {
     let json = input_to_json(input);
-    let read_db = ctx.db.to_read_state();
+    let read_db = ctx.read_db.clone();
     match provider {
         CalendarProvider::Google(client) => {
             google_calendar_create_event_impl(client, &read_db, calendar_remote_id, json)
@@ -211,7 +209,7 @@ async fn dispatch_update(
     etag: Option<&str>,
 ) -> Result<CalendarEventDto, ActionError> {
     let json = input_to_json(input);
-    let read_db = ctx.db.to_read_state();
+    let read_db = ctx.read_db.clone();
     match provider {
         CalendarProvider::Google(client) => google_calendar_update_event_impl(
             client,
@@ -273,7 +271,7 @@ async fn dispatch_delete(
     remote_event_id: &str,
     etag: Option<&str>,
 ) -> Result<(), ActionError> {
-    let read_db = ctx.db.to_read_state();
+    let read_db = ctx.read_db.clone();
     match provider {
         CalendarProvider::Google(client) => {
             google_calendar_delete_event_impl(
@@ -376,42 +374,39 @@ pub async fn create_calendar_event(
 ) -> ActionOutcome {
     let mut mlog = MutationLog::begin("create_calendar_event", account_id, calendar_id);
 
-    // 1. Look up calendar_remote_id + local insert in one spawn_blocking
+    // 1. Look up calendar_remote_id + local insert on the writer pool.
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let cid = calendar_id.to_string();
     let input_clone = input.clone();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+    let local_result = db
+        .with_conn_mapped(
+            move |conn| {
+                let calendar_remote_id = lookup_calendar_remote_id(conn, &aid, &cid)?;
 
-        let calendar_remote_id = lookup_calendar_remote_id(&conn, &aid, &cid)?;
+                let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                    account_id: aid.clone(),
+                    summary: input_clone.title,
+                    description: input_clone.description,
+                    location: input_clone.location,
+                    start_time: input_clone.start_time,
+                    end_time: input_clone.end_time,
+                    is_all_day: input_clone.is_all_day,
+                    calendar_id: Some(cid),
+                    timezone: input_clone.timezone,
+                    recurrence_rule: input_clone.recurrence_rule,
+                    availability: input_clone.availability,
+                    visibility: input_clone.visibility,
+                };
+                let event_id =
+                    rtsk::db::queries_extra::calendars::create_calendar_event_sync(conn, &params)
+                        .map_err(ActionError::db)?;
 
-        let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
-            account_id: aid.clone(),
-            summary: input_clone.title,
-            description: input_clone.description,
-            location: input_clone.location,
-            start_time: input_clone.start_time,
-            end_time: input_clone.end_time,
-            is_all_day: input_clone.is_all_day,
-            calendar_id: Some(cid),
-            timezone: input_clone.timezone,
-            recurrence_rule: input_clone.recurrence_rule,
-            availability: input_clone.availability,
-            visibility: input_clone.visibility,
-        };
-        let event_id =
-            rtsk::db::queries_extra::calendars::create_calendar_event_sync(&conn, &params)
-                .map_err(ActionError::db)?;
-
-        Ok((event_id, calendar_remote_id))
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+                Ok((event_id, calendar_remote_id))
+            },
+            ActionError::db,
+        )
+        .await;
 
     let (event_id, calendar_remote_id) = match local_result {
         Ok(ids) => {
@@ -426,7 +421,7 @@ pub async fn create_calendar_event(
     };
 
     // 2. Provider dispatch (best-effort for create)
-    let read_db = ctx.db.to_read_state();
+    let read_db = ctx.read_db.clone();
     let provider = match create_calendar_provider(&read_db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
@@ -445,18 +440,20 @@ pub async fn create_calendar_event(
             // Store provider-assigned remote_event_id and etag
             let db = ctx.db.clone();
             let eid = event_id.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                let conn = db.conn();
-                if let Ok(conn) = conn.lock() {
-                    let _ = set_calendar_event_remote_id_and_etag(
-                        &conn,
-                        &eid,
-                        &dto.remote_event_id,
-                        dto.etag.as_deref(),
-                    );
-                }
-            })
-            .await;
+            let _ = db
+                .with_write_mapped(
+                    move |conn| {
+                        let _ = set_calendar_event_remote_id_and_etag(
+                            conn,
+                            &eid,
+                            &dto.remote_event_id,
+                            dto.etag.as_deref(),
+                        );
+                        Ok(())
+                    },
+                    ActionError::db,
+                )
+                .await;
             ActionOutcome::Success
         }
         Err(e) => ActionOutcome::LocalOnly {
@@ -484,24 +481,22 @@ pub async fn update_calendar_event(
     // 1. Look up event metadata - use the event's own account_id, not the caller's
     let db = ctx.db.clone();
     let eid = event_id.to_string();
-    let meta_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        let meta = lookup_event_meta(&conn, &eid)?;
+    let meta_result = db
+        .with_conn_mapped(
+            move |conn| {
+                let meta = lookup_event_meta(conn, &eid)?;
 
-        // Use the event's own account_id for calendar lookup
-        let calendar_remote_id = meta
-            .calendar_id
-            .as_deref()
-            .and_then(|cid| lookup_calendar_remote_id(&conn, &meta.account_id, cid).ok());
+                // Use the event's own account_id for calendar lookup
+                let calendar_remote_id = meta
+                    .calendar_id
+                    .as_deref()
+                    .and_then(|cid| lookup_calendar_remote_id(conn, &meta.account_id, cid).ok());
 
-        Ok((meta, calendar_remote_id))
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+                Ok((meta, calendar_remote_id))
+            },
+            ActionError::db,
+        )
+        .await;
 
     let (meta, calendar_remote_id) = match meta_result {
         Ok(m) => m,
@@ -520,31 +515,31 @@ pub async fn update_calendar_event(
     let Some(ref remote_event_id) = meta.remote_event_id else {
         let db = ctx.db.clone();
         let eid = event_id.to_string();
-        let local_result = tokio::task::spawn_blocking(move || {
-            let conn = db.conn();
-            let conn = conn
-                .lock()
-                .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-            let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
-                account_id: meta.account_id.clone(),
-                summary: input.title,
-                description: input.description,
-                location: input.location,
-                start_time: input.start_time,
-                end_time: input.end_time,
-                is_all_day: input.is_all_day,
-                calendar_id: meta.calendar_id,
-                timezone: input.timezone,
-                recurrence_rule: input.recurrence_rule,
-                availability: input.availability,
-                visibility: input.visibility,
-            };
-            rtsk::db::queries_extra::calendars::update_calendar_event_sync(&conn, &eid, &params)
-                .map_err(ActionError::db)
-        })
-        .await
-        .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-        .and_then(|r| r);
+        let local_result = db
+            .with_conn_mapped(
+                move |conn| {
+                    let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                        account_id: meta.account_id.clone(),
+                        summary: input.title,
+                        description: input.description,
+                        location: input.location,
+                        start_time: input.start_time,
+                        end_time: input.end_time,
+                        is_all_day: input.is_all_day,
+                        calendar_id: meta.calendar_id,
+                        timezone: input.timezone,
+                        recurrence_rule: input.recurrence_rule,
+                        availability: input.availability,
+                        visibility: input.visibility,
+                    };
+                    rtsk::db::queries_extra::calendars::update_calendar_event_sync(
+                        conn, &eid, &params,
+                    )
+                    .map_err(ActionError::db)
+                },
+                ActionError::db,
+            )
+            .await;
 
         let outcome = match local_result {
             Ok(()) => ActionOutcome::Success,
@@ -555,7 +550,7 @@ pub async fn update_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
-    let read_db = ctx.db.to_read_state();
+    let read_db = ctx.read_db.clone();
     let provider =
         match create_calendar_provider(&read_db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
@@ -588,34 +583,47 @@ pub async fn update_calendar_event(
             // Use input values (what the user edited) for all fields, plus etag
             // from the DTO for concurrency control.
             let db = ctx.db.clone();
+            let db_for_etag = db.clone();
             let eid = event_id.to_string();
+            let eid_for_etag = eid.clone();
             let event_account_id = meta.account_id.clone();
             let cal_id = meta.calendar_id.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                let conn = db.conn();
-                if let Ok(conn) = conn.lock() {
-                    let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
-                        account_id: event_account_id,
-                        summary: input.title,
-                        description: input.description,
-                        location: input.location,
-                        start_time: input.start_time,
-                        end_time: input.end_time,
-                        is_all_day: input.is_all_day,
-                        calendar_id: cal_id,
-                        timezone: input.timezone,
-                        recurrence_rule: input.recurrence_rule,
-                        availability: input.availability,
-                        visibility: input.visibility,
-                    };
-                    let _ = rtsk::db::queries_extra::calendars::update_calendar_event_sync(
-                        &conn, &eid, &params,
-                    );
-                    // Also update etag from provider response
-                    let _ = set_calendar_event_etag(&conn, &eid, dto.etag.as_deref());
-                }
-            })
-            .await;
+            let etag = dto.etag.clone();
+            let _ = db
+                .with_conn_mapped(
+                    move |conn| {
+                        let params =
+                            rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                                account_id: event_account_id,
+                                summary: input.title,
+                                description: input.description,
+                                location: input.location,
+                                start_time: input.start_time,
+                                end_time: input.end_time,
+                                is_all_day: input.is_all_day,
+                                calendar_id: cal_id,
+                                timezone: input.timezone,
+                                recurrence_rule: input.recurrence_rule,
+                                availability: input.availability,
+                                visibility: input.visibility,
+                            };
+                        let _ = rtsk::db::queries_extra::calendars::update_calendar_event_sync(
+                            conn, &eid, &params,
+                        );
+                        Ok(())
+                    },
+                    ActionError::db,
+                )
+                .await;
+            let _ = db_for_etag
+                .with_write_mapped(
+                    move |conn| {
+                        let _ = set_calendar_event_etag(conn, &eid_for_etag, etag.as_deref());
+                        Ok(())
+                    },
+                    ActionError::db,
+                )
+                .await;
             ActionOutcome::Success
         }
         Err(e) => ActionOutcome::Failed { error: e },
@@ -635,21 +643,19 @@ pub async fn delete_calendar_event(
     // 1. Look up event metadata - use the event's own account_id
     let db = ctx.db.clone();
     let eid = event_id.to_string();
-    let meta_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        let meta = lookup_event_meta(&conn, &eid)?;
-        let calendar_remote_id = meta
-            .calendar_id
-            .as_deref()
-            .and_then(|cid| lookup_calendar_remote_id(&conn, &meta.account_id, cid).ok());
-        Ok((meta, calendar_remote_id))
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let meta_result = db
+        .with_conn_mapped(
+            move |conn| {
+                let meta = lookup_event_meta(conn, &eid)?;
+                let calendar_remote_id = meta
+                    .calendar_id
+                    .as_deref()
+                    .and_then(|cid| lookup_calendar_remote_id(conn, &meta.account_id, cid).ok());
+                Ok((meta, calendar_remote_id))
+            },
+            ActionError::db,
+        )
+        .await;
 
     let (meta, calendar_remote_id) = match meta_result {
         Ok(m) => m,
@@ -668,17 +674,15 @@ pub async fn delete_calendar_event(
     let Some(ref remote_event_id) = meta.remote_event_id else {
         let db = ctx.db.clone();
         let eid = event_id.to_string();
-        let local_result = tokio::task::spawn_blocking(move || {
-            let conn = db.conn();
-            let conn = conn
-                .lock()
-                .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-            rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
-                .map_err(ActionError::db)
-        })
-        .await
-        .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-        .and_then(|r| r);
+        let local_result = db
+            .with_conn_mapped(
+                move |conn| {
+                    rtsk::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
+                        .map_err(ActionError::db)
+                },
+                ActionError::db,
+            )
+            .await;
 
         let outcome = match local_result {
             Ok(()) => ActionOutcome::Success,
@@ -689,7 +693,7 @@ pub async fn delete_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
-    let read_db = ctx.db.to_read_state();
+    let read_db = ctx.read_db.clone();
     let provider =
         match create_calendar_provider(&read_db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
@@ -724,17 +728,15 @@ pub async fn delete_calendar_event(
     // 4. Provider succeeded - delete locally
     let db = ctx.db.clone();
     let eid = event_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
-            .map_err(ActionError::db)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let local_result = db
+        .with_conn_mapped(
+            move |conn| {
+                rtsk::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
+                    .map_err(ActionError::db)
+            },
+            ActionError::db,
+        )
+        .await;
 
     if let Err(e) = local_result {
         log::warn!("Calendar delete local cleanup failed (provider succeeded): {e}");

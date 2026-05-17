@@ -36,17 +36,12 @@ pub(crate) async fn permanent_delete_local(
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        delete_thread(&conn, &aid, &tid)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db))
+    db.with_conn(move |conn| delete_thread(conn, &aid, &tid))
+        .await
+        .map_err(ActionError::db)
 }
 
 async fn enqueue_permanent_delete_retry(

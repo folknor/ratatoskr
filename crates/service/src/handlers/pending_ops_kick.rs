@@ -14,10 +14,31 @@
 //! arrival so spurious kicks are cheap.
 
 use crate::boot::BootSharedState;
+use db::db::pending_ops::db_pending_ops_cancel_for_resource_sync;
 use std::sync::Arc;
 
 pub(super) async fn handle(state: &Arc<BootSharedState>) -> Result<(), String> {
     log::debug!("pending_ops.kick received; signalling action worker");
     state.notify_action_worker();
     Ok(())
+}
+
+pub(super) async fn handle_cancel_for_resource(
+    state: &Arc<BootSharedState>,
+    account_id: String,
+    resource_id: String,
+    operation_type: String,
+) -> Result<(), String> {
+    let db = state
+        .write_db_state()
+        .map_err(|error| format!("boot context not populated: {error}"))?;
+    db.with_conn(move |conn| {
+        db_pending_ops_cancel_for_resource_sync(
+            conn,
+            &account_id,
+            &resource_id,
+            &operation_type,
+        )
+    })
+    .await
 }

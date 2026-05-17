@@ -1,9 +1,9 @@
 use rusqlite::Connection;
 
-use db::db::ReadConn;
-use db::db::FromRow;
-use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use db::db::types::{AccountScope, DbThread};
+use db_read::db::ReadConn;
+use db_read::db::FromRow;
+use db_read::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
+use db_read::db::types::{AccountScope, DbThread};
 use types::SystemFolderId;
 
 use super::parser::ParsedQuery;
@@ -494,7 +494,7 @@ fn label_group_rendered_fragment(
     let account_column = grain.account_column();
     let thread_column = grain.thread_column();
 
-    db::db::queries_extra::user_visible_label_group_rendered_fragment(
+    db_read::db::queries_extra::user_visible_label_group_rendered_fragment(
         account_column,
         thread_column,
         group_predicate,

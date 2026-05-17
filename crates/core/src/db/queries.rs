@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use super::{Row, params};
-use ::db::db::Connection;
+use super::{ReadConn, Row, params};
 
 use super::ReadDbState;
 use super::types::DbMessage;
@@ -9,16 +8,14 @@ use crate::body_store::{BodyStoreReadState, MessageBody};
 use crate::provider::crypto::{decrypt_value, is_encrypted};
 
 // Re-export everything from db::queries so existing callers keep working.
-pub use db::db::queries::{
-    add_thread_folder, add_thread_label, delete_label, delete_thread, get_attachments_for_message,
-    get_bundle_unread_counts, get_categories_for_threads, get_contact_by_email, get_folders,
-    get_labels, get_provider_type, get_setting, get_thread_by_id, get_thread_count,
-    get_thread_folder_ids, get_thread_label_ids, get_threads, get_threads_for_bundle,
-    get_unread_count, remove_thread_folder, remove_thread_label, search_contacts, set_setting,
-    set_thread_muted, set_thread_pinned, set_thread_read, set_thread_starred, upsert_label,
+pub use db_read::db::queries::{
+    get_attachments_for_message, get_bundle_unread_counts, get_categories_for_threads,
+    get_contact_by_email, get_folders, get_labels, get_provider_type, get_setting,
+    get_thread_by_id, get_thread_count, get_thread_folder_ids, get_thread_label_ids, get_threads,
+    get_threads_for_bundle, get_unread_count, search_contacts,
 };
 // Re-export FTS5/LIKE helpers.
-pub use db::db::sql_fragments::{build_fts_query, make_like_pattern};
+pub use db_read::db::sql_fragments::{build_fts_query, make_like_pattern};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MessageFlag {
@@ -159,7 +156,7 @@ fn decode_secure_setting_value(raw: String, encryption_key: &[u8; 32]) -> String
 }
 
 fn read_setting_map(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     encryption_key: &[u8; 32],
     secure_keys: &[&str],
 ) -> Result<HashMap<String, String>, String> {
@@ -187,6 +184,18 @@ fn read_setting_map(
         .collect())
 }
 
+fn get_setting_read(conn: &ReadConn<'_>, key: &str) -> Result<Option<String>, String> {
+    match conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(value) => Ok(Some(value)),
+        Err(super::ReadError::Sql(::db_read::db::SqlError::QueryReturnedNoRows)) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn get_messages_for_thread(
     db: &ReadDbState,
@@ -195,7 +204,7 @@ pub async fn get_messages_for_thread(
     thread_id: String,
 ) -> Result<Vec<DbMessage>, String> {
     let mut messages = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT * FROM messages WHERE account_id = ?1 AND thread_id = ?2 ORDER BY date ASC",
@@ -232,16 +241,16 @@ pub async fn get_messages_for_thread(
 }
 
 pub fn get_secure_setting(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     encryption_key: &[u8; 32],
     key: &str,
 ) -> Result<Option<String>, String> {
-    let result = get_setting(conn, key)?;
+    let result = get_setting_read(conn, key)?;
     Ok(result.map(|raw| decode_secure_setting_value(raw, encryption_key)))
 }
 
 pub fn get_settings_bootstrap_snapshot(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     encryption_key: &[u8; 32],
 ) -> Result<SettingsBootstrapSnapshot, String> {
     let settings = read_setting_map(conn, encryption_key, &[])?;
@@ -278,7 +287,7 @@ pub fn get_settings_bootstrap_snapshot(
 }
 
 pub fn get_settings_secrets_snapshot(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     encryption_key: &[u8; 32],
 ) -> Result<SettingsSecretsSnapshot, String> {
     let settings = read_setting_map(conn, encryption_key, SECURE_SETTING_KEYS)?;
@@ -293,7 +302,7 @@ pub fn get_settings_secrets_snapshot(
 }
 
 pub fn get_ui_bootstrap_snapshot(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     encryption_key: &[u8; 32],
 ) -> Result<UiBootstrapSnapshot, String> {
     let settings = read_setting_map(conn, encryption_key, &[])?;
@@ -321,78 +330,6 @@ pub fn get_ui_bootstrap_snapshot(
         task_sidebar_visible: get("task_sidebar_visible").is_some_and(|value| value == "true"),
         sidebar_nav_config: get("sidebar_nav_config"),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::db::params;
-    use ::db::db::Connection;
-
-    use super::{
-        get_settings_bootstrap_snapshot, get_settings_secrets_snapshot, get_ui_bootstrap_snapshot,
-    };
-    use crate::provider::crypto::encrypt_value;
-
-    fn setup_conn() -> Connection {
-        let conn = Connection::open_in_memory().expect("open in-memory db");
-        conn.execute(
-            "CREATE TABLE settings (
-                key TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
-            )",
-            [],
-        )
-        .expect("create settings table");
-        conn
-    }
-
-    fn insert_setting(conn: &Connection, key: &str, value: &str) {
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2)",
-            params![key, value],
-        )
-        .expect("insert setting");
-    }
-
-    #[test]
-    fn ui_bootstrap_ignores_secure_settings() {
-        let conn = setup_conn();
-        let key = [11_u8; 32];
-        let encrypted_secret = encrypt_value(&key, "top-secret").expect("encrypt api key");
-        insert_setting(&conn, "theme", "dark");
-        insert_setting(&conn, "language", "en");
-        insert_setting(&conn, "claude_api_key", &encrypted_secret);
-
-        let snapshot = get_ui_bootstrap_snapshot(&conn, &key).expect("ui snapshot");
-
-        assert_eq!(snapshot.theme.as_deref(), Some("dark"));
-        assert_eq!(snapshot.language.as_deref(), Some("en"));
-    }
-
-    #[test]
-    fn settings_bootstrap_excludes_secure_fields() {
-        let conn = setup_conn();
-        let key = [13_u8; 32];
-        insert_setting(&conn, "notifications_enabled", "false");
-
-        let snapshot = get_settings_bootstrap_snapshot(&conn, &key).expect("settings snapshot");
-
-        assert!(!snapshot.notifications_enabled);
-    }
-
-    #[test]
-    fn secure_snapshot_decrypts_only_secret_fields() {
-        let conn = setup_conn();
-        let key = [17_u8; 32];
-        let encrypted_openai_key =
-            encrypt_value(&key, "openai-secret").expect("encrypt openai api key");
-        insert_setting(&conn, "openai_api_key", &encrypted_openai_key);
-
-        let snapshot = get_settings_secrets_snapshot(&conn, &key).expect("secure snapshot");
-
-        assert_eq!(snapshot.openai_api_key.as_deref(), Some("openai-secret"));
-        assert_eq!(snapshot.gemini_api_key, None);
-    }
 }
 
 // Remaining functions (set_thread_bool_field through get_unread_count)

@@ -111,18 +111,18 @@ pub async fn jmap_initial_sync(
     client: &JmapClient,
     account_id: &str,
     days_back: i64,
-    db: &WriteDbState,
+    _db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
     cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
-    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,
@@ -276,18 +276,18 @@ pub(crate) async fn query_email_page_for(
 pub async fn jmap_delta_sync(
     client: &JmapClient,
     account_id: &str,
-    db: &WriteDbState,
+    _db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
     cancellation_token: &CancellationToken,
 ) -> Result<JmapSyncResult, String> {
-    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,

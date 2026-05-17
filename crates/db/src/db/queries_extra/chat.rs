@@ -1,5 +1,6 @@
 //! Chat contact storage and timeline queries.
 
+use crate::db::ReadConn;
 use rusqlite::{Connection, Transaction, params};
 
 const CHAT_UNREAD_AFFECTED_THREADS_SQL: &str = "SELECT DISTINCT m.account_id, m.thread_id \
@@ -61,7 +62,7 @@ pub struct DbChatInlineImage {
 /// Filters to `is_inline = 1` AND `mime_type LIKE 'image/%'` AND a non-null
 /// `content_hash`. The hash is the lookup key for the inline image store.
 pub fn get_chat_inline_images_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     message_ids: &[String],
 ) -> Result<Vec<DbChatInlineImage>, String> {
     if message_ids.is_empty() {
@@ -170,7 +171,7 @@ pub fn undesignate_chat_contact_sync(conn: &Connection, email: &str) -> Result<(
 }
 
 /// List all chat contacts with sidebar summary data.
-pub fn get_chat_contacts_sync(conn: &Connection) -> Result<Vec<DbChatContactSummary>, String> {
+pub fn get_chat_contacts_sync(conn: &ReadConn<'_>) -> Result<Vec<DbChatContactSummary>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT cc.email, cc.display_name, cc.latest_message_at, \
@@ -206,7 +207,7 @@ pub fn get_chat_contacts_sync(conn: &Connection) -> Result<Vec<DbChatContactSumm
 /// Empty / NULL `body_text` rows are skipped - we have no usable suffix
 /// without them. Total volume is tiny (~accounts * a few sigs) so we
 /// always fetch all of them.
-pub fn get_user_signature_texts_sync(conn: &Connection) -> Result<Vec<String>, String> {
+pub fn get_user_signature_texts_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT body_text FROM signatures \
@@ -284,7 +285,7 @@ pub fn mark_chat_read_local_sync(
 
 /// Get the chat timeline rows for a contact, newest first.
 pub fn get_chat_timeline_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     email: &str,
     limit: usize,
     before: Option<(i64, String)>,

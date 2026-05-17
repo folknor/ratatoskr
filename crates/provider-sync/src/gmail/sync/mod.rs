@@ -46,7 +46,8 @@ pub async fn gmail_initial_sync(
     client: &GmailClient,
     account_id: &str,
     days_back: i64,
-    db: &WriteDbState,
+    _db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -56,11 +57,10 @@ pub async fn gmail_initial_sync(
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,
@@ -137,7 +137,8 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 pub async fn gmail_delta_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &WriteDbState,
+    _db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -147,11 +148,10 @@ pub async fn gmail_delta_sync(
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,

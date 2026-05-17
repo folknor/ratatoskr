@@ -72,7 +72,7 @@ pub(crate) async fn handle_set(
             for value in &params.values {
                 let key = value.key();
                 let storage_value = value.render_for_storage();
-                rtsk::db::queries::set_setting(&tx, key, &storage_value)
+                db::db::queries::set_setting(&tx, key, &storage_value)
                     .map_err(|e| format!("settings.set {key}: {e}"))?;
             }
             tx.commit()

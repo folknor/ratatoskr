@@ -43,6 +43,7 @@ fn compute_since_date(days_back: i64) -> String {
 pub async fn imap_delta_sync(
     _progress: &dyn ProgressReporter,
     db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -54,7 +55,6 @@ pub async fn imap_delta_sync(
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = db.to_read_state();
     log::info!("[IMAP] Starting delta sync for account {account_id} (days_back={days_back})");
     // List folders
     let all_folders = {
@@ -140,7 +140,7 @@ pub async fn imap_delta_sync(
             folder,
             &mapping.folder_id,
             &since_date,
-            &read_db,
+            read_db,
             body_store,
             inline_images,
             search,
@@ -226,7 +226,7 @@ pub async fn imap_delta_sync(
                 saved,
                 delta,
                 days_back,
-                &read_db,
+                read_db,
                 body_store,
                 inline_images,
                 search,
@@ -264,7 +264,7 @@ pub async fn imap_delta_sync(
         config,
         cancellation_token,
         account_id,
-        &read_db,
+        read_db,
         body_store,
         search,
         &syncable_folders,

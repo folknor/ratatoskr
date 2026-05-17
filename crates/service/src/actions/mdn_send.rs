@@ -11,8 +11,11 @@
 
 use common::ops::ProviderOps;
 use common::types::ProviderCtx;
+use db::db::queries_extra::mdn::{
+    ReadReceiptPolicy, mark_mdn_sent_local, resolve_read_receipt_policy,
+};
 use db::progress::NoopProgressReporter;
-use rtsk::mdn::{ReadReceiptPolicy, build_mdn_message, mark_mdn_sent_local, resolve_read_receipt_policy};
+use rtsk::mdn::build_mdn_message;
 use rusqlite::params;
 
 use super::context::ActionContext;
@@ -144,27 +147,20 @@ async fn collect_candidates(
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<Candidate>, String> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        collect_candidates_sync(&conn, &aid, &tid)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking: {e}"))?
+    db.with_conn(move |conn| collect_candidates_sync(conn, &aid, &tid))
+        .await
 }
 
 async fn load_account_identity(
     ctx: &ActionContext,
     account_id: &str,
 ) -> Result<Option<(String, Option<String>)>, String> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.with_conn(move |conn| {
         Ok(conn
             .query_row(
                 "SELECT email, display_name FROM accounts WHERE id = ?1",
@@ -174,7 +170,6 @@ async fn load_account_identity(
             .ok())
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))?
 }
 
 async fn resolve_policy(
@@ -182,18 +177,12 @@ async fn resolve_policy(
     account_id: &str,
     sender: &str,
 ) -> ReadReceiptPolicy {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let sender = sender.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let Ok(conn) = conn.lock() else {
-            return ReadReceiptPolicy::Never;
-        };
-        resolve_read_receipt_policy(&conn, &aid, &sender)
-    })
-    .await
-    .unwrap_or(ReadReceiptPolicy::Never)
+    db.with_conn(move |conn| Ok(resolve_read_receipt_policy(conn, &aid, &sender)))
+        .await
+        .unwrap_or(ReadReceiptPolicy::Never)
 }
 
 async fn mark_sent(
@@ -201,16 +190,11 @@ async fn mark_sent(
     account_id: &str,
     message_id: &str,
 ) -> Result<(), String> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let mid = message_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        mark_mdn_sent_local(&conn, &aid, &mid)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking: {e}"))?
+    db.with_conn(move |conn| mark_mdn_sent_local(conn, &aid, &mid))
+        .await
 }
 
 #[cfg(test)]

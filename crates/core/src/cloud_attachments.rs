@@ -7,8 +7,6 @@ use types::MailProviderKind;
 
 use crate::db::ReadDbState;
 
-// Re-export the storage type from db.
-pub use crate::db::queries_extra::cloud_attachments::CloudAttachment;
 use crate::graph::client::GraphClient;
 
 /// Maximum attachment size (in bytes) before suggesting cloud upload.
@@ -177,80 +175,6 @@ impl UploadStatus {
     }
 }
 
-// CloudAttachment struct is now defined in and re-exported from db.
-
-// row_to_cloud_attachment moved to db.
-
-/// Get all pending uploads for an account (status = 'pending').
-pub fn get_pending_uploads(
-    conn: &::db::db::Connection,
-    account_id: &str,
-) -> Result<Vec<CloudAttachment>, String> {
-    crate::db::queries_extra::cloud_attachments::get_pending_uploads_sync(conn, account_id)
-}
-
-pub fn update_upload_status(
-    conn: &::db::db::Connection,
-    id: i64,
-    status: UploadStatus,
-    bytes_uploaded: Option<i64>,
-) -> Result<(), String> {
-    crate::db::queries_extra::cloud_attachments::update_upload_status_sync(
-        conn,
-        id,
-        status.as_str(),
-        bytes_uploaded,
-    )
-}
-
-pub fn mark_upload_failed(conn: &::db::db::Connection, id: i64, retry: bool) -> Result<(), String> {
-    let new_status = if retry {
-        UploadStatus::Pending.as_str()
-    } else {
-        UploadStatus::Failed.as_str()
-    };
-    crate::db::queries_extra::cloud_attachments::mark_upload_failed_sync(conn, id, new_status)
-}
-
-pub fn reset_interrupted_uploads(conn: &::db::db::Connection) -> Result<usize, String> {
-    crate::db::queries_extra::cloud_attachments::reset_interrupted_uploads_sync(conn)
-}
-
-pub fn create_outgoing_upload(
-    conn: &::db::db::Connection,
-    account_id: &str,
-    file_name: &str,
-    file_size: i64,
-    mime_type: &str,
-    provider: &str,
-) -> Result<i64, String> {
-    crate::db::queries_extra::cloud_attachments::create_outgoing_upload_sync(
-        conn, account_id, provider, file_name, file_size, mime_type,
-    )
-}
-
-pub fn get_permanently_failed(
-    conn: &::db::db::Connection,
-    max_retries: i32,
-) -> Result<Vec<CloudAttachment>, String> {
-    crate::db::queries_extra::cloud_attachments::get_permanently_failed_sync(conn, max_retries)
-}
-
-pub fn insert_incoming_cloud_links(
-    conn: &::db::db::Connection,
-    message_id: &str,
-    account_id: &str,
-    links: &[CloudLink],
-) -> Result<usize, String> {
-    let link_pairs: Vec<(String, String)> = links
-        .iter()
-        .map(|l| (l.provider.as_str().to_string(), l.url.clone()))
-        .collect();
-    crate::db::queries_extra::cloud_attachments::insert_incoming_cloud_links_sync(
-        conn, message_id, account_id, &link_pairs,
-    )
-}
-
 // ---------------------------------------------------------------------------
 // Metadata enrichment
 // ---------------------------------------------------------------------------
@@ -379,21 +303,6 @@ pub fn extract_gdrive_file_id(url: &str) -> Option<String> {
         .captures(url)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_owned())
-}
-
-/// Update the metadata columns of a `cloud_attachments` row.
-pub fn update_cloud_attachment_metadata(
-    conn: &::db::db::Connection,
-    id: i64,
-    metadata: &CloudMetadata,
-) -> Result<(), String> {
-    crate::db::queries_extra::cloud_attachments::update_cloud_attachment_metadata_sync(
-        conn,
-        id,
-        metadata.file_name.as_deref(),
-        metadata.file_size,
-        metadata.mime_type.as_deref(),
-    )
 }
 
 #[cfg(test)]

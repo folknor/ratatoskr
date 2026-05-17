@@ -64,7 +64,8 @@ struct SyncCtx<'a> {
 pub async fn graph_initial_sync(
     client: &GraphClient,
     account_id: &str,
-    db: &service_state::WriteDbState,
+    _db: &service_state::WriteDbState,
+    read_db: &ReadDbState,
     body_store: &service_state::BodyStoreWriteState,
     inline_images: &service_state::InlineImageStoreWriteState,
     search: &service_state::SearchWriteHandle,
@@ -75,11 +76,10 @@ pub async fn graph_initial_sync(
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = db.to_read_state();
     let sctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,
@@ -95,7 +95,7 @@ pub async fn graph_initial_sync(
 
     let pctx = ProviderCtx {
         account_id,
-        db: &read_db,
+        db: read_db,
         progress,
     };
     let folder_map = sync_folders(client, &pctx).await?;
@@ -136,7 +136,7 @@ pub async fn graph_initial_sync(
 
         let messages = fetch_folder_messages(
             client,
-            &read_db,
+            read_db,
             graph_folder_id,
             &since_iso,
             &folder_map,
@@ -156,9 +156,9 @@ pub async fn graph_initial_sync(
     emit_progress(&sctx, "delta", "", 0, total_folders, total_messages);
 
     for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
-        match bootstrap_delta_token(client, &read_db, folder_id).await {
+        match bootstrap_delta_token(client, read_db, folder_id).await {
             Ok(delta_link) => {
-                save_delta_token(client, &read_db, account_id, folder_id, &delta_link).await?;
+                save_delta_token(client, read_db, account_id, folder_id, &delta_link).await?;
             }
             Err(e) => {
                 log::warn!("Failed to bootstrap delta token for folder {folder_id}: {e}");
@@ -171,7 +171,7 @@ pub async fn graph_initial_sync(
     }
 
     if let Err(e) =
-        super::contact_sync::graph_contacts_initial_sync(client, account_id, &read_db).await
+        super::contact_sync::graph_contacts_initial_sync(client, account_id, read_db).await
     {
         log::warn!("Contact initial sync failed (non-fatal): {e}");
     }
@@ -180,7 +180,7 @@ pub async fn graph_initial_sync(
     // labels. Delta-cadence runs again every 20th cycle from
     // `graph_delta_sync`; without this initial pass, a fresh account
     // would sit without categories for the first 20 delta cycles.
-    if let Err(e) = super::label_sync::graph_label_sync(client, account_id, &read_db).await {
+    if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db).await {
         log::warn!("Master category initial sync failed (non-fatal): {e}");
     }
 
@@ -226,7 +226,8 @@ pub async fn graph_initial_sync(
 pub async fn graph_delta_sync(
     client: &GraphClient,
     account_id: &str,
-    db: &service_state::WriteDbState,
+    _db: &service_state::WriteDbState,
+    read_db: &ReadDbState,
     body_store: &service_state::BodyStoreWriteState,
     inline_images: &service_state::InlineImageStoreWriteState,
     search: &service_state::SearchWriteHandle,
@@ -236,11 +237,10 @@ pub async fn graph_delta_sync(
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = db.to_read_state();
     let sctx = SyncCtx {
         client,
         account_id,
-        db: &read_db,
+        db: read_db,
         body_store,
         inline_images,
         search,
@@ -248,13 +248,13 @@ pub async fn graph_delta_sync(
         cancellation_token,
     };
 
-    let cycle = sync_state::increment_graph_sync_cycle(&read_db, account_id).await?;
+    let cycle = sync_state::increment_graph_sync_cycle(read_db, account_id).await?;
     log::info!(
         "[Graph] Starting delta sync for account {account_id} (cycle={cycle})"
     );
 
     // Load stored delta tokens
-    let mut tokens = load_delta_tokens(client, &read_db, account_id).await?;
+    let mut tokens = load_delta_tokens(client, read_db, account_id).await?;
     if tokens.is_empty() {
         log::error!(
             "[Graph] No delta tokens for account {account_id} - run initial sync first"
@@ -266,7 +266,7 @@ pub async fn graph_delta_sync(
     let folder_map = if cycle.is_multiple_of(10) {
         let pctx = ProviderCtx {
             account_id,
-            db: &read_db,
+            db: read_db,
             progress,
         };
         let map = sync_folders(client, &pctx).await?;
@@ -280,9 +280,9 @@ pub async fn graph_delta_sync(
         for folder_id in &known_folder_ids {
             if !token_folder_ids.contains(*folder_id) {
                 log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
-                match bootstrap_delta_token_latest(client, &read_db, folder_id).await {
+                match bootstrap_delta_token_latest(client, read_db, folder_id).await {
                     Ok(delta_link) => {
-                        save_delta_token(client, &read_db, account_id, folder_id, &delta_link)
+                        save_delta_token(client, read_db, account_id, folder_id, &delta_link)
                             .await?;
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
@@ -301,7 +301,7 @@ pub async fn graph_delta_sync(
             .collect();
         for stale_id in &stale_ids {
             log::info!("Graph delta sync: removing stale delta token for folder {stale_id}");
-            delete_delta_token(client, &read_db, account_id, stale_id).await?;
+            delete_delta_token(client, read_db, account_id, stale_id).await?;
             tokens.remove(stale_id);
         }
 
@@ -311,7 +311,7 @@ pub async fn graph_delta_sync(
     } else {
         let pctx = ProviderCtx {
             account_id,
-            db: &read_db,
+            db: read_db,
             progress,
         };
         let map = sync_folders(client, &pctx).await?;
@@ -345,7 +345,7 @@ pub async fn graph_delta_sync(
     // so delta queries miss reaction changes entirely. To compensate, we periodically
     // re-fetch reaction extended properties for messages that already have reactions.
     if cycle.is_multiple_of(5) {
-        match persistence::refresh_reactions_for_recent_messages(client, &read_db, account_id)
+        match persistence::refresh_reactions_for_recent_messages(client, read_db, account_id)
             .await
         {
             Ok(count) => {
@@ -361,15 +361,15 @@ pub async fn graph_delta_sync(
     // delta runs through `CalendarRuntime` (Phase 5), not from this path.
     if cycle.is_multiple_of(20) {
         if let Err(e) =
-            super::contact_sync::graph_contacts_delta_sync(client, account_id, &read_db).await
+            super::contact_sync::graph_contacts_delta_sync(client, account_id, read_db).await
         {
             log::warn!("Contact delta sync failed (non-fatal): {e}");
         }
-        if let Err(e) = super::label_sync::graph_label_sync(client, account_id, &read_db).await
+        if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db).await
         {
             log::warn!("Label sync failed (non-fatal): {e}");
         }
-        match super::group_sync::sync_exchange_groups(client, &read_db, account_id).await {
+        match super::group_sync::sync_exchange_groups(client, read_db, account_id).await {
             Ok(count) => {
                 if count > 0 {
                     log::info!("Exchange group delta sync: {count} groups");

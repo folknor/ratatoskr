@@ -68,16 +68,14 @@ impl ActionContext {
         account_id: &str,
         thread_id: &str,
     ) -> Result<(), super::outcome::ActionError> {
-        let conn = self.db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| super::outcome::ActionError::db(format!("db lock: {e}")))?;
-        let exists = db::db::queries_extra::action_helpers::thread_exists_sync(
-            &conn,
-            account_id,
-            thread_id,
-        )
-        .map_err(super::outcome::ActionError::db)?;
+        let aid = account_id.to_string();
+        let tid = thread_id.to_string();
+        let exists = self
+            .db
+            .with_conn_sync(move |conn| {
+                db::db::queries_extra::action_helpers::thread_exists_sync(conn, &aid, &tid)
+            })
+            .map_err(super::outcome::ActionError::db)?;
         if exists {
             Ok(())
         } else {
@@ -134,5 +132,6 @@ impl Drop for FlightGuard {
 #[derive(Clone)]
 pub struct CalendarActionContext {
     pub db: service_state::WriteDbState,
+    pub read_db: ReadDbState,
     pub encryption_key: [u8; 32],
 }

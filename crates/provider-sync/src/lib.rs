@@ -35,6 +35,7 @@ use async_trait::async_trait;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::types::SyncResult;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
@@ -52,6 +53,7 @@ use tokio_util::sync::CancellationToken;
 pub struct SyncProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a WriteDbState,
+    pub read_db: &'a ReadDbState,
     pub body_store: &'a BodyStoreWriteState,
     pub inline_images: &'a InlineImageStoreWriteState,
     pub search: &'a SearchWriteHandle,

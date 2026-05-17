@@ -15,21 +15,15 @@ pub(crate) async fn archive_local(
     account_id: &str,
     thread_id: &str,
 ) -> Result<bool, ActionError> {
-    let ctx_clone = ctx.clone();
+    ctx.verify_thread_exists(account_id, thread_id)?;
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        ctx_clone.verify_thread_exists(&aid, &tid)?;
-        let conn = ctx_clone.db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        remove_inbox_folder(&conn, &aid, &tid)
-            .map(|n| n > 0)
-            .map_err(ActionError::db)
+    db.with_conn(move |conn| {
+        remove_inbox_folder(conn, &aid, &tid).map(|n| n > 0)
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?
+    .map_err(ActionError::db)
 }
 
 /// Provider dispatch for archive (assumes local mutation already applied).

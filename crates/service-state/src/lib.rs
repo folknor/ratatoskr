@@ -1,27 +1,15 @@
 //! Service-only writer-half state types.
 //!
 //! The Service boundary uses a read/write split at the type level:
-//! `db::DbState` becomes `db::ReadDbState` (UI-visible)
-//! and `service_state::WriteDbState` (Service-only). The split is enforced
-//! by Cargo dependency graph - the `app` crate does NOT depend on this
-//! crate, so `WriteDbState` cannot be reached from UI source files even
-//! with `pub` visibility.
+//! `db::ReadDbState` is UI-visible, while `service_state::WriteDbState`
+//! is Service-only. The split is enforced by the Cargo dependency graph:
+//! the `app` crate does not depend on this crate, so `WriteDbState`
+//! cannot be reached from UI source files even with `pub` visibility.
 //!
-//! This commit is the type-level **scaffold**: the crate exists and
-//! exports `WriteDbState` with the same shape as today's `DbState`, but
-//! no call sites have been moved yet. Task 3 in the plan renames
-//! `db::DbState` to `db::ReadDbState`, extracts a private connection
-//! pool, and routes the write helpers through this crate. Tasks 6-9
-//! relocate the action service onto this writer half.
-//!
-//! Until task 3 lands, `WriteDbState` is constructible from any
-//! `Arc<Mutex<Connection>>` via `from_arc`. The Arc passed in MUST be
-//! the writer-side connection - constructing a `WriteDbState` off a
-//! read-only `ReadDbState` would silently fail every write at SQLite
-//! level, far from the boot site. That footgun is closed by removing
-//! the `from_db_state(&ReadDbState)` bridge entirely; the boot path
-//! keeps a typed handle on the writer Arc and feeds it to `from_arc`
-//! directly.
+//! `WriteDbState` wraps `db::WriterPool`. The legacy `from_arc` and
+//! raw-connection `with_conn*` shims remain only while the writer helper
+//! migration is in flight; the durable API is `from_pool` plus
+//! `with_write`.
 
 use std::sync::{Arc, Mutex};
 
@@ -36,45 +24,24 @@ pub use search_write::{SearchWriteHandle, WriterCommand};
 
 /// Service-only writer half of the shared database state.
 ///
-/// Identical in shape to today's `db::DbState`; the rename + pool
-/// extraction lands in task 3. Per the plan, the `app` crate must
-/// not depend on `service-state`, so reaching this type from UI code
-/// is a compile error (missing crate, not a visibility error).
+/// Per the plan, the `app` crate must not depend on `service-state`,
+/// so reaching this type from UI code is a compile error (missing
+/// crate, not a visibility error).
 #[derive(Clone)]
 pub struct WriteDbState {
-    conn: Arc<Mutex<Connection>>,
+    pool: db::db::WriterPool,
 }
 
 impl WriteDbState {
+    pub fn from_pool(pool: db::db::WriterPool) -> Self {
+        Self { pool }
+    }
+
     /// Construct a writer-half state from an existing connection Arc.
     /// Used by the Service boot path to consume the connection that
     /// Phase 1.5 holds in `BootContext`.
     pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
-        Self { conn }
-    }
-
-    /// Construct a `ReadDbState` view onto the same connection. Phase 3
-    /// task 4/7 transitional bridge: provider sync code paths still
-    /// consume `&ReadDbState` for queries that have not yet been
-    /// retyped onto the write half. The returned view shares the
-    /// underlying `Arc<Mutex<Connection>>` - a write through one is
-    /// observable through the other under SQLite's WAL.
-    pub fn to_read_state(&self) -> db::db::ReadDbState {
-        db::db::ReadDbState::from_arc(Arc::clone(&self.conn))
-    }
-
-    /// Borrow a clone of the underlying connection `Arc` for callers
-    /// that drive their own `spawn_blocking + lock` shape. Mirrors
-    /// `db::ReadDbState::conn()`.
-    ///
-    /// Phase 6c task 5: `cal::actions::*` (Service-side post-Phase-6c)
-    /// uses this to keep the pre-existing spawn_blocking + lock
-    /// structure while routing through the writer-half. The `with_conn`
-    /// API would force every closure to return `Result<T, String>`
-    /// and lose the `ActionError::{Db, NotFound, Remote}` taxonomy
-    /// the calendar action helpers rely on.
-    pub fn conn(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
+        Self::from_pool(db::db::WriterPool::from_arc(conn))
     }
 
     /// Run a closure with the database connection on the blocking
@@ -85,13 +52,17 @@ impl WriteDbState {
         F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
         T: Send + 'static,
     {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
-            f(&conn)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
+        self.pool.with_conn(f).await
+    }
+
+    pub async fn with_conn_mapped<F, T, E, M>(&self, f: F, map_error: M) -> Result<T, E>
+    where
+        F: FnOnce(&Connection) -> Result<T, E> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+        M: Fn(String) -> E + Copy + Send + 'static,
+    {
+        self.pool.with_conn_mapped(f, map_error).await
     }
 
     pub async fn with_write<F, T>(&self, f: F) -> Result<T, String>
@@ -99,14 +70,17 @@ impl WriteDbState {
         F: FnOnce(&db::db::WriteConn<'_>) -> Result<T, String> + Send + 'static,
         T: Send + 'static,
     {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
-            let write = db::db::WriteConn::from_raw(&conn);
-            f(&write)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
+        self.pool.with_write(f).await
+    }
+
+    pub async fn with_write_mapped<F, T, E, M>(&self, f: F, map_error: M) -> Result<T, E>
+    where
+        F: FnOnce(&db::db::WriteConn<'_>) -> Result<T, E> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+        M: Fn(String) -> E + Copy + Send + 'static,
+    {
+        self.pool.with_write_mapped(f, map_error).await
     }
 
     pub async fn with_read<F, T>(&self, f: F) -> Result<T, String>
@@ -114,14 +88,7 @@ impl WriteDbState {
         F: FnOnce(&db::db::ReadConn<'_>) -> Result<T, String> + Send + 'static,
         T: Send + 'static,
     {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
-            let read = db::db::ReadConn::from_raw(&conn);
-            f(&read)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
+        self.pool.with_read(f).await
     }
 
     /// Synchronous variant for boot-path use that already runs inside
@@ -130,35 +97,21 @@ impl WriteDbState {
     where
         F: FnOnce(&Connection) -> Result<T, String>,
     {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("db lock poisoned: {e}"))?;
-        f(&conn)
+        self.pool.with_conn_sync(f)
     }
 
     pub fn with_write_sync<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&db::db::WriteConn<'_>) -> Result<T, String>,
     {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("db lock poisoned: {e}"))?;
-        let write = db::db::WriteConn::from_raw(&conn);
-        f(&write)
+        self.pool.with_write_sync(f)
     }
 
     pub fn with_read_sync<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&db::db::ReadConn<'_>) -> Result<T, String>,
     {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("db lock poisoned: {e}"))?;
-        let read = db::db::ReadConn::from_raw(&conn);
-        f(&read)
+        self.pool.with_read_sync(f)
     }
 }
 

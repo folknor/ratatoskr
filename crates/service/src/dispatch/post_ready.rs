@@ -39,11 +39,14 @@ pub(crate) fn spawn_post_ready_push_startup(
             );
             return;
         };
-        let Some(db_conn) = boot_state.db_conn() else {
-            log::error!(
-                "post-ready push startup: db_conn missing after boot.ready - programming error",
-            );
-            return;
+        let db_state = match boot_state.write_db_state() {
+            Ok(db_state) => db_state,
+            Err(error) => {
+                log::error!(
+                    "post-ready push startup: db_conn missing after boot.ready - programming error: {error}"
+                );
+                return;
+            }
         };
         let Some(key_bytes) = boot_state.encryption_key() else {
             log::error!(
@@ -51,13 +54,11 @@ pub(crate) fn spawn_post_ready_push_startup(
             );
             return;
         };
-
-        let db_state = service_state::WriteDbState::from_arc(db_conn);
         let encryption_key = crypto_key::SecretKey::from_bytes(key_bytes);
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
 
         let push_runtime = Arc::new(crate::push::PushRuntime::new(
-            db_state.clone(),
+            boot_state.read_db_state().expect("read db installed after boot.ready"),
             encryption_key,
             sync_runtime,
             notification_tx,
@@ -137,11 +138,14 @@ pub(crate) fn spawn_post_ready_calendar_startup(
             return;
         }
 
-        let Some(db_conn) = boot_state.db_conn() else {
-            log::error!(
-                "post-ready calendar startup: db_conn missing after boot.ready - programming error",
-            );
-            return;
+        let db_state = match boot_state.write_db_state() {
+            Ok(db_state) => db_state,
+            Err(error) => {
+                log::error!(
+                    "post-ready calendar startup: db_conn missing after boot.ready - programming error: {error}"
+                );
+                return;
+            }
         };
         let Some(key_bytes) = boot_state.encryption_key() else {
             log::error!(
@@ -149,13 +153,12 @@ pub(crate) fn spawn_post_ready_calendar_startup(
             );
             return;
         };
-
-        let db_state = service_state::WriteDbState::from_arc(db_conn);
         let encryption_key = crypto_key::SecretKey::from_bytes(key_bytes);
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
 
         let calendar_runtime = Arc::new(crate::calendar::CalendarRuntime::new(
             db_state,
+            boot_state.read_db_state().expect("read db installed after boot.ready"),
             &encryption_key,
             notification_tx,
             0,
@@ -183,24 +186,19 @@ pub(crate) fn spawn_post_ready_extract_startup(
             return;
         }
 
-        let Some(db_conn) = boot_state.db_conn() else {
-            log::error!(
-                "post-ready extract startup: db_conn missing after boot.ready - programming error",
-            );
-            return;
+        let db_state = match boot_state.write_db_state() {
+            Ok(db_state) => db_state,
+            Err(error) => {
+                log::error!(
+                    "post-ready extract startup: db_conn missing after boot.ready - programming error: {error}"
+                );
+                return;
+            }
         };
         let Some(search_write) = boot_state.take_search_write() else {
-            // H1 fix: take_search_write (consume), not search_write
-            // (clone). The slot is single-use as the plan promised:
-            // either the post-ready spawn consumes it on success, or
-            // run_shutdown_drain's defensive take_search_write drains
-            // it before awaiting the writer task. Cloning left a
-            // SearchWriteHandle in the slot that drain would correctly
-            // take, but ALSO held a separate clone in this spawn's
-            // local that drain couldn't see - if drain raced ahead of
-            // install_extract_runtime, the writer-task await blocked
-            // forever on the orphan clone here.
-            log::debug!("post-ready extract startup: search_write slot empty (shutdown raced)");
+            log::error!(
+                "post-ready extract startup: search_write slot empty (shutdown raced)",
+            );
             return;
         };
         let body_read = match store::body_store::BodyStoreReadState::init(&app_data_dir) {
@@ -210,8 +208,6 @@ pub(crate) fn spawn_post_ready_extract_startup(
                 return;
             }
         };
-
-        let db_state = service_state::WriteDbState::from_arc(db_conn);
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
 
         // ExtractRuntime shares the parent shutdown token via a child:
@@ -224,6 +220,7 @@ pub(crate) fn spawn_post_ready_extract_startup(
         let cancellation = boot_state.shutdown_token().child_token();
         let extract_runtime = crate::extract::ExtractRuntime::new(
             db_state,
+            boot_state.read_db_state().expect("read db installed after boot.ready"),
             app_data_dir,
             Arc::clone(&boot_state),
             search_write,
@@ -263,13 +260,15 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
             log::debug!("post-ready prefetch startup: boot failed, skipping");
             return;
         }
-        let Some(db_conn) = boot_state.db_conn() else {
-            log::error!(
-                "post-ready prefetch startup: db_conn missing after boot.ready - programming error",
-            );
-            return;
+        let db_state = match boot_state.write_db_state() {
+            Ok(db_state) => db_state,
+            Err(error) => {
+                log::error!(
+                    "post-ready prefetch startup: db_conn missing after boot.ready - programming error: {error}"
+                );
+                return;
+            }
         };
-        let db_state = service_state::WriteDbState::from_arc(db_conn);
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
         let cancellation = boot_state.shutdown_token().child_token();
         let runtime = crate::prefetch::PrefetchRuntime::new(

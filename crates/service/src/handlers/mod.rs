@@ -228,6 +228,19 @@ pub(crate) async fn dispatch_notification(
 ) -> Result<(), String> {
     match notification {
         ClientNotification::PendingOpsKick => pending_ops_kick::handle(&boot_state).await,
+        ClientNotification::PendingOpsCancelForResource {
+            account_id,
+            resource_id,
+            operation_type,
+        } => {
+            pending_ops_kick::handle_cancel_for_resource(
+                &boot_state,
+                account_id,
+                resource_id,
+                operation_type,
+            )
+            .await
+        }
         ClientNotification::CalendarKick => calendar::handle_calendar_kick(&boot_state).await,
         ClientNotification::GalKick => gal::handle_gal_kick(&boot_state).await,
         ClientNotification::PinnedSearchKick => pinned_search::handle_kick(&boot_state).await,

@@ -57,6 +57,7 @@ fn emit_progress(progress: &dyn ProgressReporter, event: &SyncProgressEvent) {
 pub async fn imap_initial_sync(
     progress: &dyn ProgressReporter,
     db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -68,7 +69,6 @@ pub async fn imap_initial_sync(
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = db.to_read_state();
     log::info!("[IMAP] Starting initial sync for account {account_id} (days_back={days_back})");
     // Phase 1: List and sync folders
     emit_progress(
@@ -188,7 +188,7 @@ pub async fn imap_initial_sync(
 
         match sync_single_folder(
             progress,
-            &read_db,
+            read_db,
             body_store,
             inline_images,
             search,

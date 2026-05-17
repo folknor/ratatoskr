@@ -17,34 +17,28 @@ pub(crate) async fn star_local(
     thread_id: &str,
     starred: bool,
 ) -> Result<bool, ActionError> {
-    let ctx_clone = ctx.clone();
+    ctx.verify_thread_exists(account_id, thread_id)?;
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        ctx_clone.verify_thread_exists(&aid, &tid)?;
-        let conn = ctx_clone.db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+    db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
-            .map_err(|e| ActionError::db(format!("begin star transaction: {e}")))?;
-        let thread_changed = set_thread_starred(&tx, &aid, &tid, starred)
-            .map(|n| n > 0)
-            .map_err(ActionError::db)?;
+            .map_err(|e| format!("begin star transaction: {e}"))?;
+        let thread_changed = set_thread_starred(&tx, &aid, &tid, starred).map(|n| n > 0)?;
         let message_changed = tx
             .execute(
                 "UPDATE messages SET is_starred = ?1 WHERE account_id = ?2 AND thread_id = ?3",
                 params![starred, aid, tid],
             )
             .map(|n| n > 0)
-            .map_err(|e| ActionError::db(format!("update message starred flags: {e}")))?;
+            .map_err(|e| format!("update message starred flags: {e}"))?;
         tx.commit()
-            .map_err(|e| ActionError::db(format!("commit star transaction: {e}")))?;
+            .map_err(|e| format!("commit star transaction: {e}"))?;
         Ok(thread_changed || message_changed)
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?
+    .map_err(ActionError::db)
 }
 
 /// Provider dispatch for star (assumes local mutation already applied).

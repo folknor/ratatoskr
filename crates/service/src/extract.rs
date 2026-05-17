@@ -70,6 +70,7 @@ pub(crate) struct ExtractRuntimeInner {
     in_flight_hashes: Mutex<HashSet<db::blob_hash::BlobHash>>,
     tx: mpsc::Sender<ExtractWork>,
     db: WriteDbState,
+    read_db: db::db::ReadDbState,
     /// Service-side root, retained for diagnostic logging only.
     /// Attachments roadmap Phase 3 routed byte reads through
     /// `materialize_blob` against `pack_store` below, so the
@@ -131,6 +132,7 @@ impl ExtractRuntime {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: WriteDbState,
+        read_db: db::db::ReadDbState,
         app_data_dir: PathBuf,
         boot_state: Arc<crate::boot::BootSharedState>,
         search_write: SearchWriteHandle,
@@ -146,6 +148,7 @@ impl ExtractRuntime {
             in_flight_hashes: Mutex::new(HashSet::new()),
             tx,
             db,
+            read_db,
             app_data_dir,
             pack_store,
             boot_state,
@@ -472,8 +475,7 @@ async fn run_extraction_pipeline(
     // Status-aware idempotency pre-flight: skip permanent statuses.
     let hash_for_check = work.content_hash;
     let existing = inner
-        .db
-        .to_read_state()
+        .read_db
         .with_conn(move |conn| {
             db::db::queries_extra::select_extracted_text_status(
                 conn,
@@ -543,8 +545,7 @@ async fn run_extraction_pipeline(
     // dispatch deterministic and unblocks honest siblings.
     let hash_for_meta = work.content_hash;
     let meta = inner
-        .db
-        .to_read_state()
+        .read_db
         .with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
@@ -767,8 +768,7 @@ const FANOUT_CHUNK_SIZE: usize = 200;
 async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &db::blob_hash::BlobHash) {
     let hash = *content_hash;
     let pairs_result = inner
-        .db
-        .to_read_state()
+        .read_db
         .with_conn(move |conn| {
             db::db::queries_extra::find_message_ids_referencing_content_hash(conn, &hash)
         })
@@ -922,6 +922,12 @@ mod tests {
         (SearchWriteHandle::from_sender(tx), rx)
     }
 
+    fn db_states_for_test(conn: rusqlite::Connection) -> (WriteDbState, db::db::ReadDbState) {
+        let conn = Arc::new(std::sync::Mutex::new(conn));
+        let read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
+        (WriteDbState::from_arc(conn), read)
+    }
+
     /// Build a bare `BootSharedState` for tests that exercise the
     /// worker but don't need a PackStore installed. ExtractRuntime
     /// reads `boot_state.pack_store()` lazily; missing pack store is
@@ -939,13 +945,14 @@ mod tests {
         // shape to be correct; no actual extraction runs because we
         // shut down before processing.
         let conn = rusqlite::Connection::open_in_memory().expect("conn");
-        let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
+        let (db, read_db) = db_states_for_test(conn);
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, _search_rx) = dummy_search_write();
         let (body_read, _body_dir) = body_read_in_tempdir();
         let runtime = ExtractRuntime::new(
             db,
+            read_db,
             std::path::PathBuf::from("."),
             dummy_boot_state(),
             search_write,
@@ -981,13 +988,14 @@ mod tests {
                 extracted_text TEXT, status TEXT NOT NULL, \
                 extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
         ).expect("schema");
-        let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
+        let (db, read_db) = db_states_for_test(conn);
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, _search_rx) = dummy_search_write();
         let (body_read, _body_dir) = body_read_in_tempdir();
         let runtime = ExtractRuntime::new(
             db,
+            read_db,
             std::path::PathBuf::from("."),
             dummy_boot_state(),
             search_write,
@@ -1056,7 +1064,7 @@ mod tests {
             rusqlite::params![hash_a],
         ).expect("insert ext");
 
-        let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
+        let (db, read_db) = db_states_for_test(conn);
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, mut search_rx) = dummy_search_write();
@@ -1076,6 +1084,7 @@ mod tests {
             .expect("put body");
         let runtime = ExtractRuntime::new(
             db,
+            read_db,
             std::path::PathBuf::from("."),
             dummy_boot_state(),
             search_write,
@@ -1140,13 +1149,14 @@ mod tests {
                 extracted_text TEXT, status TEXT NOT NULL,\
                 extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
         ).expect("schema");
-        let db = WriteDbState::from_arc(Arc::new(std::sync::Mutex::new(conn)));
+        let (db, read_db) = db_states_for_test(conn);
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, mut search_rx) = dummy_search_write();
         let (body_read, _body_dir) = body_read_in_tempdir();
         let runtime = ExtractRuntime::new(
             db,
+            read_db,
             std::path::PathBuf::from("."),
             dummy_boot_state(),
             search_write,

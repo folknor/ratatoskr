@@ -4,10 +4,9 @@
 //! keeps the selection algorithm and domain types.
 
 use crate::db::ReadConn;
-use ::db::db::Connection;
 
 // Re-export from db (flat re-exports via queries_extra::*).
-pub use crate::db::queries_extra::{SendIdentity, get_send_identities};
+pub use crate::db::queries_extra::SendIdentity;
 
 pub fn get_all_send_identity_emails(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     crate::db::queries_extra::get_all_send_identity_emails_read(conn)
@@ -27,11 +26,11 @@ pub struct FromSelectionContext {
 /// 2. Reply-address match (case-insensitive)
 /// 3. Primary identity
 pub fn select_from_address(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     context: &FromSelectionContext,
 ) -> Result<Option<SendIdentity>, String> {
-    let identities = get_send_identities(conn, account_id)?;
+    let identities = crate::db::queries_extra::get_send_identities_read(conn, account_id)?;
 
     if identities.is_empty() {
         return Ok(None);

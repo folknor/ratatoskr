@@ -52,8 +52,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crypto_key::SecretKey;
+use db::db::ReadDbState;
 use service_api::{Notification, PushEvent};
-use service_state::WriteDbState;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -90,7 +90,7 @@ struct AccountEntry {
 
 struct PushRuntimeInner {
     accounts: Mutex<HashMap<String, AccountEntry>>,
-    db: WriteDbState,
+    read_db: ReadDbState,
     encryption_key: SecretKey,
     sync_runtime: Arc<SyncRuntime>,
     notification_tx: NotificationSender,
@@ -114,7 +114,7 @@ pub struct PushRuntime {
 
 impl PushRuntime {
     pub fn new(
-        db: WriteDbState,
+        read_db: ReadDbState,
         encryption_key: SecretKey,
         sync_runtime: Arc<SyncRuntime>,
         notification_tx: NotificationSender,
@@ -123,7 +123,7 @@ impl PushRuntime {
         Self {
             inner: Arc::new(PushRuntimeInner {
                 accounts: Mutex::new(HashMap::new()),
-                db,
+                read_db,
                 encryption_key,
                 sync_runtime,
                 notification_tx,
@@ -165,7 +165,7 @@ impl PushRuntime {
         }
 
         // Provider gate: no-op for non-JMAP accounts.
-        let read_db = self.inner.db.to_read_state();
+        let read_db = self.inner.read_db.clone();
         let provider = db::db::queries::get_provider_type(&read_db, &account_id).await?;
         if provider != "jmap" {
             log::debug!(

@@ -136,11 +136,10 @@ pub(crate) async fn handle_calendar_kick(
 async fn list_calendar_capable_account_ids(
     boot_state: &Arc<BootSharedState>,
 ) -> Result<Vec<String>, String> {
-    let Some(conn) = boot_state.db_conn() else {
+    let Some(read_db) = boot_state.read_db_state() else {
         return Err("calendar.kick: db connection not available".into());
     };
-    let read_db = db::db::ReadDbState::from_arc(conn);
     read_db
-        .with_conn(db::db::queries_extra::list_calendar_capable_account_ids_sync)
+        .with_read(db::db::queries_extra::list_calendar_capable_account_ids_sync)
         .await
 }

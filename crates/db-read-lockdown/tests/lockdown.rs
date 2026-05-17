@@ -122,6 +122,16 @@ fn db_read_public_surface_does_not_reexport_rusqlite() {
              db_read::db::*. Enumerate the read-safe items explicitly. \
              Offending line: {trimmed}",
         );
+
+        let whole_writer_query_module = matches!(
+            trimmed,
+            "queries," | "queries_extra," | "pending_ops," | "migrations," | "action_journal,"
+        );
+        assert!(
+            !whole_writer_query_module,
+            "db-read must not re-export whole writer-db modules. Re-export the \
+             read-safe functions/types explicitly instead. Offending line: {trimmed}",
+        );
     }
 }
 

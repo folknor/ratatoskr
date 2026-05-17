@@ -25,7 +25,8 @@ use db::db::queries_extra::{
     backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
     get_all_accounts_sync, get_all_send_identity_emails,
 };
-use db::db::{Connection, apply_standard_pragmas, migrations, reconcile_velo_rename};
+use db::db::{apply_writer_pragmas, migrations, reconcile_velo_rename};
+use rusqlite::{Connection, OpenFlags};
 use db::progress::ProgressReporter;
 use service_api::{BootExitCode, BootPhase, BootReadyResponse};
 use std::path::PathBuf;
@@ -34,8 +35,8 @@ use tokio::sync::{Notify, mpsc};
 
 /// Service-side boot artifacts loaded once at boot. The action worker,
 /// sync runtime, push runtime, calendar runtime, and rebuild path all
-/// consume `encryption_key` and `db_conn` from here via the
-/// `BootSharedState::encryption_key()` / `db_conn()` accessors. The
+/// consume `encryption_key` and DB state from here via the
+/// `BootSharedState::encryption_key()` / typed DB state accessors. The
 /// `#[allow(dead_code)]` markers below cover the lookup pattern (fields
 /// are read through the accessors, not through direct struct access in
 /// every consumer); they are not a TODO.
@@ -50,10 +51,17 @@ pub(crate) struct BootContext {
     pub(crate) encryption_key: SecretKey,
     /// DB connection opened during boot. Held past the boot sequence so
     /// Phase 2's relocated action service can construct its `ActionContext`
-    /// from it without re-opening the file. `Arc<Mutex<Connection>>` matches
-    /// the shape `ReadDbState::from_arc` expects.
+    /// from it without re-opening the file.
     #[allow(dead_code)]
     pub(crate) db_conn: Arc<Mutex<Connection>>,
+    /// Independent read-only handle opened after migrations completed.
+    /// This is the read handle handed to Service subsystems that need read
+    /// queries; it is not a `ReadDbState` view over `db_conn`.
+    #[allow(dead_code)]
+    pub(crate) db_read: db::db::ReadDbState,
+    /// Service-only write handle paired with `db_read`.
+    #[allow(dead_code)]
+    pub(crate) write_db: service_state::WriteDbState,
     /// Highest applied schema version after migrations completed. Echoed
     /// to the UI in `BootReadyResponse`.
     pub(crate) schema_version: u32,
@@ -953,41 +961,27 @@ impl BootSharedState {
     /// The loop survives a future refactor that might use `notify_one` or
     /// add a spurious-wakeup path; keeping it costs one extra mutex check
     /// in the unreachable case.
-    /// Get a clone of the DB connection arc once boot has populated
-    /// `context`. Returns `None` if boot is still in flight or has not
-    /// run (which is a contract violation for any caller other than the
-    /// boot task itself - by the time `boot.ready` returns, `context`
-    /// is populated and stays so for the lifetime of the Service).
-    ///
-    /// Used by handlers (`action.job_status` today; the action service
-    /// handler+worker in task 9) that need to query the journal after
-    /// boot. Cloning the `Arc` lets the handler drive its own
-    /// `spawn_blocking` against the connection without holding the
-    /// `BootSharedState` mutex across the blocking work.
-    pub(crate) fn db_conn(&self) -> Option<Arc<Mutex<Connection>>> {
+    pub(crate) fn read_db_state(&self) -> Option<db::db::ReadDbState> {
         let guard = self.context.lock().expect("boot context poisoned");
-        guard.as_ref().map(|ctx| Arc::clone(&ctx.db_conn))
+        guard.as_ref().map(|ctx| ctx.db_read.clone())
     }
 
-    /// Build a fresh `WriteDbState` wrapper for a Phase 6a IPC handler.
+    /// Clone the installed `WriteDbState` wrapper for a Service IPC handler.
     /// Returns `Err(ServiceError::Internal)` with a uniform message if
-    /// `db_conn` is not yet populated (boot still in flight, or
+    /// the writer state is not yet populated (boot still in flight, or
     /// post-respawn pre-`boot.ready`).
-    ///
-    /// Phase 6a centralises the boilerplate every write-surface handler
-    /// would otherwise repeat (`db_conn()? -> WriteDbState::from_arc`).
-    /// Each `WriteDbState` is a cheap `Arc::clone` wrapper, so handlers
-    /// constructing one per request stay fine even though boot already
-    /// holds a canonical instance for `SyncRuntime`.
     pub(crate) fn write_db_state(
         &self,
     ) -> Result<service_state::WriteDbState, service_api::ServiceError> {
-        let conn = self.db_conn().ok_or_else(|| {
-            service_api::ServiceError::Internal(
-                "request received before db_conn available; UI must wait for boot.ready".into(),
-            )
+        let guard = self.context.lock().map_err(|e| {
+            service_api::ServiceError::Internal(format!("boot context poisoned: {e}"))
         })?;
-        Ok(service_state::WriteDbState::from_arc(conn))
+        let Some(ctx) = guard.as_ref() else {
+            return Err(service_api::ServiceError::Internal(
+                "request received before db_conn available; UI must wait for boot.ready".into(),
+            ));
+        };
+        Ok(ctx.write_db.clone())
     }
 
     /// Snapshot the encryption key out of `BootContext` once boot has
@@ -1206,6 +1200,14 @@ async fn run_boot_sequence_inner(
     };
 
     let conn = Arc::new(Mutex::new(conn));
+    let db_read = db::db::open_reader_pool(&app_data_dir).map_err(|error| {
+        log::error!(
+            "DB read-only open failed for {}: {error}",
+            app_data_dir.display(),
+        );
+        BootFailure::MigrationFailure
+    })?;
+    let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
     let mut recovery_warnings: Vec<String> = Vec::new();
 
     // RecoveringPendingOps: state-repair on the pending_operations table
@@ -1217,7 +1219,7 @@ async fn run_boot_sequence_inner(
     // which targets a different sync_status value ('queued') and a
     // different failure mode (drafts that never made it into 'sending').
     boot_progress::emit(&out_tx, BootPhase::RecoveringPendingOps, None);
-    if let Err(error) = run_boot_recovery(&conn, "pending-ops recovery", |c| {
+    if let Err(error) = run_boot_recovery(&db_write, "pending-ops recovery", |c| {
         db_pending_ops_recover_on_boot_sync(c)
     })
     .await
@@ -1236,7 +1238,7 @@ async fn run_boot_sequence_inner(
     // filters strictly on status='pending' and ignores lease_expires_at,
     // and replay_unemitted requires outcome IS NOT NULL which the crashed
     // op never wrote).
-    if let Err(error) = run_boot_recovery(&conn, "action-journal stale leases", |c| {
+    if let Err(error) = run_boot_recovery(&db_write, "action-journal stale leases", |c| {
         let (jobs_reset, ops_reset) = recover_stale_leases(c)?;
         if jobs_reset > 0 || ops_reset > 0 {
             log::info!(
@@ -1270,7 +1272,7 @@ async fn run_boot_sequence_inner(
     // are state-repair passes that run before the boot handshake
     // signals readiness; no separate BootPhase notification (the
     // pass is fast - filesystem walk, no user-visible progress).
-    if let Err(error) = reconcile_send_vault(&conn, &app_data_dir).await {
+    if let Err(error) = reconcile_send_vault(&db_write, &app_data_dir).await {
         log::warn!("send-vault orphan cleanup failed: {error}");
         recovery_warnings.push("send-vault cleanup".to_string());
     }
@@ -1282,7 +1284,7 @@ async fn run_boot_sequence_inner(
     // orphaned. Distinct from the 'sending' resurfacing above (different
     // sync_status, different lifecycle stage).
     boot_progress::emit(&out_tx, BootPhase::SweepingQueuedDrafts, None);
-    if let Err(error) = run_boot_recovery(&conn, "queued-drafts sweep", |c| {
+    if let Err(error) = run_boot_recovery(&db_write, "queued-drafts sweep", |c| {
         let count = db_mark_queued_drafts_failed_sync(c)?;
         if count > 0 {
             log::info!("[drafts] Resurfaced {count} orphaned 'queued' drafts as 'failed'");
@@ -1296,7 +1298,7 @@ async fn run_boot_sequence_inner(
     }
 
     boot_progress::emit(&out_tx, BootPhase::BackfillingThreadParticipants, None);
-    if let Err(error) = run_boot_recovery(&conn, "thread-participants backfill", |c| {
+    if let Err(error) = run_boot_recovery(&db_write, "thread-participants backfill", |c| {
         run_backfill_for_all_accounts(c)
     })
     .await
@@ -1315,7 +1317,7 @@ async fn run_boot_sequence_inner(
     // re-run on the next boot.
     boot_progress::emit(&out_tx, BootPhase::DrainingDraftWal, None);
     let app_data_dir_for_drain = app_data_dir.clone();
-    if let Err(error) = run_boot_recovery(&conn, "drafts WAL drain", move |c| {
+    if let Err(error) = run_boot_recovery(&db_write, "drafts WAL drain", move |c| {
         let count = crate::draft_wal::drain(c, &app_data_dir_for_drain)?;
         if count > 0 {
             log::info!("[drafts] Drained {count} entries from drafts.wal");
@@ -1371,10 +1373,15 @@ async fn run_boot_sequence_inner(
     // post-ready attachment fetch reads the user's actual setting
     // rather than the constructor defaults. Re-read on every
     // `settings.set` that touches either key.
-    {
-        let conn_guard = conn.lock().expect("conn mutex poisoned for compression-pref load");
-        state.refresh_compression_prefs(&conn_guard);
-    }
+    db_write
+        .with_conn_sync(|conn| {
+            state.refresh_compression_prefs(conn);
+            Ok(())
+        })
+        .map_err(|e| {
+            log::error!("compression preference load failed: {e}");
+            BootFailure::MigrationFailure
+        })?;
 
     // Attachments roadmap Phase 8b: if `--rebuild-attachment-index`
     // was passed on the command line, walk every sealed pack's frames
@@ -1428,11 +1435,10 @@ async fn run_boot_sequence_inner(
     }
 
     let notification_tx = boot_progress::NotificationSender::new(out_tx.clone());
-    let writer_db_read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
     let (search_write, search_writer_handle) =
         match crate::search_writer::spawn(
             &app_data_dir,
-            writer_db_read,
+            db_read.clone(),
             notification_tx.clone(),
             0,
         ) {
@@ -1447,8 +1453,6 @@ async fn run_boot_sequence_inner(
     // grab after boot.ready. Sync still owns its own clone (moved
     // into SyncRuntime below); ExtractRuntime gets a separate clone.
     state.install_search_write(search_write.clone());
-
-    let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
 
     // Phase 3 task 11: invariant pass. Skipped on clean shutdown.
     boot_progress::emit(&out_tx, BootPhase::RunningInvariantPass, None);
@@ -1521,7 +1525,7 @@ async fn run_boot_sequence_inner(
         crate::progress::IpcProgressReporter::new(out_tx.clone(), String::new()),
     );
     let runtime = Arc::new(crate::sync::SyncRuntime::new(
-        db_write,
+        db_write.clone(),
         body_write,
         inline_write,
         search_write,
@@ -1537,36 +1541,30 @@ async fn run_boot_sequence_inner(
     Ok(BootContext {
         encryption_key: key,
         db_conn: conn,
+        db_read,
+        write_db: db_write,
         schema_version,
         migrations_applied,
         recovery_warnings,
     })
 }
 
-/// Run a synchronous recovery step inside `spawn_blocking` against a shared
-/// `Arc<Mutex<Connection>>`. The dispatch task and the writer task continue
+/// Run a synchronous recovery step inside the writer state's blocking
+/// connection helper. The dispatch task and the writer task continue
 /// to run on the async side; only the rusqlite work blocks. Errors from
 /// recovery steps are logged at warn (the boot sequence proceeds) - per
 /// scope items 4, 5, and 5a of `phase-1.5-plan.md`, these steps are state
 /// repair, not correctness gates: a failure leaves the DB in the same state
 /// the previous boot left it in, which is no worse than skipping recovery.
 async fn run_boot_recovery<F>(
-    conn: &Arc<Mutex<Connection>>,
+    db: &service_state::WriteDbState,
     label: &'static str,
     f: F,
 ) -> Result<(), String>
 where
     F: FnOnce(&Connection) -> Result<(), String> + Send + 'static,
 {
-    let conn = Arc::clone(conn);
-    tokio::task::spawn_blocking(move || {
-        let conn = conn
-            .lock()
-            .map_err(|e| format!("db lock poisoned during {label}: {e}"))?;
-        f(&conn)
-    })
-    .await
-    .map_err(|e| format!("{label} task panicked: {e}"))?
+    db.with_conn(f).await.map_err(|e| format!("{label}: {e}"))
 }
 
 /// Boot-time send-vault orphan cleanup (Phase 2 task 5).
@@ -1578,23 +1576,19 @@ where
 /// filesystem walk holds neither lock and can be relatively slow on
 /// a populated vault tree).
 async fn reconcile_send_vault(
-    conn: &Arc<Mutex<Connection>>,
+    db: &service_state::WriteDbState,
     app_data_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let conn = Arc::clone(conn);
     let live_ids: std::collections::HashSet<service_api::PlanId> =
-        tokio::task::spawn_blocking(move || -> Result<_, String> {
-            let conn = conn
-                .lock()
-                .map_err(|e| format!("db lock poisoned: {e}"))?;
-            let ids = db::db::action_journal::live_send_job_ids(&conn)?;
+        db.with_conn(move |conn| -> Result<_, String> {
+            let ids = db::db::action_journal::live_send_job_ids(conn)?;
             Ok(ids
                 .into_iter()
                 .map(|bytes| service_api::PlanId(uuid::Uuid::from_bytes(bytes)))
                 .collect())
         })
         .await
-        .map_err(|e| format!("live_send_job_ids task: {e}"))??;
+        .map_err(|e| format!("live_send_job_ids task: {e}"))?;
 
     let app_data = app_data_dir.to_path_buf();
     let removed = tokio::task::spawn_blocking(move || {
@@ -1622,7 +1616,8 @@ async fn reconcile_send_vault(
 /// the UI would see `BootReady` with no warning even though a subset of
 /// accounts had partial state repair.
 fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
-    let accounts = get_all_accounts_sync(conn)?;
+    let read = db::db::ReadConn::from_raw(conn);
+    let accounts = get_all_accounts_sync(&read)?;
     if accounts.is_empty() {
         return Ok(());
     }
@@ -1685,9 +1680,14 @@ fn open_db_and_migrate(
 ) -> Result<MigrateOutcome, String> {
     reconcile_velo_rename(app_data_dir)?;
     let db_path = app_data_dir.join("ratatoskr.db");
-    let conn = Connection::open(&db_path)
+    let conn = Connection::open_with_flags(
+        &db_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
         .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
-    apply_standard_pragmas(&conn)?;
+    apply_writer_pragmas(&conn)?;
 
     let mut progress = |current: u32, total: u32| {
         // Populate the human-readable message so the splash always has
@@ -1814,9 +1814,13 @@ mod tests {
     #[test]
     fn boot_context_constructs_with_every_field_readable() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
+        let conn = Arc::new(Mutex::new(conn));
+        let db_read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
         let ctx = BootContext {
             encryption_key: SecretKey::from_bytes([9u8; 32]),
-            db_conn: Arc::new(Mutex::new(conn)),
+            db_conn: Arc::clone(&conn),
+            db_read: db_read.clone(),
+            write_db: service_state::WriteDbState::from_arc(Arc::clone(&conn)),
             schema_version: 100,
             migrations_applied: 1,
             recovery_warnings: vec!["pending-ops recovery".to_string()],
@@ -1844,9 +1848,13 @@ mod tests {
     fn signal_ready_symmetry_success_populates_context() {
         let state = BootSharedState::new(PathBuf::new(), DispatchConfig::default());
         let conn = Connection::open_in_memory().expect("open in-memory db");
+        let conn = Arc::new(Mutex::new(conn));
+        let db_read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
         let ctx = BootContext {
             encryption_key: SecretKey::from_bytes([1u8; 32]),
-            db_conn: Arc::new(Mutex::new(conn)),
+            db_conn: Arc::clone(&conn),
+            db_read: db_read.clone(),
+            write_db: service_state::WriteDbState::from_arc(Arc::clone(&conn)),
             schema_version: 100,
             migrations_applied: 0,
             recovery_warnings: Vec::new(),

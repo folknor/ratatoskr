@@ -15,7 +15,6 @@ pub use cmdk as command_palette;
 pub use label_colors::preset_colors;
 pub mod db;
 pub mod discovery;
-pub mod email_actions;
 pub mod generation;
 #[allow(clippy::single_component_path_imports)]
 pub(crate) use gmail;
@@ -26,8 +25,8 @@ pub use store::inline_image_store;
 pub use sync::filters;
 pub mod mdn;
 pub mod oauth;
-pub use ::db::blob_hash;
-pub use ::db::progress;
+pub use ::db_read::blob_hash;
+pub use ::db_read::progress;
 pub mod provider;
 pub mod scheduled_send;
 pub mod scope;

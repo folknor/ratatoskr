@@ -143,7 +143,12 @@ fn action_context(
             "request received before encryption_key available; UI must wait for boot.ready".into(),
         )
     })?;
-    build_action_context(write_db, encryption_key, boot_state.app_data_dir())
+    let read_db = boot_state.read_db_state().ok_or_else(|| {
+        ServiceError::Internal(
+            "request received before read db available; UI must wait for boot.ready".into(),
+        )
+    })?;
+    build_action_context(write_db, read_db, encryption_key, boot_state.app_data_dir())
         .map_err(ServiceError::Internal)
 }
 

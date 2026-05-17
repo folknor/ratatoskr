@@ -58,6 +58,11 @@ forbid = [
     "app", "runner",
 ]
 
+# dev-seed is intentionally allowed only through development feature flags.
+# runner disables app default features for production and exposes
+# `runner/dev-seed` as the explicit opt-in. The regression test in
+# `crates/runner/src/main.rs` pins that manifest shape.
+
 [[dependency_rule]]
 name = "sync-no-upward"
 from = "sync"

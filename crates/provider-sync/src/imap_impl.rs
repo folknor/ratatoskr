@@ -15,12 +15,12 @@ impl ProviderSyncOps for ImapOps {
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let read_db = ctx.db.to_read_state();
-        let imap_config = self.load_config(&read_db, ctx.account_id).await?;
+        let imap_config = self.load_config(ctx.read_db, ctx.account_id).await?;
 
         let result = crate::imap::imap_initial::imap_initial_sync(
             ctx.progress,
             ctx.db,
+            ctx.read_db,
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
@@ -43,13 +43,13 @@ impl ProviderSyncOps for ImapOps {
         days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let read_db = ctx.db.to_read_state();
-        let imap_config = self.load_config(&read_db, ctx.account_id).await?;
+        let imap_config = self.load_config(ctx.read_db, ctx.account_id).await?;
         let days_back = days_back.unwrap_or(365);
 
         let result = crate::imap::imap_delta::imap_delta_sync(
             ctx.progress,
             ctx.db,
+            ctx.read_db,
             ctx.body_store,
             ctx.inline_images,
             ctx.search,

@@ -85,30 +85,25 @@ pub async fn create_folder(
     mlog.set_remote_id(&mutation.id);
 
     // 2. Local DB - insert the new folder into folders (best-effort)
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let m = mutation.clone();
     let parent_id_for_db = parent_id.map(|id| id.as_str().to_string());
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
-            &conn,
-            &m.id,
-            &aid,
-            &m.name,
-            Some(m.path.as_str()),
-            m.special_use.as_deref(),
-            parent_id_for_db.as_deref(),
-        )
-        .map_err(ActionError::db)?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let local_result = db
+        .with_conn_mapped(move |conn| {
+            db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+                conn,
+                &m.id,
+                &aid,
+                &m.name,
+                Some(m.path.as_str()),
+                m.special_use.as_deref(),
+                parent_id_for_db.as_deref(),
+            )
+            .map_err(ActionError::db)?;
+            Ok(())
+        }, ActionError::db)
+        .await;
 
     if let Err(e) = local_result {
         // Provider succeeded but local DB failed - unusual but possible.
@@ -171,30 +166,25 @@ pub async fn rename_folder(
     };
 
     // Local DB update (best-effort)
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let fid = folder_id.as_str().to_string();
     let m = mutation.clone();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
-            &conn,
-            &fid,
-            &aid,
-            &m.name,
-            Some(m.path.as_str()),
-            m.special_use.as_deref(),
-            None, // parent folder is not changed in rename
-        )
-        .map_err(ActionError::db)?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let local_result = db
+        .with_conn_mapped(move |conn| {
+            db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+                conn,
+                &fid,
+                &aid,
+                &m.name,
+                Some(m.path.as_str()),
+                m.special_use.as_deref(),
+                None, // parent folder is not changed in rename
+            )
+            .map_err(ActionError::db)?;
+            Ok(())
+        }, ActionError::db)
+        .await;
 
     if let Err(e) = local_result {
         log::warn!("rename_folder local update failed (provider succeeded): {e}");
@@ -240,21 +230,16 @@ pub async fn delete_folder(
     }
 
     // Provider succeeded - remove local rows (best-effort)
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let fid = folder_id.as_str().to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        db::db::queries_extra::action_helpers::delete_folder_sync(&conn, &aid, &fid)
-            .map_err(ActionError::db)?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let local_result = db
+        .with_conn_mapped(move |conn| {
+            db::db::queries_extra::action_helpers::delete_folder_sync(conn, &aid, &fid)
+                .map_err(ActionError::db)?;
+            Ok(())
+        }, ActionError::db)
+        .await;
 
     if let Err(e) = local_result {
         log::warn!("delete_folder local delete failed (provider succeeded): {e}");

@@ -93,33 +93,28 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     );
 
     // 1. Local DB save
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let inp = input.clone();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        let source = inp.source.as_deref().unwrap_or("user");
-        db_upsert_contact_full(
-            &conn,
-            UpsertContactParams {
-                id: &inp.id,
-                email: &inp.email,
-                display_name: inp.display_name.as_deref(),
-                email2: inp.email2.as_deref(),
-                phone: inp.phone.as_deref(),
-                company: inp.company.as_deref(),
-                notes: inp.notes.as_deref(),
-                account_id: inp.account_id.as_deref(),
-                source,
-            },
-        )
-        .map_err(ActionError::db)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let local_result = db
+        .with_conn_mapped(move |conn| {
+            let source = inp.source.as_deref().unwrap_or("user");
+            db_upsert_contact_full(
+                conn,
+                UpsertContactParams {
+                    id: &inp.id,
+                    email: &inp.email,
+                    display_name: inp.display_name.as_deref(),
+                    email2: inp.email2.as_deref(),
+                    phone: inp.phone.as_deref(),
+                    company: inp.company.as_deref(),
+                    notes: inp.notes.as_deref(),
+                    account_id: inp.account_id.as_deref(),
+                    source,
+                },
+            )
+            .map_err(ActionError::db)
+        }, ActionError::db)
+        .await;
 
     if let Err(e) = local_result {
         let outcome = ActionOutcome::Failed { error: e };
@@ -181,20 +176,15 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     let mut mlog = MutationLog::begin("delete_contact", "", contact_id);
 
     // 1. Look up contact identity from DB
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let cid = contact_id.to_string();
-    let meta_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn
-            .lock()
-            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(&conn, &cid)
-            .map_err(ActionError::db)?
-            .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r);
+    let meta_result = db
+        .with_conn_mapped(move |conn| {
+            db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(conn, &cid)
+                .map_err(ActionError::db)?
+                .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))
+        }, ActionError::db)
+        .await;
 
     let meta = match meta_result {
         Ok(m) => m,

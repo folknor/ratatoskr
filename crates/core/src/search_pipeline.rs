@@ -6,9 +6,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use db::db::FromRow;
-use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use db::db::types::{AccountScope, DbThread};
+use db_read::db::FromRow;
+use db_read::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
+use db_read::db::types::{AccountScope, DbThread};
 use crate::db::ReadConn;
 use search::{
     AttachmentAttributionInput, AttributionInputs, MatchKind, SearchParams,
@@ -297,7 +297,7 @@ fn enrich_with_attribution(
         .iter()
         .map(|r| (r.account_id.clone(), r.message_id.clone()))
         .collect();
-    let fragments = match db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs) {
+    let fragments = match db_read::db::queries_extra::select_attachment_fragments_batch(conn, &pairs) {
         Ok(map) => map,
         Err(e) => {
             log::warn!("enrich_with_attribution: attachment fetch failed: {e}");
@@ -454,12 +454,12 @@ fn fetch_thread_rows_for_results(
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id"
     );
 
-    let mut params: Vec<Box<dyn db::db::ToSql>> = Vec::with_capacity(keys.len() * 2);
+    let mut params: Vec<Box<dyn db_read::db::ToSql>> = Vec::with_capacity(keys.len() * 2);
     for (account_id, thread_id) in keys {
         params.push(Box::new(account_id));
         params.push(Box::new(thread_id));
     }
-    let param_refs: Vec<&dyn db::db::ToSql> = params.iter().map(AsRef::as_ref).collect();
+    let param_refs: Vec<&dyn db_read::db::ToSql> = params.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| format!("prepare search thread metadata: {e}"))?;

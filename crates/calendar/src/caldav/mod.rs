@@ -1,11 +1,10 @@
 mod ical;
 
-use rusqlite::OptionalExtension;
-
 use rtsk::caldav::client::{AuthMethod, CalDavClient};
 use rtsk::caldav::parse::parse_icalendar;
 use rtsk::db::ReadDbState;
-use rtsk::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
+use service_state::WriteDbState;
+use db::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
 
 use super::types::{CalendarEventDto, CalendarInfoDto};
 
@@ -37,6 +36,7 @@ impl CaldavAccountConfig {
 
 pub async fn caldav_list_calendars_impl(
     account_id: &str,
+    write_db: &WriteDbState,
     db: &ReadDbState,
     encryption_key: &[u8; 32],
 ) -> Result<Vec<CalendarInfoDto>, String> {
@@ -44,7 +44,7 @@ pub async fn caldav_list_calendars_impl(
     let client = build_client(&config).await?;
     if config.home_url().is_none() {
         persist_discovery_results(
-            db,
+            write_db,
             account_id,
             client.principal_url(),
             client.calendar_home_url(),
@@ -69,9 +69,9 @@ pub async fn caldav_list_calendars_impl(
             // the pre-fix behavior; explicit `Some(false)` (read-only
             // shared calendars on iCloud / Fastmail / SOGo) is preserved
             // here so the action layer doesn't later 403/405 on a PUT
-            // it never should have offered. The `caldav_list_calendars`
-            // path in `core::caldav::sync::sync_caldav_calendars` already
-            // does the same; this DTO conversion now matches. (Round 3 #40.)
+            // it never should have offered. The CalDAV account sync path
+            // uses the same default, so this DTO conversion matches.
+            // (Round 3 #40.)
             can_edit: cal.can_edit.unwrap_or(true),
         })
         .collect())
@@ -229,15 +229,15 @@ pub async fn load_caldav_account_config(
 ) -> Result<CaldavAccountConfig, String> {
     let key = *encryption_key;
     let account_id = account_id.to_string();
-    db.with_conn(move |conn| {
-        // `caldav_principal_url` is read alongside `caldav_home_url` so a
-        // previously discovered principal can be reused on cold-start sync.
-        // Without this the client redoes the principal-discovery PROPFIND
-        // every time, which is two extra round-trips and a regression on
-        // servers where principal discovery from the bare base URL fails
-        // (e.g. some DAViCal installs require the per-user path).
-        let row = conn
-            .query_row(
+    db.with_read_mapped(
+        move |conn| {
+            // `caldav_principal_url` is read alongside `caldav_home_url` so a
+            // previously discovered principal can be reused on cold-start sync.
+            // Without this the client redoes the principal-discovery PROPFIND
+            // every time, which is two extra round-trips and a regression on
+            // servers where principal discovery from the bare base URL fails
+            // (e.g. some DAViCal installs require the per-user path).
+            let row = match conn.query_row(
                 "SELECT email, caldav_url, caldav_username, caldav_password,
                         caldav_principal_url, caldav_home_url
                  FROM accounts WHERE id = ?1",
@@ -252,37 +252,42 @@ pub async fn load_caldav_account_config(
                         row.get::<_, Option<String>>(5)?,
                     ))
                 },
-            )
-            .optional()
-            .map_err(|e| format!("query caldav account: {e}"))?
-            .ok_or_else(|| "Account not found".to_string())?;
+            ) {
+                Ok(row) => row,
+                Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
+                    return Err("Account not found".to_string());
+                }
+                Err(e) => return Err(format!("query caldav account: {e}")),
+            };
 
-        let server_url = row
-            .1
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
-        let password_raw = row
-            .3
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
-        let password = if rtsk::provider::crypto::is_encrypted(&password_raw) {
-            rtsk::provider::crypto::decrypt_value(&key, &password_raw).unwrap_or(password_raw)
-        } else {
-            password_raw
-        };
-        let username = row
-            .2
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(row.0);
+            let server_url = row
+                .1
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
+            let password_raw = row
+                .3
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
+            let password = if rtsk::provider::crypto::is_encrypted(&password_raw) {
+                rtsk::provider::crypto::decrypt_value(&key, &password_raw).unwrap_or(password_raw)
+            } else {
+                password_raw
+            };
+            let username = row
+                .2
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(row.0);
 
-        Ok(CaldavAccountConfig {
-            server_url,
-            username,
-            password,
-            principal_url: row.4.filter(|value| !value.trim().is_empty()),
-            home_url: row.5.filter(|value| !value.trim().is_empty()),
-        })
-    })
+            Ok(CaldavAccountConfig {
+                server_url,
+                username,
+                password,
+                principal_url: row.4.filter(|value| !value.trim().is_empty()),
+                home_url: row.5.filter(|value| !value.trim().is_empty()),
+            })
+        },
+        |e| e,
+    )
     .await
 }
 
@@ -325,10 +330,10 @@ pub async fn build_client_from_config(
 /// hosting provider that kept the same credentials but changed the DAV
 /// root). Best-effort: a write failure is logged and swallowed so the
 /// caller can still attempt rediscovery in-memory.
-pub async fn clear_persisted_caldav_urls(db: &ReadDbState, account_id: &str) {
+pub async fn clear_persisted_caldav_urls(db: &WriteDbState, account_id: &str) {
     let account_id = account_id.to_string();
     let result = db
-        .with_conn(move |conn| clear_account_caldav_urls(conn, &account_id))
+        .with_write(move |conn| clear_account_caldav_urls(conn, &account_id))
         .await;
     if let Err(e) = result {
         log::warn!("Failed to clear persisted CalDAV URLs: {e}");
@@ -343,7 +348,7 @@ pub async fn clear_persisted_caldav_urls(db: &ReadDbState, account_id: &str) {
 /// discovery already succeeded and the operation that triggered the build
 /// can proceed regardless.
 pub async fn persist_discovery_results(
-    db: &ReadDbState,
+    db: &WriteDbState,
     account_id: &str,
     principal_url: Option<&str>,
     home_url: Option<&str>,
@@ -355,7 +360,7 @@ pub async fn persist_discovery_results(
     let principal = principal_url.map(String::from);
     let home = home_url.map(String::from);
     let result = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             set_account_caldav_discovered_urls(
                 conn,
                 &account_id,

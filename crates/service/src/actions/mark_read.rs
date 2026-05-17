@@ -17,12 +17,10 @@ pub(crate) async fn mark_read_local(
     thread_id: &str,
     read: bool,
 ) -> Result<(), ActionError> {
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+    db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| format!("begin mark-read transaction: {e}"))?;
@@ -37,8 +35,7 @@ pub(crate) async fn mark_read_local(
         Ok::<(), String>(())
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db))
+    .map_err(ActionError::db)
 }
 
 /// Provider dispatch for mark-read (assumes local mutation already applied).

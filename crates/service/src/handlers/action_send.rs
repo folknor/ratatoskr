@@ -81,9 +81,7 @@ pub(super) async fn handle(
     state: &Arc<BootSharedState>,
     request: SendWireRequest,
 ) -> Result<Value, ServiceError> {
-    let conn = state
-        .db_conn()
-        .ok_or_else(|| ServiceError::Internal("boot context not populated".into()))?;
+    let db = state.write_db_state()?;
     let app_data_dir = state.app_data_dir().to_path_buf();
     let send_id = request.send_id;
 
@@ -109,26 +107,23 @@ pub(super) async fn handle(
     // worker's journal drain. On failure, the partial vault dir is
     // unlinked so the orphan-cleanup pass at next boot has nothing to
     // collect.
-    let conn_for_journal = Arc::clone(&conn);
-    let journal_result = tokio::task::spawn_blocking(move || {
-        let conn = conn_for_journal
-            .lock()
-            .map_err(|error| format!("db lock poisoned: {error}"))?;
-        insert_quiet_job(
-            &conn,
-            &job_id_bytes,
-            "send",
-            &account_id_for_journal,
-            &payload_blob,
-        )
-        .map(|_| ())
-    })
-    .await
-    .map_err(|error| ServiceError::Internal(format!("spawn_blocking: {error}")))?;
+    let journal_result = db
+        .with_conn(move |conn| {
+            insert_quiet_job(
+                conn,
+                &job_id_bytes,
+                "send",
+                &account_id_for_journal,
+                &payload_blob,
+            )
+            .map(|_| ())
+        })
+        .await
+        .map_err(ServiceError::Internal);
 
     if let Err(error) = journal_result {
         send_vault::cleanup_vault_dir(&app_data_dir, &send_id);
-        return Err(ServiceError::Internal(error));
+        return Err(error);
     }
 
     state.notify_action_worker();

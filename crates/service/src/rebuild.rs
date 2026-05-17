@@ -198,10 +198,9 @@ async fn run_preserve_existing_rebuild_inner(
         staging_dir.display(),
     );
 
-    let db_conn = boot_state
-        .db_conn()
+    let staged_db_read = boot_state
+        .read_db_state()
         .ok_or_else(|| "preserve-existing rebuild: db_conn missing".to_string())?;
-    let staged_db_read = db::db::ReadDbState::from_arc(db_conn);
     let (staged_write, staged_handle) = crate::search_writer::spawn_in_index_dir(
         &staging_dir,
         staged_db_read,

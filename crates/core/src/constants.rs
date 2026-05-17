@@ -26,4 +26,4 @@ pub const DAV_CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 // ---------------------------------------------------------------------------
 
 /// Re-export from `db` - the canonical definition lives at the storage layer.
-pub use db::db::DEFAULT_QUERY_LIMIT;
+pub use db_read::db::DEFAULT_QUERY_LIMIT;

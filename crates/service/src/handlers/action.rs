@@ -29,9 +29,7 @@ pub(super) async fn handle(
     validate_plan(&plan)?;
     let plan_id = plan.plan_id;
     let account_id = plan.operations[0].account_id.clone();
-    let conn = state
-        .db_conn()
-        .ok_or_else(|| ServiceError::Internal("boot context not populated".into()))?;
+    let db = state.write_db_state()?;
     let plan_id_bytes = *plan_id.0.as_bytes();
     let ops = serialize_ops(plan)?;
 
@@ -40,14 +38,8 @@ pub(super) async fn handle(
         crate::test_counters::record("action.before_journal_write");
     }
 
-    tokio::task::spawn_blocking(move || {
-        let conn = conn
-            .lock()
-            .map_err(|e| format!("db lock poisoned: {e}"))?;
-        insert_mail_plan(&conn, &plan_id_bytes, &account_id, false, &ops)
-    })
+    db.with_conn(move |conn| insert_mail_plan(conn, &plan_id_bytes, &account_id, false, &ops))
     .await
-    .map_err(|e| ServiceError::Internal(format!("spawn_blocking: {e}")))?
     .map_err(ServiceError::Internal)?;
 
     crate::test_counters::record("action.journal_write");

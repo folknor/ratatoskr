@@ -13,17 +13,13 @@ pub async fn mute(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("mute", account_id, thread_id);
 
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        set_thread_muted(&conn, &aid, &tid, muted).map(|_| ())
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db));
+    let local_result = db
+        .with_conn(move |conn| set_thread_muted(conn, &aid, &tid, muted).map(|_| ()))
+        .await
+        .map_err(ActionError::db);
 
     let outcome = match local_result {
         Ok(()) => ActionOutcome::Success,

@@ -92,8 +92,8 @@ pub struct AccountDeletionData {
     /// Content hashes of attachments owned by this account. Phase 3
     /// of the attachments roadmap retired the flat-cache `local_path`;
     /// the consumer tombstones each hash in `PackStore`.
-    pub cached_hashes: Vec<db::blob_hash::BlobHash>,
-    pub inline_hashes: Vec<db::blob_hash::BlobHash>,
+    pub cached_hashes: Vec<db_read::blob_hash::BlobHash>,
+    pub inline_hashes: Vec<db_read::blob_hash::BlobHash>,
 }
 
 /// Result of the synchronous phase of account deletion: gathered data plus
@@ -101,9 +101,9 @@ pub struct AccountDeletionData {
 pub struct AccountDeletionPlan {
     pub data: AccountDeletionData,
     /// Cached-file content hashes referenced by at least one other account.
-    pub shared_cache_hashes: std::collections::HashSet<db::blob_hash::BlobHash>,
+    pub shared_cache_hashes: std::collections::HashSet<db_read::blob_hash::BlobHash>,
     /// Inline-image content hashes referenced by at least one other account.
-    pub shared_inline_hashes: std::collections::HashSet<db::blob_hash::BlobHash>,
+    pub shared_inline_hashes: std::collections::HashSet<db_read::blob_hash::BlobHash>,
 }
 
 /// Report of best-effort cleanup after account deletion.
