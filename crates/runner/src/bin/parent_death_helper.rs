@@ -24,8 +24,6 @@ fn main() -> std::io::Result<()> {
     let mut command = std::process::Command::new(&service_binary);
     command.arg("--service").arg("--app-data-dir").arg(&data_dir);
 
-    // SAFETY: `pre_exec` runs after fork and before exec; only async-signal-safe
-    // operations are permitted. `prctl` is async-signal-safe.
     unsafe {
         command.pre_exec(|| {
             let result = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
@@ -40,8 +38,6 @@ fn main() -> std::io::Result<()> {
     println!("{}", child.id());
     std::io::stdout().flush()?;
 
-    // Sleep forever; the test SIGKILLs us, which triggers PR_SET_PDEATHSIG
-    // on the child Service.
     loop {
         std::thread::sleep(std::time::Duration::from_secs(60));
     }

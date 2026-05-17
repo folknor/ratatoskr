@@ -1,0 +1,29 @@
+[package]
+name = "runner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ratatoskr"
+path = "src/main.rs"
+
+[dependencies]
+app = { path = "../app", default-features = false }
+service = { path = "../service", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = []
+dev-seed = ["app/dev-seed"]
+# service does not define hotpath; the cascade through app's hotpath feature
+# already covers the shared workspace crates (rtsk, store, search, ...).
+hotpath = ["app/hotpath"]
+hotpath-alloc = ["app/hotpath-alloc"]

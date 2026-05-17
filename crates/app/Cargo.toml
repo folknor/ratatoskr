@@ -42,7 +42,6 @@ display-info = "0.5"
 rfd = "0.17"
 store = { path = "../stores" }
 service-api = { path = "../service-api" }
-service = { path = "../service" }
 process-lifetime = { path = "../process-lifetime" }
 dashmap = "6"
 mime_guess = "2"

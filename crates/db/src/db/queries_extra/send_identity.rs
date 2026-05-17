@@ -2,6 +2,8 @@
 
 use rusqlite::{Connection, params};
 
+use crate::db::ReadConn;
+
 /// A row from the `send_identities` table.
 #[derive(Debug, Clone)]
 pub struct SendIdentity {
@@ -47,6 +49,16 @@ pub fn get_send_identities(
 
 /// Return all distinct send-identity email addresses across accounts.
 pub fn get_all_send_identity_emails(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT email FROM send_identities")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+pub fn get_all_send_identity_emails_read(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT DISTINCT email FROM send_identities")
         .map_err(|e| e.to_string())?;

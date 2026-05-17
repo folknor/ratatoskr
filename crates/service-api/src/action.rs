@@ -328,14 +328,7 @@ pub struct MarkChatReadAck {
 /// non-attachment fields of the Service-side `SendRequest`. Stays
 /// small (headers + bodies) so the JSON-RPC frame fits comfortably
 /// under the 4 MiB cap regardless of attachment count.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SendIntent {
-    #[default]
-    New,
-    Reply,
-    Forward,
-}
+pub use types::SendIntent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendWireMessage {

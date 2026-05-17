@@ -1,6 +1,6 @@
 -- description: Google Calendar actions create, update, and delete through the Service worker
 -- expected: pass
--- fixture: graph-calendar-small.toml
+-- fixture: gcal-actions-calendar-small.toml
 -- protocol: gcal
 -- ceiling: 120s
 

@@ -7,7 +7,7 @@ use crate::pop_out::PopOutWindow;
 use crate::pop_out::compose::ComposeMode;
 use crate::{Message, ReadyApp};
 
-use service::actions::{SendAttachment, SendIntent};
+use service_api::actions::{SendAttachment, SendIntent};
 
 impl ReadyApp {
     /// Build a MIME message from the compose state, save it to the draft row
@@ -80,7 +80,7 @@ impl ReadyApp {
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
             .clone();
 
-        let send_req = service::actions::SendRequest {
+        let send_req = service_api::actions::SendRequest {
             draft_id,
             account_id: account_info.id.clone(),
             from,
@@ -117,7 +117,7 @@ impl ReadyApp {
     fn dispatch_send(
         &mut self,
         window_id: iced::window::Id,
-        request: service::actions::SendRequest,
+        request: service_api::actions::SendRequest,
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
@@ -183,8 +183,8 @@ impl ReadyApp {
                     // handler will no-op against the closed window.
                     Err(error) => Message::SendCompleted {
                         window_id,
-                        outcome: service::actions::ActionOutcome::Failed {
-                            error: service::actions::ActionError::remote(format!(
+                        outcome: service_api::actions::ActionOutcome::Failed {
+                            error: service_api::actions::ActionError::remote(format!(
                                 "{error}"
                             )),
                         },
@@ -198,10 +198,10 @@ impl ReadyApp {
     pub(crate) fn handle_send_completed(
         &mut self,
         window_id: iced::window::Id,
-        outcome: &service::actions::ActionOutcome,
+        outcome: &service_api::actions::ActionOutcome,
     ) -> Task<Message> {
         match outcome {
-            service::actions::ActionOutcome::Success | service::actions::ActionOutcome::NoOp => {
+            service_api::actions::ActionOutcome::Success | service_api::actions::ActionOutcome::NoOp => {
                 self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
@@ -209,8 +209,8 @@ impl ReadyApp {
             }
             // LocalOnly should not occur for send (send uses Failed for all
             // failures), but handle it defensively as failure for safety.
-            service::actions::ActionOutcome::Failed { error }
-            | service::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
+            service_api::actions::ActionOutcome::Failed { error }
+            | service_api::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
                 if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
@@ -235,7 +235,7 @@ impl ReadyApp {
 fn stage_and_build_wire(
     app_data_dir: &std::path::Path,
     send_id: service_api::PlanId,
-    request: service::actions::SendRequest,
+    request: service_api::actions::SendRequest,
 ) -> Result<service_api::SendWireRequest, String> {
     let staging_dir: PathBuf = app_data_dir
         .join("staging")

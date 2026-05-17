@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use crate::db::{Connection, OptionalExtension, ToSql, params};
+use crate::db::{ReadConn, ToSql, params};
 use serde::{Deserialize, Serialize};
 
-use crate::db::queries::get_folders;
 use crate::db::types::{AccountScope, DbFolder, DbSmartFolder};
 use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
@@ -136,7 +135,7 @@ fn system_folder_ids() -> Vec<&'static str> {
 /// (when scoped to a single account) that account's non-system labels.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_navigation_state(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<NavigationState, String> {
     log::debug!("Building navigation state for scope={scope:?}");
@@ -196,7 +195,7 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
 /// subset of the folder's synced thread membership. Rationale and the
 /// local-drafts carve-out: `reference/glossary/drafts.md` § "Count semantics."
 fn build_universal_folders(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<NavigationFolder>, String> {
     let counts = get_unread_counts_by_folder(conn, scope)?;
@@ -234,7 +233,7 @@ fn build_universal_folders(
 /// sidebar *listing* is unscoped.  Query *execution* (when the user clicks
 /// a smart folder) still respects `AccountScope`.
 fn build_smart_folders(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     _scope: &AccountScope,
 ) -> Result<Vec<NavigationFolder>, String> {
     let smart_folders = query_all_smart_folders_sync(conn)?;
@@ -269,7 +268,7 @@ fn build_smart_folders(
 /// The old `query_smart_folders_sync` filtered by `AccountScope`, hiding
 /// account-specific smart folders in the unified view.  Per the sidebar spec
 /// (Phase 1B), smart folders must always be listed.
-fn query_all_smart_folders_sync(conn: &Connection) -> Result<Vec<DbSmartFolder>, String> {
+fn query_all_smart_folders_sync(conn: &ReadConn<'_>) -> Result<Vec<DbSmartFolder>, String> {
     let mut stmt = conn
         .prepare("SELECT * FROM smart_folders ORDER BY sort_order, created_at")
         .map_err(|e| e.to_string())?;
@@ -279,12 +278,30 @@ fn query_all_smart_folders_sync(conn: &Connection) -> Result<Vec<DbSmartFolder>,
         .map_err(|e| e.to_string())
 }
 
+fn get_folders_for_navigation(
+    conn: &ReadConn<'_>,
+    account_id: &str,
+) -> Result<Vec<DbFolder>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM folders
+             WHERE account_id = ?1
+             ORDER BY sort_order ASC, name ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![account_id], DbFolder::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 /// Account-specific folders, filtering out system folders.
 fn build_account_folders(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<NavigationFolder>, String> {
-    let all_folders = get_folders(conn, account_id)?;
+    let all_folders = get_folders_for_navigation(conn, account_id)?;
     let system_ids = system_folder_ids();
     let unread_by_folder = get_folder_unread_counts(conn, account_id)?;
 
@@ -325,7 +342,7 @@ fn build_account_folders(
 
 /// Explicit label groups for the sidebar LABELS section.
 fn build_label_groups(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<NavigationFolder>, String> {
     let unread_by_group = load_label_group_unread_counts(conn, scope)?;
@@ -333,7 +350,7 @@ fn build_label_groups(
 }
 
 fn build_label_groups_from_counts(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     unread_by_group: &HashMap<i64, i64>,
 ) -> Result<Vec<NavigationFolder>, String> {
     let mut stmt = conn
@@ -379,7 +396,7 @@ fn build_label_groups_from_counts(
 
 /// Batch-fetch unread thread counts for all folders belonging to an account.
 fn get_folder_unread_counts(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
     let mut stmt = conn
@@ -435,7 +452,7 @@ fn scope_clause_for_threads(
 }
 
 fn load_label_group_unread_counts(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<HashMap<i64, i64>, String> {
     let (scope_clause, scope_params) = scope_clause_for_threads(scope, 1);
@@ -481,7 +498,7 @@ fn load_label_group_unread_counts(
 }
 
 fn load_label_group_unread_counts_for_shared_mailbox(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<HashMap<i64, i64>, String> {
@@ -529,11 +546,11 @@ fn load_label_group_unread_counts_for_shared_mailbox(
 /// threads belonging to that mailbox.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_shared_mailbox_navigation(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<NavigationState, String> {
-    let all_folders = get_folders(conn, account_id)?;
+    let all_folders = get_folders_for_navigation(conn, account_id)?;
     let system_ids = system_folder_ids();
 
     // Unread counts for folders, scoped to this shared mailbox.
@@ -651,7 +668,7 @@ pub struct SharedMailboxRow {
 }
 
 /// Load all shared mailboxes for sidebar display, across all active accounts.
-pub fn get_shared_mailboxes_sync(conn: &Connection) -> Result<Vec<SharedMailboxRow>, String> {
+pub fn get_shared_mailboxes_sync(conn: &ReadConn<'_>) -> Result<Vec<SharedMailboxRow>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT s.mailbox_id, s.display_name, s.account_id,
@@ -683,19 +700,20 @@ pub fn get_shared_mailboxes_sync(conn: &Connection) -> Result<Vec<SharedMailboxR
 /// Used by pop-out compose to determine the sender identity for shared
 /// mailbox contexts - not a sidebar boot query.
 pub fn get_shared_mailbox_email_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<Option<String>, String> {
-    conn.query_row(
+    match conn.query_row(
         "SELECT email_address FROM shared_mailbox_sync_state
          WHERE account_id = ?1 AND mailbox_id = ?2",
         params![account_id, mailbox_id],
         |row| row.get::<_, Option<String>>(0),
-    )
-    .optional()
-    .map_err(|e| format!("shared mailbox email: {e}"))
-    .map(Option::flatten)
+    ) {
+        Ok(value) => Ok(value),
+        Err(crate::db::ReadError::Sql(crate::db::SqlError::QueryReturnedNoRows)) => Ok(None),
+        Err(e) => Err(format!("shared mailbox email: {e}")),
+    }
 }
 
 // ── Pinned public folder queries ───────────────────────────
@@ -713,7 +731,7 @@ pub struct PinnedPublicFolderRow {
 
 /// Load pinned public folders for sidebar display, across all active accounts.
 pub fn get_pinned_public_folders_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<PinnedPublicFolderRow>, String> {
     let mut stmt = conn
         .prepare(
@@ -753,7 +771,7 @@ mod tests {
 
     #[test]
     fn drafts_universal_pill_uses_unread_synced_threads_only() {
-        let conn = crate::db::Connection::open_in_memory().unwrap();
+        let conn = ::db::db::Connection::open_in_memory().unwrap();
         migrations::run_all(&conn).unwrap();
         conn.execute(
             "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', 'graph')",
@@ -788,7 +806,8 @@ mod tests {
             .unwrap();
         }
 
-        let nav = get_navigation_state(&conn, &AccountScope::Single("acc".to_string())).unwrap();
+        let read = crate::db::ReadConn::from_raw(&conn);
+        let nav = get_navigation_state(&read, &AccountScope::Single("acc".to_string())).unwrap();
         let drafts = nav
             .folders
             .iter()
@@ -814,7 +833,7 @@ pub struct LabelTypeaheadRow {
 
 /// Search visible labels for `label:` / `folder:` operator typeahead.
 pub fn search_labels_for_typeahead_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     query: &str,
 ) -> Result<Vec<LabelTypeaheadRow>, String> {
     let pattern = crate::db::make_like_pattern(query.trim());
@@ -853,7 +872,7 @@ pub struct SeenAddressTypeaheadRow {
 /// This queries `seen_addresses` (addresses observed in message headers),
 /// not the synced contacts table.
 pub fn search_seen_addresses_for_typeahead_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     query: &str,
 ) -> Result<Vec<SeenAddressTypeaheadRow>, String> {
     let pattern = crate::db::make_like_pattern(query.trim());
@@ -889,7 +908,7 @@ pub struct AccountTypeaheadRow {
 
 /// Search accounts for `account:` operator typeahead.
 pub fn search_accounts_for_typeahead_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     query: &str,
 ) -> Result<Vec<AccountTypeaheadRow>, String> {
     let pattern = crate::db::make_like_pattern(query.trim());
@@ -957,7 +976,7 @@ pub struct AccountLabelsGroup {
 /// Return all raw labels grouped by account, in account `sort_order`
 /// then label `sort_order`. Drives the Mail Rules > Labels settings list.
 pub fn query_labels_by_account(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<AccountLabelsGroup>, String> {
     let mut acc_stmt = conn
         .prepare(
@@ -1074,7 +1093,7 @@ pub struct SettingsLabelGroupRow {
 /// Members of one `label_groups` row as `(account_id, label_id)` pairs.
 /// Used to populate the editor sheet on open.
 pub fn query_label_group_members(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     group_id: i64,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
@@ -1097,7 +1116,7 @@ pub fn query_label_group_members(
 /// All user-visible label groups, ordered by name, with their member counts.
 /// Drives the top section of the Labels settings tab.
 pub fn query_label_groups_for_settings(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<SettingsLabelGroupRow>, String> {
     let mut stmt = conn
         .prepare(

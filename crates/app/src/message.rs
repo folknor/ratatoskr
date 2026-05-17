@@ -223,7 +223,7 @@ pub enum Message {
     /// Action service completed - carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         plan: crate::action_resolve::ActionExecutionPlan,
-        outcomes: Vec<service::actions::ActionOutcome>,
+        outcomes: Vec<service_api::actions::ActionOutcome>,
     },
     /// Synchronous response from the IPC `action.execute_plan`
     /// round-trip, classified into the tri-state per Phase 2 plan
@@ -257,7 +257,7 @@ pub enum Message {
     /// not a thread list selection.
     SendCompleted {
         window_id: iced::window::Id,
-        outcome: service::actions::ActionOutcome,
+        outcome: service_api::actions::ActionOutcome,
     },
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
@@ -396,7 +396,7 @@ pub enum Message {
     /// Undo compensation completed.
     UndoCompleted {
         desc: String,
-        outcomes: Vec<service::actions::ActionOutcome>,
+        outcomes: Vec<service_api::actions::ActionOutcome>,
     },
 
     // Shared mailboxes & public folders

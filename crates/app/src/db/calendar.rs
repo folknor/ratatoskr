@@ -12,7 +12,7 @@ impl Db {
         &self,
         event_id: String,
     ) -> Result<Option<CalendarEvent>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             let core_event = get_calendar_event_sync(conn, &event_id)?;
             Ok(core_event.map(|ev| CalendarEvent {
                 id: ev.id,
@@ -49,7 +49,7 @@ impl Db {
         window_end: i64,
     ) -> Result<Vec<crate::ui::calendar_time_grid::TimeGridEvent>, String> {
         let rows = self
-            .with_conn(move |conn| load_view_event_rows_sync(conn, window_start, window_end))
+            .with_read(move |conn| load_view_event_rows_sync(conn, window_start, window_end))
             .await?;
         // Expand off the lock. Pure CPU work over the loaded Vec.
         let core_events = expand_view_events(rows, window_start, window_end);
@@ -84,7 +84,7 @@ impl Db {
         account_id: String,
         event_id: String,
     ) -> Result<Vec<crate::ui::calendar::AttendeeEntry>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(get_event_attendees_sync(conn, &account_id, &event_id)?
                 .into_iter()
                 .map(|row| crate::ui::calendar::AttendeeEntry {
@@ -106,7 +106,7 @@ impl Db {
         account_id: String,
         event_id: String,
     ) -> Result<Vec<crate::ui::calendar::ReminderEntry>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(get_event_reminders_sync(conn, &account_id, &event_id)?
                 .into_iter()
                 .map(|row| crate::ui::calendar::ReminderEntry {
@@ -122,7 +122,7 @@ impl Db {
     pub async fn load_calendars_for_sidebar(
         &self,
     ) -> Result<Vec<crate::ui::calendar::CalendarListEntry>, String> {
-        self.with_conn(|conn| {
+        self.with_read(|conn| {
             Ok(load_calendars_for_sidebar_sync(conn)?
                 .into_iter()
                 .map(|row| crate::ui::calendar::CalendarListEntry {

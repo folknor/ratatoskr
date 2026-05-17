@@ -248,7 +248,7 @@ pub(crate) struct PendingActionPlan {
     /// `(operation_id, ActionOutcome)` pairs in arrival order. Sorted
     /// by `operation_id` before firing `Message::ActionCompleted` so
     /// the per-target outcome ordering matches the dispatched plan.
-    pub(crate) outcomes: Vec<(u32, service::actions::ActionOutcome)>,
+    pub(crate) outcomes: Vec<(u32, service_api::actions::ActionOutcome)>,
     pub(crate) state: PlanState,
     /// Idempotency guard for `OperationOutcome` notifications: replay
     /// from the journal can re-emit an outcome the UI already saw, and
@@ -357,7 +357,7 @@ impl ReadyApp {
 
         let calendar_default_view = db
             .read_db_state()
-            .with_conn_sync(get_calendar_default_view_sync)
+            .with_read_sync(get_calendar_default_view_sync)
             .ok()
             .flatten()
             .map(|view_name| CalendarState::parse_view_name(&view_name))

@@ -2,8 +2,9 @@
 //! and contact groups. Used by compose autocomplete and calendar attendee
 //! fields.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
+use crate::db::ReadConn;
 use crate::db::sql_fragments::{build_fts_query, make_like_pattern};
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,7 @@ pub struct ContactSearchResult {
 /// contacts -> GAL cache -> seen addresses -> groups.
 /// Returns up to `limit` results.
 pub fn search_contacts_unified(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     query: &str,
     limit: i64,
 ) -> Result<Vec<ContactSearchResult>, String> {
@@ -103,7 +104,7 @@ pub fn search_contacts_unified(
 /// Search contacts via FTS5 prefix matching, falling back to LIKE if
 /// the FTS5 table is unavailable.
 fn search_contacts_fts_or_like(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     raw_query: &str,
     like_pattern: &str,
     limit: i64,
@@ -149,7 +150,7 @@ fn search_contacts_fts_or_like(
 }
 
 fn search_gal_cache(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     pattern: &str,
     limit: i64,
     seen_emails: &mut std::collections::HashSet<String>,
@@ -185,7 +186,7 @@ fn search_gal_cache(
 // ---------------------------------------------------------------------------
 
 fn search_contacts_table(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     pattern: &str,
     limit: i64,
     seen_emails: &mut std::collections::HashSet<String>,
@@ -219,7 +220,7 @@ fn search_contacts_table(
 /// Search seen_addresses via FTS5 prefix matching, falling back to LIKE if
 /// the FTS5 table is unavailable (e.g. old DB without migration 79).
 fn search_seen_addresses_fts_or_like(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     raw_query: &str,
     like_pattern: &str,
     limit: i64,
@@ -286,7 +287,7 @@ fn search_seen_addresses_fts_or_like(
 }
 
 fn search_groups_table(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     pattern: &str,
     limit: i64,
     results: &mut Vec<ContactSearchResult>,

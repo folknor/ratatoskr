@@ -9,7 +9,7 @@ use super::types::{
     ThreadInfoRow,
 };
 use super::queries_extra::validate_label_color_pairs;
-use super::ReadDbState;
+use super::{ReadConn, ReadDbState};
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
@@ -113,7 +113,7 @@ pub fn get_threads(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_bundle(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     category: &str,
     limit: Option<i64>,
@@ -136,7 +136,11 @@ pub fn get_threads_for_bundle(
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?2 OFFSET ?3"
         );
-        query_as::<DbThread>(conn, &sql, &[&account_id, &lim, &off])
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        stmt.query_map(params![account_id, lim, off], DbThread::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     } else {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
@@ -150,7 +154,11 @@ pub fn get_threads_for_bundle(
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3 OFFSET ?4"
         );
-        query_as::<DbThread>(conn, &sql, &[&account_id, &category, &lim, &off])
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        stmt.query_map(params![account_id, category, lim, off], DbThread::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 }
 

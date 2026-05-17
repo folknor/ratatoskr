@@ -1,11 +1,11 @@
 use cmdk::OptionItem;
-use crate::db::Connection;
+use crate::db::ReadConn;
 
 use crate::db::queries_extra::command_palette;
 
 /// User-visible folders for an account, excluding system folders.
 pub fn get_user_folders_for_palette(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<OptionItem>, String> {
     Ok(command_palette::get_user_folders_for_account_sync(conn, account_id)?
@@ -15,7 +15,7 @@ pub fn get_user_folders_for_palette(
 }
 
 /// All user-visible label groups.
-pub fn get_label_groups_for_palette(conn: &Connection) -> Result<Vec<OptionItem>, String> {
+pub fn get_label_groups_for_palette(conn: &ReadConn<'_>) -> Result<Vec<OptionItem>, String> {
     Ok(command_palette::get_label_groups_for_palette_sync(conn)?
         .into_iter()
         .map(|r| label_name_to_option_item(r.id.to_string(), &r.name))
@@ -24,7 +24,7 @@ pub fn get_label_groups_for_palette(conn: &Connection) -> Result<Vec<OptionItem>
 
 /// Label groups currently rendered for a specific thread.
 pub fn get_thread_label_groups_for_palette(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<OptionItem>, String> {

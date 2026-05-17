@@ -2,6 +2,8 @@
 
 use rusqlite::{Connection, params};
 
+use crate::db::ReadConn;
+
 /// Raw auto-response row from the database.
 ///
 /// The `external_audience` field is stored as a string and parsed into
@@ -87,7 +89,7 @@ pub fn upsert_auto_response_sync(
 }
 
 /// Check whether any account has an active auto-response.
-pub fn any_auto_response_active_sync(conn: &Connection) -> Result<bool, String> {
+pub fn any_auto_response_active_sync(conn: &ReadConn<'_>) -> Result<bool, String> {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM auto_responses WHERE enabled = 1)",
         [],

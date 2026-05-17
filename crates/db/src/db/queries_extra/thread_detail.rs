@@ -8,6 +8,7 @@ pub type BodyMap = HashMap<String, (Option<String>, Option<String>)>;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
+use crate::db::ReadConn;
 use super::thread_ui_state::get_attachments_collapsed;
 
 // ── Return types ────────────────────────────────────────────
@@ -100,7 +101,7 @@ pub struct ThreadAttachment {
 }
 
 pub fn query_thread_list_decorations(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     thread_keys: &[(String, String)],
 ) -> Result<Vec<ThreadListDecoration>, String> {
     let mut by_key: HashMap<(String, String), ThreadListDecoration> = HashMap::new();
@@ -138,7 +139,7 @@ fn group_thread_ids_by_account(thread_keys: &[(String, String)]) -> HashMap<Stri
 }
 
 fn query_thread_state_decorations(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_ids: &[String],
     by_key: &mut HashMap<(String, String), ThreadListDecoration>,
@@ -186,7 +187,7 @@ fn query_thread_state_decorations(
 }
 
 fn query_thread_label_decorations(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_ids: &[String],
     by_key: &mut HashMap<(String, String), ThreadListDecoration>,
@@ -287,7 +288,7 @@ pub struct ThreadMeta {
 }
 
 fn query_thread_meta(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<ThreadMeta, String> {
@@ -311,7 +312,7 @@ fn query_thread_meta(
 // ── Messages ────────────────────────────────────────────────
 
 fn query_messages(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<ThreadDetailMessage>, String> {
@@ -434,7 +435,7 @@ fn fetch_bodies_chunk(
 
 // ── Identity detection ──────────────────────────────────────
 
-fn query_identity_emails(conn: &Connection, account_id: &str) -> Result<HashSet<String>, String> {
+fn query_identity_emails(conn: &ReadConn<'_>, account_id: &str) -> Result<HashSet<String>, String> {
     let mut emails = HashSet::new();
 
     let mut stmt = conn
@@ -552,7 +553,7 @@ fn truncate_summary(text: &str) -> String {
 // ── Label groups with resolved colors ───────────────────────
 
 fn query_thread_labels(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<ThreadLabel>, String> {
@@ -610,7 +611,7 @@ struct LabelGroupRow {
 // ── Attachments with message context ────────────────────────
 
 fn query_thread_attachments(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<ThreadAttachment>, String> {
@@ -662,7 +663,7 @@ fn query_thread_attachments(
 /// `<img src="cid:...">` references in HTML email bodies.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn query_inline_cid_hashes(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<(String, String)>, String> {
@@ -717,7 +718,7 @@ pub struct ThreadDbData {
 /// call [`assemble_thread_detail`] with body data from the body store.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn query_thread_from_db(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<ThreadDbData, String> {
@@ -810,7 +811,7 @@ pub fn assemble_thread_detail(
 /// [`assemble_thread_detail`] individually instead.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_thread_detail(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     body_store_conn: &Connection,
     account_id: &str,
     thread_id: &str,

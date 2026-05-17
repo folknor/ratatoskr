@@ -7,7 +7,7 @@ impl Db {
         &self,
         account_id: &str,
     ) -> Result<rtsk::db::queries_extra::AccountAuthInfo, String> {
-        self.with_conn_sync(|conn| rtsk::db::queries_extra::get_account_auth_info_sync(conn, account_id))
+        self.with_read_sync(|conn| rtsk::db::queries_extra::get_account_auth_info_sync(conn, account_id))
     }
 
     pub fn get_shared_mailbox_email(
@@ -15,13 +15,13 @@ impl Db {
         account_id: &str,
         mailbox_id: &str,
     ) -> Result<Option<String>, String> {
-        self.with_conn_sync(|conn| {
+        self.with_read_sync(|conn| {
             rtsk::db::queries_extra::get_shared_mailbox_email_sync(conn, account_id, mailbox_id)
         })
     }
 
     pub fn get_send_identity_emails_sync(&self) -> Result<Vec<String>, String> {
-        self.with_conn_sync(|conn| {
+        self.with_read_sync(|conn| {
             rtsk::send_identity::get_all_send_identity_emails(conn)
         })
     }
@@ -49,7 +49,7 @@ impl Db {
 
     /// Load all shared mailboxes for sidebar display, across all accounts.
     pub async fn get_shared_mailboxes(&self) -> Result<Vec<SharedMailbox>, String> {
-        self.with_conn(|conn| {
+        self.with_read(|conn| {
             Ok(rtsk::db::queries_extra::get_shared_mailboxes_sync(conn)?
                 .into_iter()
                 .map(|row| SharedMailbox {
@@ -67,7 +67,7 @@ impl Db {
 
     /// Load pinned public folders for sidebar display, across all accounts.
     pub async fn get_pinned_public_folders(&self) -> Result<Vec<PinnedPublicFolder>, String> {
-        self.with_conn(|conn| {
+        self.with_read(|conn| {
             Ok(rtsk::db::queries_extra::get_pinned_public_folders_sync(conn)?
                 .into_iter()
                 .map(|row| PinnedPublicFolder {
@@ -88,7 +88,7 @@ impl Db {
         &self,
         partial: String,
     ) -> Result<Vec<TypeaheadItem>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(rtsk::db::queries_extra::search_labels_for_typeahead_sync(conn, &partial)?
                 .into_iter()
                 .map(|row| TypeaheadItem {
@@ -106,7 +106,7 @@ impl Db {
         &self,
         partial: String,
     ) -> Result<Vec<TypeaheadItem>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(
                 rtsk::db::queries_extra::search_seen_addresses_for_typeahead_sync(conn, &partial)?
                     .into_iter()
@@ -133,7 +133,7 @@ impl Db {
         &self,
         partial: String,
     ) -> Result<Vec<TypeaheadItem>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(
                 rtsk::db::queries_extra::search_accounts_for_typeahead_sync(conn, &partial)?
                     .into_iter()
@@ -158,7 +158,7 @@ impl Db {
 
     pub async fn any_auto_response_active(&self) -> Result<bool, String> {
         self.read_db_state()
-            .with_conn(rtsk::auto_responses::any_auto_response_active)
+            .with_read(rtsk::auto_responses::any_auto_response_active)
             .await
     }
 }

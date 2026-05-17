@@ -52,8 +52,15 @@ use std::path::PathBuf;
 pub(crate) static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 
+pub type RunResult = iced::Result;
+
 #[allow(clippy::unwrap_in_result)]
-pub fn run() -> iced::Result {
+pub fn run() -> RunResult {
+    run_app_blocking()
+}
+
+#[allow(clippy::unwrap_in_result)]
+pub fn run_app_blocking() -> RunResult {
     env_logger::init();
     log::info!("Ratatoskr starting");
     #[cfg(feature = "hotpath")]

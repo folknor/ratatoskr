@@ -1,17 +1,17 @@
 use std::path::Path;
-use rtsk::db::{Connection, ReadDbState, ReadWriteDb};
+use rtsk::db::{ReadConn, ReadDbState};
 
 // ── DB connection ───────────────────────────────────────
 
 pub struct Db {
-    inner: ReadWriteDb,
+    inner: ReadDbState,
 }
 
 impl Db {
     /// Open the UI's view of the DB after the Service has signaled
-    /// `boot.ready`. Routes through `ReadWriteDb::open_existing` (no rename
+    /// `boot.ready`. Routes through `rtsk::db::open_reader_pool` (no rename
     /// reconciliation, no migrations) since the Service owns those as part of
-    /// the boot sequence. Calling `ReadWriteDb::init` here would re-run the
+    /// the boot sequence. Running migrations here would re-run the
     /// rename and the migration runner from the UI process - both correct
     /// (idempotent) but contradicting "the Service is the only writer" and
     /// adding a redundant migration check on every boot.
@@ -21,27 +21,27 @@ impl Db {
             return Err(format!("database not found: {}", db_path.display()));
         }
         Ok(Self {
-            inner: ReadWriteDb::open_existing(app_data_dir)?,
+            inner: rtsk::db::open_reader_pool(app_data_dir)?,
         })
     }
 
     pub fn read_db_state(&self) -> ReadDbState {
-        self.inner.read()
+        self.inner.clone()
     }
 
-    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
+    pub async fn with_read<F, T>(&self, f: F) -> Result<T, String>
     where
-        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+        F: FnOnce(&ReadConn<'_>) -> Result<T, String> + Send + 'static,
         T: Send + 'static,
     {
-        self.inner.read().with_conn(f).await
+        self.inner.with_read(f).await
     }
 
     /// Synchronous DB access for use inside `spawn_blocking`.
-    pub fn with_conn_sync<F, T>(&self, f: F) -> Result<T, String>
+    pub fn with_read_sync<F, T>(&self, f: F) -> Result<T, String>
     where
-        F: FnOnce(&Connection) -> Result<T, String>,
+        F: FnOnce(&ReadConn<'_>) -> Result<T, String>,
     {
-        self.inner.read().with_conn_sync(f)
+        self.inner.with_read_sync(f)
     }
 }

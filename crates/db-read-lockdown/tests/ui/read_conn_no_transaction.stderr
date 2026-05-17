@@ -1,0 +1,5 @@
+error[E0599]: no method named `transaction` found for reference `&ReadConn<'_>` in the current scope
+ --> tests/ui/read_conn_no_transaction.rs:3:19
+  |
+3 |         let _ = c.transaction();
+  |                   ^^^^^^^^^^^ method not found in `&ReadConn<'_>`

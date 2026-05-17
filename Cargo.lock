@@ -25,6 +25,7 @@ dependencies = [
  "db",
  "log",
  "search",
+ "service-api",
  "service-state",
  "store",
 ]
@@ -274,7 +275,6 @@ dependencies = [
  "rtsk",
  "serde",
  "serde_json",
- "service",
  "service-api",
  "sha2 0.11.0",
  "smart-folder",
@@ -1510,6 +1510,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "db-read"
+version = "0.1.0"
+dependencies = [
+ "db",
+ "rusqlite",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "db-read-lockdown"
+version = "0.1.0"
+dependencies = [
+ "db-read",
+ "trybuild",
+]
+
+[[package]]
 name = "dellingr"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2380,6 +2399,12 @@ name = "glam"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
+
+[[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "glow"
@@ -6072,7 +6097,7 @@ dependencies = [
  "chrono",
  "cmdk",
  "common",
- "db",
+ "db-read",
  "flate2",
  "futures",
  "getrandom 0.4.2",
@@ -6114,6 +6139,15 @@ dependencies = [
  "urlencoding",
  "uuid",
  "xxhash-rust",
+]
+
+[[package]]
+name = "runner"
+version = "0.1.0"
+dependencies = [
+ "app",
+ "libc",
+ "service",
 ]
 
 [[package]]
@@ -6518,6 +6552,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "types",
  "uuid",
 ]
 
@@ -7304,6 +7339,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df7f62577c25e07834649fc3b39fafdc597c0a3527dc1c60129201ccfcbaa50c"
 
 [[package]]
+name = "target-triple"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7729,6 +7770,21 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "trybuild"
+version = "1.0.116"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47c635f0191bd3a2941013e5062667100969f8c4e9cd787c14f977265d73616e"
+dependencies = [
+ "glob",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "target-triple",
+ "termcolor",
+ "toml",
+]
 
 [[package]]
 name = "ttf-parser"

@@ -25,7 +25,7 @@ pub fn load_visible_labels_async(db: &Arc<Db>) -> Task<LabelOp> {
         async move {
             let core_db = db.read_db_state();
             core_db
-                .with_conn(move |conn| {
+                .with_read(move |conn| {
                     rtsk::db::queries_extra::navigation::query_labels_by_account(conn)
                 })
                 .await
@@ -55,7 +55,7 @@ pub fn load_label_group_members_async(
         async move {
             let core_db = db.read_db_state();
             core_db
-                .with_conn(move |conn| {
+                .with_read(move |conn| {
                     rtsk::db::queries_extra::navigation::query_label_group_members(
                         conn, group_id,
                     )
@@ -77,7 +77,7 @@ pub fn load_label_groups_async(db: &Arc<Db>) -> Task<LabelOp> {
         async move {
             let core_db = db.read_db_state();
             core_db
-                .with_conn(move |conn| {
+                .with_read(move |conn| {
                     rtsk::db::queries_extra::navigation::query_label_groups_for_settings(conn)
                 })
                 .await

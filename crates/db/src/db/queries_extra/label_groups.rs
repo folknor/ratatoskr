@@ -3,13 +3,13 @@
 //! Service is the only crate that can mutate them - the `app-no-db`
 //! dependency rule enforces that the app cannot import this module.
 
-use rusqlite::{Connection, params};
+use crate::db::{WriteConn, params};
 
 /// Persist a new ordering for label groups. Each `(group_id, sort_order)`
 /// pair is written in a single transaction. Drives drag-to-reorder in
 /// Settings > Labels.
 pub fn update_label_group_sort_order_sync(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     updates: &[(i64, i64)],
 ) -> Result<(), String> {
     let tx = conn

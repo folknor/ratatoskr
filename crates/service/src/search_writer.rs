@@ -457,7 +457,7 @@ async fn enrich_thin_docs(docs: &mut [search::SearchDocument], db_read: &ReadDbS
     }
     let pairs_for_query = pairs.clone();
     let result = db_read
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs_for_query)
         })
         .await;

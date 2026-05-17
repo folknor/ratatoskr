@@ -3,7 +3,9 @@
 //! Returns simple row structs. OptionItem mapping stays in core (avoids
 //! db depending on cmdk).
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
+
+use crate::db::ReadConn;
 
 /// A label row: id + name.
 pub struct LabelRow {
@@ -23,7 +25,7 @@ pub struct LabelGroupRow {
 /// `CHAT`, which live in `folders` but should not appear in user-facing
 /// folder pickers.
 pub fn get_user_folders_for_account_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<LabelRow>, String> {
     let mut stmt = conn
@@ -47,7 +49,7 @@ pub fn get_user_folders_for_account_sync(
 }
 
 /// User-visible label groups.
-pub fn get_label_groups_for_palette_sync(conn: &Connection) -> Result<Vec<LabelGroupRow>, String> {
+pub fn get_label_groups_for_palette_sync(conn: &ReadConn<'_>) -> Result<Vec<LabelGroupRow>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, name FROM label_groups
@@ -68,7 +70,7 @@ pub fn get_label_groups_for_palette_sync(conn: &Connection) -> Result<Vec<LabelG
 
 /// Label groups currently rendered for a specific thread.
 pub fn get_thread_label_groups_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<LabelGroupRow>, String> {

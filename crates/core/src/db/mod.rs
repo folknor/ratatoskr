@@ -1,7 +1,8 @@
 // Re-export foundation types from db
 pub use db::db::ReadDbState;
-pub use db::db::ReadWriteDb;
-pub use db::db::Connection;
+pub use db::db::ReadConn;
+pub use db::db::ReadError;
+pub use db::db::open_reader_pool;
 pub use db::db::Row;
 pub use db::db::SqlError;
 pub use db::db::ToSql;

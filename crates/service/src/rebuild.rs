@@ -359,7 +359,7 @@ async fn rebuild_chunk(
     let messages_fut = db.with_conn(move |conn| {
         db::db::queries_extra::select_messages_for_index_batch(conn, &pairs_for_msgs)
     });
-    let attachments_fut = db.with_conn(move |conn| {
+    let attachments_fut = db.with_read(move |conn| {
         db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs_for_atts)
     });
     let message_ids: Vec<String> = pairs.iter().map(|(_, m)| m.clone()).collect();

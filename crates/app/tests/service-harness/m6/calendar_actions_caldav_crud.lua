@@ -1,6 +1,6 @@
 -- description: CalDAV calendar actions create, update, and delete through the Service worker
 -- expected: pass
--- fixture: graph-calendar-small.toml
+-- fixture: caldav-actions-calendar-small.toml
 -- protocol: caldav
 -- ceiling: 120s
 

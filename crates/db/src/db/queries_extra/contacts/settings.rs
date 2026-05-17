@@ -1,5 +1,7 @@
 use rusqlite::params;
 
+use crate::db::ReadConn;
+
 /// A contact entry with extended fields for the settings UI.
 #[derive(Debug, Clone)]
 pub struct ContactSettingsEntry {
@@ -19,7 +21,7 @@ pub struct ContactSettingsEntry {
 
 /// Load contacts for the settings management list (synchronous).
 pub fn load_contacts_for_settings_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     filter: &str,
 ) -> Result<Vec<ContactSettingsEntry>, String> {
     let trimmed = filter.trim();

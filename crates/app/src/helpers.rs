@@ -165,7 +165,7 @@ pub(crate) async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, Strin
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_navigation(db: Arc<Db>, scope: AccountScope) -> Result<NavigationState, String> {
-    db.with_conn(move |conn| get_navigation_state(conn, &scope))
+    db.with_read(move |conn| get_navigation_state(conn, &scope))
         .await
 }
 
@@ -213,7 +213,7 @@ async fn load_threads_scoped(
     scope: AccountScope,
     label_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         // `label_id` here is a real `folders.id` value (or None for All Mail).
         // Virtual views (Starred / Snoozed) are dispatched upstream because
         // they are backed by `threads.is_starred` / `is_snoozed`, not by
@@ -251,7 +251,7 @@ async fn load_threads_for_label_group_view(
     scope: AccountScope,
     group_id: i64,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_threads_for_label_group(conn, &scope, group_id, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
@@ -268,7 +268,7 @@ async fn load_threads_starred(
     db: Arc<Db>,
     scope: AccountScope,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_starred_threads(conn, &scope, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
@@ -285,7 +285,7 @@ async fn load_threads_snoozed(
     db: Arc<Db>,
     scope: AccountScope,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_snoozed_threads(conn, &scope, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
@@ -303,7 +303,7 @@ async fn load_threads_for_bundle_view(
     scope: AccountScope,
     bundle: Bundle,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let bundle_name = match bundle {
             Bundle::Primary => "Primary",
             Bundle::Updates => "Updates",
@@ -346,7 +346,7 @@ async fn load_shared_mailbox_navigation(
     account_id: String,
     mailbox_id: String,
 ) -> Result<NavigationState, String> {
-    db.with_conn(move |conn| get_shared_mailbox_navigation(conn, &account_id, &mailbox_id))
+    db.with_read(move |conn| get_shared_mailbox_navigation(conn, &account_id, &mailbox_id))
         .await
 }
 
@@ -357,7 +357,7 @@ async fn load_shared_mailbox_threads(
     mailbox_id: String,
     label_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_threads_for_shared_mailbox(
             conn,
             &account_id,
@@ -381,7 +381,7 @@ async fn load_shared_mailbox_starred(
     account_id: String,
     mailbox_id: String,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_threads_for_shared_mailbox_starred(
             conn,
             &account_id,
@@ -404,7 +404,7 @@ async fn load_shared_mailbox_snoozed(
     account_id: String,
     mailbox_id: String,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_threads_for_shared_mailbox_snoozed(
             conn,
             &account_id,
@@ -428,7 +428,7 @@ async fn load_shared_mailbox_label_group_threads(
     mailbox_id: String,
     group_id: i64,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let db_threads = get_threads_for_shared_mailbox_label_group(
             conn,
             &account_id,
@@ -447,7 +447,7 @@ async fn load_shared_mailbox_label_group_threads(
 }
 
 pub(crate) fn apply_thread_decorations(
-    conn: &rtsk::db::Connection,
+    conn: &rtsk::db::ReadConn<'_>,
     threads: &mut [Thread],
 ) -> Result<(), String> {
     let keys: Vec<(String, String)> = threads
@@ -485,7 +485,7 @@ async fn load_public_folder_items_async(
     account_id: String,
     folder_id: String,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let items = get_public_folder_items(conn, &account_id, &folder_id, Some(1000))?;
         let mut threads: Vec<Thread> = items
             .into_iter()

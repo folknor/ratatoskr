@@ -16,7 +16,7 @@
 //! a `MailOperation` / `WireMailOperation` variant without updating
 //! both sides is a compile error.
 
-use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
+use service_api::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
 use service_api::{
     ActionWireOperation, ActionWirePlan, OperationId, OperationResult, PlanId, RemoteFailure,
     WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId,

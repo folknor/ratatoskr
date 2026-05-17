@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::{ReadConn, ReadDbState};
 use super::dynamic_update;
 use rusqlite::{Connection, OptionalExtension, params};
 use types::MailProviderKind;
@@ -132,8 +132,8 @@ pub fn create_account_sync(
     Ok(id)
 }
 
-/// Synchronous duplicate-email check - callable from any `&Connection`.
-pub fn account_exists_by_email_sync(conn: &Connection, email: &str) -> Result<bool, String> {
+/// Synchronous duplicate-email check.
+pub fn account_exists_by_email_sync(conn: &ReadConn<'_>, email: &str) -> Result<bool, String> {
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) AS cnt FROM accounts WHERE email = ?1",
@@ -589,7 +589,7 @@ pub struct AccountAuthInfo {
 
 /// Fetch the auth info for a single account (synchronous).
 pub fn get_account_auth_info_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<AccountAuthInfo, String> {
     conn.query_row(
@@ -641,7 +641,7 @@ pub fn get_account_provider_raw_sync(conn: &Connection, account_id: &str) -> Res
 
 /// Check whether an account with the given email already exists.
 pub async fn db_account_exists_by_email(db: &ReadDbState, email: String) -> Result<bool, String> {
-    db.with_conn(move |conn| account_exists_by_email_sync(conn, &email))
+    db.with_read(move |conn| account_exists_by_email_sync(conn, &email))
         .await
 }
 

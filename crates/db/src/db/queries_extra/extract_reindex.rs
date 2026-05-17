@@ -9,6 +9,8 @@
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
 
+use crate::db::ReadConn;
+
 /// `SQLITE_LIMIT_VARIABLE_NUMBER` historically defaulted to 999. Modern
 /// builds raise it but we stay portable. Each pair binds two params, so a
 /// 256-pair chunk uses 512 placeholders well under the floor.
@@ -346,7 +348,7 @@ pub fn select_messages_for_index_batch(
 /// vector, attachments are ordered by `attachments.rowid` ASC for
 /// deterministic doc shape across runs.
 pub fn select_attachment_fragments_batch(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     pairs: &[(String, String)],
 ) -> Result<HashMap<(String, String), Vec<AttachmentFragmentRow>>, String> {
     let mut out: HashMap<(String, String), Vec<AttachmentFragmentRow>> = HashMap::new();
@@ -536,7 +538,8 @@ mod tests {
         )
         .expect("seed extracted");
         let pairs = vec![("acc1".into(), "msg1".into())];
-        let map = select_attachment_fragments_batch(&conn, &pairs).expect("query");
+        let read = ReadConn::from_raw(&conn);
+        let map = select_attachment_fragments_batch(&read, &pairs).expect("query");
         let frags = map.get(&("acc1".into(), "msg1".into())).expect("frags");
         assert_eq!(frags.len(), 2);
         let by_id: HashMap<&str, &AttachmentFragmentRow> =

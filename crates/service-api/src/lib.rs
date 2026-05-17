@@ -1,4 +1,5 @@
 mod action;
+pub mod actions;
 mod boot;
 mod cal_action;
 mod calendar;

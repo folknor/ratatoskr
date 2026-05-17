@@ -4,16 +4,9 @@ use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 
 pub use ::types::{
-    FolderKind, GmailSystemLabelId, ImportanceLevel, LabelKind, MailProviderKind, SystemFolderId,
+    FolderKind, GmailSystemLabelId, ImportanceLevel, LabelKind, MailProviderKind, SendIntent,
+    SystemFolderId,
 };
-
-/// How a send relates to an existing message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SendIntent {
-    New,
-    Reply,
-    Forward,
-}
 
 /// Standardized sync result across all providers.
 #[derive(Debug, Clone, Default, Serialize)]

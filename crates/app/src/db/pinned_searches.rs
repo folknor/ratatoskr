@@ -57,7 +57,7 @@ impl Db {
             .into_iter()
             .map(Thread::from_db_thread)
             .collect();
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             crate::helpers::apply_thread_decorations(conn, &mut threads)?;
             Ok(threads)
         })

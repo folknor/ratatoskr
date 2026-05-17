@@ -11,7 +11,7 @@
 //! service-state` transitive check closed the known UI-reachable
 //! write escape paths. The strict transitive variant now closes the
 //! remaining Cargo-graph gap: `app` may not reach `service-state`
-//! through any path-dep chain except by descending through `service`.
+//! through any path-dep chain.
 //!
 //! Why a Cargo.toml lint instead of a Rust visibility flip: the
 //! service crate (also a separate crate from `service-state`)
@@ -196,7 +196,7 @@ fn app_crate_must_not_transitively_depend_on_cal() {
 }
 
 #[test]
-fn app_crate_must_not_transitively_depend_on_service_state_except_via_service() {
+fn app_crate_must_not_transitively_depend_on_service_state() {
     let crates_dir = workspace_path("crates");
     let entries = std::fs::read_dir(&crates_dir)
         .unwrap_or_else(|e| panic!("read {}: {e}", crates_dir.display()));
@@ -236,7 +236,6 @@ fn app_crate_must_not_transitively_depend_on_service_state_except_via_service() 
         graph.insert(crate_name, deps);
     }
 
-    let blessed: std::collections::HashSet<&str> = ["service"].iter().copied().collect();
     let target = "service-state";
     let start = "app";
     let mut parent: std::collections::HashMap<String, String> =
@@ -262,9 +261,6 @@ fn app_crate_must_not_transitively_depend_on_service_state_except_via_service() 
                  dependencies behind the service crate or provider-sync instead.",
                 chain.join(" -> "),
             );
-        }
-        if blessed.contains(current.as_str()) {
-            continue;
         }
         if let Some(deps) = graph.get(&current) {
             for dep in deps {

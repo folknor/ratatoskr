@@ -69,6 +69,16 @@ pub(super) async fn seed_account_handle(
     let caldav_url = params.caldav_url;
     let caldav_username = params.caldav_username;
     let caldav_password = params.caldav_password;
+    let encryption_key = boot_state.encryption_key().ok_or_else(|| ServiceError::Internal(
+        "test.seed_account received before encryption key was available".into(),
+    ))?;
+    let encrypt_secret = |value: Option<String>| -> Result<Option<String>, ServiceError> {
+        value
+            .map(|secret| common::crypto::encrypt_value(&encryption_key, &secret))
+            .transpose()
+            .map_err(ServiceError::Internal)
+    };
+    let caldav_password = encrypt_secret(caldav_password)?;
     let requested_auth_method = params.auth_method;
     let default_oauth_provider = match provider.as_str() {
         "gmail_api" => Some("google".to_string()),
@@ -101,30 +111,30 @@ pub(super) async fn seed_account_handle(
                 "password".into()
             }
         }),
-        access_token: params
+        access_token: encrypt_secret(params
             .access_token
-            .or_else(|| uses_oauth.then(|| "test-access-token".into())),
-        refresh_token: params
+            .or_else(|| uses_oauth.then(|| "test-access-token".into())))?,
+        refresh_token: encrypt_secret(params
             .refresh_token
-            .or_else(|| uses_oauth.then(|| "test-refresh-token".into())),
+            .or_else(|| uses_oauth.then(|| "test-refresh-token".into())))?,
         token_expires_at: params
             .token_expires_at
             .or_else(|| uses_oauth.then(|| chrono::Utc::now().timestamp() + 3_600)),
         oauth_provider,
-        oauth_client_id: params
+        oauth_client_id: encrypt_secret(params
             .oauth_client_id
-            .or_else(|| uses_oauth.then(|| "test-client-id".into())),
+            .or_else(|| uses_oauth.then(|| "test-client-id".into())))?,
         oauth_token_url: params.oauth_token_url,
         imap_host: Some("imap.example.test".into()),
         imap_port: Some(993),
         imap_security: Some("tls".into()),
         imap_username: Some(email.clone()),
-        imap_password: Some("test-password".into()),
+        imap_password: encrypt_secret(Some("test-password".into()))?,
         smtp_host: Some("smtp.example.test".into()),
         smtp_port: Some(587),
         smtp_security: Some("starttls".into()),
         smtp_username: Some(email.clone()),
-        smtp_password: Some("test-password".into()),
+        smtp_password: encrypt_secret(Some("test-password".into()))?,
         jmap_url: Some("https://jmap.example.test".into()),
         accept_invalid_certs: true,
     };
@@ -588,7 +598,8 @@ async fn enrich_test_search_results(
     let write_db = boot_state.write_db_state()?;
     let inputs = write_db
         .with_conn(move |conn| {
-            let fragments = db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs)?;
+            let read = db::db::ReadConn::from_raw(conn);
+            let fragments = db::db::queries_extra::select_attachment_fragments_batch(&read, &pairs)?;
             let mut body_by_mid: HashMap<String, String> = HashMap::new();
             for body in body_read.get_batch_sync(&message_ids)? {
                 if let Some(text) = body.body_text {
@@ -1007,6 +1018,9 @@ fn read_harness_thread(
     let mut stmt = conn
         .prepare(
             "SELECT label_id FROM thread_labels
+             WHERE account_id = ?1 AND thread_id = ?2
+             UNION
+             SELECT folder_id AS label_id FROM thread_folders
              WHERE account_id = ?1 AND thread_id = ?2
              ORDER BY label_id",
         )

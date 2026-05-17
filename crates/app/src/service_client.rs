@@ -1492,7 +1492,7 @@ impl ServiceClient {
     /// Phase 6d-A: full single-contact save pipeline including
     /// provider write-back (JMAP / Google People / Graph) for synced
     /// contacts. Replaces the pre-6d UI-side
-    /// `service::actions::contacts::save_contact` call routed through
+    /// Service-side contact save call routed through
     /// `action_ctx`. Returns the `WritebackOutcome` so the caller can
     /// distinguish a clean save (`Success`) from a degraded one
     /// (`LocalOnly` - row committed locally, provider not notified).

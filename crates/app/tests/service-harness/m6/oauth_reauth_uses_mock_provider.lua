@@ -42,12 +42,12 @@ harness.assert_eq(before.auth_method, "oauth2", "auth method")
 harness.assert(before.access_token_present, "seed access token missing")
 harness.assert(before.refresh_token_present, "seed refresh token missing")
 harness.assert(
-    not before.access_token_encrypted,
-    "seed access token should start as plaintext test data"
+    before.access_token_encrypted,
+    "seed access token should be encrypted"
 )
 harness.assert(
-    not before.refresh_token_encrypted,
-    "seed refresh token should start as plaintext test data"
+    before.refresh_token_encrypted,
+    "seed refresh token should be encrypted"
 )
 
 local reauth_started_at = math.floor(harness.now_ms() / 1000)

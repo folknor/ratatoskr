@@ -1,6 +1,6 @@
 -- description: JMAP calendar actions create, update, and delete through the Service worker
 -- expected: pass
--- fixture: graph-calendar-small.toml
+-- fixture: jmap-actions-calendar-small.toml
 -- protocol: jmap
 -- ceiling: 120s
 

@@ -1,0 +1,5 @@
+error[E0599]: no method named `execute` found for mutable reference `&mut ReadStatement<'_>` in the current scope
+ --> tests/ui/read_statement_no_execute.rs:3:22
+  |
+3 |         let _ = stmt.execute([]);
+  |                      ^^^^^^^ method not found in `&mut ReadStatement<'_>`

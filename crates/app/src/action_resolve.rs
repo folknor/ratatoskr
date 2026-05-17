@@ -8,7 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
-use service::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation};
+use service_api::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation};
 
 // ── Intent ──────────────────────────────────────────────
 

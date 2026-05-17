@@ -3,8 +3,9 @@
 //! Used when no Tantivy search index is available. Matches against
 //! thread subject and snippet via LIKE.
 
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::params_from_iter;
 
+use crate::db::ReadConn;
 use super::super::types::AccountScope;
 
 /// A thread row from the free-text SQL fallback search.
@@ -26,7 +27,7 @@ pub struct SearchFallbackRow {
 /// Search threads by free-text LIKE on subject and snippet,
 /// scoped to the given accounts.
 pub fn search_threads_freetext_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     pattern: &str,
     scope: &AccountScope,
     limit: i64,

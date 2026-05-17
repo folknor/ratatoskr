@@ -2,10 +2,13 @@
 resolver = "2"
 members = [
 "crates/db",
+"crates/db-read",
+"crates/db-read-lockdown",
 "crates/core",
 "crates/service-api",
 "crates/service",
 "crates/app",
+"crates/runner",
 "crates/squeeze",
 "crates/cmdk",
 "crates/search",

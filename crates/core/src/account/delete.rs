@@ -1,4 +1,4 @@
-use crate::db::Connection;
+use ::db::db::Connection;
 use crate::db::queries_extra::delete_account_orchestrate_sync;
 
 use super::types::{AccountDeletionData, AccountDeletionPlan};

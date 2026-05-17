@@ -9,12 +9,12 @@ use std::collections::{HashMap, HashSet};
 use db::db::FromRow;
 use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use db::db::types::{AccountScope, DbThread};
-use crate::db::Connection;
+use crate::db::ReadConn;
 use search::{
     AttachmentAttributionInput, AttributionInputs, MatchKind, SearchParams,
     SearchReadState, SearchResult as TantivyResult,
 };
-use smart_folder::{ParsedQuery, parse_query, query_threads};
+use smart_folder::{ParsedQuery, parse_query, query_threads_read};
 
 // ── Result type ─────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ pub enum SearchResults {
 pub fn search(
     query: &str,
     search_state: Option<&SearchReadState>,
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<SearchResults, String> {
@@ -121,13 +121,13 @@ pub fn search(
 /// quality explicitly.
 fn search_sql_fallback(
     parsed: &ParsedQuery,
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let scope = scope.clone();
 
     if parsed.has_any_operator() || parsed.free_text.is_empty() {
-        let db_threads = query_threads(conn, parsed, &scope, Some(200), Some(0))?;
+        let db_threads = query_threads_read(conn, parsed, &scope, Some(200), Some(0))?;
         Ok(db_threads.into_iter().map(db_thread_to_unified).collect())
     } else {
         let pattern = format!("%{}%", parsed.free_text);
@@ -160,10 +160,10 @@ fn search_sql_fallback(
 /// Operators without free text: run SQL query, return date-sorted results.
 fn search_sql_only(
     parsed: &ParsedQuery,
-    conn: &Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let scope = build_scope(parsed);
-    let threads = query_threads(conn, parsed, &scope, Some(200), Some(0))?;
+    let threads = query_threads_read(conn, parsed, &scope, Some(200), Some(0))?;
     Ok(threads.into_iter().map(db_thread_to_unified).collect())
 }
 
@@ -173,7 +173,7 @@ fn search_sql_only(
 fn search_tantivy_only(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let params = build_tantivy_params(parsed);
@@ -206,12 +206,12 @@ fn search_tantivy_only(
 fn search_combined(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     // Step 1: SQL generates candidate thread IDs.
     let scope = build_scope(parsed);
-    let sql_threads = query_threads(
+    let sql_threads = query_threads_read(
         conn,
         parsed,
         &scope,
@@ -287,7 +287,7 @@ fn enrich_with_attribution(
     results: &mut [TantivyResult],
     free_text: &str,
     search_state: &SearchReadState,
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) {
     if free_text.trim().is_empty() || results.is_empty() {
@@ -419,7 +419,7 @@ fn group_by_thread_unified(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResu
 }
 
 fn fetch_thread_rows_for_results(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     results: &[UnifiedSearchResult],
 ) -> Result<Vec<DbThread>, String> {
     let mut seen = HashSet::new();

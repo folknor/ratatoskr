@@ -21,7 +21,7 @@ base64.workspace = true
 quick-xml.workspace = true
 
 # Extracted workspace crates
-db = { path = "../db" }
+db = { package = "db-read", path = "../db-read" }
 store = { path = "../stores" }
 cmdk = { path = "../cmdk" }
 search = { path = "../search" }

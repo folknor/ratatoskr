@@ -1,4 +1,4 @@
-use crate::db::Connection;
+use ::db::db::Connection;
 use crate::db::queries_extra::{
     InsertGmailAccountParams as DbInsertGmailAccountParams,
     InsertGraphAccountParams as DbInsertGraphAccountParams,

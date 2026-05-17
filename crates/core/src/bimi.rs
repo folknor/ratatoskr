@@ -8,7 +8,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use futures::stream::{self, StreamExt};
 use hickory_resolver::TokioResolver;
 use log::{debug, info, warn};
-use crate::db::Connection;
+use ::db::db::Connection;
 use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------

@@ -17,60 +17,7 @@ use lettre::message::{
 
 use db::db::ReadDbState;
 use common::encoding::encode_base64url_nopad;
-pub use common::types::SendIntent;
-
-// ── Types ────────────────────────────────────────────────────
-
-/// Attachment payload for outgoing messages.
-#[derive(Debug, Clone)]
-pub struct SendAttachment {
-    /// Original filename (e.g. `report.pdf`).
-    pub filename: String,
-    /// MIME type (e.g. `application/pdf`).
-    pub mime_type: String,
-    /// Raw file bytes.
-    pub data: Vec<u8>,
-    /// Optional Content-ID for inline images (without angle brackets).
-    pub content_id: Option<String>,
-}
-
-/// Everything needed to send a single email.
-///
-/// The UI (compose window) populates this from the local draft and
-/// finalized HTML/plain-text bodies.
-#[derive(Debug, Clone)]
-pub struct SendRequest {
-    /// Local draft ID (from `local_drafts` table).
-    pub draft_id: String,
-    /// Account this message is sent from.
-    pub account_id: String,
-    /// RFC 5322 `From` address (e.g. `"Alice <alice@example.com>"`).
-    pub from: String,
-    /// RFC 5322 `To` addresses.
-    pub to: Vec<String>,
-    /// RFC 5322 `Cc` addresses.
-    pub cc: Vec<String>,
-    /// RFC 5322 `Bcc` addresses.
-    pub bcc: Vec<String>,
-    /// Subject line.
-    pub subject: Option<String>,
-    /// HTML body (finalized via `finalize_compose_html`).
-    pub body_html: String,
-    /// Plain-text body (finalized via `finalize_compose_plain_text`).
-    pub body_text: String,
-    /// File attachments.
-    pub attachments: Vec<SendAttachment>,
-    /// `In-Reply-To` header value (Message-ID of the message being replied to).
-    pub in_reply_to: Option<String>,
-    /// `References` header value (space-separated Message-IDs).
-    pub references: Option<String>,
-    /// Provider thread ID (for threading on send).
-    pub thread_id: Option<String>,
-    /// Local DB message ID for the message being replied to or forwarded.
-    pub source_message_id: Option<String>,
-    /// Whether this send is new mail, a reply, or a forward.
-    pub intent: SendIntent,
-}
+pub use service_api::actions::{SendAttachment, SendIntent, SendRequest};
 
 /// Errors that can occur during the send pipeline.
 #[derive(Debug, Clone)]

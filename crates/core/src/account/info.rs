@@ -1,4 +1,4 @@
-use crate::db::Connection;
+use ::db::db::Connection;
 use crate::db::queries_extra::{get_account_sync, get_all_accounts_sync};
 use crate::db::types::DbAccount;
 use crate::provider::crypto::{StoredSecret, decrypt_value, is_encrypted};

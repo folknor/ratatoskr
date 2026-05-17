@@ -2,10 +2,11 @@ mod parser;
 mod sql_builder;
 
 pub use parser::{CursorContext, ParsedQuery, analyze_cursor_context, parse_query};
-pub use sql_builder::{count_matching, query_threads};
+pub use sql_builder::{count_matching, query_threads, query_threads_read};
 
 use rusqlite::Connection;
 
+use db::db::ReadConn;
 use db::db::types::{AccountScope, DbThread};
 
 /// Parameters for a smart folder query, packed to stay under the 7-arg limit.
@@ -39,14 +40,14 @@ pub fn execute_smart_folder_query(
 
 /// Return the count of unread threads matching a smart folder query.
 pub fn count_smart_folder_unread(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     query: &str,
     scope: &AccountScope,
 ) -> Result<i64, String> {
     let query = migrate_legacy_tokens(query);
     let mut parsed = parse_query(&query);
     parsed.is_unread = Some(true);
-    let result = sql_builder::count_matching(conn, &parsed, scope);
+    let result = sql_builder::count_matching_read(conn, &parsed, scope);
     if let Err(ref e) = result {
         log::error!("Smart folder unread count failed: {e}");
     }

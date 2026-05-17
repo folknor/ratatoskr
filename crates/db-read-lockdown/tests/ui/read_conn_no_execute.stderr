@@ -1,0 +1,5 @@
+error[E0599]: no method named `execute` found for reference `&ReadConn<'_>` in the current scope
+ --> tests/ui/read_conn_no_execute.rs:3:11
+  |
+3 |         c.execute("UPDATE x SET y = 1", []);
+  |           ^^^^^^^ method not found in `&ReadConn<'_>`

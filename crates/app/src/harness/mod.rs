@@ -718,7 +718,7 @@ fn lua_stage_attachment(state: &mut State) -> dellingr::Result<u8> {
     // ~6400. The wrapper also covers the small-payload branch for free.
     let file = std::fs::File::create(staging_dir.join(&relative_path)).map_err(lua_io)?;
     let mut writer = BufWriter::with_capacity(64 * 1024, file);
-    // BLAKE3 to match `service::send_vault::verify_and_transfer`,
+    // BLAKE3 to match the Service vault verification path,
     // which re-hashes the staged file with `blake3_file` and rejects
     // any hash that does not match. The harness previously hashed
     // with SHA-256, which mismatched on every staged send.
@@ -3932,10 +3932,15 @@ fn artefact_dir() -> std::io::Result<PathBuf> {
 
 fn app_binary_path() -> std::io::Result<PathBuf> {
     if let Some(dir) = std::env::var_os("BROKKR_TEST_BIN_DIR") {
-        let candidate = PathBuf::from(dir).join("app");
+        let candidate = PathBuf::from(&dir).join("ratatoskr");
         if candidate.exists() {
             return Ok(candidate);
         }
+        return Err(std::io::Error::other(format!(
+            "BROKKR_TEST_BIN_DIR={dir:?} but ratatoskr binary not found at {}; \
+             a stale `app` binary from before the runner split is not a valid fallback",
+            candidate.display()
+        )));
     }
     std::env::current_exe()
 }

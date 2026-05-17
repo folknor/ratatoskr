@@ -1,0 +1,48 @@
+name = "gcal-actions-calendar-small"
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[calendar]]
+id = "cal-work"
+name = "Work"
+color = "lightBlue"
+is_default = true
+
+[[calendar]]
+id = "cal-personal"
+name = "Personal"
+color = "lightGreen"
+
+[[event]]
+id = "ev-001"
+calendar_id = "cal-work"
+subject = "Standup"
+body_preview = "Daily team sync."
+body_text = "Daily team sync. 15 minutes, agenda in the deck."
+start = "2026-01-15T09:00:00Z"
+end = "2026-01-15T09:15:00Z"
+location = "Conf Room A"
+organizer = { name = "Alice", email = "alice@example.com" }
+attendees = [
+    { name = "Bob", email = "bob@example.com" },
+    "carol@example.com",
+]
+is_all_day = false
+
+[[event]]
+id = "ev-002"
+calendar_id = "cal-work"
+subject = "Quarterly review"
+body_preview = "Q1 numbers."
+start = "2026-02-01T14:00:00Z"
+end = "2026-02-01T15:00:00Z"
+attendees = []

@@ -34,7 +34,7 @@ impl AddAccountWizard {
                 // Duplicate check - run synchronously inside spawn_blocking
                 let email_for_dup = email.clone();
                 let dup = db
-                    .with_conn(move |conn| account_exists_by_email_sync(conn, &email_for_dup))
+                    .with_read(move |conn| account_exists_by_email_sync(conn, &email_for_dup))
                     .await;
                 match dup {
                     Ok(true) => {

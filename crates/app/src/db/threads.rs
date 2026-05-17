@@ -134,7 +134,7 @@ pub async fn load_thread_detail(
     let db_account_id = account_id.clone();
     let db_thread_id = thread_id.clone();
     let (db_data, cid_hashes) = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let data = query_thread_from_db(conn, &db_account_id, &db_thread_id)?;
             let cids = query_inline_cid_hashes(conn, &db_account_id, &db_thread_id)?;
             Ok((data, cids))
@@ -190,7 +190,7 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<(Option<String>, Option<String>), String> {
-        self.with_conn(move |conn| message_queries::get_message_body(conn, &account_id, &message_id))
+        self.with_read(move |conn| message_queries::get_message_body(conn, &account_id, &message_id))
             .await
     }
 
@@ -200,7 +200,7 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             let core_atts = message_queries::get_message_attachments(conn, &account_id, &message_id)?;
             Ok(core_atts
                 .into_iter()
@@ -221,7 +221,7 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<String, String> {
-        self.with_conn(move |conn| message_queries::get_message_raw_source(conn, &account_id, &message_id))
+        self.with_read(move |conn| message_queries::get_message_raw_source(conn, &account_id, &message_id))
             .await
     }
 }

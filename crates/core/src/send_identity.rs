@@ -3,10 +3,15 @@
 //! Queries live in `db::queries_extra::send_identity`. This module
 //! keeps the selection algorithm and domain types.
 
-use crate::db::Connection;
+use crate::db::ReadConn;
+use ::db::db::Connection;
 
 // Re-export from db (flat re-exports via queries_extra::*).
-pub use crate::db::queries_extra::{SendIdentity, get_all_send_identity_emails, get_send_identities};
+pub use crate::db::queries_extra::{SendIdentity, get_send_identities};
+
+pub fn get_all_send_identity_emails(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
+    crate::db::queries_extra::get_all_send_identity_emails_read(conn)
+}
 
 /// Context used by [`select_from_address`] to pick the best identity.
 #[derive(Debug, Clone, Default)]

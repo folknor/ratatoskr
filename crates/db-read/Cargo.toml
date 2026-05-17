@@ -1,0 +1,23 @@
+[package]
+name = "db-read"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+writer_db = { package = "db", path = "../db" }
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+hotpath = ["writer_db/hotpath"]
+hotpath-alloc = ["hotpath", "writer_db/hotpath-alloc"]

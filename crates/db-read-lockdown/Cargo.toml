@@ -1,0 +1,17 @@
+[package]
+name = "db-read-lockdown"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+db-read = { path = "../db-read" }
+
+[dev-dependencies]
+trybuild = "1"

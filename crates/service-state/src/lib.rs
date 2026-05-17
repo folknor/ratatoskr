@@ -15,9 +15,13 @@
 //! relocate the action service onto this writer half.
 //!
 //! Until task 3 lands, `WriteDbState` is constructible from any
-//! `Arc<Mutex<Connection>>` via `from_arc`; the `from_db_state` bridge
-//! is provided so the boot path can construct one off the existing
-//! `db::DbState` connection pool without touching read-side call sites.
+//! `Arc<Mutex<Connection>>` via `from_arc`. The Arc passed in MUST be
+//! the writer-side connection - constructing a `WriteDbState` off a
+//! read-only `ReadDbState` would silently fail every write at SQLite
+//! level, far from the boot site. That footgun is closed by removing
+//! the `from_db_state(&ReadDbState)` bridge entirely; the boot path
+//! keeps a typed handle on the writer Arc and feeds it to `from_arc`
+//! directly.
 
 use std::sync::{Arc, Mutex};
 
@@ -47,14 +51,6 @@ impl WriteDbState {
     /// Phase 1.5 holds in `BootContext`.
     pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
         Self { conn }
-    }
-
-    /// Bridge from `db::DbState` for the boot transition. Will be
-    /// removed in task 3 once the connection pool moves into a
-    /// private `db::ConnectionPool` type and `WriteDbState` consumes
-    /// it directly.
-    pub fn from_db_state(state: &db::db::ReadDbState) -> Self {
-        Self::from_arc(state.conn())
     }
 
     /// Construct a `ReadDbState` view onto the same connection. Phase 3
@@ -98,6 +94,36 @@ impl WriteDbState {
         .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
+    pub async fn with_write<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&db::db::WriteConn<'_>) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            let write = db::db::WriteConn::from_raw(&conn);
+            f(&write)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    pub async fn with_read<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&db::db::ReadConn<'_>) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            let read = db::db::ReadConn::from_raw(&conn);
+            f(&read)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
     /// Synchronous variant for boot-path use that already runs inside
     /// `spawn_blocking`. Mirrors `db::DbState::with_conn_sync`.
     pub fn with_conn_sync<F, T>(&self, f: F) -> Result<T, String>
@@ -109,6 +135,30 @@ impl WriteDbState {
             .lock()
             .map_err(|e| format!("db lock poisoned: {e}"))?;
         f(&conn)
+    }
+
+    pub fn with_write_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&db::db::WriteConn<'_>) -> Result<T, String>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned: {e}"))?;
+        let write = db::db::WriteConn::from_raw(&conn);
+        f(&write)
+    }
+
+    pub fn with_read_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&db::db::ReadConn<'_>) -> Result<T, String>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned: {e}"))?;
+        let read = db::db::ReadConn::from_raw(&conn);
+        f(&read)
     }
 }
 

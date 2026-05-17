@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::params;
 
+use crate::db::ReadConn;
+
 mod rrule;
 
 use rrule::expand_recurrence_with_overrides;
@@ -61,7 +63,7 @@ pub struct CalendarViewEvent {
 /// `expand_view_events` (which has no DB dependency), so callers can
 /// drop the connection mutex before the CPU-heavy walk. (Round 3 #3.)
 pub fn load_view_event_rows_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     window_start: i64,
     window_end: i64,
 ) -> Result<Vec<CalendarViewEvent>, String> {
@@ -191,7 +193,7 @@ pub fn expand_view_events(
 /// would otherwise block sync workers, IPC, search, and body store on
 /// each render).
 pub fn load_calendar_events_for_view_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     window_start: i64,
     window_end: i64,
 ) -> Result<Vec<CalendarViewEvent>, String> {

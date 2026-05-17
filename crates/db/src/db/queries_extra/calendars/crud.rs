@@ -1,4 +1,4 @@
-use super::super::super::ReadDbState;
+use super::super::super::{ReadConn, ReadDbState};
 use super::super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
@@ -801,7 +801,7 @@ pub async fn db_delete_reminders_for_event(
 
 /// Get a single calendar event by its DB id (synchronous).
 pub fn get_calendar_event_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     event_id: &str,
 ) -> Result<Option<DbCalendarEvent>, String> {
     let result = conn.query_row(
@@ -811,14 +811,14 @@ pub fn get_calendar_event_sync(
     );
     match result {
         Ok(event) => Ok(Some(event)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
         Err(e) => Err(e.to_string()),
     }
 }
 
 /// Load attendees for a given event (synchronous).
 pub fn get_event_attendees_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     event_id: &str,
 ) -> Result<Vec<DbCalendarAttendee>, String> {
@@ -838,7 +838,7 @@ pub fn get_event_attendees_sync(
 
 /// Load reminders for a given event (synchronous).
 pub fn get_event_reminders_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     event_id: &str,
 ) -> Result<Vec<DbCalendarReminder>, String> {
@@ -858,7 +858,7 @@ pub fn get_event_reminders_sync(
 
 /// Load all calendars for the sidebar list (synchronous).
 pub fn load_calendars_for_sidebar_sync(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<DbCalendar>, String> {
     let mut stmt = conn
         .prepare(&format!(

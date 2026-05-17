@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::{ReadConn, ReadDbState};
 use super::super::types::DbAccount;
 use rusqlite::{Row, params};
 
@@ -97,7 +97,7 @@ pub fn get_all_accounts_sync(conn: &rusqlite::Connection) -> Result<Vec<DbAccoun
         .map_err(|e| e.to_string())
 }
 
-pub fn get_active_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+pub fn get_active_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT id FROM accounts WHERE is_active = 1 ORDER BY email ASC")
         .map_err(|e| e.to_string())?;

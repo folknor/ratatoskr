@@ -13,7 +13,7 @@ pub(crate) async fn handle_reorder(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::label_groups::update_label_group_sort_order_sync(
                 conn,
                 &params.orders,

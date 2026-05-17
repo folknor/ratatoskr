@@ -1,6 +1,5 @@
-use rusqlite::Connection;
-
 use crate::db::FromRow;
+use crate::db::ReadConn;
 use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use crate::db::types::{
     AccountScope, DbThread, DraftTotalCount, FolderAccountUnreadCount, FolderUnreadCount,
@@ -83,7 +82,7 @@ fn broad_inbox_exclusion_clause(
 /// Like `get_threads` but accepts an `AccountScope` to query across accounts.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_scoped(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     label_id: Option<&str>,
     limit: Option<i64>,
@@ -160,7 +159,7 @@ pub fn get_threads_scoped(
 }
 
 fn execute_thread_query_with_folder(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     sql: &str,
     scope_params: Vec<Box<dyn rusqlite::types::ToSql>>,
     folder_id: &str,
@@ -183,7 +182,7 @@ fn execute_thread_query_with_folder(
 }
 
 fn execute_thread_query_no_label(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     sql: &str,
     scope_params: Vec<Box<dyn rusqlite::types::ToSql>>,
     limit: i64,
@@ -206,7 +205,7 @@ fn execute_thread_query_no_label(
 /// Threads that render a user-created label group in the given scope.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_label_group(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     group_id: i64,
     limit: Option<i64>,
@@ -252,7 +251,7 @@ pub fn get_threads_for_label_group(
 /// Like `get_thread_count` but accepts an `AccountScope`.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_thread_count_scoped(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     label_id: Option<&str>,
 ) -> Result<i64, String> {
@@ -297,7 +296,7 @@ pub fn get_thread_count_scoped(
 /// thread count in Single/Multiple scopes, the broad "everything except
 /// drafts/trash/sent/archive/spam" count in All.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn get_unread_count_scoped(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
+pub fn get_unread_count_scoped(conn: &ReadConn<'_>, scope: &AccountScope) -> Result<i64, String> {
     if matches!(scope, AccountScope::All) {
         return broad_inbox_unread_count(conn, scope);
     }
@@ -316,7 +315,7 @@ pub fn get_unread_count_scoped(conn: &Connection, scope: &AccountScope) -> Resul
 
 /// Unread count for the broad All-Accounts Inbox view: everything except
 /// `BROAD_INBOX_EXCLUSIONS`.
-fn broad_inbox_unread_count(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
+fn broad_inbox_unread_count(conn: &ReadConn<'_>, scope: &AccountScope) -> Result<i64, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     let next_idx = scope_params.len() + 1;
     let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
@@ -337,7 +336,7 @@ fn broad_inbox_unread_count(conn: &Connection, scope: &AccountScope) -> Result<i
 }
 
 fn execute_count_query(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     sql: &str,
     scope_params: Vec<Box<dyn rusqlite::types::ToSql>>,
     extra_param: Option<&str>,
@@ -365,7 +364,7 @@ const SYSTEM_FOLDER_IDS: &[&str] = &[
 /// and all other folders use the `thread_folders` join.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_counts_by_folder(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<FolderUnreadCount>, String> {
     let mut results = get_system_folder_unread_counts(conn, scope)?;
@@ -394,7 +393,7 @@ pub fn get_unread_counts_by_folder(
 /// Return unread counts for each universal folder, grouped by account.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_counts_by_folder_and_account(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<FolderAccountUnreadCount>, String> {
     let mut results = get_system_folder_unread_counts_by_account(conn, scope)?;
@@ -409,7 +408,7 @@ pub fn get_unread_counts_by_folder_and_account(
 
 /// Unread counts for system folders (INBOX, SENT, DRAFT, TRASH, SPAM).
 fn get_system_folder_unread_counts(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<FolderUnreadCount>, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
@@ -445,7 +444,7 @@ fn get_system_folder_unread_counts(
 
 /// Unread count for a flag-based virtual folder (STARRED or SNOOZED).
 fn get_flag_folder_unread_count(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     folder_id: &str,
 ) -> Result<FolderUnreadCount, String> {
@@ -473,7 +472,7 @@ fn get_flag_folder_unread_count(
 
 /// Unread count for the virtual All Mail view.
 fn get_all_mail_unread_count(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<FolderUnreadCount, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
@@ -495,7 +494,7 @@ fn get_all_mail_unread_count(
 
 /// System folder unread counts grouped by account.
 fn get_system_folder_unread_counts_by_account(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<FolderAccountUnreadCount>, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
@@ -531,7 +530,7 @@ fn get_system_folder_unread_counts_by_account(
 
 /// Flag-based virtual folder unread counts grouped by account.
 fn get_flag_folder_unread_by_account(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     folder_id: &str,
 ) -> Result<Vec<FolderAccountUnreadCount>, String> {
@@ -563,7 +562,7 @@ fn get_flag_folder_unread_by_account(
 
 /// Virtual All Mail unread counts grouped by account.
 fn get_all_mail_unread_by_account(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<Vec<FolderAccountUnreadCount>, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
@@ -591,7 +590,7 @@ fn get_all_mail_unread_by_account(
 /// Threads where `is_starred = 1`, scoped by `AccountScope`.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_starred_threads(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     limit: Option<i64>,
     offset: Option<i64>,
@@ -602,7 +601,7 @@ pub fn get_starred_threads(
 /// Threads where `is_snoozed = 1`, scoped by `AccountScope`.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_snoozed_threads(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     limit: Option<i64>,
     offset: Option<i64>,
@@ -633,7 +632,7 @@ impl DraftsView {
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_drafts_view(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     limit: Option<i64>,
     offset: Option<i64>,
@@ -648,7 +647,7 @@ pub fn get_drafts_view(
 /// cannot silently undercount Drafts by skipping local-only rows.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) fn get_draft_threads_synced(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     limit: Option<i64>,
     offset: Option<i64>,
@@ -677,7 +676,7 @@ pub(crate) fn get_draft_threads_synced(
 
 /// Shared implementation for flag-based thread queries (`is_starred`, `is_snoozed`).
 fn get_flag_threads(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     flag_col: &str,
     limit: Option<i64>,
@@ -720,7 +719,7 @@ fn flag_column(folder_id: &str) -> &'static str {
 /// compose-pane indicators). Rationale: `reference/glossary/drafts.md`
 /// § "Count semantics."
 pub fn get_draft_count_with_local(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
 ) -> Result<DraftTotalCount, String> {
     // Count server-synced drafts (threads with DRAFT label)
@@ -753,7 +752,7 @@ pub struct LocalDraftSummary {
 /// ordered by `updated_at DESC`. These are combined with server-synced
 /// draft threads by the app layer to produce a unified drafts view.
 pub(crate) fn get_local_draft_summaries(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     scope: &AccountScope,
     limit: Option<i64>,
     offset: Option<i64>,
@@ -839,7 +838,7 @@ pub(crate) fn get_local_draft_summaries(
 /// from `SidebarSelection` so a virtual id cannot land here by mistake.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_shared_mailbox(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
     label_id: Option<&str>,
@@ -921,7 +920,7 @@ pub fn get_threads_for_shared_mailbox(
 /// personal-account starred.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_shared_mailbox_starred(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
     limit: Option<i64>,
@@ -932,7 +931,7 @@ pub fn get_threads_for_shared_mailbox_starred(
 /// Shared-mailbox snoozed threads. Backed by `threads.is_snoozed`.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_shared_mailbox_snoozed(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
     limit: Option<i64>,
@@ -944,7 +943,7 @@ pub fn get_threads_for_shared_mailbox_snoozed(
 /// is statically chosen by the public entry points, so SQL injection
 /// is structurally impossible.
 fn shared_mailbox_threads_by_flag(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
     flag_col: &'static str,
@@ -987,7 +986,7 @@ fn shared_mailbox_threads_by_flag(
 /// Shared-mailbox threads that render a user-created label group.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_shared_mailbox_label_group(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     mailbox_id: &str,
     group_id: i64,
@@ -1031,7 +1030,7 @@ pub fn get_threads_for_shared_mailbox_label_group(
 }
 
 /// Count local drafts that don't yet have a server-synced thread.
-fn count_local_drafts(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
+fn count_local_drafts(conn: &ReadConn<'_>, scope: &AccountScope) -> Result<i64, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     // Rewrite "t.account_id" references to just "account_id" for local_drafts table
     let clause = scope_clause.replace("t.account_id", "account_id");
@@ -1065,7 +1064,7 @@ pub struct PublicFolderItem {
 /// Items from a pinned public folder, ordered by received date.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_public_folder_items(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     folder_id: &str,
     limit: Option<i64>,

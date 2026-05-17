@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use super::{Connection, Row, params};
+use super::{Row, params};
+use ::db::db::Connection;
 
 use super::ReadDbState;
 use super::types::DbMessage;
@@ -324,7 +325,8 @@ pub fn get_ui_bootstrap_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use crate::db::{Connection, params};
+    use crate::db::params;
+    use ::db::db::Connection;
 
     use super::{
         get_settings_bootstrap_snapshot, get_settings_secrets_snapshot, get_ui_bootstrap_snapshot,

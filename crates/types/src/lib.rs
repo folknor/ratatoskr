@@ -1,6 +1,7 @@
 mod date_bound;
 mod folder_label;
 mod mail_provider;
+mod send_intent;
 mod sidebar_selection;
 mod typed_ids;
 
@@ -10,5 +11,6 @@ pub use folder_label::{
     ImportanceLevel, JmapId, KeywordName, LabelKind, MailLocator, Namespace, SystemFolderId,
 };
 pub use mail_provider::MailProviderKind;
+pub use send_intent::SendIntent;
 pub use sidebar_selection::{Bundle, FeatureView, SidebarSelection, SystemFolder, VirtualView};
 pub use typed_ids::{FolderId, LabelGroupId, LabelId};

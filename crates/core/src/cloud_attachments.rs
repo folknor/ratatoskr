@@ -183,14 +183,14 @@ impl UploadStatus {
 
 /// Get all pending uploads for an account (status = 'pending').
 pub fn get_pending_uploads(
-    conn: &crate::db::Connection,
+    conn: &::db::db::Connection,
     account_id: &str,
 ) -> Result<Vec<CloudAttachment>, String> {
     crate::db::queries_extra::cloud_attachments::get_pending_uploads_sync(conn, account_id)
 }
 
 pub fn update_upload_status(
-    conn: &crate::db::Connection,
+    conn: &::db::db::Connection,
     id: i64,
     status: UploadStatus,
     bytes_uploaded: Option<i64>,
@@ -203,7 +203,7 @@ pub fn update_upload_status(
     )
 }
 
-pub fn mark_upload_failed(conn: &crate::db::Connection, id: i64, retry: bool) -> Result<(), String> {
+pub fn mark_upload_failed(conn: &::db::db::Connection, id: i64, retry: bool) -> Result<(), String> {
     let new_status = if retry {
         UploadStatus::Pending.as_str()
     } else {
@@ -212,12 +212,12 @@ pub fn mark_upload_failed(conn: &crate::db::Connection, id: i64, retry: bool) ->
     crate::db::queries_extra::cloud_attachments::mark_upload_failed_sync(conn, id, new_status)
 }
 
-pub fn reset_interrupted_uploads(conn: &crate::db::Connection) -> Result<usize, String> {
+pub fn reset_interrupted_uploads(conn: &::db::db::Connection) -> Result<usize, String> {
     crate::db::queries_extra::cloud_attachments::reset_interrupted_uploads_sync(conn)
 }
 
 pub fn create_outgoing_upload(
-    conn: &crate::db::Connection,
+    conn: &::db::db::Connection,
     account_id: &str,
     file_name: &str,
     file_size: i64,
@@ -230,14 +230,14 @@ pub fn create_outgoing_upload(
 }
 
 pub fn get_permanently_failed(
-    conn: &crate::db::Connection,
+    conn: &::db::db::Connection,
     max_retries: i32,
 ) -> Result<Vec<CloudAttachment>, String> {
     crate::db::queries_extra::cloud_attachments::get_permanently_failed_sync(conn, max_retries)
 }
 
 pub fn insert_incoming_cloud_links(
-    conn: &crate::db::Connection,
+    conn: &::db::db::Connection,
     message_id: &str,
     account_id: &str,
     links: &[CloudLink],
@@ -383,7 +383,7 @@ pub fn extract_gdrive_file_id(url: &str) -> Option<String> {
 
 /// Update the metadata columns of a `cloud_attachments` row.
 pub fn update_cloud_attachment_metadata(
-    conn: &crate::db::Connection,
+    conn: &::db::db::Connection,
     id: i64,
     metadata: &CloudMetadata,
 ) -> Result<(), String> {

@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 db = { path = "../db" }
+service-api = { path = "../service-api" }
 # Phase 6c: CalendarActionContext carries a WriteDbState so the
 # Service-side calendar dispatcher can mutate the DB. The action-types
 # crate is below `service` and `cal` in the dep graph, but does NOT

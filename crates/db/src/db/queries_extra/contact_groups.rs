@@ -305,7 +305,7 @@ pub struct GroupSettingsEntry {
 
 /// Load groups with optional name filter (synchronous).
 pub fn load_groups_for_settings_sync(
-    conn: &rusqlite::Connection,
+    conn: &crate::db::ReadConn<'_>,
     filter: &str,
 ) -> Result<Vec<GroupSettingsEntry>, String> {
     let trimmed = filter.trim();
@@ -350,7 +350,7 @@ pub fn load_groups_for_settings_sync(
 
 /// Load member emails for a group (synchronous).
 pub fn load_group_member_emails_sync(
-    conn: &rusqlite::Connection,
+    conn: &crate::db::ReadConn<'_>,
     group_id: &str,
 ) -> Result<Vec<String>, String> {
     let mut stmt = conn

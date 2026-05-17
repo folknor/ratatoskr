@@ -1,6 +1,6 @@
 -- description: Graph calendar actions create, update, and delete through the Service worker
 -- expected: pass
--- fixture: graph-calendar-small.toml
+-- fixture: graph-actions-calendar-small.toml
 -- protocol: graph
 -- ceiling: 120s
 

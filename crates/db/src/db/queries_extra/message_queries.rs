@@ -6,6 +6,8 @@
 
 use rusqlite::{Connection, params};
 
+use crate::db::ReadConn;
+
 /// Attachment metadata for a single message (pop-out view).
 #[derive(Debug, Clone)]
 pub struct MessageAttachment {
@@ -24,7 +26,7 @@ pub struct MessageAttachment {
 ///
 /// Returns `(body_text, body_html)`. body_html is always None here.
 pub fn get_message_body(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     message_id: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
@@ -36,14 +38,16 @@ pub fn get_message_body(
     );
     match result {
         Ok(snippet) => Ok((snippet, None)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
+        Err(crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
+            Ok((None, None))
+        }
         Err(e) => Err(e.to_string()),
     }
 }
 
 /// Load attachments for a single message (pop-out view).
 pub fn get_message_attachments(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     message_id: &str,
 ) -> Result<Vec<MessageAttachment>, String> {
@@ -136,7 +140,7 @@ pub fn list_message_ids_for_account(
 /// database. This returns a placeholder. When real sync is running,
 /// raw source would be stored in the body store or a dedicated column.
 pub fn get_message_raw_source(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     message_id: &str,
 ) -> Result<String, String> {

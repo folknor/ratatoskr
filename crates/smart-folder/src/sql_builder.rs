@@ -1,5 +1,6 @@
 use rusqlite::Connection;
 
+use db::db::ReadConn;
 use db::db::FromRow;
 use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use db::db::types::{AccountScope, DbThread};
@@ -43,9 +44,64 @@ pub fn query_threads(
     execute_thread_query(conn, &sql, &ctx.params)
 }
 
+pub fn query_threads_read(
+    conn: &ReadConn<'_>,
+    parsed: &ParsedQuery,
+    scope: &AccountScope,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<DbThread>, String> {
+    let lim = limit.unwrap_or(50);
+    let off = offset.unwrap_or(0);
+    let mut ctx = QueryContext::new();
+
+    build_message_clauses(&mut ctx, parsed);
+    build_effective_scope(&mut ctx, parsed, scope);
+    build_thread_flag_clauses(&mut ctx, parsed);
+    build_label_clause(&mut ctx, parsed);
+
+    let where_str = ctx.where_string();
+    let thread_flag_str = ctx.thread_flag_where_string();
+
+    let sql = build_thread_select_sql(&where_str, &thread_flag_str, ctx.next_idx);
+    log::debug!(
+        "Smart folder SQL built: msg_clauses={}, thread_flag_clauses={}",
+        ctx.msg_clauses.len(),
+        ctx.thread_flag_clauses.len()
+    );
+    ctx.params.push(Box::new(lim));
+    ctx.params.push(Box::new(off));
+
+    execute_thread_query_read(conn, &sql, &ctx.params)
+}
+
 /// Count distinct threads matching a parsed query (used for unread counts).
 pub fn count_matching(
     conn: &Connection,
+    parsed: &ParsedQuery,
+    scope: &AccountScope,
+) -> Result<i64, String> {
+    let mut ctx = QueryContext::new();
+
+    build_message_clauses(&mut ctx, parsed);
+    build_effective_scope(&mut ctx, parsed, scope);
+    build_thread_flag_clauses(&mut ctx, parsed);
+    build_label_clause(&mut ctx, parsed);
+
+    let where_str = ctx.where_string();
+    let thread_flag_str = ctx.thread_flag_where_string();
+
+    let sql = build_count_sql(&where_str, &thread_flag_str);
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        ctx.params.iter().map(AsRef::as_ref).collect();
+
+    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+        .map_err(|e| e.to_string())
+}
+
+pub fn count_matching_read(
+    conn: &ReadConn<'_>,
     parsed: &ParsedQuery,
     scope: &AccountScope,
 ) -> Result<i64, String> {
@@ -532,6 +588,20 @@ fn build_count_sql(msg_where: &str, thread_flag_where: &str) -> String {
 
 fn execute_thread_query(
     conn: &Connection,
+    sql: &str,
+    params: &[Box<dyn rusqlite::types::ToSql>],
+) -> Result<Vec<DbThread>, String> {
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(AsRef::as_ref).collect();
+
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    stmt.query_map(param_refs.as_slice(), DbThread::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+fn execute_thread_query_read(
+    conn: &ReadConn<'_>,
     sql: &str,
     params: &[Box<dyn rusqlite::types::ToSql>],
 ) -> Result<Vec<DbThread>, String> {

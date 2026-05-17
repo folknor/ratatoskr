@@ -9,12 +9,12 @@ impl Db {
         &self,
         account_id: &str,
     ) -> Result<Vec<cmdk::OptionItem>, String> {
-        self.with_conn_sync(|conn| rtsk::command_palette_queries::get_user_folders_for_palette(conn, account_id))
+        self.with_read_sync(|conn| rtsk::command_palette_queries::get_user_folders_for_palette(conn, account_id))
     }
 
     /// All user-visible label groups.
     pub fn get_label_groups_for_palette(&self) -> Result<Vec<cmdk::OptionItem>, String> {
-        self.with_conn_sync(rtsk::command_palette_queries::get_label_groups_for_palette)
+        self.with_read_sync(rtsk::command_palette_queries::get_label_groups_for_palette)
     }
 
     /// Label groups currently rendered for a specific thread.
@@ -23,7 +23,7 @@ impl Db {
         account_id: &str,
         thread_id: &str,
     ) -> Result<Vec<cmdk::OptionItem>, String> {
-        self.with_conn_sync(|conn| {
+        self.with_read_sync(|conn| {
             rtsk::command_palette_queries::get_thread_label_groups_for_palette(
                 conn,
                 account_id,

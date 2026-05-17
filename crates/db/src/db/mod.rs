@@ -14,6 +14,7 @@ pub mod types;
 pub use from_row::{FromRow, query_as, query_one};
 pub use rusqlite::Connection;
 pub use rusqlite::Error as SqlError;
+use rusqlite::OpenFlags;
 pub use rusqlite::OptionalExtension;
 pub use rusqlite::Row;
 pub use rusqlite::params;
@@ -97,10 +98,7 @@ pub fn reconcile_velo_rename(app_data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Apply the standard `PRAGMA` set the Service / UI use after opening a
-/// connection. Extracted so the Service boot sequence and the existing
-/// `ReadDbState::init` / `ReadWriteDb::init` use the same canonical pragmas.
-pub fn apply_standard_pragmas(conn: &Connection) -> Result<(), String> {
+pub fn apply_writer_pragmas(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA busy_timeout = 15000;
@@ -111,11 +109,146 @@ pub fn apply_standard_pragmas(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("pragmas: {e}"))
 }
 
-/// Shared database connection managed by Tauri state.
+pub fn apply_reader_pragmas(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "PRAGMA busy_timeout = 15000;
+         PRAGMA query_only = ON;
+         PRAGMA foreign_keys = ON;
+         PRAGMA temp_store = MEMORY;",
+    )
+    .map_err(|e| format!("reader pragmas: {e}"))
+}
+
+pub fn apply_standard_pragmas(conn: &Connection) -> Result<(), String> {
+    apply_writer_pragmas(conn)
+}
+
+/// Error returned by `ReadConn` SQL methods.
 ///
-/// Uses `std::sync::Mutex` (not `tokio::sync::Mutex`) because rusqlite
-/// operations are blocking I/O. All queries run via [`with_conn`] which
-/// dispatches to `spawn_blocking` so the tokio async runtime is never blocked.
+/// `NotReadOnly` is the typed signal that `prepare`/`prepare_cached`
+/// rejected a statement whose `Statement::readonly()` came back false
+/// (every mutating SQL string, including `UPDATE ... RETURNING` and
+/// `INSERT ... RETURNING` which step through `query`). Previously the
+/// bridge type abused `rusqlite::Error::ExecuteReturnedResults` for
+/// this case - semantically the opposite condition ("execute() got
+/// rows"), and any caller pattern-matching the error would draw the
+/// wrong conclusion.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error("{0}")]
+    Sql(#[from] rusqlite::Error),
+    #[error("SQL is not read-only: {0}")]
+    NotReadOnly(String),
+}
+
+pub struct ReadConn<'a> {
+    raw: &'a Connection,
+}
+
+impl<'a> ReadConn<'a> {
+    #[doc(hidden)]
+    pub fn from_raw(raw: &'a Connection) -> Self {
+        Self { raw }
+    }
+
+    pub fn prepare<'b>(&'b self, sql: &str) -> Result<ReadStatement<'b>, ReadError> {
+        let stmt = self.raw.prepare(sql)?;
+        if !stmt.readonly() {
+            return Err(ReadError::NotReadOnly(sql.to_string()));
+        }
+        Ok(ReadStatement { raw: stmt })
+    }
+
+    pub fn prepare_cached<'b>(
+        &'b self,
+        sql: &str,
+    ) -> Result<ReadCachedStatement<'b>, ReadError> {
+        let stmt = self.raw.prepare_cached(sql)?;
+        if !stmt.readonly() {
+            return Err(ReadError::NotReadOnly(sql.to_string()));
+        }
+        Ok(ReadCachedStatement { raw: stmt })
+    }
+
+    /// Route through validated `prepare` so a mutating SQL string supplied to
+    /// `query_row` (e.g. `UPDATE ... RETURNING id`) cannot bypass the
+    /// readonly check.
+    pub fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> Result<T, ReadError>
+    where
+        P: rusqlite::Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        let mut stmt = self.prepare(sql)?;
+        stmt.query_row(params, f)
+    }
+}
+
+pub struct ReadStatement<'a> {
+    raw: rusqlite::Statement<'a>,
+}
+
+impl<'a> ReadStatement<'a> {
+    pub fn query<P>(&mut self, params: P) -> Result<rusqlite::Rows<'_>, ReadError>
+    where
+        P: rusqlite::Params,
+    {
+        Ok(self.raw.query(params)?)
+    }
+
+    pub fn query_map<T, P, F>(
+        &mut self,
+        params: P,
+        f: F,
+    ) -> Result<rusqlite::MappedRows<'_, F>, ReadError>
+    where
+        P: rusqlite::Params,
+        F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        Ok(self.raw.query_map(params, f)?)
+    }
+
+    pub fn query_row<T, P, F>(&mut self, params: P, f: F) -> Result<T, ReadError>
+    where
+        P: rusqlite::Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        Ok(self.raw.query_row(params, f)?)
+    }
+}
+
+pub struct ReadCachedStatement<'a> {
+    raw: rusqlite::CachedStatement<'a>,
+}
+
+impl<'a> ReadCachedStatement<'a> {
+    pub fn query<P>(&mut self, params: P) -> Result<rusqlite::Rows<'_>, ReadError>
+    where
+        P: rusqlite::Params,
+    {
+        Ok(self.raw.query(params)?)
+    }
+
+    pub fn query_map<T, P, F>(
+        &mut self,
+        params: P,
+        f: F,
+    ) -> Result<rusqlite::MappedRows<'_, F>, ReadError>
+    where
+        P: rusqlite::Params,
+        F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        Ok(self.raw.query_map(params, f)?)
+    }
+
+    pub fn query_row<T, P, F>(&mut self, params: P, f: F) -> Result<T, ReadError>
+    where
+        P: rusqlite::Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        Ok(self.raw.query_row(params, f)?)
+    }
+}
+
 #[derive(Clone)]
 pub struct ReadDbState {
     conn: Arc<Mutex<Connection>>,
@@ -135,20 +268,44 @@ impl ReadDbState {
         Self { conn }
     }
 
-    /// Open (or create) the SQLite database and apply all pending migrations.
-    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
-        std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
-        reconcile_velo_rename(app_data_dir)?;
-
+    pub fn open_existing(app_data_dir: &Path) -> Result<Self, String> {
         let db_path = app_data_dir.join("ratatoskr.db");
-        let conn = Connection::open(&db_path)
-            .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
-        apply_standard_pragmas(&conn)?;
-        migrations::run_all(&conn)?;
-
+        let conn = Connection::open_with_flags(
+            &db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("open read db {}: {e}", db_path.display()))?;
+        apply_reader_pragmas(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    pub async fn with_read<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&ReadConn<'_>) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            let read = ReadConn::from_raw(&conn);
+            f(&read)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    pub fn with_read_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&ReadConn<'_>) -> Result<T, String>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned: {e}"))?;
+        let read = ReadConn::from_raw(&conn);
+        f(&read)
     }
 
     /// Run a closure with the database connection on the blocking thread pool.
@@ -181,73 +338,118 @@ impl ReadDbState {
 }
 
 #[derive(Clone)]
-pub struct ReadWriteDb {
-    read: ReadDbState,
-    write: ReadDbState,
+pub struct WriterPool {
+    conn: Arc<Mutex<Connection>>,
 }
 
-impl ReadWriteDb {
-    /// Full init: reconcile the velo->ratatoskr rename, open both connections,
-    /// run migrations on the writer.
-    ///
-    /// Phase 1.5 moved boot-side ownership of rename + migration to the
-    /// Service. Production UI code MUST NOT call this method - call
-    /// [`open_existing`] instead, which opens the connections without
-    /// touching schema. `init` is retained for tests that exercise migrations
-    /// directly and for any future single-process tooling that wants the full
-    /// init.
-    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
-        std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
-        reconcile_velo_rename(app_data_dir)?;
-
-        let (read, write) = open_read_write_conns(app_data_dir)?;
-        migrations::run_all(&write)?;
-
-        Ok(Self {
-            read: ReadDbState::from_arc(Arc::new(Mutex::new(read))),
-            write: ReadDbState::from_arc(Arc::new(Mutex::new(write))),
+impl WriterPool {
+    pub async fn with_write<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&WriteConn<'_>) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            let write = WriteConn::from_raw(&conn);
+            f(&write)
         })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
-    /// Open both read and write connections against an already-migrated DB.
-    /// The Service owns rename + migration as part of the boot handshake; by
-    /// the time the UI calls this, the schema is current and no rename is
-    /// pending. This method explicitly does NOT call `reconcile_velo_rename`
-    /// or `migrations::run_all` - duplicating either Service-owned step from
-    /// the UI side reintroduces the multiple-writer hazard the Phase 1.5
-    /// boot ownership flip was meant to close.
-    pub fn open_existing(app_data_dir: &Path) -> Result<Self, String> {
-        let (read, write) = open_read_write_conns(app_data_dir)?;
-        Ok(Self {
-            read: ReadDbState::from_arc(Arc::new(Mutex::new(read))),
-            write: ReadDbState::from_arc(Arc::new(Mutex::new(write))),
-        })
-    }
-
-    pub fn read(&self) -> ReadDbState {
-        self.read.clone()
-    }
-
-    pub fn write(&self) -> ReadDbState {
-        self.write.clone()
+    pub fn with_write_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&WriteConn<'_>) -> Result<T, String>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned: {e}"))?;
+        let write = WriteConn::from_raw(&conn);
+        f(&write)
     }
 }
 
-fn open_read_write_conns(app_data_dir: &Path) -> Result<(Connection, Connection), String> {
+pub struct WriteConn<'a> {
+    raw: &'a Connection,
+}
+
+impl<'a> WriteConn<'a> {
+    #[doc(hidden)]
+    pub fn from_raw(raw: &'a Connection) -> Self {
+        Self { raw }
+    }
+
+    pub fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
+        self.raw.execute(sql, params)
+    }
+
+    pub fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<rusqlite::Statement<'b>> {
+        self.raw.prepare(sql)
+    }
+
+    pub fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> rusqlite::Result<T>
+    where
+        P: rusqlite::Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
+    {
+        self.raw.query_row(sql, params, f)
+    }
+
+    pub fn unchecked_transaction<'b>(&'b self) -> rusqlite::Result<WriteTxn<'b>> {
+        Ok(WriteTxn {
+            raw: self.raw.unchecked_transaction()?,
+        })
+    }
+
+    pub fn as_read(&self) -> ReadConn<'_> {
+        ReadConn::from_raw(self.raw)
+    }
+}
+
+pub struct WriteTxn<'a> {
+    raw: rusqlite::Transaction<'a>,
+}
+
+impl<'a> WriteTxn<'a> {
+    pub fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
+        self.raw.execute(sql, params)
+    }
+
+    pub fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<rusqlite::Statement<'b>> {
+        self.raw.prepare(sql)
+    }
+
+    pub fn commit(self) -> rusqlite::Result<()> {
+        self.raw.commit()
+    }
+
+    pub fn rollback(self) -> rusqlite::Result<()> {
+        self.raw.rollback()
+    }
+}
+
+pub fn open_reader_pool(app_data_dir: &Path) -> Result<ReadDbState, String> {
+    ReadDbState::open_existing(app_data_dir)
+}
+
+pub fn open_writer_pool(app_data_dir: &Path) -> Result<WriterPool, String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
+    reconcile_velo_rename(app_data_dir)?;
     let db_path = app_data_dir.join("ratatoskr.db");
-
-    let read_conn = Connection::open(&db_path)
-        .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
-    apply_standard_pragmas(&read_conn)?;
-    read_conn
-        .execute_batch("PRAGMA query_only = ON;")
-        .map_err(|e| format!("query_only pragma: {e}"))?;
-
-    let write_conn = Connection::open(&db_path)
+    let conn = Connection::open_with_flags(
+        &db_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
         .map_err(|e| format!("open write db {}: {e}", db_path.display()))?;
-    apply_standard_pragmas(&write_conn)?;
-
-    Ok((read_conn, write_conn))
+    apply_writer_pragmas(&conn)?;
+    migrations::run_all(&conn)?;
+    Ok(WriterPool {
+        conn: Arc::new(Mutex::new(conn)),
+    })
 }
 
 #[cfg(test)]

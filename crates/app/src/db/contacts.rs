@@ -30,7 +30,7 @@ impl Db {
         query: String,
         limit: i64,
     ) -> Result<Vec<ContactMatch>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(search_contacts_unified(conn, &query, limit)?
                 .into_iter()
                 .map(|row| match row.kind {
@@ -111,7 +111,7 @@ impl Db {
         &self,
         filter: String,
     ) -> Result<Vec<ContactEntry>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(load_contacts_for_settings_sync(conn, &filter)?
                 .into_iter()
                 .map(|row| ContactEntry {
@@ -135,7 +135,7 @@ impl Db {
 
     /// Load contact groups for the settings management list.
     pub async fn get_groups_for_settings(&self, filter: String) -> Result<Vec<GroupEntry>, String> {
-        self.with_conn(move |conn| {
+        self.with_read(move |conn| {
             Ok(load_groups_for_settings_sync(conn, &filter)?
                 .into_iter()
                 .map(|row| GroupEntry {
@@ -152,7 +152,7 @@ impl Db {
 
     /// Get member emails for a group.
     pub async fn get_group_member_emails(&self, group_id: String) -> Result<Vec<String>, String> {
-        self.with_conn(move |conn| load_group_member_emails_sync(conn, &group_id))
+        self.with_read(move |conn| load_group_member_emails_sync(conn, &group_id))
             .await
     }
 

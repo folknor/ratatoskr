@@ -11,14 +11,19 @@ from = "rtsk"
 forbid = "rusqlite"
 
 [[dependency_rule]]
+name = "core-no-writer-db"
+from = "rtsk"
+forbid = ["db", "rusqlite", "service-state", "service", "action-types"]
+
+[[dependency_rule]]
 name = "app-no-service-state"
 from = "app"
 forbid = "service-state"
 
 [[dependency_rule]]
-name = "app-no-db"
+name = "app-no-db-internals"
 from = "app"
-forbid = "db"
+forbid = ["db", "db-read", "rusqlite", "service-state", "service", "action-types", "common"]
 
 [[dependency_rule]]
 name = "service-no-app"
@@ -39,6 +44,19 @@ forbid = ["gmail", "jmap", "graph", "imap", "provider-sync", "sync", "rtsk", "se
 name = "core-no-upward"
 from = "rtsk"
 forbid = ["service", "service-state", "cal", "app"]
+
+[[dependency_rule]]
+name = "service-api-is-pure-leaf"
+from = "service-api"
+forbid = [
+    "db", "db-read", "rusqlite",
+    "rtsk", "service", "service-state", "action-types",
+    "store", "search", "common", "cal", "calendar",
+    "sync", "provider-sync",
+    "gmail", "jmap", "graph", "imap", "smtp",
+    "smart-folder", "seen", "ai", "import", "dev-seed",
+    "app", "runner",
+]
 
 [[dependency_rule]]
 name = "sync-no-upward"
@@ -84,7 +102,8 @@ test_endpoint_env_gcal = "RATATOSKR_TEST_GCAL_ENDPOINT"
 sync_script_dir = "crates/app/tests/sync-harness"
 
 [ratatoskr.harness]
-package = "app"
+package = "runner"
+binary = "ratatoskr"
 debug = true
 
 [ratatoskr.gate.jmap_steady_state_delta]

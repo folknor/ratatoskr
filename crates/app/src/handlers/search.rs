@@ -898,7 +898,7 @@ pub(crate) async fn execute_search(
     query: String,
     scope: rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         // M2 fix: pass body_store so per-message attribution can score body
         // matches. Without it, body+attachment co-matches skewed toward
         // attachment attribution and the documented "matched in body +
