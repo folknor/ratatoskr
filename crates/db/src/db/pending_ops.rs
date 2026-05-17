@@ -65,31 +65,6 @@ fn backoff_schedule(operation_type: &str) -> &'static [i64] {
 /// Handles both deduplication and directional updates (e.g., spam→unspam
 /// replaces the old params rather than being dropped as a duplicate).
 #[allow(clippy::too_many_arguments)]
-pub async fn db_pending_ops_enqueue(
-    db: &ReadDbState,
-    id: String,
-    account_id: String,
-    operation_type: String,
-    resource_id: String,
-    params_json: String,
-    max_retries: i64,
-) -> Result<(), String> {
-    db
-        .with_conn(move |conn| {
-            db_pending_ops_enqueue_sync(
-                conn,
-                &id,
-                &account_id,
-                &operation_type,
-                &resource_id,
-                &params_json,
-                max_retries,
-            )
-        })
-        .await
-}
-
-#[allow(clippy::too_many_arguments)]
 pub fn db_pending_ops_enqueue_sync(
     conn: &Connection,
     id: &str,
@@ -165,16 +140,6 @@ pub async fn db_pending_ops_get(
     .await
 }
 
-pub async fn db_pending_ops_update_status(
-    db: &ReadDbState,
-    id: String,
-    status: String,
-    error_message: Option<String>,
-) -> Result<(), String> {
-    db.with_conn(move |conn| db_pending_ops_update_status_sync(conn, &id, &status, error_message.as_deref()))
-    .await
-}
-
 pub fn db_pending_ops_update_status_sync(
     conn: &Connection,
     id: &str,
@@ -189,11 +154,6 @@ pub fn db_pending_ops_update_status_sync(
     Ok(())
 }
 
-pub async fn db_pending_ops_delete(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| db_pending_ops_delete_sync(conn, &id))
-    .await
-}
-
 pub fn db_pending_ops_delete_sync(conn: &Connection, id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
         .map_err(|e| format!("delete op: {e}"))?;
@@ -204,23 +164,6 @@ pub fn db_pending_ops_delete_sync(conn: &Connection, id: &str) -> Result<(), Str
 /// Used by undo to prevent retried actions from re-executing after undo.
 /// Catches both 'pending' and 'executing' status - but cannot stop an
 /// already in-flight provider call.
-pub async fn db_pending_ops_cancel_for_resource(
-    db: &ReadDbState,
-    account_id: String,
-    resource_id: String,
-    operation_type: String,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        db_pending_ops_cancel_for_resource_sync(
-            conn,
-            &account_id,
-            &resource_id,
-            &operation_type,
-        )
-    })
-    .await
-}
-
 /// Synchronous writer-side form used by the Service notification handler.
 pub fn db_pending_ops_cancel_for_resource_sync(
     conn: &Connection,
@@ -236,11 +179,6 @@ pub fn db_pending_ops_cancel_for_resource_sync(
     )
     .map_err(|e| format!("cancel pending op: {e}"))?;
     Ok(())
-}
-
-pub async fn db_pending_ops_increment_retry(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| db_pending_ops_increment_retry_sync(conn, &id))
-    .await
 }
 
 pub fn db_pending_ops_increment_retry_sync(conn: &Connection, id: &str) -> Result<(), String> {
@@ -272,8 +210,11 @@ pub fn db_pending_ops_increment_retry_sync(conn: &Connection, id: &str) -> Resul
     let schedule = backoff_schedule(&operation_type);
     let retry_idx = usize::try_from(new_count - 1)
         .map_err(|_| format!("invalid retry count for pending op {id}: {new_count}"))?;
-    let backoff_idx = std::cmp::min(retry_idx, schedule.len() - 1);
-    let delay_sec = schedule[backoff_idx];
+    let delay_sec = schedule
+        .get(retry_idx)
+        .copied()
+        .or_else(|| schedule.last().copied())
+        .unwrap_or(60);
     let now = now_epoch()?;
     let next_retry_at = now + delay_sec;
 
@@ -295,109 +236,8 @@ fn now_epoch() -> Result<i64, String> {
     .map_err(|_| "current time exceeds i64 range".to_string())
 }
 
-pub async fn db_pending_ops_count(db: &ReadDbState, account_id: Option<String>) -> Result<i64, String> {
-    db
-        .with_conn(move |conn| {
-            if let Some(ref aid) = account_id {
-                conn.query_row(
-                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE account_id = ?1 AND status = 'pending'",
-                    params![aid],
-                    |row| row.get("cnt"),
-                )
-                .map_err(|e| e.to_string())
-            } else {
-                conn.query_row(
-                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE status = 'pending'",
-                    [],
-                    |row| row.get("cnt"),
-                )
-                .map_err(|e| e.to_string())
-            }
-        })
-        .await
-}
-
-pub async fn db_pending_ops_failed_count(
-    db: &ReadDbState,
-    account_id: Option<String>,
-) -> Result<i64, String> {
-    db
-        .with_conn(move |conn| {
-            if let Some(ref aid) = account_id {
-                conn.query_row(
-                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE account_id = ?1 AND status = 'failed'",
-                    params![aid],
-                    |row| row.get("cnt"),
-                )
-                .map_err(|e| e.to_string())
-            } else {
-                conn.query_row(
-                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE status = 'failed'",
-                    [],
-                    |row| row.get("cnt"),
-                )
-                .map_err(|e| e.to_string())
-            }
-        })
-        .await
-}
-
-pub async fn db_pending_ops_for_resource(
-    db: &ReadDbState,
-    account_id: String,
-    resource_id: String,
-) -> Result<Vec<PendingOperation>, String> {
-    db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT * FROM pending_operations
-                     WHERE account_id = ?1 AND resource_id = ?2 AND status = 'pending'
-                     ORDER BY created_at ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id, resource_id], row_to_pending_op)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-    })
-    .await
-}
-
-pub async fn db_pending_ops_compact(
-    db: &ReadDbState,
-    account_id: Option<String>,
-) -> Result<i64, String> {
-    db.with_conn(move |conn| compact_queue(conn, account_id.as_deref()))
-        .await
-}
-
-pub async fn db_pending_ops_clear_failed(
-    db: &ReadDbState,
-    account_id: Option<String>,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        if let Some(ref aid) = account_id {
-            conn.execute(
-                "DELETE FROM pending_operations WHERE account_id = ?1 AND status = 'failed'",
-                params![aid],
-            )
-            .map_err(|e| format!("clear failed: {e}"))?;
-        } else {
-            conn.execute("DELETE FROM pending_operations WHERE status = 'failed'", [])
-                .map_err(|e| format!("clear failed: {e}"))?;
-        }
-        Ok(())
-    })
-    .await
-}
-
 /// Reset any operations stuck in 'executing' back to 'pending'.
 /// Called at startup to recover from crash/forced quit.
-pub async fn db_pending_ops_recover_executing(db: &ReadDbState) -> Result<i64, String> {
-    db.with_conn(db_pending_ops_recover_executing_sync)
-    .await
-}
-
 pub fn db_pending_ops_recover_executing_sync(conn: &Connection) -> Result<i64, String> {
     let count = conn
         .execute(
@@ -447,172 +287,6 @@ pub fn db_pending_ops_recover_on_boot_sync(
     }
 
     Ok(())
-}
-
-pub async fn db_pending_ops_retry_failed(
-    db: &ReadDbState,
-    account_id: Option<String>,
-) -> Result<(), String> {
-    db
-        .with_conn(move |conn| {
-            if let Some(ref aid) = account_id {
-                conn.execute(
-                    "UPDATE pending_operations SET status = 'pending', retry_count = 0, next_retry_at = NULL, error_message = NULL
-                     WHERE account_id = ?1 AND status = 'failed'",
-                    params![aid],
-                )
-                .map_err(|e| format!("retry failed: {e}"))?;
-            } else {
-                conn.execute(
-                    "UPDATE pending_operations SET status = 'pending', retry_count = 0, next_retry_at = NULL, error_message = NULL
-                     WHERE status = 'failed'",
-                    [],
-                )
-                .map_err(|e| format!("retry failed: {e}"))?;
-            }
-            Ok(())
-        })
-        .await
-}
-
-// ── Queue compaction logic ───────────────────────────────────
-//
-// Groups pending ops by resource, then:
-// 1. Cancels toggle pairs (star true+false, markRead true+false)
-// 2. Cancels matching addLabel/removeLabel for same label
-// 3. Collapses sequential moveToFolder ops (keeps only the latest)
-
-#[allow(clippy::too_many_lines)]
-fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, String> {
-    // Fetch all pending ops, optionally filtered by account
-    let ops: Vec<PendingOperation> = if let Some(aid) = account_id {
-        let mut stmt = conn
-            .prepare(
-                "SELECT * FROM pending_operations WHERE status = 'pending' AND account_id = ?1
-                 ORDER BY created_at ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![aid], row_to_pending_op)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-    } else {
-        let mut stmt = conn
-            .prepare(
-                "SELECT * FROM pending_operations WHERE status = 'pending'
-                 ORDER BY created_at ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map([], row_to_pending_op)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-    };
-
-    // Group by account_id:resource_id
-    let mut by_resource: std::collections::HashMap<String, Vec<&PendingOperation>> =
-        std::collections::HashMap::new();
-    for op in &ops {
-        let key = format!("{}:{}", op.account_id, op.resource_id);
-        by_resource.entry(key).or_default().push(op);
-    }
-
-    let mut to_delete: Vec<&str> = Vec::new();
-
-    for resource_ops in by_resource.values() {
-        // 1. Cancel toggle pairs: star(true)+star(false), markRead(true)+markRead(false)
-        for toggle_type in &["star", "markRead"] {
-            let toggle_ops: Vec<&&PendingOperation> = resource_ops
-                .iter()
-                .filter(|o| o.operation_type == *toggle_type)
-                .collect();
-
-            let mut i = 0;
-            while i + 1 < toggle_ops.len() {
-                let params_a: serde_json::Value =
-                    serde_json::from_str(&toggle_ops[i].params).unwrap_or_default();
-                let params_b: serde_json::Value =
-                    serde_json::from_str(&toggle_ops[i + 1].params).unwrap_or_default();
-
-                let opposite = match *toggle_type {
-                    "star" => params_a.get("starred") != params_b.get("starred"),
-                    "markRead" => params_a.get("read") != params_b.get("read"),
-                    _ => false,
-                };
-
-                if opposite {
-                    to_delete.push(&toggle_ops[i].id);
-                    to_delete.push(&toggle_ops[i + 1].id);
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-        }
-
-        // 2. Cancel matching addLabel/removeLabel for same label on same resource
-        let add_label_ops: Vec<&&PendingOperation> = resource_ops
-            .iter()
-            .filter(|o| o.operation_type == "addLabel")
-            .collect();
-        let mut remove_label_ops: Vec<&&PendingOperation> = resource_ops
-            .iter()
-            .filter(|o| o.operation_type == "removeLabel")
-            .collect();
-
-        for add_op in &add_label_ops {
-            let add_params: serde_json::Value =
-                serde_json::from_str(&add_op.params).unwrap_or_default();
-            let add_label_id = add_params.get("labelId");
-
-            if let Some(match_idx) = remove_label_ops.iter().position(|r| {
-                let r_params: serde_json::Value =
-                    serde_json::from_str(&r.params).unwrap_or_default();
-                r_params.get("labelId") == add_label_id
-            }) {
-                to_delete.push(&add_op.id);
-                to_delete.push(&remove_label_ops[match_idx].id);
-                remove_label_ops.remove(match_idx);
-            }
-        }
-
-        // 3. Collapse sequential moveToFolder - keep only the latest
-        let move_ops: Vec<&&PendingOperation> = resource_ops
-            .iter()
-            .filter(|o| o.operation_type == "moveToFolder")
-            .collect();
-        if move_ops.len() > 1 {
-            for op in &move_ops[..move_ops.len() - 1] {
-                to_delete.push(&op.id);
-            }
-        }
-    }
-
-    // Delete compacted ops
-    let deleted =
-        i64::try_from(to_delete.len()).map_err(|_| "too many operations to delete".to_string())?;
-    if !to_delete.is_empty() {
-        // Batch delete in chunks to stay within SQLite parameter limits
-        for chunk in to_delete.chunks(100) {
-            let placeholders: String = chunk
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 1))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!("DELETE FROM pending_operations WHERE id IN ({placeholders})");
-            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
-                .iter()
-                .map(|id| Box::new(id.to_string()) as Box<dyn rusqlite::types::ToSql>)
-                .collect();
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(AsRef::as_ref).collect();
-            conn.execute(&sql, param_refs.as_slice())
-                .map_err(|e| format!("compact delete: {e}"))?;
-        }
-    }
-
-    Ok(deleted)
 }
 
 #[cfg(test)]

@@ -14,4 +14,5 @@ workspace = true
 db-read = { path = "../db-read" }
 
 [dev-dependencies]
+rusqlite.workspace = true
 trybuild = "1"

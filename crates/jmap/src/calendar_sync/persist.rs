@@ -3,13 +3,6 @@ use std::collections::HashMap;
 use bifrost_jmap::Get;
 use bifrost_jmap::calendar_event::CalendarEvent;
 
-use db::db::ReadDbState;
-use db::db::queries_extra::{
-    CalendarAttendeeWriteRow, CalendarReminderWriteRow, UpsertCalendarEventParams,
-    delete_event_by_account_remote_id_sync, replace_event_attendees_sync,
-    replace_event_reminders_sync, upsert_calendar_event_sync, upsert_calendar_sync,
-};
-
 use super::payload::{
     extract_attendee_rows, extract_attendees_json, extract_location, extract_organizer_email,
     extract_reminder_rows, parse_jscalendar_times, resolve_calendar_id,
@@ -48,91 +41,6 @@ pub struct JmapCalendarEventRecord {
     pub recurrence_rule: Option<String>,
     pub attendees: Vec<JmapCalendarAttendeeRecord>,
     pub reminders: Vec<JmapCalendarReminderRecord>,
-}
-
-/// Persist a JMAP CalendarEvent into the local database.
-///
-/// Extracts JSCalendar properties and maps them to the DB schema.
-pub(super) async fn persist_jmap_event(
-    db: &ReadDbState,
-    account_id: &str,
-    event: &CalendarEvent<Get>,
-    cal_map: &HashMap<&str, &str>,
-) -> Result<(), String> {
-    let Some(record) = jmap_event_record(event, cal_map) else {
-        return Ok(());
-    };
-
-    persist_jmap_event_record(db, account_id, record).await
-}
-
-pub(super) async fn persist_jmap_event_record(
-    db: &ReadDbState,
-    account_id: &str,
-    record: JmapCalendarEventRecord,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-
-    db.with_conn(move |conn| {
-        let local_event_id = upsert_calendar_event_sync(
-            conn,
-            &UpsertCalendarEventParams {
-                account_id: aid.clone(),
-                google_event_id: record.google_event_id.clone(),
-                summary: record.summary.clone(),
-                description: record.description.clone(),
-                location: record.location.clone(),
-                start_time: record.start_time,
-                end_time: record.end_time,
-                is_all_day: record.is_all_day,
-                status: record.status.clone(),
-                organizer_email: record.organizer_email.clone(),
-                attendees_json: record.attendees_json.clone(),
-                html_link: None,
-                calendar_id: record.calendar_id.clone(),
-                remote_event_id: Some(record.remote_event_id.clone()),
-                etag: None,
-                ical_data: record.ical_data.clone(),
-                uid: record.uid.clone(),
-                title: None,
-                timezone: None,
-                recurrence_rule: record.recurrence_rule.clone(),
-                organizer_name: None,
-                rsvp_status: None,
-                availability: None,
-                visibility: None,
-                // JMAP's CalendarEvent type carries `recurrenceOverrides` as
-                // a JSCalendar map keyed by RECURRENCE-ID; the sync path
-                // currently flattens those into the master row. Leave None
-                // until the override-as-row path lands here too.
-                recurrence_id: None,
-            },
-        )?;
-
-        let attendee_rows: Vec<CalendarAttendeeWriteRow> = record
-            .attendees
-            .iter()
-            .map(|att| CalendarAttendeeWriteRow {
-                email: att.email.clone(),
-                name: att.name.clone(),
-                rsvp_status: att.rsvp_status.clone(),
-                is_organizer: att.is_organizer,
-            })
-            .collect();
-        replace_event_attendees_sync(conn, &aid, &local_event_id, &attendee_rows)?;
-
-        let reminder_rows: Vec<CalendarReminderWriteRow> = record
-            .reminders
-            .iter()
-            .map(|rem| CalendarReminderWriteRow {
-                minutes_before: rem.minutes_before,
-                method: rem.method.clone(),
-            })
-            .collect();
-        replace_event_reminders_sync(conn, &aid, &local_event_id, &reminder_rows)?;
-        Ok(())
-    })
-    .await
 }
 
 pub fn jmap_event_record(
@@ -289,75 +197,4 @@ fn jmap_until_to_rrule(until: &str) -> Option<String> {
                 .and_then(|date| date.and_hms_opt(23, 59, 59))
                 .map(|dt| format!("{}Z", dt.format("%Y%m%dT%H%M%S")))
         })
-}
-
-/// Delete a calendar event by its JMAP event ID.
-pub(super) async fn delete_event_by_jmap_id(
-    db: &ReadDbState,
-    account_id: &str,
-    jmap_event_id: &str,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let eid = jmap_event_id.to_string();
-
-    db.with_conn(move |conn| delete_event_by_account_remote_id_sync(conn, &aid, &eid))
-        .await
-}
-
-// ── Sync state persistence ─────────────────────────────────
-
-/// Save a JMAP sync state for calendar objects.
-///
-/// Reuses the existing `jmap_sync_state` table via sync.
-pub(super) async fn save_calendar_sync_state(
-    db: &ReadDbState,
-    account_id: &str,
-    state_type: &str,
-    state: &str,
-) -> Result<(), String> {
-    sync::state::save_jmap_sync_state(db, account_id, state_type, state).await
-}
-
-/// Load a JMAP sync state for calendar objects.
-pub(super) async fn load_calendar_sync_state(
-    db: &ReadDbState,
-    account_id: &str,
-    state_type: &str,
-) -> Result<Option<String>, String> {
-    sync::state::load_jmap_sync_state(db, account_id, state_type).await
-}
-
-// ── Calendar DB helpers ────────────────────────────────────
-
-/// Upsert a calendar entry. Returns the local UUID.
-pub(super) async fn upsert_calendar(
-    db: &ReadDbState,
-    account_id: &str,
-    remote_id: &str,
-    display_name: Option<&str>,
-    color: Option<&str>,
-    is_primary: bool,
-) -> Result<String, String> {
-    let aid = account_id.to_string();
-    let rid = remote_id.to_string();
-    let dname = display_name.map(String::from);
-    let col = color.map(String::from);
-
-    db.with_conn(move |conn| {
-        // JMAP calendars discovered via Calendar/get are owned by the
-        // authenticated user; sharing/permissions land via JMAP Sharing
-        // (already wired for mailboxes) and would override this in a future
-        // pass.
-        upsert_calendar_sync(
-            conn,
-            &aid,
-            "jmap",
-            &rid,
-            dname.as_deref(),
-            col.as_deref(),
-            is_primary,
-            true,
-        )
-    })
-    .await
 }

@@ -15,7 +15,7 @@ use store::inline_image_store::InlineImageStoreReadState;
 ///
 /// `db` is the read-half view used by mail action paths; `write_db`
 /// is the write-half view used by the calendar dispatch path
-/// (`run_one_calendar` builds `CalendarActionContext { db: write_db,
+/// (`run_one_calendar` builds `CalendarActionContext { write_db,
 /// ... }` from this field). Both wrap the same connection arc; the
 /// distinction is type-level - holding `write_db` keeps the
 /// "writes go through the writer half" invariant compile-checked
@@ -131,7 +131,7 @@ impl Drop for FlightGuard {
 /// shape is just data.
 #[derive(Clone)]
 pub struct CalendarActionContext {
-    pub db: service_state::WriteDbState,
+    pub write_db: service_state::WriteDbState,
     pub read_db: ReadDbState,
     pub encryption_key: [u8; 32],
 }

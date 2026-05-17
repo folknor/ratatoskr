@@ -52,8 +52,36 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
             log::warn!("Google contacts delta sync failed (non-fatal): {e}");
         }
         if let Err(e) =
-            super::super::contacts::sync_google_other_contacts(ctx.client, ctx.account_id, ctx.db)
-                .await
+            super::super::contacts::sync_google_other_contacts(
+                ctx.client,
+                ctx.account_id,
+                ctx.db,
+                {
+                    let write_db = ctx.write_db.clone();
+                    move |write| {
+                        let write_db = write_db.clone();
+                        async move {
+                            write_db
+                                .with_write(move |conn| {
+                                    let tx = conn
+                                        .unchecked_transaction()
+                                        .map_err(|e| {
+                                            format!("begin google other contacts tx: {e}")
+                                        })?;
+                                    super::super::contacts::persist_google_other_contacts_write(
+                                        &tx, write,
+                                    )?;
+                                    tx.commit().map_err(|e| {
+                                        format!("commit google other contacts tx: {e}")
+                                    })?;
+                                    Ok(())
+                                })
+                                .await
+                        }
+                    }
+                },
+            )
+            .await
         {
             log::warn!("Google otherContacts delta sync failed (non-fatal): {e}");
         }

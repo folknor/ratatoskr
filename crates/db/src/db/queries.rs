@@ -249,6 +249,19 @@ pub fn set_thread_starred(
     set_thread_bool_field(conn, account_id, thread_id, "is_starred", is_starred)
 }
 
+pub fn set_thread_messages_starred(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+    is_starred: bool,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE messages SET is_starred = ?1 WHERE account_id = ?2 AND thread_id = ?3",
+        params![is_starred, account_id, thread_id],
+    )
+    .map_err(|e| format!("update message starred flags: {e}"))
+}
+
 pub fn set_thread_pinned(
     conn: &Connection,
     account_id: &str,

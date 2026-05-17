@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use gmail::client::GmailState;
 use graph::client::GraphState;
 use jmap::client::JmapState;
+use db::db::WriteTxn;
 use db::db::queries_extra::calendar_contacts_writes::{
     CalDavAttendee, CalDavReminder, CalendarEventRow, DiscoveredCalendar,
     delete_caldav_events, delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id,
@@ -713,59 +714,76 @@ async fn sync_caldav_calendar_events(
         if cancellation_token.is_cancelled() {
             return Err("calendar sync cancelled".to_string());
         }
-        let etag = etag_map.get(uri.as_str()).unwrap_or(&"").to_string();
+        let etag = etag_map
+            .get(uri.as_str())
+            .map(|etag| etag.trim())
+            .filter(|etag| !etag.is_empty())
+            .map(str::to_string);
 
         match parse::parse_icalendar(ical_data) {
             Ok(events) => {
-                let mut seen_keys: Vec<String> = Vec::with_capacity(events.len());
-                let mut representative_uid: Option<String> = None;
-                for event in &events {
-                    let key = upsert_caldav_parsed_event(
-                        write_db,
-                        account_id,
-                        calendar_id,
-                        uri,
-                        &etag,
-                        ical_data,
-                        event,
-                    )
-                    .await?;
-                    if representative_uid.is_none() {
-                        representative_uid = Some(
-                            event
-                                .uid
-                                .clone()
-                                .unwrap_or_else(|| href_synthetic_uid(uri)),
-                        );
-                    }
-                    seen_keys.push(key);
-                    upserted += 1;
-                }
-                if let Some(uid_for_map) = representative_uid {
-                    let cal_id_for_map = calendar_id.to_string();
-                    let uri_for_map = uri.clone();
-                    let etag_for_map = etag.clone();
-                    write_db
-                        .with_write(move |conn| {
+                let account_id_owned = account_id.to_string();
+                let calendar_id_owned = calendar_id.to_string();
+                let uri_owned = uri.clone();
+                let ical_data_owned = ical_data.clone();
+                let written = write_db
+                    .with_write(move |conn| {
+                        let tx = conn
+                            .unchecked_transaction()
+                            .map_err(|e| format!("begin caldav resource tx: {e}"))?;
+                        let mut seen_keys: Vec<String> = Vec::with_capacity(events.len());
+                        let mut representative_uid: Option<String> = None;
+
+                        for event in &events {
+                            let key = upsert_caldav_parsed_event_tx(
+                                &tx,
+                                &account_id_owned,
+                                &calendar_id_owned,
+                                &uri_owned,
+                                etag.as_deref(),
+                                &ical_data_owned,
+                                event,
+                            )?;
+                            if representative_uid.is_none() {
+                                // RFC 5545 uses the same UID for a master and its
+                                // overrides. If a server lists an override before
+                                // the master, either UID is equivalent for the map.
+                                representative_uid = Some(
+                                    event
+                                        .uid
+                                        .clone()
+                                        .unwrap_or_else(|| href_synthetic_uid(&uri_owned)),
+                                );
+                            }
+                            seen_keys.push(key);
+                        }
+
+                        if let (Some(uid_for_map), Some(etag_for_map)) =
+                            (representative_uid, etag.as_deref())
+                        {
                             upsert_caldav_event_map(
-                                conn,
-                                &uri_for_map,
-                                &cal_id_for_map,
+                                &tx,
+                                &uri_owned,
+                                &calendar_id_owned,
                                 &uid_for_map,
-                                &etag_for_map,
-                            )
-                        })
-                        .await?;
-                }
-                if !seen_keys.is_empty() {
-                    let cal_id_owned = calendar_id.to_string();
-                    let uri_owned = uri.clone();
-                    write_db
-                        .with_write(move |conn| {
-                            reap_orphan_overrides(conn, &cal_id_owned, &uri_owned, &seen_keys)
-                        })
-                        .await?;
-                }
+                                etag_for_map,
+                            )?;
+                        }
+                        if !seen_keys.is_empty() {
+                            reap_orphan_overrides(
+                                &tx,
+                                &calendar_id_owned,
+                                &uri_owned,
+                                &seen_keys,
+                            )?;
+                        }
+
+                        tx.commit()
+                            .map_err(|e| format!("commit caldav resource tx: {e}"))?;
+                        Ok(seen_keys.len())
+                    })
+                    .await?;
+                upserted += written;
             }
             Err(e) => {
                 log::warn!("Failed to parse iCalendar at {uri}: {e}");
@@ -778,19 +796,27 @@ async fn sync_caldav_calendar_events(
         let cal_id = calendar_id.to_string();
         let deleted_owned = deleted_uris;
         write_db
-            .with_write(move |conn| delete_caldav_events(conn, &cal_id, &deleted_owned))
+            .with_write(move |conn| {
+                let tx = conn
+                    .unchecked_transaction()
+                    .map_err(|e| format!("begin caldav delete tx: {e}"))?;
+                delete_caldav_events(&tx, &cal_id, &deleted_owned)?;
+                tx.commit()
+                    .map_err(|e| format!("commit caldav delete tx: {e}"))?;
+                Ok(())
+            })
             .await?;
     }
 
     Ok((upserted, deleted_count))
 }
 
-async fn upsert_caldav_parsed_event(
-    write_db: &WriteDbState,
+fn upsert_caldav_parsed_event_tx(
+    tx: &WriteTxn<'_>,
     account_id: &str,
     calendar_id: &str,
     uri: &str,
-    etag: &str,
+    etag: Option<&str>,
     ical_data: &str,
     event: &parse::ParsedVEvent,
 ) -> Result<String, String> {
@@ -843,7 +869,7 @@ async fn upsert_caldav_parsed_event(
         organizer_email: event.organizer_email.clone(),
         attendees_json,
         html_link: None,
-        etag: Some(etag.to_string()),
+        etag: etag.map(str::to_string),
         ical_data: Some(ical_data.to_string()),
         uid: event.uid.clone(),
         title: event.summary.clone(),
@@ -856,17 +882,36 @@ async fn upsert_caldav_parsed_event(
         recurrence_id: event.recurrence_id.clone(),
     };
 
-    write_db
-        .with_write(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            upsert_calendar_event_row(&tx, &row)?;
-            tx.commit().map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await?;
+    upsert_calendar_event_row(tx, &row)?;
 
-    sync_event_attendees(write_db, account_id, &google_event_id, event).await?;
-    sync_event_reminders(write_db, account_id, &google_event_id, event).await?;
+    let db_attendees: Vec<CalDavAttendee> = event
+        .attendees
+        .iter()
+        .map(|a| CalDavAttendee {
+            email: a.email.clone(),
+            name: a.name.clone(),
+            partstat: a.partstat.clone(),
+            is_organizer: a.is_organizer,
+        })
+        .collect();
+    sync_caldav_attendees(
+        tx,
+        account_id,
+        &google_event_id,
+        &db_attendees,
+        event.organizer_email.as_deref(),
+        event.organizer_name.as_deref(),
+    )?;
+
+    let db_reminders: Vec<CalDavReminder> = event
+        .reminders
+        .iter()
+        .map(|r| CalDavReminder {
+            minutes_before: r.minutes_before,
+            method: r.method.clone(),
+        })
+        .collect();
+    sync_caldav_reminders(tx, account_id, &google_event_id, &db_reminders)?;
 
     Ok(google_event_id)
 }
@@ -880,61 +925,6 @@ fn make_google_event_id(uid: &str, recurrence_id: Option<&str>) -> String {
         Some(rid) => format!("caldav:{uid}::recurrence-id={rid}"),
         None => format!("caldav:{uid}"),
     }
-}
-
-async fn sync_event_attendees(
-    db: &WriteDbState,
-    account_id: &str,
-    google_event_id: &str,
-    event: &parse::ParsedVEvent,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let geid = google_event_id.to_string();
-    let db_attendees: Vec<CalDavAttendee> = event
-        .attendees
-        .iter()
-        .map(|a| CalDavAttendee {
-            email: a.email.clone(),
-            name: a.name.clone(),
-            partstat: a.partstat.clone(),
-            is_organizer: a.is_organizer,
-        })
-        .collect();
-    let organizer_email = event.organizer_email.clone();
-    let organizer_name = event.organizer_name.clone();
-
-    db.with_write(move |conn| {
-        sync_caldav_attendees(
-            conn,
-            &aid,
-            &geid,
-            &db_attendees,
-            organizer_email.as_deref(),
-            organizer_name.as_deref(),
-        )
-    })
-    .await
-}
-
-async fn sync_event_reminders(
-    db: &WriteDbState,
-    account_id: &str,
-    google_event_id: &str,
-    event: &parse::ParsedVEvent,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let geid = google_event_id.to_string();
-    let db_reminders: Vec<CalDavReminder> = event
-        .reminders
-        .iter()
-        .map(|r| CalDavReminder {
-            minutes_before: r.minutes_before,
-            method: r.method.clone(),
-        })
-        .collect();
-
-    db.with_write(move |conn| sync_caldav_reminders(conn, &aid, &geid, &db_reminders))
-        .await
 }
 
 async fn load_calendar_ctag(db: &ReadDbState, calendar_id: &str) -> Result<Option<String>, String> {

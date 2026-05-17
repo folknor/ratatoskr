@@ -1,6 +1,7 @@
 use std::collections::HashSet;
+use std::future::Future;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriteTxn};
 use db::db::queries_extra::{delete_seen_address_google_other, upsert_seen_address_google_other};
 use sync::state as sync_state;
 
@@ -20,15 +21,20 @@ const OTHER_CONTACTS_READ_MASK: &str = "names,emailAddresses,phoneNumbers,photos
 /// account via the People API. These are inserted into `seen_addresses` with
 /// `source = 'google_other'` rather than the `contacts` table, since they are
 /// lower-priority autocomplete candidates.
-pub async fn sync_google_other_contacts(
+pub async fn sync_google_other_contacts<F, Fut>(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
-) -> Result<SyncContactsResult, String> {
+    mut write: F,
+) -> Result<SyncContactsResult, String>
+where
+    F: FnMut(GoogleOtherContactsWrite) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
     let existing_token = sync_state::load_google_other_contacts_sync_token(db, account_id).await?;
 
     match existing_token {
-        Some(token) => match incremental_sync(client, account_id, db, &token).await {
+        Some(token) => match incremental_sync(client, account_id, db, &token, &mut write).await {
             Ok(result) => Ok(result),
             Err(e) if e.contains("410") || e.contains("GONE") || e.contains("syncToken") => {
                 log::warn!(
@@ -36,23 +42,41 @@ pub async fn sync_google_other_contacts(
                          falling back to full sync"
                 );
                 sync_state::delete_google_other_contacts_sync_token(db, account_id).await?;
-                full_sync(client, account_id, db).await
+                full_sync(client, account_id, db, &mut write).await
             }
             Err(e) => Err(e),
         },
-        None => full_sync(client, account_id, db).await,
+        None => full_sync(client, account_id, db, &mut write).await,
     }
+}
+
+pub enum GoogleOtherContactsWrite {
+    Full {
+        account_id: String,
+        persons: Vec<Person>,
+        seen_resource_names: HashSet<String>,
+    },
+    Delta {
+        account_id: String,
+        upserts: Vec<Person>,
+        deleted_resource_names: Vec<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
 // Full sync
 // ---------------------------------------------------------------------------
 
-async fn full_sync(
+async fn full_sync<F, Fut>(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
-) -> Result<SyncContactsResult, String> {
+    write: &mut F,
+) -> Result<SyncContactsResult, String>
+where
+    F: FnMut(GoogleOtherContactsWrite) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
     let mut all_persons = Vec::new();
     let mut page_token: Option<String> = None;
     let mut sync_token: Option<String> = None;
@@ -93,16 +117,10 @@ async fn full_sync(
         .filter(|p| extract_primary_email(p).is_some())
         .count();
 
-    let aid = account_id.to_string();
-    let seen = seen_resource_names;
-    db.with_conn(move |conn| {
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| format!("begin tx: {e}"))?;
-        persist_other_contacts(&tx, &aid, &all_persons)?;
-        let pruned = prune_stale_other_contacts(&tx, &aid, &seen)?;
-        tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-        Ok(pruned)
+    write(GoogleOtherContactsWrite::Full {
+        account_id: account_id.to_string(),
+        persons: all_persons,
+        seen_resource_names,
     })
     .await?;
 
@@ -119,12 +137,17 @@ async fn full_sync(
 // Incremental sync
 // ---------------------------------------------------------------------------
 
-async fn incremental_sync(
+async fn incremental_sync<F, Fut>(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
     sync_token: &str,
-) -> Result<SyncContactsResult, String> {
+    write: &mut F,
+) -> Result<SyncContactsResult, String>
+where
+    F: FnMut(GoogleOtherContactsWrite) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
     let mut upserts = Vec::new();
     let mut deleted_resource_names = Vec::new();
     let mut page_token: Option<String> = None;
@@ -177,18 +200,10 @@ async fn incremental_sync(
     let deleted_count = deleted_resource_names.len();
 
     if !upserts.is_empty() || !deleted_resource_names.is_empty() {
-        let aid = account_id.to_string();
-        let deleted_owned = deleted_resource_names;
-        db.with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
-            persist_other_contacts(&tx, &aid, &upserts)?;
-            for resource_name in &deleted_owned {
-                delete_other_contact(&tx, &aid, resource_name)?;
-            }
-            tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-            Ok(())
+        write(GoogleOtherContactsWrite::Delta {
+            account_id: account_id.to_string(),
+            upserts,
+            deleted_resource_names,
         })
         .await?;
     }
@@ -212,8 +227,35 @@ async fn incremental_sync(
 // Persistence helpers (run inside a transaction)
 // ---------------------------------------------------------------------------
 
+pub fn persist_google_other_contacts_write(
+    tx: &WriteTxn<'_>,
+    write: GoogleOtherContactsWrite,
+) -> Result<(), String> {
+    match write {
+        GoogleOtherContactsWrite::Full {
+            account_id,
+            persons,
+            seen_resource_names,
+        } => {
+            persist_other_contacts(tx, &account_id, &persons)?;
+            let _ = prune_stale_other_contacts(tx, &account_id, &seen_resource_names)?;
+        }
+        GoogleOtherContactsWrite::Delta {
+            account_id,
+            upserts,
+            deleted_resource_names,
+        } => {
+            persist_other_contacts(tx, &account_id, &upserts)?;
+            for resource_name in &deleted_resource_names {
+                delete_other_contact(tx, &account_id, resource_name)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn persist_other_contacts(
-    conn: &rusqlite::Connection,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     persons: &[Person],
 ) -> Result<(), String> {
@@ -250,7 +292,7 @@ fn persist_other_contacts(
 }
 
 fn delete_other_contact(
-    conn: &rusqlite::Connection,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     resource_name: &str,
 ) -> Result<(), String> {
@@ -295,7 +337,7 @@ fn delete_other_contact(
 /// After a full otherContacts sync, remove mapping rows for resource_names
 /// not seen in the fetch, then delete orphaned source='google_other' addresses.
 fn prune_stale_other_contacts(
-    conn: &rusqlite::Connection,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     seen_resource_names: &HashSet<String>,
 ) -> Result<usize, String> {

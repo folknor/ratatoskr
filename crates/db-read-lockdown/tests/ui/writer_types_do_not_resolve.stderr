@@ -1,0 +1,17 @@
+error[E0425]: cannot find type `WriteConn` in crate `db_read`
+ --> tests/ui/writer_types_do_not_resolve.rs:2:44
+  |
+2 |     let _ = std::any::type_name::<db_read::WriteConn<'_>>();
+  |                                            ^^^^^^^^^ not found in `db_read`
+
+error[E0425]: cannot find type `WriteTxn` in crate `db_read`
+ --> tests/ui/writer_types_do_not_resolve.rs:3:44
+  |
+3 |     let _ = std::any::type_name::<db_read::WriteTxn<'_>>();
+  |                                            ^^^^^^^^ not found in `db_read`
+
+error[E0425]: cannot find type `WriterPool` in crate `db_read`
+ --> tests/ui/writer_types_do_not_resolve.rs:4:44
+  |
+4 |     let _ = std::any::type_name::<db_read::WriterPool>();
+  |                                            ^^^^^^^^^^ not found in `db_read`

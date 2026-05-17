@@ -10,8 +10,10 @@
 //! cannot accidentally route calendar mutations through a read handle.
 
 use crate::db::{WriteConn, WriteTxn};
-use rusqlite::{Connection, OptionalExtension, params};
-pub use super::calendars::{CalendarAttendeeWriteRow, CalendarReminderWriteRow};
+use rusqlite::{OptionalExtension, params};
+pub use super::calendars::{
+    CalendarAttendeeWriteRow, CalendarReminderWriteRow, LocalCalendarEventParams,
+};
 
 // ---------------------------------------------------------------------------
 // `calendars` table helpers
@@ -54,22 +56,13 @@ pub fn upsert_discovered_calendar(
     conn: &WriteTxn<'_>,
     cal: &DiscoveredCalendar<'_>,
 ) -> Result<String, String> {
-    let existing_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
-            params![cal.account_id, cal.remote_id],
-            |row| row.get("id"),
-        )
-        .optional()
-        .map_err(|e| format!("upsert_discovered_calendar lookup: {e}"))?;
-
-    let id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-    conn.execute(
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.query_row(
         "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
          ON CONFLICT(account_id, remote_id) DO UPDATE SET \
-           display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch()",
+           display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch() \
+         RETURNING id",
         params![
             id,
             cal.account_id,
@@ -80,10 +73,9 @@ pub fn upsert_discovered_calendar(
             cal.is_primary as i64,
             cal.can_edit as i64,
         ],
+        |row| row.get::<_, String>(0),
     )
-    .map_err(|e| format!("upsert_discovered_calendar insert: {e}"))?;
-
-    Ok(id)
+    .map_err(|e| format!("upsert_discovered_calendar: {e}"))
 }
 
 /// Update the sync_token and/or ctag for a calendar row.
@@ -157,7 +149,7 @@ pub fn upsert_calendar_event_row(
     row: &CalendarEventRow,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    conn.execute(
+    conn.query_row(
         "INSERT INTO calendar_events \
          (id, account_id, google_event_id, summary, description, location, \
           start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
@@ -172,7 +164,8 @@ pub fn upsert_calendar_event_row(
            html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16, \
            ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21, \
            organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25, \
-           recurrence_id = ?26, updated_at = unixepoch()",
+           recurrence_id = ?26, updated_at = unixepoch() \
+         RETURNING id",
         params![
             id,
             row.account_id,
@@ -201,19 +194,13 @@ pub fn upsert_calendar_event_row(
             row.visibility,
             row.recurrence_id,
         ],
+        |row| row.get::<_, String>(0),
     )
-    .map_err(|e| format!("upsert_calendar_event_row: {e}"))?;
-
-    conn.query_row(
-        "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
-        params![row.account_id, row.google_event_id],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("fetch calendar event id: {e}"))
+    .map_err(|e| format!("upsert_calendar_event_row: {e}"))
 }
 
 pub fn replace_event_attendees(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     event_id: &str,
     attendees: &[CalendarAttendeeWriteRow],
@@ -249,7 +236,7 @@ pub fn replace_event_attendees(
 }
 
 pub fn replace_event_reminders(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     event_id: &str,
     reminders: &[CalendarReminderWriteRow],
@@ -273,7 +260,7 @@ pub fn replace_event_reminders(
 }
 
 pub fn delete_event_by_account_remote_id(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     remote_event_id: &str,
 ) -> Result<(), String> {
@@ -315,7 +302,7 @@ pub struct CalDavReminder {
 
 /// Delete events and their map entries for a calendar by remote_event_id.
 pub fn delete_caldav_events(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     calendar_id: &str,
     uris: &[String],
 ) -> Result<(), String> {
@@ -337,7 +324,7 @@ pub fn delete_caldav_events(
 
 /// Upsert a URI to ETag mapping in the caldav_event_map.
 pub fn upsert_caldav_event_map(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     uri: &str,
     calendar_id: &str,
     event_uid: &str,
@@ -355,7 +342,7 @@ pub fn upsert_caldav_event_map(
 
 /// Sync attendees for a calendar event.
 pub fn sync_caldav_attendees(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     google_event_id: &str,
     attendees: &[CalDavAttendee],
@@ -409,7 +396,7 @@ pub fn sync_caldav_attendees(
 
 /// Sync reminders for a calendar event.
 pub fn sync_caldav_reminders(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     google_event_id: &str,
     reminders: &[CalDavReminder],
@@ -448,7 +435,7 @@ pub fn sync_caldav_reminders(
 /// Drop calendar_event rows for a CalDAV resource whose storage key is not
 /// in the seen set, plus their attendees and reminders.
 pub fn reap_orphan_overrides(
-    conn: &WriteConn<'_>,
+    conn: &WriteTxn<'_>,
     calendar_id: &str,
     uri: &str,
     seen_keys: &[String],
@@ -558,6 +545,41 @@ pub fn set_calendar_event_etag(
     Ok(())
 }
 
+/// Update editable local event fields and the provider `etag` in one write.
+pub fn update_calendar_event_fields_and_etag(
+    conn: &WriteConn<'_>,
+    event_id: &str,
+    p: &LocalCalendarEventParams,
+    etag: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE calendar_events SET
+            summary = ?2, description = ?3, location = ?4,
+            start_time = ?5, end_time = ?6, is_all_day = ?7,
+            calendar_id = ?8, timezone = ?9, recurrence_rule = ?10,
+            availability = ?11, visibility = ?12, etag = ?13,
+            updated_at = unixepoch()
+         WHERE id = ?1",
+        params![
+            event_id,
+            p.summary,
+            p.description,
+            p.location,
+            p.start_time,
+            p.end_time,
+            p.is_all_day as i64,
+            p.calendar_id,
+            p.timezone,
+            p.recurrence_rule,
+            p.availability,
+            p.visibility,
+            etag,
+        ],
+    )
+    .map_err(|e| format!("update_calendar_event_fields_and_etag: {e}"))?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // `accounts` CalDAV URL helpers
 // ---------------------------------------------------------------------------
@@ -617,7 +639,7 @@ pub struct ContactGroupRow {
 
 /// Upsert a contact group row (INSERT OR UPDATE on conflict by id).
 pub fn upsert_contact_group(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     row: &ContactGroupRow,
 ) -> Result<(), String> {
     conn.execute(
@@ -645,7 +667,7 @@ pub fn upsert_contact_group(
 /// Delete all member rows for a contact group (replace pattern: delete then
 /// re-insert).
 pub fn delete_contact_group_members(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     group_id: &str,
 ) -> Result<(), String> {
     conn.execute(
@@ -658,7 +680,7 @@ pub fn delete_contact_group_members(
 
 /// Insert a single email-type member into a contact group (INSERT OR IGNORE).
 pub fn insert_contact_group_member_email(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     group_id: &str,
     email: &str,
 ) -> Result<(), String> {
@@ -673,7 +695,7 @@ pub fn insert_contact_group_member_email(
 
 /// Delete a single contact group by its local id (members cascade via FK).
 pub fn delete_contact_group_by_id(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     group_id: &str,
 ) -> Result<(), String> {
     conn.execute(
@@ -686,7 +708,7 @@ pub fn delete_contact_group_by_id(
 
 /// Delete all contact groups for an account with a given source label.
 pub fn delete_contact_groups_for_account_by_source(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     source: &str,
 ) -> Result<(), String> {
@@ -698,28 +720,6 @@ pub fn delete_contact_groups_for_account_by_source(
     Ok(())
 }
 
-/// Return (local_id, server_id) pairs for all contact groups owned by an
-/// account with a given source label.
-pub fn list_contact_groups_for_account_by_source(
-    conn: &Connection,
-    account_id: &str,
-    source: &str,
-) -> Result<Vec<(String, String)>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, server_id FROM contact_groups \
-             WHERE account_id = ?1 AND source = ?2",
-        )
-        .map_err(|e| format!("list_contact_groups_for_account_by_source prepare: {e}"))?;
-
-    stmt.query_map(params![account_id, source], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })
-    .map_err(|e| format!("list_contact_groups_for_account_by_source query: {e}"))?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| format!("list_contact_groups_for_account_by_source collect: {e}"))
-}
-
 // ---------------------------------------------------------------------------
 // `message_reactions` helpers
 // ---------------------------------------------------------------------------
@@ -727,7 +727,7 @@ pub fn list_contact_groups_for_account_by_source(
 /// Upsert a message reaction row. On conflict (same message, account,
 /// reactor_email, reaction_type), updates `reacted_at`.
 pub fn upsert_message_reaction(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     message_id: &str,
     account_id: &str,
     reactor_email: &str,
@@ -751,7 +751,7 @@ pub fn upsert_message_reaction(
 /// conflict rather than `reacted_at`. Used for count/metadata rows where
 /// the type encodes a numeric value.
 pub fn upsert_message_reaction_update_type(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     message_id: &str,
     account_id: &str,
     reactor_email: &str,
@@ -774,7 +774,7 @@ pub fn upsert_message_reaction_update_type(
 ///
 /// Used when the owner removes their reaction and we need to clean up the row.
 pub fn delete_message_reaction(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     message_id: &str,
     account_id: &str,
     reactor_email: &str,
@@ -800,7 +800,7 @@ pub fn delete_message_reaction(
 /// - Updates `display_name` only when the existing source is also `google_other`
 /// - Always bumps `last_seen_at` to the maximum of old and new
 pub fn upsert_seen_address_google_other(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     email: &str,
     account_id: &str,
     display_name: Option<&str>,
@@ -833,7 +833,7 @@ pub fn upsert_seen_address_google_other(
 /// Callers should check that no other mapping references the email before
 /// calling (i.e. only call when the address is truly orphaned).
 pub fn delete_seen_address_google_other(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     email: &str,
     account_id: &str,
 ) -> Result<(), String> {

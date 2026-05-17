@@ -630,7 +630,7 @@ async fn run_one_calendar(
     // dispatch reuses the writer half compile-checked through the
     // type system, no `WriteDbState::from_arc` end-run.
     let cal_ctx = action_types::CalendarActionContext {
-        db: ctx.write_db.clone(),
+        write_db: ctx.write_db.clone(),
         read_db: ctx.db.clone(),
         encryption_key: ctx.encryption_key,
     };

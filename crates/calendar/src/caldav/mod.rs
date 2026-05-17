@@ -180,7 +180,7 @@ fn synthesize_event_dto(
         .and_then(serde_json::Value::as_str)
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.timestamp())
-        .unwrap_or(start_time + 3600);
+        .unwrap_or(start_time);
     let is_all_day = input
         .get("isAllDay")
         .and_then(serde_json::Value::as_bool)
@@ -415,7 +415,7 @@ async fn fetch_caldav_event(
     };
 
     let start_time = parsed.start_time.unwrap_or(0);
-    let end_time = parsed.end_time.unwrap_or(start_time + 3600);
+    let end_time = parsed.end_time.unwrap_or(start_time);
     let status = if parsed.status.is_empty() {
         "confirmed".to_string()
     } else {

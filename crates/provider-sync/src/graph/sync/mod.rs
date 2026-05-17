@@ -37,7 +37,7 @@ const BATCH_SIZE: usize = 50;
 struct SyncCtx<'a> {
     client: &'a GraphClient,
     account_id: &'a str,
-    /// Read view onto the writer connection (Phase 3 task 4 transitional bridge).
+    write_db: &'a service_state::WriteDbState,
     db: &'a ReadDbState,
     body_store: &'a BodyStoreWriteState,
     inline_images: &'a InlineImageStoreWriteState,
@@ -64,7 +64,7 @@ struct SyncCtx<'a> {
 pub async fn graph_initial_sync(
     client: &GraphClient,
     account_id: &str,
-    _db: &service_state::WriteDbState,
+    db: &service_state::WriteDbState,
     read_db: &ReadDbState,
     body_store: &service_state::BodyStoreWriteState,
     inline_images: &service_state::InlineImageStoreWriteState,
@@ -79,6 +79,7 @@ pub async fn graph_initial_sync(
     let sctx = SyncCtx {
         client,
         account_id,
+        write_db: db,
         db: read_db,
         body_store,
         inline_images,
@@ -226,7 +227,7 @@ pub async fn graph_initial_sync(
 pub async fn graph_delta_sync(
     client: &GraphClient,
     account_id: &str,
-    _db: &service_state::WriteDbState,
+    db: &service_state::WriteDbState,
     read_db: &ReadDbState,
     body_store: &service_state::BodyStoreWriteState,
     inline_images: &service_state::InlineImageStoreWriteState,
@@ -240,6 +241,7 @@ pub async fn graph_delta_sync(
     let sctx = SyncCtx {
         client,
         account_id,
+        write_db: db,
         db: read_db,
         body_store,
         inline_images,
@@ -345,8 +347,13 @@ pub async fn graph_delta_sync(
     // so delta queries miss reaction changes entirely. To compensate, we periodically
     // re-fetch reaction extended properties for messages that already have reactions.
     if cycle.is_multiple_of(5) {
-        match persistence::refresh_reactions_for_recent_messages(client, read_db, account_id)
-            .await
+        match persistence::refresh_reactions_for_recent_messages(
+            client,
+            read_db,
+            sctx.write_db,
+            account_id,
+        )
+        .await
         {
             Ok(count) => {
                 if count > 0 {
@@ -369,7 +376,22 @@ pub async fn graph_delta_sync(
         {
             log::warn!("Label sync failed (non-fatal): {e}");
         }
-        match super::group_sync::sync_exchange_groups(client, read_db, account_id).await {
+        let write_db = sctx.write_db.clone();
+        match super::group_sync::sync_exchange_groups(
+            client,
+            read_db,
+            account_id,
+            move |write| {
+                let write_db = write_db.clone();
+                async move {
+                    write_db
+                        .with_write(move |conn| super::group_sync::persist_exchange_group_write(conn, write))
+                        .await
+                }
+            },
+        )
+        .await
+        {
             Ok(count) => {
                 if count > 0 {
                     log::info!("Exchange group delta sync: {count} groups");

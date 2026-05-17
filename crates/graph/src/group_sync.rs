@@ -1,8 +1,9 @@
 use std::collections::HashSet;
+use std::future::Future;
 
 use serde::Deserialize;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriteConn};
 use db::db::queries_extra::{
     ContactGroupRow, delete_contact_group_by_id, delete_contact_group_members,
     delete_contact_groups_for_account_by_source, insert_contact_group_member_email,
@@ -183,16 +184,24 @@ pub async fn fetch_user_groups(
 /// Main sync entry point: fetch groups, resolve members, persist to DB.
 ///
 /// Returns the count of synced groups.
-pub async fn sync_exchange_groups(
+pub async fn sync_exchange_groups<F, Fut>(
     client: &GraphClient,
     db: &ReadDbState,
     account_id: &str,
-) -> Result<usize, String> {
+    mut write: F,
+) -> Result<usize, String>
+where
+    F: FnMut(ExchangeGroupWrite) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
     log::debug!("[Graph] Syncing Exchange groups for account {account_id}");
     let groups = fetch_user_groups(client, db).await?;
     if groups.is_empty() {
         // Prune any previously synced groups for this account
-        prune_all_account_groups(db, account_id).await?;
+        write(ExchangeGroupWrite::PruneAll {
+            account_id: account_id.to_string(),
+        })
+        .await?;
         return Ok(0);
     }
 
@@ -203,19 +212,21 @@ pub async fn sync_exchange_groups(
         seen_server_ids.insert(group.id.clone());
 
         // Upsert the group
-        let g = group.clone();
-        let aid = account_id.to_string();
-        db.with_conn(move |conn| upsert_group(conn, &aid, &g))
-            .await?;
+        write(ExchangeGroupWrite::UpsertGroup {
+            account_id: account_id.to_string(),
+            group: group.clone(),
+        })
+        .await?;
 
         // Resolve and persist members
         match resolve_group_members(client, db, &group.id).await {
             Ok(result) => {
-                let gid = group.id.clone();
-                let aid = account_id.to_string();
-                let members = result.members;
-                db.with_conn(move |conn| persist_group_members(conn, &aid, &gid, &members))
-                    .await?;
+                write(ExchangeGroupWrite::ReplaceMembers {
+                    account_id: account_id.to_string(),
+                    server_group_id: group.id.clone(),
+                    members: result.members,
+                })
+                .await?;
                 log::info!(
                     "Resolved {} members for group '{}' ({})",
                     result.resolved_count,
@@ -234,12 +245,56 @@ pub async fn sync_exchange_groups(
     }
 
     // Prune stale groups that no longer exist on the server
-    let aid = account_id.to_string();
-    db.with_conn(move |conn| prune_stale_groups(conn, &aid, &seen_server_ids))
-        .await?;
+    write(ExchangeGroupWrite::PruneStale {
+        account_id: account_id.to_string(),
+        seen_server_ids,
+    })
+    .await?;
 
     log::info!("Exchange group sync complete: {group_count} groups for account {account_id}");
     Ok(group_count)
+}
+
+pub enum ExchangeGroupWrite {
+    UpsertGroup {
+        account_id: String,
+        group: ExchangeGroup,
+    },
+    ReplaceMembers {
+        account_id: String,
+        server_group_id: String,
+        members: Vec<ResolvedGroupMember>,
+    },
+    PruneStale {
+        account_id: String,
+        seen_server_ids: HashSet<String>,
+    },
+    PruneAll {
+        account_id: String,
+    },
+}
+
+pub fn persist_exchange_group_write(
+    conn: &WriteConn<'_>,
+    write: ExchangeGroupWrite,
+) -> Result<(), String> {
+    match write {
+        ExchangeGroupWrite::UpsertGroup { account_id, group } => {
+            upsert_group(conn, &account_id, &group)
+        }
+        ExchangeGroupWrite::ReplaceMembers {
+            account_id,
+            server_group_id,
+            members,
+        } => persist_group_members(conn, &account_id, &server_group_id, &members),
+        ExchangeGroupWrite::PruneStale {
+            account_id,
+            seen_server_ids,
+        } => prune_stale_groups(conn, &account_id, &seen_server_ids),
+        ExchangeGroupWrite::PruneAll { account_id } => {
+            delete_contact_groups_for_account_by_source(conn, &account_id, "exchange")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +355,7 @@ fn extract_member_email(member: &GraphGroupMember) -> Option<ResolvedGroupMember
 // ---------------------------------------------------------------------------
 
 fn upsert_group(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     group: &ExchangeGroup,
 ) -> Result<(), String> {
@@ -320,7 +375,7 @@ fn upsert_group(
 }
 
 fn persist_group_members(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     server_group_id: &str,
     members: &[ResolvedGroupMember],
@@ -343,11 +398,17 @@ fn persist_group_members(
 }
 
 fn prune_stale_groups(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     seen_server_ids: &HashSet<String>,
 ) -> Result<(), String> {
-    let all_groups = list_contact_groups_for_account_by_source(conn, account_id, "exchange")?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin prune groups tx: {e}"))?;
+    let all_groups = {
+        let read = tx.as_read();
+        list_contact_groups_for_account_by_source(&read, account_id, "exchange")?
+    };
 
     let stale: Vec<String> = all_groups
         .into_iter()
@@ -357,7 +418,7 @@ fn prune_stale_groups(
 
     for local_id in &stale {
         // Members cascade-deleted via FK
-        delete_contact_group_by_id(conn, local_id)?;
+        delete_contact_group_by_id(&tx, local_id)?;
     }
 
     if !stale.is_empty() {
@@ -367,15 +428,9 @@ fn prune_stale_groups(
         );
     }
 
+    tx.commit()
+        .map_err(|e| format!("commit prune groups tx: {e}"))?;
     Ok(())
-}
-
-async fn prune_all_account_groups(db: &ReadDbState, account_id: &str) -> Result<(), String> {
-    let aid = account_id.to_string();
-    db.with_conn(move |conn| {
-        delete_contact_groups_for_account_by_source(conn, &aid, "exchange")
-    })
-    .await
 }
 
 // ---------------------------------------------------------------------------

@@ -6,9 +6,8 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use db::db::queries::set_thread_starred;
+use db::db::queries::{set_thread_messages_starred, set_thread_starred};
 use db::progress::NoopProgressReporter;
-use rusqlite::params;
 
 /// Local DB mutation for star. Returns true if state changed.
 pub(crate) async fn star_local(
@@ -26,13 +25,8 @@ pub(crate) async fn star_local(
             .unchecked_transaction()
             .map_err(|e| format!("begin star transaction: {e}"))?;
         let thread_changed = set_thread_starred(&tx, &aid, &tid, starred).map(|n| n > 0)?;
-        let message_changed = tx
-            .execute(
-                "UPDATE messages SET is_starred = ?1 WHERE account_id = ?2 AND thread_id = ?3",
-                params![starred, aid, tid],
-            )
-            .map(|n| n > 0)
-            .map_err(|e| format!("update message starred flags: {e}"))?;
+        let message_changed =
+            set_thread_messages_starred(&tx, &aid, &tid, starred).map(|n| n > 0)?;
         tx.commit()
             .map_err(|e| format!("commit star transaction: {e}"))?;
         Ok(thread_changed || message_changed)

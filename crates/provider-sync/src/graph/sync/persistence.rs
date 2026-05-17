@@ -45,15 +45,27 @@ pub(super) async fn persist_messages(
         .map(|(tid, msgs)| (tid.to_string(), msgs.into_iter().cloned().collect()))
         .collect();
 
-    sctx.db
-        .with_conn(move |conn| {
+    let reaction_writes: Vec<GraphReactionWrite> = messages
+        .iter()
+        .filter(|m| m.owner_reaction_type.is_some() || m.reactions_count.is_some())
+        .map(|m| GraphReactionWrite {
+            message_id: m.base.id.clone(),
+            owner_reaction_type: m.owner_reaction_type.clone(),
+            reactions_count: m.reactions_count,
+            reacted_at: m.base.date,
+        })
+        .collect();
+
+    sctx.write_db
+        .with_write(move |conn| {
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            let user_emails = sync_persistence::query_user_emails(&tx)?;
+            let raw_tx = tx.as_raw_tx();
+            let user_emails = sync_persistence::query_user_emails(raw_tx)?;
             for (thread_id, msgs) in &thread_groups {
                 store_thread_to_db(
-                    &tx,
+                    raw_tx,
                     &aid,
                     thread_id,
                     msgs,
@@ -61,6 +73,7 @@ pub(super) async fn persist_messages(
                     &user_emails,
                 )?;
             }
+            insert_exchange_reactions(&tx, &aid, &reaction_writes)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
         })
@@ -91,7 +104,7 @@ pub(super) async fn delete_messages(
     let ids = message_ids.to_vec();
 
     // Delete from DB and update parent threads
-    sctx.db
+    sctx.write_db
         .with_conn(move |conn| {
             let tx = conn
                 .unchecked_transaction()
@@ -131,7 +144,6 @@ fn store_thread_to_db(
     upsert_thread_record(tx, account_id, thread_id, messages, shared_mailbox_id)?;
     upsert_graph_label_rows(tx, account_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
-    insert_exchange_reactions(tx, account_id, messages)?;
 
     // Populate thread_participants from message address fields.
     for msg in messages {
@@ -355,27 +367,23 @@ fn upsert_attachments(
     insert_attachments(tx, &rows)
 }
 
-/// Insert Exchange reactions from extended properties into `message_reactions`.
-///
-/// For each message with `owner_reaction_type` set, inserts a reaction row with
-/// `source = 'exchange_native'`. The reactor email is looked up from the
-/// `accounts` table. `reactions_count` is stored as a separate metadata row
-/// with `reactor_email = '__count__'` so it can be read back without a
-/// separate column.
+#[derive(Clone)]
+struct GraphReactionWrite {
+    message_id: String,
+    owner_reaction_type: Option<String>,
+    reactions_count: Option<i64>,
+    reacted_at: i64,
+}
+
 fn insert_exchange_reactions(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
-    messages: &[ParsedGraphMessage],
+    writes: &[GraphReactionWrite],
 ) -> Result<(), String> {
-    // Check if any message has reaction data before looking up the account email
-    let has_reactions = messages
-        .iter()
-        .any(|m| m.owner_reaction_type.is_some() || m.reactions_count.is_some());
-    if !has_reactions {
+    if writes.is_empty() {
         return Ok(());
     }
 
-    // Look up the authenticated user's email address
     let owner_email: String = tx
         .query_row(
             "SELECT email FROM accounts WHERE id = ?1",
@@ -384,26 +392,23 @@ fn insert_exchange_reactions(
         )
         .map_err(|e| format!("lookup account email for reactions: {e}"))?;
 
-    for msg in messages {
-        // Insert the owner's reaction if present
-        if let Some(emoji) = &msg.owner_reaction_type {
+    for write in writes {
+        if let Some(emoji) = &write.owner_reaction_type {
             upsert_message_reaction(
                 tx,
-                &msg.base.id,
+                &write.message_id,
                 account_id,
                 &owner_email,
                 emoji,
-                Some(msg.base.date),
+                Some(write.reacted_at),
                 "exchange_native",
             )?;
         }
 
-        // Store the total reactions count as a metadata row so we know
-        // there are other reactions beyond the owner's.
-        if let Some(count) = msg.reactions_count {
+        if let Some(count) = write.reactions_count {
             upsert_message_reaction_update_type(
                 tx,
-                &msg.base.id,
+                &write.message_id,
                 account_id,
                 "__count__",
                 &count.to_string(),
@@ -432,6 +437,7 @@ fn insert_exchange_reactions(
 pub(super) async fn refresh_reactions_for_recent_messages(
     client: &GraphClient,
     db: &ReadDbState,
+    write_db: &service_state::WriteDbState,
     account_id: &str,
 ) -> Result<usize, String> {
     // Find message IDs that have existing reaction rows (excluding the __count__ metadata)
@@ -551,8 +557,8 @@ pub(super) async fn refresh_reactions_for_recent_messages(
         if !reaction_updates.is_empty() {
             let aid3 = account_id.to_string();
             let email = owner_email.clone();
-            let batch_updated = db
-                .with_conn(move |conn| {
+            let batch_updated = write_db
+                .with_write(move |conn| {
                     let tx = conn
                         .unchecked_transaction()
                         .map_err(|e| format!("begin tx: {e}"))?;

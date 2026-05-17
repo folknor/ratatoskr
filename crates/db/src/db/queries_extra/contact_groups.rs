@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::super::ReadDbState;
+use super::super::{ReadConn, ReadDbState};
 use super::super::types::{DbContactGroup, DbContactGroupMember};
 use super::contacts::ExpandedGroupContact;
 use crate::db::from_row::FromRow;
@@ -215,6 +215,28 @@ pub async fn db_find_contact_group_id_by_name(
         .map_err(|e| e.to_string())
     })
     .await
+}
+
+/// Return (local_id, server_id) pairs for all contact groups owned by an
+/// account with a given source label.
+pub fn list_contact_groups_for_account_by_source(
+    conn: &ReadConn<'_>,
+    account_id: &str,
+    source: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, server_id FROM contact_groups \
+             WHERE account_id = ?1 AND source = ?2",
+        )
+        .map_err(|e| format!("list_contact_groups_for_account_by_source prepare: {e}"))?;
+
+    stmt.query_map(params![account_id, source], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .map_err(|e| format!("list_contact_groups_for_account_by_source query: {e}"))?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| format!("list_contact_groups_for_account_by_source collect: {e}"))
 }
 
 pub async fn db_expand_contact_group(

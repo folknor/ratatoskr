@@ -81,11 +81,6 @@ The PR 0 / PR 1 / PR 2 sections have been removed from this doc;
 their content is in the git history (start at `729eabe4 db boundary:
 complete the slice + fix review blockers` on `main`).
 
-Per-file bugs surfaced during the in-flight migration live in
-`docs/discrepancies.md`. That doc tracks concrete file:line items
-that are correctness/cleanup follow-ups; this doc tracks the
-structural shape.
-
 ## Root cause
 
 Three leaks compound:
@@ -793,13 +788,16 @@ non-escaping, and retires the untyped `with_conn*` shims.
      `db.with_write(move |conn| ...)`.
    - The pending-ops `_sync` helpers
      (`crates/db/src/db/pending_ops.rs`) have their `&Connection`
-     signatures retyped to `&WriteConn`. The async wrappers that
-     take `&ReadDbState` and execute writes (already callerless;
-     see `docs/discrepancies.md`) get deleted at the same time.
-   - The contact-groups / message-reactions / seen-address helpers
-     in `crates/db/src/db/queries_extra/calendar_contacts_writes.rs`
-     (the rest of the boundary work in `docs/discrepancies.md`)
-     get retyped here.
+     signatures retyped to `&WriteConn`.
+   - The `db::queries::set_thread_messages_starred` and similar
+     helpers that still take `&Connection` get retyped to
+     `&WriteConn`.
+   - `WriteTxn::as_raw_tx` (the transitional bridge added in the
+     gap-closing slice for `provider-sync/src/graph/sync/persistence.rs`
+     and the message_reactions helpers in `calendar_contacts_writes.rs`)
+     gets removed once the surrounding `&rusqlite::Transaction`-typed
+     helpers in `crates/db/src/db/queries_extra/{message,label}_persistence.rs`
+     are retyped to `&WriteTxn`.
 6. Tighten the transitive
    `crates/service-state/tests/lockdown.rs` check to assert that
    `app` cannot reach `service-state` through any path at all (the

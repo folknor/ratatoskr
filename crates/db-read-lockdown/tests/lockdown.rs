@@ -29,10 +29,37 @@ fn lockdown_trybuild_read_statement_no_execute() {
 }
 
 #[test]
+fn lockdown_trybuild_writer_types_do_not_resolve() {
+    isolate_trybuild_cargo_home();
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/writer_types_do_not_resolve.rs");
+}
+
+#[test]
 fn lockdown_trybuild_read_conn_query_row() {
     isolate_trybuild_cargo_home();
     let t = trybuild::TestCases::new();
     t.pass("tests/ui/read_conn_query_row.rs");
+}
+
+#[test]
+fn read_conn_query_row_rejects_mutating_sql() {
+    let raw = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+    raw.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER)", [])
+        .expect("create table");
+    raw.execute("INSERT INTO t (n) VALUES (1)", [])
+        .expect("insert row");
+
+    let read = db_read::ReadConn::from_raw(&raw);
+    let err = read
+        .query_row("UPDATE t SET n = 2 RETURNING n", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .expect_err("mutating query_row must fail");
+
+    assert!(
+        matches!(err, db_read::ReadError::NotReadOnly(sql) if sql == "UPDATE t SET n = 2 RETURNING n")
+    );
 }
 
 #[test]
@@ -153,9 +180,6 @@ fn db_read_raw_rusqlite_access_is_quarantined() {
     for entry in std::fs::read_dir(&src).expect("read db-read src") {
         let entry = entry.expect("dir entry");
         let path = entry.path();
-        if path.file_name().and_then(|n| n.to_str()) == Some("raw.rs") {
-            continue;
-        }
         if path.extension().and_then(|e| e.to_str()) != Some("rs") {
             continue;
         }

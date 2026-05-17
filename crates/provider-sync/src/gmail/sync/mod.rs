@@ -25,8 +25,7 @@ pub(crate) use delta::GmailSyncResult;
 pub(crate) struct SyncCtx<'a> {
     pub client: &'a GmailClient,
     pub account_id: &'a str,
-    /// Read view onto the writer connection (Phase 3 task 4 transitional
-    /// bridge).
+    pub write_db: &'a WriteDbState,
     pub db: &'a ReadDbState,
     pub body_store: &'a BodyStoreWriteState,
     pub inline_images: &'a InlineImageStoreWriteState,
@@ -46,7 +45,7 @@ pub async fn gmail_initial_sync(
     client: &GmailClient,
     account_id: &str,
     days_back: i64,
-    _db: &WriteDbState,
+    db: &WriteDbState,
     read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
@@ -60,6 +59,7 @@ pub async fn gmail_initial_sync(
     let ctx = SyncCtx {
         client,
         account_id,
+        write_db: db,
         db: read_db,
         body_store,
         inline_images,
@@ -101,8 +101,29 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
     }
 
     // Phase 4b: Sync Google otherContacts (non-fatal)
-    if let Err(e) =
-        super::contacts::sync_google_other_contacts(ctx.client, ctx.account_id, ctx.db).await
+    let write_db = ctx.write_db.clone();
+    if let Err(e) = super::contacts::sync_google_other_contacts(
+        ctx.client,
+        ctx.account_id,
+        ctx.db,
+        move |write| {
+            let write_db = write_db.clone();
+            async move {
+                write_db
+                    .with_write(move |conn| {
+                        let tx = conn
+                            .unchecked_transaction()
+                            .map_err(|e| format!("begin google other contacts tx: {e}"))?;
+                        super::contacts::persist_google_other_contacts_write(&tx, write)?;
+                        tx.commit()
+                            .map_err(|e| format!("commit google other contacts tx: {e}"))?;
+                        Ok(())
+                    })
+                    .await
+            }
+        },
+    )
+    .await
     {
         log::warn!("Google otherContacts initial sync failed (non-fatal): {e}");
     }
@@ -137,7 +158,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 pub async fn gmail_delta_sync(
     client: &GmailClient,
     account_id: &str,
-    _db: &WriteDbState,
+    db: &WriteDbState,
     read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
@@ -151,6 +172,7 @@ pub async fn gmail_delta_sync(
     let ctx = SyncCtx {
         client,
         account_id,
+        write_db: db,
         db: read_db,
         body_store,
         inline_images,

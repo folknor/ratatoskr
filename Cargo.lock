@@ -791,6 +791,7 @@ dependencies = [
  "serde",
  "serde_json",
  "service-state",
+ "sync",
  "tokio",
  "tokio-util",
  "urlencoding",
@@ -1526,6 +1527,7 @@ name = "db-read-lockdown"
 version = "0.1.0"
 dependencies = [
  "db-read",
+ "rusqlite",
  "trybuild",
 ]
 

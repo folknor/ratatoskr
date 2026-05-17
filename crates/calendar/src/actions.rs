@@ -14,14 +14,16 @@
 //! The Service-side `service::cal_actions::batch_execute` (Phase 6c-6)
 //! is the only caller; the UI dispatches via the
 //! `cal_action.execute_plan` IPC. Direct connection-lock patterns are
-//! replaced with `ctx.db.with_conn(...)` so writes go through the
+//! replaced with `ctx.write_db.with_conn(...)` so writes go through the
 //! writer-half exclusively.
 
 use gmail::client::GmailClient;
 use graph::client::GraphClient;
 use jmap::client::JmapClient;
 use action_types::{ActionError, ActionOutcome, CalendarActionContext, MutationLog};
-use db::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
+use db::db::queries_extra::{
+    set_calendar_event_remote_id_and_etag, update_calendar_event_fields_and_etag,
+};
 use rtsk::db::ReadDbState;
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
@@ -375,7 +377,7 @@ pub async fn create_calendar_event(
     let mut mlog = MutationLog::begin("create_calendar_event", account_id, calendar_id);
 
     // 1. Look up calendar_remote_id + local insert on the writer pool.
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let cid = calendar_id.to_string();
     let input_clone = input.clone();
@@ -438,7 +440,7 @@ pub async fn create_calendar_event(
         Ok(dto) => {
             mlog.set_remote_id(&dto.remote_event_id);
             // Store provider-assigned remote_event_id and etag
-            let db = ctx.db.clone();
+            let db = ctx.write_db.clone();
             let eid = event_id.clone();
             let _ = db
                 .with_write_mapped(
@@ -479,7 +481,7 @@ pub async fn update_calendar_event(
     let mut mlog = MutationLog::begin("update_calendar_event", "", event_id);
 
     // 1. Look up event metadata - use the event's own account_id, not the caller's
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let eid = event_id.to_string();
     let meta_result = db
         .with_conn_mapped(
@@ -513,7 +515,7 @@ pub async fn update_calendar_event(
 
     // 2. If no remote_event_id, this is a local-only event - update locally
     let Some(ref remote_event_id) = meta.remote_event_id else {
-        let db = ctx.db.clone();
+        let db = ctx.write_db.clone();
         let eid = event_id.to_string();
         let local_result = db
             .with_conn_mapped(
@@ -582,15 +584,13 @@ pub async fn update_calendar_event(
             // Update local DB with all edited fields + provider-returned etag.
             // Use input values (what the user edited) for all fields, plus etag
             // from the DTO for concurrency control.
-            let db = ctx.db.clone();
-            let db_for_etag = db.clone();
+            let db = ctx.write_db.clone();
             let eid = event_id.to_string();
-            let eid_for_etag = eid.clone();
             let event_account_id = meta.account_id.clone();
             let cal_id = meta.calendar_id.clone();
             let etag = dto.etag.clone();
-            let _ = db
-                .with_conn_mapped(
+            match db
+                .with_write_mapped(
                     move |conn| {
                         let params =
                             rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
@@ -607,24 +607,22 @@ pub async fn update_calendar_event(
                                 availability: input.availability,
                                 visibility: input.visibility,
                             };
-                        let _ = rtsk::db::queries_extra::calendars::update_calendar_event_sync(
-                            conn, &eid, &params,
-                        );
+                        update_calendar_event_fields_and_etag(
+                            conn,
+                            &eid,
+                            &params,
+                            etag.as_deref(),
+                        )
+                        .map_err(ActionError::db)?;
                         Ok(())
                     },
                     ActionError::db,
                 )
-                .await;
-            let _ = db_for_etag
-                .with_write_mapped(
-                    move |conn| {
-                        let _ = set_calendar_event_etag(conn, &eid_for_etag, etag.as_deref());
-                        Ok(())
-                    },
-                    ActionError::db,
-                )
-                .await;
-            ActionOutcome::Success
+                .await
+            {
+                Ok(()) => ActionOutcome::Success,
+                Err(error) => ActionOutcome::Failed { error },
+            }
         }
         Err(e) => ActionOutcome::Failed { error: e },
     };
@@ -641,7 +639,7 @@ pub async fn delete_calendar_event(
     let mut mlog = MutationLog::begin("delete_calendar_event", "", event_id);
 
     // 1. Look up event metadata - use the event's own account_id
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let eid = event_id.to_string();
     let meta_result = db
         .with_conn_mapped(
@@ -672,7 +670,7 @@ pub async fn delete_calendar_event(
 
     // 2. If no remote_event_id, local-only delete
     let Some(ref remote_event_id) = meta.remote_event_id else {
-        let db = ctx.db.clone();
+        let db = ctx.write_db.clone();
         let eid = event_id.to_string();
         let local_result = db
             .with_conn_mapped(
@@ -726,7 +724,7 @@ pub async fn delete_calendar_event(
     }
 
     // 4. Provider succeeded - delete locally
-    let db = ctx.db.clone();
+    let db = ctx.write_db.clone();
     let eid = event_id.to_string();
     let local_result = db
         .with_conn_mapped(

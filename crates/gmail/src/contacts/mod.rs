@@ -5,7 +5,9 @@ use serde::Deserialize;
 
 // Re-export public API
 pub use google_contacts::sync_google_contacts;
-pub use other_contacts::sync_google_other_contacts;
+pub use other_contacts::{
+    GoogleOtherContactsWrite, persist_google_other_contacts_write, sync_google_other_contacts,
+};
 
 // ---------------------------------------------------------------------------
 // Public types

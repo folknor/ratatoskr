@@ -548,6 +548,20 @@ impl<'a> WriteTxn<'a> {
     pub fn rollback(self) -> rusqlite::Result<()> {
         self.raw.rollback()
     }
+
+    pub fn as_read(&self) -> ReadConn<'_> {
+        ReadConn::from_raw(&self.raw)
+    }
+
+    /// Transitional bridge for writer-side crates whose helpers still
+    /// take `&rusqlite::Transaction`. Lets a `WriteTxn`-typed caller
+    /// hand the underlying transaction to those helpers without
+    /// duplicating their SQL. Goes away once those helpers are
+    /// retyped to `&WriteTxn` (plan PR 4).
+    #[doc(hidden)]
+    pub fn as_raw_tx(&self) -> &rusqlite::Transaction<'_> {
+        &self.raw
+    }
 }
 
 pub struct WriteStatement<'a> {

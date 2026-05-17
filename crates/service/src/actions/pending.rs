@@ -43,10 +43,11 @@ fn retry_policy(operation_type: &str) -> RetryPolicy {
 /// Called by action functions after determining the outcome. Only enqueues
 /// if `retryable` is true AND `reason.is_retryable()` (policy + capability).
 ///
-/// Deduplication is atomic: `db_pending_ops_enqueue` replaces any existing
-/// pending/executing op for the same (account_id, resource_id, operation_type)
-/// in a single connection hold. This handles both exact duplicates and
-/// directional updates (e.g., spam→unspam replaces stale params).
+/// Deduplication is atomic: `db_pending_ops_enqueue_sync` replaces any
+/// existing pending/executing op for the same (account_id, resource_id,
+/// operation_type) in a single connection hold. This handles both exact
+/// duplicates and directional updates (e.g., spam->unspam replaces stale
+/// params).
 pub async fn enqueue_if_retryable(
     ctx: &ActionContext,
     outcome: &ActionOutcome,
