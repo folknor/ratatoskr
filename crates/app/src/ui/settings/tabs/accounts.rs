@@ -367,6 +367,7 @@ fn account_editor_color_section<'a>(
         editor.account_color_index,
         &used_colors,
         SettingsMessage::AccountColorEditorChanged,
+        None,
     );
 
     section(

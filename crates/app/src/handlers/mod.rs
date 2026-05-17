@@ -23,7 +23,7 @@ pub(crate) mod search;
 pub mod signatures;
 
 use crate::ui::settings::SignatureEntry;
-use rtsk::db::queries_extra::navigation::AccountLabelsGroup;
+use rtsk::db::queries_extra::navigation::{AccountLabelsGroup, SettingsLabelGroupRow};
 
 /// Result variants for per-account label operations driven from the
 /// Mail Rules > Labels settings section.
@@ -43,6 +43,14 @@ pub enum LabelOp {
     RecoloredAck(Result<(), String>),
     /// `label.rename` ack for one `(account_id, label_id)`.
     RenamedAck(Result<(), String>),
+    /// User-visible label groups for the Settings > Labels top section.
+    /// Loaded via `query_label_groups_for_settings`. Writes (create /
+    /// rename / recolor / delete / member changes) will get their own
+    /// ack variants once the action service grows the matching ops.
+    GroupsLoaded(Result<Vec<SettingsLabelGroupRow>, String>),
+    /// `label_group.reorder` ack. Triggers a `label_groups` reload so
+    /// any consumer of the settings list sees the persisted order.
+    ReorderAck(Result<(), String>),
 }
 
 /// Result variants for signature operations, used as the output type

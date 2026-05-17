@@ -16,8 +16,8 @@ mod contacts;
 mod general;
 mod groups;
 mod import;
+mod filters;
 mod labels;
-mod mail_rules;
 mod people;
 mod reference;
 mod signatures;
@@ -32,7 +32,8 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         Tab::Theme => theme_panel::theme_tab(state),
         Tab::Notifications => behavior::notifications_tab(state),
         Tab::Composing => behavior::composing_tab(state),
-        Tab::MailRules => mail_rules::mail_rules_tab(state),
+        Tab::Labels => labels::labels_tab(state),
+        Tab::Filters => filters::filters_tab(state),
         Tab::People => people::people_tab(state),
         Tab::Shortcuts => reference::shortcuts_tab(),
         Tab::Ai => ai::ai_tab(state),
@@ -72,6 +73,9 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
             Some(SettingsSheetPage::EditGroup { .. }) => groups::group_editor_sheet(state),
             Some(SettingsSheetPage::ImportContacts) => import::import_wizard_sheet(state),
             Some(SettingsSheetPage::EditLabel { .. }) => labels::label_editor_sheet(state),
+            Some(SettingsSheetPage::EditLabelGroup { .. }) => {
+                labels::label_group_editor_sheet(state)
+            }
             None => column![].into(),
         };
 

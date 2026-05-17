@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS label_groups (
     name TEXT NOT NULL,
     color_bg TEXT NOT NULL,
     color_fg TEXT NOT NULL,
+    -- User-driven display order in Settings > Labels and the sidebar.
+    -- Lower values render first. Reordered by drag in Settings.
+    sort_order INTEGER NOT NULL DEFAULT 0,
     UNIQUE (name COLLATE NOCASE)
 );
 

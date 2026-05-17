@@ -34,19 +34,25 @@ impl Settings {
             }
         }
 
-        let row_step = SETTINGS_ROW_HEIGHT + 1.0;
+        // Different lists use different row heights. The +1.0 accounts
+        // for the divider rule between rows.
+        let row_step = if list_id == "label-groups" {
+            SETTINGS_TOGGLE_ROW_HEIGHT + 1.0
+        } else {
+            SETTINGS_ROW_HEIGHT + 1.0
+        };
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let raw_target = (point.y / row_step).max(0.0) as usize;
 
-        // Labels list - `list_id` is `labels:{account_id}`.
-        if let Some(account_id) = list_id.strip_prefix("labels:") {
-            let Some(labels) = self.label_rows_for_account_mut(account_id) else {
+        // Label-groups list (Settings > Labels top section).
+        if list_id == "label-groups" {
+            let count = self.label_groups.len();
+            if from >= count {
                 return Task::none();
-            };
-            let count = labels.len();
+            }
             let target = raw_target.min(count.saturating_sub(1));
             if target != from {
-                labels.swap(from, target);
+                self.label_groups.swap(from, target);
                 if let Some(ref mut drag) = self.drag_state {
                     drag.dragging_index = target;
                 }
@@ -55,6 +61,9 @@ impl Settings {
         }
 
         let count = self.list_items_mut(list_id).len();
+        if from >= count {
+            return Task::none();
+        }
         let target = raw_target.min(count.saturating_sub(1));
 
         if target != from {
@@ -67,22 +76,9 @@ impl Settings {
     }
 
     pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
-        // Labels live in `labels_by_account` and are handled in
-        // `handle_drag_move` via `label_rows_for_account_mut`. This helper
-        // only services the `EditableItem`-backed lists.
         match list_id {
             "filters" => &mut self.demo_filters,
             _ => &mut self.demo_filters,
         }
-    }
-
-    pub(super) fn label_rows_for_account_mut(
-        &mut self,
-        account_id: &str,
-    ) -> Option<&mut Vec<rtsk::db::queries_extra::navigation::AccountLabelRow>> {
-        self.labels_by_account
-            .iter_mut()
-            .find(|g| g.account_id == account_id)
-            .map(|g| &mut g.labels)
     }
 }

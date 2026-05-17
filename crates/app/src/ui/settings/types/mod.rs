@@ -26,7 +26,8 @@ pub enum Tab {
     Theme,
     Notifications,
     Composing,
-    MailRules,
+    Labels,
+    Filters,
     People,
     Shortcuts,
     Ai,
@@ -40,7 +41,8 @@ impl Tab {
         Tab::Theme,
         Tab::Notifications,
         Tab::Composing,
-        Tab::MailRules,
+        Tab::Labels,
+        Tab::Filters,
         Tab::People,
         Tab::Shortcuts,
         Tab::Ai,
@@ -54,7 +56,8 @@ impl Tab {
             Tab::Theme => "Theme",
             Tab::Notifications => "Notifications",
             Tab::Composing => "Composing",
-            Tab::MailRules => "Mail Rules",
+            Tab::Labels => "Labels",
+            Tab::Filters => "Filters",
             Tab::People => "People",
             Tab::Shortcuts => "Shortcuts",
             Tab::Ai => "AI",
@@ -70,7 +73,8 @@ impl Tab {
             Tab::Theme => icon::palette(),
             Tab::Notifications => icon::bell(),
             Tab::Composing => icon::pencil(),
-            Tab::MailRules => icon::filter(),
+            Tab::Labels => icon::tag(),
+            Tab::Filters => icon::filter(),
             Tab::People => icon::users(),
             Tab::Shortcuts => icon::zap(),
             Tab::Ai => icon::globe(),
@@ -158,6 +162,13 @@ pub struct LabelEditorState {
     pub color_fg: String,
     /// True if `color_bg`/`color_fg` came from an existing user color.
     pub has_override: bool,
+    /// Index into `label_colors::preset_colors::all_presets()` for the
+    /// currently selected swatch. None if no preset matches.
+    pub color_index: Option<usize>,
+    /// `labels.is_undeletable = 1`. When true, hide the Delete button
+    /// in the editor sheet - name and colour stay editable. Today this
+    /// covers Graph importance synth tags.
+    pub is_undeletable: bool,
     /// Show the destructive delete confirmation modal.
     pub show_delete_confirmation: bool,
     /// True once the user has edited any field.
@@ -166,13 +177,20 @@ pub struct LabelEditorState {
 
 impl LabelEditorState {
     pub fn new_create() -> Self {
+        let presets = label_colors::preset_colors::all_presets();
+        let (color_bg, color_fg) = presets
+            .first()
+            .map(|(_, bg, fg)| ((*bg).to_owned(), (*fg).to_owned()))
+            .unwrap_or_else(|| ("#999999".to_owned(), "#ffffff".to_owned()));
         Self {
             account_id: String::new(),
             label_id: String::new(),
             name: String::new(),
-            color_bg: "#999999".to_owned(),
-            color_fg: "#ffffff".to_owned(),
+            color_bg,
+            color_fg,
             has_override: false,
+            color_index: Some(0),
+            is_undeletable: false,
             show_delete_confirmation: false,
             dirty: false,
         }
@@ -181,6 +199,9 @@ impl LabelEditorState {
     pub fn from_row(
         row: &rtsk::db::queries_extra::navigation::AccountLabelRow,
     ) -> Self {
+        let presets = label_colors::preset_colors::all_presets();
+        let color_index = label_colors::preset_colors::nearest_exchange_preset(&row.color_bg)
+            .and_then(|name| presets.iter().position(|(n, _, _)| *n == name));
         Self {
             account_id: row.account_id.clone(),
             label_id: row.label_id.clone(),
@@ -188,6 +209,79 @@ impl LabelEditorState {
             color_bg: row.color_bg.clone(),
             color_fg: row.color_fg.clone(),
             has_override: row.has_color_override,
+            color_index,
+            is_undeletable: row.is_undeletable,
+            show_delete_confirmation: false,
+            dirty: false,
+        }
+    }
+}
+
+/// State for the label-group editor sheet.
+///
+/// Edits target one `label_groups` row. Create mode leaves `group_id` as
+/// None and the row is inserted on save. Member edits stage adds/removes
+/// locally and commit atomically with the save.
+#[derive(Debug, Clone)]
+pub struct LabelGroupEditorState {
+    /// Group being edited. None in create mode.
+    pub group_id: Option<i64>,
+    /// User-editable display name.
+    pub name: String,
+    /// User-selected background colour hex.
+    pub color_bg: String,
+    /// User-selected foreground colour hex.
+    pub color_fg: String,
+    /// Index into `label_colors::preset_colors::all_presets()` for the
+    /// currently selected swatch. None if no preset matches (e.g. legacy
+    /// hex). Drives the colour grid's selected ring.
+    pub color_index: Option<usize>,
+    /// Staged member set: `(account_id, label_id)` pairs the group will
+    /// contain on save. Loaded from `label_group_members` on open;
+    /// mutated by the picker.
+    pub members: Vec<(String, String)>,
+    /// Show the destructive delete confirmation modal.
+    pub show_delete_confirmation: bool,
+    /// True once the user has edited any field.
+    pub dirty: bool,
+}
+
+impl LabelGroupEditorState {
+    pub fn new_create() -> Self {
+        // Default to the first preset so the colour grid has a sensible
+        // selection from the start. Matches the account-editor pattern.
+        let presets = label_colors::preset_colors::all_presets();
+        let (color_bg, color_fg) = presets
+            .first()
+            .map(|(_, bg, fg)| ((*bg).to_owned(), (*fg).to_owned()))
+            .unwrap_or_else(|| ("#999999".to_owned(), "#ffffff".to_owned()));
+        Self {
+            group_id: None,
+            name: String::new(),
+            color_bg,
+            color_fg,
+            color_index: Some(0),
+            members: Vec::new(),
+            show_delete_confirmation: false,
+            dirty: false,
+        }
+    }
+
+    pub fn from_row(
+        row: &rtsk::db::queries_extra::navigation::SettingsLabelGroupRow,
+    ) -> Self {
+        // Snap the stored hex to the nearest preset so the grid has a
+        // selected swatch even for legacy / arbitrary hex values.
+        let presets = label_colors::preset_colors::all_presets();
+        let color_index = label_colors::preset_colors::nearest_exchange_preset(&row.color_bg)
+            .and_then(|name| presets.iter().position(|(n, _, _)| *n == name));
+        Self {
+            group_id: Some(row.id),
+            name: row.name.clone(),
+            color_bg: row.color_bg.clone(),
+            color_fg: row.color_fg.clone(),
+            color_index,
+            members: Vec::new(),
             show_delete_confirmation: false,
             dirty: false,
         }
@@ -256,6 +350,11 @@ pub struct Settings {
     pub labels_by_account: Vec<rtsk::db::queries_extra::navigation::AccountLabelsGroup>,
     /// Label editor sheet state (Mail Rules > Labels).
     pub editing_label: Option<LabelEditorState>,
+    /// User-visible label groups, top section of Settings > Labels.
+    /// Loaded from `query_label_groups_for_settings`.
+    pub label_groups: Vec<rtsk::db::queries_extra::navigation::SettingsLabelGroupRow>,
+    /// Label group editor sheet state (Settings > Labels top section).
+    pub editing_label_group: Option<LabelGroupEditorState>,
     // Demo data for Mail Rules > Filters (placeholder until filters land).
     pub demo_filters: Vec<EditableItem>,
     // Accounts tab
@@ -480,6 +579,8 @@ impl Default for Settings {
             hovered_help: None,
             drag_state: None,
             labels_by_account: Vec::new(),
+            label_groups: Vec::new(),
+            editing_label_group: None,
             demo_filters: vec![
                 EditableItem {
                     label: "Auto-archive promotions".into(),

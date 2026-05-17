@@ -146,6 +146,7 @@ impl AddAccountWizard {
             self.identity.selected_color_index,
             &self.used_colors,
             AddAccountMessage::SelectColor,
+            None,
         ));
 
         if let Some(ref err) = self.error {

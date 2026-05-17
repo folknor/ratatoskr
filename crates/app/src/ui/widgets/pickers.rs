@@ -186,6 +186,7 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
     selected: Option<usize>,
     used_colors: &[String],
     on_select: impl Fn(usize) -> M + 'a,
+    on_custom: Option<M>,
 ) -> Element<'a, M> {
     let used_colors: Vec<String> = used_colors.to_vec();
     iced::widget::Responsive::new(move |size| {
@@ -206,6 +207,7 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
 
         let mut grid = column![].spacing(SPACE_XS);
         let mut current_row = row![].spacing(SPACE_XS);
+        let mut count: usize = 0;
 
         for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
             let is_selected = selected == Some(i);
@@ -239,14 +241,38 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
             };
 
             current_row = current_row.push(cell);
+            count += 1;
 
-            if (i + 1) % cols == 0 {
+            if count.is_multiple_of(cols) {
                 grid = grid.push(current_row);
                 current_row = row![].spacing(SPACE_XS);
             }
         }
 
-        if !presets.len().is_multiple_of(cols) {
+        // Optional "+" tile for opening a custom-colour picker. Rendered
+        // as the final cell in the grid so it wraps naturally with the
+        // swatches above.
+        if let Some(msg) = on_custom.clone() {
+            let plus_cell: Element<'_, M> = button(
+                container(text("+").size(TEXT_TITLE).style(text::base))
+                    .width(COLOR_SWATCH_SIZE)
+                    .height(COLOR_SWATCH_SIZE)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(msg)
+            .padding(PAD_COLOR_SWATCH)
+            .style(theme::ButtonClass::BareTransparent.style())
+            .into();
+            current_row = current_row.push(plus_cell);
+            count += 1;
+            if count.is_multiple_of(cols) {
+                grid = grid.push(current_row);
+                current_row = row![].spacing(SPACE_XS);
+            }
+        }
+
+        if !count.is_multiple_of(cols) {
             grid = grid.push(current_row);
         }
 

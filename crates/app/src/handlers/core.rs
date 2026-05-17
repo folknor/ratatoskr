@@ -603,6 +603,13 @@ impl ReadyApp {
             SettingsEvent::SaveGroup(group, members) => self.handle_save_group(group, members),
             SettingsEvent::DeleteGroup(id) => self.handle_delete_group(id),
             SettingsEvent::LoadGroupMembers(group_id) => self.handle_load_group_members(group_id),
+            SettingsEvent::LoadLabelGroupMembers(group_id) => {
+                handlers::labels::load_label_group_members_async(&self.db, group_id)
+            }
+            SettingsEvent::ReorderLabelGroups(orders) => {
+                handlers::labels::reorder_label_groups_async(&self.db, orders)
+                    .map(Message::LabelOp)
+            }
             SettingsEvent::ExecuteContactImport {
                 prepared,
                 account_id,
@@ -669,6 +676,22 @@ impl ReadyApp {
                 log::error!("Failed to load per-account labels: {e}");
                 return Task::none();
             }
+            handlers::LabelOp::GroupsLoaded(Ok(groups)) => {
+                self.settings.label_groups = groups;
+                return Task::none();
+            }
+            handlers::LabelOp::GroupsLoaded(Err(e)) => {
+                log::error!("Failed to load label groups: {e}");
+                return Task::none();
+            }
+            handlers::LabelOp::ReorderAck(Ok(())) => {
+                return handlers::labels::load_label_groups_async(&self.db)
+                    .map(Message::LabelOp);
+            }
+            handlers::LabelOp::ReorderAck(Err(e)) => {
+                log::error!("Failed to persist label group order: {e}");
+                return Task::none();
+            }
             handlers::LabelOp::CreatedAck(Err(ref e))
             | handlers::LabelOp::RenamedAck(Err(ref e))
             | handlers::LabelOp::DeletedAck(Err(ref e))
@@ -683,7 +706,10 @@ impl ReadyApp {
         };
 
         if mutated {
-            handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp)
+            Task::batch([
+                handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp),
+                handlers::labels::load_label_groups_async(&self.db).map(Message::LabelOp),
+            ])
         } else {
             Task::none()
         }
@@ -1067,6 +1093,8 @@ impl ReadyApp {
             handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp);
         let labels_task =
             handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp);
+        let label_groups_task =
+            handlers::labels::load_label_groups_async(&self.db).map(Message::LabelOp);
         let sync_task = self.sync_all_accounts();
         let auto_reply_task = self.check_auto_reply_status();
         // Per-account thread_participants backfill used to run from here.
@@ -1084,6 +1112,7 @@ impl ReadyApp {
             self.load_navigation_and_threads(),
             sig_task,
             labels_task,
+            label_groups_task,
             sync_task,
             auto_reply_task,
         ])

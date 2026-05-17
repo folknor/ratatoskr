@@ -173,7 +173,12 @@ pub enum SettingsMessage {
     /// Name field in the editor changed.
     LabelEditorNameChanged(String),
     /// User picked a new color in the editor.
-    LabelEditorColorChanged(String, String),
+    /// Index into `label_colors::preset_colors::all_presets()` for the
+    /// swatch the user picked.
+    LabelEditorColorChanged(usize),
+    /// User clicked the "+" tile in the colour grid - open a custom
+    /// colour picker. Stub until the picker lands.
+    LabelEditorOpenCustomColor,
     /// User reset the override (use synced/hash color again).
     LabelEditorColorReset,
     /// Save the editor (create or rename + recolor).
@@ -186,6 +191,39 @@ pub enum SettingsMessage {
     LabelEditorConfirmDelete,
     /// Cancel the confirm-delete dialog.
     LabelEditorCancelDelete,
+
+    // ── Settings > Labels group editor ─────────────────────
+    /// Open the label-group editor sheet. None = create new.
+    OpenLabelGroupEditor {
+        group_id: Option<i64>,
+    },
+    /// Name field in the group editor changed.
+    LabelGroupEditorNameChanged(String),
+    /// User picked a new colour in the group editor. Index into
+    /// `label_colors::preset_colors::all_presets()`.
+    LabelGroupEditorColorChanged(usize),
+    /// User clicked the "+" tile in the colour grid - open a custom
+    /// colour picker. Stub until the picker lands.
+    LabelGroupEditorOpenCustomColor,
+    /// Add a raw `(account_id, label_id)` tag as a member of the group
+    /// being edited.
+    LabelGroupEditorAddMember(String, String),
+    /// Remove a raw `(account_id, label_id)` tag from the group being
+    /// edited.
+    LabelGroupEditorRemoveMember(String, String),
+    /// Async load result: existing members of the label group currently
+    /// being edited.
+    LabelGroupMembersLoaded(i64, Result<Vec<(String, String)>, String>),
+    /// Save the group editor (create or update + members).
+    LabelGroupEditorSave,
+    /// Delete the group being edited.
+    LabelGroupEditorDelete,
+    /// Cancel and close the editor without saving.
+    LabelGroupEditorCancel,
+    /// Confirm-delete dialog shown.
+    LabelGroupEditorConfirmDelete,
+    /// Cancel the confirm-delete dialog.
+    LabelGroupEditorCancelDelete,
 }
 
 /// Events the settings component emits upward to the App.
@@ -228,6 +266,8 @@ pub enum SettingsEvent {
     LoadGroups(String),
     /// Request the App to load group members by group ID.
     LoadGroupMembers(String),
+    /// Load `(account_id, label_id)` members for a `label_groups` row.
+    LoadLabelGroupMembers(i64),
     /// Request the App to execute a contact import.
     ExecuteContactImport {
         prepared: import::PreparedImport,
@@ -236,6 +276,9 @@ pub enum SettingsEvent {
     },
     /// Request the App to persist reordered account sort orders.
     ReorderAccounts(Vec<(String, i64)>),
+    /// Persist a new ordering for label groups. Pairs are
+    /// `(label_groups.id, sort_order)`.
+    ReorderLabelGroups(Vec<(i64, i64)>),
     /// Request the App to open the re-auth wizard for an account.
     ReauthenticateAccount(String),
 }
@@ -265,6 +308,11 @@ pub enum SettingsSheetPage {
     EditLabel {
         account_id: String,
         label_id: String,
+    },
+    /// User-visible label group editor.
+    /// None = creating a new group.
+    EditLabelGroup {
+        group_id: Option<i64>,
     },
 }
 

@@ -4,6 +4,7 @@ use rand::RngExt;
 use rusqlite::Connection;
 
 use db::db::queries_extra::{NonReactionMessage, ThreadAggregate};
+use types::{ImportanceLevel, MailProviderKind};
 
 use crate::accounts::Account;
 use crate::contacts;
@@ -570,6 +571,27 @@ pub fn generate_threads(
                 rusqlite::params![thread_id, acc.id, label_id],
             )
             .map_err(|e| format!("insert thread_label (user): {e}"))?;
+        }
+
+        // Graph importance: mutually exclusive high/low, ~12%/4% of threads.
+        // See `reference/glossary/folders-labels.md` (Microsoft Graph row).
+        if MailProviderKind::parse(&acc.provider) == Ok(MailProviderKind::Graph) {
+            let roll = rng.random::<f64>();
+            let level = if roll < 0.12 {
+                Some(ImportanceLevel::High)
+            } else if roll < 0.16 {
+                Some(ImportanceLevel::Low)
+            } else {
+                None
+            };
+            if let Some(level) = level {
+                conn.execute(
+                    "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![thread_id, acc.id, level.label_id()],
+                )
+                .map_err(|e| format!("insert thread_label (importance): {e}"))?;
+            }
         }
     }
 

@@ -339,6 +339,39 @@ impl Component for Settings {
                 self.open_group_editor(&id);
                 return (Task::none(), Some(SettingsEvent::LoadGroupMembers(id)));
             }
+            SettingsMessage::ListDragEnd(ref list_id) if list_id == "label-groups" => {
+                let was_dragging = self
+                    .drag_state
+                    .as_ref()
+                    .is_some_and(|d| d.is_dragging && d.list_id == "label-groups");
+                self.drag_state = None;
+                if was_dragging {
+                    let orders: Vec<(i64, i64)> = self
+                        .label_groups
+                        .iter()
+                        .enumerate()
+                        .map(|(i, g)| {
+                            #[allow(clippy::cast_possible_wrap)]
+                            (g.id, i as i64)
+                        })
+                        .collect();
+                    return (
+                        Task::none(),
+                        Some(SettingsEvent::ReorderLabelGroups(orders)),
+                    );
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::OpenLabelGroupEditor { group_id } => {
+                self.open_label_group_editor(group_id);
+                if let Some(id) = group_id {
+                    return (
+                        Task::none(),
+                        Some(SettingsEvent::LoadLabelGroupMembers(id)),
+                    );
+                }
+                return (Task::none(), None);
+            }
             _ => self.handle_simple_message(message),
         }
         (Task::none(), None)
@@ -350,6 +383,25 @@ impl Component for Settings {
 }
 
 impl Settings {
+    /// Open the label-group editor sheet. None = create new; Some(id) =
+    /// edit existing. Members are loaded async by the caller via
+    /// `SettingsEvent::LoadLabelGroupMembers` because we do not have DB
+    /// access here.
+    pub(super) fn open_label_group_editor(&mut self, group_id: Option<i64>) {
+        let editor = match group_id {
+            None => LabelGroupEditorState::new_create(),
+            Some(id) => self
+                .label_groups
+                .iter()
+                .find(|g| g.id == id)
+                .map(LabelGroupEditorState::from_row)
+                .unwrap_or_else(LabelGroupEditorState::new_create),
+        };
+        self.editing_label_group = Some(editor);
+        self.active_sheet = Some(SettingsSheetPage::EditLabelGroup { group_id });
+        self.sheet_anim.go_mut(true, Instant::now());
+    }
+
     fn handle_simple_message(&mut self, message: SettingsMessage) {
         match message {
             SettingsMessage::Noop
@@ -789,13 +841,23 @@ impl Settings {
                     editor.dirty = true;
                 }
             }
-            SettingsMessage::LabelEditorColorChanged(bg, fg) => {
-                if let Some(ref mut editor) = self.editing_label {
-                    editor.color_bg = bg;
-                    editor.color_fg = fg;
+            SettingsMessage::LabelEditorColorChanged(idx) => {
+                let presets = label_colors::preset_colors::all_presets();
+                if let Some(ref mut editor) = self.editing_label
+                    && let Some((_, bg, fg)) = presets.get(idx)
+                {
+                    editor.color_bg = (*bg).to_owned();
+                    editor.color_fg = (*fg).to_owned();
                     editor.has_override = true;
+                    editor.color_index = Some(idx);
                     editor.dirty = true;
                 }
+            }
+            SettingsMessage::LabelEditorOpenCustomColor => {
+                // Stub: custom-colour picker not yet implemented.
+            }
+            SettingsMessage::LabelGroupEditorOpenCustomColor => {
+                // Stub: custom-colour picker not yet implemented.
             }
             SettingsMessage::LabelEditorColorReset => {
                 if let Some(ref mut editor) = self.editing_label {
@@ -820,6 +882,74 @@ impl Settings {
             }
             SettingsMessage::LabelEditorCancel => {
                 self.editing_label = None;
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
+            }
+
+            // ── Label group editor ──────────────────────
+            SettingsMessage::LabelGroupEditorNameChanged(v) => {
+                if let Some(ref mut editor) = self.editing_label_group {
+                    editor.name = v;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::LabelGroupEditorColorChanged(idx) => {
+                let presets = label_colors::preset_colors::all_presets();
+                if let Some(ref mut editor) = self.editing_label_group
+                    && let Some((_, bg, fg)) = presets.get(idx)
+                {
+                    editor.color_bg = (*bg).to_owned();
+                    editor.color_fg = (*fg).to_owned();
+                    editor.color_index = Some(idx);
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::LabelGroupEditorSave => {
+                // Stub: real save lands once action-service ops exist.
+            }
+            SettingsMessage::LabelGroupEditorDelete => {
+                // Stub: real delete lands once action-service ops exist.
+            }
+            SettingsMessage::LabelGroupEditorConfirmDelete => {
+                if let Some(ref mut editor) = self.editing_label_group {
+                    editor.show_delete_confirmation = true;
+                }
+            }
+            SettingsMessage::LabelGroupMembersLoaded(group_id, Ok(members)) => {
+                if let Some(ref mut editor) = self.editing_label_group
+                    && editor.group_id == Some(group_id)
+                {
+                    editor.members = members;
+                }
+            }
+            SettingsMessage::LabelGroupMembersLoaded(_, Err(e)) => {
+                log::error!("Failed to load label group members: {e}");
+            }
+            SettingsMessage::LabelGroupEditorAddMember(account_id, label_id) => {
+                if let Some(ref mut editor) = self.editing_label_group {
+                    let key = (account_id, label_id);
+                    if !editor.members.contains(&key) {
+                        editor.members.push(key);
+                        editor.dirty = true;
+                    }
+                }
+            }
+            SettingsMessage::LabelGroupEditorRemoveMember(account_id, label_id) => {
+                if let Some(ref mut editor) = self.editing_label_group {
+                    let key = (account_id, label_id);
+                    if let Some(pos) = editor.members.iter().position(|m| m == &key) {
+                        editor.members.remove(pos);
+                        editor.dirty = true;
+                    }
+                }
+            }
+            SettingsMessage::LabelGroupEditorCancelDelete => {
+                if let Some(ref mut editor) = self.editing_label_group {
+                    editor.show_delete_confirmation = false;
+                }
+            }
+            SettingsMessage::LabelGroupEditorCancel => {
+                self.editing_label_group = None;
                 self.active_sheet = None;
                 self.sheet_anim.go_mut(false, Instant::now());
             }

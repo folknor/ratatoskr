@@ -934,6 +934,10 @@ pub struct AccountLabelRow {
     pub color_fg: String,
     pub has_color_override: bool,
     pub sort_order: i64,
+    /// `labels.is_undeletable = 1`. Today covers Graph importance synth
+    /// tags (`importance:high` / `importance:low`). Editable (name +
+    /// colour) but the Delete action must be hidden.
+    pub is_undeletable: bool,
 }
 
 /// Per-account section of the settings label list. Header text is the
@@ -989,7 +993,8 @@ pub fn query_labels_by_account(
         .prepare(
             "SELECT id, account_id, name, server_color_bg, server_color_fg, \
                     user_color_bg, user_color_fg, \
-                    COALESCE(sort_order, 0) AS sort_order \
+                    COALESCE(sort_order, 0) AS sort_order, \
+                    COALESCE(is_undeletable, 0) AS is_undeletable \
              FROM labels \
              WHERE COALESCE(visible, 1) = 1 \
              ORDER BY account_id, sort_order, name",
@@ -1006,12 +1011,13 @@ pub fn query_labels_by_account(
                 row.get::<_, Option<String>>("user_color_bg")?,
                 row.get::<_, Option<String>>("user_color_fg")?,
                 row.get::<_, i64>("sort_order")?,
+                row.get::<_, i64>("is_undeletable")? != 0,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     for r in lbl_rows {
-        let (label_id, account_id, name, server_color_bg, server_color_fg, user_color_bg, user_color_fg, sort_order) =
+        let (label_id, account_id, name, server_color_bg, server_color_fg, user_color_bg, user_color_fg, sort_order, is_undeletable) =
             r.map_err(|e| e.to_string())?;
 
         let user_pair = label_colors::LabelStyleHex::from_optional_pair(
@@ -1042,6 +1048,7 @@ pub fn query_labels_by_account(
                 color_fg: fg,
                 has_color_override,
                 sort_order,
+                is_undeletable,
             });
         }
     }
@@ -1050,4 +1057,92 @@ pub fn query_labels_by_account(
     groups.retain(|g| !g.labels.is_empty());
 
     Ok(groups)
+}
+
+/// One row in the Settings > Labels top section. Represents a user-created
+/// `label_groups` row with its resolved colour and current member count.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsLabelGroupRow {
+    pub id: i64,
+    pub name: String,
+    pub color_bg: String,
+    pub color_fg: String,
+    pub member_count: i64,
+}
+
+/// Persist a new ordering for label groups. Each `(group_id, sort_order)`
+/// pair is written in a single transaction. Drives drag-to-reorder in
+/// Settings > Labels.
+pub fn update_label_group_sort_order_sync(
+    conn: &Connection,
+    updates: &[(i64, i64)],
+) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("label_group.reorder begin tx: {e}"))?;
+    {
+        let mut stmt = tx
+            .prepare("UPDATE label_groups SET sort_order = ?1 WHERE id = ?2")
+            .map_err(|e| e.to_string())?;
+        for (id, order) in updates {
+            stmt.execute(params![order, id])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit()
+        .map_err(|e| format!("label_group.reorder commit: {e}"))?;
+    Ok(())
+}
+
+/// Members of one `label_groups` row as `(account_id, label_id)` pairs.
+/// Used to populate the editor sheet on open.
+pub fn query_label_group_members(
+    conn: &Connection,
+    group_id: i64,
+) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT account_id, label_id \
+             FROM label_group_members \
+             WHERE group_id = ?1 \
+             ORDER BY account_id, label_id",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![group_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+/// All user-visible label groups, ordered by name, with their member counts.
+/// Drives the top section of the Labels settings tab.
+pub fn query_label_groups_for_settings(
+    conn: &Connection,
+) -> Result<Vec<SettingsLabelGroupRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT lg.id, lg.name, lg.color_bg, lg.color_fg, \
+                    (SELECT COUNT(*) FROM label_group_members lgm \
+                     WHERE lgm.group_id = lg.id) AS member_count \
+             FROM label_groups lg \
+             ORDER BY lg.sort_order ASC, lg.name COLLATE NOCASE ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map([], |row| {
+        Ok(SettingsLabelGroupRow {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            color_bg: row.get("color_bg")?,
+            color_fg: row.get("color_fg")?,
+            member_count: row.get("member_count")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }
