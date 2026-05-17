@@ -1,5 +1,7 @@
 use rusqlite::Connection;
 
+use super::ReadConn;
+
 /// Trait for types that can be constructed from a `rusqlite::Row`.
 pub trait FromRow: Sized {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self>;
@@ -126,32 +128,71 @@ macro_rules! impl_from_row_munch {
     };
 }
 
+pub trait QuerySource {
+    fn query_as<T: FromRow>(
+        &self,
+        sql: &str,
+        params: &[&dyn rusqlite::types::ToSql],
+    ) -> Result<Vec<T>, String>;
+
+    fn query_one<T: FromRow>(
+        &self,
+        sql: &str,
+        params: &[&dyn rusqlite::types::ToSql],
+    ) -> Result<Option<T>, String>;
+}
+
+macro_rules! impl_query_source {
+    ($ty:ty) => {
+        impl QuerySource for $ty {
+            fn query_as<T: FromRow>(
+                &self,
+                sql: &str,
+                params: &[&dyn rusqlite::types::ToSql],
+            ) -> Result<Vec<T>, String> {
+                let mut stmt = self.prepare(sql).map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(params, T::from_row)
+                    .map_err(|e| e.to_string())?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())
+            }
+
+            fn query_one<T: FromRow>(
+                &self,
+                sql: &str,
+                params: &[&dyn rusqlite::types::ToSql],
+            ) -> Result<Option<T>, String> {
+                let mut stmt = self.prepare(sql).map_err(|e| e.to_string())?;
+                let mut rows = stmt
+                    .query_map(params, T::from_row)
+                    .map_err(|e| e.to_string())?;
+                match rows.next() {
+                    Some(row) => Ok(Some(row.map_err(|e| e.to_string())?)),
+                    None => Ok(None),
+                }
+            }
+        }
+    };
+}
+
+impl_query_source!(Connection);
+impl_query_source!(ReadConn<'_>);
+
 /// Execute a query and map all rows to `T` using `FromRow`.
 pub fn query_as<T: FromRow>(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     sql: &str,
     params: &[&dyn rusqlite::types::ToSql],
 ) -> Result<Vec<T>, String> {
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params, T::from_row)
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    conn.query_as(sql, params)
 }
 
 /// Execute a query and map the first row, returning `None` if no rows match.
 pub fn query_one<T: FromRow>(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     sql: &str,
     params: &[&dyn rusqlite::types::ToSql],
 ) -> Result<Option<T>, String> {
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    let mut rows = stmt
-        .query_map(params, T::from_row)
-        .map_err(|e| e.to_string())?;
-    match rows.next() {
-        Some(row) => Ok(Some(row.map_err(|e| e.to_string())?)),
-        None => Ok(None),
-    }
+    conn.query_one(sql, params)
 }

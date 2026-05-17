@@ -76,6 +76,28 @@ fn service_crate_can_still_construct_write_state() {
     );
 }
 
+#[test]
+fn main_db_state_arc_escape_constructors_stay_deleted() {
+    let banned = ["from", "_arc("].concat();
+    for suffix in [
+        "crates/db/src",
+        "crates/db-read/src",
+        "crates/service-state/src",
+    ] {
+        for path in rust_files_under(&workspace_path(suffix)) {
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            assert!(
+                !raw.contains(&banned),
+                "{} contains a raw Arc constructor or call; main DB state \
+                 construction must go through open_writer_pool/open_reader_pool \
+                 and WriteDbState::from_pool",
+                path.display(),
+            );
+        }
+    }
+}
+
 fn workspace_path(suffix: &str) -> PathBuf {
     // `CARGO_MANIFEST_DIR` is `crates/service-state`; walk two levels
     // up to reach the workspace root.
@@ -85,6 +107,29 @@ fn workspace_path(suffix: &str) -> PathBuf {
         .and_then(std::path::Path::parent)
         .unwrap_or_else(|| panic!("unexpected manifest dir: {}", manifest_dir.display()));
     workspace_root.join(suffix)
+}
+
+fn rust_files_under(root: &std::path::Path) -> Vec<PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(&path)
+                .unwrap_or_else(|e| panic!("read dir {}: {e}", path.display()))
+            {
+                pending.push(entry.expect("dir entry").path());
+            }
+            continue;
+        }
+
+        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+
+    files.sort();
+    files
 }
 
 /// Phase 6c-11: cal-out-of-app lockdown (the 6b-deferred check, refocused).

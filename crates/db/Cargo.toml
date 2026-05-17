@@ -14,6 +14,7 @@ workspace = true
 blake3 = "1"
 chrono.workspace = true
 chrono-tz = "0.10"
+db-read = { path = "../db-read" }
 flate2 = "1"
 label-colors = { path = "../label-colors" }
 types = { path = "../types" }

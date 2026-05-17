@@ -2,23 +2,23 @@
 //!
 //! Phase 5 task 5. GAL refresh is kick-driven, idempotent, and bounded
 //! (60 s per-account timeout x account count, gated by the existing
-//! 24 h cache check inside `refresh_gal_for_account`). No per-account
-//! runtime; no cancellation. Iterates all accounts -
-//! `refresh_gal_for_account` self-gates non-supported providers with
-//! `Ok(0)`.
+//! 24 h cache check inside `fetch_gal_for_account_if_stale`). No
+//! per-account runtime; no cancellation. Iterates all accounts -
+//! `fetch_gal_for_account_if_stale` self-gates non-supported
+//! providers with `Ok(None)`.
 //!
 //! ## Required: serialize handler invocations via the module-level Tokio Mutex
 //!
 //! The notification dispatcher runs handlers concurrently up to
 //! `NOTIFY_CAP = 4` (`dispatch.rs`); two stale-account kicks back-to-
 //! back without serialization will duplicate provider calls because
-//! `refresh_gal_for_account` only writes the cache after the network
-//! round-trip completes. The mutex is load-bearing for correctness, not
-//! just performance.
+//! the handler only writes the cache after the network round-trip
+//! completes. The mutex is load-bearing for correctness, not just
+//! performance.
 //!
-//! The cleanest fix lives inside `refresh_gal_for_account` itself - a
-//! per-account in-flight set so different accounts can refresh in
-//! parallel - which is the documented future-work direction. The
+//! The cleanest fix is a per-account in-flight set so different
+//! accounts can refresh in parallel - which is the documented
+//! future-work direction. The
 //! global handler mutex here is the cheaper "no concurrent kicks at
 //! all" coarsening of that load-bearing form. Acceptable because:
 //!
@@ -31,9 +31,8 @@
 //!
 //! ## Interaction with the notification-drain bound
 //!
-//! `refresh_gal_for_account` performs DB writes via
-//! `tokio::task::spawn_blocking` (inside `ReadDbState::with_conn`,
-//! `crates/db/src/db/mod.rs`). If the consolidated drain's
+//! GAL cache persistence performs DB writes via
+//! `WriteDbState::with_write`. If the consolidated drain's
 //! notification-drain bound (Phase 5 task 7) aborts a wedged GAL
 //! handler, the *outer* async future is dropped but the blocking
 //! closure runs to completion regardless. Acceptable because GAL
@@ -46,6 +45,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::boot::BootSharedState;
+use service_state::WriteDbState;
 
 /// Global handler mutex - coarsens the load-bearing per-account
 /// hazard. See module docs for rationale.
@@ -66,6 +66,9 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
         log::debug!("gal.kick received before encryption_key available; ignoring");
         return Ok(());
     };
+    let write_db = boot_state
+        .write_db_state()
+        .map_err(|e| format!("gal.kick write db unavailable: {e}"))?;
 
     let account_ids = read_db
         .with_read(db::db::queries_extra::list_all_account_ids_sync)
@@ -89,7 +92,7 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
         }
         match tokio::time::timeout(
             PER_ACCOUNT_TIMEOUT,
-            rtsk::contacts::gal::refresh_gal_for_account(&read_db, &account_id, encryption_key),
+            refresh_gal_cache_for_account(&read_db, &write_db, &account_id, encryption_key),
         )
         .await
         {
@@ -107,4 +110,32 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
     }
 
     Ok(())
+}
+
+async fn refresh_gal_cache_for_account(
+    read_db: &db::db::ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+) -> Result<usize, String> {
+    let Some(entries) =
+        rtsk::contacts::gal::fetch_gal_for_account_if_stale(read_db, account_id, encryption_key)
+            .await?
+    else {
+        return Ok(0);
+    };
+
+    let account_id = account_id.to_string();
+
+    write_db
+        .with_write(move |conn| {
+            let cached = db::db::queries_extra::contacts::cache_gal_entries_sync(
+                conn,
+                &account_id,
+                &entries,
+            )?;
+            db::db::queries_extra::contacts::record_gal_refresh_sync(conn, &account_id)?;
+            Ok(cached)
+        })
+        .await
 }

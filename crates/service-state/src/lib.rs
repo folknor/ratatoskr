@@ -6,12 +6,9 @@
 //! the `app` crate does not depend on this crate, so `WriteDbState`
 //! cannot be reached from UI source files even with `pub` visibility.
 //!
-//! `WriteDbState` wraps `db::WriterPool`. The legacy `from_arc` and
-//! raw-connection `with_conn*` shims remain only while the writer helper
-//! migration is in flight; the durable API is `from_pool` plus
-//! `with_write`.
-
-use std::sync::{Arc, Mutex};
+//! `WriteDbState` wraps `db::WriterPool`. The raw-connection
+//! `with_conn*` shims remain only while the writer helper migration is
+//! in flight; the durable API is `from_pool` plus `with_write`.
 
 use rusqlite::Connection;
 
@@ -35,13 +32,6 @@ pub struct WriteDbState {
 impl WriteDbState {
     pub fn from_pool(pool: db::db::WriterPool) -> Self {
         Self { pool }
-    }
-
-    /// Construct a writer-half state from an existing connection Arc.
-    /// Used by the Service boot path to consume the connection that
-    /// Phase 1.5 holds in `BootContext`.
-    pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
-        Self::from_pool(db::db::WriterPool::from_arc(conn))
     }
 
     /// Run a closure with the database connection on the blocking
@@ -118,16 +108,16 @@ impl WriteDbState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
 
-    fn fresh_state() -> WriteDbState {
-        let conn = Connection::open_in_memory().expect("open in-memory db");
-        WriteDbState::from_arc(Arc::new(Mutex::new(conn)))
+    fn fresh_state() -> (WriteDbState, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let pool = db::db::open_writer_pool(tmp.path()).expect("open writer pool");
+        (WriteDbState::from_pool(pool), tmp)
     }
 
     #[test]
-    fn from_arc_is_clone() {
-        let state = fresh_state();
+    fn from_pool_is_clone() {
+        let (state, _tmp) = fresh_state();
         let cloned = state.clone();
         // Both clones share the same underlying connection.
         let result = state.with_conn_sync(|conn| {
@@ -152,7 +142,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_conn_dispatches_to_blocking_pool() {
-        let state = fresh_state();
+        let (state, _tmp) = fresh_state();
         let value = state
             .with_conn(|conn| {
                 conn.execute_batch("CREATE TABLE async_t (n INTEGER)")

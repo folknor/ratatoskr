@@ -10,7 +10,6 @@ pub mod cloud_attachments;
 pub mod command_palette_queries;
 pub mod contacts;
 pub use sync::bundling;
-pub mod contact_photos;
 pub use cmdk as command_palette;
 pub use label_colors::preset_colors;
 pub mod db;
@@ -28,7 +27,6 @@ pub mod oauth;
 pub use ::db_read::blob_hash;
 pub use ::db_read::progress;
 pub mod provider;
-pub mod scheduled_send;
 pub mod scope;
 // Phase 2 task 6: `core::send` moved to `service::send`; consumers
 // import from `service::send` directly. The Phase 5 prerequisite

@@ -30,11 +30,6 @@ impl InlineImageStoreWriteState {
         })
     }
 
-    /// Construct from an already-open connection.
-    pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
-        Self { conn }
-    }
-
     /// Run a closure on the writer connection via `spawn_blocking`.
     pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
     where

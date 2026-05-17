@@ -49,12 +49,6 @@ impl BodyStoreWriteState {
         })
     }
 
-    /// Construct from an already-open connection. Useful for tests
-    /// and for the boot path's deferred initialization.
-    pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
-        Self { conn }
-    }
-
     /// Underlying `Arc<Mutex<Connection>>` accessor. Used by tests +
     /// by service-side code that needs to bridge into a parallel
     /// `BodyStoreReadState` view onto the same connection.

@@ -48,7 +48,7 @@ pub enum ClientNotification {
     CalendarKick,
     /// Phase 5: "The UI's tick fired; please consider refreshing GAL
     /// caches." The Service handler enumerates all accounts and calls
-    /// `refresh_gal_for_account`, which self-gates on the 24 h cache
+    /// `fetch_gal_for_account_if_stale`, which self-gates on the 24 h cache
     /// age check. `Drop` class - same forgiveness as the other kicks.
     #[serde(rename = "gal.kick")]
     GalKick,

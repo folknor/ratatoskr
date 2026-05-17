@@ -16,11 +16,10 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     // Main DB with full migrations
-    let conn = Connection::open_in_memory().expect("open in-memory db");
-    db::db::migrations::run_all(&conn).expect("migrations");
-    let conn_arc = Arc::new(Mutex::new(conn));
-    let db = db::db::ReadDbState::from_arc(Arc::clone(&conn_arc));
-    let write_db = service_state::WriteDbState::from_arc(conn_arc);
+    let write_db = service_state::WriteDbState::from_pool(
+        db::db::open_writer_pool(tmp.path()).expect("open writer pool"),
+    );
+    let db = db::db::open_reader_pool(tmp.path()).expect("open reader pool");
 
     // Stores: tempdir-backed
     let body_store = store::body_store::BodyStoreReadState::init(tmp.path()).expect("body store");
@@ -42,7 +41,7 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
 }
 
 fn with_test_conn<T>(ctx: &ActionContext, f: impl FnOnce(&Connection) -> T) -> T {
-    ctx.db
+    ctx.write_db
         .with_conn_sync(|conn| Ok(f(conn)))
         .expect("test db access")
 }

@@ -1495,6 +1495,7 @@ dependencies = [
  "blake3",
  "chrono",
  "chrono-tz",
+ "db-read",
  "flate2",
  "hotpath 0.16.0",
  "label-colors",
@@ -1515,11 +1516,22 @@ dependencies = [
 name = "db-read"
 version = "0.1.0"
 dependencies = [
- "db",
+ "blake3",
+ "chrono",
+ "chrono-tz",
+ "flate2",
+ "hotpath 0.16.0",
+ "log",
+ "lol_html",
+ "mail-parser",
  "rusqlite",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "types",
+ "uuid",
 ]
 
 [[package]]
@@ -3885,7 +3897,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rtsk",
- "rusqlite",
  "serde",
  "serde_json",
  "urlencoding",

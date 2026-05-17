@@ -386,7 +386,7 @@ pub async fn create_calendar_event(
             move |conn| {
                 let calendar_remote_id = lookup_calendar_remote_id(conn, &aid, &cid)?;
 
-                let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                let params = db::db::queries_extra::calendars::LocalCalendarEventParams {
                     account_id: aid.clone(),
                     summary: input_clone.title,
                     description: input_clone.description,
@@ -401,7 +401,7 @@ pub async fn create_calendar_event(
                     visibility: input_clone.visibility,
                 };
                 let event_id =
-                    rtsk::db::queries_extra::calendars::create_calendar_event_sync(conn, &params)
+                    db::db::queries_extra::calendars::create_calendar_event_sync(conn, &params)
                         .map_err(ActionError::db)?;
 
                 Ok((event_id, calendar_remote_id))
@@ -520,7 +520,7 @@ pub async fn update_calendar_event(
         let local_result = db
             .with_conn_mapped(
                 move |conn| {
-                    let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                    let params = db::db::queries_extra::calendars::LocalCalendarEventParams {
                         account_id: meta.account_id.clone(),
                         summary: input.title,
                         description: input.description,
@@ -534,7 +534,7 @@ pub async fn update_calendar_event(
                         availability: input.availability,
                         visibility: input.visibility,
                     };
-                    rtsk::db::queries_extra::calendars::update_calendar_event_sync(
+                    db::db::queries_extra::calendars::update_calendar_event_sync(
                         conn, &eid, &params,
                     )
                     .map_err(ActionError::db)
@@ -593,7 +593,7 @@ pub async fn update_calendar_event(
                 .with_write_mapped(
                     move |conn| {
                         let params =
-                            rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                            db::db::queries_extra::calendars::LocalCalendarEventParams {
                                 account_id: event_account_id,
                                 summary: input.title,
                                 description: input.description,
@@ -675,7 +675,7 @@ pub async fn delete_calendar_event(
         let local_result = db
             .with_conn_mapped(
                 move |conn| {
-                    rtsk::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
+                    db::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
                         .map_err(ActionError::db)
                 },
                 ActionError::db,
@@ -729,7 +729,7 @@ pub async fn delete_calendar_event(
     let local_result = db
         .with_conn_mapped(
             move |conn| {
-                rtsk::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
+                db::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
                     .map_err(ActionError::db)
             },
             ActionError::db,

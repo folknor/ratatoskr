@@ -14,7 +14,7 @@ use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
 
 /// Load the full AI settings map from the `settings` table.
 pub async fn load_ai_settings_map(db: &ReadDbState) -> Result<HashMap<String, String>, AiError> {
-    db.with_conn(|conn| {
+    db.with_read(|conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT key, value
@@ -102,7 +102,7 @@ fn build_ai_config(
 /// Read a single plain-text setting value.
 pub async fn read_plain_setting(db: &ReadDbState, key: &str) -> Result<Option<String>, AiError> {
     let key_name = key.to_string();
-    db.with_conn(move |conn| rtsk::db::get_setting(conn, &key_name))
+    db.with_read(move |conn| rtsk::db::get_setting(conn, &key_name))
         .await
         .map_err(|e| AiError::DbError(format!("read setting {key}: {e}")))
 }

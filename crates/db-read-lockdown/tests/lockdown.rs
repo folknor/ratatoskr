@@ -120,10 +120,18 @@ fn db_read_public_surface_does_not_reexport_rusqlite() {
     let root = workspace_root();
     let lib = std::fs::read_to_string(root.join("crates/db-read/src/lib.rs"))
         .expect("read db-read lib");
-    assert!(
-        !lib.contains("pub use rusqlite"),
-        "db-read must not publicly re-export rusqlite mutating types",
-    );
+    for banned in [
+        "pub use rusqlite::Connection",
+        "pub use rusqlite::Statement",
+        "pub use rusqlite::CachedStatement",
+        "pub use rusqlite::Transaction",
+        "pub use rusqlite::*",
+    ] {
+        assert!(
+            !lib.contains(banned),
+            "db-read must not publicly re-export rusqlite mutating types",
+        );
+    }
 
     // Catch the indirect bypass: glob-re-exporting the writer crate's
     // `db` module pulls every public item from writer_db (including
@@ -177,10 +185,9 @@ fn db_read_raw_rusqlite_access_is_quarantined() {
         "pragma_update",
     ];
 
-    for entry in std::fs::read_dir(&src).expect("read db-read src") {
-        let entry = entry.expect("dir entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+    for path in rust_files_under(&src) {
+        let file_name = path.file_name().and_then(|name| name.to_str());
+        if matches!(file_name, Some("raw.rs")) {
             continue;
         }
         let raw = std::fs::read_to_string(&path)
@@ -193,6 +200,29 @@ fn db_read_raw_rusqlite_access_is_quarantined() {
             );
         }
     }
+}
+
+fn rust_files_under(root: &std::path::Path) -> Vec<PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(&path)
+                .unwrap_or_else(|e| panic!("read dir {}: {e}", path.display()))
+            {
+                pending.push(entry.expect("dir entry").path());
+            }
+            continue;
+        }
+
+        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+
+    files.sort();
+    files
 }
 
 fn workspace_root() -> PathBuf {

@@ -49,14 +49,9 @@ pub(crate) struct BootContext {
     /// into the cipher's internal slot.
     #[allow(dead_code)]
     pub(crate) encryption_key: SecretKey,
-    /// DB connection opened during boot. Held past the boot sequence so
-    /// Phase 2's relocated action service can construct its `ActionContext`
-    /// from it without re-opening the file.
-    #[allow(dead_code)]
-    pub(crate) db_conn: Arc<Mutex<Connection>>,
     /// Independent read-only handle opened after migrations completed.
     /// This is the read handle handed to Service subsystems that need read
-    /// queries; it is not a `ReadDbState` view over `db_conn`.
+    /// queries.
     #[allow(dead_code)]
     pub(crate) db_read: db::db::ReadDbState,
     /// Service-only write handle paired with `db_read`.
@@ -329,7 +324,7 @@ impl BootSharedState {
     /// `settings` table. Called once during boot (after the DB opens)
     /// and again on every successful `settings.set` that touches
     /// either key.
-    pub(crate) fn refresh_compression_prefs(&self, conn: &rusqlite::Connection) {
+    pub(crate) fn refresh_compression_prefs(&self, conn: &db::db::ReadConn<'_>) {
         let compress = match rtsk::db::queries::get_setting(conn, "compress_attachments") {
             Ok(Some(s)) => s == "true",
             _ => true,
@@ -1199,7 +1194,15 @@ async fn run_boot_sequence_inner(
         }
     };
 
-    let conn = Arc::new(Mutex::new(conn));
+    let db_write = db::db::open_writer_pool(&app_data_dir)
+        .map(service_state::WriteDbState::from_pool)
+        .map_err(|error| {
+            log::error!(
+                "DB writer open failed for {}: {error}",
+                app_data_dir.display(),
+            );
+            BootFailure::MigrationFailure
+        })?;
     let db_read = db::db::open_reader_pool(&app_data_dir).map_err(|error| {
         log::error!(
             "DB read-only open failed for {}: {error}",
@@ -1207,7 +1210,7 @@ async fn run_boot_sequence_inner(
         );
         BootFailure::MigrationFailure
     })?;
-    let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
+    let pack_conn = Arc::new(Mutex::new(conn));
     let mut recovery_warnings: Vec<String> = Vec::new();
 
     // RecoveringPendingOps: state-repair on the pending_operations table
@@ -1359,7 +1362,7 @@ async fn run_boot_sequence_inner(
     // index (`attachment_blobs`) lives in the main DB schema.
     let pack_store = store::PackStore::open(
         app_data_dir.join("attachment_packs"),
-        Arc::clone(&conn),
+        Arc::clone(&pack_conn),
         store::DEFAULT_PACK_TARGET_SIZE,
     )
     .await
@@ -1374,7 +1377,7 @@ async fn run_boot_sequence_inner(
     // rather than the constructor defaults. Re-read on every
     // `settings.set` that touches either key.
     db_write
-        .with_conn_sync(|conn| {
+        .with_read_sync(|conn| {
             state.refresh_compression_prefs(conn);
             Ok(())
         })
@@ -1540,7 +1543,6 @@ async fn run_boot_sequence_inner(
 
     Ok(BootContext {
         encryption_key: key,
-        db_conn: conn,
         db_read,
         write_db: db_write,
         schema_version,
@@ -1805,22 +1807,22 @@ mod tests {
     use super::*;
 
     /// Smoke test that constructs a `BootContext` and reads every field.
-    /// The struct is `#[allow(dead_code)]` on the encryption key + DB
-    /// connection until Phase 2's action service starts consuming them; if
-    /// a future PR drops a field thinking it was unused, the dead_code
-    /// allow would silence the unused-field warning AND this test would
-    /// fail to compile, surfacing the loss before it lands. Locks the
-    /// scaffold-for-Phase-2 contract.
+    /// The struct is `#[allow(dead_code)]` on the encryption key until
+    /// action-service consumers read it through accessors; if a future
+    /// PR drops a field thinking it was unused, the dead_code allow would
+    /// silence the unused-field warning AND this test would fail to
+    /// compile, surfacing the loss before it lands.
     #[test]
     fn boot_context_constructs_with_every_field_readable() {
-        let conn = Connection::open_in_memory().expect("open in-memory db");
-        let conn = Arc::new(Mutex::new(conn));
-        let db_read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let write_db = service_state::WriteDbState::from_pool(
+            db::db::open_writer_pool(tmp.path()).expect("open writer pool"),
+        );
+        let db_read = db::db::open_reader_pool(tmp.path()).expect("open reader pool");
         let ctx = BootContext {
             encryption_key: SecretKey::from_bytes([9u8; 32]),
-            db_conn: Arc::clone(&conn),
             db_read: db_read.clone(),
-            write_db: service_state::WriteDbState::from_arc(Arc::clone(&conn)),
+            write_db,
             schema_version: 100,
             migrations_applied: 1,
             recovery_warnings: vec!["pending-ops recovery".to_string()],
@@ -1833,9 +1835,6 @@ mod tests {
         assert_eq!(ctx.migrations_applied, 1);
         assert_eq!(ctx.recovery_warnings.len(), 1);
         assert_eq!(ctx.recovery_warnings[0], "pending-ops recovery");
-        // The DB connection is held under Arc<Mutex<>>; verify we can
-        // acquire it (the shape Phase 2's ActionContext expects).
-        let _guard = ctx.db_conn.lock().expect("db_conn mutex");
     }
 
     /// `signal_ready` symmetry: the success path must populate both
@@ -1847,14 +1846,15 @@ mod tests {
     #[test]
     fn signal_ready_symmetry_success_populates_context() {
         let state = BootSharedState::new(PathBuf::new(), DispatchConfig::default());
-        let conn = Connection::open_in_memory().expect("open in-memory db");
-        let conn = Arc::new(Mutex::new(conn));
-        let db_read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let write_db = service_state::WriteDbState::from_pool(
+            db::db::open_writer_pool(tmp.path()).expect("open writer pool"),
+        );
+        let db_read = db::db::open_reader_pool(tmp.path()).expect("open reader pool");
         let ctx = BootContext {
             encryption_key: SecretKey::from_bytes([1u8; 32]),
-            db_conn: Arc::clone(&conn),
             db_read: db_read.clone(),
-            write_db: service_state::WriteDbState::from_arc(Arc::clone(&conn)),
+            write_db,
             schema_version: 100,
             migrations_applied: 0,
             recovery_warnings: Vec::new(),

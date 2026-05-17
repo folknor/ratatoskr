@@ -1,17 +1,10 @@
-/// A GAL entry for bulk cache insert.
-#[derive(Debug, Clone)]
-pub struct GalEntry {
-    pub email: String,
-    pub display_name: Option<String>,
-    pub phone: Option<String>,
-    pub company: Option<String>,
-    pub title: Option<String>,
-    pub department: Option<String>,
-}
+use crate::db::WriteConn;
+
+pub use db_read::db::queries_extra::contacts::gal::GalEntry;
 
 /// Clear and refill the GAL cache for an account.
 pub fn cache_gal_entries_sync(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     entries: &[GalEntry],
 ) -> Result<usize, String> {
@@ -72,7 +65,7 @@ pub fn gal_cache_age_sync(
 
 /// Record that a GAL refresh was performed for an account.
 pub fn record_gal_refresh_sync(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp().to_string();

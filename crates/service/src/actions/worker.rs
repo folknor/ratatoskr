@@ -628,7 +628,7 @@ async fn run_one_calendar(
         .map_err(|e| format!("deserialize WireCalendarOperation: {e}"))?;
     // ActionContext now carries `write_db` directly so calendar
     // dispatch reuses the writer half compile-checked through the
-    // type system, no `WriteDbState::from_arc` end-run.
+    // type system, no legacy raw-Arc writer-state end-run.
     let cal_ctx = action_types::CalendarActionContext {
         write_db: ctx.write_db.clone(),
         read_db: ctx.db.clone(),

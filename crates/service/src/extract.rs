@@ -922,10 +922,13 @@ mod tests {
         (SearchWriteHandle::from_sender(tx), rx)
     }
 
-    fn db_states_for_test(conn: rusqlite::Connection) -> (WriteDbState, db::db::ReadDbState) {
-        let conn = Arc::new(std::sync::Mutex::new(conn));
-        let read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
-        (WriteDbState::from_arc(conn), read)
+    fn db_states_for_test() -> (WriteDbState, db::db::ReadDbState, TempDir) {
+        let tmp = TempDir::new().expect("temp dir");
+        let write = WriteDbState::from_pool(
+            db::db::open_writer_pool(tmp.path()).expect("open writer pool"),
+        );
+        let read = db::db::open_reader_pool(tmp.path()).expect("open reader pool");
+        (write, read, tmp)
     }
 
     /// Build a bare `BootSharedState` for tests that exercise the
@@ -944,8 +947,7 @@ mod tests {
         // Build a runtime with a dummy DB - we only need the lifecycle
         // shape to be correct; no actual extraction runs because we
         // shut down before processing.
-        let conn = rusqlite::Connection::open_in_memory().expect("conn");
-        let (db, read_db) = db_states_for_test(conn);
+        let (db, read_db, _db_dir) = db_states_for_test();
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, _search_rx) = dummy_search_write();
@@ -978,17 +980,7 @@ mod tests {
         // Build a runtime; enqueue the same hash twice without letting
         // the worker process. The second call should be a no-op
         // (Ok with no extra item enqueued).
-        let conn = rusqlite::Connection::open_in_memory().expect("conn");
-        // Schema with attachment_extracted_text so the worker pre-
-        // flight query doesn't error. The test doesn't drive the
-        // worker to completion - shutdown after the dedupe assertion.
-        conn.execute_batch(
-            "CREATE TABLE attachment_extracted_text (\
-                content_hash BLOB PRIMARY KEY, mime_type TEXT, \
-                extracted_text TEXT, status TEXT NOT NULL, \
-                extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
-        ).expect("schema");
-        let (db, read_db) = db_states_for_test(conn);
+        let (db, read_db, _db_dir) = db_states_for_test();
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, _search_rx) = dummy_search_write();
@@ -1027,44 +1019,46 @@ mod tests {
     /// extracted text inlined.
     #[tokio::test]
     async fn phase_7_7_indexed_outcome_emits_writer_command_index() {
-        let conn = rusqlite::Connection::open_in_memory().expect("conn");
-        conn.execute_batch(
-            "CREATE TABLE messages (\
-                id TEXT NOT NULL, account_id TEXT NOT NULL, thread_id TEXT NOT NULL,\
-                from_address TEXT, from_name TEXT, to_addresses TEXT,\
-                subject TEXT, snippet TEXT, date INTEGER NOT NULL,\
-                is_read INTEGER DEFAULT 0, is_starred INTEGER DEFAULT 0,\
-                PRIMARY KEY (account_id, id));\
-             CREATE TABLE attachments (\
-                id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
-                filename TEXT, mime_type TEXT, content_hash BLOB);\
-             CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
-             CREATE TABLE attachment_extracted_text (\
-                content_hash BLOB PRIMARY KEY, mime_type TEXT,\
-                extracted_text TEXT, status TEXT NOT NULL,\
-                extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
-        ).expect("schema");
-        conn.execute(
-            "INSERT INTO messages (id, account_id, thread_id, subject, from_name,\
-                from_address, to_addresses, snippet, date, is_read, is_starred) \
-             VALUES ('msg1', 'acc1', 'thr1', 'Quarterly report', 'Alice', \
-                     'a@example.com', 'b@example.com', 'snip', 1700000000, 0, 1)",
-            [],
-        ).expect("insert msg");
+        let (db, read_db, _db_dir) = db_states_for_test();
         let hash_a = db::blob_hash::BlobHash::hash(b"A");
-        conn.execute(
-            "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, content_hash) \
-             VALUES ('att1', 'msg1', 'acc1', 'report.pdf', 'application/pdf', ?1)",
-            rusqlite::params![hash_a],
-        ).expect("insert att");
-        conn.execute(
-            "INSERT INTO attachment_extracted_text \
-             (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
-             VALUES (?1, 'application/pdf', 'pdf full text body', 'indexed', 1, 2)",
-            rusqlite::params![hash_a],
-        ).expect("insert ext");
+        db.with_conn_sync(move |conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider, is_active) \
+                 VALUES ('acc1', 'acc1@example.com', 'gmail_api', 1)",
+                [],
+            )
+            .map_err(|e| format!("insert account: {e}"))?;
+            conn.execute(
+                "INSERT INTO threads (account_id, id, subject, snippet, last_message_at) \
+                 VALUES ('acc1', 'thr1', 'Quarterly report', 'snip', 1700000000)",
+                [],
+            )
+            .map_err(|e| format!("insert thread: {e}"))?;
+            conn.execute(
+                "INSERT INTO messages (id, account_id, thread_id, subject, from_name,\
+                    from_address, to_addresses, snippet, date, is_read, is_starred) \
+                 VALUES ('msg1', 'acc1', 'thr1', 'Quarterly report', 'Alice', \
+                         'a@example.com', 'b@example.com', 'snip', 1700000000, 0, 1)",
+                [],
+            )
+            .map_err(|e| format!("insert msg: {e}"))?;
+            conn.execute(
+                "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, content_hash) \
+                 VALUES ('att1', 'msg1', 'acc1', 'report.pdf', 'application/pdf', ?1)",
+                rusqlite::params![hash_a],
+            )
+            .map_err(|e| format!("insert att: {e}"))?;
+            conn.execute(
+                "INSERT INTO attachment_extracted_text \
+                 (content_hash, mime_type, extracted_text, status, extracted_at, schema_version) \
+                 VALUES (?1, 'application/pdf', 'pdf full text body', 'indexed', 1, 2)",
+                rusqlite::params![hash_a],
+            )
+            .map_err(|e| format!("insert ext: {e}"))?;
+            Ok(())
+        })
+        .expect("seed db");
 
-        let (db, read_db) = db_states_for_test(conn);
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, mut search_rx) = dummy_search_write();
@@ -1132,24 +1126,7 @@ mod tests {
     /// logged no-op; no `WriterCommand` is sent.
     #[tokio::test]
     async fn phase_7_7_empty_fan_out_is_no_op() {
-        let conn = rusqlite::Connection::open_in_memory().expect("conn");
-        conn.execute_batch(
-            "CREATE TABLE messages (\
-                id TEXT NOT NULL, account_id TEXT NOT NULL, thread_id TEXT NOT NULL,\
-                from_address TEXT, from_name TEXT, to_addresses TEXT,\
-                subject TEXT, snippet TEXT, date INTEGER NOT NULL,\
-                is_read INTEGER DEFAULT 0, is_starred INTEGER DEFAULT 0,\
-                PRIMARY KEY (account_id, id));\
-             CREATE TABLE attachments (\
-                id TEXT PRIMARY KEY, message_id TEXT NOT NULL, account_id TEXT NOT NULL,\
-                filename TEXT, mime_type TEXT, content_hash BLOB);\
-             CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);\
-             CREATE TABLE attachment_extracted_text (\
-                content_hash BLOB PRIMARY KEY, mime_type TEXT,\
-                extracted_text TEXT, status TEXT NOT NULL,\
-                extracted_at INTEGER NOT NULL, schema_version INTEGER NOT NULL);",
-        ).expect("schema");
-        let (db, read_db) = db_states_for_test(conn);
+        let (db, read_db, _db_dir) = db_states_for_test();
         let (tx, _rx) = mpsc::channel::<Vec<u8>>(8);
         let notification_tx = NotificationSender::new(tx);
         let (search_write, mut search_rx) = dummy_search_write();

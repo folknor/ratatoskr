@@ -430,7 +430,7 @@ pub enum Message {
     // Phase 5 task 10: GalRefreshTick / GalCacheRefreshed deleted. GAL
     // refresh now rides on `Message::SyncTick -> kick_gal_refresh`
     // (fire-and-forget IPC notification); the Service handler iterates
-    // accounts and the 24 h cache gate inside refresh_gal_for_account
+    // accounts and the 24 h cache gate inside fetch_gal_for_account_if_stale
     // self-throttles.
 
     // Phase 3 task 17: debounced reader reload after `index.committed`

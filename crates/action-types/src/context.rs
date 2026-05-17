@@ -19,7 +19,7 @@ use store::inline_image_store::InlineImageStoreReadState;
 /// ... }` from this field). Both wrap the same connection arc; the
 /// distinction is type-level - holding `write_db` keeps the
 /// "writes go through the writer half" invariant compile-checked
-/// without the `WriteDbState::from_arc` end-run the worker used to
+/// without the legacy raw-Arc writer-state end-run the worker used to
 /// perform per calendar op.
 #[derive(Clone)]
 pub struct ActionContext {

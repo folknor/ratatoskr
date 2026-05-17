@@ -9,21 +9,6 @@ use types::MailProviderKind;
 // Re-export the entry type from db.
 pub use crate::db::queries_extra::contacts::GalEntry;
 
-/// Store fetched GAL entries in the cache for a given account (full refresh).
-pub async fn cache_gal_entries(
-    db: &ReadDbState,
-    account_id: String,
-    entries: Vec<GalEntry>,
-) -> Result<usize, String> {
-    let aid = account_id;
-    db.with_conn(move |conn| {
-        crate::db::queries_extra::contacts::cache_gal_entries_sync(conn, &aid, &entries)
-    })
-    .await
-}
-
-// ── Provider fetch functions ────────────────────────────────
-
 /// Fetch the organization directory from Microsoft Graph (`/users`).
 ///
 /// Requires the `User.ReadBasic.All` or `User.Read.All` Graph permission.
@@ -168,30 +153,27 @@ pub async fn fetch_google_gal(
     Ok(entries)
 }
 
-/// Refresh the GAL cache for a single account if stale (>24h).
-/// Determines the provider type from the DB and dispatches to the
-/// appropriate fetch function. Returns the number of entries cached,
-/// or 0 if the cache was fresh or the provider doesn't support GAL.
-pub async fn refresh_gal_for_account(
+/// Fetch GAL entries for a single account if the cached data is stale
+/// (>24h). The caller owns persistence because only the service layer
+/// has access to the writer pool.
+pub async fn fetch_gal_for_account_if_stale(
     db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
-) -> Result<usize, String> {
+) -> Result<Option<Vec<GalEntry>>, String> {
     // Check cache age
     let now = chrono::Utc::now().timestamp();
     let stale_threshold = now - 86400; // 24 hours
     if let Some(cached_at) = gal_cache_age(db, account_id.to_string()).await?
         && cached_at > stale_threshold
     {
-        return Ok(0); // cache is fresh
+        return Ok(None); // cache is fresh
     }
 
     // Look up provider type via db
     let aid = account_id.to_string();
     let provider = db
-        .with_conn(move |conn| {
-            crate::db::queries_extra::get_account_provider_sync(conn, &aid)
-        })
+        .with_read(move |conn| crate::db::queries_extra::get_account_provider_sync(conn, &aid))
         .await?;
 
     let entries = match provider {
@@ -207,26 +189,15 @@ pub async fn refresh_gal_for_account(
                     .await?;
             fetch_google_gal(&client, db).await?
         }
-        MailProviderKind::Jmap | MailProviderKind::Imap => return Ok(0),
+        MailProviderKind::Jmap | MailProviderKind::Imap => return Ok(None),
     };
 
-    let count = entries.len();
-    cache_gal_entries(db, account_id.to_string(), entries).await?;
-    record_gal_refresh(db, account_id.to_string()).await?;
-    Ok(count)
-}
-
-/// Record that a GAL refresh was performed for an account.
-async fn record_gal_refresh(db: &ReadDbState, account_id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        crate::db::queries_extra::contacts::record_gal_refresh_sync(conn, &account_id)
-    })
-    .await
+    Ok(Some(entries))
 }
 
 /// Get the timestamp of the last GAL refresh attempt for an account.
 pub async fn gal_cache_age(db: &ReadDbState, account_id: String) -> Result<Option<i64>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         crate::db::queries_extra::contacts::gal_cache_age_sync(conn, &account_id)
     })
     .await

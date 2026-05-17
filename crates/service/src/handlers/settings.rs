@@ -52,7 +52,7 @@ pub(crate) async fn handle_set(
     let write_db = boot_state.write_db_state()?;
     let old_window_days: Option<i64> = if touches_sync_period {
         write_db
-            .with_conn(|conn| {
+            .with_read(|conn| {
                 Ok(rtsk::db::queries::get_setting(conn, "sync_period_days")
                     .ok()
                     .flatten()
@@ -94,7 +94,7 @@ pub(crate) async fn handle_set(
         // read.
         let boot_state_for_refresh = Arc::clone(boot_state);
         let _ = write_db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 boot_state_for_refresh.refresh_compression_prefs(conn);
                 Ok(())
             })
@@ -107,7 +107,7 @@ pub(crate) async fn handle_set(
         // the kick decision from any future filter in `set_setting`
         // that could reject or rewrite the wire input.
         let committed_days: Option<i64> = write_db
-            .with_conn(|conn| {
+            .with_read(|conn| {
                 Ok(rtsk::db::queries::get_setting(conn, "sync_period_days")
                     .ok()
                     .flatten()

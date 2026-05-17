@@ -3,10 +3,9 @@ use chrono::{TimeZone, Utc};
 use crate::parsing;
 use crate::prompts;
 use crate::types::{
-    AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, AutoDraftMode,
-    ExtractedTask, TextTransformType, ThreadBundle, ThreadForBundling, WritingStyleProfile,
+    AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, ExtractedTask,
+    TextTransformType, ThreadBundle, ThreadForBundling,
 };
-use rtsk::db::ReadDbState;
 
 // ---------------------------------------------------------------------------
 // Internal formatting helpers
@@ -49,21 +48,13 @@ fn truncate(s: &str, max: usize) -> String {
 // 1. summarize_thread
 // ---------------------------------------------------------------------------
 
-/// Summarize an email thread, using a cache to avoid redundant AI calls.
+/// Summarize an email thread. Caching is the caller's responsibility:
+/// the writer pool lives in `service-state`, which `ai` does not depend
+/// on, so persistence cannot happen here.
 pub async fn summarize_thread(
     ai: &dyn AiCompleter,
-    db: &ReadDbState,
-    account_id: &str,
-    thread_id: &str,
     messages: &[AiMessageInput],
 ) -> Result<String, AiError> {
-    // Check cache
-    let cached = db_get_cache(db, account_id, thread_id, "summary").await?;
-    if let Some(content) = cached {
-        log::info!("AI summary cache hit for thread {thread_id}");
-        return Ok(content);
-    }
-
     let subject = messages
         .first()
         .and_then(|m| m.subject.as_deref())
@@ -75,40 +66,24 @@ pub async fn summarize_thread(
         .join("\n---\n");
     let combined = truncate(&format!("Subject: {subject}\n\n{formatted}"), 6000);
 
-    let summary = ai
-        .complete(&AiCompletionRequest {
-            system_prompt: prompts::SUMMARIZE_PROMPT.to_string(),
-            user_content: combined,
-            max_tokens: None,
-        })
-        .await?;
-
-    db_set_cache(db, account_id, thread_id, "summary", &summary).await?;
-    Ok(summary)
+    ai.complete(&AiCompletionRequest {
+        system_prompt: prompts::SUMMARIZE_PROMPT.to_string(),
+        user_content: combined,
+        max_tokens: None,
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------
 // 2. generate_smart_replies
 // ---------------------------------------------------------------------------
 
-/// Generate three short reply options for a thread.
+/// Generate three short reply options for a thread. Caching is the
+/// caller's responsibility (see `summarize_thread`).
 pub async fn generate_smart_replies(
     ai: &dyn AiCompleter,
-    db: &ReadDbState,
-    account_id: &str,
-    thread_id: &str,
     messages: &[AiMessageInput],
 ) -> Result<Vec<String>, AiError> {
-    // Check cache
-    let cached = db_get_cache(db, account_id, thread_id, "smart_replies").await?;
-    if let Some(content) = cached
-        && let Ok(replies) = serde_json::from_str::<Vec<String>>(&content)
-    {
-        log::info!("AI smart_replies cache hit for thread {thread_id}");
-        return Ok(replies);
-    }
-    // Corrupted cache entry (if any) - fall through and regenerate
-
     let formatted: String = messages
         .iter()
         .map(format_message)
@@ -124,11 +99,7 @@ pub async fn generate_smart_replies(
         })
         .await?;
 
-    let replies = parsing::parse_smart_replies(&response);
-
-    let json = serde_json::to_string(&replies).map_err(|e| AiError::ParseError(e.to_string()))?;
-    db_set_cache(db, account_id, thread_id, "smart_replies", &json).await?;
-    Ok(replies)
+    Ok(parsing::parse_smart_replies(&response))
 }
 
 // ---------------------------------------------------------------------------
@@ -397,176 +368,6 @@ pub async fn generate_reply(
 }
 
 // ---------------------------------------------------------------------------
-// 10. analyze_writing_style
-// ---------------------------------------------------------------------------
-
-/// Analyze writing style from sent email samples and store the profile.
-pub async fn analyze_writing_style(
-    ai: &dyn AiCompleter,
-    db: &ReadDbState,
-    account_id: &str,
-    sent_messages: &[AiMessageInput],
-) -> Result<WritingStyleProfile, AiError> {
-    let formatted: String = sent_messages
-        .iter()
-        .map(|msg| {
-            let body = msg
-                .body_text
-                .as_deref()
-                .or(msg.snippet.as_deref())
-                .unwrap_or("")
-                .trim();
-            let truncated = truncate(body, 1000);
-            format!("--- Sample ---\n{truncated}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let input = truncate(&formatted, 8000);
-
-    let profile_text = ai
-        .complete(&AiCompletionRequest {
-            system_prompt: prompts::WRITING_STYLE_ANALYSIS_PROMPT.to_string(),
-            user_content: input,
-            max_tokens: None,
-        })
-        .await?;
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    let sample_count = sent_messages.len() as i64;
-
-    // Store in DB
-    rtsk::db::queries_extra::db_upsert_writing_style_profile(
-        db,
-        account_id.to_string(),
-        profile_text.clone(),
-        sample_count,
-    )
-    .await
-    .map_err(AiError::DbError)?;
-
-    Ok(WritingStyleProfile {
-        profile_text,
-        sample_count,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// 11. generate_auto_draft
-// ---------------------------------------------------------------------------
-
-/// Generate an auto-draft reply for a thread, caching the result.
-pub async fn generate_auto_draft(
-    ai: &dyn AiCompleter,
-    db: &ReadDbState,
-    account_id: &str,
-    thread_id: &str,
-    messages: &[AiMessageInput],
-    writing_style: &str,
-    mode: AutoDraftMode,
-) -> Result<String, AiError> {
-    let cache_type = mode.cache_type();
-
-    // Check cache
-    let cached = db_get_cache(db, account_id, thread_id, cache_type).await?;
-    if let Some(content) = cached {
-        log::info!("AI {cache_type} cache hit for thread {thread_id}");
-        return Ok(content);
-    }
-
-    let subject = messages
-        .first()
-        .and_then(|m| m.subject.as_deref())
-        .unwrap_or("No subject");
-
-    let thread_content: String = messages
-        .iter()
-        .map(|msg| {
-            let from = match (&msg.from_name, &msg.from_address) {
-                (Some(name), Some(addr)) if !name.is_empty() => format!("{name} <{addr}>"),
-                (_, Some(addr)) => addr.clone(),
-                (Some(name), None) if !name.is_empty() => name.clone(),
-                _ => "Unknown".to_string(),
-            };
-            let date = Utc
-                .timestamp_opt(msg.date, 0)
-                .single()
-                .map(|dt| dt.format("%b %d, %Y").to_string())
-                .unwrap_or_else(|| "Unknown date".to_string());
-            let body = msg
-                .body_text
-                .as_deref()
-                .or(msg.snippet.as_deref())
-                .unwrap_or("")
-                .trim();
-            format!("From: {from}\nDate: {date}\n\n{body}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n---\n");
-
-    let style_section = if writing_style.is_empty() {
-        String::new()
-    } else {
-        format!("\n\nUser's writing style:\n{writing_style}")
-    };
-
-    let user_content = truncate(
-        &format!(
-            "<email_content>Subject: {subject}\n\n{thread_content}</email_content>{style_section}"
-        ),
-        6000,
-    );
-
-    let draft = ai
-        .complete(&AiCompletionRequest {
-            system_prompt: prompts::AUTO_DRAFT_REPLY_PROMPT.to_string(),
-            user_content,
-            max_tokens: None,
-        })
-        .await?;
-
-    db_set_cache(db, account_id, thread_id, cache_type, &draft).await?;
-    Ok(draft)
-}
-
-// ---------------------------------------------------------------------------
-// DB helpers (thin wrappers that map String errors to AiError)
-// ---------------------------------------------------------------------------
-
-async fn db_get_cache(
-    db: &ReadDbState,
-    account_id: &str,
-    thread_id: &str,
-    cache_type: &str,
-) -> Result<Option<String>, AiError> {
-    rtsk::db::queries_extra::db_get_ai_cache(
-        db,
-        account_id.to_string(),
-        thread_id.to_string(),
-        cache_type.to_string(),
-    )
-    .await
-    .map_err(AiError::DbError)
-}
-
-async fn db_set_cache(
-    db: &ReadDbState,
-    account_id: &str,
-    thread_id: &str,
-    cache_type: &str,
-    content: &str,
-) -> Result<(), AiError> {
-    rtsk::db::queries_extra::db_set_ai_cache(
-        db,
-        account_id.to_string(),
-        thread_id.to_string(),
-        cache_type.to_string(),
-        content.to_string(),
-    )
-    .await
-    .map_err(AiError::DbError)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -597,12 +398,6 @@ mod tests {
             TextTransformType::Formalize => prompts::FORMALIZE_PROMPT,
         };
         assert!(formalize.contains("formal"));
-    }
-
-    #[test]
-    fn auto_draft_mode_cache_key() {
-        assert_eq!(AutoDraftMode::Reply.cache_type(), "auto_draft_reply");
-        assert_eq!(AutoDraftMode::ReplyAll.cache_type(), "auto_draft_replyAll");
     }
 
     #[test]

@@ -345,7 +345,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         // than the `opened_files_cleanup_days` setting. Cheap
         // filesystem scan, runs once per boot.
         let cleanup_days: i64 = match db_state
-            .with_conn(|conn| rtsk::db::queries::get_setting(conn, "opened_files_cleanup_days"))
+            .with_read(|conn| rtsk::db::queries::get_setting(conn, "opened_files_cleanup_days"))
             .await
         {
             Ok(Some(s)) => s.parse::<i64>().unwrap_or(7).max(1),

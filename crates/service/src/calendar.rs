@@ -540,26 +540,24 @@ mod tests {
 
     use super::*;
     use crypto_key::SecretKey;
-    use rusqlite::Connection;
-    use std::sync::{Arc as StdArc, Mutex as StdMutex};
     use tokio::sync::mpsc;
 
-    fn fresh_runtime() -> (CalendarRuntime, mpsc::Receiver<Vec<u8>>) {
-        let conn = StdArc::new(StdMutex::new(
-            Connection::open_in_memory().expect("open in-memory db"),
-        ));
-        let read = db::db::ReadDbState::from_arc(StdArc::clone(&conn));
-        let db = WriteDbState::from_arc(conn);
+    fn fresh_runtime() -> (CalendarRuntime, mpsc::Receiver<Vec<u8>>, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let db = WriteDbState::from_pool(
+            db::db::open_writer_pool(tmp.path()).expect("open writer pool"),
+        );
+        let read = db::db::open_reader_pool(tmp.path()).expect("open reader pool");
         let key = SecretKey::from_bytes([0u8; 32]);
         let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
         let notification_tx = NotificationSender::new(tx);
         let runtime = CalendarRuntime::new(db, read, &key, notification_tx, 1);
-        (runtime, rx)
+        (runtime, rx, tmp)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cancel_account_returns_none_when_no_entry() {
-        let (runtime, _rx) = fresh_runtime();
+        let (runtime, _rx, _tmp) = fresh_runtime();
         let ack = runtime.cancel_account("missing").await;
         assert!(ack.run_id.is_none());
         assert!(!ack.was_in_flight);
@@ -567,13 +565,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn shutdown_is_safe_on_empty_runtime() {
-        let (runtime, _rx) = fresh_runtime();
+        let (runtime, _rx, _tmp) = fresh_runtime();
         runtime.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn start_account_returns_err_after_shutdown() {
-        let (runtime, _rx) = fresh_runtime();
+        let (runtime, _rx, _tmp) = fresh_runtime();
         runtime.shutdown().await;
         let result = runtime.start_account("acc-1".into()).await;
         assert!(result.is_err(), "expected Err after shutdown, got {result:?}");

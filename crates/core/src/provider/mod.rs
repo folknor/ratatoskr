@@ -1,5 +1,3 @@
-pub mod account_resync;
-
 // Re-export everything from the extracted common crate so that
 // existing `crate::provider::*` paths throughout core continue to work.
 pub use common::attachment_dedup;

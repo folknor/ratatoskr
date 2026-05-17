@@ -127,7 +127,7 @@ impl ReadyApp {
         // subscription is gone. GAL refresh now rides on the 5-min
         // `SyncTick` via `Message::SyncTick -> kick_gal_refresh`, gated
         // Service-side by the existing 24 h cache check inside
-        // `refresh_gal_for_account`. Two cadences would mean two failure
+        // `fetch_gal_for_account_if_stale`. Two cadences would mean two failure
         // modes (one timer stops working but the other doesn't); one
         // cadence + Service-side gating is the simpler shape.
         //
@@ -140,7 +140,7 @@ impl ReadyApp {
         // `tokio::time::interval` in the dispatch loop, per-account
         // staleness gating, and the existing Service-side staleness logic
         // (`CalendarRuntime::accounts_due_for_sync` at 1 h,
-        // `refresh_gal_for_account`'s 24 h cache check) transplants
+        // `fetch_gal_for_account_if_stale`'s 24 h cache check) transplants
         // unchanged.
 
         // Phase 3 task 17: debounced reader reload after

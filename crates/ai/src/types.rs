@@ -196,29 +196,6 @@ pub enum TextTransformType {
     Formalize,
 }
 
-/// Writing style profile produced by analyze_writing_style.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WritingStyleProfile {
-    pub profile_text: String,
-    pub sample_count: i64,
-}
-
-/// Auto-draft mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutoDraftMode {
-    Reply,
-    ReplyAll,
-}
-
-impl AutoDraftMode {
-    pub fn cache_type(&self) -> &'static str {
-        match self {
-            Self::Reply => "auto_draft_reply",
-            Self::ReplyAll => "auto_draft_replyAll",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
