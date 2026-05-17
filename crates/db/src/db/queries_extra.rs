@@ -48,6 +48,7 @@ pub mod account_sync_writes;
 pub mod provider_sync_writes;
 pub mod calendar_contacts_writes;
 pub mod extract_reindex;
+pub mod label_groups;
 
 pub use action_helpers::*;
 pub use accounts_crud::*;
