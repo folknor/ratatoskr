@@ -17,7 +17,7 @@ pub async fn pin(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let local_result = db
-        .with_conn(move |conn| set_thread_pinned(conn, &aid, &tid, pinned).map(|_| ()))
+        .with_write(move |conn| set_thread_pinned(conn, &aid, &tid, pinned).map(|_| ()))
         .await
         .map_err(ActionError::db);
 

@@ -96,7 +96,7 @@ pub async fn imap_initial_sync(
     {
         let account_id = account_id.to_string();
         let folders_owned: Vec<_> = syncable_folders.iter().map(|f| (*f).clone()).collect();
-        db.with_conn(move |conn| {
+        db.with_write(move |conn| {
             let refs: Vec<&super::types::ImapFolder> = folders_owned.iter().collect();
             sync_pipeline::sync_folders_to_folders(conn, &account_id, &refs)
         })
@@ -188,6 +188,7 @@ pub async fn imap_initial_sync(
 
         match sync_single_folder(
             progress,
+            db,
             read_db,
             body_store,
             inline_images,
@@ -236,7 +237,7 @@ pub async fn imap_initial_sync(
         let aid = account_id.to_string();
         let db2 = db.clone();
         let _ = db2
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 db::db::queries_extra::set_account_supports_keywords(conn, &aid, all_support)
             })
             .await;
@@ -277,7 +278,10 @@ pub async fn imap_initial_sync(
     let skipped = {
         let aid = account_id.to_string();
         let tids = thread_ids.clone();
-        db.with_conn(move |conn| sync::pending::get_blocked_thread_ids(conn, &aid, &tids))
+        db.with_write(move |conn| {
+            let read = conn.as_read();
+            sync::pending::get_blocked_thread_ids(&read, &aid, &tids)
+        })
             .await?
     };
 
@@ -286,7 +290,7 @@ pub async fn imap_initial_sync(
         let tg = thread_groups.clone();
         let meta = all_meta.clone();
         let sk = skipped;
-        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &meta, &sk))
+        db.with_write(move |conn| thread_store::store_threads(conn, &aid, &tg, &meta, &sk))
             .await?
     };
 
@@ -306,7 +310,7 @@ pub async fn imap_initial_sync(
     let msg_ids: HashSet<String> = all_meta.keys().cloned().collect();
     let orphans = {
         let aid = account_id.to_string();
-        db.with_conn(move |conn| pipeline::cleanup_orphan_threads(conn, &aid, &msg_ids, &final_ids))
+        db.with_write(move |conn| pipeline::cleanup_orphan_threads(conn, &aid, &msg_ids, &final_ids))
             .await?
     };
     if orphans > 0 {
@@ -317,7 +321,7 @@ pub async fn imap_initial_sync(
     if stored_count > 0 || total_messages_found == 0 {
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
-        db.with_conn(move |conn| sync::state::update_account_sync_state(conn, &aid, &marker))
+        db.with_write(move |conn| sync::state::update_account_sync_state(conn, &aid, &marker))
             .await?;
     }
 
@@ -367,7 +371,8 @@ pub async fn imap_initial_sync(
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 async fn sync_single_folder(
     progress: &dyn ProgressReporter,
-    db: &ReadDbState,
+    db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -471,6 +476,7 @@ async fn sync_single_folder(
         if !chunk_converted.is_empty() {
             store_chunk(
                 db,
+                read_db,
                 body_store,
                 inline_images,
                 search,
@@ -527,7 +533,7 @@ async fn sync_single_folder(
         let aid = account_id.to_string();
         let fp = folder.raw_path.clone();
         let sync_at = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| {
+        db.with_write(move |conn| {
             sync_pipeline::upsert_folder_sync_state(
                 conn,
                 &aid,

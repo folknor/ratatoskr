@@ -2,7 +2,7 @@ use super::super::ReadDbState;
 use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature, DbTemplate};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
-use crate::db::{query_as, query_one};
+use crate::db::{query_as, query_one, WriteTarget, WriteTransactionTarget};
 use rusqlite::params;
 
 pub async fn db_get_templates_for_account(
@@ -169,7 +169,7 @@ pub struct InsertSignatureParams {
 /// the handler hold the connection across the transaction without an
 /// async wrapper.
 pub fn db_insert_signature_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     p: &InsertSignatureParams,
 ) -> Result<String, String> {
     log::info!(
@@ -178,7 +178,7 @@ pub fn db_insert_signature_sync(
         p.name
     );
     let id = uuid::Uuid::new_v4().to_string();
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
     if p.is_default {
         tx.execute(
             "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
@@ -231,11 +231,11 @@ pub struct UpdateSignatureParams {
 /// Phase 6a: paired sync version of the prior async function so the
 /// `signature.update` handler can run inside `WriteDbState::with_conn`.
 pub fn db_update_signature_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     p: UpdateSignatureParams,
 ) -> Result<(), String> {
     log::info!("Updating signature: id={}", p.id);
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
     let account_id = get_signature_account_id(&tx, &p.id)?;
     if p.is_default == Some(true)
         && let Some(ref aid) = account_id
@@ -288,7 +288,7 @@ pub fn db_update_signature_sync(
 /// returns `Ok` (rusqlite's `execute` reports rows-affected but does
 /// not error on zero matches), so callers do not need to pre-check.
 pub fn db_delete_signature_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     id: &str,
 ) -> Result<(), String> {
     log::info!("Deleting signature: id={id}");
@@ -305,10 +305,10 @@ pub fn db_delete_signature_sync(
 /// existing `sort_order`, so callers reordering a per-account subset
 /// only need to pass that account's ids.
 pub fn db_reorder_signatures_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     ordered_ids: &[String],
 ) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
     for (i, sig_id) in ordered_ids.iter().enumerate() {
         #[allow(clippy::cast_possible_wrap)]
         let order = i as i64;
@@ -403,7 +403,7 @@ pub async fn db_resolve_signature_for_compose(
 
 /// Helper to look up the account_id for a signature (used inside transactions).
 fn get_signature_account_id(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     signature_id: &str,
 ) -> Result<Option<String>, String> {
     Ok(conn
@@ -572,7 +572,7 @@ const SAVE_LOCAL_DRAFT_SQL: &str = "INSERT INTO local_drafts (id, account_id, to
        updated_at = unixepoch(), sync_status = 'pending'";
 
 fn exec_save_local_draft(
-    conn: &rusqlite::Connection,
+    conn: &impl crate::db::WriteTarget,
     p: &SaveLocalDraftParams,
 ) -> Result<(), String> {
     conn.execute(
@@ -607,13 +607,15 @@ pub async fn db_save_local_draft(
 }
 
 pub fn db_save_local_draft_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl crate::db::WriteTarget,
     params: &SaveLocalDraftParams,
 ) -> Result<(), String> {
     exec_save_local_draft(conn, params)
 }
 
-pub fn db_mark_queued_drafts_failed_sync(conn: &rusqlite::Connection) -> Result<usize, String> {
+pub fn db_mark_queued_drafts_failed_sync(
+    conn: &impl crate::db::WriteTarget,
+) -> Result<usize, String> {
     conn.execute(
         "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'",
         [],

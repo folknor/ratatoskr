@@ -88,8 +88,9 @@ async fn persist_folders_and_importance(
 
     ctx.db
         .with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
+            let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             insert_folders_batch(&tx, &folder_rows)?;
             upsert_labels(&tx, &label_rows)?;

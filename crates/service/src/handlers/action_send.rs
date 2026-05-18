@@ -108,7 +108,7 @@ pub(super) async fn handle(
     // unlinked so the orphan-cleanup pass at next boot has nothing to
     // collect.
     let journal_result = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             insert_quiet_job(
                 conn,
                 &job_id_bytes,

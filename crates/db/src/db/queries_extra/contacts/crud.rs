@@ -1,7 +1,8 @@
-use crate::db::ReadDbState;
 use crate::db::FromRow;
+use crate::db::ReadDbState;
+use crate::db::WriteTarget;
 use crate::db::types::DbContact;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 
 #[derive(Debug, Clone)]
 pub struct ExpandedGroupContact {
@@ -131,7 +132,7 @@ pub struct UpsertContactParams<'a> {
 /// Used by the contact action service. The app-crate `save_contact_inner`
 /// has equivalent SQL - this is the core-accessible version.
 pub fn db_upsert_contact_full(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     input: UpsertContactParams<'_>,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();

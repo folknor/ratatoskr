@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use mail_parser::MessageParser;
-use rusqlite::{Connection, Transaction};
+use crate::db::{WriteConn, WriteTxn};
 
 use crate::db::lookups;
 
@@ -140,7 +140,7 @@ struct AddressRow {
 }
 
 fn fetch_thread_address_rows(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<AddressRow>, String> {
@@ -166,7 +166,7 @@ fn fetch_thread_address_rows(
 }
 
 pub fn compute_thread_aggregate(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<ThreadAggregate, String> {
@@ -242,7 +242,7 @@ pub fn compute_thread_aggregate(
 }
 
 pub fn upsert_thread_aggregate(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     aggregate: &ThreadAggregate,
@@ -333,7 +333,7 @@ pub fn upsert_thread_aggregate(
 }
 
 pub fn ensure_thread_exists(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -346,7 +346,7 @@ pub fn ensure_thread_exists(
 }
 
 pub fn upsert_thread_participants(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     from_address: Option<&str>,
@@ -385,7 +385,7 @@ pub fn upsert_thread_participants(
     Ok(())
 }
 
-pub fn query_user_emails(tx: &Transaction) -> Result<Vec<String>, String> {
+pub fn query_user_emails(tx: &WriteTxn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = tx
         .prepare("SELECT email FROM accounts")
         .map_err(|e| format!("prepare user emails: {e}"))?;
@@ -399,7 +399,7 @@ pub fn query_user_emails(tx: &Transaction) -> Result<Vec<String>, String> {
 }
 
 pub fn maybe_update_chat_state(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     user_emails: &[String],
@@ -526,7 +526,7 @@ pub fn maybe_update_chat_state(
 }
 
 pub fn delete_messages_and_cleanup_threads(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     message_ids: &[impl AsRef<str>],
 ) -> Result<Vec<String>, String> {
@@ -544,7 +544,9 @@ pub fn delete_messages_and_cleanup_threads(
 
     let mut affected_threads: HashSet<String> = HashSet::new();
     for id in message_ids {
-        if let Ok(Some(tid)) = lookups::get_thread_id_for_message(tx, account_id, id.as_ref()) {
+        if let Ok(Some(tid)) =
+            lookups::get_thread_id_for_message(&tx.as_read(), account_id, id.as_ref())
+        {
             affected_threads.insert(tid);
         }
     }
@@ -624,7 +626,7 @@ pub fn delete_messages_and_cleanup_threads(
 }
 
 pub fn delete_thread_folder_rows(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -637,7 +639,7 @@ pub fn delete_thread_folder_rows(
 }
 
 pub fn insert_thread_folder_rows<'a>(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     folders: impl IntoIterator<Item = &'a str>,
@@ -655,7 +657,7 @@ pub fn insert_thread_folder_rows<'a>(
 }
 
 pub fn delete_thread_label_rows(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -668,7 +670,7 @@ pub fn delete_thread_label_rows(
 }
 
 pub fn insert_thread_label_rows<'a>(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     labels: impl IntoIterator<Item = &'a str>,
@@ -686,7 +688,7 @@ pub fn insert_thread_label_rows<'a>(
 }
 
 pub fn reassign_messages_and_repair_threads(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     new_thread_id: &str,
     message_ids: &[&str],
@@ -725,7 +727,7 @@ pub fn reassign_messages_and_repair_threads(
 }
 
 fn query_old_thread_ids_for_messages(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     new_thread_id: &str,
     message_ids: &[&str],
@@ -769,7 +771,7 @@ fn query_old_thread_ids_for_messages(
 }
 
 fn update_message_thread_ids(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     new_thread_id: &str,
     message_ids: &[&str],
@@ -803,7 +805,7 @@ fn update_message_thread_ids(
 }
 
 fn repair_thread_after_message_reassignment(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     user_emails: &[String],
@@ -862,12 +864,12 @@ fn repair_thread_after_message_reassignment(
 /// stale thread on the account. Returns the number of threads
 /// processed.
 pub fn backfill_thread_participants_for_account_sync(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     user_emails: &[String],
 ) -> Result<usize, String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin: {e}"))?;
 
     let thread_ids: Vec<String> = {
@@ -903,7 +905,7 @@ pub fn backfill_thread_participants_for_account_sync(
 }
 
 fn rebuild_thread_participants(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {

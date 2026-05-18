@@ -22,7 +22,7 @@ pub(crate) async fn handle_set(
     let write_db = boot_state.write_db_state()?;
     if let Some(collapsed) = params.attachments_collapsed {
         write_db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 db::db::queries_extra::set_attachments_collapsed(
                     conn,
                     &params.account_id,

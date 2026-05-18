@@ -13,7 +13,7 @@ pub fn update_label_group_sort_order_sync(
     updates: &[(i64, i64)],
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("label_group.reorder begin tx: {e}"))?;
     {
         let mut stmt = tx

@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::OptionalExtension;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriteConn};
 use db::db::queries_extra::{
     AttachmentInsertRow, FolderWriteRow, MessageInsertRow, insert_attachments,
     insert_folders_batch, insert_messages, recompute_thread_read_starred, set_message_imap_flags,
     sync_thread_read_starred_labels,
 };
 use search::SearchDocument;
-use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState};
 use seen::MessageAddresses;
 use store::inline_image_store::InlineImage;
 use crate::keyword_membership::{
@@ -140,7 +140,7 @@ impl DbInsertData {
         }
     }
 
-    pub(crate) fn insert(&self, tx: &rusqlite::Transaction) -> Result<(), String> {
+    pub(crate) fn insert(&self, tx: &db::db::WriteTxn<'_>) -> Result<(), String> {
         if self.thread_id == self.id {
             tx.execute(
                 "INSERT OR REPLACE INTO threads \
@@ -230,7 +230,7 @@ impl DbInsertData {
 }
 
 fn existing_imap_message_identity(
-    conn: &Connection,
+    conn: &db::db::WriteTxn<'_>,
     account_id: &str,
     folder: &str,
     uid: u32,
@@ -252,7 +252,8 @@ fn existing_imap_message_identity(
 
 /// Store a chunk of converted messages to all four subsystems.
 pub(crate) async fn store_chunk(
-    db: &ReadDbState,
+    db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -264,9 +265,9 @@ pub(crate) async fn store_chunk(
         .iter()
         .map(|c| DbInsertData::from_converted(c, account_id))
         .collect();
-    let resolved_ids = db.with_conn(move |conn| {
+    let resolved_ids = db.with_write(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+                .transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
         let mut resolved_ids = Vec::with_capacity(db_data.len());
         for d in &mut db_data {
@@ -309,7 +310,7 @@ pub(crate) async fn store_chunk(
         store_bodies(body_store, chunk, &resolved_ids),
         store_inline_images(inline_images, chunk),
         index_messages(search, chunk, account_id, &resolved_ids),
-        seen::ingest_from_messages(db, account_id, &addr_data),
+        seen::ingest_from_messages(read_db, account_id, &addr_data),
     );
 
     Ok(())
@@ -461,12 +462,12 @@ pub async fn index_messages(
 
 /// Sync IMAP folders to the labels table.
 pub fn sync_folders_to_folders(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folders: &[&ImapFolder],
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+                .transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
     // Build path → folder_id map for parent resolution
@@ -549,7 +550,7 @@ fn derive_imap_parent_folder_id(
 
 /// Update folder sync state in DB.
 pub fn upsert_folder_sync_state(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folder_path: &str,
     uidvalidity: u32,
@@ -578,7 +579,7 @@ pub fn upsert_folder_sync_state(
 
 /// Get all folder sync states for an account.
 pub fn get_all_folder_sync_states(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
 ) -> Result<Vec<FolderSyncState>, String> {
     let mut stmt = conn
@@ -609,7 +610,7 @@ pub fn get_all_folder_sync_states(
 }
 
 pub fn get_local_message_counts_by_folder(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
 ) -> Result<HashMap<String, u32>, String> {
     let mut stmt = conn
@@ -651,7 +652,7 @@ pub struct FolderSyncState {
 /// membership. Thread-level `kw:` labels are then recomputed from that
 /// per-message table so removed keywords do not stick forever.
 pub fn apply_flag_changes(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folder: &str,
     changes: &[FlagChange],
@@ -661,7 +662,7 @@ pub fn apply_flag_changes(
     }
 
     let tx = conn
-        .unchecked_transaction()
+                .transaction()
         .map_err(|e| format!("flag change tx: {e}"))?;
 
     let mut updated = 0u64;
@@ -710,7 +711,7 @@ pub fn apply_flag_changes(
 
 /// Get the timestamp of the last deletion detection check for a folder.
 pub fn get_last_deletion_check_at(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folder_path: &str,
 ) -> Result<Option<i64>, String> {
@@ -725,7 +726,7 @@ pub fn get_last_deletion_check_at(
 
 /// Update the last deletion detection check timestamp for a folder.
 pub fn set_last_deletion_check_at(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folder_path: &str,
     timestamp: i64,
@@ -744,7 +745,7 @@ pub fn set_last_deletion_check_at(
 /// Returns `(message_id, imap_uid)` pairs so callers can identify which
 /// messages to delete by their local ID.
 pub fn get_local_uids_for_folder(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folder_path: &str,
 ) -> Result<Vec<(String, u32)>, String> {
@@ -783,7 +784,7 @@ pub struct LocalImapFlags {
 
 /// Get locally cached flags for all messages in a folder.
 pub fn get_local_flags_for_folder(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     folder_path: &str,
 ) -> Result<Vec<LocalImapFlags>, String> {
@@ -852,7 +853,7 @@ pub fn get_local_flags_for_folder(
 ///
 /// Returns the list of affected thread IDs (for UI refresh).
 pub fn remove_deleted_messages(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     deleted_message_ids: &[String],
 ) -> Result<Vec<String>, String> {
@@ -861,7 +862,7 @@ pub fn remove_deleted_messages(
     }
 
     let tx = conn
-        .unchecked_transaction()
+                .transaction()
         .map_err(|e| format!("deletion tx: {e}"))?;
 
     let affected_threads =

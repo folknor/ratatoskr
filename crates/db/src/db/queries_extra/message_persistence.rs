@@ -1,4 +1,6 @@
-use rusqlite::{Transaction, params};
+use rusqlite::params;
+
+use crate::db::WriteTxn;
 
 #[derive(Debug, Clone)]
 pub struct MessageInsertRow {
@@ -50,7 +52,7 @@ pub struct AttachmentInsertRow {
     pub is_inline: bool,
 }
 
-pub fn insert_messages(tx: &Transaction, rows: &[MessageInsertRow]) -> Result<(), String> {
+pub fn insert_messages(tx: &WriteTxn<'_>, rows: &[MessageInsertRow]) -> Result<(), String> {
     for row in rows {
         tx.execute(
             "INSERT OR REPLACE INTO messages \
@@ -105,7 +107,7 @@ pub fn insert_messages(tx: &Transaction, rows: &[MessageInsertRow]) -> Result<()
     Ok(())
 }
 
-pub fn insert_attachments(tx: &Transaction, rows: &[AttachmentInsertRow]) -> Result<(), String> {
+pub fn insert_attachments(tx: &WriteTxn<'_>, rows: &[AttachmentInsertRow]) -> Result<(), String> {
     for row in rows {
         tx.execute(
             "INSERT INTO attachments \

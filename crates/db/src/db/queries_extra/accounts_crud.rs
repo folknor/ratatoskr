@@ -1,4 +1,4 @@
-use super::super::{ReadConn, ReadDbState};
+use super::super::{ReadConn, ReadDbState, WriteTarget};
 use super::dynamic_update;
 use rusqlite::{Connection, OptionalExtension, params};
 use types::MailProviderKind;
@@ -57,7 +57,7 @@ pub struct UpdateAccountParams {
 /// the async `db_create_account` (via `ReadDbState`) and the app crate's
 /// `Db::with_write_conn` use this function.
 pub fn create_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     params: &CreateAccountParams,
 ) -> Result<String, String> {
     log::info!(
@@ -159,7 +159,7 @@ pub async fn db_create_account(
 /// `db_update_account` (via `ReadDbState`) and the app crate's
 /// `Db::with_write_conn` use this function.
 pub fn update_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: &str,
     params: UpdateAccountParams,
 ) -> Result<(), String> {
@@ -230,11 +230,11 @@ pub async fn db_update_account_name(db: &ReadDbState, id: String, name: String) 
 ///
 /// Phase 6a: paired sync helper for the `account.reorder` IPC handler.
 pub fn update_account_sort_order_sync(
-    conn: &Connection,
+    conn: &impl super::super::WriteTransactionTarget,
     updates: &[(String, i64)],
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("account.reorder begin tx: {e}"))?;
     {
         let mut stmt = tx
@@ -546,7 +546,7 @@ pub fn get_stored_graph_client_id_sync(
 /// Synchronous token/credential update for re-authentication.
 /// Updates only the credential columns for an existing account.
 pub fn update_account_tokens_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     params: ReauthAccountParams,
 ) -> Result<(), String> {

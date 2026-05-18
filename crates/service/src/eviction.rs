@@ -96,7 +96,7 @@ pub async fn run_eviction_sweep(
 
         let cursor_for_query = cursor;
         let rows: Result<Vec<BlobHash>, String> = db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 // `messages.date` is stored as a Unix millisecond
                 // timestamp (JMAP wire format passes straight through;
                 // see `provider_sync::jmap::sync::storage`). The caller

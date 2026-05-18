@@ -34,7 +34,7 @@ pub(super) async fn handle(
     let plan_id_bytes = *plan_id.0.as_bytes();
     let ops = serialize_ops(plan)?;
 
-    db.with_conn(move |conn| insert_calendar_plan(conn, &plan_id_bytes, &account_id, &ops))
+    db.with_write(move |conn| insert_calendar_plan(conn, &plan_id_bytes, &account_id, &ops))
     .await
     .map_err(ServiceError::Internal)?;
 

@@ -11,6 +11,7 @@
 
 use common::ops::ProviderOps;
 use common::types::ProviderCtx;
+use db::db::WriteTarget;
 use db::db::queries_extra::mdn::{
     ReadReceiptPolicy, mark_mdn_sent_local, resolve_read_receipt_policy,
 };
@@ -113,7 +114,7 @@ pub(crate) async fn send_mdn_responses(
 }
 
 fn collect_candidates_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<Candidate>, String> {
@@ -150,7 +151,7 @@ async fn collect_candidates(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn(move |conn| collect_candidates_sync(conn, &aid, &tid))
+    db.with_write(move |conn| collect_candidates_sync(conn, &aid, &tid))
         .await
 }
 
@@ -160,7 +161,7 @@ async fn load_account_identity(
 ) -> Result<Option<(String, Option<String>)>, String> {
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         Ok(conn
             .query_row(
                 "SELECT email, display_name FROM accounts WHERE id = ?1",
@@ -180,7 +181,7 @@ async fn resolve_policy(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let sender = sender.to_string();
-    db.with_conn(move |conn| Ok(resolve_read_receipt_policy(conn, &aid, &sender)))
+    db.with_write(move |conn| Ok(resolve_read_receipt_policy(conn, &aid, &sender)))
         .await
         .unwrap_or(ReadReceiptPolicy::Never)
 }
@@ -193,7 +194,7 @@ async fn mark_sent(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let mid = message_id.to_string();
-    db.with_conn(move |conn| mark_mdn_sent_local(conn, &aid, &mid))
+    db.with_write(move |conn| mark_mdn_sent_local(conn, &aid, &mid))
         .await
 }
 

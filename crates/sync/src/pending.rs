@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
-use db::db::ReadDbState;
-use rusqlite::Connection;
+use db::db::{ReadConn, ReadDbState};
 
 /// Synchronous version: check which thread IDs have pending local operations.
 pub fn get_blocked_thread_ids(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_ids: &[String],
 ) -> Result<HashSet<String>, String> {
@@ -38,7 +37,7 @@ pub async fn blocked_thread_ids(
     }
 
     let aid = account_id.to_string();
-    db.with_conn(move |conn| get_blocked_thread_ids(conn, &aid, &thread_ids))
+    db.with_read(move |conn| get_blocked_thread_ids(conn, &aid, &thread_ids))
         .await
 }
 

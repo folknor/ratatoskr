@@ -26,7 +26,7 @@ pub(crate) async fn handle_create(
     let id = uuid::Uuid::new_v4().to_string();
     let id_for_db = id.clone();
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             // Default icon `"search"` and no color / no account scope
             // matches today's UI-side defaults (`app/src/db/
             // pinned_searches.rs:122` before this commit). Future

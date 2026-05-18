@@ -9,7 +9,7 @@ use super::types::{
     ThreadInfoRow,
 };
 use super::queries_extra::validate_label_color_pairs;
-use super::{ReadConn, ReadDbState};
+use super::{ReadConn, ReadDbState, WriteTarget};
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
@@ -217,7 +217,7 @@ pub fn get_thread_folder_ids(
 // ---------------------------------------------------------------------------
 
 fn set_thread_bool_field(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     column: &str,
@@ -232,7 +232,7 @@ fn set_thread_bool_field(
 }
 
 pub fn set_thread_read(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     is_read: bool,
@@ -241,7 +241,7 @@ pub fn set_thread_read(
 }
 
 pub fn set_thread_starred(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     is_starred: bool,
@@ -250,7 +250,7 @@ pub fn set_thread_starred(
 }
 
 pub fn set_thread_messages_starred(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     is_starred: bool,
@@ -263,7 +263,7 @@ pub fn set_thread_messages_starred(
 }
 
 pub fn set_thread_pinned(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     is_pinned: bool,
@@ -272,7 +272,7 @@ pub fn set_thread_pinned(
 }
 
 pub fn set_thread_muted(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     is_muted: bool,
@@ -281,7 +281,7 @@ pub fn set_thread_muted(
 }
 
 pub fn delete_thread(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -404,7 +404,7 @@ pub fn delete_label(conn: &Connection, account_id: &str, label_id: &str) -> Resu
 // Settings
 // ---------------------------------------------------------------------------
 
-pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+pub fn set_setting(conn: &impl WriteTarget, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
         params![key, value],

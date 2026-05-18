@@ -2,6 +2,7 @@ use super::super::ReadDbState;
 use super::super::types::{DbFilterRule, DbSmartFolder, DbSmartLabelRule, SortOrderItem};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
+use crate::db::WriteTarget;
 use rusqlite::params;
 
 pub async fn db_get_filters_for_account(
@@ -142,7 +143,7 @@ pub async fn db_get_smart_folder_by_id(
 /// Service-side `smart_folder.create` handler via
 /// `WriteDbState::with_conn`.
 pub fn db_insert_smart_folder_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     id: &str,
     name: &str,
     query: &str,

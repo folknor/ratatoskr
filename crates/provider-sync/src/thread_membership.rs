@@ -7,7 +7,7 @@ use db::db::queries_extra::{
 };
 
 pub(crate) fn replace_thread_membership_from_full_coverage(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     folders: &[FolderKind],
@@ -22,7 +22,7 @@ pub(crate) fn replace_thread_membership_from_full_coverage(
 }
 
 pub(crate) fn replace_message_membership_and_recompute(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     message_id: &str,
@@ -41,7 +41,7 @@ pub(crate) fn replace_message_membership_and_recompute(
 /// `message_labels` - so a future keyword-recompute path cannot be
 /// silently wiped by an empty per-message label list.
 pub(crate) fn replace_message_folders_and_recompute(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     message_id: &str,

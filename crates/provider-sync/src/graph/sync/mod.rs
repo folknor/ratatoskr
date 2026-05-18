@@ -186,8 +186,7 @@ pub async fn graph_initial_sync(
     }
 
     let aid = account_id.to_string();
-    read_db
-        .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
+    db.with_write(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
     log::info!(

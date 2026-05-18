@@ -97,7 +97,7 @@ pub async fn enqueue_if_retryable_with_id(
         let resource_id = resource_id.to_string();
         let params_json = params_json.to_string();
         let enqueue_result = write_db
-            .with_conn({
+            .with_write({
                 let op_id = op_id.clone();
                 move |conn| {
                     db_pending_ops_enqueue_sync(
@@ -164,7 +164,7 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
 async fn sweep_stale_label_intents(ctx: &ActionContext) {
     let db = ctx.write_db.clone();
     let result = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::delete_stale_pending_thread_label_intents(
                 conn,
                 STALE_LABEL_INTENT_AGE_SECS,
@@ -219,7 +219,7 @@ async fn process_account_group(
         // Mark as executing
         let update_result = ctx
             .write_db
-            .with_conn({
+            .with_write({
                 let op_id = op.id.clone();
                 move |conn| db_pending_ops_update_status_sync(conn, &op_id, "executing", None)
             })
@@ -255,7 +255,7 @@ async fn process_account_group(
             ActionOutcome::Success | ActionOutcome::NoOp => {
                 let _ = ctx
                     .write_db
-                    .with_conn({
+                    .with_write({
                         let op_id = op.id.clone();
                         move |conn| db_pending_ops_delete_sync(conn, &op_id)
                     })
@@ -276,7 +276,7 @@ async fn process_account_group(
                 );
                 let _ = ctx
                     .write_db
-                    .with_conn({
+                    .with_write({
                         let op_id = op.id.clone();
                         move |conn| db_pending_ops_increment_retry_sync(conn, &op_id)
                     })
@@ -519,7 +519,7 @@ pub async fn recover_on_boot(ctx: &ActionContext) {
     // 1. Reset stranded executing operations
     match ctx
         .write_db
-        .with_conn(db_pending_ops_recover_executing_sync)
+        .with_write(|conn| db_pending_ops_recover_executing_sync(conn))
         .await
     {
         Ok(count) if count > 0 => {
@@ -536,7 +536,7 @@ pub async fn recover_on_boot(ctx: &ActionContext) {
     // 2. Resurface stale 'sending' drafts as 'failed'
     let db = ctx.write_db.clone();
     let result = db
-        .with_conn(db::db::queries_extra::mark_sending_drafts_failed)
+        .with_write(|conn| db::db::queries_extra::mark_sending_drafts_failed(conn))
         .await;
 
     match result {

@@ -29,7 +29,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use db::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
-use rusqlite::Connection;
+use db::db::WriteTarget;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use service_api::WAL_FILENAME;
@@ -63,7 +63,7 @@ fn rotated_path(data_dir: &Path) -> PathBuf {
 /// reading or replaying log a warning and the drain continues -
 /// per the boot recovery contract (log+continue is preferable to
 /// blocking the boot handshake on a broken local file).
-pub(crate) fn drain(conn: &Connection, data_dir: &Path) -> Result<usize, String> {
+pub(crate) fn drain(conn: &impl WriteTarget, data_dir: &Path) -> Result<usize, String> {
     let path = wal_path(data_dir);
     let file = match File::open(&path) {
         Ok(f) => f,

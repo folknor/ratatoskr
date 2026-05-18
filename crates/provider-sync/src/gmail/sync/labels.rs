@@ -30,8 +30,9 @@ fn persist_folders_and_labels(
     account_id: &str,
     labels: &[GmailLabel],
 ) -> Result<(), String> {
-    let tx = conn
-        .unchecked_transaction()
+    let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
     let mut folder_rows = Vec::new();

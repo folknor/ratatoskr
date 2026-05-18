@@ -3,13 +3,13 @@
 //! message that references the just-indexed `content_hash`, plus the
 //! 7-6 post-boot backfill query that drives the kick handler.
 //!
-//! All functions take `&Connection` (sync); callers wrap them in
-//! `ReadDbState::with_conn(...)` for async dispatch.
+//! Functions are synchronous; callers wrap them in the appropriate
+//! typed DB state helper for async dispatch.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 use std::collections::HashMap;
 
-use crate::db::ReadConn;
+use crate::db::{ReadConn, WriteTarget};
 
 /// `SQLITE_LIMIT_VARIABLE_NUMBER` historically defaulted to 999. Modern
 /// builds raise it but we stay portable. Each pair binds two params, so a
@@ -69,7 +69,7 @@ pub struct UnindexedCachedAttachmentRow {
 /// need to scale past that, swap to a paginated query reading from a
 /// cursor.
 pub fn select_all_message_ids_for_rebuild(
-    conn: &Connection,
+    conn: &impl WriteTarget,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
         .prepare(
@@ -100,7 +100,7 @@ pub fn select_all_message_ids_for_rebuild(
 /// pre-PreserveExisting Tantivy schema bump invalidates stale rows
 /// without explicit cleanup.
 pub fn select_extracted_text_status(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     content_hash: &crate::blob_hash::BlobHash,
     schema_version: i64,
 ) -> Result<Option<String>, String> {
@@ -129,7 +129,7 @@ pub fn select_extracted_text_status(
 /// re-emitting permanent skips) and by the post-extraction success
 /// path (so backfill stops re-emitting newly-resolved rows).
 pub fn mark_attachment_text_indexed(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     content_hash: &crate::blob_hash::BlobHash,
     at: i64,
 ) -> Result<(), String> {
@@ -147,7 +147,7 @@ pub fn mark_attachment_text_indexed(
 /// INSERT OR REPLACE is the correct shape - re-running with the same
 /// hash overwrites in place.
 pub fn upsert_extracted_text_row(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     content_hash: &crate::blob_hash::BlobHash,
     mime_type: &str,
     extracted_text: Option<&str>,
@@ -176,7 +176,7 @@ pub fn upsert_extracted_text_row(
 /// truncate `attachment_extracted_text`. Run at the start of a Wipe
 /// rebuild so the subsequent backfill kick re-extracts everything
 /// against the new schema.
-pub fn reset_extracted_text_for_rebuild(conn: &Connection) -> Result<(), String> {
+pub fn reset_extracted_text_for_rebuild(conn: &impl WriteTarget) -> Result<(), String> {
     conn.execute(
         "UPDATE attachments SET text_indexed_at = NULL WHERE text_indexed_at IS NOT NULL",
         [],
@@ -199,7 +199,7 @@ pub fn reset_extracted_text_for_rebuild(conn: &Connection) -> Result<(), String>
 /// status-aware skip inside the worker. A second kick after the first
 /// finishes returns 0 rows.
 pub fn find_unindexed_cached_attachments(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     limit: usize,
 ) -> Result<Vec<UnindexedCachedAttachmentRow>, String> {
     // Attachments roadmap Phase 3: join against `attachment_blobs` so
@@ -237,7 +237,7 @@ pub fn find_unindexed_cached_attachments(
 /// Distinct `(account_id, message_id)` pairs whose `attachments` rows
 /// reference the given `content_hash`. Uses `idx_attachments_content_hash`.
 pub fn find_message_ids_referencing_content_hash(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     content_hash: &crate::blob_hash::BlobHash,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
@@ -267,7 +267,7 @@ pub fn find_message_ids_referencing_content_hash(
 /// rather than the entire extracted-text store. Defense-in-depth: the
 /// content-hash join is by sub-select against `attachments`.
 pub fn delete_extracted_text_orphans_since(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     cursor: i64,
 ) -> Result<u64, String> {
     let n = conn
@@ -288,7 +288,7 @@ pub fn delete_extracted_text_orphans_since(
 /// message_id)` pairs. Chunks transparently to stay under SQLite's
 /// host-parameter cap.
 pub fn select_messages_for_index_batch(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     pairs: &[(String, String)],
 ) -> Result<Vec<MessageIndexRow>, String> {
     if pairs.is_empty() {

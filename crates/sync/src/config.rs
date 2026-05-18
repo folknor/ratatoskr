@@ -63,10 +63,13 @@ pub fn calendar_provider_kind(account: &SyncAccount) -> Option<&'static str> {
 }
 
 /// Read the `sync_period_days` setting from DB, defaulting to 365.
-pub fn get_sync_period_days(conn: &Connection) -> i64 {
-    db::db::queries::get_setting(conn, "sync_period_days")
+pub fn get_sync_period_days(conn: &impl db::db::WriteTarget) -> i64 {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        rusqlite::params!["sync_period_days"],
+        |row| row.get::<_, String>("value"),
+    )
         .ok()
-        .flatten()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(365)
 }

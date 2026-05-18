@@ -46,7 +46,7 @@ pub async fn sync_for_account(
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let initial_sync_completed = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.query_row(
                 "SELECT initial_sync_completed FROM accounts WHERE id = ?1",
                 rusqlite::params![aid],

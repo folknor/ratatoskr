@@ -8,12 +8,14 @@
 //! See `crates/service/src/startup_invariants.rs` for the consumer side
 //! and `crates/service/src/lifecycle.rs` for the producer side.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
+
+use crate::db::{WriteTarget, WriteTransactionTarget};
 
 /// Read the cursor for a store. Returns 0 if the row is absent
 /// (semantics: "no clean shutdown ever recorded for this store" -
 /// scan everything).
-pub fn get_clean_shutdown_cursor(conn: &Connection, store_name: &str) -> Result<i64, String> {
+pub fn get_clean_shutdown_cursor(conn: &impl WriteTarget, store_name: &str) -> Result<i64, String> {
     match conn.query_row(
         "SELECT last_clean_shutdown_at FROM clean_shutdown_cursors WHERE store_name = ?1",
         params![store_name],
@@ -29,14 +31,12 @@ pub fn get_clean_shutdown_cursor(conn: &Connection, store_name: &str) -> Result<
 /// transaction. Idempotent. Failure is non-fatal: callers log at warn
 /// and continue (the cost is just a wider scan on the next dirty boot).
 ///
-/// Uses `unchecked_transaction()` so the helper composes with the
-/// `WriteDbState::with_conn(|conn| ...)` shape (which yields a shared
-/// `&Connection` reference). The connection is already exclusive
-/// behind the writer-half mutex, so the lack of `&mut` checking at the
-/// rusqlite level is sound.
-pub fn update_clean_shutdown_cursors(conn: &Connection, stores: &[&str]) -> Result<(), String> {
+pub fn update_clean_shutdown_cursors(
+    conn: &impl WriteTransactionTarget,
+    stores: &[&str],
+) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("update_clean_shutdown_cursors begin: {e}"))?;
     for store in stores {
         tx.execute(
@@ -55,6 +55,7 @@ pub fn update_clean_shutdown_cursors(conn: &Connection, stores: &[&str]) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
 
     fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory");

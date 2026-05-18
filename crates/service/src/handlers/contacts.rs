@@ -37,7 +37,7 @@ pub(crate) async fn handle_group_save(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let entry = db::db::queries_extra::GroupSettingsEntry {
                 id: params.id,
                 name: params.name,
@@ -59,7 +59,7 @@ pub(crate) async fn handle_group_delete(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| db::db::queries_extra::delete_group_sync(conn, &params.id))
+        .with_write(move |conn| db::db::queries_extra::delete_group_sync(conn, &params.id))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ContactGroupDeleteAck)
@@ -72,7 +72,7 @@ pub(crate) async fn handle_contact_save(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let entry = db::db::queries_extra::ContactSettingsEntry {
                 id: params.id,
                 email: params.email,

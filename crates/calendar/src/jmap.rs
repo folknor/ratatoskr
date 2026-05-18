@@ -72,7 +72,7 @@ pub(crate) async fn sync_jmap_calendar_account(
         write_db
             .with_write(move |conn| {
                 let tx = conn
-                    .unchecked_transaction()
+                    .transaction()
                     .map_err(|e| format!("begin jmap event delete tx: {e}"))?;
                 delete_event_by_account_remote_id(&tx, &aid, &remote_event_id)?;
                 tx.commit()
@@ -134,7 +134,7 @@ async fn persist_jmap_calendar_event(
             recurrence_id: None,
         };
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin jmap calendar event tx: {e}"))?;
         let local_event_id = upsert_calendar_event_row(&tx, &row)?;
 

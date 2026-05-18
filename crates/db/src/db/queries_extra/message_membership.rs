@@ -1,4 +1,6 @@
-use rusqlite::{Transaction, params};
+use rusqlite::params;
+
+use crate::db::WriteTxn;
 use types::{FolderKind, LabelKind};
 
 use super::label_intent::finalize_provider_truth_label_membership;
@@ -8,7 +10,7 @@ use super::thread_persistence::{
 };
 
 pub fn replace_message_folder_rows(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     message_id: &str,
     folders: &[FolderKind],
@@ -32,7 +34,7 @@ pub fn replace_message_folder_rows(
 }
 
 pub fn replace_message_label_rows(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     message_id: &str,
     labels: &[LabelKind],
@@ -56,7 +58,7 @@ pub fn replace_message_label_rows(
 }
 
 pub fn delete_message_membership_rows(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     message_id: &str,
 ) -> Result<(), String> {
@@ -74,7 +76,7 @@ pub fn delete_message_membership_rows(
 }
 
 pub fn recompute_thread_folders_from_messages(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -103,7 +105,7 @@ pub fn recompute_thread_folders_from_messages(
 }
 
 pub fn recompute_thread_labels_from_messages(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -133,7 +135,7 @@ pub fn recompute_thread_labels_from_messages(
 }
 
 pub fn insert_full_thread_folders(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     folders: &[FolderKind],
@@ -143,7 +145,7 @@ pub fn insert_full_thread_folders(
 }
 
 pub fn insert_full_thread_labels(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     labels: &[LabelKind],
@@ -243,14 +245,16 @@ mod tests {
         folders: &[FolderKind],
         labels: &[LabelKind],
     ) {
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = crate::db::WriteConn::from_raw(conn);
+        let tx = write.transaction().unwrap();
         replace_message_folder_rows(&tx, "acc", message_id, folders).unwrap();
         replace_message_label_rows(&tx, "acc", message_id, labels).unwrap();
         tx.commit().unwrap();
     }
 
     fn recompute(conn: &mut Connection, thread_id: &str) {
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = crate::db::WriteConn::from_raw(conn);
+        let tx = write.transaction().unwrap();
         recompute_thread_folders_from_messages(&tx, "acc", thread_id).unwrap();
         recompute_thread_labels_from_messages(&tx, "acc", thread_id).unwrap();
         tx.commit().unwrap();
@@ -311,7 +315,8 @@ mod tests {
         );
         recompute(&mut conn, "t1");
 
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         super::super::thread_persistence::delete_messages_and_cleanup_threads(&tx, "acc", &["m1"])
             .unwrap();
         tx.commit().unwrap();
@@ -341,7 +346,8 @@ mod tests {
         );
         recompute(&mut conn, "old");
 
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         super::super::thread_persistence::reassign_messages_and_repair_threads(
             &tx,
             "acc",

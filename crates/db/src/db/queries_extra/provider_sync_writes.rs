@@ -5,10 +5,12 @@
 //! `crates/graph/src/public_folder_sync.rs`, and
 //! `crates/stores/src/attachment_cache.rs` are routed through `db` APIs.
 //!
-//! Each function takes `&Connection` (sync); callers wrap in
-//! `ReadDbState::with_conn(...)` if they need async dispatch.
+//! Functions use typed DB capabilities; callers wrap them in the
+//! appropriate state helper if they need async dispatch.
 
 use rusqlite::{Connection, params};
+
+use crate::db::{WriteTarget, WriteTxn};
 
 // ---------------------------------------------------------------------------
 // messages table
@@ -18,7 +20,7 @@ use rusqlite::{Connection, params};
 /// `(account_id, imap_folder, imap_uid)`. Returns the number of rows updated.
 #[allow(clippy::too_many_arguments)]
 pub fn set_message_imap_flags(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     folder: &str,
     imap_uid: i64,
@@ -82,7 +84,7 @@ pub fn get_thread_id_for_imap_uid(
 /// starred". Reaction-only threads should be transient cleanup cases rather
 /// than user-visible unread/starred threads.
 pub fn recompute_thread_read_starred(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -104,7 +106,7 @@ pub fn recompute_thread_read_starred(
 /// as `pending_thread_label_intents` rows. Skipping the bump avoids
 /// clearing unrelated overlay rows on threads where this cleanup fires.
 pub fn sync_thread_read_starred_labels(
-    conn: &Connection,
+    conn: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -162,7 +164,7 @@ pub struct AttachmentCacheInfo {
 /// UI callers pass the local `attachments.id`; provider-specific callers can
 /// still pass the remote attachment ID.
 pub fn find_attachment_cache_info(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     message_id: &str,
     remote_attachment_id: &str,
@@ -213,7 +215,7 @@ pub fn find_attachment_cache_info(
 /// been persisted in PackStore. Only touches `content_hash`;
 /// `attachments.size` is expected to be pre-filled by the sync path.
 pub fn update_attachment_cache_fields(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     attachment_id: &str,
     content_hash: &crate::blob_hash::BlobHash,
 ) -> Result<(), String> {

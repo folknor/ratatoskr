@@ -1,13 +1,14 @@
 use common::ops::ProviderOps;
 use common::typed_ids::LabelId;
 use common::types::ActionProviderCtx;
-use types::LabelKind;
+use types::{LabelKind, MailProviderKind};
 
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable_with_id;
 use super::provider::{classify_provider_error, create_provider};
+use db::db::WriteTarget;
 use db::progress::NoopProgressReporter;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
 
@@ -69,7 +70,7 @@ async fn label_local_step(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let lid = label_id.as_str().to_string();
-    db.with_conn_mapped(move |conn| {
+    db.with_write_mapped(move |conn| {
         let label_kind =
             label_kind_for_account_sync(conn, &aid, &lid).map_err(ActionError::db)?;
 
@@ -118,7 +119,7 @@ fn label_intents(
 }
 
 fn upsert_pending_intents_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     intents: &[(String, PendingLabelIntentOp)],
@@ -147,7 +148,7 @@ async fn attach_pending_action_id(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    if let Err(e) = db.with_conn(move |conn| {
+    if let Err(e) = db.with_write(move |conn| {
         db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
             conn,
             &aid,
@@ -176,7 +177,7 @@ async fn clear_pending_intents_immediate(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    if let Err(e) = db.with_conn(move |conn| {
+    if let Err(e) = db.with_write(move |conn| {
         db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
             conn,
             &aid,
@@ -203,9 +204,9 @@ async fn confirm_provider_intents(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn_mapped(move |conn| {
+    db.with_write_mapped(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| ActionError::db(format!("begin confirm tx: {e}")))?;
         db::db::queries_extra::confirmed_provider_label_intents(
             &tx,
@@ -224,16 +225,23 @@ async fn confirm_provider_intents(
 }
 
 fn label_kind_for_account_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     label_id: &str,
 ) -> Result<LabelKind, String> {
-    let provider = db::db::queries_extra::get_account_provider_sync(conn, account_id)?;
+    let provider = conn
+        .query_row(
+            "SELECT provider FROM accounts WHERE id = ?1",
+            rusqlite::params![account_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| format!("get account provider: {e}"))?;
+    let provider = MailProviderKind::parse(&provider)?;
     LabelKind::parse(label_id, provider)
 }
 
 fn ensure_typed_tag_label(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     label: &LabelKind,
 ) -> Result<Option<()>, String> {
@@ -657,8 +665,8 @@ async fn resolve_member_label_kind(
 ) -> Result<LabelKind, ActionError> {
     let aid = account_id.to_string();
     let lid = label_id.as_str().to_string();
-    ctx.db
-        .with_conn(move |conn| label_kind_for_account_sync(conn, &aid, &lid))
+    ctx.write_db
+        .with_write(move |conn| label_kind_for_account_sync(conn, &aid, &lid))
         .await
         .map_err(|e| ActionError::db(format!("label kind lookup: {e}")))
 }

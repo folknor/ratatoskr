@@ -46,7 +46,7 @@ pub(crate) async fn maybe_compress(
         return bytes;
     }
     let mime = match db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let mime: Option<String> = conn
                 .query_row(
                     "SELECT mime_type FROM attachments WHERE id = ?1",

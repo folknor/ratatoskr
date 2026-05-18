@@ -111,7 +111,7 @@ pub async fn jmap_initial_sync(
     client: &JmapClient,
     account_id: &str,
     days_back: i64,
-    _db: &WriteDbState,
+    db: &WriteDbState,
     read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
@@ -195,8 +195,7 @@ pub async fn jmap_initial_sync(
     let email_state = mailbox::get_email_state(client).await?;
     save_sync_state(ctx.db, account_id, "Email", &email_state).await?;
     let aid = account_id.to_string();
-    ctx.db
-        .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
+    db.with_write(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
     log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");

@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use super::from_row::query_as;
 use super::types::DbThread;
-use super::ReadDbState;
+use super::{ReadDbState, WriteTarget, WriteTransactionTarget};
 
 /// Stored pinned-search metadata and snapshot ownership.
 #[derive(Debug, Clone)]
@@ -22,12 +22,12 @@ pub struct DbPinnedSearch {
 /// Inside one transaction: query-keyed UPSERT on `pinned_searches`,
 /// then full replacement of the row's `pinned_search_threads`.
 pub fn db_create_or_update_pinned_search_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     query: &str,
     thread_ids: &[(String, String)],
     scope_account_id: Option<&str>,
 ) -> Result<i64, String> {
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let existing_id: Option<i64> = tx
         .query_row(
@@ -89,13 +89,13 @@ pub fn db_create_or_update_pinned_search_sync(
 /// before the update fires, preserving the UNIQUE on
 /// `pinned_searches.query`.
 pub fn db_update_pinned_search_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     id: i64,
     query: &str,
     thread_ids: &[(String, String)],
     scope_account_id: Option<&str>,
 ) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let conflict_id: Option<i64> = tx
         .query_row(
@@ -146,7 +146,7 @@ pub fn db_update_pinned_search_sync(
 /// is `Ok`. Sync helper called from the Service-side
 /// `pinned_search.delete` handler.
 pub fn db_delete_pinned_search_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     id: i64,
 ) -> Result<(), String> {
     conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
@@ -291,7 +291,7 @@ pub async fn db_get_recent_search_queries(
 /// Sync helper called from the Service-side `pinned_search.delete_all`
 /// handler.
 pub fn db_delete_all_pinned_searches_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
 ) -> Result<u64, String> {
     let deleted = conn
         .execute("DELETE FROM pinned_searches", [])
@@ -309,7 +309,7 @@ pub fn db_delete_all_pinned_searches_sync(
 /// the handler hold the connection for the duration of the DELETE
 /// without needing an async wrapper.
 pub fn db_expire_stale_pinned_searches_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     max_age_secs: i64,
 ) -> Result<u64, String> {
     let deleted = conn

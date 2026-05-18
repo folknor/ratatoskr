@@ -17,7 +17,7 @@ pub async fn mute(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let local_result = db
-        .with_conn(move |conn| set_thread_muted(conn, &aid, &tid, muted).map(|_| ()))
+        .with_write(move |conn| set_thread_muted(conn, &aid, &tid, muted).map(|_| ()))
         .await
         .map_err(ActionError::db);
 

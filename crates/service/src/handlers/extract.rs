@@ -179,7 +179,7 @@ pub(crate) async fn handle_backfill_kick(
         return Ok(());
     };
     let rows = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::find_unindexed_cached_attachments(conn, BACKFILL_KICK_LIMIT)
         })
         .await

@@ -512,7 +512,7 @@ async fn run_extraction_pipeline(
         let hash_for_update = work.content_hash;
         if let Err(e) = inner
             .db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 let now: i64 = chrono::Utc::now().timestamp();
                 db::db::queries_extra::mark_attachment_text_indexed(conn, &hash_for_update, now)
             })
@@ -694,7 +694,7 @@ async fn run_extraction_pipeline(
         let hash = work.content_hash;
         let _ = inner
             .db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 let now: i64 = chrono::Utc::now().timestamp();
                 db::db::queries_extra::mark_attachment_text_indexed(conn, &hash, now)
             })
@@ -726,7 +726,7 @@ async fn persist_outcome_row(
     let mime = mime_type.to_string();
     let result = inner
         .db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::upsert_extracted_text_row(
                 conn,
                 &hash,
@@ -800,7 +800,7 @@ async fn fan_out_reindex_chunk(
 ) -> Result<(), String> {
     let pairs_for_msgs = pairs.to_vec();
     let pairs_for_atts = pairs.to_vec();
-    let messages_fut = inner.db.with_conn(move |conn| {
+    let messages_fut = inner.db.with_write(move |conn| {
         db::db::queries_extra::select_messages_for_index_batch(conn, &pairs_for_msgs)
     });
     let attachments_fut = inner.db.with_read(move |conn| {
@@ -1021,7 +1021,7 @@ mod tests {
     async fn phase_7_7_indexed_outcome_emits_writer_command_index() {
         let (db, read_db, _db_dir) = db_states_for_test();
         let hash_a = db::blob_hash::BlobHash::hash(b"A");
-        db.with_conn_sync(move |conn| {
+        db.with_write_sync(move |conn| {
             conn.execute(
                 "INSERT INTO accounts (id, email, provider, is_active) \
                  VALUES ('acc1', 'acc1@example.com', 'gmail_api', 1)",

@@ -65,8 +65,9 @@ fn store_thread_to_db(
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
-    let tx = conn
-        .unchecked_transaction()
+    let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
         .map_err(|e| format!("begin tx: {e}"))?;
 
     upsert_thread_record(&tx, account_id, thread_id, messages)?;
@@ -93,7 +94,7 @@ fn store_thread_to_db(
 
 #[allow(clippy::too_many_lines)]
 fn upsert_thread_record(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGmailMessage],
@@ -129,7 +130,7 @@ fn upsert_thread_record(
 }
 
 fn set_thread_labels(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGmailMessage],
@@ -190,7 +191,7 @@ fn set_thread_labels(
 }
 
 fn upsert_messages(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
@@ -244,7 +245,7 @@ fn upsert_messages(
 }
 
 fn upsert_attachments(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
@@ -271,7 +272,7 @@ fn upsert_attachments(
 /// For each reaction message, resolve the target message via `In-Reply-To` header
 /// and insert into `message_reactions`.
 fn insert_reactions(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {

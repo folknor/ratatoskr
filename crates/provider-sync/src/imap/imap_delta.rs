@@ -70,7 +70,7 @@ pub async fn imap_delta_sync(
     {
         let aid = account_id.to_string();
         let fowned: Vec<_> = syncable_folders.iter().map(|f| (*f).clone()).collect();
-        db.with_conn(move |conn| {
+        db.with_write(move |conn| {
             let refs: Vec<_> = fowned.iter().collect();
             sync_pipeline::sync_folders_to_folders(conn, &aid, &refs)
         })
@@ -80,12 +80,12 @@ pub async fn imap_delta_sync(
     // Get saved folder sync states
     let sync_states = {
         let aid = account_id.to_string();
-        db.with_conn(move |conn| sync_pipeline::get_all_folder_sync_states(conn, &aid))
+        db.with_write(move |conn| sync_pipeline::get_all_folder_sync_states(conn, &aid))
             .await?
     };
     let local_message_counts = {
         let aid = account_id.to_string();
-        db.with_conn(move |conn| sync_pipeline::get_local_message_counts_by_folder(conn, &aid))
+        db.with_write(move |conn| sync_pipeline::get_local_message_counts_by_folder(conn, &aid))
             .await?
     };
     let state_map: HashMap<String, sync_pipeline::FolderSyncState> = sync_states
@@ -140,6 +140,7 @@ pub async fn imap_delta_sync(
             folder,
             &mapping.folder_id,
             &since_date,
+            db,
             read_db,
             body_store,
             inline_images,
@@ -226,6 +227,7 @@ pub async fn imap_delta_sync(
                 saved,
                 delta,
                 days_back,
+                db,
                 read_db,
                 body_store,
                 inline_images,
@@ -252,7 +254,7 @@ pub async fn imap_delta_sync(
             let aid = account_id.to_string();
             let db2 = db.clone();
             let _ = db2
-                .with_conn(move |conn| {
+                .with_write(move |conn| {
                     db::db::queries_extra::set_account_supports_keywords(conn, &aid, all_support)
                 })
                 .await;
@@ -264,7 +266,7 @@ pub async fn imap_delta_sync(
         config,
         cancellation_token,
         account_id,
-        read_db,
+        db,
         body_store,
         search,
         &syncable_folders,
@@ -301,7 +303,10 @@ pub async fn imap_delta_sync(
     let skipped = {
         let aid = account_id.to_string();
         let t = tids.clone();
-        db.with_conn(move |conn| sync::pending::get_blocked_thread_ids(conn, &aid, &t))
+        db.with_write(move |conn| {
+            let read = conn.as_read();
+            sync::pending::get_blocked_thread_ids(&read, &aid, &t)
+        })
             .await?
     };
 
@@ -310,7 +315,7 @@ pub async fn imap_delta_sync(
         let tg = thread_groups.clone();
         let m = all_meta.clone();
         let s = skipped;
-        db.with_conn(move |conn| thread_store::store_threads(conn, &aid, &tg, &m, &s))
+        db.with_write(move |conn| thread_store::store_threads(conn, &aid, &tg, &m, &s))
             .await?
     };
 
@@ -329,7 +334,7 @@ pub async fn imap_delta_sync(
     {
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
-        db.with_conn(move |conn| sync::state::update_account_sync_state(conn, &aid, &marker))
+        db.with_write(move |conn| sync::state::update_account_sync_state(conn, &aid, &marker))
             .await?;
     }
 
@@ -536,7 +541,8 @@ async fn fetch_folder_uids(
     folder: &super::types::ImapFolder,
     folder_id: &str,
     since_date: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -560,7 +566,7 @@ async fn fetch_folder_uids(
         let uv = sr.folder_status.uidvalidity;
         let ms = sr.folder_status.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| {
+        db.with_write(move |conn| {
             sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
         })
         .await?;
@@ -575,6 +581,7 @@ async fn fetch_folder_uids(
         folder_id,
         &sr.uids,
         db,
+        read_db,
         body_store,
         inline_images,
         search,
@@ -589,7 +596,7 @@ async fn fetch_folder_uids(
     let uv = sr.folder_status.uidvalidity;
     let ms = sr.folder_status.highest_modseq;
     let sat = chrono::Utc::now().timestamp();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
     })
     .await?;
@@ -607,7 +614,8 @@ async fn fetch_uids_on_session(
     folder: &super::types::ImapFolder,
     folder_id: &str,
     uids: &[u32],
-    db: &ReadDbState,
+    db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -644,6 +652,7 @@ async fn fetch_uids_on_session(
         if !converted.is_empty() {
             store_chunk(
                 db,
+                read_db,
                 body_store,
                 inline_images,
                 search,
@@ -679,7 +688,8 @@ async fn process_folder_delta(
     saved: &sync_pipeline::FolderSyncState,
     delta: &DeltaCheckResult,
     days_back: i64,
-    db: &ReadDbState,
+    db: &WriteDbState,
+    read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -701,7 +711,7 @@ async fn process_folder_delta(
             let uv = delta.uidvalidity;
             let lu = saved.last_uid;
             let sat = chrono::Utc::now().timestamp();
-            db.with_conn(move |conn| {
+            db.with_write(move |conn| {
                 sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, Some(modseq))
             })
             .await?;
@@ -733,7 +743,7 @@ async fn process_folder_delta(
                 let aid = account_id.to_string();
                 let fp = folder.raw_path.clone();
                 let ch = changes;
-                db.with_conn(move |conn| sync_pipeline::apply_flag_changes(conn, &aid, &fp, &ch))
+                db.with_write(move |conn| sync_pipeline::apply_flag_changes(conn, &aid, &fp, &ch))
                     .await?;
             }
             Ok(_) => {
@@ -760,7 +770,7 @@ async fn process_folder_delta(
         let lu = saved.last_uid;
         let ms = delta.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| {
+        db.with_write(move |conn| {
             sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
         })
         .await?;
@@ -794,7 +804,7 @@ async fn process_folder_delta(
             let uv = sr.folder_status.uidvalidity;
             let ms = sr.folder_status.highest_modseq;
             let sat = chrono::Utc::now().timestamp();
-            db.with_conn(move |conn| {
+            db.with_write(move |conn| {
                 sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
             })
             .await?;
@@ -809,6 +819,7 @@ async fn process_folder_delta(
             folder_id,
             &sr.uids,
             db,
+            read_db,
             body_store,
             inline_images,
             search,
@@ -823,7 +834,7 @@ async fn process_folder_delta(
         let uv = sr.folder_status.uidvalidity;
         let ms = sr.folder_status.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| {
+        db.with_write(move |conn| {
             sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
         })
         .await?;
@@ -878,7 +889,7 @@ async fn process_folder_delta(
                         let aid = account_id.to_string();
                         let fp = folder.raw_path.clone();
                         let ch = changes;
-                        db.with_conn(move |conn| {
+                        db.with_write(move |conn| {
                             sync_pipeline::apply_flag_changes(conn, &aid, &fp, &ch)
                         })
                         .await?;
@@ -934,7 +945,7 @@ async fn process_folder_delta(
             let lu = saved.last_uid;
             let ms = delta.highest_modseq;
             let sat = chrono::Utc::now().timestamp();
-            db.with_conn(move |conn| {
+            db.with_write(move |conn| {
                 sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
             })
             .await?;
@@ -951,6 +962,7 @@ async fn process_folder_delta(
         folder_id,
         &delta.new_uids,
         db,
+        read_db,
         body_store,
         inline_images,
         search,
@@ -994,7 +1006,7 @@ async fn process_folder_delta(
     let fp = folder.raw_path.clone();
     let ms = delta.highest_modseq;
     let sat = chrono::Utc::now().timestamp();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
     })
     .await?;

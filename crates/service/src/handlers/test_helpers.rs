@@ -6,7 +6,7 @@
 //! mismatch, in-flight-cap, and stdio-corruption behaviors.
 
 use crate::boot::BootSharedState;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
@@ -140,7 +140,7 @@ pub(super) async fn seed_account_handle(
     };
     let ack_email = email.clone();
     let (account_id, label_count) = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let account_id =
                 db::db::queries_extra::create_account_sync(conn, &create_params)?;
             if caldav_url.is_some() || caldav_username.is_some() || caldav_password.is_some() {
@@ -230,7 +230,7 @@ pub(super) async fn seed_thread_handle(
     );
     let app_data_dir = boot_state.app_data_dir().to_path_buf();
     write_db
-        .with_conn(move |conn| insert_harness_thread(conn, params, &thread_id, &message_id))
+        .with_write(move |conn| insert_harness_thread(conn, params, &thread_id, &message_id))
         .await
         .map_err(ServiceError::Internal)?;
     store::body_store::BodyStoreReadState::init(&app_data_dir)
@@ -297,7 +297,7 @@ pub(super) async fn seed_cached_attachment_handle(
         size_bytes,
     };
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             insert_harness_cached_attachment(
                 conn,
                 &CachedAttachmentInsert {
@@ -360,7 +360,7 @@ pub(super) async fn seed_remote_attachment_handle(
         size_bytes,
     };
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             insert_harness_remote_attachment(
                 conn,
                 &RemoteAttachmentInsert {
@@ -436,7 +436,7 @@ pub(super) async fn thread_read_handle(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     let ack = write_db
-        .with_conn(move |conn| read_harness_thread(conn, &params))
+        .with_write(move |conn| read_harness_thread(conn, &params))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -448,7 +448,7 @@ pub(super) async fn pending_ops_read_handle(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     let ack = write_db
-        .with_conn(move |conn| read_harness_pending_ops(conn, &params))
+        .with_write(move |conn| read_harness_pending_ops(conn, &params))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -480,7 +480,7 @@ pub(super) async fn query_db_state_handle(
     let write_db = boot_state.write_db_state()?;
     let encryption_key = boot_state.encryption_key();
     let ack = write_db
-        .with_conn(move |conn| read_harness_db_state(conn, &params, encryption_key))
+        .with_write(move |conn| read_harness_db_state(conn, &params, encryption_key))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -597,8 +597,8 @@ async fn enrich_test_search_results(
         .map_err(|e| ServiceError::Internal(format!("test.search_index body store: {e}")))?;
     let write_db = boot_state.write_db_state()?;
     let inputs = write_db
-        .with_conn(move |conn| {
-            let read = db::db::ReadConn::from_raw(conn);
+        .with_write(move |conn| {
+            let read = conn.as_read();
             let fragments = db::db::queries_extra::select_attachment_fragments_batch(&read, &pairs)?;
             let mut body_by_mid: HashMap<String, String> = HashMap::new();
             for body in body_read.get_batch_sync(&message_ids)? {
@@ -673,7 +673,7 @@ pub(super) async fn query_blob_tombstone_state_handle(
         ServiceError::Internal("write_db_state unavailable".into())
     })?;
     let ack: TestQueryBlobTombstoneStateAck = db_state
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let row: Option<Option<i64>> = conn
                 .query_row(
                     "SELECT tombstoned_at FROM attachment_blobs WHERE content_hash = ?1",
@@ -698,7 +698,7 @@ pub(super) async fn query_blob_tombstone_state_handle(
 }
 
 fn insert_harness_account_rows(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     account_id: &str,
     email: &str,
 ) -> Result<u64, String> {
@@ -755,7 +755,7 @@ fn insert_harness_account_rows(
 }
 
 fn insert_harness_thread(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: TestSeedThreadParams,
     thread_id: &str,
     message_id: &str,
@@ -779,7 +779,7 @@ fn insert_harness_thread(
         .unwrap_or_else(|| "sender@example.test".into());
     let is_chat_thread = params.is_chat_thread || chat_email.is_some();
     let unread_messages = if params.is_read { 0_i64 } else { 1_i64 };
-    let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
 
     tx.execute(
         "INSERT INTO threads (
@@ -919,10 +919,10 @@ struct RemoteAttachmentInsert<'a> {
 }
 
 fn insert_harness_cached_attachment(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     insert: &CachedAttachmentInsert<'_>,
 ) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
     tx.execute(
         "INSERT INTO attachments (
             id, message_id, account_id, filename, mime_type, size,
@@ -951,10 +951,10 @@ fn insert_harness_cached_attachment(
 }
 
 fn insert_harness_remote_attachment(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     insert: &RemoteAttachmentInsert<'_>,
 ) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
     tx.execute(
         "INSERT INTO attachments (
             id, message_id, account_id, filename, mime_type, size,
@@ -982,7 +982,7 @@ fn insert_harness_remote_attachment(
 }
 
 fn read_harness_thread(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestThreadReadParams,
 ) -> Result<TestThreadReadAck, String> {
     let flags = conn
@@ -1053,7 +1053,7 @@ fn read_harness_thread(
 }
 
 fn read_harness_pending_ops(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     filters: &TestPendingOpsReadParams,
 ) -> Result<TestPendingOpsReadAck, String> {
     let mut stmt = conn
@@ -1134,7 +1134,7 @@ fn read_harness_pending_ops(
 }
 
 fn read_harness_db_state(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
     encryption_key: Option<[u8; 32]>,
 ) -> Result<TestQueryDbStateAck, String> {
@@ -1181,7 +1181,7 @@ struct HarnessAccountRaw {
 }
 
 fn read_harness_accounts(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     account_id: Option<&str>,
     encryption_key: Option<&[u8; 32]>,
 ) -> Result<Vec<TestDbAccountRow>, String> {
@@ -1292,7 +1292,7 @@ fn credential_summary(
 // `state.folders[id]` or `state.labels[id]` for the right table.
 
 fn read_harness_folders(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     account_id: Option<&str>,
 ) -> Result<Vec<TestDbFolderRow>, String> {
     let cols = "id, account_id, name, parent_id, imap_folder_path,
@@ -1342,7 +1342,7 @@ fn test_db_folder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbFo
 }
 
 fn read_harness_labels(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     account_id: Option<&str>,
 ) -> Result<Vec<TestDbLabelRow>, String> {
     let cols = "id, account_id, name, sort_order, visible, is_undeletable,
@@ -1390,7 +1390,7 @@ fn test_db_label_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbLab
 }
 
 fn read_harness_signatures(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     account_id: Option<&str>,
 ) -> Result<Vec<TestDbSignatureRow>, String> {
     match account_id {
@@ -1463,7 +1463,7 @@ fn decrypt_if_service_ciphertext(
     }
 }
 
-fn count_accounts(conn: &Connection, account_id: Option<&str>) -> Result<u64, String> {
+fn count_accounts(conn: &impl db::db::WriteTransactionTarget, account_id: Option<&str>) -> Result<u64, String> {
     let count = match account_id {
         Some(account_id) => conn.query_row(
             "SELECT COUNT(*) FROM accounts WHERE id = ?1",
@@ -1479,7 +1479,7 @@ fn count_accounts(conn: &Connection, account_id: Option<&str>) -> Result<u64, St
 }
 
 fn count_account_rows(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     table: &str,
     account_id: Option<&str>,
 ) -> Result<u64, String> {
@@ -1498,7 +1498,7 @@ fn count_account_rows(
 }
 
 fn count_unread_messages(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     account_id: Option<&str>,
 ) -> Result<u64, String> {
     let count = match account_id {
@@ -1518,7 +1518,7 @@ fn count_unread_messages(
 }
 
 fn read_harness_messages(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbMessageRow>, String> {
     let limit = i64::try_from(params.message_limit.unwrap_or(20).min(200))
@@ -1559,7 +1559,7 @@ fn read_harness_messages(
 }
 
 fn read_harness_local_drafts(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbLocalDraftRow>, String> {
     let limit = i64::try_from(params.message_limit.unwrap_or(20).min(200))
@@ -1604,7 +1604,7 @@ fn read_harness_local_drafts(
 }
 
 fn read_harness_attachments(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbAttachmentRow>, String> {
     let limit = i64::try_from(params.attachment_limit.unwrap_or(20).min(200))
@@ -1649,7 +1649,7 @@ fn read_harness_attachments(
 }
 
 fn read_harness_calendars(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbCalendarRow>, String> {
     let limit = i64::try_from(params.calendar_limit.unwrap_or(20).min(200))
@@ -1692,7 +1692,7 @@ fn read_harness_calendars(
 }
 
 fn read_harness_calendar_events(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbCalendarEventRow>, String> {
     let limit = i64::try_from(params.calendar_limit.unwrap_or(20).min(200))
@@ -1739,7 +1739,7 @@ fn read_harness_calendar_events(
 }
 
 fn read_harness_contacts(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbContactRow>, String> {
     let limit = i64::try_from(params.contact_limit.unwrap_or(20).min(200))
@@ -1782,7 +1782,7 @@ fn read_harness_contacts(
 }
 
 fn read_harness_contact_groups(
-    conn: &Connection,
+    conn: &impl db::db::WriteTransactionTarget,
     params: &TestQueryDbStateParams,
 ) -> Result<Vec<TestDbContactGroupRow>, String> {
     let limit = i64::try_from(params.contact_group_limit.unwrap_or(20).min(200))

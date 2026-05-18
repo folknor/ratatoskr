@@ -200,7 +200,7 @@ async fn drain_mark_chat_read_jobs(
             let job_id_bytes = job.job_id;
             let write_db = ctx.write_db.clone();
             let _ = write_db
-                .with_conn(move |conn| {
+                .with_write(move |conn| {
                     finalize_job(conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
                 })
             .await;
@@ -215,7 +215,7 @@ async fn lease_next_quiet_job_via_blocking(
 ) -> Result<Option<LeasedQuietJob>, String> {
     let owner = *owner;
     ctx.write_db
-        .with_conn(move |conn| lease_next_ready_quiet_job(conn, kind, &owner, LEASE_DURATION_MS))
+        .with_write(move |conn| lease_next_ready_quiet_job(conn, kind, &owner, LEASE_DURATION_MS))
         .await
 }
 
@@ -246,7 +246,7 @@ async fn run_mark_chat_read(
         serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
     let job_id_bytes = job.job_id;
     ctx.write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             finalize_job(conn, &job_id_bytes, JobTerminalStatus::Completed, &summary_blob)
         })
         .await?;
@@ -306,7 +306,7 @@ async fn drain_send_jobs(
             let job_id_bytes = job.job_id;
             let write_db = ctx.write_db.clone();
             let _ = write_db
-                .with_conn(move |conn| {
+                .with_write(move |conn| {
                     finalize_job(conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
                 })
             .await;
@@ -376,7 +376,7 @@ async fn run_send(
         serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
     let job_id_bytes = job.job_id;
     ctx.write_db
-        .with_conn(move |conn| finalize_job(conn, &job_id_bytes, status, &summary_blob))
+        .with_write(move |conn| finalize_job(conn, &job_id_bytes, status, &summary_blob))
         .await?;
 
     crate::send_vault::cleanup_vault_dir(app_data_dir, &send_id);
@@ -491,7 +491,7 @@ async fn drain_one_pass(
     // without this sweep maybe_finalize is never called again.
     let stranded = match ctx
         .write_db
-        .with_conn(unfinalized_per_op_plan_jobs)
+        .with_write(|conn| unfinalized_per_op_plan_jobs(conn))
         .await
     {
         Ok(ids) => ids,
@@ -556,7 +556,7 @@ async fn lease_next_via_blocking(
 ) -> Result<Option<LeasedOp>, String> {
     let owner = *owner;
     ctx.write_db
-        .with_conn(move |conn| lease_next_ready_op(conn, &owner, LEASE_DURATION_MS))
+        .with_write(move |conn| lease_next_ready_op(conn, &owner, LEASE_DURATION_MS))
         .await
 }
 
@@ -657,7 +657,7 @@ async fn run_one_calendar(
     let operation_id = op.operation_id;
     let blob_for_blocking = outcome_blob.clone();
     ctx.write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             mark_op_terminal(conn, &plan_id, operation_id, status, &blob_for_blocking)
         })
         .await?;
@@ -691,7 +691,7 @@ async fn persist_and_emit(
     let operation_id = op.operation_id;
     let blob_for_blocking = outcome_blob.clone();
     ctx.write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             mark_op_terminal(conn, &plan_id, operation_id, status, &blob_for_blocking)
         })
         .await?;
@@ -717,7 +717,7 @@ async fn maybe_finalize(
     let plan_id = *plan_id_bytes;
     let counts: OpStatusCounts = ctx
         .write_db
-        .with_conn(move |conn| count_ops_by_status(conn, &plan_id))
+        .with_write(move |conn| count_ops_by_status(conn, &plan_id))
         .await?;
     if counts.non_terminal() > 0 {
         return Ok(());
@@ -740,7 +740,7 @@ async fn maybe_finalize(
         serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
     let plan_id_for_blocking = *plan_id_bytes;
     ctx.write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             finalize_job(conn, &plan_id_for_blocking, terminal_status, &summary_blob)
         })
         .await?;
@@ -764,7 +764,7 @@ async fn maybe_finalize(
         let plan_id_for_blocking = *plan_id_bytes;
         let rows: Vec<(u32, Vec<u8>)> = ctx
             .write_db
-            .with_conn(move |conn| terminal_ops_for_plan(conn, &plan_id_for_blocking))
+            .with_write(move |conn| terminal_ops_for_plan(conn, &plan_id_for_blocking))
             .await?;
         let mut outcomes = Vec::with_capacity(rows.len());
         for (operation_id, blob) in rows {
@@ -827,7 +827,7 @@ async fn maybe_finalize(
 
 async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
     let result: Result<Vec<ReplayableOp>, String> =
-        ctx.write_db.with_conn(unemitted_terminal_ops).await;
+        ctx.write_db.with_write(|conn| unemitted_terminal_ops(conn)).await;
     let ops = match result {
         Ok(ops) => ops,
         Err(error) => {

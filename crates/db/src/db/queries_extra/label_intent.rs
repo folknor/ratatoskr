@@ -1,4 +1,6 @@
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::params;
+
+use crate::db::{WriteTarget, WriteTxn};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PendingLabelIntentOp {
@@ -38,7 +40,7 @@ fn now_epoch() -> Result<i64, String> {
 /// is what makes the attach immune to a same-`op` overwrite by a
 /// concurrent action.
 pub fn upsert_pending_thread_label_intents<'a>(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     intents: impl IntoIterator<Item = PendingLabelIntent<'a>>,
@@ -88,7 +90,7 @@ pub fn upsert_pending_thread_label_intents<'a>(
 /// `generation_seen` to a newer snapshot - silently no-ops here instead
 /// of clobbering the newer action's `action_id`.
 pub fn attach_action_id_to_pending_thread_label_intents<'a>(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     intents: impl IntoIterator<Item = PendingLabelIntent<'a>>,
@@ -125,7 +127,7 @@ pub fn attach_action_id_to_pending_thread_label_intents<'a>(
 /// provider error we tear down the optimistic state instead of waiting
 /// for the stale-intent sweep.
 pub fn delete_pending_thread_label_intents_for_labels<'a>(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     intents: impl IntoIterator<Item = PendingLabelIntent<'a>>,
@@ -153,7 +155,7 @@ pub fn delete_pending_thread_label_intents_for_labels<'a>(
 }
 
 pub fn delete_pending_thread_label_intents_for_action(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     action_id: &str,
 ) -> Result<(), String> {
     conn.execute(
@@ -165,7 +167,7 @@ pub fn delete_pending_thread_label_intents_for_action(
 }
 
 pub fn delete_stale_pending_thread_label_intents(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     max_age_secs: i64,
 ) -> Result<usize, String> {
     if max_age_secs <= 0 {
@@ -191,7 +193,7 @@ pub fn delete_stale_pending_thread_label_intents(
 }
 
 pub fn bump_thread_label_membership_generation(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -206,7 +208,7 @@ pub fn bump_thread_label_membership_generation(
 }
 
 pub fn clear_satisfied_pending_thread_label_intents(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -240,7 +242,7 @@ pub fn clear_satisfied_pending_thread_label_intents(
 }
 
 pub fn finalize_provider_truth_label_membership(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -268,7 +270,7 @@ pub fn finalize_provider_truth_label_membership(
 /// satisfies. The caller owns the `Transaction` so this helper can be
 /// composed with other writes in the same atomic step.
 pub fn confirmed_provider_label_intents<'a>(
-    tx: &Transaction,
+    tx: &WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     intents: impl IntoIterator<Item = PendingLabelIntent<'a>>,
@@ -374,6 +376,7 @@ pub fn user_visible_label_group_rendered_fragment(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
 
     fn conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -453,7 +456,7 @@ mod tests {
 
     #[test]
     fn confirmed_add_bumps_and_clears_matching_intent() {
-        let mut conn = conn();
+        let conn = conn();
         upsert_pending_thread_label_intents(
             &conn,
             "acc",
@@ -466,7 +469,8 @@ mod tests {
         )
         .unwrap();
 
-        let tx = conn.transaction().unwrap();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         confirmed_provider_label_intents(
             &tx,
             "acc",
@@ -537,8 +541,9 @@ mod tests {
         // (delete-sibling, JWZ rethread, etc.) would silently wipe the
         // label. This test simulates that recompute against the schema
         // confirmed-intent writes to, and asserts truth survives.
-        let mut conn = conn();
-        let tx = conn.transaction().unwrap();
+        let conn = conn();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         confirmed_provider_label_intents(
             &tx,
             "acc",
@@ -589,7 +594,7 @@ mod tests {
 
     #[test]
     fn confirmed_remove_clears_per_message_and_keyword_rows() {
-        let mut conn = conn();
+        let conn = conn();
         // Seed both per-message tables as if the label had been added previously.
         conn.execute(
             "INSERT INTO message_labels (account_id, message_id, label_id) VALUES ('acc', 'm1', 'kw:todo')",
@@ -612,7 +617,8 @@ mod tests {
         )
         .unwrap();
 
-        let tx = conn.transaction().unwrap();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         confirmed_provider_label_intents(
             &tx,
             "acc",

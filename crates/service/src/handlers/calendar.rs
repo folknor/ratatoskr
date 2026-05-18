@@ -78,7 +78,7 @@ pub(crate) async fn handle_set_visibility(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::calendars::set_calendar_visibility_sync(
                 conn,
                 &params.calendar_id,

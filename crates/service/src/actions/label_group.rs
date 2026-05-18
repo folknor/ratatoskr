@@ -7,6 +7,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable_with_id;
 use super::provider::{classify_provider_error, create_provider};
+use db::db::WriteTarget;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
 
 /// Distinguishes initial dispatch from a pending-ops drain retry. The
@@ -68,7 +69,7 @@ async fn apply_label_group_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn_mapped(move |conn| {
+    db.with_write_mapped(move |conn| {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM label_groups WHERE id = ?1",
@@ -109,7 +110,7 @@ async fn remove_label_group_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn_mapped(move |conn| {
+    db.with_write_mapped(move |conn| {
         if kind == DispatchKind::Retry {
             // User re-applied the group after the queued `removeLabelGroup`.
             // Skip member RemoveLabel dispatches.
@@ -130,7 +131,7 @@ async fn remove_label_group_local(
 }
 
 fn thread_renders_group_for_user(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     group_id: LabelGroupId,
@@ -158,7 +159,7 @@ fn thread_renders_group_for_user(
 }
 
 fn upsert_group_intents(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     labels: &[LabelId],
@@ -652,7 +653,7 @@ async fn clear_group_intents_immediate(
     } else {
         PendingLabelIntentOp::Remove
     };
-    if let Err(e) = db.with_conn(move |conn| {
+    if let Err(e) = db.with_write(move |conn| {
         db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
             conn,
             &aid,
@@ -709,7 +710,7 @@ async fn attach_group_action_id(
         .iter()
         .map(|label_id| label_id.as_str().to_string())
         .collect();
-    if let Err(e) = db.with_conn(move |conn| {
+    if let Err(e) = db.with_write(move |conn| {
         db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
             conn,
             &aid,
@@ -729,7 +730,7 @@ async fn attach_group_action_id(
 }
 
 fn read_group_member_labels(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     group_id: LabelGroupId,
 ) -> Result<Vec<LabelId>, ActionError> {
@@ -749,7 +750,7 @@ fn read_group_member_labels(
 }
 
 fn read_applied_group_member_labels(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     group_id: LabelGroupId,

@@ -112,7 +112,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
                 write_db
                     .with_write(move |conn| {
                         let tx = conn
-                            .unchecked_transaction()
+                .transaction()
                             .map_err(|e| format!("begin google other contacts tx: {e}"))?;
                         super::contacts::persist_google_other_contacts_write(&tx, write)?;
                         tx.commit()

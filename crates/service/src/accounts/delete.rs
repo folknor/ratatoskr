@@ -102,7 +102,7 @@ pub(crate) async fn delete_with_marker(
 ) -> Result<CleanupReport, String> {
     let aid = account_id.clone();
     let plan = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let data = db::db::queries_extra::gather_account_deletion_data_sync(conn, &aid)?;
             let shared_cache_hashes =
                 db::db::queries_extra::referenced_hashes_excluding_account_sync(
@@ -295,7 +295,7 @@ async fn drive_steps(
                 } else {
                     let aid = marker.account_id.clone();
                     write_db
-                        .with_conn(move |conn| {
+                        .with_write(move |conn| {
                             db::db::queries_extra::delete_account_row_sync(conn, &aid)
                         })
                         .await?;

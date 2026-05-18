@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use db::db::ReadDbState;
-use rusqlite::{Connection, OptionalExtension};
+use db::db::{ReadDbState, WriteConn};
+use rusqlite::OptionalExtension;
 
 /// Synchronous version: update account sync state (history_id column).
 pub fn update_account_sync_state(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     history_id: &str,
 ) -> Result<(), String> {
@@ -20,7 +20,10 @@ pub async fn save_account_history_id(
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let hid = history_id.to_string();
-    db.with_conn(move |conn| update_account_sync_state(conn, &aid, &hid))
+    db.with_conn(move |conn| {
+        let write = WriteConn::from_raw(conn);
+        update_account_sync_state(&write, &aid, &hid)
+    })
         .await
 }
 

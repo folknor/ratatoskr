@@ -1,5 +1,6 @@
 //! MDN (read receipt) policy lookup and sent-flag tracking.
 
+use crate::db::WriteTarget;
 use rusqlite::{Connection, params};
 
 /// Policy that governs whether an MDN (read receipt) should be sent.
@@ -29,7 +30,7 @@ impl ReadReceiptPolicy {
 /// 4. Global default from the `settings` table (`default_read_receipt_policy`)
 /// 5. Hard-coded fallback: `Never`
 pub fn resolve_read_receipt_policy(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     sender_email: &str,
 ) -> ReadReceiptPolicy {
@@ -55,8 +56,7 @@ pub fn resolve_read_receipt_policy(
     }
 
     // 4. Global default from settings table
-    if let Ok(Some(value)) = super::super::queries::get_setting(conn, "default_read_receipt_policy")
-    {
+    if let Ok(Some(value)) = get_setting_for_write(conn, "default_read_receipt_policy") {
         return ReadReceiptPolicy::from_str(&value);
     }
 
@@ -64,7 +64,11 @@ pub fn resolve_read_receipt_policy(
     ReadReceiptPolicy::Never
 }
 
-fn query_policy(conn: &Connection, account_id: &str, scope: &str) -> Option<ReadReceiptPolicy> {
+fn query_policy(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    scope: &str,
+) -> Option<ReadReceiptPolicy> {
     conn.query_row(
         "SELECT policy FROM read_receipt_policy WHERE account_id = ?1 AND scope = ?2",
         params![account_id, scope],
@@ -72,6 +76,20 @@ fn query_policy(conn: &Connection, account_id: &str, scope: &str) -> Option<Read
     )
     .ok()
     .map(|v| ReadReceiptPolicy::from_str(&v))
+}
+
+fn get_setting_for_write(
+    conn: &impl WriteTarget,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let result = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>("value"),
+        )
+        .ok();
+    Ok(result)
 }
 
 /// Check whether an MDN has already been sent for a message.
@@ -86,7 +104,7 @@ pub fn is_mdn_already_sent(conn: &Connection, account_id: &str, message_id: &str
 
 /// Mark an MDN as sent in the local database.
 pub fn mark_mdn_sent_local(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     message_id: &str,
 ) -> Result<(), String> {

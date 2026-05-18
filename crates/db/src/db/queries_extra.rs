@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use crate::db::WriteTarget;
 
 // Re-export from the db queries module so siblings can use `super::load_recent_rule_bundled_threads`.
 pub use super::queries::load_recent_rule_bundled_threads;
@@ -95,7 +95,7 @@ pub use calendar_contacts_writes::*;
 pub use extract_reindex::*;
 
 pub(super) fn dynamic_update(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     table: &str,
     id_col: &str,
     id_val: &str,

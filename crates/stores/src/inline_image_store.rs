@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use db::db::WriteTarget;
 use rusqlite::{Connection, params};
 
 /// Max size for inline images stored in the SQLite blob store (256 KB).
@@ -381,7 +382,7 @@ impl InlineImageStoreReadState {
 /// main database's `attachments` table. The main DB's content_hash column
 /// holds BLAKE3 bytes via `BlobHash`; we parse the hex form to bind it.
 pub fn find_unreferenced_hashes(
-    main_db: &Connection,
+    main_db: &impl WriteTarget,
     content_hashes: &[String],
 ) -> Result<Vec<String>, String> {
     let mut orphaned = Vec::new();

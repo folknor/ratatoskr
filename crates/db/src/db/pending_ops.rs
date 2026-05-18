@@ -1,5 +1,5 @@
-use super::ReadDbState;
-use rusqlite::{Connection, params};
+use super::{ReadDbState, WriteTarget};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 // ── Types ────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ fn backoff_schedule(operation_type: &str) -> &'static [i64] {
 /// replaces the old params rather than being dropped as a duplicate).
 #[allow(clippy::too_many_arguments)]
 pub fn db_pending_ops_enqueue_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: &str,
     account_id: &str,
     operation_type: &str,
@@ -141,7 +141,7 @@ pub async fn db_pending_ops_get(
 }
 
 pub fn db_pending_ops_update_status_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: &str,
     status: &str,
     error_message: Option<&str>,
@@ -154,7 +154,7 @@ pub fn db_pending_ops_update_status_sync(
     Ok(())
 }
 
-pub fn db_pending_ops_delete_sync(conn: &Connection, id: &str) -> Result<(), String> {
+pub fn db_pending_ops_delete_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
         .map_err(|e| format!("delete op: {e}"))?;
     Ok(())
@@ -166,7 +166,7 @@ pub fn db_pending_ops_delete_sync(conn: &Connection, id: &str) -> Result<(), Str
 /// already in-flight provider call.
 /// Synchronous writer-side form used by the Service notification handler.
 pub fn db_pending_ops_cancel_for_resource_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     resource_id: &str,
     operation_type: &str,
@@ -181,7 +181,7 @@ pub fn db_pending_ops_cancel_for_resource_sync(
     Ok(())
 }
 
-pub fn db_pending_ops_increment_retry_sync(conn: &Connection, id: &str) -> Result<(), String> {
+pub fn db_pending_ops_increment_retry_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
     let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
         .query_row(
             "SELECT retry_count, max_retries, operation_type FROM pending_operations WHERE id = ?1",
@@ -238,7 +238,7 @@ fn now_epoch() -> Result<i64, String> {
 
 /// Reset any operations stuck in 'executing' back to 'pending'.
 /// Called at startup to recover from crash/forced quit.
-pub fn db_pending_ops_recover_executing_sync(conn: &Connection) -> Result<i64, String> {
+pub fn db_pending_ops_recover_executing_sync(conn: &impl WriteTarget) -> Result<i64, String> {
     let count = conn
         .execute(
             "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
@@ -262,7 +262,7 @@ pub fn db_pending_ops_recover_executing_sync(conn: &Connection) -> Result<i64, S
 /// Phase 2's relocated periodic drainer continues to call against the
 /// `ActionContext`-shaped API.
 pub fn db_pending_ops_recover_on_boot_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
 ) -> Result<(), String> {
     let pending_count = conn
         .execute(

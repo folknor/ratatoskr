@@ -23,7 +23,7 @@ pub(crate) async fn move_local(
     let tid = thread_id.to_string();
     let fid = folder_id.as_str().to_string();
     let source = source_folder_id.map(|s| s.as_str().to_string());
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         if let Some(ref src) = source {
             remove_folder(conn, &aid, &tid, src)?;
         }

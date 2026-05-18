@@ -9,7 +9,7 @@ pub fn cache_gal_entries_sync(
     entries: &[GalEntry],
 ) -> Result<usize, String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin gal tx: {e}"))?;
 
     tx.execute(

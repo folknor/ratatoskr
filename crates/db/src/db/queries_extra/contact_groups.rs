@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::super::{ReadConn, ReadDbState};
+use super::super::{ReadConn, ReadDbState, WriteTransactionTarget};
 use super::super::types::{DbContactGroup, DbContactGroupMember};
 use super::contacts::ExpandedGroupContact;
 use crate::db::from_row::FromRow;
@@ -398,13 +398,13 @@ pub fn load_group_member_emails_sync(
 /// the Service is the new write boundary, and the IPC ack must imply
 /// "all rows committed or none."
 pub fn save_group_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     entry: &GroupSettingsEntry,
     member_emails: &[String],
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("save_group begin tx: {e}"))?;
     tx.execute(
         "INSERT INTO contact_groups (id, name, created_at, updated_at)
@@ -443,9 +443,12 @@ pub fn save_group_sync(
 }
 
 /// Delete a group and clean up inbound refs (synchronous).
-pub fn delete_group_sync(conn: &rusqlite::Connection, group_id: &str) -> Result<(), String> {
+pub fn delete_group_sync(
+    conn: &impl WriteTransactionTarget,
+    group_id: &str,
+) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin tx: {e}"))?;
 
     // Remove inbound nested-group references from other groups

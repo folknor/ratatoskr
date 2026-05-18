@@ -117,7 +117,7 @@ pub(crate) async fn handle_exchange_code(
         };
         let id_for_log = account_id.clone();
         write_db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 db::db::queries_extra::update_account_tokens_sync(conn, &account_id, reauth)
             })
             .await

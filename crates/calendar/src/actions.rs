@@ -14,7 +14,7 @@
 //! The Service-side `service::cal_actions::batch_execute` (Phase 6c-6)
 //! is the only caller; the UI dispatches via the
 //! `cal_action.execute_plan` IPC. Direct connection-lock patterns are
-//! replaced with `ctx.write_db.with_conn(...)` so writes go through the
+//! replaced with `ctx.write_db.with_write(...)` so writes go through the
 //! writer-half exclusively.
 
 use gmail::client::GmailClient;
@@ -24,6 +24,7 @@ use action_types::{ActionError, ActionOutcome, CalendarActionContext, MutationLo
 use db::db::queries_extra::{
     set_calendar_event_remote_id_and_etag, update_calendar_event_fields_and_etag,
 };
+use db::db::WriteConn;
 use rtsk::db::ReadDbState;
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
@@ -311,7 +312,7 @@ async fn dispatch_delete(
 
 /// Look up a calendar's `remote_id` from its local `calendar_id`.
 fn lookup_calendar_remote_id(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     calendar_id: &str,
 ) -> Result<String, ActionError> {
@@ -337,7 +338,7 @@ struct EventMeta {
 }
 
 fn lookup_event_meta(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     event_id: &str,
 ) -> Result<EventMeta, ActionError> {
     conn.query_row(
@@ -382,7 +383,7 @@ pub async fn create_calendar_event(
     let cid = calendar_id.to_string();
     let input_clone = input.clone();
     let local_result = db
-        .with_conn_mapped(
+        .with_write_mapped(
             move |conn| {
                 let calendar_remote_id = lookup_calendar_remote_id(conn, &aid, &cid)?;
 
@@ -484,7 +485,7 @@ pub async fn update_calendar_event(
     let db = ctx.write_db.clone();
     let eid = event_id.to_string();
     let meta_result = db
-        .with_conn_mapped(
+        .with_write_mapped(
             move |conn| {
                 let meta = lookup_event_meta(conn, &eid)?;
 
@@ -518,7 +519,7 @@ pub async fn update_calendar_event(
         let db = ctx.write_db.clone();
         let eid = event_id.to_string();
         let local_result = db
-            .with_conn_mapped(
+            .with_write_mapped(
                 move |conn| {
                     let params = db::db::queries_extra::calendars::LocalCalendarEventParams {
                         account_id: meta.account_id.clone(),
@@ -642,7 +643,7 @@ pub async fn delete_calendar_event(
     let db = ctx.write_db.clone();
     let eid = event_id.to_string();
     let meta_result = db
-        .with_conn_mapped(
+        .with_write_mapped(
             move |conn| {
                 let meta = lookup_event_meta(conn, &eid)?;
                 let calendar_remote_id = meta
@@ -673,7 +674,7 @@ pub async fn delete_calendar_event(
         let db = ctx.write_db.clone();
         let eid = event_id.to_string();
         let local_result = db
-            .with_conn_mapped(
+            .with_write_mapped(
                 move |conn| {
                     db::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
                         .map_err(ActionError::db)
@@ -727,7 +728,7 @@ pub async fn delete_calendar_event(
     let db = ctx.write_db.clone();
     let eid = event_id.to_string();
     let local_result = db
-        .with_conn_mapped(
+        .with_write_mapped(
             move |conn| {
                 db::db::queries_extra::calendars::delete_calendar_event_sync(conn, &eid)
                     .map_err(ActionError::db)

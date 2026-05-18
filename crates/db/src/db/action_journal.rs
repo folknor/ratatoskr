@@ -9,6 +9,8 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+use super::{WriteTarget, WriteTransactionTarget};
+
 /// Status of an action job, as reported by `query_job_status`.
 ///
 /// Mirrors the `status` enum in the journal SQL. The IPC reconciliation
@@ -50,7 +52,7 @@ impl JobStatus {
 /// reset rows on its first scheduling pass.
 ///
 /// Idempotent: a second call after the first returns `(0, 0)`.
-pub fn recover_stale_leases(conn: &Connection) -> Result<(usize, usize), String> {
+pub fn recover_stale_leases(conn: &impl WriteTarget) -> Result<(usize, usize), String> {
     let jobs_reset = conn
         .execute(
             "UPDATE action_jobs \
@@ -85,7 +87,7 @@ pub fn recover_stale_leases(conn: &Connection) -> Result<(usize, usize), String>
 ///
 /// Phase 2 task 5. The query is a small SELECT; the boot recovery
 /// pass that calls it runs once per Service incarnation.
-pub fn live_send_job_ids(conn: &Connection) -> Result<Vec<[u8; 16]>, String> {
+pub fn live_send_job_ids(conn: &impl WriteTarget) -> Result<Vec<[u8; 16]>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT job_id FROM action_jobs \
@@ -169,14 +171,14 @@ pub struct PlanOpInsert {
 /// "journaled = true" promise: on a Service crash after this returns,
 /// the worker's recovery sweep finds the rows and replays them.
 pub fn insert_mail_plan(
-    conn: &Connection,
+    conn: &impl WriteTransactionTarget,
     plan_id: &[u8; 16],
     account_id: &str,
     quiet: bool,
     ops: &[PlanOpInsert],
 ) -> Result<i64, String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("insert_mail_plan begin: {e}"))?;
     let now: i64 = tx
         .query_row("SELECT unixepoch()", [], |row| row.get(0))
@@ -225,13 +227,13 @@ pub fn insert_mail_plan(
 /// per-op correlation. This is documented at the
 /// `service-api::cal_action::CalendarOperation` site.
 pub fn insert_calendar_plan(
-    conn: &Connection,
+    conn: &impl WriteTransactionTarget,
     plan_id: &[u8; 16],
     account_id: &str,
     ops: &[PlanOpInsert],
 ) -> Result<i64, String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("insert_calendar_plan begin: {e}"))?;
     let now: i64 = tx
         .query_row("SELECT unixepoch()", [], |row| row.get(0))
@@ -278,7 +280,7 @@ pub fn insert_calendar_plan(
 /// (currently `mail_plan` / `send` / `mark_chat_read`); the row gets
 /// `quiet = 1`.
 pub fn insert_quiet_job(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     job_id: &[u8; 16],
     kind: &str,
     account_id: &str,
@@ -316,7 +318,7 @@ pub struct LeasedQuietJob {
 /// atomicity. The `action_jobs_status_account` index covers the
 /// inner SELECT.
 pub fn lease_next_ready_quiet_job(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     kind: &str,
     worker_owner: &[u8; 16],
     lease_duration_ms: i64,
@@ -439,7 +441,7 @@ pub struct LeasedOp {
 /// (`recover_stale_leases`) - if the worker dies before completing
 /// the op, recovery resets it to `pending`.
 pub fn lease_next_ready_op(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     worker_owner: &[u8; 16],
     lease_duration_ms: i64,
 ) -> Result<Option<LeasedOp>, String> {
@@ -523,7 +525,7 @@ pub fn lease_next_ready_op(
 /// the serialized `OperationResult` blob. Clears the lease so recovery
 /// won't reset the row.
 pub fn mark_op_terminal(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     plan_id: &[u8; 16],
     operation_id: u32,
     new_status: OpTerminalStatus,
@@ -591,7 +593,7 @@ impl OpStatusCounts {
 /// `non_terminal() == 0`) and which terminal status to write
 /// (`completed` / `partial` / `failed`).
 pub fn count_ops_by_status(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     plan_id: &[u8; 16],
 ) -> Result<OpStatusCounts, String> {
     let mut counts = OpStatusCounts::default();
@@ -652,7 +654,7 @@ pub fn count_ops_by_status(
 pub type UnfinalizedPerOpPlanJob = ([u8; 16], Option<PerOpJobKind>);
 
 pub fn unfinalized_per_op_plan_jobs(
-    conn: &Connection,
+    conn: &impl WriteTarget,
 ) -> Result<Vec<UnfinalizedPerOpPlanJob>, String> {
     let mut stmt = conn
         .prepare(
@@ -696,7 +698,7 @@ pub fn unfinalized_per_op_plan_jobs(
 /// counts (`completed` if everything succeeded, `failed` if every op
 /// failed, `partial` otherwise).
 pub fn finalize_job(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     plan_id: &[u8; 16],
     new_status: JobTerminalStatus,
     summary_blob: &[u8],
@@ -761,7 +763,7 @@ pub struct ReplayableOp {
 ///
 /// Quiet jobs (e.g. mark-chat-read) suppress per-op outcome emission;
 /// `quiet` is returned so the caller can skip them.
-pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, String> {
+pub fn unemitted_terminal_ops(conn: &impl WriteTarget) -> Result<Vec<ReplayableOp>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT ops.job_id, ops.operation_id, ops.status, ops.outcome, jobs.quiet, jobs.kind \
@@ -819,7 +821,7 @@ pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, St
 /// has no terminal ops yet (caller should not call this until the
 /// finalization pre-check confirms `non_terminal() == 0`).
 pub fn terminal_ops_for_plan(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     plan_id: &[u8; 16],
 ) -> Result<Vec<(u32, Vec<u8>)>, String> {
     let mut stmt = conn

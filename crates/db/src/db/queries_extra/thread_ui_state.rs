@@ -1,8 +1,8 @@
 //! Per-thread UI state persistence (attachment collapse, etc.).
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
-use crate::db::ReadConn;
+use crate::db::{ReadConn, WriteTarget};
 
 /// Get whether the attachment group is collapsed for a thread.
 /// Returns `false` (expanded) if no row exists.
@@ -27,7 +27,7 @@ pub fn get_attachments_collapsed(
 /// Set the attachment group collapse state for a thread.
 /// Uses INSERT OR REPLACE - creates the row on first toggle.
 pub fn set_attachments_collapsed(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     collapsed: bool,
@@ -46,6 +46,7 @@ pub fn set_attachments_collapsed(
 mod tests {
     use super::*;
     use crate::db::migrations;
+    use rusqlite::Connection;
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");

@@ -53,7 +53,7 @@ pub(super) async fn handle(
     //    Returns affected (account_id, thread_id) pairs.
     let email_for_local = chat_email.to_lowercase();
     let affected: Vec<(String, String)> = db
-        .with_conn(move |conn| mark_chat_read_local_sync(conn, &email_for_local))
+        .with_write(move |conn| mark_chat_read_local_sync(conn, &email_for_local))
         .await
         .map_err(ServiceError::Internal)?;
 
@@ -99,7 +99,7 @@ pub(super) async fn handle(
     let payload_blob = serde_json::to_vec(&payload)
         .map_err(|error| ServiceError::Internal(format!("serialize JournaledChatRead: {error}")))?;
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         insert_quiet_job(
             conn,
             &job_id_bytes,

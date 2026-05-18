@@ -76,7 +76,7 @@ pub(crate) async fn handle_update(
     let was_enabled_before: Option<bool> = if toggle_request.is_some() {
         let aid = account_id_for_kick.clone();
         write_db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 let v: Option<i64> = conn
                     .query_row(
                         "SELECT cache_attachments_enabled FROM accounts WHERE id = ?1",
@@ -94,7 +94,7 @@ pub(crate) async fn handle_update(
     };
 
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let id = params.id;
             let update = db::db::queries_extra::UpdateAccountParams {
                 account_name: params.account_name,
@@ -135,7 +135,7 @@ async fn kick_cache_reenable(boot_state: Arc<BootSharedState>, account_id: Strin
     let Ok(write_db) = boot_state.write_db_state() else { return };
     let aid = account_id.clone();
     let provider: String = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.query_row(
                 "SELECT COALESCE(provider, '') FROM accounts WHERE id = ?1",
                 rusqlite::params![aid],
@@ -149,7 +149,7 @@ async fn kick_cache_reenable(boot_state: Arc<BootSharedState>, account_id: Strin
         return;
     }
     let window_days = match write_db
-        .with_conn(|conn| Ok(sync::config::get_sync_period_days(conn)))
+        .with_write(|conn| Ok(sync::config::get_sync_period_days(conn)))
         .await
     {
         Ok(v) => v,
@@ -173,7 +173,7 @@ pub(crate) async fn handle_reorder(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let updates: Vec<(String, i64)> = params
                 .orders
                 .into_iter()
@@ -219,7 +219,7 @@ pub(crate) async fn handle_update_tokens(
         smtp_password,
     };
     write_db
-        .with_conn(move |conn| db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth))
+        .with_write(move |conn| db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth))
         .await
         .map_err(ServiceError::Internal)?;
 
@@ -350,7 +350,7 @@ pub(crate) async fn handle_delete(
     let aid_for_flag = account_id.clone();
     if let Ok(write_db) = boot_state.write_db_state()
         && let Err(e) = write_db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 conn.execute(
                     "UPDATE accounts SET is_deleting = 1 WHERE id = ?1",
                     rusqlite::params![aid_for_flag],

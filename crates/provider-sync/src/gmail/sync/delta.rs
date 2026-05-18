@@ -64,7 +64,7 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
                             write_db
                                 .with_write(move |conn| {
                                     let tx = conn
-                                        .unchecked_transaction()
+                                        .transaction()
                                         .map_err(|e| {
                                             format!("begin google other contacts tx: {e}")
                                         })?;

@@ -19,7 +19,7 @@ pub(crate) async fn spam_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         if is_spam {
             remove_folder(conn, &aid, &tid, "INBOX")?;
             insert_folder(conn, &aid, &tid, "SPAM").map(|_| ())

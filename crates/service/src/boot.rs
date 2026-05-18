@@ -23,7 +23,7 @@ use db::db::action_journal::recover_stale_leases;
 use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
 use db::db::queries_extra::{
     backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
-    get_all_accounts_sync, get_all_send_identity_emails,
+    get_all_accounts_sync, get_all_send_identity_emails_read,
 };
 use db::db::{apply_writer_pragmas, migrations, reconcile_velo_rename};
 use rusqlite::{Connection, OpenFlags};
@@ -1564,9 +1564,9 @@ async fn run_boot_recovery<F>(
     f: F,
 ) -> Result<(), String>
 where
-    F: FnOnce(&Connection) -> Result<(), String> + Send + 'static,
+    F: FnOnce(&db::db::WriteConn<'_>) -> Result<(), String> + Send + 'static,
 {
-    db.with_conn(f).await.map_err(|e| format!("{label}: {e}"))
+    db.with_write(f).await.map_err(|e| format!("{label}: {e}"))
 }
 
 /// Boot-time send-vault orphan cleanup (Phase 2 task 5).
@@ -1582,7 +1582,7 @@ async fn reconcile_send_vault(
     app_data_dir: &std::path::Path,
 ) -> Result<(), String> {
     let live_ids: std::collections::HashSet<service_api::PlanId> =
-        db.with_conn(move |conn| -> Result<_, String> {
+        db.with_write(move |conn| -> Result<_, String> {
             let ids = db::db::action_journal::live_send_job_ids(conn)?;
             Ok(ids
                 .into_iter()
@@ -1617,8 +1617,8 @@ async fn reconcile_send_vault(
 /// account detail stays in the rolling log file. Without this propagation
 /// the UI would see `BootReady` with no warning even though a subset of
 /// accounts had partial state repair.
-fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
-    let read = db::db::ReadConn::from_raw(conn);
+fn run_backfill_for_all_accounts(conn: &db::db::WriteConn<'_>) -> Result<(), String> {
+    let read = conn.as_read();
     let accounts = get_all_accounts_sync(&read)?;
     if accounts.is_empty() {
         return Ok(());
@@ -1627,7 +1627,7 @@ fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
         .iter()
         .map(|a| a.email.to_lowercase())
         .collect();
-    for email in get_all_send_identity_emails(conn)? {
+    for email in get_all_send_identity_emails_read(&read)? {
         let lower = email.to_lowercase();
         if !user_emails.contains(&lower) {
             user_emails.push(lower);

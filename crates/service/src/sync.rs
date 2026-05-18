@@ -194,7 +194,7 @@ impl SyncRuntime {
         let is_deleting: bool = self
             .inner
             .db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 conn.query_row(
                     "SELECT is_deleting FROM accounts WHERE id = ?1",
                     rusqlite::params![aid],
@@ -523,7 +523,7 @@ async fn run_sync(
         let aid = account_id.clone();
         inner
             .db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 conn.query_row(
                     "SELECT COALESCE(cache_attachments_enabled, 1), \
                             COALESCE(provider, '') \
@@ -545,7 +545,7 @@ async fn run_sync(
         && !account_provider.is_empty()
         && let Some(prefetch) = inner.boot_state.prefetch_runtime()
     {
-        let window_start_unix = match inner.db.with_conn(|conn| {
+        let window_start_unix = match inner.db.with_write(|conn| {
             Ok(sync::config::get_sync_period_days(conn))
         }).await {
             Ok(days) => chrono::Utc::now().timestamp() - days.saturating_mul(86_400),

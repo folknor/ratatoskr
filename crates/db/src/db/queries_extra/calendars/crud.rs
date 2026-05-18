@@ -1,4 +1,4 @@
-use super::super::super::{ReadConn, ReadDbState};
+use super::super::super::{ReadConn, ReadDbState, WriteConn};
 use super::super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
@@ -648,7 +648,7 @@ pub fn load_calendars_for_sidebar_sync(
 
 /// Set calendar visibility (synchronous).
 pub fn set_calendar_visibility_sync(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     calendar_id: &str,
     visible: bool,
 ) -> Result<(), String> {
@@ -679,7 +679,7 @@ pub struct LocalCalendarEventParams {
 
 /// Create a new local calendar event (synchronous). Returns the new event ID.
 pub fn create_calendar_event_sync(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     p: &LocalCalendarEventParams,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
@@ -713,7 +713,7 @@ pub fn create_calendar_event_sync(
 
 /// Update an existing calendar event (synchronous).
 pub fn update_calendar_event_sync(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     event_id: &str,
     p: &LocalCalendarEventParams,
 ) -> Result<(), String> {
@@ -745,7 +745,7 @@ pub fn update_calendar_event_sync(
 
 /// Delete a calendar event by id (synchronous), cascading to attendees and reminders.
 pub fn delete_calendar_event_sync(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     event_id: &str,
 ) -> Result<(), String> {
     conn.execute(

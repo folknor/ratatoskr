@@ -65,9 +65,9 @@ pub(crate) async fn handle_set(
     };
 
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| format!("settings.set begin tx: {e}"))?;
             for value in &params.values {
                 let key = value.key();
@@ -170,7 +170,7 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
     // size the per-account semaphore and pick the IMAP folder-batch
     // path.
     let accounts: Vec<(String, String)> = match write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, COALESCE(provider, '') FROM accounts \

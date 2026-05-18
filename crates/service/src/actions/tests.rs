@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use db::db::params;
-use rusqlite::Connection;
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -40,9 +39,9 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     (ctx, tmp)
 }
 
-fn with_test_conn<T>(ctx: &ActionContext, f: impl FnOnce(&Connection) -> T) -> T {
+fn with_test_conn<T>(ctx: &ActionContext, f: impl FnOnce(&db::db::WriteConn<'_>) -> T) -> T {
     ctx.write_db
-        .with_conn_sync(|conn| Ok(f(conn)))
+        .with_write_sync(|conn| Ok(f(conn)))
         .expect("test db access")
 }
 

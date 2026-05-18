@@ -16,7 +16,7 @@ pub async fn snooze(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let local_result = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::remove_folder(conn, &aid, &tid, "INBOX")?;
             db::db::queries_extra::action_helpers::snooze_thread_sync(conn, &aid, &tid, until)?;
             Ok(())
@@ -41,7 +41,7 @@ pub async fn unsnooze(ctx: &ActionContext, account_id: &str, thread_id: &str) ->
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let local_result = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::insert_folder(conn, &aid, &tid, "INBOX")?;
             db::db::queries_extra::action_helpers::unsnooze_thread_sync(conn, &aid, &tid)?;
             Ok(())

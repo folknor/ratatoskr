@@ -50,8 +50,9 @@ pub(crate) async fn persist_messages(
 
     ctx.db
         .with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
+            let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
@@ -90,8 +91,9 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
     // Delete from DB and update parent threads
     ctx.db
         .with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
+            let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
@@ -119,7 +121,7 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
 // ---------------------------------------------------------------------------
 
 fn store_thread_to_db(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedJmapMessage],
@@ -146,7 +148,7 @@ fn store_thread_to_db(
 
 #[allow(clippy::too_many_lines)]
 fn upsert_thread_record(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedJmapMessage],
@@ -182,7 +184,7 @@ fn upsert_thread_record(
 }
 
 fn set_thread_labels(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedJmapMessage],
@@ -214,7 +216,7 @@ fn set_thread_labels(
 }
 
 fn upsert_messages(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
@@ -268,7 +270,7 @@ fn upsert_messages(
 }
 
 fn upsert_attachments(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
@@ -299,7 +301,7 @@ fn upsert_attachments(
 /// Replace per-message keyword rows for incoming JMAP messages, then
 /// recompute the thread aggregate from the full per-message union.
 fn sync_keyword_labels(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedJmapMessage],
@@ -432,8 +434,9 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
     if let Err(error) = ctx
         .db
         .with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
+            let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
                 .map_err(|e| format!("jmap inline image update tx: {e}"))?;
             for (attachment_row_id, content_hash) in updates {
                 tx.execute(

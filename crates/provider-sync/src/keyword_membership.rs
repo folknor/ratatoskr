@@ -26,7 +26,7 @@ impl KeywordProvider {
 }
 
 pub(crate) fn replace_message_keywords(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     provider: KeywordProvider,
     account_id: &str,
     message_id: &str,
@@ -59,7 +59,7 @@ pub(crate) fn replace_message_keywords(
 /// `thread_label_groups`. The destructive replace is therefore scoped to
 /// the whole thread_labels set for the thread.
 pub(crate) fn recompute_thread_keyword_labels(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     provider: KeywordProvider,
     account_id: &str,
     thread_id: &str,
@@ -69,7 +69,7 @@ pub(crate) fn recompute_thread_keyword_labels(
 }
 
 fn upsert_keyword_labels(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     provider: KeywordProvider,
     account_id: &str,
     keywords: &[String],
@@ -152,7 +152,8 @@ mod tests {
     #[test]
     fn recompute_removes_keyword_absent_from_message_union() {
         let conn = setup_conn("jmap");
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = db::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         replace_message_keywords(
             &tx,
             KeywordProvider::Jmap,
@@ -165,7 +166,8 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!(thread_label_count(&conn, "kw:todo"), 1);
 
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = db::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         replace_message_keywords(&tx, KeywordProvider::Jmap, "acc", "m1", &[]).unwrap();
         recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
         tx.commit().unwrap();
@@ -175,7 +177,8 @@ mod tests {
     #[test]
     fn recompute_keeps_keyword_present_on_sibling_message() {
         let conn = setup_conn("jmap");
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = db::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         replace_message_keywords(
             &tx,
             KeywordProvider::Jmap,
@@ -196,7 +199,8 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!(thread_label_count(&conn, "kw:todo"), 1);
 
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = db::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         replace_message_keywords(&tx, KeywordProvider::Jmap, "acc", "m1", &[]).unwrap();
         recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
         tx.commit().unwrap();
@@ -206,7 +210,8 @@ mod tests {
     #[test]
     fn imap_keywords_use_the_same_recompute_path() {
         let conn = setup_conn("imap");
-        let tx = conn.unchecked_transaction().unwrap();
+        let write = db::db::WriteConn::from_raw(&conn);
+        let tx = write.transaction().unwrap();
         replace_message_keywords(
             &tx,
             KeywordProvider::Imap,

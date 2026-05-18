@@ -90,7 +90,7 @@ pub async fn create_folder(
     let m = mutation.clone();
     let parent_id_for_db = parent_id.map(|id| id.as_str().to_string());
     let local_result = db
-        .with_conn_mapped(move |conn| {
+        .with_write_mapped(move |conn| {
             db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
                 conn,
                 &m.id,
@@ -171,7 +171,7 @@ pub async fn rename_folder(
     let fid = folder_id.as_str().to_string();
     let m = mutation.clone();
     let local_result = db
-        .with_conn_mapped(move |conn| {
+        .with_write_mapped(move |conn| {
             db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
                 conn,
                 &fid,
@@ -234,7 +234,7 @@ pub async fn delete_folder(
     let aid = account_id.to_string();
     let fid = folder_id.as_str().to_string();
     let local_result = db
-        .with_conn_mapped(move |conn| {
+        .with_write_mapped(move |conn| {
             db::db::queries_extra::action_helpers::delete_folder_sync(conn, &aid, &fid)
                 .map_err(ActionError::db)?;
             Ok(())

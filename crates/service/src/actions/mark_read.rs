@@ -20,9 +20,9 @@ pub(crate) async fn mark_read_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin mark-read transaction: {e}"))?;
         set_thread_read(&tx, &aid, &tid, read)?;
         tx.execute(

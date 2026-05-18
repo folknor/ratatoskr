@@ -234,7 +234,7 @@ pub(crate) async fn handle_fetch(
     if let Some(info) = info {
         let id = info.id;
         write_db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 db::db::queries_extra::update_attachment_cache_fields(
                     conn,
                     &id,

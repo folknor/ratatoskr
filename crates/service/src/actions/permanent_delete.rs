@@ -39,7 +39,7 @@ pub(crate) async fn permanent_delete_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn(move |conn| delete_thread(conn, &aid, &tid))
+    db.with_write(move |conn| delete_thread(conn, &aid, &tid))
         .await
         .map_err(ActionError::db)
 }

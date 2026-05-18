@@ -515,7 +515,7 @@ impl PrefetchRuntime {
         let rows: Vec<(String, String, Option<String>, Option<String>)> = self
             .inner
             .db
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 // `messages.date` is Unix milliseconds (provider sync
                 // writes ms across all four providers - see schema
                 // comment on the column). Callers supply
@@ -1225,7 +1225,7 @@ async fn run_item_pipeline(
     let id_for_update = info.id.clone();
     inner
         .db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::update_attachment_cache_fields(conn, &id_for_update, &content_hash)
         })
         .await
@@ -1426,7 +1426,7 @@ async fn account_caching_enabled(
     let aid = account_id.to_string();
     inner
         .db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let v: Option<i64> = conn
                 .query_row(
                     "SELECT COALESCE(cache_attachments_enabled, 1) \
@@ -1460,7 +1460,7 @@ async fn account_is_cancelling_or_deleting(
     let aid = account_id.to_string();
     inner
         .db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let v: i64 = conn
                 .query_row(
                     "SELECT COALESCE(is_deleting, 0) FROM accounts WHERE id = ?1",

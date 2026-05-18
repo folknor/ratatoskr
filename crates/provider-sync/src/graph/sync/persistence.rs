@@ -59,13 +59,12 @@ pub(super) async fn persist_messages(
     sctx.write_db
         .with_write(move |conn| {
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            let raw_tx = tx.as_raw_tx();
-            let user_emails = sync_persistence::query_user_emails(raw_tx)?;
+            let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
                 store_thread_to_db(
-                    raw_tx,
+                    &tx,
                     &aid,
                     thread_id,
                     msgs,
@@ -105,9 +104,9 @@ pub(super) async fn delete_messages(
 
     // Delete from DB and update parent threads
     sctx.write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
@@ -134,7 +133,7 @@ pub(super) async fn delete_messages(
 // ---------------------------------------------------------------------------
 
 fn store_thread_to_db(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGraphMessage],
@@ -164,7 +163,7 @@ fn store_thread_to_db(
 
 #[allow(clippy::too_many_lines)]
 fn upsert_thread_record(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGraphMessage],
@@ -201,7 +200,7 @@ fn upsert_thread_record(
 }
 
 fn set_thread_labels(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGraphMessage],
@@ -232,7 +231,7 @@ fn set_thread_labels(
 }
 
 fn upsert_graph_label_rows(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
@@ -287,7 +286,7 @@ fn upsert_graph_label_rows(
 }
 
 fn upsert_messages(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
@@ -343,7 +342,7 @@ fn upsert_messages(
 }
 
 fn upsert_attachments(
-    tx: &rusqlite::Transaction,
+    tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
@@ -444,7 +443,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
     // or were recently viewed. Limit to 60 to keep API cost bounded (3 batch calls max).
     let aid = account_id.to_string();
     let message_ids: Vec<String> = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT DISTINCT mr.message_id FROM message_reactions mr \
@@ -479,7 +478,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
     // Look up the authenticated user's email for reaction rows
     let aid2 = account_id.to_string();
     let owner_email: String = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             conn.query_row(
                 "SELECT email FROM accounts WHERE id = ?1",
                 rusqlite::params![aid2],
@@ -560,7 +559,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
             let batch_updated = write_db
                 .with_write(move |conn| {
                     let tx = conn
-                        .unchecked_transaction()
+                .transaction()
                         .map_err(|e| format!("begin tx: {e}"))?;
 
                     let mut count: usize = 0;

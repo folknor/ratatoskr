@@ -1,8 +1,7 @@
-use rusqlite::Connection;
-use rusqlite::OptionalExtension;
+use crate::db::{ReadConn, ReadError};
 
 pub fn get_message_ids_for_thread(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<String>, String> {
@@ -18,15 +17,17 @@ pub fn get_message_ids_for_thread(
 }
 
 pub fn get_thread_id_for_message(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     message_id: &str,
 ) -> Result<Option<String>, String> {
-    conn.query_row(
+    match conn.query_row(
         "SELECT thread_id FROM messages WHERE account_id = ?1 AND id = ?2",
         rusqlite::params![account_id, message_id],
         |row| row.get::<_, String>("thread_id"),
-    )
-    .optional()
-    .map_err(|e| format!("query thread id: {e}"))
+    ) {
+        Ok(thread_id) => Ok(Some(thread_id)),
+        Err(ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
+        Err(error) => Err(format!("query thread id: {error}")),
+    }
 }

@@ -19,7 +19,7 @@ pub(crate) async fn archive_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         remove_inbox_folder(conn, &aid, &tid).map(|n| n > 0)
     })
     .await

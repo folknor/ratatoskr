@@ -6,11 +6,8 @@
 //! the `app` crate does not depend on this crate, so `WriteDbState`
 //! cannot be reached from UI source files even with `pub` visibility.
 //!
-//! `WriteDbState` wraps `db::WriterPool`. The raw-connection
-//! `with_conn*` shims remain only while the writer helper migration is
-//! in flight; the durable API is `from_pool` plus `with_write`.
-
-use rusqlite::Connection;
+//! `WriteDbState` wraps `db::WriterPool`; callers receive only typed
+//! `WriteConn` or `ReadConn` capabilities.
 
 pub mod body_store_write;
 pub mod inline_image_store_write;
@@ -32,27 +29,6 @@ pub struct WriteDbState {
 impl WriteDbState {
     pub fn from_pool(pool: db::db::WriterPool) -> Self {
         Self { pool }
-    }
-
-    /// Run a closure with the database connection on the blocking
-    /// thread pool. Mirrors `db::DbState::with_conn` so the action
-    /// service can call this directly once relocation lands in task 9.
-    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
-    where
-        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
-        T: Send + 'static,
-    {
-        self.pool.with_conn(f).await
-    }
-
-    pub async fn with_conn_mapped<F, T, E, M>(&self, f: F, map_error: M) -> Result<T, E>
-    where
-        F: FnOnce(&Connection) -> Result<T, E> + Send + 'static,
-        T: Send + 'static,
-        E: Send + 'static,
-        M: Fn(String) -> E + Copy + Send + 'static,
-    {
-        self.pool.with_conn_mapped(f, map_error).await
     }
 
     pub async fn with_write<F, T>(&self, f: F) -> Result<T, String>
@@ -79,15 +55,6 @@ impl WriteDbState {
         T: Send + 'static,
     {
         self.pool.with_read(f).await
-    }
-
-    /// Synchronous variant for boot-path use that already runs inside
-    /// `spawn_blocking`. Mirrors `db::DbState::with_conn_sync`.
-    pub fn with_conn_sync<F, T>(&self, f: F) -> Result<T, String>
-    where
-        F: FnOnce(&Connection) -> Result<T, String>,
-    {
-        self.pool.with_conn_sync(f)
     }
 
     pub fn with_write_sync<F, T>(&self, f: F) -> Result<T, String>
@@ -120,14 +87,14 @@ mod tests {
         let (state, _tmp) = fresh_state();
         let cloned = state.clone();
         // Both clones share the same underlying connection.
-        let result = state.with_conn_sync(|conn| {
+        let result = state.with_write_sync(|conn| {
             conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)", [])
                 .map_err(|e| e.to_string())
         });
         assert!(result.is_ok());
 
         let count = cloned
-            .with_conn_sync(|conn| {
+            .with_write_sync(|conn| {
                 let mut stmt = conn
                     .prepare("SELECT count(*) FROM sqlite_master WHERE name = 't'")
                     .map_err(|e| e.to_string())?;
@@ -141,10 +108,10 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn with_conn_dispatches_to_blocking_pool() {
+    async fn with_write_dispatches_to_blocking_pool() {
         let (state, _tmp) = fresh_state();
         let value = state
-            .with_conn(|conn| {
+            .with_write(|conn| {
                 conn.execute_batch("CREATE TABLE async_t (n INTEGER)")
                     .map_err(|e| e.to_string())?;
                 conn.execute("INSERT INTO async_t VALUES (?)", [42])
@@ -158,7 +125,7 @@ mod tests {
                 Ok(n)
             })
             .await
-            .expect("with_conn ok");
+            .expect("with_write ok");
         assert_eq!(value, 42);
     }
 }

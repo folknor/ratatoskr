@@ -5,12 +5,13 @@
 
 use rusqlite::{Connection, params};
 
+use crate::db::WriteTarget;
 use super::super::from_row::FromRow;
 
 /// Persist a draft as 'pending' (upsert - retries update the existing row).
 #[allow(clippy::too_many_arguments)]
 pub fn persist_draft_pending_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: &str,
     account_id: &str,
     to_addresses: &str,
@@ -55,7 +56,7 @@ pub fn persist_draft_pending_sync(
 
 /// Transition a draft to 'sending'. Returns `Ok(true)` if the transition
 /// succeeded, `Ok(false)` if the draft was not found or already sending/sent.
-pub fn mark_draft_sending_sync(conn: &Connection, draft_id: &str) -> Result<bool, String> {
+pub fn mark_draft_sending_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<bool, String> {
     let rows = conn
         .execute(
             "UPDATE local_drafts SET sync_status = 'sending' \
@@ -68,7 +69,7 @@ pub fn mark_draft_sending_sync(conn: &Connection, draft_id: &str) -> Result<bool
 
 /// Transition a draft to 'sent' with the provider-assigned message ID.
 pub fn mark_draft_sent_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     draft_id: &str,
     sent_message_id: &str,
 ) -> Result<(), String> {
@@ -82,7 +83,7 @@ pub fn mark_draft_sent_sync(
 }
 
 /// Transition a draft to 'failed'.
-pub fn mark_draft_failed_sync(conn: &Connection, draft_id: &str) -> Result<(), String> {
+pub fn mark_draft_failed_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE local_drafts SET sync_status = 'failed' WHERE id = ?1",
         params![draft_id],
@@ -93,7 +94,7 @@ pub fn mark_draft_failed_sync(conn: &Connection, draft_id: &str) -> Result<(), S
 
 /// Look up the remote draft ID for a local draft. Returns None if not found.
 pub fn get_remote_draft_id_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     draft_id: &str,
 ) -> Result<Option<String>, String> {
     conn.query_row(
@@ -163,7 +164,7 @@ pub fn mark_scheduled_failed_sync(
 }
 
 /// Delete a local draft by ID.
-pub fn delete_draft_sync(conn: &Connection, draft_id: &str) -> Result<(), String> {
+pub fn delete_draft_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM local_drafts WHERE id = ?1",
         params![draft_id],

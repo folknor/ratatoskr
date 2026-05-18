@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use crate::db::ReadConn;
+use crate::db::{ReadConn, WriteTarget};
 
 /// A contact entry with extended fields for the settings UI.
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ pub fn load_contacts_for_settings_sync(
 
 /// Save (upsert) a contact with extended fields (synchronous).
 pub fn save_contact_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     entry: &ContactSettingsEntry,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();

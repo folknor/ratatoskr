@@ -3,6 +3,7 @@
 //! These are small query/mutation primitives used by `core::actions::*` modules.
 //! Keeping them here avoids inline SQL in the action handlers.
 
+use crate::db::WriteTarget;
 use rusqlite::{Connection, params};
 
 /// Check whether a thread exists.
@@ -22,7 +23,7 @@ pub fn thread_exists_sync(
 
 /// Check whether a tag label exists for an account.
 pub fn label_exists_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     label_id: &str,
     account_id: &str,
 ) -> Result<bool, String> {
@@ -44,7 +45,7 @@ pub struct ContactMeta {
 
 /// Look up contact metadata by ID. Returns `None` when the contact row is missing.
 pub fn get_contact_meta_by_id_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     contact_id: &str,
 ) -> Result<Option<ContactMeta>, String> {
     conn.query_row(
@@ -67,7 +68,7 @@ pub fn get_contact_meta_by_id_sync(
 
 /// Set snooze state on a thread.
 pub fn snooze_thread_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     until: i64,
@@ -83,7 +84,7 @@ pub fn snooze_thread_sync(
 
 /// Clear snooze state on a thread.
 pub fn unsnooze_thread_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -110,7 +111,7 @@ pub fn unsnooze_thread_sync(
 /// rather than trying to upsert ancestors here. Batch ingest from sync
 /// goes through `insert_folders_batch`, which topologically sorts.
 pub fn upsert_folder_from_mutation_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     folder_id: &str,
     account_id: &str,
     name: &str,
@@ -161,7 +162,7 @@ pub fn delete_threads_for_account_sync(
 
 /// Delete a folder and its thread_folders associations.
 pub fn delete_folder_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {

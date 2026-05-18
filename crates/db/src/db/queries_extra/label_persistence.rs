@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use rusqlite::{Transaction, params};
+use rusqlite::params;
+
+use crate::db::WriteTxn;
 
 #[derive(Debug, Clone)]
 pub struct FolderWriteRow {
@@ -40,7 +42,26 @@ pub struct LabelWriteRow {
     pub is_undeletable: bool,
 }
 
-pub fn insert_folders_batch(tx: &Transaction, rows: &[FolderWriteRow]) -> Result<(), String> {
+pub trait LabelPersistenceTarget {
+    fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize>;
+}
+
+impl LabelPersistenceTarget for WriteTxn<'_> {
+    fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
+        WriteTxn::execute(self, sql, params)
+    }
+}
+
+impl LabelPersistenceTarget for rusqlite::Transaction<'_> {
+    fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
+        std::ops::Deref::deref(self).execute(sql, params)
+    }
+}
+
+pub fn insert_folders_batch<T: LabelPersistenceTarget + ?Sized>(
+    tx: &T,
+    rows: &[FolderWriteRow],
+) -> Result<(), String> {
     let sorted_rows = sort_folders_parent_first(rows)?;
 
     for row in sorted_rows {
@@ -105,7 +126,10 @@ pub fn insert_folders_batch(tx: &Transaction, rows: &[FolderWriteRow]) -> Result
 /// flag: once a row is marked undeletable (e.g. by the bootstrap synth
 /// for `importance:*`, the typed action-side label writer, or a
 /// system-flag classification at ingest), it stays that way.
-pub fn upsert_labels(tx: &Transaction, rows: &[LabelWriteRow]) -> Result<(), String> {
+pub fn upsert_labels<T: LabelPersistenceTarget + ?Sized>(
+    tx: &T,
+    rows: &[LabelWriteRow],
+) -> Result<(), String> {
     for row in rows {
         validate_label_color_pairs(
             &row.id,

@@ -7,7 +7,7 @@
 //! the DB write itself plus any post-create side effects we grow.
 //!
 //! The point of the indirection is not the DB call - that's a
-//! one-liner `with_conn(create_account_sync)`. The point is "what
+//! one-liner `with_write(create_account_sync)`. The point is "what
 //! makes a fully-formed account" being defined once. If a future
 //! release adds "every account needs a default folder set" or
 //! "every account needs an initial signature" or similar, the
@@ -27,7 +27,7 @@ pub(crate) async fn create_account_inner(
     params: db::db::queries_extra::CreateAccountParams,
 ) -> Result<String, ServiceError> {
     let id = write_db
-        .with_conn(move |conn| db::db::queries_extra::create_account_sync(conn, &params))
+        .with_write(move |conn| db::db::queries_extra::create_account_sync(conn, &params))
         .await
         .map_err(ServiceError::Internal)?;
 

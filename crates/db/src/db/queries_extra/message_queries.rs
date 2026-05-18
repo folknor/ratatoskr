@@ -4,9 +4,9 @@
 //! Thread-level queries live in `thread_detail.rs`; these are for
 //! individual messages in pop-out windows.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
-use crate::db::ReadConn;
+use crate::db::{ReadConn, WriteTarget};
 
 /// Attachment metadata for a single message (pop-out view).
 #[derive(Debug, Clone)]
@@ -80,7 +80,7 @@ pub fn get_message_attachments(
 ///
 /// Chunked to stay under SQLite's host-parameter cap (default 999).
 pub fn find_unreferenced_message_ids(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     candidates: &[String],
 ) -> Result<Vec<String>, String> {
     if candidates.is_empty() {
@@ -118,7 +118,7 @@ pub fn find_unreferenced_message_ids(
 /// startup invariant pass to build the live-set passed to
 /// `SearchReadState::find_orphan_message_ids_for_account`.
 pub fn list_message_ids_for_account(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
 ) -> Result<std::collections::HashSet<String>, String> {
     let mut stmt = conn

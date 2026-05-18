@@ -29,7 +29,7 @@ pub(crate) async fn handle_create(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     let id = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             // body_text=None on the wire means "let the Service derive
             // it from body_html" - the strip-HTML helper lives in rtsk
             // and is reused here so callers get identical text fallback
@@ -59,7 +59,7 @@ pub(crate) async fn handle_update(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             // The wire's `body_text: Option<String>` collapses the
             // underlying API's `Option<Option<String>>` to "no change"
             // / "set to text." Set-to-NULL is not exposed because
@@ -87,7 +87,7 @@ pub(crate) async fn handle_delete(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| db::db::queries_extra::db_delete_signature_sync(conn, &params.id))
+        .with_write(move |conn| db::db::queries_extra::db_delete_signature_sync(conn, &params.id))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(SignatureDeleteAck)
@@ -100,7 +100,7 @@ pub(crate) async fn handle_reorder(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::queries_extra::db_reorder_signatures_sync(conn, &params.ordered_ids)
         })
         .await

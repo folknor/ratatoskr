@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::Connection;
+use db::db::WriteConn;
 use sync::threading::ThreadGroup;
 use sync::types::MessageMeta;
 
@@ -15,7 +15,7 @@ const THREAD_BATCH_SIZE: usize = 100;
 /// of `thread_folders` and `thread_labels` from those sources, so no
 /// separate thread-scope replace is performed here.
 pub(super) fn store_threads(
-    conn: &Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     thread_groups: &[ThreadGroup],
     all_meta: &HashMap<String, MessageMeta>,
@@ -30,7 +30,7 @@ pub(super) fn store_threads(
 
     for batch in thread_groups.chunks(THREAD_BATCH_SIZE) {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin thread tx: {e}"))?;
 
         let user_emails = db::db::queries_extra::query_user_emails(&tx)?;

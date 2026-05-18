@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use db::db::ReadDbState;
-use service_state::{BodyStoreWriteState, SearchWriteHandle};
+use service_state::{BodyStoreWriteState, SearchWriteHandle, WriteDbState};
 use tokio_util::sync::CancellationToken;
 
 use super::client;
@@ -33,7 +32,7 @@ pub(crate) async fn sync_flags_on_session(
     session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
     sync_flags_on_session_inner(session, folder_path, account_id, db, cancellation_token, false)
@@ -44,7 +43,7 @@ async fn sync_flags_on_session_inner(
     session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     cancellation_token: &CancellationToken,
     force: bool,
 ) -> Result<u64, String> {
@@ -53,7 +52,7 @@ async fn sync_flags_on_session_inner(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let last_sync = db
-        .with_conn(move |conn| sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp))
+        .with_write(move |conn| sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp))
         .await;
 
     // Reuse the deletion check timestamp table for throttling. If we can't
@@ -73,7 +72,7 @@ async fn sync_flags_on_session_inner(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let local_flags = db
-        .with_conn(move |conn| sync_pipeline::get_local_flags_for_folder(conn, &aid, &fp))
+        .with_write(move |conn| sync_pipeline::get_local_flags_for_folder(conn, &aid, &fp))
         .await?;
 
     if local_flags.is_empty() {
@@ -126,7 +125,7 @@ async fn sync_flags_on_session_inner(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let updated = db
-        .with_conn(move |conn| sync_pipeline::apply_flag_changes(conn, &aid, &fp, &changes))
+        .with_write(move |conn| sync_pipeline::apply_flag_changes(conn, &aid, &fp, &changes))
         .await?;
 
     Ok(updated)
@@ -140,7 +139,7 @@ pub async fn sync_flags_without_condstore(
     config: &ImapConfig,
     folder_path: &str,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
     let mut session = connect(config).await?;
@@ -154,7 +153,7 @@ pub async fn sync_flags_without_condstore_forced(
     config: &ImapConfig,
     folder_path: &str,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
     let mut session = connect(config).await?;
@@ -183,7 +182,7 @@ async fn detect_deleted_on_session(
     session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     force: bool,
 ) -> Result<Vec<String>, String> {
     // Throttle: only check every DELETION_CHECK_INTERVAL_SECS
@@ -191,7 +190,7 @@ async fn detect_deleted_on_session(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let should_run = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             if force {
                 Ok(true)
             } else {
@@ -221,7 +220,7 @@ async fn detect_deleted_on_session(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let local_entries = db
-        .with_conn(move |conn| sync_pipeline::get_local_uids_for_folder(conn, &aid, &fp))
+        .with_write(move |conn| sync_pipeline::get_local_uids_for_folder(conn, &aid, &fp))
         .await?;
 
     // Diff: local UIDs not on server = deleted
@@ -234,7 +233,7 @@ async fn detect_deleted_on_session(
     // Update the last check timestamp
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
-    db.with_conn(move |conn| sync_pipeline::set_last_deletion_check_at(conn, &aid, &fp, now))
+    db.with_write(move |conn| sync_pipeline::set_last_deletion_check_at(conn, &aid, &fp, now))
         .await?;
 
     if !deleted_ids.is_empty() {
@@ -256,7 +255,7 @@ pub async fn detect_deleted_messages(
     config: &ImapConfig,
     folder_path: &str,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
 ) -> Result<Vec<String>, String> {
     let mut session = connect(config).await?;
     let result = detect_deleted_on_session(&mut session, folder_path, account_id, db, false).await;
@@ -276,7 +275,7 @@ pub async fn run_deletion_detection(
     config: &ImapConfig,
     cancellation_token: &CancellationToken,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     body_store: &BodyStoreWriteState,
     search: &SearchWriteHandle,
     syncable_folders: &[&super::types::ImapFolder],
@@ -332,7 +331,7 @@ pub async fn run_deletion_detection(
                 let aid = account_id.to_string();
                 let ids = deleted_ids;
                 match db
-                    .with_conn(move |conn| sync_pipeline::remove_deleted_messages(conn, &aid, &ids))
+                    .with_write(move |conn| sync_pipeline::remove_deleted_messages(conn, &aid, &ids))
                     .await
                 {
                     Ok(affected) => all_affected.extend(affected),
@@ -375,7 +374,7 @@ pub async fn run_deletion_detection(
                                     let aid = account_id.to_string();
                                     let ids = deleted_ids;
                                     match db
-                                        .with_conn(move |conn| {
+                                        .with_write(move |conn| {
                                             sync_pipeline::remove_deleted_messages(conn, &aid, &ids)
                                         })
                                         .await

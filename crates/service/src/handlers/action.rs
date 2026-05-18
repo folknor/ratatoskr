@@ -38,7 +38,7 @@ pub(super) async fn handle(
         crate::test_counters::record("action.before_journal_write");
     }
 
-    db.with_conn(move |conn| insert_mail_plan(conn, &plan_id_bytes, &account_id, false, &ops))
+    db.with_write(move |conn| insert_mail_plan(conn, &plan_id_bytes, &account_id, false, &ops))
     .await
     .map_err(ServiceError::Internal)?;
 

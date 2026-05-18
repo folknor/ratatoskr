@@ -51,7 +51,7 @@ pub(crate) async fn handle_kick(boot_state: &Arc<BootSharedState>) -> Result<(),
         }
     };
     let deleted = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::pinned_searches::db_expire_stale_pinned_searches_sync(conn, STALENESS_SECS)
         })
         .await?;
@@ -67,7 +67,7 @@ pub(crate) async fn handle_create_or_update(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     let id = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             // Wire's PinnedThreadRef -> tuple expected by the DB
             // helper. Cheap allocation; the Vec is small (sidebar
             // rows). Keeping the wire type human-readable wins over a
@@ -96,7 +96,7 @@ pub(crate) async fn handle_update(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             let thread_ids: Vec<(String, String)> = params
                 .thread_ids
                 .into_iter()
@@ -122,7 +122,7 @@ pub(crate) async fn handle_delete(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::pinned_searches::db_delete_pinned_search_sync(conn, params.id)
         })
         .await
@@ -137,7 +137,7 @@ pub(crate) async fn handle_delete_all(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     let deleted = write_db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             db::db::pinned_searches::db_delete_all_pinned_searches_sync(conn)
         })
         .await

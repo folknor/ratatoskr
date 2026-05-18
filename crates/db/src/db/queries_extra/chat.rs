@@ -1,7 +1,7 @@
 //! Chat contact storage and timeline queries.
 
-use crate::db::ReadConn;
-use rusqlite::{Connection, Transaction, params};
+use crate::db::{ReadConn, WriteTarget, WriteTransactionTarget};
+use rusqlite::params;
 
 const CHAT_UNREAD_AFFECTED_THREADS_SQL: &str = "SELECT DISTINCT m.account_id, m.thread_id \
      FROM messages m \
@@ -101,12 +101,12 @@ pub fn get_chat_inline_images_sync(
 
 /// Insert or update a chat contact designation and recompute chat flags/summary.
 pub fn designate_chat_contact_sync(
-    conn: &Connection,
+    conn: &impl WriteTransactionTarget,
     email: &str,
     user_emails: &[String],
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin: {e}"))?;
 
     tx.execute(
@@ -144,9 +144,12 @@ pub fn designate_chat_contact_sync(
 }
 
 /// Remove a chat contact designation and clear all related chat flags.
-pub fn undesignate_chat_contact_sync(conn: &Connection, email: &str) -> Result<(), String> {
+pub fn undesignate_chat_contact_sync(
+    conn: &impl WriteTransactionTarget,
+    email: &str,
+) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin: {e}"))?;
 
     tx.execute(
@@ -229,11 +232,11 @@ pub fn get_user_signature_texts_sync(conn: &ReadConn<'_>) -> Result<Vec<String>,
 /// that had any unread messages, so the caller can dispatch provider
 /// mark-read against each of them.
 pub fn mark_chat_read_local_sync(
-    conn: &Connection,
+    conn: &impl WriteTransactionTarget,
     email: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin: {e}"))?;
 
     let affected: Vec<(String, String)> = {
@@ -354,7 +357,7 @@ pub fn get_chat_timeline_sync(
 }
 
 fn set_chat_thread_flags(
-    tx: &Transaction<'_>,
+    tx: &impl WriteTarget,
     email: &str,
     user_emails: &[String],
 ) -> Result<(), String> {
@@ -401,7 +404,7 @@ fn set_chat_thread_flags(
     Ok(())
 }
 
-fn update_chat_summary(tx: &Transaction<'_>, email: &str) -> Result<(), String> {
+fn update_chat_summary(tx: &impl WriteTarget, email: &str) -> Result<(), String> {
     let latest: Option<(Option<String>, i64)> = tx
         .query_row(
             "SELECT m.snippet, m.date FROM messages m \

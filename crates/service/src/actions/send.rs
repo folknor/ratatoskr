@@ -41,7 +41,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     let account_id_outer = account_id.clone();
     let thread_id_outer = thread_id.clone();
     let source_message_id_outer = source_message_id.clone();
-    let local_result = db.with_conn_mapped(move |conn| {
+    let local_result = db.with_write_mapped(move |conn| {
         let mime_base64url = build_mime_message_base64url(&request)
             .map_err(|e| ActionError::build(format!("{e}")))?;
 
@@ -156,7 +156,7 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
     // 1. Look up remote_draft_id and delete locally in one spawn_blocking call
     let db = ctx.write_db.clone();
     let did = draft_id.to_string();
-    let local_result = db.with_conn_mapped(move |conn| {
+    let local_result = db.with_write_mapped(move |conn| {
         let remote_id =
             db::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(conn, &did)
                 .map_err(ActionError::db)?;

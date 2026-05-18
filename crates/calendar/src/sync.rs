@@ -170,7 +170,7 @@ pub async fn upsert_discovered_calendars_impl(
     let account_id = account_id.to_string();
     let provider = provider.to_string();
     db.with_write(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for calendar in calendars {
             upsert_discovered_calendar(
                 &tx,
@@ -203,7 +203,7 @@ pub async fn apply_calendar_sync_result_impl(
         let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
             .ok_or_else(|| format!("calendar not found: account={account_id} remote={calendar_remote_id}"))?;
 
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
 
         for event in sync_result.created.into_iter().chain(sync_result.updated) {
             let row = calendar_event_dto_to_row(&account_id, &calendar_id, &event);
@@ -243,7 +243,7 @@ pub async fn upsert_provider_events_impl(
                 format!("Calendar with remote_id '{calendar_remote_id}' not found for account '{account_id}'")
             })?;
 
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for event in events {
             let row = calendar_event_dto_to_row(&account_id, &calendar_id, &event);
             upsert_calendar_event_row(&tx, &row)?;
@@ -266,7 +266,7 @@ pub async fn delete_provider_event_impl(
     db.with_write(move |conn| {
         let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
             .ok_or_else(|| format!("calendar not found: account={account_id} remote={calendar_remote_id}"))?;
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         delete_calendar_event_by_remote_id(&tx, &calendar_id, &remote_event_id)?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -571,7 +571,7 @@ async fn sync_caldav_calendars(
         let color = cal.color.clone();
         let calendar_id = write_db
             .with_write(move |conn| {
-                let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+                let tx = conn.transaction().map_err(|e| e.to_string())?;
                 let id = upsert_discovered_calendar(
                     &tx,
                     &DiscoveredCalendar {
@@ -620,7 +620,7 @@ async fn sync_caldav_calendars(
         let ctag = cal.ctag.clone();
         write_db
             .with_write(move |conn| {
-                let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+                let tx = conn.transaction().map_err(|e| e.to_string())?;
                 update_calendar_sync_token(&tx, &calendar_id_for_update, None, ctag.as_deref())?;
                 tx.commit().map_err(|e| e.to_string())?;
                 Ok(())
@@ -729,7 +729,7 @@ async fn sync_caldav_calendar_events(
                 let written = write_db
                     .with_write(move |conn| {
                         let tx = conn
-                            .unchecked_transaction()
+                            .transaction()
                             .map_err(|e| format!("begin caldav resource tx: {e}"))?;
                         let mut seen_keys: Vec<String> = Vec::with_capacity(events.len());
                         let mut representative_uid: Option<String> = None;
@@ -798,7 +798,7 @@ async fn sync_caldav_calendar_events(
         write_db
             .with_write(move |conn| {
                 let tx = conn
-                    .unchecked_transaction()
+                    .transaction()
                     .map_err(|e| format!("begin caldav delete tx: {e}"))?;
                 delete_caldav_events(&tx, &cal_id, &deleted_owned)?;
                 tx.commit()

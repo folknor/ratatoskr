@@ -6,11 +6,12 @@
 //! on `crates/db/src/db/queries_extra/label_intent.rs` for the overlay
 //! lifecycle.
 
-use rusqlite::{Connection, params};
+use crate::db::WriteTarget;
+use rusqlite::params;
 
 /// Remove a folder from a thread. Returns the number of rows affected.
 pub fn remove_folder(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     folder_id: &str,
@@ -24,7 +25,7 @@ pub fn remove_folder(
 
 /// Add a folder to a thread. Returns the number of rows affected.
 pub fn insert_folder(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     folder_id: &str,
@@ -38,7 +39,7 @@ pub fn insert_folder(
 
 /// Remove the INBOX folder from a thread.
 pub fn remove_inbox_folder(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
 ) -> Result<usize, String> {

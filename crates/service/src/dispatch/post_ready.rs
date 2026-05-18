@@ -67,7 +67,7 @@ pub(crate) fn spawn_post_ready_push_startup(
         boot_state.install_push_runtime(Arc::clone(&push_runtime));
 
         let jmap_account_ids: Result<Vec<String>, String> = db_state
-            .with_conn(|conn| {
+            .with_write(|conn| {
                 let mut stmt = conn
                     .prepare("SELECT id FROM accounts WHERE provider = 'jmap'")
                     .map_err(|e| format!("prepare jmap accounts query: {e}"))?;
@@ -294,7 +294,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         // window and enqueue. Idempotent w.r.t. the post-sync sweep
         // (in-flight dedupe blocks duplicates).
         let window_days = match db_state
-            .with_conn(|conn| Ok(sync::config::get_sync_period_days(conn)))
+            .with_write(|conn| Ok(sync::config::get_sync_period_days(conn)))
             .await
         {
             Ok(v) => v,
@@ -370,7 +370,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         // per-provider concurrency caps and the IMAP folder-batch
         // worker handle the differences inside `PrefetchRuntime`.
         let accounts: Vec<(String, String)> = match db_state
-            .with_conn(move |conn| {
+            .with_write(move |conn| {
                 let mut stmt = conn
                     .prepare(
                         "SELECT id, COALESCE(provider, '') FROM accounts \

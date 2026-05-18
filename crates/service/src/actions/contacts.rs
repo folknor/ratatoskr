@@ -96,7 +96,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     let db = ctx.write_db.clone();
     let inp = input.clone();
     let local_result = db
-        .with_conn_mapped(move |conn| {
+        .with_write_mapped(move |conn| {
             let source = inp.source.as_deref().unwrap_or("user");
             db_upsert_contact_full(
                 conn,
@@ -179,7 +179,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     let db = ctx.write_db.clone();
     let cid = contact_id.to_string();
     let meta_result = db
-        .with_conn_mapped(move |conn| {
+        .with_write_mapped(move |conn| {
             db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(conn, &cid)
                 .map_err(ActionError::db)?
                 .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))

@@ -197,15 +197,15 @@ pub async fn run_invariant_pass(
     // everything) - the cursor is an optimization hint, not a
     // correctness gate.
     let body_cursor = db
-        .with_conn(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "body"))
+        .with_write(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "body"))
         .await
         .unwrap_or(0);
     let inline_cursor = db
-        .with_conn(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "inline"))
+        .with_write(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "inline"))
         .await
         .unwrap_or(0);
     let extract_cursor = db
-        .with_conn(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "extract"))
+        .with_write(|c| ::db::db::queries_extra::get_clean_shutdown_cursor(c, "extract"))
         .await
         .unwrap_or(0);
     log::debug!(
@@ -225,7 +225,7 @@ pub async fn run_invariant_pass(
         // Clear JMAP cursor (load-bearing).
         let aid = account_id.clone();
         match db
-            .with_conn(move |conn| ::sync::pipeline::clear_account_history_id(conn, &aid))
+            .with_write(move |conn| ::sync::pipeline::clear_account_history_id(conn, &aid))
             .await
         {
             Ok(()) => stats.history_ids_cleared += 1,
@@ -273,7 +273,7 @@ pub async fn run_invariant_pass(
 
     let extract_started = Instant::now();
     match db
-        .with_conn(move |c| {
+        .with_write(move |c| {
             ::db::db::queries_extra::delete_extracted_text_orphans_since(c, extract_cursor)
         })
         .await
@@ -314,7 +314,7 @@ async fn drop_body_orphans(
         return Ok(0);
     }
     let orphans: Vec<String> = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             ::db::db::queries_extra::find_unreferenced_message_ids(conn, &candidates)
         })
         .await?;
@@ -358,7 +358,7 @@ async fn drop_inline_orphans(
         return Ok(0);
     }
     let orphans: Vec<String> = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             ::store::inline_image_store::find_unreferenced_hashes(conn, &hashes)
         })
         .await?;
@@ -403,7 +403,7 @@ async fn drop_search_orphans(
 ) -> Result<u64, String> {
     let aid = account_id.to_string();
     let live: HashSet<String> = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             ::db::db::queries_extra::list_message_ids_for_account(conn, &aid)
         })
         .await?;

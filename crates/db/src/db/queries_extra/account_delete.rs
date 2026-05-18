@@ -1,7 +1,7 @@
-use rusqlite::Connection;
 use std::collections::HashSet;
 
 use crate::blob_hash::BlobHash;
+use crate::db::WriteTarget;
 
 pub struct DbAccountDeletionData {
     pub message_ids: Vec<String>,
@@ -22,7 +22,7 @@ pub struct DbAccountDeletionPlan {
 /// Gather all data needed for account deletion cleanup (message IDs, cached
 /// file paths, inline image hashes) in a single DB pass.
 pub fn gather_account_deletion_data_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
 ) -> Result<DbAccountDeletionData, String> {
     let message_ids = {
@@ -83,7 +83,7 @@ pub fn gather_account_deletion_data_sync(
 /// hashes, excluding a specific account. Returns the set of hashes that
 /// still have at least one reference from another account.
 pub fn referenced_hashes_excluding_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     content_hashes: &[BlobHash],
     account_id: &str,
 ) -> Result<HashSet<BlobHash>, String> {
@@ -130,7 +130,7 @@ pub fn referenced_hashes_excluding_account_sync(
 /// accounts. Returns the set of hashes that have at least one inline
 /// reference from a different account (regardless of cache state).
 pub fn inline_hashes_referenced_by_other_accounts_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     inline_hashes: &[BlobHash],
     account_id: &str,
 ) -> Result<HashSet<BlobHash>, String> {
@@ -170,7 +170,7 @@ pub fn inline_hashes_referenced_by_other_accounts_sync(
     Ok(referenced)
 }
 
-pub fn delete_account_row_sync(conn: &Connection, account_id: &str) -> Result<(), String> {
+pub fn delete_account_row_sync(conn: &impl WriteTarget, account_id: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM accounts WHERE id = ?1",
         rusqlite::params![account_id],
@@ -180,7 +180,7 @@ pub fn delete_account_row_sync(conn: &Connection, account_id: &str) -> Result<()
 }
 
 pub fn delete_account_orchestrate_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
 ) -> Result<DbAccountDeletionPlan, String> {
     let data = gather_account_deletion_data_sync(conn, account_id)?;

@@ -97,8 +97,9 @@ pub(crate) async fn sync_mailboxes(
     // Persist folders to DB
     ctx.db
         .with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
+            let write = db::db::WriteConn::from_raw(conn);
+        let tx = write
+            .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             let rows: Vec<FolderWriteRow> = folder_rows
                 .iter()
