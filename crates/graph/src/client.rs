@@ -701,8 +701,10 @@ mod tests {
         POOL.get_or_init(|| {
             let tmp = tempfile::TempDir::new().expect("temp dir");
             let pool = db::db::open_writer_pool(tmp.path()).expect("open writer pool");
-            // Leak the TempDir so its backing files outlive the test
-            // process. Tests never read the DB; the OS reclaims /tmp.
+            // Skip TempDir's Drop so the backing directory survives for
+            // the duration of the test process (the OnceLock holds the
+            // pool indefinitely). Tests never read the DB; the OS
+            // reclaims /tmp after the process exits.
             std::mem::forget(tmp);
             pool
         })

@@ -2,9 +2,9 @@
 //!
 //! Phase 5 task 5. GAL refresh is kick-driven, idempotent, and bounded
 //! (60 s per-account timeout x account count, gated by the existing
-//! 24 h cache check inside `fetch_gal_for_account_if_stale`). No
+//! 24 h cache check inside `fetch_gal_entries_if_stale`). No
 //! per-account runtime; no cancellation. Iterates all accounts -
-//! `fetch_gal_for_account_if_stale` self-gates non-supported
+//! `fetch_gal_entries_if_stale` self-gates non-supported
 //! providers with `Ok(None)`.
 //!
 //! ## Required: serialize handler invocations via the module-level Tokio Mutex

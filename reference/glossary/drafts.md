@@ -10,17 +10,21 @@ If you're touching anything that lists, counts, opens, sends, or syncs a draft, 
 
 A composition the user has started but has not yet sent or synced to the provider. Stored in `local_drafts` (`crates/db/src/db/schema/04_compose.sql`).
 
-Key fields: `id` (primary key, TEXT, app-generated UUID), `account_id`, `to_addresses` / `cc_addresses` / `bcc_addresses`, `subject`, `body_html`, `reply_to_message_id`, `thread_id`, `from_email`, `remote_draft_id`, `attachments`, `created_at`, `updated_at`, `sync_status`.
+Key fields: `id` (primary key, TEXT, app-generated UUID), `account_id`, `to_addresses` / `cc_addresses` / `bcc_addresses`, `subject`, `body_html`, `reply_to_message_id`, `thread_id`, `from_email`, `signature_id`, `signature_separator_index`, `remote_draft_id`, `attachments`, `created_at`, `updated_at`, `sync_status`.
 
-`sync_status` is the state machine:
+`sync_status` is the state machine. The live transitions (`crates/db/src/db/queries_extra/draft_lifecycle.rs`) are `pending → sending → sent`, with `failed` reachable from any state:
 
-- `pending` (default) - saved locally, no remote write attempted.
-- `queued` - flagged for the next send pass.
-- `sending` - currently being submitted to the provider.
-- `failed` - submission attempted and rejected. Reset to `failed` on app restart if `sync_status = 'sending'` is found at boot (`crates/db/src/db/queries_extra/account_sync_writes.rs`), so a crashed send never leaves a row stuck in `'sending'`.
-- `synced` - successfully submitted; `remote_draft_id` populated.
+- `pending` (default) - saved locally, no remote submission attempted. Set by `persist_draft_pending_sync` and `SAVE_LOCAL_DRAFT_SQL`.
+- `sending` - currently being submitted to the provider. Set by `mark_draft_sending_sync` at the start of `send_email` (`crates/service/src/actions/send.rs`).
+- `sent` - provider accepted the send; `remote_draft_id` holds the sent message ID returned by the provider. Set by `mark_draft_sent_sync` (`draft_lifecycle.rs`). The row is **not** deleted on send - it remains as a sent-message back-reference until cleanup.
+- `failed` - submission rejected. Set on send error (`mark_draft_failed_sync`), and on boot if a `'sending'` row is found stranded from a crashed send (`crates/db/src/db/queries_extra/account_sync_writes.rs`, also `pending_ops.rs`).
 
-A local draft is **deleted** from `local_drafts` once it has been sent (not just synced) - see the `DELETE FROM local_drafts WHERE id = ?1` path in `crates/db/src/db/queries_extra/compose.rs`. Synced-but-not-sent drafts stay in `local_drafts` with `sync_status = 'synced'` until either the user sends them or they get cleaned up.
+Two additional values exist in the schema as forward-looking outbox/auto-save scaffolding but are not reached by current call sites:
+
+- `queued` - reserved for a future explicit-queue send pass. Today no caller writes it; boot sweeps any `'queued'` rows to `'failed'` (`db_mark_queued_drafts_failed_sync`, run via `BootPhase::SweepingQueuedDrafts` in `crates/service/src/boot.rs`).
+- `synced` - reserved for a future "draft persisted to the provider as a remote draft, not yet sent" flow. `db_mark_draft_synced` and `db_delete_local_draft` (`crates/db/src/db/queries_extra/compose.rs`) are defined but currently uncalled; `get_local_draft_summaries` already filters `sync_status != 'synced'` in anticipation.
+
+The only live `DELETE FROM local_drafts` path is `delete_draft_sync` (`draft_lifecycle.rs`), driven by the `delete_draft` action in `crates/service/src/actions/send.rs`. That action is itself forward-looking (no UI call site yet - the action header documents it as becoming useful when auto-save or outbox UI land).
 
 ### Server-synced draft
 
@@ -48,7 +52,7 @@ The app still performs the presentation merge in `crates/app/src/helpers.rs`:
 4. Convert local rows with `Thread::from_local_draft`.
 5. Concatenate, sort by `last_message_at desc`, then apply thread decorations.
 
-`Thread::from_local_draft` assigns thread fields that don't have a natural value on a local draft:
+`Thread::from_local_draft` (`crates/app/src/db/types.rs`, paired with `Thread::from_db_thread`) assigns thread fields that don't have a natural value on a local draft:
 
 - `is_read: true` - a draft you wrote yourself isn't "unread."
 - `is_starred: false`, `is_replied: false`, `is_forwarded: false`, `is_pinned: false`, `is_muted: false`, `has_attachments: false` - no provider interactions yet.
@@ -67,19 +71,24 @@ Clicking a row in the Drafts list diverges on `is_local_draft`:
 
 The visual cue is a "Draft" pill rendered in the thread card (`crates/app/src/ui/widgets/cards.rs`), shown only when `is_local_draft = true`. Synced drafts get no pill - they look like ordinary threads with the DRAFT folder membership reflected in the sidebar selection state.
 
-## Sync lifecycle
+## Lifecycle
 
-A local draft becomes a server-synced draft when the user explicitly saves it remotely (currently driven by the compose flow). The path is:
+Today there is no "save as remote draft" path - a local draft stays in `local_drafts` until the user sends it. The synced-as-remote-draft scaffolding (`db_get_unsynced_drafts`, `db_mark_draft_synced`, `db_delete_local_draft` in `crates/db/src/db/queries_extra/compose.rs`) is in place but uncalled, awaiting an outbox/auto-save flow.
 
-1. App writes the local draft via `SAVE_LOCAL_DRAFT_SQL` (`crates/db/src/db/queries_extra/compose.rs`) with `sync_status = 'pending'`.
-2. A sync pass picks it up: `SELECT * FROM local_drafts WHERE account_id = ?1 AND sync_status = 'pending'`.
-3. Provider call creates the remote draft (provider-specific - JMAP `EmailSet`, Graph `messages` POST, Gmail `drafts.create`, IMAP APPEND with `\Draft`).
-4. On success: `UPDATE local_drafts SET sync_status = 'synced', remote_draft_id = ? WHERE id = ?` (`compose.rs`).
-5. The next sync pass ingests the remote draft as a thread with `DRAFT` membership. At this point the same composition can exist in **both** tables: as a `local_drafts` row with `sync_status = 'synced'` and as a `DbThread` carrying `DRAFT`.
+**Save**: the compose flow writes via `SAVE_LOCAL_DRAFT_SQL` (`crates/db/src/db/queries_extra/compose.rs`) with `sync_status = 'pending'`. Subsequent edits upsert the same `id` and reset `sync_status` back to `'pending'`.
 
-The visible Drafts list does not show the synced local row. `get_local_draft_summaries` filters to `sync_status != 'synced'`, so after the remote draft is ingested the list shows the server-synced thread side. The local row remains as send/edit bookkeeping until send or cleanup removes it.
+**Send** (`send_email` in `crates/service/src/actions/send.rs`):
 
-**Send** is a different path: when the user clicks Send, the provider's submission API is called and the local row is deleted (`DELETE FROM local_drafts WHERE id = ?1`, `compose.rs`). The corresponding DRAFT-labelled thread, if any, is removed by the provider's own state machine and picked up on the next sync.
+1. `mark_draft_sending_sync` transitions the row to `'sending'` (rejecting if it's already sending/sent).
+2. The provider's submission API is called with the assembled MIME.
+3. On success: `mark_draft_sent_sync` writes `sync_status = 'sent'` and stores the provider-assigned message ID in `remote_draft_id`. The row is **not** deleted - it stays as a sent-message back-reference.
+4. On failure: `mark_draft_failed_sync` writes `sync_status = 'failed'`. Boot recovery resurrects any stranded `'sending'` rows as `'failed'` so a crashed send can't leave one stuck (`account_sync_writes.rs`, `pending_ops.rs`).
+
+If the send was a reply/forward, a parallel `mark_send_intent` writeback runs against the source message (replied/forwarded flag), both provider-side and local. Failure of that side-effect is logged but does not fail the send.
+
+Server-synced drafts (the other half of the Drafts list) arrive through the normal sync pipeline as threads with `DRAFT` folder membership. They have no relationship to the `local_drafts` table - they're regular threads that happen to live in the DRAFT folder.
+
+`get_local_draft_summaries` filters `sync_status != 'synced'`, which is currently a no-op because nothing writes `'synced'`. The filter is in place for the future outbox flow.
 
 ## Count semantics
 

@@ -109,7 +109,7 @@ pub fn get_active_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, S
 
 /// Return every account id ordered by `sort_order`. Used by the GAL
 /// kick handler, which iterates all accounts and lets
-/// `fetch_gal_for_account_if_stale` self-gates unsupported providers via
+/// `fetch_gal_entries_if_stale` self-gates unsupported providers via
 /// `Ok(0)`.
 pub fn list_all_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn

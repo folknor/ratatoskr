@@ -93,7 +93,7 @@ impl ReadyApp {
     /// Phase 5 task 10: kick the Service-side GAL refresh.
     ///
     /// Replaces the deleted UI-side `refresh_gal_caches`. The Service
-    /// handler iterates all accounts and calls `fetch_gal_for_account_if_stale`
+    /// handler iterates all accounts and calls `fetch_gal_entries_if_stale`
     /// (which self-gates via the 24 h cache check), under a global
     /// Tokio Mutex so the `NOTIFY_CAP=4` concurrent dispatcher can't
     /// double-fire stale-account fetches. Notification class is `Drop`
