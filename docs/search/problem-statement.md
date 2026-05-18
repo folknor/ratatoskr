@@ -73,7 +73,7 @@ The query language is the smart folder syntax, extended. Users type into one sea
 | `account:` | Limit to a specific account | `account:FooCorp`, `account:"Work Gmail"` |
 | `label:` | Label/folder membership | `label:Clients` |
 | `folder:` | Folder path (Exchange/IMAP/JMAP hierarchy) | `folder:Projects`, `folder:"Projects/Q2"` |
-| `in:` | Universal folder shorthand | `in:inbox`, `in:sent`, `in:trash`, `in:starred` |
+| `in:` | Universal folder shorthand | `in:inbox`, `in:sent`, `in:drafts`, `in:trash`, `in:spam`, `in:archive`, `in:starred`, `in:snoozed` |
 | `before:` | Messages before date | `before:2026/03/01` |
 | `after:` | Messages after date | `after:2026/01/01` |
 
@@ -136,11 +136,13 @@ These four operators control *where* to search. They compose naturally:
 
 The distinction between `folder:`, `label:`, and `in:`:
 
-- **`in:`** - universal folder shorthands only (inbox, sent, drafts, trash, spam, starred, snoozed). These map to provider-agnostic predicates. Works cross-account.
+- **`in:`** - universal folder shorthands (inbox, sent, drafts, trash, spam, archive, starred, snoozed). These map to provider-agnostic predicates. Works cross-account.
 - **`folder:`** - provider-specific folder paths (Exchange folders, IMAP hierarchy, JMAP mailboxes). Supports `/`-separated paths for nested folders: `folder:"Projects/Q2/Reviews"`. A message lives in exactly one folder.
 - **`label:`** - provider-specific labels/tags (Gmail labels). A message can have multiple labels. On providers that only have folders (Exchange, IMAP), `label:` and `folder:` are equivalent.
 
 When `account:` is omitted, `folder:` and `label:` match across all accounts that have a folder/label with that name. If the name is ambiguous (same folder name on multiple accounts), all matching accounts are included. Use `account:` to disambiguate.
+
+**Planned: `in:` / `folder:` merge.** The two-operator split is a holdover from the early SQL builder and isn't worth the cognitive load. The direction we're moving toward is a single `in:` operator that fuzzy-matches over both universal shorthands and provider folder paths, surfacing a popup dropdown so the user can pick the intended target. Until that lands, `folder:` and `in:` remain separate with the semantics above.
 
 ##### "Search here" interaction
 

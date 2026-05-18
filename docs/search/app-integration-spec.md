@@ -1285,10 +1285,6 @@ If search ever takes long enough to be perceptible (which would indicate a bug o
 
 UI-side open items as of 2026-05-18. Backend semantic issues (folder/label/contact/MIME) live in `implementation-spec.md`; pinned-search items live in `pinned-searches-implementation-spec.md`.
 
-### Result rendering
-
-- **`has_attachments` indicator missing on search results.** `UnifiedSearchResult` has no `has_attachments` field, and `unified_to_app_thread` passes `false` through. Thread cards from search will not show the paperclip until `UnifiedSearchResult` is extended.
-
 ### Typeahead
 
 - **No "keep as text" fallback item.** The product spec says the last typeahead suggestion should always let the user keep the raw input. The current popup only shows matched suggestions; if no result matches, the popup hides entirely and the user has no explicit confirmation that the raw text will be used.

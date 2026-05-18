@@ -151,7 +151,9 @@ fn build_free_text_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     ));
 }
 
-/// Build `from:` clause with contact expansion via contacts_fts.
+/// Build `from:` clause with contact expansion. If `?N` matches a contact's
+/// display name, that contact's `email` and `email2` are also considered as
+/// possible sender addresses.
 fn build_from_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.from.is_empty() {
         return;
@@ -164,16 +166,21 @@ fn build_from_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
             format!(
                 "(m.from_address LIKE '%' || ?{idx} || '%' \
                  OR m.from_name LIKE '%' || ?{idx} || '%' \
-                 OR m.from_address IN (\
-                   SELECT c.email FROM contacts c \
-                   WHERE c.display_name LIKE '%' || ?{idx} || '%'))"
+                 OR EXISTS (\
+                   SELECT 1 FROM contacts c \
+                   WHERE c.display_name LIKE '%' || ?{idx} || '%' \
+                     AND (m.from_address = c.email OR m.from_address = c.email2)))"
             )
         })
         .collect();
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
-/// Build `to:` clause with contact expansion via contacts table.
+/// Build `to:` clause. Matches against `to_addresses`, `cc_addresses`, and
+/// `bcc_addresses` directly, and additionally expands via the contacts table:
+/// if `?N` matches a contact's display name, that contact's email is also
+/// looked for in the three address columns. Mirrors the contact-expansion
+/// path in `build_from_clause`.
 fn build_to_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.to.is_empty() {
         return;
@@ -185,7 +192,18 @@ fn build_to_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
             let idx = ctx.push_param(Box::new(to.clone()));
             format!(
                 "(m.to_addresses LIKE '%' || ?{idx} || '%' \
-                 OR m.cc_addresses LIKE '%' || ?{idx} || '%')"
+                 OR m.cc_addresses LIKE '%' || ?{idx} || '%' \
+                 OR m.bcc_addresses LIKE '%' || ?{idx} || '%' \
+                 OR EXISTS (\
+                   SELECT 1 FROM contacts c \
+                   WHERE c.display_name LIKE '%' || ?{idx} || '%' \
+                     AND (m.to_addresses LIKE '%' || c.email || '%' \
+                       OR m.cc_addresses LIKE '%' || c.email || '%' \
+                       OR m.bcc_addresses LIKE '%' || c.email || '%' \
+                       OR (c.email2 IS NOT NULL AND (\
+                            m.to_addresses LIKE '%' || c.email2 || '%' \
+                         OR m.cc_addresses LIKE '%' || c.email2 || '%' \
+                         OR m.bcc_addresses LIKE '%' || c.email2 || '%')))))"
             )
         })
         .collect();
@@ -355,13 +373,26 @@ fn build_single_mime_condition(ctx: &mut QueryContext, mime: &str) -> String {
     }
 }
 
-/// Build `has:contact` clause - check if sender is a known contact.
+/// Build `has:contact` clause - matches when any participant (sender or
+/// to/cc/bcc recipient) is a known contact.
 fn build_has_contact_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if !parsed.has_contact {
         return;
     }
-    ctx.msg_clauses
-        .push("EXISTS (SELECT 1 FROM contacts c WHERE c.email = m.from_address)".to_owned());
+    ctx.msg_clauses.push(
+        "EXISTS (\
+           SELECT 1 FROM contacts c \
+           WHERE c.email = m.from_address \
+              OR m.to_addresses LIKE '%' || c.email || '%' \
+              OR m.cc_addresses LIKE '%' || c.email || '%' \
+              OR m.bcc_addresses LIKE '%' || c.email || '%' \
+              OR (c.email2 IS NOT NULL AND (\
+                   c.email2 = m.from_address \
+                OR m.to_addresses LIKE '%' || c.email2 || '%' \
+                OR m.cc_addresses LIKE '%' || c.email2 || '%' \
+                OR m.bcc_addresses LIKE '%' || c.email2 || '%')))"
+            .to_owned(),
+    );
 }
 
 /// Add thread-level flag clauses (snoozed, pinned, muted, tagged).
@@ -595,6 +626,8 @@ mod tests {
                 from_address TEXT,
                 from_name TEXT,
                 to_addresses TEXT,
+                cc_addresses TEXT,
+                bcc_addresses TEXT,
                 subject TEXT,
                 snippet TEXT,
                 date INTEGER NOT NULL,
@@ -658,6 +691,7 @@ mod tests {
              CREATE TABLE contacts (
                 id TEXT PRIMARY KEY,
                 email TEXT NOT NULL,
+                email2 TEXT,
                 display_name TEXT,
                 frequency INTEGER NOT NULL DEFAULT 0
              );",

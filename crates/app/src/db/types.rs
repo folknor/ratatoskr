@@ -178,7 +178,7 @@ impl Thread {
             is_forwarded: false,
             is_pinned: false,
             is_muted: false,
-            has_attachments: false,
+            has_attachments: r.has_attachments,
             label_paints: Vec::new(),
             from_name: r.from_name,
             from_address: r.from_address,

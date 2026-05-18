@@ -30,6 +30,7 @@ pub struct UnifiedSearchResult {
     pub date: Option<i64>,
     pub is_read: bool,
     pub is_starred: bool,
+    pub has_attachments: bool,
     pub message_count: Option<i64>,
     /// BM25 score from Tantivy, or 0.0 for SQL-only results.
     pub rank: f32,
@@ -146,6 +147,7 @@ fn search_sql_fallback(
                 date: r.last_message_at,
                 is_read: r.is_read,
                 is_starred: r.is_starred,
+                has_attachments: r.has_attachments,
                 message_count: Some(r.message_count),
                 rank: 0.0,
                 match_kind: None,
@@ -229,10 +231,28 @@ fn search_combined(
         .map(|t| ((t.account_id.clone(), t.id.clone()), t))
         .collect();
 
-    // Step 2: Tantivy searches free text (no account filter - SQL handles it
-    // via intersection, and account: values are display names, not IDs).
+    // Step 2: Tantivy ranks free-text matches across the full index. Operator
+    // filters (from/to/account/dates/flags/attachment) are intentionally NOT
+    // applied here - SQL has already enforced them in Step 1, and the
+    // candidate-set intersection in Step 3 is the canonical constraint gate.
+    //
+    // Why: SQL's `from:` / `to:` clauses do contact expansion (display name
+    // -> email lookup via the contacts table). Tantivy's `from`/`to` filters
+    // match against indexed text fields (`from_name`, `to_addresses`), so a
+    // SQL hit found via "Alice Smith" -> alice@example.com would be dropped
+    // by Tantivy because "Alice Smith" doesn't appear in `to_addresses`.
+    // Same class of mismatch applies to any operator whose semantics differ
+    // between the two engines. Letting SQL be the sole constraint authority
+    // eliminates the asymmetry.
     let mut params = build_tantivy_params(parsed);
     params.account_ids = None;
+    params.from = Vec::new();
+    params.to = Vec::new();
+    params.has_attachment = None;
+    params.is_unread = None;
+    params.is_starred = None;
+    params.before = None;
+    params.after = None;
     let tantivy_results = search_state.search_with_filters(&params)?;
 
     // Step 3: Intersect - keep only Tantivy hits in the SQL candidate set.
@@ -400,6 +420,7 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
         date: t.last_message_at,
         is_read: t.is_read,
         is_starred: t.is_starred,
+        has_attachments: t.has_attachments,
         message_count: Some(t.message_count),
         rank: 0.0,
         match_kind: None,
@@ -483,6 +504,7 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
         date: Some(r.date),
         is_read: false,
         is_starred: false,
+        has_attachments: false,
         message_count: None,
         rank: r.rank,
         match_kind: Some(r.match_kind.clone()),
@@ -501,6 +523,7 @@ fn enrich_from_sql(
     result.from_address = result.from_address.or_else(|| thread.from_address.clone());
     result.is_read = thread.is_read;
     result.is_starred = thread.is_starred;
+    result.has_attachments = thread.has_attachments;
     result.message_count = Some(thread.message_count);
     if result.date.is_none() {
         result.date = thread.last_message_at;
@@ -728,6 +751,7 @@ mod tests {
             date: Some(1000),
             is_read: false,
             is_starred: false,
+            has_attachments: false,
             message_count: None,
             rank: 3.5,
             match_kind: Some(MatchKind::Body),

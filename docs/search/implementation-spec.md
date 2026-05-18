@@ -289,6 +289,7 @@ pub struct UnifiedSearchResult {
     pub date: Option<i64>,
     pub is_read: bool,
     pub is_starred: bool,
+    pub has_attachments: bool,
     pub message_count: Option<i64>,
     pub rank: f32,                          // BM25, or 0.0 for SQL-only
     pub match_kind: Option<MatchKind>,      // Phase 7-8 attribution
@@ -298,7 +299,7 @@ pub struct UnifiedSearchResult {
 
 `match_kind` and `also_matched` are the Phase 7-8 attribution outputs: the pipeline knows whether the hit came from subject, from-name, body, or snippet, and surfaces secondary fields the result also matched. The Tantivy paths optionally re-read body text from the body store (`body_read: Option<&BodyStoreReadState>`) to refine attribution.
 
-`has_attachments` is intentionally absent from `UnifiedSearchResult` and is tracked as an open issue (see "Known semantic issues" below) - the thread card cannot display the attachment indicator from search results today.
+`has_attachments` is populated from `DbThread.has_attachments` in the SQL-driven and combined paths and defaults to `false` in the Tantivy-only path (where thread membership isn't joined back to SQL). Search-result thread cards render the paperclip indicator from this field.
 
 For the Tantivy-only path: query returns message-level hits, group by `thread_id`, take the highest score per thread, enrich with thread metadata from SQLite.
 
@@ -443,26 +444,20 @@ Open items as of 2026-05-18. UI-side items live in `app-integration-spec.md`; pi
 1. **Combined path applies free text in SQL before Tantivy ranking.** `search_combined` passes the full parsed query into `query_threads_read()`, which always includes `build_free_text_clause()`. Mixed queries are constrained by a SQL `LIKE` candidate set before ranking, defeating the "SQL narrows by structured operators; Tantivy ranks free text" intent.
 2. **Combined path does a broad Tantivy search, then intersects in application code.** Works correctly but does not implement the "SQL narrows corpus first" performance model.
 3. **Tantivy-only thread cards can show best-matching-message metadata instead of latest-message metadata.** The product spec says thread cards always show the latest message; ranking should only affect order. The Tantivy-only path groups by highest-scoring message per thread and uses that message's subject/snippet/sender. Only the combined path re-enriches from `DbThread`.
-4. **Date boundary semantics differ across engines.** SQL uses strict `<` / `>` for `before:` / `after:`. Tantivy uses inclusive bounds. The same query can include boundary-day messages in one path and exclude them in another.
-5. **`folder:` is still fuzzy substring matching, not true folder-path semantics.** Current SQL lowers `folder:` to `%LIKE%` against `folders.name` or `imap_folder_path`. The spec calls for path-aware folder matching with cross-provider normalization.
-6. **`has_attachments` is missing from `UnifiedSearchResult`.** Search results cannot show the attachment indicator on the thread card. Fix: extend the struct, populate from `DbThread.has_attachments` in SQL paths, default to `false` in the Tantivy-only path.
-7. **SQL fallback search is a real semantics downgrade.** When `SearchReadState` is unavailable, free-text search falls back to a thread-level `LIKE` on subject/snippet. The pipeline marks the result set `SearchResults::Degraded` so callers can warn, but the contract is not the same.
+4. **`folder:` / `in:` merge.** The current split between `folder:` (provider-specific path) and `in:` (universal shorthand) is being retired in favour of a single `in:` operator with fuzzy matching across both surfaces, backed by a typeahead popup that lets the user select the intended folder. The existing `folder:` clause does substring `%LIKE%` against `folders.name` / `imap_folder_path`, which is wrong for path semantics and provider-asymmetric (only IMAP carries `imap_folder_path`); that whole code path goes away with the merge. Implementation deferred - see `problem-statement.md` § "Planned: `in:` / `folder:` merge".
+5. **SQL fallback search is a real semantics downgrade.** When `SearchReadState` is unavailable, free-text search falls back to a thread-level `LIKE` on subject/snippet. The pipeline marks the result set `SearchResults::Degraded` so callers can warn, but the contract is not the same.
 
 ### Medium
 
-8. **`label:` matching is not normalized to the cross-account label model.** Current predicate is `LOWER(lg.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described in `reference/glossary/folders-labels.md`.
-9. **`to:` semantics are incomplete.** SQL checks only `to_addresses` and `cc_addresses`. No `bcc_addresses` coverage. No contact expansion. (Note: `from:` *does* expand via `contacts_fts` - the asymmetry is unintentional.)
-10. **`has:contact` is sender-only.** Implementation checks only `m.from_address IN (SELECT email FROM contacts)`. The product surface implies "any known participant"; sender-vs-any-participant remains unresolved.
-11. **Free-text Tantivy search does not cover all indexed address fields.** The index stores `from_address` and `to_addresses`, but the free-text query parser searches only `subject`, `from_name`, `body_text`, and `snippet`.
-12. **Legacy `execute_smart_folder_query` facade is still SQL-only.** The reachable app path uses the unified pipeline; the facade is leftover. Either delete it or convert it to a thin wrapper around the unified pipeline.
-13. **Legacy date-token migration is still runtime, not a one-time DB migration.** `migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__`-style tokens at execution time. A persisted SQL migration was specified but never written.
-14. **Smart-folder unread counts are scaffolded as 0.** `get_navigation_state()` returns 0 for every smart folder's unread count. Wiring `count_smart_folder_unread` into navigation-state computation is still pending (with batching, to avoid N+1 queries per sidebar refresh).
-15. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Broad searches can truncate in engine-specific ways before paging / refinement exists.
+6. **`label:` matching is not normalized to the cross-account label model.** Current predicate is `LOWER(lg.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described in `reference/glossary/folders-labels.md`.
+7. **Legacy `execute_smart_folder_query` facade is still SQL-only.** The reachable app path uses the unified pipeline; the facade is leftover. Either delete it or convert it to a thin wrapper around the unified pipeline.
+8. **Legacy date-token migration is still runtime, not a one-time DB migration.** `migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__`-style tokens at execution time. A persisted SQL migration was specified but never written.
+9. **Smart-folder unread counts are scaffolded as 0.** `get_navigation_state()` returns 0 for every smart folder's unread count. Wiring `count_smart_folder_unread` into navigation-state computation is still pending (with batching, to avoid N+1 queries per sidebar refresh).
+10. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Broad searches can truncate in engine-specific ways before paging / refinement exists.
 
 ### Low
 
-16. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
-17. **`in:` accepts undocumented shorthands.** `archive` and `important` are matched in code but absent from the documented operator surface in `problem-statement.md`. Decide: extend the docs or drop the shorthands.
+11. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
 
 ## Stale spec content (kept here so it doesn't drift back)
 

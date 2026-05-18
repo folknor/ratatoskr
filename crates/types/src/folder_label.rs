@@ -299,6 +299,9 @@ impl SystemFolderId {
         }
     }
 
+    /// Parse a user-facing `in:` shorthand into the corresponding system folder.
+    /// `Important` is intentionally absent - it's a Gmail-only concept and is
+    /// exposed through `is:starred` and per-account label rendering, not `in:`.
     pub fn parse_shorthand(raw: &str) -> Option<Self> {
         match raw.to_ascii_lowercase().as_str() {
             "inbox" => Some(Self::Inbox),
@@ -307,7 +310,6 @@ impl SystemFolderId {
             "trash" => Some(Self::Trash),
             "spam" => Some(Self::Spam),
             "archive" => Some(Self::Archive),
-            "important" => Some(Self::Important),
             _ => None,
         }
     }
@@ -595,9 +597,10 @@ mod tests {
             "DRAFT",
         );
         assert_eq!(
-            SystemFolderId::parse_shorthand("important").unwrap().as_str(),
-            "IMPORTANT",
+            SystemFolderId::parse_shorthand("archive").unwrap().as_str(),
+            "archive",
         );
+        assert!(SystemFolderId::parse_shorthand("important").is_none());
     }
 
     #[test]

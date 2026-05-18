@@ -700,12 +700,15 @@ impl SearchReadState {
             clauses.push((Occur::Must, filter));
         }
 
-        // Free text → QueryParser on subject+from_name+body_text+snippet
-        // plus attachment_text and attachment_filename so attachment-only
-        // matches can enter the result set. The per-attachment attribution
-        // pass downstream of this query (`enrich_match_kinds`) annotates
-        // hits as `MatchKind::Attachment` when the attachment fields scored
-        // higher than the body fields.
+        // Free text → QueryParser on subject+from_name+to_addresses+
+        // body_text+snippet plus attachment_text and attachment_filename so
+        // attachment-only matches can enter the result set. The per-attachment
+        // attribution pass downstream of this query (`enrich_match_kinds`)
+        // annotates hits as `MatchKind::Attachment` when the attachment fields
+        // scored higher than the body fields. `from_address` is intentionally
+        // omitted - the field is indexed as `STRING` (untokenized) for exact
+        // matching by the `from:` operator, so it cannot participate in
+        // tokenized free-text search.
         if let Some(ref text) = params.free_text
             && !text.is_empty()
         {
@@ -714,6 +717,7 @@ impl SearchReadState {
                 vec![
                     self.fields.subject,
                     self.fields.from_name,
+                    self.fields.to_addresses,
                     self.fields.body_text,
                     self.fields.snippet,
                     self.fields.attachment_text,
