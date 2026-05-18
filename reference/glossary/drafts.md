@@ -12,19 +12,18 @@ A composition the user has started but has not yet sent or synced to the provide
 
 Key fields: `id` (primary key, TEXT, app-generated UUID), `account_id`, `to_addresses` / `cc_addresses` / `bcc_addresses`, `subject`, `body_html`, `reply_to_message_id`, `thread_id`, `from_email`, `signature_id`, `signature_separator_index`, `remote_draft_id`, `attachments`, `created_at`, `updated_at`, `sync_status`.
 
-`sync_status` is the state machine. The live transitions (`crates/db/src/db/queries_extra/draft_lifecycle.rs`) are `pending → sending → sent`, with `failed` reachable from any state:
+`sync_status` is the state machine. The live transitions (`crates/db/src/db/queries_extra/draft_lifecycle.rs`) are `pending → sending → (row deleted on success)`, with `failed` reachable from any state:
 
 - `pending` (default) - saved locally, no remote submission attempted. Set by `persist_draft_pending_sync` and `SAVE_LOCAL_DRAFT_SQL`.
 - `sending` - currently being submitted to the provider. Set by `mark_draft_sending_sync` at the start of `send_email` (`crates/service/src/actions/send.rs`).
-- `sent` - provider accepted the send; `remote_draft_id` holds the sent message ID returned by the provider. Set by `mark_draft_sent_sync` (`draft_lifecycle.rs`). The row is **not** deleted on send - it remains as a sent-message back-reference until cleanup.
 - `failed` - submission rejected. Set on send error (`mark_draft_failed_sync`), and on boot if a `'sending'` row is found stranded from a crashed send (`crates/db/src/db/queries_extra/account_sync_writes.rs`, also `pending_ops.rs`).
+
+On a successful send the row is deleted via `delete_draft_sync` (`draft_lifecycle.rs`) - the sent message returns through provider sync as a regular thread in the Sent folder, so the local row has no further purpose. Same `delete_draft_sync` underlies the `delete_draft` action in `crates/service/src/actions/send.rs`.
 
 Two additional values exist in the schema as forward-looking outbox/auto-save scaffolding but are not reached by current call sites:
 
 - `queued` - reserved for a future explicit-queue send pass. Today no caller writes it; boot sweeps any `'queued'` rows to `'failed'` (`db_mark_queued_drafts_failed_sync`, run via `BootPhase::SweepingQueuedDrafts` in `crates/service/src/boot.rs`).
-- `synced` - reserved for a future "draft persisted to the provider as a remote draft, not yet sent" flow. `db_mark_draft_synced` and `db_delete_local_draft` (`crates/db/src/db/queries_extra/compose.rs`) are defined but currently uncalled; `get_local_draft_summaries` already filters `sync_status != 'synced'` in anticipation.
-
-The only live `DELETE FROM local_drafts` path is `delete_draft_sync` (`draft_lifecycle.rs`), driven by the `delete_draft` action in `crates/service/src/actions/send.rs`. That action is itself forward-looking (no UI call site yet - the action header documents it as becoming useful when auto-save or outbox UI land).
+- `synced` - reserved for a future "draft persisted to the provider as a remote draft, not yet sent" flow. `db_mark_draft_synced` and `db_get_unsynced_drafts` (`crates/db/src/db/queries_extra/compose.rs`) are defined but currently uncalled; `get_local_draft_summaries` already filters `sync_status != 'synced'` in anticipation.
 
 ### Server-synced draft
 
@@ -79,9 +78,9 @@ Today there is no "save as remote draft" path - a local draft stays in `local_dr
 
 **Send** (`send_email` in `crates/service/src/actions/send.rs`):
 
-1. `mark_draft_sending_sync` transitions the row to `'sending'` (rejecting if it's already sending/sent).
+1. `mark_draft_sending_sync` transitions the row to `'sending'` (rejecting if it's already sending).
 2. The provider's submission API is called with the assembled MIME.
-3. On success: `mark_draft_sent_sync` writes `sync_status = 'sent'` and stores the provider-assigned message ID in `remote_draft_id`. The row is **not** deleted - it stays as a sent-message back-reference.
+3. On success: `delete_local_draft` (`crates/service/src/send.rs`, wrapping `delete_draft_sync`) removes the row. The sent message returns through provider sync as a thread in the Sent folder; the local row would otherwise show up forever as a phantom entry in the Drafts pane.
 4. On failure: `mark_draft_failed_sync` writes `sync_status = 'failed'`. Boot recovery resurrects any stranded `'sending'` rows as `'failed'` so a crashed send can't leave one stuck (`account_sync_writes.rs`, `pending_ops.rs`).
 
 If the send was a reply/forward, a parallel `mark_send_intent` writeback runs against the source message (replied/forwarded flag), both provider-side and local. Failure of that side-effect is logged but does not fail the send.

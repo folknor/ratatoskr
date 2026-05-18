@@ -1,7 +1,11 @@
 //! Local draft lifecycle: persist, status transitions, and deletion.
 //!
-//! The `local_drafts` table tracks drafts from creation through sending.
-//! Status flow: pending → sending → sent (or failed at any point).
+//! The `local_drafts` table tracks drafts from creation until they are
+//! either successfully sent (row is deleted) or abandoned (deleted via
+//! `delete_draft_sync`). Status flow: `pending` → `sending` → row
+//! removed on send success, or `failed` from any state. The sent
+//! message arrives back through provider sync as a regular thread in
+//! the Sent folder, which is why the local row has no further purpose.
 
 use rusqlite::{Connection, params};
 
@@ -55,31 +59,16 @@ pub fn persist_draft_pending_sync(
 }
 
 /// Transition a draft to 'sending'. Returns `Ok(true)` if the transition
-/// succeeded, `Ok(false)` if the draft was not found or already sending/sent.
+/// succeeded, `Ok(false)` if the draft was not found or already sending.
 pub fn mark_draft_sending_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<bool, String> {
     let rows = conn
         .execute(
             "UPDATE local_drafts SET sync_status = 'sending' \
-             WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'failed')",
+             WHERE id = ?1 AND sync_status IN ('pending', 'failed')",
             params![draft_id],
         )
         .map_err(|e| format!("mark sending: {e}"))?;
     Ok(rows > 0)
-}
-
-/// Transition a draft to 'sent' with the provider-assigned message ID.
-pub fn mark_draft_sent_sync(
-    conn: &impl WriteTarget,
-    draft_id: &str,
-    sent_message_id: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE local_drafts SET sync_status = 'sent', remote_draft_id = ?1 \
-         WHERE id = ?2",
-        params![sent_message_id, draft_id],
-    )
-    .map_err(|e| format!("mark sent: {e}"))?;
-    Ok(())
 }
 
 /// Transition a draft to 'failed'.

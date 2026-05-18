@@ -4,16 +4,17 @@ use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use db::progress::NoopProgressReporter;
 use crate::send::{
-    SendIntent, SendRequest, build_mime_message_base64url, mark_draft_failed,
-    mark_draft_sent, mark_send_intent_local,
+    SendIntent, SendRequest, build_mime_message_base64url, delete_local_draft, mark_draft_failed,
+    mark_send_intent_local,
 };
 use common::types::ProviderCtx;
 
 /// Send an email: build MIME, persist draft, dispatch to provider.
 ///
-/// On success, the provider-assigned sent message ID is stored in
-/// `local_drafts.remote_draft_id` via `mark_draft_sent()` - the caller
-/// does not need it. Returns plain `ActionOutcome::Success`.
+/// On success, the `local_drafts` row is deleted - the sent message
+/// will arrive through provider sync as a thread in the Sent folder,
+/// so the local row has no further purpose. Returns plain
+/// `ActionOutcome::Success`.
 ///
 /// On any failure (MIME build, DB, or provider), returns `Failed` and
 /// marks the draft as `'failed'` if it was persisted. `LocalOnly` is
@@ -130,7 +131,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
                     log::warn!("Local send-intent writeback failed: {e}");
                 }
             }
-            let _ = mark_draft_sent(&ctx.write_db, draft_id_outer, sent_message_id).await;
+            let _ = delete_local_draft(&ctx.write_db, draft_id_outer).await;
             ActionOutcome::Success
         }
         Err(e) => {

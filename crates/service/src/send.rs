@@ -4,7 +4,7 @@
 //! This module provides:
 //! - [`SendRequest`] - all data needed to send an email
 //! - [`build_mime_message`] - assembles a proper MIME message and returns raw bytes
-//! - Draft lifecycle helpers - `mark_draft_sent`, `mark_draft_failed`
+//! - Draft lifecycle helpers - `delete_local_draft`, `mark_draft_failed`
 //!
 //! Provider-specific send logic lives in each provider crate. This module
 //! produces the raw RFC 2822 bytes that providers consume (Gmail uploads raw
@@ -147,18 +147,13 @@ pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendErr
 
 // ── Draft lifecycle ──────────────────────────────────────────
 
-/// Transition a local draft to `'sent'` status after successful provider send.
-pub async fn mark_draft_sent(
-    db: &WriteDbState,
-    draft_id: String,
-    sent_message_id: String,
-) -> Result<(), String> {
+/// Remove the local draft after a successful provider send. The sent
+/// message arrives via provider sync as a regular thread in the Sent
+/// folder; the `local_drafts` row has no further purpose. Leaving it
+/// would surface a phantom entry in the Drafts pane permanently.
+pub async fn delete_local_draft(db: &WriteDbState, draft_id: String) -> Result<(), String> {
     db.with_write(move |conn| {
-        db::db::queries_extra::draft_lifecycle::mark_draft_sent_sync(
-            conn,
-            &draft_id,
-            &sent_message_id,
-        )
+        db::db::queries_extra::draft_lifecycle::delete_draft_sync(conn, &draft_id)
     })
     .await
 }

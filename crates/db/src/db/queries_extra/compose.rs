@@ -660,15 +660,6 @@ pub async fn db_mark_draft_synced(
     .await
 }
 
-pub async fn db_delete_local_draft(db: &WriterPool, id: String) -> Result<(), String> {
-    db.with_write(move |conn| {
-        conn.execute("DELETE FROM local_drafts WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
 pub async fn db_get_pending_scheduled_emails(
     db: &WriterPool,
     now: i64,
