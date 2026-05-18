@@ -25,6 +25,8 @@ fn empty_context() -> CommandContext {
         composer_is_open: false,
         focused_region: None,
         search_query: None,
+        active_pinned_search: None,
+        has_pinned_searches: false,
         may_remove_items: None,
         may_set_seen: None,
         may_set_keywords: None,

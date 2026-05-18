@@ -86,6 +86,17 @@ pub struct CommandContext {
     /// availability.
     pub search_query: Option<String>,
 
+    /// ID of the currently active pinned search, if one is selected.
+    /// Used to gate "Save as Smart Folder" on graduation from a pinned
+    /// search rather than on any non-empty search bar.
+    pub active_pinned_search: Option<i64>,
+
+    /// Whether the sidebar holds at least one pinned search. Used to
+    /// gate "Clear All Pinned Searches" - `active_pinned_search` is
+    /// not a sufficient witness because the user can have many pinned
+    /// searches without one being selected.
+    pub has_pinned_searches: bool,
+
     // ── Mailbox rights (from JMAP/IMAP ACL) ─────────────────
     // `None` = unknown / not reported (allow by default).
     // `Some(false)` = explicitly denied by the server.
@@ -160,6 +171,8 @@ mod tests {
             composer_is_open: false,
             focused_region: None,
             search_query: None,
+            active_pinned_search: None,
+            has_pinned_searches: false,
             may_remove_items: None,
             may_set_seen: None,
             may_set_keywords: None,

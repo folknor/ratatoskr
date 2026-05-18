@@ -565,18 +565,34 @@ impl ReadyApp {
             SearchPinnedStateBehavior::Clear => {
                 self.sidebar.active_pinned_search = None;
                 self.editing_pinned_search = None;
+                self.thread_list.pinned_search_updated_at = None;
             }
             SearchPinnedStateBehavior::SmartFolder { .. } => {
                 self.sidebar.active_pinned_search = None;
                 self.editing_pinned_search = None;
+                self.thread_list.pinned_search_updated_at = None;
             }
             SearchPinnedStateBehavior::PinnedSearch { active, editing } => {
                 let resolve_ref = |r: PinnedSearchRef, persisted_id: Option<i64>| match r {
                     PinnedSearchRef::Existing(id) => Some(id),
                     PinnedSearchRef::FromPersistence => persisted_id,
                 };
-                self.sidebar.active_pinned_search = resolve_ref(*active, persisted_id);
+                let active_id = resolve_ref(*active, persisted_id);
+                self.sidebar.active_pinned_search = active_id;
                 self.editing_pinned_search = resolve_ref(*editing, persisted_id);
+                // Mirror the active pinned search's `updated_at` onto
+                // the thread list so the "Last updated …" indicator
+                // under the search bar can render. Fall back to "now"
+                // for freshly created rows whose `pinned_searches`
+                // entry has not yet round-tripped through the list
+                // reload - the subsequent `handle_pinned_searches_loaded`
+                // re-syncs the canonical value.
+                self.thread_list.pinned_search_updated_at = active_id.map(|id| {
+                    self.pinned_searches
+                        .iter()
+                        .find(|p| p.id == id)
+                        .map_or_else(|| chrono::Utc::now().timestamp(), |ps| ps.updated_at)
+                });
             }
         }
     }
@@ -785,6 +801,17 @@ impl ReadyApp {
                     .pinned_searches
                     .clone_from(&self.pinned_searches);
 
+                // Re-sync the staleness indicator if a pinned search is
+                // active - the list reload is the authoritative source
+                // for `updated_at` after fresh create / refresh.
+                if let Some(active_id) = self.sidebar.active_pinned_search {
+                    self.thread_list.pinned_search_updated_at = self
+                        .pinned_searches
+                        .iter()
+                        .find(|p| p.id == active_id)
+                        .map(|ps| ps.updated_at);
+                }
+
                 let db = Arc::clone(&self.db);
                 Task::perform(
                     async move { db.get_recent_search_queries(10).await },
@@ -869,6 +896,7 @@ impl ReadyApp {
     pub(crate) fn clear_pinned_search_context(&mut self) {
         self.sidebar.active_pinned_search = None;
         self.editing_pinned_search = None;
+        self.thread_list.pinned_search_updated_at = None;
     }
 
     /// Clear all search-related state without restoring pre-search threads.
@@ -1019,8 +1047,22 @@ impl ReadyApp {
         match result {
             Ok(_id) => {
                 log::info!("Smart folder saved");
+
+                // Graduation: the smart folder was created from a pinned
+                // search, so the pinned search has been promoted and the
+                // row should not linger. Dismiss it (the ack handler
+                // clears local state and restores the prior folder view)
+                // and reload the navigation state so the new smart
+                // folder appears in the sidebar.
+                let dismiss_task = if let Some(id) = self.editing_pinned_search.take() {
+                    self.handle_dismiss_pinned_search(id)
+                } else {
+                    Task::none()
+                };
+
                 let token = self.nav_generation.next();
-                self.fire_navigation_load(token)
+                let nav_task = self.fire_navigation_load(token);
+                Task::batch([dismiss_task, nav_task])
             }
             Err(e) => {
                 log::error!("Save smart folder error: {e}");

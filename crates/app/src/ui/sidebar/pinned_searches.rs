@@ -141,7 +141,7 @@ fn pinned_search_scope_label(sidebar: &Sidebar, ps: &PinnedSearch) -> String {
 }
 
 /// Formats a unix timestamp as a relative time string (e.g. "5 min ago", "2 hours ago").
-fn format_relative_time(timestamp: i64) -> String {
+pub(crate) fn format_relative_time(timestamp: i64) -> String {
     let Some(dt) = chrono::DateTime::from_timestamp(timestamp, 0) else {
         return "Unknown".to_string();
     };

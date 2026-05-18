@@ -169,6 +169,11 @@ pub struct ThreadList {
     pub mode: ThreadListMode,
     /// The search query string, set by App before view() is called.
     pub search_query: String,
+    /// `updated_at` of the active pinned search (unix seconds), when the
+    /// thread list is showing a pinned-search snapshot. Drives the
+    /// "Last updated …" indicator under the search bar. `None` means
+    /// no pinned search is active.
+    pub pinned_search_updated_at: Option<i64>,
     /// Direction to auto-advance after an email action removes a thread.
     pub auto_advance_direction: AutoAdvanceDirection,
     /// Typeahead suggestion state.
@@ -188,6 +193,7 @@ impl ThreadList {
             scope_name: "All".to_string(),
             mode: ThreadListMode::Scope,
             search_query: String::new(),
+            pinned_search_updated_at: None,
             auto_advance_direction: AutoAdvanceDirection::Next,
             typeahead: TypeaheadState::default(),
             bimi_cache,
@@ -517,6 +523,7 @@ impl Component for ThreadList {
             self.threads.len(),
             selection_count,
             &self.typeahead,
+            self.pinned_search_updated_at,
         );
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
@@ -539,6 +546,7 @@ impl Component for ThreadList {
 
 // ── View helpers ────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn thread_list_header<'a>(
     folder_name: &'a str,
     scope_name: &'a str,
@@ -547,6 +555,7 @@ fn thread_list_header<'a>(
     thread_count: usize,
     selection_count: usize,
     typeahead: &'a TypeaheadState,
+    pinned_search_updated_at: Option<i64>,
 ) -> Element<'a, ThreadListMessage> {
     let search_input = text_input("Search...", search_query)
         .id("search-bar")
@@ -554,6 +563,16 @@ fn thread_list_header<'a>(
         .on_submit(ThreadListMessage::SearchSubmit)
         .size(TEXT_MD)
         .padding(PAD_INPUT);
+
+    let staleness: Option<Element<'a, ThreadListMessage>> = pinned_search_updated_at.map(|ts| {
+        text(format!(
+            "Last updated {}",
+            crate::ui::sidebar::format_relative_time(ts)
+        ))
+        .size(TEXT_XS)
+        .style(theme::TextClass::Tertiary.style())
+        .into()
+    });
 
     let context_row: Element<'a, ThreadListMessage> = if selection_count > 1 {
         // Multi-selection: show count and deselect link.
@@ -607,7 +626,11 @@ fn thread_list_header<'a>(
         }
     };
 
-    let mut header_col = column![search_input, context_row].spacing(SPACE_XXS);
+    let mut header_col = column![search_input].spacing(SPACE_XXS);
+    if let Some(label) = staleness {
+        header_col = header_col.push(label);
+    }
+    header_col = header_col.push(context_row);
 
     // Typeahead popup
     if typeahead.visible && !typeahead.items.is_empty() {

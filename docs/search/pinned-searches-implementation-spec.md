@@ -20,7 +20,7 @@ The implementation is organized into four phases:
 |-------|--------|-------|
 | Phase 1 | Landed, with two architecture differences from this spec | Schema lives in v100 (`crates/db/src/db/schema/07_smart.sql`). All writes go through the Service IPC layer (Phase 6a refactor) - the `with_local_conn` dual-connection model was superseded by `WriterPool` / `WriteDbState`. Schema adds a `scope_account_id TEXT` column for account-scoped pinned searches. |
 | Phase 2 | Landed in refactored form | The naive state-machine sketched in §2 is implemented as the `SearchIntent` → `resolve_search_intent` → `ResolvedSearch` resolver in `crates/app/src/handlers/search.rs`. `editing_pinned_search` is on `App`; `clear_pinned_search_context()` exists. Navigate-away clearing fires through `SearchPinnedStateBehavior::Clear`. `SearchExecuted` / `PinnedSearchSaved` message variants were never added - the resolver carries `SearchPersistenceBehavior` instead. |
-| Phase 3 | Partial | "Save as Smart Folder" exists as `CommandId::SmartFolderSave`, but its availability gate is `ctx.search_query.is_some()`, not "pinned search is active." The pinned search is **not** auto-deleted on graduation - the discrepancy noted on 2026-03-30 is still open. `CommandContext` has no `active_pinned_search` field. |
+| Phase 3 | Landed | "Save as Smart Folder" (`CommandId::SmartFolderSave`) is gated on `CommandContext.active_pinned_search.is_some()`. `handle_smart_folder_saved` now dismisses the active pinned search after a successful save (delete IPC fires and the dismiss-ack restores the prior folder view) and triggers a navigation reload so the new smart folder appears. |
 | Phase 4 | Landed Service-side | `db_expire_stale_pinned_searches_sync()` implements the SQL. Trigger is the Service-side `pinned_search.kick` IPC handler; there is no app-side `expiry_ran` boot guard. |
 
 The remainder of this document is the original design rationale. The literal field names, message variants, and helper signatures below should be treated as illustrative - `crates/app/src/handlers/search.rs`, `crates/app/src/db/pinned_searches.rs`, and `crates/db/src/db/pinned_searches.rs` are the source of truth.
@@ -1620,17 +1620,17 @@ In practice the search-integration dependency was met by the `SearchIntent` / `R
 
 ## Open items
 
-As of 2026-05-18. Backend semantic issues live in `implementation-spec.md`; non-pinned-search UI items live in `app-integration-spec.md`.
+As of 2026-05-18, the open items below are closed. Backend semantic issues live in `implementation-spec.md`; non-pinned-search UI items live in `app-integration-spec.md`.
 
-### Graduation
+### Graduation (resolved)
 
-- **Graduation does not delete the pinned search.** "Save as Smart Folder" creates the smart folder but leaves the pinned-search row in place. The product spec calls for the pinned search to be removed on promotion. Fix in `handle_save_as_smart_folder` (`crates/app/src/handlers/search.rs`): after a successful smart-folder insert, delete the active pinned search and clear `editing_pinned_search`.
-- **`SmartFolderSave` is not gated by pinned-search activity.** The command's availability predicate is `ctx.search_query.is_some()`, which makes it visible for any non-empty search bar. Either rename it to "Save Search as Smart Folder" and accept the broader gate, or add an explicit `active_pinned_search: Option<i64>` to `CommandContext` and gate on that.
+- **Graduation deletes the pinned search.** `handle_smart_folder_saved` in `crates/app/src/handlers/search.rs` takes `editing_pinned_search` on success and routes through `handle_dismiss_pinned_search`, whose ack handler clears local state and calls `restore_folder_view` to put the user back where they were. A parallel `fire_navigation_load` reloads the sidebar so the new smart folder appears.
+- **`SmartFolderSave` is gated on `active_pinned_search`.** `CommandContext` has a new `active_pinned_search: Option<i64>` field, populated in `build_context` from `app.sidebar.active_pinned_search`. The registry predicate in `crates/cmdk/src/registry/smart_folders.rs` is `|ctx| ctx.active_pinned_search.is_some()`.
 
-### Bar-side affordances
+### Bar-side affordances (resolved)
 
-- **"Last updated …" indicator near the search bar is missing.** Sidebar cards show relative age via `format_relative_time`, but the doc also calls for a subtle "Last updated 3 days ago" indicator below or beside the search bar when a pinned search is active. The data is on `PinnedSearch.updated_at` and is already in scope; only the rendering hook is missing.
+- **"Last updated …" indicator renders under the search bar when a pinned search is active.** `ThreadList` gains a `pinned_search_updated_at: Option<i64>` field; `apply_search_pinned_state` mirrors the active pinned row's `updated_at` (falling back to "now" while the persistence IPC is in flight), and `handle_pinned_searches_loaded` re-syncs once the canonical list reloads. The label uses `format_relative_time`, exported from `crate::ui::sidebar`.
 
-### Cleanup affordances
+### Cleanup affordances (resolved)
 
-- **Clear-all UI affordance is not exposed.** `ClearAllPinnedSearches` exists as a Message handler and reaches a Service IPC that runs `delete_all_pinned_searches_sync`, but there is no visible command palette entry or sidebar header button that triggers it. Add a `CommandId::PinnedSearchesClearAll` registration.
+- **"Clear All Pinned Searches" is registered as a palette command.** `CommandId::PinnedSearchesClearAll` dispatches to `Message::ClearAllPinnedSearches` (which already reaches `delete_all_pinned_searches_sync` via IPC). Availability is gated on a new `CommandContext.has_pinned_searches: bool` flag - `active_pinned_search` was rejected as a witness because the user can hold many pinned searches without one being selected.

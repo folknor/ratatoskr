@@ -90,6 +90,9 @@ pub enum CommandId {
     // Smart Folders
     SmartFolderSave,
 
+    // Pinned Searches
+    PinnedSearchesClearAll,
+
     // Phase 7-9d: search-index rebuild from palette.
     AppRebuildSearchIndex,
 }
@@ -164,6 +167,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::AppOpenPalette, "app.openPalette"),
     (CommandId::Undo, "app.undo"),
     (CommandId::SmartFolderSave, "smartFolder.save"),
+    (CommandId::PinnedSearchesClearAll, "pinnedSearches.clearAll"),
     (CommandId::AppRebuildSearchIndex, "app.rebuildSearchIndex"),
 ];
 
@@ -260,6 +264,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::AppOpenPalette,
     CommandId::Undo,
     CommandId::SmartFolderSave,
+    CommandId::PinnedSearchesClearAll,
     CommandId::AppRebuildSearchIndex,
 ];
 

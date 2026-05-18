@@ -140,6 +140,8 @@ pub fn build_context(app: &ReadyApp) -> CommandContext {
         composer_is_open: app.composer_is_open(),
         focused_region: app.focused_region,
         search_query,
+        active_pinned_search: app.sidebar.active_pinned_search,
+        has_pinned_searches: !app.pinned_searches.is_empty(),
         may_remove_items,
         may_set_seen,
         may_set_keywords,
@@ -483,6 +485,9 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
 
         // Undo
         CommandId::Undo => Some(Message::Undo),
+
+        // Pinned searches
+        CommandId::PinnedSearchesClearAll => Some(Message::ClearAllPinnedSearches),
 
         // Phase 7-9d: rebuild the search index from the palette.
         CommandId::AppRebuildSearchIndex => Some(Message::RebuildSearchIndex),
