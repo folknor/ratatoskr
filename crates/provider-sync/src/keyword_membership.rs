@@ -115,15 +115,9 @@ fn upsert_keyword_labels(
 mod tests {
     use super::{KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords};
 
-    fn setup_pool(provider: &str) -> db::db::WriterPool {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let dir = std::path::PathBuf::from("target")
-            .join("provider-sync-keyword-tests")
-            .join(unique.to_string());
-        let pool = db::db::open_writer_pool(&dir).expect("open writer pool");
+    fn setup_pool(provider: &str) -> (db::db::WriterPool, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let pool = db::db::open_writer_pool(tmp.path()).expect("open writer pool");
         let provider = provider.to_string();
         pool.with_write_sync(move |conn| {
             conn.execute(
@@ -147,7 +141,7 @@ mod tests {
             Ok(())
         })
         .expect("seed db");
-        pool
+        (pool, tmp)
     }
 
     fn thread_label_count(pool: &db::db::WriterPool, label_id: &str) -> i64 {
@@ -166,7 +160,7 @@ mod tests {
 
     #[test]
     fn recompute_removes_keyword_absent_from_message_union() {
-        let pool = setup_pool("jmap");
+        let (pool, _tmp) = setup_pool("jmap");
         pool.with_write_sync(|write| {
             let tx = write.transaction().unwrap();
             replace_message_keywords(
@@ -197,7 +191,7 @@ mod tests {
 
     #[test]
     fn recompute_keeps_keyword_present_on_sibling_message() {
-        let pool = setup_pool("jmap");
+        let (pool, _tmp) = setup_pool("jmap");
         pool.with_write_sync(|write| {
             let tx = write.transaction().unwrap();
             replace_message_keywords(
@@ -236,7 +230,7 @@ mod tests {
 
     #[test]
     fn imap_keywords_use_the_same_recompute_path() {
-        let pool = setup_pool("imap");
+        let (pool, _tmp) = setup_pool("imap");
         pool.with_write_sync(|write| {
             let tx = write.transaction().unwrap();
             replace_message_keywords(

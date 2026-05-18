@@ -165,7 +165,7 @@ pub struct InsertSignatureParams {
 /// one default" invariant is preserved without UI-side care.
 ///
 /// Phase 6a: callable from the Service-side `signature.create`
-/// handler via `WriteDbState::with_conn` - the synchronous shape lets
+/// handler via `WriteDbState::with_write` - the synchronous shape lets
 /// the handler hold the connection across the transaction without an
 /// async wrapper.
 pub fn db_insert_signature_sync(
@@ -229,7 +229,7 @@ pub struct UpdateSignatureParams {
 /// account inside the transaction.
 ///
 /// Phase 6a: paired sync version of the prior async function so the
-/// `signature.update` handler can run inside `WriteDbState::with_conn`.
+/// `signature.update` handler can run inside `WriteDbState::with_write`.
 pub fn db_update_signature_sync(
     conn: &impl WriteTransactionTarget,
     p: UpdateSignatureParams,
@@ -540,7 +540,7 @@ pub async fn db_delete_alias(db: &WriterPool, id: String) -> Result<(), String> 
 ///
 /// Used by both the async `db_save_local_draft` and the sync
 /// `db_save_local_draft_sync`. Owned strings so the value can move into the
-/// `with_conn` closure on the async path.
+/// `with_write` closure on the async path.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SaveLocalDraftParams {
     pub id: String,

@@ -3,7 +3,7 @@ use common::typed_ids::FolderId;
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
-use super::provider::create_provider_with_writer;
+use super::provider::create_provider;
 use db::progress::NoopProgressReporter;
 use common::types::{ProviderCtx, ProviderFolderMutation};
 
@@ -47,7 +47,7 @@ pub async fn create_folder(
     let mut mlog = MutationLog::begin("create_folder", account_id, "(pending)");
 
     // 1. Provider dispatch first - we need the provider-assigned ID
-    let provider = match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+    let provider = match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::Failed {
@@ -131,7 +131,7 @@ pub async fn rename_folder(
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
     let mlog = MutationLog::begin("rename_folder", account_id, folder_id.as_str());
 
-    let provider = match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+    let provider = match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::Failed {
@@ -207,7 +207,7 @@ pub async fn delete_folder(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("delete_folder", account_id, folder_id.as_str());
 
-    let provider = match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+    let provider = match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::Failed {

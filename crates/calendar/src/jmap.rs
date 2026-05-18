@@ -29,9 +29,10 @@ pub(crate) async fn sync_jmap_calendar_account(
     if cancellation_token.is_cancelled() {
         return Err("calendar sync cancelled".to_string());
     }
+    let writer_pool = write_db.writer_pool();
     let client = jmap
         .get_or_try_insert_with(account_id, || {
-            JmapClient::from_account(read_db, account_id, jmap.encryption_key())
+            JmapClient::from_account(read_db, writer_pool, account_id, jmap.encryption_key())
         })
         .await?;
     // Calendar list and event fetches are provider RPCs, but every local

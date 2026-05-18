@@ -153,7 +153,7 @@ async fn maybe_send_shutdown_ack<R>(
 /// unflushed work as "clean").
 ///
 /// Uses a fresh `Connection::open` rather than the shared writer mutex.
-/// The shared `WriteDbState::with_conn` path hung when an
+/// The shared `WriteDbState::with_write` path hung when an
 /// aborted-but-still-running `spawn_blocking` from the action worker
 /// held the rust-level `Mutex<Connection>`. SQLite WAL handles
 /// multi-connection write contention via its busy timeout.

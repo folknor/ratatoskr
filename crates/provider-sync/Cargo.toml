@@ -41,3 +41,6 @@ gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }
 imap = { path = "../imap" }
+
+[dev-dependencies]
+tempfile = "3"

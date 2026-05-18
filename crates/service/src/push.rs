@@ -211,7 +211,7 @@ impl PushRuntime {
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(self.inner.encryption_key.expose().as_slice());
         let client =
-            jmap::client::JmapClient::from_account_with_writer(
+            jmap::client::JmapClient::from_account(
                 &read_db,
                 writer_pool.clone(),
                 &account_id,

@@ -180,7 +180,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     let cid = contact_id.to_string();
     let meta_result = db
         .with_write_mapped(move |conn| {
-            db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(conn, &cid)
+            db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(&conn.as_read(), &cid)
                 .map_err(ActionError::db)?
                 .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))
         }, ActionError::db)
@@ -262,7 +262,7 @@ async fn dispatch_write_back(
     match source {
         "jmap" => {
             let client =
-                jmap::client::JmapClient::from_account_with_writer(
+                jmap::client::JmapClient::from_account(
                     &ctx.db,
                     ctx.write_db.writer_pool(),
                     account_id,
@@ -293,7 +293,7 @@ async fn dispatch_write_back(
             }
 
             let client =
-                gmail::client::GmailClient::from_account_with_writer(
+                gmail::client::GmailClient::from_account(
                     &ctx.db,
                     ctx.write_db.writer_pool(),
                     account_id,
@@ -318,7 +318,7 @@ async fn dispatch_write_back(
         }
         "graph" => {
             let client =
-                graph::client::GraphClient::from_account_with_writer(
+                graph::client::GraphClient::from_account(
                     &ctx.db,
                     ctx.write_db.writer_pool(),
                     account_id,
@@ -355,7 +355,7 @@ async fn dispatch_delete(
     match source {
         "jmap" => {
             let client =
-                jmap::client::JmapClient::from_account_with_writer(
+                jmap::client::JmapClient::from_account(
                     &ctx.db,
                     ctx.write_db.writer_pool(),
                     account_id,
@@ -369,7 +369,7 @@ async fn dispatch_delete(
         }
         "google" => {
             let client =
-                gmail::client::GmailClient::from_account_with_writer(
+                gmail::client::GmailClient::from_account(
                     &ctx.db,
                     ctx.write_db.writer_pool(),
                     account_id,
@@ -388,7 +388,7 @@ async fn dispatch_delete(
         }
         "graph" => {
             let client =
-                graph::client::GraphClient::from_account_with_writer(
+                graph::client::GraphClient::from_account(
                     &ctx.db,
                     ctx.write_db.writer_pool(),
                     account_id,

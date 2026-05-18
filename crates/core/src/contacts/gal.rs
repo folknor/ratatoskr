@@ -1,10 +1,13 @@
 //! GAL (Global Address List) / organization directory caching.
 //!
 //! SQL lives in `db::queries_extra::contacts`. This module keeps
-//! HTTP fetch logic and cache-age orchestration.
+//! HTTP fetch logic and cache-age orchestration. The
+//! cache-staleness orchestrator lives Service-side (see
+//! `crates/service/src/handlers/gal.rs`) because OAuth token refresh
+//! inside the provider client requires writer access, and `rtsk` is
+//! reader-only by `core-no-writer-db` (brokkr.toml).
 
 use crate::db::ReadDbState;
-use types::MailProviderKind;
 
 // Re-export the entry type from db.
 pub use crate::db::queries_extra::contacts::GalEntry;
@@ -151,48 +154,6 @@ pub async fn fetch_google_gal(
 
     log::info!("[Google-GAL] Fetched {} directory entries", entries.len());
     Ok(entries)
-}
-
-/// Fetch GAL entries for a single account if the cached data is stale
-/// (>24h). The caller owns persistence because only the service layer
-/// has access to the writer pool.
-pub async fn fetch_gal_for_account_if_stale(
-    db: &ReadDbState,
-    account_id: &str,
-    encryption_key: [u8; 32],
-) -> Result<Option<Vec<GalEntry>>, String> {
-    // Check cache age
-    let now = chrono::Utc::now().timestamp();
-    let stale_threshold = now - 86400; // 24 hours
-    if let Some(cached_at) = gal_cache_age(db, account_id.to_string()).await?
-        && cached_at > stale_threshold
-    {
-        return Ok(None); // cache is fresh
-    }
-
-    // Look up provider type via db
-    let aid = account_id.to_string();
-    let provider = db
-        .with_read(move |conn| crate::db::queries_extra::get_account_provider_sync(conn, &aid))
-        .await?;
-
-    let entries = match provider {
-        MailProviderKind::Graph => {
-            let client =
-                crate::graph::client::GraphClient::from_account(db, account_id, encryption_key)
-                    .await?;
-            fetch_graph_gal(&client, db).await?
-        }
-        MailProviderKind::Gmail => {
-            let client =
-                crate::gmail::client::GmailClient::from_account(db, account_id, encryption_key)
-                    .await?;
-            fetch_google_gal(&client, db).await?
-        }
-        MailProviderKind::Jmap | MailProviderKind::Imap => return Ok(None),
-    };
-
-    Ok(Some(entries))
 }
 
 /// Get the timestamp of the last GAL refresh attempt for an account.

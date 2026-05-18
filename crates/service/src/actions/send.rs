@@ -1,7 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
-use super::provider::create_provider_with_writer;
+use super::provider::create_provider;
 use db::progress::NoopProgressReporter;
 use crate::send::{
     SendIntent, SendRequest, build_mime_message_base64url, mark_draft_failed,
@@ -84,7 +84,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     };
 
     // 2. Provider dispatch
-    let provider = match create_provider_with_writer(&ctx.db, &ctx.write_db, &account_id_outer, ctx.encryption_key).await {
+    let provider = match create_provider(&ctx.db, &ctx.write_db, &account_id_outer, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
             let _ = mark_draft_failed(&ctx.write_db, draft_id_outer).await;
@@ -179,7 +179,7 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
 
     // 2. Provider delete (best-effort, only if remote_draft_id exists)
     if let Some(remote_draft_id) = remote_id
-        && let Ok(provider) = create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await
+        && let Ok(provider) = create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await
     {
         let provider_ctx = ProviderCtx {
             account_id,

@@ -119,8 +119,7 @@ async fn refresh_gal_cache_for_account(
     encryption_key: [u8; 32],
 ) -> Result<usize, String> {
     let Some(entries) =
-        rtsk::contacts::gal::fetch_gal_for_account_if_stale(read_db, account_id, encryption_key)
-            .await?
+        fetch_gal_entries_if_stale(read_db, write_db, account_id, encryption_key).await?
     else {
         return Ok(0);
     };
@@ -138,4 +137,59 @@ async fn refresh_gal_cache_for_account(
             Ok(cached)
         })
         .await
+}
+
+/// Fetch GAL entries from the provider when the local cache is stale
+/// (>24 h). Returns `Ok(None)` when the cache is still fresh or when
+/// the provider doesn't support a directory feed (JMAP, IMAP).
+///
+/// Lives Service-side because OAuth token refresh inside the provider
+/// client requires the writer pool, and `rtsk` is reader-only by
+/// `core-no-writer-db` (brokkr.toml).
+async fn fetch_gal_entries_if_stale(
+    read_db: &db::db::ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+) -> Result<Option<Vec<rtsk::contacts::gal::GalEntry>>, String> {
+    let now = chrono::Utc::now().timestamp();
+    let stale_threshold = now - 86400;
+    if let Some(cached_at) =
+        rtsk::contacts::gal::gal_cache_age(read_db, account_id.to_string()).await?
+        && cached_at > stale_threshold
+    {
+        return Ok(None);
+    }
+
+    let aid = account_id.to_string();
+    let provider = read_db
+        .with_read(move |conn| db::db::queries_extra::get_account_provider_sync(conn, &aid))
+        .await?;
+
+    let writer_pool = write_db.writer_pool();
+    let entries = match provider {
+        types::MailProviderKind::Graph => {
+            let client = graph::client::GraphClient::from_account(
+                read_db,
+                writer_pool,
+                account_id,
+                encryption_key,
+            )
+            .await?;
+            rtsk::contacts::gal::fetch_graph_gal(&client, read_db).await?
+        }
+        types::MailProviderKind::Gmail => {
+            let client = gmail::client::GmailClient::from_account(
+                read_db,
+                writer_pool,
+                account_id,
+                encryption_key,
+            )
+            .await?;
+            rtsk::contacts::gal::fetch_google_gal(&client, read_db).await?
+        }
+        types::MailProviderKind::Jmap | types::MailProviderKind::Imap => return Ok(None),
+    };
+
+    Ok(Some(entries))
 }

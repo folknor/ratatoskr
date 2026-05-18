@@ -188,7 +188,7 @@ pub(crate) async fn handle_fetch(
         .map_or_else(|| params.attachment_id.clone(), |info| info.id.clone());
 
     let provider =
-        crate::actions::provider::create_provider_with_writer(&read_db, &write_db, &params.account_id, key)
+        crate::actions::provider::create_provider(&read_db, &write_db, &params.account_id, key)
             .await
             .map_err(ServiceError::Internal)?;
 

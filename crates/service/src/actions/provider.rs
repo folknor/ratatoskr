@@ -21,24 +21,7 @@ use super::outcome::RemoteFailureKind;
 /// must not construct providers directly.
 pub async fn create_provider(
     db: &ReadDbState,
-    account_id: &str,
-    encryption_key: [u8; 32],
-) -> Result<Box<dyn ProviderSyncOps>, String> {
-    create_provider_inner(db, None, account_id, encryption_key).await
-}
-
-pub async fn create_provider_with_writer(
-    db: &ReadDbState,
     write_db: &WriteDbState,
-    account_id: &str,
-    encryption_key: [u8; 32],
-) -> Result<Box<dyn ProviderSyncOps>, String> {
-    create_provider_inner(db, Some(write_db), account_id, encryption_key).await
-}
-
-async fn create_provider_inner(
-    db: &ReadDbState,
-    write_db: Option<&WriteDbState>,
     account_id: &str,
     encryption_key: [u8; 32],
 ) -> Result<Box<dyn ProviderSyncOps>, String> {
@@ -56,63 +39,39 @@ async fn create_provider_inner(
 
     match MailProviderKind::parse(&raw_provider)? {
         MailProviderKind::Gmail => {
-            let client = match write_db {
-                Some(write_db) => {
-                    gmail::client::GmailClient::from_account_with_writer(
-                        db,
-                        write_db.writer_pool(),
-                        account_id,
-                        encryption_key,
-                    )
-                    .await?
-                }
-                None => {
-                    gmail::client::GmailClient::from_account(db, account_id, encryption_key).await?
-                }
-            };
+            let client = gmail::client::GmailClient::from_account(
+                db,
+                write_db.writer_pool(),
+                account_id,
+                encryption_key,
+            )
+            .await?;
             Ok(Box::new(gmail::ops::GmailOps::new(client)))
         }
         MailProviderKind::Graph => {
-            let client = match write_db {
-                Some(write_db) => {
-                    graph::client::GraphClient::from_account_with_writer(
-                        db,
-                        write_db.writer_pool(),
-                        account_id,
-                        encryption_key,
-                    )
-                    .await?
-                }
-                None => {
-                    graph::client::GraphClient::from_account(db, account_id, encryption_key).await?
-                }
-            };
+            let client = graph::client::GraphClient::from_account(
+                db,
+                write_db.writer_pool(),
+                account_id,
+                encryption_key,
+            )
+            .await?;
             Ok(Box::new(graph::ops::GraphOps::new(client)))
         }
         MailProviderKind::Jmap => {
-            let client = match write_db {
-                Some(write_db) => {
-                    jmap::client::JmapClient::from_account_with_writer(
-                        db,
-                        write_db.writer_pool(),
-                        account_id,
-                        &encryption_key,
-                    )
-                    .await?
-                }
-                None => {
-                    jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?
-                }
-            };
+            let client = jmap::client::JmapClient::from_account(
+                db,
+                write_db.writer_pool(),
+                account_id,
+                &encryption_key,
+            )
+            .await?;
             Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
-        MailProviderKind::Imap => match write_db {
-            Some(write_db) => Ok(Box::new(imap::ops::ImapOps::new_with_writer(
-                encryption_key,
-                write_db.writer_pool(),
-            ))),
-            None => Ok(Box::new(imap::ops::ImapOps::new(encryption_key))),
-        },
+        MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(
+            encryption_key,
+            write_db.writer_pool(),
+        ))),
     }
 }
 

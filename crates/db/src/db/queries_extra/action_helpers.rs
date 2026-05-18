@@ -23,7 +23,7 @@ pub fn thread_exists_sync(
 
 /// Check whether a tag label exists for an account.
 pub fn label_exists_sync(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     label_id: &str,
     account_id: &str,
 ) -> Result<bool, String> {
@@ -45,7 +45,7 @@ pub struct ContactMeta {
 
 /// Look up contact metadata by ID. Returns `None` when the contact row is missing.
 pub fn get_contact_meta_by_id_sync(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     contact_id: &str,
 ) -> Result<Option<ContactMeta>, String> {
     conn.query_row(
@@ -61,7 +61,7 @@ pub fn get_contact_meta_by_id_sync(
     )
     .map(Some)
     .or_else(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         _ => Err(e.to_string()),
     })
 }

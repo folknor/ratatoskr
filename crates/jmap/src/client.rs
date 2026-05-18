@@ -28,7 +28,7 @@ pub struct JmapClient {
     db: Option<ReadDbState>,
     account_id: String,
     encryption_key: Option<[u8; 32]>,
-    writer: Option<WriterPool>,
+    writer: WriterPool,
     auth_method: String,
     jmap_url: String,
 }
@@ -94,7 +94,7 @@ impl JmapClient {
             .encryption_key
             .ok_or("JMAP OAuth client missing encryption key")?;
         if let Some(refreshed_access) =
-            refresh_token_in_db_if_expired(db, self.writer.as_ref(), &self.account_id, &key).await?
+            refresh_token_in_db_if_expired(db, &self.writer, &self.account_id, &key).await?
         {
             self.rebuild_client_with_token(&refreshed_access).await?;
         }
@@ -125,7 +125,7 @@ impl JmapClient {
 /// never reached.
 async fn refresh_token_in_db_if_expired(
     db: &ReadDbState,
-    writer: Option<&WriterPool>,
+    writer: &WriterPool,
     account_id: &str,
     key: &[u8; 32],
 ) -> Result<Option<String>, String> {
@@ -217,8 +217,6 @@ async fn refresh_token_in_db_if_expired(
     let encrypted_access = encrypt_value(key, &refreshed.access_token)?;
     let aid = account_id.to_string();
     let new_expires = refreshed.expires_at;
-    let writer = writer
-        .ok_or_else(|| format!("JMAP token refresh for {account_id} requires a writer handle"))?;
     writer
         .with_write(move |conn| {
             db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access, new_expires)
@@ -276,25 +274,7 @@ impl JmapClient {
     /// or Bearer auth depending on the account's `auth_method`.
     pub async fn from_account(
         db: &ReadDbState,
-        account_id: &str,
-        encryption_key: &[u8; 32],
-    ) -> Result<Self, String> {
-        Self::from_account_inner(db, None, account_id, encryption_key).await
-    }
-
-    /// Create a JMAP client with a writer handle for token refresh persistence.
-    pub async fn from_account_with_writer(
-        db: &ReadDbState,
         writer: WriterPool,
-        account_id: &str,
-        encryption_key: &[u8; 32],
-    ) -> Result<Self, String> {
-        Self::from_account_inner(db, Some(writer), account_id, encryption_key).await
-    }
-
-    async fn from_account_inner(
-        db: &ReadDbState,
-        writer: Option<WriterPool>,
         account_id: &str,
         encryption_key: &[u8; 32],
     ) -> Result<Self, String> {
@@ -328,7 +308,7 @@ impl JmapClient {
             })
             .await?;
         if matches!(auth_method.as_str(), "oauth2" | "bearer") {
-            let _ = refresh_token_in_db_if_expired(db, writer.as_ref(), account_id, &key).await?;
+            let _ = refresh_token_in_db_if_expired(db, &writer, account_id, &key).await?;
         }
 
         let creds = db
@@ -371,7 +351,7 @@ impl JmapClient {
             db: if is_oauth { Some(db.clone()) } else { None },
             account_id: account_id.to_string(),
             encryption_key: if is_oauth { Some(key) } else { None },
-            writer: if is_oauth { writer } else { None },
+            writer,
             auth_method: creds.auth_method,
             jmap_url: creds.jmap_url,
         })

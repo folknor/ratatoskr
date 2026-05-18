@@ -18,7 +18,7 @@ pub struct DbPinnedSearch {
 /// Create a pinned search or update the existing row for the same query.
 ///
 /// Sync helper called from the Service-side
-/// `pinned_search.create_or_update` handler via `WriteDbState::with_conn`.
+/// `pinned_search.create_or_update` handler via `WriteDbState::with_write`.
 /// Inside one transaction: query-keyed UPSERT on `pinned_searches`,
 /// then full replacement of the row's `pinned_search_threads`.
 pub fn db_create_or_update_pinned_search_sync(
@@ -84,7 +84,7 @@ pub fn db_create_or_update_pinned_search_sync(
 /// Update an existing pinned search and replace its thread snapshot.
 ///
 /// Sync helper called from the Service-side `pinned_search.update`
-/// handler via `WriteDbState::with_conn`. Includes a query-conflict
+/// handler via `WriteDbState::with_write`. Includes a query-conflict
 /// cleanup step that deletes any other row with the same target query
 /// before the update fires, preserving the UNIQUE on
 /// `pinned_searches.query`.
@@ -305,7 +305,7 @@ pub fn db_delete_all_pinned_searches_sync(
 /// no-ops by construction.
 ///
 /// Phase 6a: callable from the Service-side `pinned_search.kick`
-/// handler via `WriteDbState::with_conn`. The synchronous shape lets
+/// handler via `WriteDbState::with_write`. The synchronous shape lets
 /// the handler hold the connection for the duration of the DELETE
 /// without needing an async wrapper.
 pub fn db_expire_stale_pinned_searches_sync(

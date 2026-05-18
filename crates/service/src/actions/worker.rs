@@ -52,7 +52,7 @@ use tokio::sync::mpsc;
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
-use super::provider::{classify_provider_error, create_provider_with_writer};
+use super::provider::{classify_provider_error, create_provider};
 use super::wire_conversion::wire_to_mail;
 use common::types::ActionProviderCtx;
 use db::progress::NoopProgressReporter;
@@ -971,7 +971,7 @@ async fn mark_chat_read_remote(ctx: &ActionContext, affected: Vec<(String, Strin
     }
     for (account_id, thread_ids) in by_account {
         let provider =
-            match create_provider_with_writer(&ctx.db, &ctx.write_db, &account_id, ctx.encryption_key)
+            match create_provider(&ctx.db, &ctx.write_db, &account_id, ctx.encryption_key)
                 .await
             {
             Ok(p) => p,

@@ -16,8 +16,6 @@ pub mod db;
 pub mod discovery;
 pub mod generation;
 #[allow(clippy::single_component_path_imports)]
-pub(crate) use gmail;
-#[allow(clippy::single_component_path_imports)]
 pub(crate) use graph;
 pub use label_colors;
 pub use store::inline_image_store;

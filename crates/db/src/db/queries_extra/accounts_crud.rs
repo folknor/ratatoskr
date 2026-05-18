@@ -191,7 +191,7 @@ pub fn update_account_sync(
 // db_update_account async wrapper removed in Phase 6a: the only
 // caller (`handle_save_account_changes`) is now an IPC dispatch via
 // `account.update`, which calls `update_account_sync` directly inside
-// `WriteDbState::with_conn`.
+// `WriteDbState::with_write`.
 
 /// Update only the account color.
 pub async fn db_update_account_color(

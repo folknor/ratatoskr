@@ -190,10 +190,10 @@ async fn process_account_group(
     account_id: &str,
     ops: Vec<db::db::pending_ops::PendingOperation>,
 ) {
-    use super::provider::create_provider_with_writer;
+    use super::provider::create_provider;
 
     let provider =
-        match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
             .await
         {
         Ok(p) => Some(p),

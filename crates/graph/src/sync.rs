@@ -46,12 +46,7 @@ async fn persist_folders(
     ctx: &ProviderCtx<'_>,
     folder_map: &FolderMap,
 ) -> Result<(), String> {
-    let Some(writer) = client.writer_pool() else {
-        return Err(format!(
-            "Graph folder persistence for {} requires a writer handle",
-            ctx.account_id
-        ));
-    };
+    let writer = client.writer_pool();
     persist_folders_with_writer(&writer, ctx.account_id, folder_map).await
 }
 

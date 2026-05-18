@@ -5,7 +5,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
-use super::provider::create_provider_with_writer;
+use super::provider::create_provider;
 use db::db::queries::set_thread_read;
 use db::progress::NoopProgressReporter;
 use rusqlite::params;
@@ -99,7 +99,7 @@ pub async fn mark_read(
         return outcome;
     }
 
-    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => mark_read_dispatch(ctx, &*provider, account_id, thread_id, read).await,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly {

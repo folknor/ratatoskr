@@ -531,7 +531,7 @@ impl ReadyApp {
             SettingsEvent::PreferencesCommitted => {
                 // Phase 6a: persist via Service IPC instead of UI-side
                 // transaction. Atomicity is preserved Service-side - the
-                // handler writes all values in one `unchecked_transaction`
+                // handler writes all values in one `WriteConn::transaction`
                 // so a partial commit on failure is impossible. Failure
                 // policy is log-only (the user already sees the new
                 // values reflected; if the persist fails, the next boot

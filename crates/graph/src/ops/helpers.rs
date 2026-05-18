@@ -79,12 +79,7 @@ pub(super) async fn delete_folder_delta_token(
     ctx: &ProviderCtx<'_>,
     folder_id: &str,
 ) -> Result<(), String> {
-    let writer = client.writer_pool().ok_or_else(|| {
-        format!(
-            "Graph folder delta token delete for {} requires a writer handle",
-            ctx.account_id
-        )
-    })?;
+    let writer = client.writer_pool();
     sync::state::delete_graph_delta_token(&writer, ctx.account_id, folder_id).await
 }
 

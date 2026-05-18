@@ -25,7 +25,6 @@ use db::db::queries_extra::{
     set_calendar_event_remote_id_and_etag, update_calendar_event_fields_and_etag,
 };
 use db::db::WriteConn;
-use rtsk::db::ReadDbState;
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
 use super::google::{
@@ -69,10 +68,11 @@ enum CalendarProvider {
 /// Same routing logic as `calendar_sync_account_impl`: checks
 /// `calendar_provider` column first, falls back to `provider`.
 async fn create_calendar_provider(
-    db: &ReadDbState,
+    ctx: &CalendarActionContext,
     account_id: &str,
-    encryption_key: [u8; 32],
 ) -> Result<CalendarProvider, ActionError> {
+    let db = &ctx.read_db;
+    let encryption_key = ctx.encryption_key;
     let aid = account_id.to_string();
     let (provider, calendar_provider) = db
         .with_read_mapped(
@@ -94,22 +94,23 @@ async fn create_calendar_provider(
         .await?;
 
     let effective = calendar_provider.as_deref().unwrap_or(provider.as_str());
+    let writer_pool = ctx.write_db.writer_pool();
 
     match effective {
         "google_api" | "gmail_api" => {
-            let client = GmailClient::from_account(db, account_id, encryption_key)
+            let client = GmailClient::from_account(db, writer_pool, account_id, encryption_key)
                 .await
                 .map_err(ActionError::remote)?;
             Ok(CalendarProvider::Google(client))
         }
         "graph" => {
-            let client = GraphClient::from_account(db, account_id, encryption_key)
+            let client = GraphClient::from_account(db, writer_pool, account_id, encryption_key)
                 .await
                 .map_err(ActionError::remote)?;
             Ok(CalendarProvider::Graph(client))
         }
         "jmap" => {
-            let client = JmapClient::from_account(db, account_id, &encryption_key)
+            let client = JmapClient::from_account(db, writer_pool, account_id, &encryption_key)
                 .await
                 .map_err(ActionError::remote)?;
             Ok(CalendarProvider::Jmap(client))
@@ -424,8 +425,7 @@ pub async fn create_calendar_event(
     };
 
     // 2. Provider dispatch (best-effort for create)
-    let read_db = ctx.read_db.clone();
-    let provider = match create_calendar_provider(&read_db, account_id, ctx.encryption_key).await {
+    let provider = match create_calendar_provider(ctx, account_id).await {
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly {
@@ -553,9 +553,8 @@ pub async fn update_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
-    let read_db = ctx.read_db.clone();
     let provider =
-        match create_calendar_provider(&read_db, &meta.account_id, ctx.encryption_key).await {
+        match create_calendar_provider(ctx, &meta.account_id).await {
             Ok(p) => p,
             Err(e) => {
                 let outcome = ActionOutcome::Failed { error: e };
@@ -692,9 +691,8 @@ pub async fn delete_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
-    let read_db = ctx.read_db.clone();
     let provider =
-        match create_calendar_provider(&read_db, &meta.account_id, ctx.encryption_key).await {
+        match create_calendar_provider(ctx, &meta.account_id).await {
             Ok(p) => p,
             Err(e) => {
                 let outcome = ActionOutcome::Failed { error: e };

@@ -18,7 +18,7 @@ use service_state::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::actions::provider::create_provider_with_writer;
+use crate::actions::provider::create_provider;
 
 /// Run sync for a single account.
 ///
@@ -56,7 +56,7 @@ pub async fn sync_for_account(
             .map_err(|e| format!("read initial_sync_completed: {e}"))
         })
         .await?;
-    let provider = create_provider_with_writer(read_db, write_db, account_id, encryption_key).await?;
+    let provider = create_provider(read_db, write_db, account_id, encryption_key).await?;
     let ctx = SyncProviderCtx {
         account_id,
         db: write_db,

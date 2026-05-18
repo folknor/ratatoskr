@@ -33,7 +33,7 @@ struct ClientInner {
     client_id: String,
     client_secret: Option<String>,
     encryption_key: [u8; 32],
-    writer: Option<WriterPool>,
+    writer: WriterPool,
 }
 
 /// State holding all Gmail clients and the encryption key.
@@ -62,25 +62,7 @@ impl GmailClient {
     /// Create a Gmail client by reading account credentials from the database.
     pub async fn from_account(
         db: &ReadDbState,
-        account_id: &str,
-        encryption_key: [u8; 32],
-    ) -> Result<Self, String> {
-        Self::from_account_inner(db, None, account_id, encryption_key).await
-    }
-
-    /// Create a Gmail client by reading account credentials from the database.
-    pub async fn from_account_with_writer(
-        db: &ReadDbState,
         writer: WriterPool,
-        account_id: &str,
-        encryption_key: [u8; 32],
-    ) -> Result<Self, String> {
-        Self::from_account_inner(db, Some(writer), account_id, encryption_key).await
-    }
-
-    async fn from_account_inner(
-        db: &ReadDbState,
-        writer: Option<WriterPool>,
         account_id: &str,
         encryption_key: [u8; 32],
     ) -> Result<Self, String> {
@@ -411,7 +393,7 @@ impl GmailClient {
 
         // Persist encrypted token to DB
         persist_refreshed_token(
-            self.inner.writer.as_ref(),
+            &self.inner.writer,
             &self.inner.account_id,
             &new_access_token,
             result.expires_at,
@@ -475,7 +457,7 @@ fn read_account_tokens(
 
 /// Persist a refreshed access token (encrypted) to the database.
 async fn persist_refreshed_token(
-    writer: Option<&WriterPool>,
+    writer: &WriterPool,
     account_id: &str,
     access_token: &str,
     expires_at: i64,
@@ -483,8 +465,6 @@ async fn persist_refreshed_token(
 ) -> Result<(), String> {
     let encrypted = crypto::encrypt_value(key, access_token)?;
     let aid = account_id.to_string();
-    let writer = writer
-        .ok_or_else(|| format!("Gmail token refresh for {account_id} requires a writer handle"))?;
     writer
         .with_write(move |conn| {
             db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)

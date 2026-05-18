@@ -392,7 +392,7 @@ pub fn load_group_member_emails_sync(
 /// Save (upsert) a group and replace all members (synchronous).
 ///
 /// The whole sequence (UPSERT contact_groups + DELETE members +
-/// INSERT N members) runs inside one `unchecked_transaction` so a
+/// INSERT N members) runs inside one `WriteConn::transaction` so a
 /// crash mid-write cannot leave a half-populated member list. Phase
 /// 6a tightened this from the prior per-statement autocommit shape -
 /// the Service is the new write boundary, and the IPC ack must imply

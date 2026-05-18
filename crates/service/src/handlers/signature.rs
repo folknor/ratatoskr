@@ -4,7 +4,7 @@
 //! `signature.delete`, `signature.reorder` - establish the CRUD shape
 //! that contacts/groups will copy. Each handler is a thin wrapper:
 //! convert the wire `Params` into the underlying `*_sync` DB
-//! function's argument shape, run inside one `WriteDbState::with_conn`,
+//! function's argument shape, run inside one `WriteDbState::with_write`,
 //! return the named ack struct.
 //!
 //! The per-account "exactly one is_default / is_reply_default"

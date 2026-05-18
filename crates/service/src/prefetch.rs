@@ -941,7 +941,7 @@ async fn process_imap_batch(
         }
     };
     let writer_pool = write_db.writer_pool();
-    let config = match imap::account_config::load_imap_config_with_writer(
+    let config = match imap::account_config::load_imap_config(
         &read_db,
         &writer_pool,
         &account_id,
@@ -1134,7 +1134,7 @@ async fn run_item_pipeline(
                 .write_db_state()
                 .map_err(|_| SkipReason::InternalError)?;
             let provider =
-                crate::actions::provider::create_provider_with_writer(&read_db, &write_db, &item.account_id, key)
+                crate::actions::provider::create_provider(&read_db, &write_db, &item.account_id, key)
                     .await
                     .map_err(|e| {
                         log::debug!("prefetch create_provider {}: {e}", item.account_id);

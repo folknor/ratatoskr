@@ -49,7 +49,7 @@ struct ClientInner {
     semaphore: Arc<Semaphore>,
     folder_map: RwLock<Option<FolderMap>>,
     folder_map_last_sync: RwLock<Option<std::time::Instant>>,
-    writer: Option<WriterPool>,
+    writer: WriterPool,
 }
 
 /// State holding all Graph clients and the encryption key.
@@ -98,25 +98,7 @@ impl GraphClient {
     /// Create a Graph client by reading account credentials from the database.
     pub async fn from_account(
         db: &ReadDbState,
-        account_id: &str,
-        encryption_key: [u8; 32],
-    ) -> Result<Self, String> {
-        Self::from_account_inner(db, None, account_id, encryption_key).await
-    }
-
-    /// Create a Graph client with a writer handle for token refresh and folder persistence.
-    pub async fn from_account_with_writer(
-        db: &ReadDbState,
         writer: WriterPool,
-        account_id: &str,
-        encryption_key: [u8; 32],
-    ) -> Result<Self, String> {
-        Self::from_account_inner(db, Some(writer), account_id, encryption_key).await
-    }
-
-    async fn from_account_inner(
-        db: &ReadDbState,
-        writer: Option<WriterPool>,
         account_id: &str,
         encryption_key: [u8; 32],
     ) -> Result<Self, String> {
@@ -154,7 +136,7 @@ impl GraphClient {
         })
     }
 
-    pub fn writer_pool(&self) -> Option<WriterPool> {
+    pub fn writer_pool(&self) -> WriterPool {
         self.inner.writer.clone()
     }
 
@@ -622,7 +604,7 @@ impl GraphClient {
         }
 
         persist_refreshed_token(
-            self.inner.writer.as_ref(),
+            &self.inner.writer,
             &self.inner.account_id,
             &new_access_token,
             result.expires_at,
@@ -677,7 +659,7 @@ fn read_account_tokens(
 
 /// Persist a refreshed access token (encrypted) to the database.
 async fn persist_refreshed_token(
-    writer: Option<&WriterPool>,
+    writer: &WriterPool,
     account_id: &str,
     access_token: &str,
     expires_at: i64,
@@ -685,8 +667,6 @@ async fn persist_refreshed_token(
 ) -> Result<(), String> {
     let encrypted = crypto::encrypt_value(key, access_token)?;
     let aid = account_id.to_string();
-    let writer = writer
-        .ok_or_else(|| format!("Graph token refresh for {account_id} requires a writer handle"))?;
     writer
         .with_write(move |conn| {
             db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
@@ -711,6 +691,23 @@ async fn parse_bytes_response(response: reqwest::Response) -> Result<Vec<u8>, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    /// Shared writer pool for unit tests. The pool is never written to;
+    /// it exists only to satisfy `ClientInner::writer`. Stored in a
+    /// `OnceLock` so we open the DB at most once per test process.
+    fn test_writer_pool() -> WriterPool {
+        static POOL: OnceLock<WriterPool> = OnceLock::new();
+        POOL.get_or_init(|| {
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let pool = db::db::open_writer_pool(tmp.path()).expect("open writer pool");
+            // Leak the TempDir so its backing files outlive the test
+            // process. Tests never read the DB; the OS reclaims /tmp.
+            std::mem::forget(tmp);
+            pool
+        })
+        .clone()
+    }
 
     /// Helper to build a GraphClient without DB access (for unit tests).
     fn test_client(mailbox_id: Option<String>) -> GraphClient {
@@ -734,7 +731,7 @@ mod tests {
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
-                writer: None,
+                writer: test_writer_pool(),
             }),
         }
     }

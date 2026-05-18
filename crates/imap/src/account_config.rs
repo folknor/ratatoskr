@@ -136,7 +136,7 @@ async fn load_account_record(
 
 async fn ensure_oauth_access_token(
     db: &ReadDbState,
-    writer: Option<&WriterPool>,
+    writer: &WriterPool,
     account_id: &str,
     encryption_key: &[u8; 32],
     record: &AccountConfigRecord,
@@ -205,8 +205,6 @@ async fn ensure_oauth_access_token(
     let encrypted_access_token = encrypt_value(encryption_key, &refreshed.access_token)?;
     let aid = account_id.to_string();
     let new_expires = refreshed.expires_at;
-    let writer = writer
-        .ok_or_else(|| format!("IMAP token refresh for {account_id} requires a writer handle"))?;
     writer
         .with_write(move |conn| {
             db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access_token, new_expires)
@@ -218,7 +216,7 @@ async fn ensure_oauth_access_token(
 
 async fn resolve_account_password(
     db: &ReadDbState,
-    writer: Option<&WriterPool>,
+    writer: &WriterPool,
     account_id: &str,
     encryption_key: &[u8; 32],
     record: &AccountConfigRecord,
@@ -317,24 +315,7 @@ fn smtp_config_from_record(
 
 pub async fn load_imap_config(
     db: &ReadDbState,
-    account_id: &str,
-    encryption_key: &[u8; 32],
-) -> Result<ImapConfig, String> {
-    load_imap_config_inner(db, None, account_id, encryption_key).await
-}
-
-pub async fn load_imap_config_with_writer(
-    db: &ReadDbState,
     writer: &WriterPool,
-    account_id: &str,
-    encryption_key: &[u8; 32],
-) -> Result<ImapConfig, String> {
-    load_imap_config_inner(db, Some(writer), account_id, encryption_key).await
-}
-
-async fn load_imap_config_inner(
-    db: &ReadDbState,
-    writer: Option<&WriterPool>,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<ImapConfig, String> {
@@ -346,24 +327,7 @@ async fn load_imap_config_inner(
 
 pub async fn load_smtp_config(
     db: &ReadDbState,
-    account_id: &str,
-    encryption_key: &[u8; 32],
-) -> Result<SmtpConfig, String> {
-    load_smtp_config_inner(db, None, account_id, encryption_key).await
-}
-
-pub async fn load_smtp_config_with_writer(
-    db: &ReadDbState,
     writer: &WriterPool,
-    account_id: &str,
-    encryption_key: &[u8; 32],
-) -> Result<SmtpConfig, String> {
-    load_smtp_config_inner(db, Some(writer), account_id, encryption_key).await
-}
-
-async fn load_smtp_config_inner(
-    db: &ReadDbState,
-    writer: Option<&WriterPool>,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<SmtpConfig, String> {
@@ -375,24 +339,7 @@ async fn load_smtp_config_inner(
 
 pub async fn load_both_configs(
     db: &ReadDbState,
-    account_id: &str,
-    encryption_key: &[u8; 32],
-) -> Result<ImapAndSmtpConfig, String> {
-    load_both_configs_inner(db, None, account_id, encryption_key).await
-}
-
-pub async fn load_both_configs_with_writer(
-    db: &ReadDbState,
     writer: &WriterPool,
-    account_id: &str,
-    encryption_key: &[u8; 32],
-) -> Result<ImapAndSmtpConfig, String> {
-    load_both_configs_inner(db, Some(writer), account_id, encryption_key).await
-}
-
-async fn load_both_configs_inner(
-    db: &ReadDbState,
-    writer: Option<&WriterPool>,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<ImapAndSmtpConfig, String> {

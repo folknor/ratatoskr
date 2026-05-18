@@ -53,21 +53,14 @@ pub struct ImapOps {
     /// `imap_delta`. Phase 6d-B carved the sync trait out of
     /// `common::ProviderOps`.
     pub encryption_key: [u8; 32],
-    writer: Option<WriterPool>,
+    writer: WriterPool,
 }
 
 impl ImapOps {
-    pub fn new(encryption_key: [u8; 32]) -> Self {
+    pub fn new(encryption_key: [u8; 32], writer: WriterPool) -> Self {
         Self {
             encryption_key,
-            writer: None,
-        }
-    }
-
-    pub fn new_with_writer(encryption_key: [u8; 32], writer: WriterPool) -> Self {
-        Self {
-            encryption_key,
-            writer: Some(writer),
+            writer,
         }
     }
 
@@ -79,18 +72,13 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<super::types::ImapConfig, String> {
-        match self.writer.as_ref() {
-            Some(writer) => {
-                crate::account_config::load_imap_config_with_writer(
-                    db,
-                    writer,
-                    account_id,
-                    &self.encryption_key,
-                )
-                .await
-            }
-            None => crate::account_config::load_imap_config(db, account_id, &self.encryption_key).await,
-        }
+        crate::account_config::load_imap_config(
+            db,
+            &self.writer,
+            account_id,
+            &self.encryption_key,
+        )
+        .await
     }
 
     async fn load_smtp_config(
@@ -98,18 +86,13 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<smtp::types::SmtpConfig, String> {
-        match self.writer.as_ref() {
-            Some(writer) => {
-                crate::account_config::load_smtp_config_with_writer(
-                    db,
-                    writer,
-                    account_id,
-                    &self.encryption_key,
-                )
-                .await
-            }
-            None => crate::account_config::load_smtp_config(db, account_id, &self.encryption_key).await,
-        }
+        crate::account_config::load_smtp_config(
+            db,
+            &self.writer,
+            account_id,
+            &self.encryption_key,
+        )
+        .await
     }
 
     async fn load_both_configs(
@@ -117,18 +100,13 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<crate::account_config::ImapAndSmtpConfig, String> {
-        match self.writer.as_ref() {
-            Some(writer) => {
-                crate::account_config::load_both_configs_with_writer(
-                    db,
-                    writer,
-                    account_id,
-                    &self.encryption_key,
-                )
-                .await
-            }
-            None => crate::account_config::load_both_configs(db, account_id, &self.encryption_key).await,
-        }
+        crate::account_config::load_both_configs(
+            db,
+            &self.writer,
+            account_id,
+            &self.encryption_key,
+        )
+        .await
     }
 }
 
@@ -235,15 +213,13 @@ fn get_thread_message_refs(
 }
 
 async fn update_message_refs_after_move(
-    writer: Option<&WriterPool>,
+    writer: &WriterPool,
     account_id: String,
     refs: Vec<MovedMessageRef>,
 ) -> Result<(), String> {
     if refs.is_empty() {
         return Ok(());
     }
-    let writer = writer
-        .ok_or_else(|| "IMAP move reference update requires a writer handle".to_string())?;
     writer
         .with_write(move |conn| {
             for moved in refs {
@@ -591,7 +567,7 @@ impl ProviderOps for ImapOps {
 
         let moved =
             execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await?;
-        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
+        update_message_refs_after_move(&self.writer, account_id, moved).await?;
         Ok(())
     }
 
@@ -612,7 +588,7 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let moved = execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
-        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
+        update_message_refs_after_move(&self.writer, account_id, moved).await?;
         Ok(())
     }
 
@@ -777,7 +753,7 @@ impl ProviderOps for ImapOps {
         };
 
         let moved = execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await?;
-        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
+        update_message_refs_after_move(&self.writer, account_id, moved).await?;
         Ok(())
     }
 
@@ -803,7 +779,7 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let moved = execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await?;
-        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
+        update_message_refs_after_move(&self.writer, account_id, moved).await?;
         Ok(())
     }
 

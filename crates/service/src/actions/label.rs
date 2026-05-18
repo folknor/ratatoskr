@@ -7,7 +7,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable_with_id;
-use super::provider::{classify_provider_error, create_provider_with_writer};
+use super::provider::{classify_provider_error, create_provider};
 use db::db::WriteTarget;
 use db::progress::NoopProgressReporter;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
@@ -74,7 +74,7 @@ async fn label_local_step(
         let label_kind =
             label_kind_for_account_sync(conn, &aid, &lid).map_err(ActionError::db)?;
 
-        let exists = db::db::queries_extra::action_helpers::label_exists_sync(conn, &lid, &aid)
+        let exists = db::db::queries_extra::action_helpers::label_exists_sync(&conn.as_read(), &lid, &aid)
             .map_err(|e| ActionError::db(format!("label lookup: {e}")))?;
         if !exists {
             ensure_typed_tag_label(conn, &aid, &label_kind)
@@ -397,7 +397,7 @@ pub async fn add_label(
         }
     };
 
-    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             add_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, local).await
         }
@@ -580,7 +580,7 @@ pub async fn remove_label(
         }
     };
 
-    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             remove_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, local).await
         }

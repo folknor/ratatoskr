@@ -330,9 +330,10 @@ async fn sync_google_calendar_account(
     mutated: &mut bool,
 ) -> Result<(), String> {
     let gmail_key = *gmail.encryption_key();
+    let writer_pool = write_db.writer_pool();
     let client = gmail
         .get_or_try_insert_with(account_id, || {
-            gmail::client::GmailClient::from_account(read_db, account_id, gmail_key)
+            gmail::client::GmailClient::from_account(read_db, writer_pool, account_id, gmail_key)
         })
         .await?;
     let calendars = google_calendar_list_calendars_impl(account_id, read_db, &client).await?;
@@ -373,9 +374,10 @@ async fn sync_graph_calendar_account(
     mutated: &mut bool,
 ) -> Result<(), String> {
     let graph_key = *graph.encryption_key();
+    let writer_pool = write_db.writer_pool();
     let client = graph
         .get_or_try_insert_with(account_id, || {
-            graph::client::GraphClient::from_account(read_db, account_id, graph_key)
+            graph::client::GraphClient::from_account(read_db, writer_pool, account_id, graph_key)
         })
         .await?;
     let calendars = graph_calendar_list_calendars_impl(account_id, read_db, &client).await?;

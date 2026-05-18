@@ -12,7 +12,7 @@ use super::log::MutationLog;
 use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
-use super::provider::{classify_provider_error, create_provider_with_writer};
+use super::provider::{classify_provider_error, create_provider};
 use super::{
     archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
     spam, star, trash,
@@ -122,7 +122,7 @@ async fn execute_account_group(
 
     // Create provider once for this account
     let provider =
-        match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
             .await
         {
         Ok(p) => p,

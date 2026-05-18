@@ -141,7 +141,7 @@ pub async fn db_get_smart_folder_by_id(
 
 /// Insert a `smart_folders` row. Sync helper called from the
 /// Service-side `smart_folder.create` handler via
-/// `WriteDbState::with_conn`.
+/// `WriteDbState::with_write`.
 pub fn db_insert_smart_folder_sync(
     conn: &impl WriteTarget,
     id: &str,
