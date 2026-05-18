@@ -680,36 +680,7 @@ fn unified_to_db_thread(r: UnifiedSearchResult) -> DbThread {
 
 **Missing fields:** `is_snoozed`, `is_pinned`, `is_muted` are thread-level flags not carried in `UnifiedSearchResult`. For smart folder display this is acceptable - these flags affect the thread card UI minimally (snooze icon, pin icon). To fix properly, extend `UnifiedSearchResult` with these fields. The SQL paths already have them (they come from `DbThread`); the Tantivy path defaults to `false`. This is a minor enhancement - not blocking.
 
-### 2.3 Token Migration
-
-The `__LAST_7_DAYS__`, `__LAST_30_DAYS__`, `__TODAY__` token system in `crates/smart-folder/src/tokens.rs` is superseded by the parser's native relative offset support (`after:-7`, `after:-30`, `after:0`).
-
-#### DB migration
-
-Add a SQLite migration in `crates/db/src/db/migrations.rs`:
-
-```sql
--- Migrate smart folder queries from token syntax to offset syntax.
-UPDATE smart_folders SET query = REPLACE(query, '__LAST_7_DAYS__', '-7')
-    WHERE query LIKE '%__LAST_7_DAYS__%';
-UPDATE smart_folders SET query = REPLACE(query, '__LAST_30_DAYS__', '-30')
-    WHERE query LIKE '%__LAST_30_DAYS__%';
-UPDATE smart_folders SET query = REPLACE(query, '__TODAY__', '0')
-    WHERE query LIKE '%__TODAY__%';
-```
-
-#### Backward compatibility
-
-Keep `resolve_query_tokens()` for one release cycle as a fallback. In `execute_smart_folder_query`, call it before `search()` to handle any un-migrated queries:
-
-```rust
-let resolved = resolve_query_tokens(params.query);
-let results = search(&resolved, search_state, conn)?;
-```
-
-Remove `resolve_query_tokens()` and `tokens.rs` after the migration is confirmed complete (no queries in the wild use the old format).
-
-### 2.4 Smart Folder Selection in Sidebar
+### 2.3 Smart Folder Selection in Sidebar
 
 When the user clicks a smart folder in the sidebar:
 
@@ -765,7 +736,7 @@ When the search bar shows a smart folder's query and the user modifies it:
 - The modified query is ephemeral - not auto-saved.
 - `active_smart_folder_id` remains set, so "Update Smart Folder" is available in the command palette.
 
-### 2.5 Smart Folder CRUD via Command Palette
+### 2.4 Smart Folder CRUD via Command Palette
 
 Smart folder management moves from the settings UI to the command palette. The settings-based smart folder editor is removed. These commands use the real `CommandId` / `CommandDescriptor` / `CommandArgs` system from the command palette spec - not a separate command model.
 
@@ -844,7 +815,7 @@ CommandId::SmartFolderDelete => Some(Message::SmartFolderDelete),
 
 The `update()` handlers for these messages perform the DB operations (INSERT/UPDATE/DELETE on `smart_folders` table) and refresh the sidebar navigation.
 
-### 2.6 Smart Folder Unread Counts
+### 2.5 Smart Folder Unread Counts
 
 Currently scaffolded as 0 in `get_navigation_state()`. Wire them using `count_smart_folder_unread()`:
 

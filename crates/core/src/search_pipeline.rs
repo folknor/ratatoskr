@@ -14,7 +14,7 @@ use search::{
     AttachmentAttributionInput, AttributionInputs, MatchKind, SearchParams,
     SearchReadState, SearchResult as TantivyResult,
 };
-use smart_folder::{ParsedQuery, parse_query, query_threads_read};
+use smart_folder::{ParsedQuery, parse_query, query_thread_keys_read, query_threads_read};
 
 // ── Result type ─────────────────────────────────────────────
 
@@ -211,40 +211,26 @@ fn search_combined(
     conn: &ReadConn<'_>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
-    // Step 1: SQL narrows the corpus by structured operators ONLY. Free-text
-    // matching belongs to Tantivy on the combined path - SQL's
-    // `build_free_text_clause` does a subject/snippet/from LIKE that lacks
-    // tokenization and stemming, so if it ran here it would shrink the
-    // candidate set below what Tantivy can usefully rank. We pass a clone of
-    // the parsed query with `free_text` cleared so the SQL builder treats
-    // this as an operators-only query.
+    // Step 1: SQL narrows the corpus by structured operators ONLY, returning
+    // an exhaustive list of (account_id, thread_id) candidate keys (no LIMIT,
+    // no hydration). Free-text matching belongs to Tantivy on the combined
+    // path - SQL's `build_free_text_clause` does a subject/snippet/from LIKE
+    // without tokenisation, so if it ran here it would shrink the candidate
+    // set below what Tantivy can usefully rank. The query is cloned with
+    // `free_text` cleared so the SQL builder treats this as operators-only.
+    //
+    // Exhaustive (no LIMIT) is required: capping at DEFAULT_QUERY_LIMIT would
+    // truncate older threads before Tantivy gets a chance to rank them, so
+    // the actual best free-text match could be silently excluded.
     let mut sql_parsed = parsed.clone();
     sql_parsed.free_text.clear();
     let scope = build_scope(parsed);
-    let sql_threads = query_threads_read(
-        conn,
-        &sql_parsed,
-        &scope,
-        Some(crate::constants::DEFAULT_QUERY_LIMIT),
-        Some(0),
-    )?;
-
-    // Step 2: Build the candidate (account_id, thread_id) set. If it's
-    // empty, the structured operators excluded everything and there's
-    // nothing for Tantivy to rank.
-    let candidate_pairs: Vec<(String, String)> = sql_threads
-        .iter()
-        .map(|t| (t.account_id.clone(), t.id.clone()))
-        .collect();
+    let candidate_pairs = query_thread_keys_read(conn, &sql_parsed, &scope)?;
     if candidate_pairs.is_empty() {
         return Ok(Vec::new());
     }
-    let thread_map: HashMap<(String, String), &DbThread> = sql_threads
-        .iter()
-        .map(|t| ((t.account_id.clone(), t.id.clone()), t))
-        .collect();
 
-    // Step 3: Tantivy ranks free-text matches WITHIN the SQL candidate set.
+    // Step 2: Tantivy ranks free-text matches WITHIN the SQL candidate set.
     // Operator filters are not re-applied here - SQL is the sole constraint
     // authority on the combined path (Tantivy's text-match semantics on
     // those fields don't always agree with SQL's contact-expanded ones).
@@ -274,14 +260,22 @@ fn search_combined(
         body_read,
     );
 
-    // Step 4: Group by thread, take max score.
+    // Step 3: Group by thread, take max score.
     let grouped = group_by_thread_unified(tantivy_results);
 
-    // Step 5: Enrich with SQL metadata. The thread_filter above guarantees
-    // every Tantivy result has a corresponding SQL row, so the filter_map
-    // is conservative - it's the right shape if the guarantee ever slips
-    // (account-shard race, index/db skew, etc.) but we don't expect
-    // dropouts in practice.
+    // Step 4: Hydrate latest-message metadata for the top-N hits only.
+    // fetch_thread_rows_for_results does a batched VALUES-list JOIN so this
+    // is one round trip regardless of N.
+    let hydrated = fetch_thread_rows_for_results(conn, &grouped)?;
+    let thread_map: HashMap<(String, String), &DbThread> = hydrated
+        .iter()
+        .map(|t| ((t.account_id.clone(), t.id.clone()), t))
+        .collect();
+
+    // Step 5: Re-project each Tantivy hit onto the thread's latest-message
+    // metadata. filter_map is defensive: thread_filter guarantees every hit
+    // is in the SQL candidate set, but a thread could in theory be deleted
+    // between the SQL candidate fetch and the hydration step.
     let mut enriched: Vec<UnifiedSearchResult> = grouped
         .into_iter()
         .filter_map(|r| {

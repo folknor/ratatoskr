@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_smart_folders_account ON smart_folders(account_id
 INSERT OR IGNORE INTO smart_folders (id, account_id, name, query, icon, sort_order, is_default) VALUES
     ('sf-unread', NULL, 'Unread', 'is:unread', 'MailOpen', 0, 1),
     ('sf-attachments', NULL, 'Has Attachments', 'has:attachment', 'Paperclip', 1, 1),
-    ('sf-starred-recent', NULL, 'Starred This Week', 'is:starred after:__LAST_7_DAYS__', 'Star', 2, 1);
+    ('sf-starred-recent', NULL, 'Starred This Week', 'is:starred after:-7', 'Star', 2, 1);
 
 CREATE TABLE IF NOT EXISTS quick_steps (
     id TEXT PRIMARY KEY,

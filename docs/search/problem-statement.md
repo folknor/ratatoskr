@@ -142,7 +142,7 @@ The distinction between `folder:`, `label:`, and `in:`:
 
 When `account:` is omitted, `folder:` and `label:` match across all accounts that have a folder/label with that name. If the name is ambiguous (same folder name on multiple accounts), all matching accounts are included. Use `account:` to disambiguate.
 
-**Planned: `in:` / `folder:` merge.** The two-operator split is a holdover from the early SQL builder and isn't worth the cognitive load. The direction we're moving toward is a single `in:` operator that fuzzy-matches over both universal shorthands and provider folder paths, surfacing a popup dropdown so the user can pick the intended target. Until that lands, `folder:` and `in:` remain separate with the semantics above.
+**Planned: `in:` / `folder:` / `label:` merge.** The three-operator split is a holdover from the early SQL builder and isn't worth the cognitive load. The direction we're moving toward is a unified picker model: the user types `in:` or `label:`, sees a fuzzy-matched popup that spans universal-folder shorthands, provider folder paths, and label groups, and selects a target. The query then carries an exact reference rather than a bare-LOWER substring guess. Until that lands, `in:`, `folder:`, and `label:` remain separate with the semantics above.
 
 ##### "Search here" interaction
 
@@ -248,9 +248,7 @@ When the user types `before:` or `after:`, a popup appears with common presets a
 
 Absolute dates accept any reasonable separator or none: `2026/03/11`, `2026-03-11`, `2026 03 11`, `20260311` are all equivalent. The date parser greedily consumes subsequent tokens that look like date parts (bare digits, separators), so spaces don't need quoting - `after:2026 03 11 from:alice` parses correctly because the date parser grabs `2026`, `03`, `11` and the main lexer resumes at `from:`.
 
-Relative offsets resolve at query time. A smart folder with `after:-7` always shows the last week's email. A smart folder with `after:2026/03/11` is frozen to that date. For ad-hoc search, the distinction is invisible - both resolve identically.
-
-The existing date token system (`__LAST_7_DAYS__`, `__TODAY__`, etc.) in the smart folder engine is an internal implementation detail. The user-facing syntax is always the offset format. The parser translates `after:-7` to the appropriate absolute date before the query hits the engines.
+Relative offsets resolve at query time. A smart folder with `after:-7` always shows the last week's email. A smart folder with `after:2026/03/11` is frozen to that date. For ad-hoc search, the distinction is invisible - both resolve identically. The parser translates `after:-7` to the appropriate absolute date before the query hits the engines.
 
 #### Why No `subject:` Operator
 
@@ -318,8 +316,6 @@ The existing smart folder settings UI should be removed. Smart folder management
 Smart folders use relative date offsets that resolve at query time:
 
 Example: a smart folder with query `is:unread after:-7` always shows unread messages from the last week. The `-7` resolves to an absolute date each time the query runs.
-
-The existing internal token system (`__LAST_7_DAYS__`, etc.) is replaced by the offset syntax in all user-facing contexts. The parser handles the translation.
 
 ## Search UX
 

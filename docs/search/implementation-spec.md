@@ -158,12 +158,7 @@ The greedy space consumption requires the parser to look ahead past whitespace, 
 
 ### Token system deprecation
 
-The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates/smart-folder/src/tokens.rs` becomes unnecessary once the parser handles relative offsets natively. Steps:
-
-1. Add relative offset support to the parser (this slice)
-2. Migrate any persisted smart folder queries that use tokens to offset syntax (DB migration or on-read translation)
-3. Keep `resolve_query_tokens` as a backward-compatibility shim until migration is confirmed complete
-4. Remove `tokens.rs` once no queries use the old format
+The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system has been deleted - the parser handles relative offsets natively (`after:-7`, `after:-30`, `after:0`) and there is no production database with persisted token-form queries.
 
 ## Slice 2: SQL Builder Expansion
 
@@ -380,17 +375,11 @@ The scope parameter is real and supplied by the dispatcher (always one of `ViewS
 
 ## Slice 6: Smart Folder Migration
 
-**Status: Split.** Sidebar smart-folder selection in the iced app routes through `search_pipeline::search()` via `handle_smart_folder_selected` → `SearchIntent::SmartFolder` → `resolve_search_intent`. So in practice smart folders already get Tantivy ranking when their query has free text, all new operators, and contact expansion.
-
-The legacy `execute_smart_folder_query` facade in `crates/smart-folder/src/lib.rs` is still SQL-only - it calls `query_threads_read()` after `migrate_legacy_tokens()` / `parse_query()`. The facade is not on the reachable app path today; cleanup is tracked under "Known semantic issues" below.
-
-### Token migration
-
-`migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` at parse time. A one-time DB migration that rewrites these on disk has not been done; see "Known semantic issues."
+**Status: Landed.** Sidebar smart-folder selection in the iced app routes through `search_pipeline::search()` via `handle_smart_folder_selected` → `SearchIntent::SmartFolder` → `resolve_search_intent`, so smart folders get Tantivy ranking when their query has free text, all new operators, and contact expansion. The old `execute_smart_folder_query` SQL-only facade and the `migrate_legacy_tokens` token-rewriting shim have been removed.
 
 ### Unread counts
 
-`count_smart_folder_unread` remains SQL-only. Unread counts don't need Tantivy ranking, only a count of matching unread threads. `get_navigation_state()` returns scaffolded zeros for smart-folder unread counts today; wiring `count_smart_folder_unread` into the navigation-state computation is still pending.
+`count_smart_folder_unread` is SQL-only by design - unread counts don't need Tantivy ranking, only a count of matching unread threads. `build_smart_folders` in `core/src/db/queries_extra/navigation.rs` calls it for each smart folder on every nav-state refresh. The N+1 pattern is a known perf concern; see "Known semantic issues" below.
 
 ## Prerequisites / Schema Changes
 
@@ -441,20 +430,17 @@ Open items as of 2026-05-18. UI-side items live in `app-integration-spec.md`; pi
 
 ### High
 
-1. **`folder:` / `in:` merge.** The current split between `folder:` (provider-specific path) and `in:` (universal shorthand) is being retired in favour of a single `in:` operator with fuzzy matching across both surfaces, backed by a typeahead popup that lets the user select the intended folder. The existing `folder:` clause does substring `%LIKE%` against `folders.name` / `imap_folder_path`, which is wrong for path semantics and provider-asymmetric (only IMAP carries `imap_folder_path`); that whole code path goes away with the merge. Implementation deferred - see `problem-statement.md` § "Planned: `in:` / `folder:` merge".
+1. **`in:` / `folder:` / `label:` typeahead overhaul.** The three operators currently use three different mechanisms - `in:` does an exact match on universal-folder shorthands, `folder:` does substring `%LIKE%` on `folders.name` / `imap_folder_path` (wrong for path semantics and IMAP-only), `label:` does `LOWER(lg.name) = LOWER(?)` (bare ASCII compare, no normalization). All three are being collapsed into a single typeahead-driven flow: the user types `in:` or `label:`, picks a target (universal folder, provider folder path, or label group) from a fuzzy-matched popup, and the query carries an exact reference. Implementation deferred - see `problem-statement.md` § "Planned: `in:` / `folder:` / `label:` merge".
 2. **SQL fallback search is a real semantics downgrade.** When `SearchReadState` is unavailable, free-text search falls back to a thread-level `LIKE` on subject/snippet. The pipeline marks the result set `SearchResults::Degraded` so callers can warn, but the contract is not the same.
 
 ### Medium
 
-3. **`label:` matching is not normalized to the cross-account label model.** Current predicate is `LOWER(lg.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described in `reference/glossary/folders-labels.md`.
-4. **Legacy `execute_smart_folder_query` facade is still SQL-only.** The reachable app path uses the unified pipeline; the facade is leftover. Either delete it or convert it to a thin wrapper around the unified pipeline.
-5. **Legacy date-token migration is still runtime, not a one-time DB migration.** `migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__`-style tokens at execution time. A persisted SQL migration was specified but never written.
-6. **Smart-folder unread counts are scaffolded as 0.** `get_navigation_state()` returns 0 for every smart folder's unread count. Wiring `count_smart_folder_unread` into navigation-state computation is still pending (with batching, to avoid N+1 queries per sidebar refresh).
-7. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Broad searches can truncate in engine-specific ways before paging / refinement exists.
+3. **Smart-folder unread counts are N+1.** `build_smart_folders` calls `count_smart_folder_unread` per smart folder on every nav-state refresh. Correctness is fine; perf concern at scale. The right fix is either a single SQL query that returns counts for all smart folders in one trip, or caching with invalidation on thread mutations.
+4. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Real fix is the lazy-loaded "endless list" tracked in `docs/lazy-loading.md`; until that lands, the caps are a known truncation point at the top end of result sets.
 
 ### Low
 
-8. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
+5. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
 
 ## Stale spec content (kept here so it doesn't drift back)
 

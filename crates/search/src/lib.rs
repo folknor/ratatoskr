@@ -3,7 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
+use tantivy::query::{
+    BooleanQuery, BoostQuery, Occur, Query, QueryParser, RangeQuery, TermQuery,
+};
 use tantivy::schema::{
     DateOptions, Field, NumericOptions, STORED, STRING, Schema, TextFieldIndexing, TextOptions,
 };
@@ -855,6 +857,11 @@ impl SearchReadState {
         // so that Tantivy ranks within the SQL candidate set rather than
         // returning a broad global top-N that's then intersected in app
         // code.
+        //
+        // The whole filter clause is wrapped in BoostQuery(_, 0.0) so the
+        // (account_id, thread_id) terms don't contribute to BM25 - we want
+        // pure free-text scoring within the candidate set, not ranking
+        // perturbed by per-account or per-thread term-frequency variance.
         if let Some(threads) = params.thread_filter.as_deref() {
             if threads.is_empty() {
                 // Caller signalled "no candidates" - skip Tantivy entirely.
@@ -881,7 +888,8 @@ impl SearchReadState {
                 ];
                 thread_clauses.push((Occur::Should, Box::new(BooleanQuery::new(pair))));
             }
-            clauses.push((Occur::Must, Box::new(BooleanQuery::new(thread_clauses))));
+            let filter: Box<dyn Query> = Box::new(BooleanQuery::new(thread_clauses));
+            clauses.push((Occur::Must, Box::new(BoostQuery::new(filter, 0.0))));
         }
 
         let limit = params.limit.unwrap_or(50);

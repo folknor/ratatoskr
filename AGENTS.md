@@ -114,7 +114,7 @@ State types are `Clone` - `DbState`, `BodyStoreState`, `InlineImageStoreState`, 
 
 Scoped queries (`core/src/db/queries_extra/scoped_queries.rs`) - Cross-account query infrastructure. `ViewScope` enum (`AllAccounts`/`Account`/`SharedMailbox`/`PublicFolder`) in `core/src/scope.rs` is the sidebar's single source of truth. Personal-account queries use `AccountScope` internally and filter `shared_mailbox_id IS NULL`. Shared mailbox and public folder scopes route to dedicated query functions. Predicate-based virtual folder queries for Starred/Snoozed use boolean flags on `threads`, not label joins. Draft counts include `local_drafts` table.
 
-Navigation state (`core/src/db/queries_extra/navigation.rs`) - `get_navigation_state()` returns the full sidebar state in one call: universal folders (Inbox, Starred, Snoozed, Sent, Drafts, Trash) with unread counts, smart folders, and per-account labels when scoped. Smart folder and per-label unread counts are scaffolded (return 0).
+Navigation state (`core/src/db/queries_extra/navigation.rs`) - `get_navigation_state()` returns the full sidebar state in one call: universal folders (Inbox, Starred, Snoozed, Sent, Drafts, Trash) with unread counts, smart folders (real unread counts via `count_smart_folder_unread` per folder - N+1 today, see `docs/search/implementation-spec.md` § Known semantic issues), and per-account labels when scoped. Per-label unread counts are scaffolded (return 0).
 
 Thread detail (`core/src/db/queries_extra/thread_detail.rs`) - `get_thread_detail()` returns messages (with ownership detection, collapsed summaries, body text from body store), labels (with resolved colors), attachments (with message context), and attachment collapse state for a single thread.
 
