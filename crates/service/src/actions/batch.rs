@@ -12,7 +12,7 @@ use super::log::MutationLog;
 use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
-use super::provider::{classify_provider_error, create_provider};
+use super::provider::{classify_provider_error, create_provider_with_writer};
 use super::{
     archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
     spam, star, trash,
@@ -121,13 +121,16 @@ async fn execute_account_group(
     }
 
     // Create provider once for this account
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    let provider =
+        match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
+            .await
+        {
         Ok(p) => p,
         Err(e) => {
             let kind = classify_provider_error(&e);
             return degraded_fallback(ctx, account_id, &e, kind, thread_ops).await;
         }
-    };
+        };
 
     // Dispatch sequentially with short-circuit on consecutive failures
     let mut consecutive_remote_failures: u32 = 0;

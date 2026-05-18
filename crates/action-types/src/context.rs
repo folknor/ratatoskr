@@ -72,7 +72,7 @@ impl ActionContext {
         let tid = thread_id.to_string();
         let exists = self
             .db
-            .with_conn_sync(move |conn| {
+            .with_read_sync(move |conn| {
                 db::db::queries_extra::action_helpers::thread_exists_sync(conn, &aid, &tid)
             })
             .map_err(super::outcome::ActionError::db)?;

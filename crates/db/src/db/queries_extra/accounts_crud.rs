@@ -1,6 +1,6 @@
-use super::super::{ReadConn, ReadDbState, WriteTarget};
+use super::super::{ReadConn, WriterPool, WriteTarget};
 use super::dynamic_update;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::params;
 use types::MailProviderKind;
 
 /// Parameters for creating a new account.
@@ -54,7 +54,7 @@ pub struct UpdateAccountParams {
 /// Synchronous account creation - callable from any `&Connection`.
 ///
 /// This is the single source of truth for the INSERT statement. Both
-/// the async `db_create_account` (via `ReadDbState`) and the app crate's
+/// the async `db_create_account` (via `WriterPool`) and the app crate's
 /// `Db::with_write_conn` use this function.
 pub fn create_account_sync(
     conn: &impl WriteTarget,
@@ -146,17 +146,17 @@ pub fn account_exists_by_email_sync(conn: &ReadConn<'_>, email: &str) -> Result<
 
 /// Create a new account and return its generated ID.
 pub async fn db_create_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     params: CreateAccountParams,
 ) -> Result<String, String> {
-    db.with_conn(move |conn| create_account_sync(conn, &params))
+    db.with_write(move |conn| create_account_sync(conn, &params))
         .await
 }
 
 /// Synchronous account update - callable from any `&Connection`.
 ///
 /// This is the single source of truth for the update logic. Both the async
-/// `db_update_account` (via `ReadDbState`) and the app crate's
+/// `db_update_account` (via `WriterPool`) and the app crate's
 /// `Db::with_write_conn` use this function.
 pub fn update_account_sync(
     conn: &impl WriteTarget,
@@ -195,11 +195,11 @@ pub fn update_account_sync(
 
 /// Update only the account color.
 pub async fn db_update_account_color(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     color: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE accounts SET account_color = ?1 WHERE id = ?2",
             params![color, id],
@@ -211,8 +211,8 @@ pub async fn db_update_account_color(
 }
 
 /// Update only the account name.
-pub async fn db_update_account_name(db: &ReadDbState, id: String, name: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_update_account_name(db: &WriterPool, id: String, name: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE accounts SET account_name = ?1 WHERE id = ?2",
             params![name, id],
@@ -322,17 +322,20 @@ pub struct StoredOAuthCredentials {
     pub oauth_client_secret: Option<String>,
 }
 
-pub fn check_gmail_duplicate_sync(conn: &Connection, email: &str) -> Result<Option<String>, String> {
+pub fn check_gmail_duplicate_sync(conn: &ReadConn<'_>, email: &str) -> Result<Option<String>, String> {
     conn.query_row(
         "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
         params![email],
         |row| row.get::<_, String>(0),
     )
-    .optional()
-    .map_err(|e| format!("Duplicate Gmail check failed: {e}"))
+    .map(Some)
+    .or_else(|e| match e {
+        super::super::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        other => Err(format!("Duplicate Gmail check failed: {other}")),
+    })
 }
 
-pub fn get_used_account_colors_sync(conn: &Connection) -> Result<Vec<String>, String> {
+pub fn get_used_account_colors_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT account_color FROM accounts WHERE account_color IS NOT NULL")
         .map_err(|e| format!("prepare used account colors: {e}"))?;
@@ -343,7 +346,7 @@ pub fn get_used_account_colors_sync(conn: &Connection) -> Result<Vec<String>, St
 }
 
 pub fn insert_gmail_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     params: &InsertGmailAccountParams,
 ) -> Result<(), String> {
     conn.execute(
@@ -371,7 +374,7 @@ pub fn insert_gmail_account_sync(
 
 #[allow(clippy::too_many_lines)]
 pub fn insert_imap_oauth_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     params: &InsertImapOAuthAccountParams,
 ) -> Result<(), String> {
     conn.execute(
@@ -411,7 +414,7 @@ pub fn insert_imap_oauth_account_sync(
 }
 
 pub fn insert_graph_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     params: &InsertGraphAccountParams,
 ) -> Result<(), String> {
     conn.execute(
@@ -436,7 +439,7 @@ pub fn insert_graph_account_sync(
 }
 
 pub fn finalize_graph_profile_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     email: &str,
     display_name: &str,
@@ -453,7 +456,7 @@ pub fn finalize_graph_profile_sync(
 }
 
 pub fn update_gmail_reauth_tokens_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     access_token: &str,
     refresh_token: &str,
@@ -488,7 +491,7 @@ pub fn update_gmail_reauth_tokens_sync(
 }
 
 pub fn update_graph_reauth_tokens_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     access_token: &str,
     refresh_token: &str,
@@ -515,7 +518,7 @@ pub fn update_graph_reauth_tokens_sync(
 }
 
 pub fn get_stored_oauth_credentials_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<StoredOAuthCredentials, String> {
     conn.query_row(
@@ -532,7 +535,7 @@ pub fn get_stored_oauth_credentials_sync(
 }
 
 pub fn get_stored_graph_client_id_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Option<String>, String> {
     conn.query_row(
@@ -619,7 +622,7 @@ pub fn get_account_auth_info_sync(
 
 /// Look up the typed mail provider for an account.
 pub fn get_account_provider_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<MailProviderKind, String> {
     let raw = get_account_provider_raw_sync(conn, account_id)?;
@@ -630,7 +633,7 @@ pub fn get_account_provider_sync(
 ///
 /// This is for explicit boundary code such as harness-provider handling.
 /// Normal mail-provider callers should use `get_account_provider_sync`.
-pub fn get_account_provider_raw_sync(conn: &Connection, account_id: &str) -> Result<String, String> {
+pub fn get_account_provider_raw_sync(conn: &ReadConn<'_>, account_id: &str) -> Result<String, String> {
     conn.query_row(
         "SELECT provider FROM accounts WHERE id = ?1",
         params![account_id],
@@ -640,8 +643,8 @@ pub fn get_account_provider_raw_sync(conn: &Connection, account_id: &str) -> Res
 }
 
 /// Check whether an account with the given email already exists.
-pub async fn db_account_exists_by_email(db: &ReadDbState, email: String) -> Result<bool, String> {
-    db.with_read(move |conn| account_exists_by_email_sync(conn, &email))
+pub async fn db_account_exists_by_email(db: &WriterPool, email: String) -> Result<bool, String> {
+    db.with_write(move |conn| account_exists_by_email_sync(&conn.as_read(), &email))
         .await
 }
 
@@ -666,6 +669,10 @@ mod sync_account_tests {
             .expect("seed account");
         }
         conn
+    }
+
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
     }
 
     fn get_sort_order(conn: &Connection, id: &str) -> i64 {
@@ -695,7 +702,7 @@ mod sync_account_tests {
         .expect("seed");
 
         update_account_sync(
-            &conn,
+            &write(&conn),
             "acc-a",
             UpdateAccountParams {
                 account_name: Some("New".into()),
@@ -722,7 +729,7 @@ mod sync_account_tests {
         let conn = setup_db();
         // Reorder to c, a, b.
         update_account_sort_order_sync(
-            &conn,
+            &write(&conn),
             &[
                 ("acc-c".into(), 0),
                 ("acc-a".into(), 1),
@@ -747,7 +754,7 @@ mod sync_account_tests {
         .expect("seed sort_order");
 
         update_account_sort_order_sync(
-            &conn,
+            &write(&conn),
             &[("acc-b".into(), 0), ("acc-a".into(), 1)],
         )
         .expect("reorder");
@@ -764,7 +771,7 @@ mod sync_account_tests {
     #[test]
     fn reorder_empty_list_is_noop() {
         let conn = setup_db();
-        update_account_sort_order_sync(&conn, &[]).expect("noop");
+        update_account_sort_order_sync(&write(&conn), &[]).expect("noop");
         assert_eq!(get_sort_order(&conn, "acc-a"), 0);
         assert_eq!(get_sort_order(&conn, "acc-b"), 1);
         assert_eq!(get_sort_order(&conn, "acc-c"), 2);

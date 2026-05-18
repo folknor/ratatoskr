@@ -1,6 +1,5 @@
-use rusqlite::{Connection, params};
-
-use db::db::ReadDbState;
+use db_read::ReadConn;
+use rusqlite::params;
 
 use super::parse::extract_observations;
 use super::types::{AddressObservation, Direction, ObservationParams};
@@ -19,70 +18,7 @@ pub trait MessageAddresses {
 ///
 /// Uses INSERT ON CONFLICT DO UPDATE to increment direction counters
 /// and update timestamps. Display name precedence: 'sent' beats 'observed'.
-pub fn ingest_observations(
-    conn: &Connection,
-    account_id: &str,
-    observations: &[AddressObservation],
-) -> Result<(), String> {
-    if observations.is_empty() {
-        return Ok(());
-    }
-
-    log::debug!(
-        "Ingesting {} address observations for account {}",
-        observations.len(),
-        account_id
-    );
-
-    let mut stmt = conn
-        .prepare_cached(
-            "INSERT INTO seen_addresses
-                (email, account_id, display_name, display_name_source,
-                 times_sent_to, times_sent_cc, times_received_from, times_received_cc,
-                 first_seen_at, last_seen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
-             ON CONFLICT(account_id, email) DO UPDATE SET
-                times_sent_to = times_sent_to + ?5,
-                times_sent_cc = times_sent_cc + ?6,
-                times_received_from = times_received_from + ?7,
-                times_received_cc = times_received_cc + ?8,
-                last_seen_at = MAX(last_seen_at, ?9),
-                first_seen_at = MIN(first_seen_at, ?9),
-                display_name = CASE
-                    WHEN ?4 = 'sent' THEN COALESCE(?3, display_name)
-                    WHEN display_name_source = 'sent' THEN display_name
-                    ELSE COALESCE(?3, display_name)
-                END,
-                display_name_source = CASE
-                    WHEN ?4 = 'sent' THEN 'sent'
-                    WHEN display_name_source = 'sent' THEN display_name_source
-                    ELSE ?4
-                END",
-        )
-        .map_err(|e| format!("prepare seen_addresses upsert: {e}"))?;
-
-    for obs in observations {
-        let (sent_to, sent_cc, recv_from, recv_cc) = direction_counters(obs.direction);
-        let source = direction_source(obs.direction);
-
-        stmt.execute(params![
-            obs.email,
-            account_id,
-            obs.display_name,
-            source,
-            sent_to,
-            sent_cc,
-            recv_from,
-            recv_cc,
-            obs.date_ms,
-        ])
-        .map_err(|e| format!("upsert seen_address: {e}"))?;
-    }
-
-    Ok(())
-}
-
-fn direction_counters(d: Direction) -> (i64, i64, i64, i64) {
+pub fn direction_counters(d: Direction) -> (i64, i64, i64, i64) {
     match d {
         Direction::SentTo => (1, 0, 0, 0),
         Direction::SentCc => (0, 1, 0, 0),
@@ -91,7 +27,7 @@ fn direction_counters(d: Direction) -> (i64, i64, i64, i64) {
     }
 }
 
-fn direction_source(d: Direction) -> &'static str {
+pub fn direction_source(d: Direction) -> &'static str {
     match d {
         Direction::SentTo | Direction::SentCc => "sent",
         Direction::ReceivedFrom | Direction::ReceivedCc => "observed",
@@ -99,7 +35,7 @@ fn direction_source(d: Direction) -> &'static str {
 }
 
 /// Look up all email addresses belonging to this account (primary + aliases).
-pub(crate) fn get_self_emails(conn: &Connection, account_id: &str) -> Result<Vec<String>, String> {
+pub fn get_self_emails(conn: &ReadConn<'_>, account_id: &str) -> Result<Vec<String>, String> {
     let primary: String = conn
         .query_row(
             "SELECT email FROM accounts WHERE id = ?1",
@@ -133,37 +69,9 @@ pub(crate) fn get_self_emails(conn: &Connection, account_id: &str) -> Result<Vec
 ///
 /// Looks up account email + aliases, extracts observations, and upserts.
 /// Errors are logged but do not fail the sync.
-pub async fn ingest_from_messages<T: MessageAddresses + Send + Sync + 'static>(
-    db: &ReadDbState,
-    account_id: &str,
-    messages: &[T],
-) {
-    if messages.is_empty() {
-        return;
-    }
-
-    // Collect the data we need before moving into spawn_blocking
-    let observations = collect_observations_deferred(account_id, messages);
-    if observations.is_empty() {
-        return;
-    }
-
-    let account_id = account_id.to_string();
-    if let Err(e) = db
-        .with_conn(move |conn| {
-            let self_emails = get_self_emails(conn, &account_id)?;
-            let resolved = resolve_observations(&observations, &self_emails);
-            ingest_observations(conn, &account_id, &resolved)
-        })
-        .await
-    {
-        log::warn!("Failed to ingest seen addresses: {e}");
-    }
-}
-
 /// Pre-extract address fields from messages (without direction, since we need
 /// self_emails from DB to determine direction).
-struct DeferredObservation {
+pub struct DeferredObservation {
     from_address: Option<String>,
     from_name: Option<String>,
     to_addresses: Option<String>,
@@ -172,10 +80,7 @@ struct DeferredObservation {
     date_ms: i64,
 }
 
-fn collect_observations_deferred<T: MessageAddresses>(
-    _account_id: &str,
-    messages: &[T],
-) -> Vec<DeferredObservation> {
+pub fn collect_observations_deferred<T: MessageAddresses>(messages: &[T]) -> Vec<DeferredObservation> {
     messages
         .iter()
         .map(|m| DeferredObservation {
@@ -189,7 +94,7 @@ fn collect_observations_deferred<T: MessageAddresses>(
         .collect()
 }
 
-fn resolve_observations(
+pub fn resolve_observations(
     deferred: &[DeferredObservation],
     self_emails: &[String],
 ) -> Vec<AddressObservation> {
@@ -207,4 +112,12 @@ fn resolve_observations(
         all.extend(extract_observations(&params));
     }
     all
+}
+
+pub fn resolve_message_observations<T: MessageAddresses>(
+    messages: &[T],
+    self_emails: &[String],
+) -> Vec<AddressObservation> {
+    let deferred = collect_observations_deferred(messages);
+    resolve_observations(&deferred, self_emails)
 }

@@ -18,7 +18,7 @@ use service_state::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::actions::provider::create_provider;
+use crate::actions::provider::create_provider_with_writer;
 
 /// Run sync for a single account.
 ///
@@ -56,7 +56,7 @@ pub async fn sync_for_account(
             .map_err(|e| format!("read initial_sync_completed: {e}"))
         })
         .await?;
-    let provider = create_provider(read_db, account_id, encryption_key).await?;
+    let provider = create_provider_with_writer(read_db, write_db, account_id, encryption_key).await?;
     let ctx = SyncProviderCtx {
         account_id,
         db: write_db,
@@ -73,7 +73,7 @@ pub async fn sync_for_account(
     // missing or out of range; saturating cast keeps an absurd
     // pref value from underflowing.
     let initial_window_days: i64 = read_db
-        .with_conn_sync(|conn| Ok(sync::config::get_sync_period_days(conn).max(1)))
+        .with_read_sync(|conn| Ok(sync::config::get_sync_period_days(conn).max(1)))
         .unwrap_or(365);
     let result = if initial_sync_completed {
         provider.sync_delta(&ctx, None).await

@@ -91,11 +91,17 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 
     // Store history ID for delta sync
     if !history_id.is_empty() {
-        sync_state::save_account_history_id(ctx.db, ctx.account_id, &history_id).await?;
+        sync_state::save_account_history_id(&ctx.write_db.writer_pool(), ctx.account_id, &history_id).await?;
     }
 
     // Phase 4: Sync Google contacts (non-fatal)
-    if let Err(e) = super::contacts::sync_google_contacts(ctx.client, ctx.account_id, ctx.db).await
+    if let Err(e) = super::contacts::sync_google_contacts(
+        ctx.client,
+        ctx.account_id,
+        ctx.db,
+        &ctx.write_db.writer_pool(),
+    )
+    .await
     {
         log::warn!("Google contacts initial sync failed (non-fatal): {e}");
     }
@@ -106,6 +112,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
         ctx.client,
         ctx.account_id,
         ctx.db,
+        &ctx.write_db.writer_pool(),
         move |write| {
             let write_db = write_db.clone();
             async move {
@@ -283,6 +290,7 @@ async fn run_fetch_worker(
             tid,
             ctx.account_id,
             ctx.db,
+            ctx.write_db,
             ctx.body_store,
             ctx.inline_images,
             ctx.search,

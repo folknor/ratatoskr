@@ -3,12 +3,12 @@
 //! These are small query/mutation primitives used by `core::actions::*` modules.
 //! Keeping them here avoids inline SQL in the action handlers.
 
-use crate::db::WriteTarget;
-use rusqlite::{Connection, params};
+use crate::db::{ReadConn, WriteTarget};
+use rusqlite::params;
 
 /// Check whether a thread exists.
 pub fn thread_exists_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<bool, String> {
@@ -135,7 +135,7 @@ pub fn upsert_folder_from_mutation_sync(
 
 /// Get all message IDs for an account.
 pub fn get_message_ids_for_account_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<String>, String> {
     let mut stmt = conn
@@ -149,7 +149,7 @@ pub fn get_message_ids_for_account_sync(
 
 /// Delete all threads for an account within a transaction.
 pub fn delete_threads_for_account_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
 ) -> Result<(), String> {
     conn.execute(

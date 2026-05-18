@@ -16,7 +16,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, mpsc, watch};
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, ReadError, WriterPool};
 
 use super::client::JmapClient;
 
@@ -157,6 +157,7 @@ pub async fn start_push(
     client: &JmapClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     change_tx: mpsc::Sender<StateChange>,
     auth_resolver: AuthResolver,
     fresh_start: bool,
@@ -187,7 +188,7 @@ pub async fn start_push(
     //   2. `handle_exchange_code` after a re-auth, since the new
     //      session may not honour the old session's push_state.
     let last_push_state = if fresh_start {
-        clear_push_state(db, account_id).await;
+        clear_push_state(writer, account_id).await;
         None
     } else {
         load_push_state(db, account_id).await?
@@ -197,13 +198,14 @@ pub async fn start_push(
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     // Persist initial push state
-    save_push_enabled(db, account_id, &ws_url).await;
+    save_push_enabled(writer, account_id, &ws_url).await;
 
     // Spawn the background connection loop. Capture its JoinHandle on
     // the manager so stop_push can await termination - dropping the
     // handle here would leak the task past PushRuntime::shutdown.
     let aid = account_id.to_string();
     let db_clone = db.clone();
+    let writer_clone = writer.clone();
     let ws_url_loop = ws_url.clone();
     let state_loop = Arc::clone(&state);
     let loop_handle = tokio::spawn(async move {
@@ -216,6 +218,7 @@ pub async fn start_push(
             shutdown_rx,
             change_tx,
             &db_clone,
+            &writer_clone,
         )
         .await;
     });
@@ -285,7 +288,8 @@ async fn push_connection_loop(
     state: Arc<RwLock<PushState>>,
     mut shutdown_rx: watch::Receiver<bool>,
     change_tx: mpsc::Sender<StateChange>,
-    db: &ReadDbState,
+    _db: &ReadDbState,
+    writer: &WriterPool,
 ) {
     let mut consecutive_failures: u32 = 0;
     let mut last_push_state = initial_push_state;
@@ -305,7 +309,7 @@ async fn push_connection_loop(
             );
             log::warn!("[JMAP push] {account_id}: {msg}");
             *state.write().await = PushState::Error(msg);
-            save_push_disabled(db, account_id, consecutive_failures).await;
+            save_push_disabled(writer, account_id, consecutive_failures).await;
             break;
         }
 
@@ -339,7 +343,7 @@ async fn push_connection_loop(
                      (attempt {consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}): {e}"
                 );
                 *state.write().await = PushState::Error(e);
-                save_consecutive_failures(db, account_id, consecutive_failures).await;
+                save_consecutive_failures(writer, account_id, consecutive_failures).await;
                 let backoff = backoff_duration(consecutive_failures);
                 tokio::select! {
                     _ = tokio::time::sleep(backoff) => {}
@@ -365,7 +369,7 @@ async fn push_connection_loop(
             &state,
             &mut shutdown_rx,
             &change_tx,
-            db,
+            writer,
         )
         .await
         {
@@ -373,7 +377,7 @@ async fn push_connection_loop(
                 // Clean disconnect - update last push state
                 last_push_state = new_push_state.or(last_push_state);
                 consecutive_failures = 0;
-                save_consecutive_failures(db, account_id, 0).await;
+                save_consecutive_failures(writer, account_id, 0).await;
             }
             Err(e) => {
                 consecutive_failures += 1;
@@ -382,7 +386,7 @@ async fn push_connection_loop(
                      (attempt {consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}): {e}"
                 );
                 *state.write().await = PushState::Error(e);
-                save_consecutive_failures(db, account_id, consecutive_failures).await;
+                save_consecutive_failures(writer, account_id, consecutive_failures).await;
 
                 // Exponential backoff before reconnect
                 let backoff = backoff_duration(consecutive_failures);
@@ -418,7 +422,7 @@ async fn connect_and_listen(
     state: &Arc<RwLock<PushState>>,
     shutdown_rx: &mut watch::Receiver<bool>,
     change_tx: &mpsc::Sender<StateChange>,
-    db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<Option<String>, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -482,7 +486,7 @@ async fn connect_and_listen(
     *state.write().await = PushState::Connected;
 
     // Record connection time
-    save_connected_at(db, account_id).await;
+    save_connected_at(writer, account_id).await;
 
     // Listen for messages
     let mut current_push_state: Option<String> = last_push_state.clone();
@@ -510,7 +514,7 @@ async fn connect_and_listen(
 
                                     // Persist updated push state to DB
                                     if let Some(ref ps) = current_push_state {
-                                        save_last_push_state(db, account_id, ps).await;
+                                        save_last_push_state(writer, account_id, ps).await;
                                     }
 
                                     if change_tx.send(state_change).await.is_err() {
@@ -608,7 +612,7 @@ fn backoff_duration(consecutive_failures: u32) -> std::time::Duration {
 
 async fn load_push_state(db: &ReadDbState, account_id: &str) -> Result<Option<String>, String> {
     let aid = account_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare("SELECT push_state FROM jmap_push_state WHERE account_id = ?1")
             .map_err(|e| format!("prepare load_push_state: {e}"))?;
@@ -616,7 +620,7 @@ async fn load_push_state(db: &ReadDbState, account_id: &str) -> Result<Option<St
             row.get::<_, Option<String>>(0)
         })
         .map_err(|e| {
-            if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+            if matches!(e, ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) {
                 return String::new(); // sentinel for "no row"
             }
             format!("load_push_state: {e}")
@@ -635,10 +639,10 @@ async fn load_push_state(db: &ReadDbState, account_id: &str) -> Result<Option<St
 /// failure here just means the next reconnect tries to resume; the
 /// server will reject if the state is stale and the client recovers
 /// via the existing reconcile path.
-async fn clear_push_state(db: &ReadDbState, account_id: &str) {
+async fn clear_push_state(db: &WriterPool, account_id: &str) {
     let aid = account_id.to_string();
     if let Err(e) = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET push_state = NULL WHERE account_id = ?1",
                 rusqlite::params![aid],
@@ -651,11 +655,11 @@ async fn clear_push_state(db: &ReadDbState, account_id: &str) {
     }
 }
 
-async fn save_push_enabled(db: &ReadDbState, account_id: &str, ws_url: &str) {
+async fn save_push_enabled(db: &WriterPool, account_id: &str, ws_url: &str) {
     let aid = account_id.to_string();
     let url = ws_url.to_string();
     if let Err(e) = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.execute(
                 "INSERT INTO jmap_push_state (account_id, ws_url, is_push_enabled) \
                  VALUES (?1, ?2, 1) \
@@ -671,10 +675,10 @@ async fn save_push_enabled(db: &ReadDbState, account_id: &str, ws_url: &str) {
     }
 }
 
-async fn save_push_disabled(db: &ReadDbState, account_id: &str, failures: u32) {
+async fn save_push_disabled(db: &WriterPool, account_id: &str, failures: u32) {
     let aid = account_id.to_string();
     if let Err(e) = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET is_push_enabled = 0, \
                  consecutive_failures = ?2 WHERE account_id = ?1",
@@ -688,10 +692,10 @@ async fn save_push_disabled(db: &ReadDbState, account_id: &str, failures: u32) {
     }
 }
 
-async fn save_connected_at(db: &ReadDbState, account_id: &str) {
+async fn save_connected_at(db: &WriterPool, account_id: &str) {
     let aid = account_id.to_string();
     if let Err(e) = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET last_connected_at = unixepoch(), \
                  consecutive_failures = 0 WHERE account_id = ?1",
@@ -705,10 +709,10 @@ async fn save_connected_at(db: &ReadDbState, account_id: &str) {
     }
 }
 
-async fn save_consecutive_failures(db: &ReadDbState, account_id: &str, failures: u32) {
+async fn save_consecutive_failures(db: &WriterPool, account_id: &str, failures: u32) {
     let aid = account_id.to_string();
     if let Err(e) = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET consecutive_failures = ?2 \
                  WHERE account_id = ?1",
@@ -722,11 +726,11 @@ async fn save_consecutive_failures(db: &ReadDbState, account_id: &str, failures:
     }
 }
 
-async fn save_last_push_state(db: &ReadDbState, account_id: &str, push_state: &str) {
+async fn save_last_push_state(db: &WriterPool, account_id: &str, push_state: &str) {
     let aid = account_id.to_string();
     let ps = push_state.to_string();
     if let Err(e) = db
-        .with_conn(move |conn| {
+        .with_write(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET push_state = ?2 WHERE account_id = ?1",
                 rusqlite::params![aid, ps],

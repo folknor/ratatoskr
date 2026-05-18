@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, RwLock};
 use common::crypto;
 use common::http::{self, RetryConfig};
 use common::token::{self, TokenState};
-use db::db::ReadDbState;
+use db::db::{ReadConn, ReadDbState, WriterPool};
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
 const RETRY_CONFIG: RetryConfig = RetryConfig {
@@ -33,6 +33,7 @@ struct ClientInner {
     client_id: String,
     client_secret: Option<String>,
     encryption_key: [u8; 32],
+    writer: Option<WriterPool>,
 }
 
 /// State holding all Gmail clients and the encryption key.
@@ -64,11 +65,30 @@ impl GmailClient {
         account_id: &str,
         encryption_key: [u8; 32],
     ) -> Result<Self, String> {
+        Self::from_account_inner(db, None, account_id, encryption_key).await
+    }
+
+    /// Create a Gmail client by reading account credentials from the database.
+    pub async fn from_account_with_writer(
+        db: &ReadDbState,
+        writer: WriterPool,
+        account_id: &str,
+        encryption_key: [u8; 32],
+    ) -> Result<Self, String> {
+        Self::from_account_inner(db, Some(writer), account_id, encryption_key).await
+    }
+
+    async fn from_account_inner(
+        db: &ReadDbState,
+        writer: Option<WriterPool>,
+        account_id: &str,
+        encryption_key: [u8; 32],
+    ) -> Result<Self, String> {
         let aid = account_id.to_string();
         let key = encryption_key;
 
         let (access_token, refresh_token, expires_at, client_id, client_secret) = db
-            .with_conn(move |conn| read_account_tokens(conn, &aid, &key))
+            .with_read(move |conn| read_account_tokens(conn, &aid, &key))
             .await?;
 
         let token_state = TokenState {
@@ -87,6 +107,7 @@ impl GmailClient {
                 client_id,
                 client_secret,
                 encryption_key,
+                writer,
             }),
         })
     }
@@ -352,7 +373,7 @@ impl GmailClient {
     }
 
     /// Perform the actual token refresh, with mutex to coalesce concurrent refreshes.
-    async fn do_refresh(&self, db: &ReadDbState) -> Result<String, String> {
+    async fn do_refresh(&self, _db: &ReadDbState) -> Result<String, String> {
         // Acquire refresh lock - only one refresh at a time
         let _guard = self.inner.refresh_lock.lock().await;
 
@@ -390,7 +411,7 @@ impl GmailClient {
 
         // Persist encrypted token to DB
         persist_refreshed_token(
-            db,
+            self.inner.writer.as_ref(),
             &self.inner.account_id,
             &new_access_token,
             result.expires_at,
@@ -404,7 +425,7 @@ impl GmailClient {
 
 /// Read and decrypt account tokens from the database.
 fn read_account_tokens(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     key: &[u8; 32],
 ) -> Result<(String, String, i64, String, Option<String>), String> {
@@ -454,7 +475,7 @@ fn read_account_tokens(
 
 /// Persist a refreshed access token (encrypted) to the database.
 async fn persist_refreshed_token(
-    db: &ReadDbState,
+    writer: Option<&WriterPool>,
     account_id: &str,
     access_token: &str,
     expires_at: i64,
@@ -462,11 +483,13 @@ async fn persist_refreshed_token(
 ) -> Result<(), String> {
     let encrypted = crypto::encrypt_value(key, access_token)?;
     let aid = account_id.to_string();
-
-    db.with_conn(move |conn| {
-        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
-    })
-    .await
+    let writer = writer
+        .ok_or_else(|| format!("Gmail token refresh for {account_id} requires a writer handle"))?;
+    writer
+        .with_write(move |conn| {
+            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
+        })
+        .await
 }
 
 #[cfg(test)]

@@ -931,7 +931,24 @@ async fn process_imap_batch(
             return;
         }
     };
-    let config = match imap::account_config::load_imap_config(&read_db, &account_id, &key).await {
+    let write_db = match inner.boot_state.write_db_state() {
+        Ok(db) => db,
+        Err(_) => {
+            for item in items {
+                record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
+            }
+            return;
+        }
+    };
+    let writer_pool = write_db.writer_pool();
+    let config = match imap::account_config::load_imap_config_with_writer(
+        &read_db,
+        &writer_pool,
+        &account_id,
+        &key,
+    )
+    .await
+    {
         Ok(c) => c,
         Err(e) => {
             log::debug!("prefetch imap load_config {account_id}: {e}");
@@ -1080,7 +1097,7 @@ async fn run_item_pipeline(
     let lookup_message = item.message_id.clone();
     let lookup_attachment = item.attachment_id.clone();
     let info = read_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             db::db::queries_extra::find_attachment_cache_info(
                 conn,
                 &lookup_account,
@@ -1112,8 +1129,12 @@ async fn run_item_pipeline(
                 .boot_state
                 .encryption_key()
                 .ok_or(SkipReason::InternalError)?;
+            let write_db = inner
+                .boot_state
+                .write_db_state()
+                .map_err(|_| SkipReason::InternalError)?;
             let provider =
-                crate::actions::provider::create_provider(&read_db, &item.account_id, key)
+                crate::actions::provider::create_provider_with_writer(&read_db, &write_db, &item.account_id, key)
                     .await
                     .map_err(|e| {
                         log::debug!("prefetch create_provider {}: {e}", item.account_id);

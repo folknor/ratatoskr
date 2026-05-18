@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use rusqlite::{Connection, OptionalExtension};
+use db::db::{ReadConn, ReadError, WriterPool};
 
 use common::error::ProviderError;
 use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
@@ -53,11 +53,22 @@ pub struct ImapOps {
     /// `imap_delta`. Phase 6d-B carved the sync trait out of
     /// `common::ProviderOps`.
     pub encryption_key: [u8; 32],
+    writer: Option<WriterPool>,
 }
 
 impl ImapOps {
     pub fn new(encryption_key: [u8; 32]) -> Self {
-        Self { encryption_key }
+        Self {
+            encryption_key,
+            writer: None,
+        }
+    }
+
+    pub fn new_with_writer(encryption_key: [u8; 32], writer: WriterPool) -> Self {
+        Self {
+            encryption_key,
+            writer: Some(writer),
+        }
     }
 
     /// Shorthand for loading the IMAP config from the database.
@@ -68,7 +79,56 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<super::types::ImapConfig, String> {
-        crate::account_config::load_imap_config(db, account_id, &self.encryption_key).await
+        match self.writer.as_ref() {
+            Some(writer) => {
+                crate::account_config::load_imap_config_with_writer(
+                    db,
+                    writer,
+                    account_id,
+                    &self.encryption_key,
+                )
+                .await
+            }
+            None => crate::account_config::load_imap_config(db, account_id, &self.encryption_key).await,
+        }
+    }
+
+    async fn load_smtp_config(
+        &self,
+        db: &db::db::ReadDbState,
+        account_id: &str,
+    ) -> Result<smtp::types::SmtpConfig, String> {
+        match self.writer.as_ref() {
+            Some(writer) => {
+                crate::account_config::load_smtp_config_with_writer(
+                    db,
+                    writer,
+                    account_id,
+                    &self.encryption_key,
+                )
+                .await
+            }
+            None => crate::account_config::load_smtp_config(db, account_id, &self.encryption_key).await,
+        }
+    }
+
+    async fn load_both_configs(
+        &self,
+        db: &db::db::ReadDbState,
+        account_id: &str,
+    ) -> Result<crate::account_config::ImapAndSmtpConfig, String> {
+        match self.writer.as_ref() {
+            Some(writer) => {
+                crate::account_config::load_both_configs_with_writer(
+                    db,
+                    writer,
+                    account_id,
+                    &self.encryption_key,
+                )
+                .await
+            }
+            None => crate::account_config::load_both_configs(db, account_id, &self.encryption_key).await,
+        }
     }
 }
 
@@ -100,7 +160,7 @@ async fn source_imap_location(
     let account_id = ctx.account_id.to_string();
     let message_id = source_message_id.to_string();
     ctx.db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             conn.query_row(
                 "SELECT imap_folder, imap_uid FROM messages \
                  WHERE account_id = ?1 AND id = ?2 AND imap_folder IS NOT NULL AND imap_uid IS NOT NULL",
@@ -111,8 +171,11 @@ async fn source_imap_location(
                     Ok((folder, u32::try_from(uid).unwrap_or(0)))
                 },
             )
-            .optional()
-            .map_err(|e| format!("lookup source IMAP message: {e}"))
+            .map(Some)
+            .or_else(|e| match e {
+                ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                other => Err(format!("lookup source IMAP message: {other}")),
+            })
         })
         .await
         .map_err(ProviderError::Db)
@@ -135,7 +198,7 @@ struct MovedMessageRef {
 
 /// Query messages for a thread and extract IMAP folder + UID pairs.
 fn get_thread_message_refs(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<ImapMessageRef>, String> {
@@ -172,31 +235,42 @@ fn get_thread_message_refs(
 }
 
 async fn update_message_refs_after_move(
-    db: &db::db::ReadDbState,
+    writer: Option<&WriterPool>,
     account_id: String,
     refs: Vec<MovedMessageRef>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        for r in refs {
-            if let Some(uid) = r.uid {
-                conn.execute(
-                    "UPDATE messages SET imap_folder = ?1, imap_uid = ?2 \
-                     WHERE account_id = ?3 AND id = ?4",
-                    rusqlite::params![&r.folder, i64::from(uid), &account_id, &r.message_id],
-                )
-                .map_err(|e| format!("update message IMAP folder/uid: {e}"))?;
-            } else {
-                conn.execute(
-                    "UPDATE messages SET imap_folder = ?1 \
-                     WHERE account_id = ?2 AND id = ?3",
-                    rusqlite::params![&r.folder, &account_id, &r.message_id],
-                )
-                .map_err(|e| format!("update message IMAP folder: {e}"))?;
+    if refs.is_empty() {
+        return Ok(());
+    }
+    let writer = writer
+        .ok_or_else(|| "IMAP move reference update requires a writer handle".to_string())?;
+    writer
+        .with_write(move |conn| {
+            for moved in refs {
+                if let Some(uid) = moved.uid {
+                    conn.execute(
+                        "UPDATE messages SET imap_folder = ?1, imap_uid = ?2 \
+                         WHERE account_id = ?3 AND id = ?4",
+                        rusqlite::params![
+                            moved.folder,
+                            i64::from(uid),
+                            account_id,
+                            moved.message_id
+                        ],
+                    )
+                    .map_err(|e| format!("update moved IMAP ref: {e}"))?;
+                } else {
+                    conn.execute(
+                        "UPDATE messages SET imap_folder = ?1 \
+                         WHERE account_id = ?2 AND id = ?3",
+                        rusqlite::params![moved.folder, account_id, moved.message_id],
+                    )
+                    .map_err(|e| format!("update moved IMAP folder: {e}"))?;
+                }
             }
-        }
-        Ok(())
-    })
-    .await
+            Ok(())
+        })
+        .await
 }
 
 /// Group message refs by folder → list of UIDs.
@@ -285,7 +359,7 @@ fn imap_message_to_provider_message(
 /// First checks `imap_special_use`, then falls back to well-known folder IDs
 /// (e.g., "TRASH", "SPAM") when the server didn't advertise special-use flags.
 fn find_special_folder(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     special_use: &str,
 ) -> Result<Option<String>, String> {
@@ -297,8 +371,11 @@ fn find_special_folder(
             rusqlite::params![account_id, special_use],
             |row| row.get("folder_path"),
         )
-        .optional()
-        .map_err(|e| format!("find IMAP special folder {special_use}: {e}"))?;
+        .map(Some)
+        .or_else(|e| match e {
+            ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            other => Err(format!("find IMAP special folder {special_use}: {other}")),
+        })?;
 
     if path.is_some() {
         return Ok(path);
@@ -315,8 +392,11 @@ fn find_special_folder(
                 rusqlite::params![account_id, lid],
                 |row| row.get("folder_path"),
             )
-            .optional()
-            .map_err(|e| format!("find IMAP fallback folder {lid}: {e}"))?;
+            .map(Some)
+            .or_else(|e| match e {
+                ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                other => Err(format!("find IMAP fallback folder {lid}: {other}")),
+            })?;
 
         if fallback.is_some() {
             return Ok(fallback);
@@ -327,7 +407,7 @@ fn find_special_folder(
 }
 
 fn resolve_folder_path(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     folder_id: &str,
 ) -> Result<String, String> {
@@ -338,8 +418,11 @@ fn resolve_folder_path(
             rusqlite::params![account_id, folder_id],
             |row| row.get("folder_path"),
         )
-        .optional()
-        .map_err(|e| format!("resolve IMAP folder path {folder_id}: {e}"))?;
+        .map(Some)
+        .or_else(|e| match e {
+            ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            other => Err(format!("resolve IMAP folder path {folder_id}: {other}")),
+        })?;
     if let Some(path) = path {
         return Ok(path);
     }
@@ -386,7 +469,7 @@ async fn set_keyword_batched(
 
     let refs = ctx
         .db
-        .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+        .with_read(move |conn| get_thread_message_refs(conn, &account_id, &tid))
         .await?;
 
     let grouped = group_by_folder(&refs);
@@ -498,7 +581,7 @@ impl ProviderOps for ImapOps {
 
         let (refs, archive_folder) = ctx
             .db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
                 let archive = find_special_folder(conn, &query_account_id, "\\Archive")?
                     .unwrap_or_else(|| "Archive".to_string());
@@ -508,7 +591,7 @@ impl ProviderOps for ImapOps {
 
         let moved =
             execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await?;
-        update_message_refs_after_move(ctx.db, account_id, moved).await?;
+        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
         Ok(())
     }
 
@@ -520,7 +603,7 @@ impl ProviderOps for ImapOps {
 
         let (refs, trash_folder) = ctx
             .db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
                 let trash = find_special_folder(conn, &query_account_id, "\\Trash")?
                     .unwrap_or_else(|| "Trash".to_string());
@@ -529,7 +612,7 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let moved = execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
-        update_message_refs_after_move(ctx.db, account_id, moved).await?;
+        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
         Ok(())
     }
 
@@ -544,7 +627,7 @@ impl ProviderOps for ImapOps {
 
         let refs = ctx
             .db
-            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+            .with_read(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
         execute_folder_action(&config, &refs, &FolderAction::Delete).await?;
@@ -563,7 +646,7 @@ impl ProviderOps for ImapOps {
 
         let refs = ctx
             .db
-            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+            .with_read(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
         let flag_op = if read { "+FLAGS" } else { "-FLAGS" };
@@ -597,7 +680,7 @@ impl ProviderOps for ImapOps {
 
         let lookup = ctx
             .db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 conn.query_row(
                     "SELECT imap_folder, imap_uid FROM messages \
                      WHERE account_id = ?1 AND id = ?2 \
@@ -610,8 +693,11 @@ impl ProviderOps for ImapOps {
                         Ok((folder, uid as u32))
                     },
                 )
-                .optional()
-                .map_err(|e| format!("lookup imap ref for mdn keyword: {e}"))
+                .map(Some)
+                .or_else(|e| match e {
+                    ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    other => Err(format!("lookup imap ref for mdn keyword: {other}")),
+                })
             })
             .await?;
 
@@ -640,7 +726,7 @@ impl ProviderOps for ImapOps {
 
         let refs = ctx
             .db
-            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+            .with_read(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
         let flag_op = if starred { "+FLAGS" } else { "-FLAGS" };
@@ -676,7 +762,7 @@ impl ProviderOps for ImapOps {
 
         let (refs, junk_folder) = ctx
             .db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
                 let junk = find_special_folder(conn, &query_account_id, "\\Junk")?
                     .unwrap_or_else(|| "Junk".to_string());
@@ -691,7 +777,7 @@ impl ProviderOps for ImapOps {
         };
 
         let moved = execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await?;
-        update_message_refs_after_move(ctx.db, account_id, moved).await?;
+        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
         Ok(())
     }
 
@@ -709,7 +795,7 @@ impl ProviderOps for ImapOps {
 
         let (refs, dest) = ctx
             .db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 let refs = get_thread_message_refs(conn, &query_account_id, &tid)?;
                 let dest = resolve_folder_path(conn, &query_account_id, &folder_id)?;
                 Ok((refs, dest))
@@ -717,7 +803,7 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let moved = execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await?;
-        update_message_refs_after_move(ctx.db, account_id, moved).await?;
+        update_message_refs_after_move(self.writer.as_ref(), account_id, moved).await?;
         Ok(())
     }
 
@@ -760,15 +846,13 @@ impl ProviderOps for ImapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let configs =
-            crate::account_config::load_both_configs(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let configs = self.load_both_configs(ctx.db, &account_id).await?;
         let smtp_config = configs.smtp;
         let imap_config = configs.imap;
 
         let sent_folder = ctx
             .db
-            .with_conn(move |conn| find_special_folder(conn, &account_id, "\\Sent"))
+            .with_read(move |conn| find_special_folder(conn, &account_id, "\\Sent"))
             .await?
             .unwrap_or_else(|| "Sent".to_string());
 
@@ -832,9 +916,7 @@ impl ProviderOps for ImapOps {
         };
 
         let account_id = ctx.account_id.to_string();
-        let config =
-            crate::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = self.load_config(ctx.db, &account_id).await?;
 
         match intent {
             SendIntent::New => Ok(()),
@@ -864,7 +946,7 @@ impl ProviderOps for ImapOps {
 
         let drafts_folder = ctx
             .db
-            .with_conn(move |conn| find_special_folder(conn, &account_id, "\\Drafts"))
+            .with_read(move |conn| find_special_folder(conn, &account_id, "\\Drafts"))
             .await?
             .unwrap_or_else(|| "Drafts".to_string());
 
@@ -956,7 +1038,7 @@ impl ProviderOps for ImapOps {
         let msg_id = message_id.to_string();
         if let Ok(thread_id) = ctx
             .db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 conn.query_row(
                     "SELECT thread_id FROM messages WHERE id = ?1",
                     rusqlite::params![msg_id],
@@ -1068,9 +1150,7 @@ impl ProviderOps for ImapOps {
     ) -> Result<ProviderTestResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
-        let smtp_config =
-            crate::account_config::load_smtp_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let smtp_config = self.load_smtp_config(ctx.db, &account_id).await?;
 
         let imap_result = imap_client::test_connection(&imap_config).await?;
         let smtp_result = smtp::client::test_connection(&smtp_config).await?;
@@ -1090,7 +1170,7 @@ impl ProviderOps for ImapOps {
     async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
         let account_id = ctx.account_id.to_string();
         ctx.db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 conn.query_row(
                     "SELECT email, display_name FROM accounts WHERE id = ?1",
                     rusqlite::params![account_id],

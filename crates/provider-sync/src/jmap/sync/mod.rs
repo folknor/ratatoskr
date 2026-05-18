@@ -60,6 +60,7 @@ pub(crate) struct SyncCtx<'a> {
     /// `&ReadDbState`. The Service constructs the underlying writer
     /// half; `to_read_state()` shares the `Arc<Mutex<Connection>>`.
     pub db: &'a ReadDbState,
+    pub write_db: &'a WriteDbState,
     /// Write half: drives `put_batch` and `delete` for the body store.
     pub body_store: &'a BodyStoreWriteState,
     /// Write half: drives `put_batch` for the inline image store.
@@ -123,6 +124,7 @@ pub async fn jmap_initial_sync(
         client,
         account_id,
         db: read_db,
+        write_db: db,
         body_store,
         inline_images,
         search,
@@ -145,7 +147,7 @@ pub async fn jmap_initial_sync(
 
     // Save mailbox state
     let mailbox_state = mailbox::get_mailbox_state(client).await?;
-    save_sync_state(ctx.db, account_id, "Mailbox", &mailbox_state).await?;
+    save_sync_state(&ctx, "Mailbox", &mailbox_state).await?;
 
     emit_progress(&ctx, "mailboxes", 1, 1);
 
@@ -193,7 +195,7 @@ pub async fn jmap_initial_sync(
 
     // Save email state
     let email_state = mailbox::get_email_state(client).await?;
-    save_sync_state(ctx.db, account_id, "Email", &email_state).await?;
+    save_sync_state(&ctx, "Email", &email_state).await?;
     let aid = account_id.to_string();
     db.with_write(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
@@ -201,13 +203,20 @@ pub async fn jmap_initial_sync(
     log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");
 
     // Phase 3: Shared account discovery from JMAP Session
-    discover_shared_accounts(client, account_id, ctx.db).await;
+    discover_shared_accounts(&ctx).await;
 
     // Phase 3b: Resolve shared account identities via Principals
-    resolve_shared_account_identities(client, account_id, ctx.db).await;
+    resolve_shared_account_identities(&ctx).await;
 
     // Phase 4: Contacts sync
-    match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, ctx.db).await {
+    match super::contacts_sync::jmap_contacts_initial_sync(
+        client,
+        account_id,
+        ctx.db,
+        &ctx.write_db.writer_pool(),
+    )
+    .await
+    {
         Ok(count) => {
             log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}");
         }
@@ -275,7 +284,7 @@ pub(crate) async fn query_email_page_for(
 pub async fn jmap_delta_sync(
     client: &JmapClient,
     account_id: &str,
-    _db: &WriteDbState,
+    db: &WriteDbState,
     read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
@@ -287,6 +296,7 @@ pub async fn jmap_delta_sync(
         client,
         account_id,
         db: read_db,
+        write_db: db,
         body_store,
         inline_images,
         search,
@@ -386,19 +396,26 @@ pub async fn jmap_delta_sync(
     }
 
     // Save updated states
-    save_sync_state(ctx.db, account_id, "Email", &since_state).await?;
+    save_sync_state(&ctx, "Email", &since_state).await?;
 
     // 3. Shared account discovery (re-check Session on every delta sync)
-    discover_shared_accounts(client, account_id, ctx.db).await;
+    discover_shared_accounts(&ctx).await;
 
     // 3b. Resolve shared account identities via Principals
-    resolve_shared_account_identities(client, account_id, ctx.db).await;
+    resolve_shared_account_identities(&ctx).await;
 
     // 3c. ShareNotification polling (RFC 9670)
-    poll_share_notifications(client, account_id, ctx.db).await;
+    poll_share_notifications(&ctx).await;
 
     // 4. Contacts delta sync
-    match super::contacts_sync::jmap_contacts_delta_sync(client, account_id, ctx.db).await {
+    match super::contacts_sync::jmap_contacts_delta_sync(
+        client,
+        account_id,
+        ctx.db,
+        &ctx.write_db.writer_pool(),
+    )
+    .await
+    {
         Ok(count) => {
             if count > 0 {
                 log::info!("[JMAP] Contacts delta sync: {count} affected for account {account_id}");
@@ -527,12 +544,12 @@ async fn filter_pending_ops(
 // ---------------------------------------------------------------------------
 
 async fn save_sync_state(
-    db: &ReadDbState,
-    account_id: &str,
+    ctx: &SyncCtx<'_>,
     state_type: &str,
     state: &str,
 ) -> Result<(), String> {
-    sync_state::save_jmap_sync_state(db, account_id, state_type, state).await
+    let writer_pool = ctx.write_db.writer_pool();
+    sync_state::save_jmap_sync_state(&writer_pool, ctx.account_id, state_type, state).await
 }
 
 async fn load_sync_state(
@@ -549,8 +566,9 @@ pub(crate) async fn save_sync_state_ctx(
     state_type: &str,
     state: &str,
 ) -> Result<(), String> {
+    let writer_pool = ctx.write_db.writer_pool();
     sync_state::save_jmap_sync_state_for(
-        ctx.db,
+        &writer_pool,
         ctx.account_id,
         ctx.shared_account_id(),
         state_type,
@@ -604,7 +622,10 @@ pub(crate) fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total:
 ///    are no longer in the Session (access revoked server-side).
 ///
 /// Does not fail the overall sync - discovery errors are logged and skipped.
-pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &str, db: &ReadDbState) {
+pub(crate) async fn discover_shared_accounts(ctx: &SyncCtx<'_>) {
+    let client = ctx.client;
+    let account_id = ctx.account_id;
+    let writer_pool = ctx.write_db.writer_pool();
     let session = client.inner().session();
 
     // Collect non-personal accounts from the Session.
@@ -626,14 +647,14 @@ pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &s
         } else {
             Some(display_name.as_str())
         };
-        if let Err(e) = sync_state::enable_shared_mailbox_sync(db, account_id, jmap_id, dn).await {
+        if let Err(e) = sync_state::enable_shared_mailbox_sync(&writer_pool, account_id, jmap_id, dn).await {
             log::warn!("[JMAP] Failed to enable shared account {jmap_id} for {account_id}: {e}");
         }
     }
 
     // Detect revoked access: shared accounts we knew about but are no longer
     // in the Session.
-    let known_ids = match sync_state::get_all_shared_mailbox_ids(db, account_id).await {
+    let known_ids = match sync_state::get_all_shared_mailbox_ids(ctx.db, account_id).await {
         Ok(ids) => ids,
         Err(e) => {
             log::warn!("[JMAP] Failed to load known shared mailboxes for {account_id}: {e}");
@@ -652,7 +673,7 @@ pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &s
                 "[JMAP] Shared account {known_id} no longer in Session for {account_id} - disabling"
             );
             if let Err(e) = sync_state::disable_shared_mailbox_sync_with_error(
-                db,
+                &writer_pool,
                 account_id,
                 known_id,
                 "Access revoked - account no longer in JMAP Session",
@@ -685,10 +706,11 @@ pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &s
 /// Requires `urn:ietf:params:jmap:principals` capability. Skips silently
 /// if the server doesn't support it.
 pub(crate) async fn resolve_shared_account_identities(
-    client: &JmapClient,
-    account_id: &str,
-    db: &ReadDbState,
+    ctx: &SyncCtx<'_>,
 ) {
+    let client = ctx.client;
+    let account_id = ctx.account_id;
+    let writer_pool = ctx.write_db.writer_pool();
     let inner = client.inner();
     let session = inner.session();
 
@@ -712,7 +734,7 @@ pub(crate) async fn resolve_shared_account_identities(
         }
 
         // Check if we already have an email for this shared account.
-        match sync_state::get_shared_mailbox_email(db, account_id, jmap_account_id).await {
+        match sync_state::get_shared_mailbox_email(ctx.db, account_id, jmap_account_id).await {
             Ok(Some(_)) => continue, // already resolved
             Ok(None) => {}           // need to resolve
             Err(e) => {
@@ -740,7 +762,7 @@ pub(crate) async fn resolve_shared_account_identities(
             let account_name = account.name();
             if account_name.contains('@') {
                 if let Err(e) = sync_state::set_shared_mailbox_email(
-                    db,
+                    &writer_pool,
                     account_id,
                     jmap_account_id,
                     account_name,
@@ -774,7 +796,7 @@ pub(crate) async fn resolve_shared_account_identities(
         };
 
         if let Err(e) =
-            sync_state::set_shared_mailbox_email(db, account_id, jmap_account_id, &email).await
+            sync_state::set_shared_mailbox_email(&writer_pool, account_id, jmap_account_id, &email).await
         {
             log::warn!("[JMAP] Failed to cache shared account email: {e}");
         } else {
@@ -830,7 +852,11 @@ async fn fetch_principal_email(
 ///
 /// On any mailbox-related notification, re-runs session discovery to pick up
 /// grants or revocations. Non-fatal - errors are logged and skipped.
-pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &str, db: &ReadDbState) {
+pub(crate) async fn poll_share_notifications(ctx: &SyncCtx<'_>) {
+    let client = ctx.client;
+    let account_id = ctx.account_id;
+    let writer_pool = ctx.write_db.writer_pool();
+    let db = ctx.db;
     let inner = client.inner();
     let session = inner.session();
 
@@ -855,7 +881,7 @@ pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &s
         match get_share_notification_state(client).await {
             Ok(state) => {
                 if let Err(e) =
-                    sync_state::save_jmap_sync_state(db, account_id, "ShareNotification", &state)
+                    sync_state::save_jmap_sync_state(&writer_pool, account_id, "ShareNotification", &state)
                         .await
                 {
                     log::warn!("[JMAP] Failed to save initial ShareNotification state: {e}");
@@ -879,7 +905,7 @@ pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &s
                 // State expired - reset by capturing fresh state.
                 if let Ok(state) = get_share_notification_state(client).await {
                     let _ = sync_state::save_jmap_sync_state(
-                        db,
+                        &writer_pool,
                         account_id,
                         "ShareNotification",
                         &state,
@@ -954,13 +980,13 @@ pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &s
         // new or revoked accounts.
         if has_mailbox_change {
             log::info!("[JMAP] Mailbox sharing changed - re-running session discovery");
-            discover_shared_accounts(client, account_id, db).await;
+            discover_shared_accounts(ctx).await;
         }
     }
 
     // Save updated state.
     if let Err(e) =
-        sync_state::save_jmap_sync_state(db, account_id, "ShareNotification", &new_state).await
+        sync_state::save_jmap_sync_state(&writer_pool, account_id, "ShareNotification", &new_state).await
     {
         log::warn!("[JMAP] Failed to save ShareNotification state: {e}");
     }

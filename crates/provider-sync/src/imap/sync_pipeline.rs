@@ -253,7 +253,7 @@ fn existing_imap_message_identity(
 /// Store a chunk of converted messages to all four subsystems.
 pub(crate) async fn store_chunk(
     db: &WriteDbState,
-    read_db: &ReadDbState,
+    _read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -310,7 +310,7 @@ pub(crate) async fn store_chunk(
         store_bodies(body_store, chunk, &resolved_ids),
         store_inline_images(inline_images, chunk),
         index_messages(search, chunk, account_id, &resolved_ids),
-        seen::ingest_from_messages(read_db, account_id, &addr_data),
+        crate::seen_ingest::ingest_from_messages(db, account_id, &addr_data),
     );
 
     Ok(())

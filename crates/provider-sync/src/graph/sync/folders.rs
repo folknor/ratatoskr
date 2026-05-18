@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use common::types::{ImportanceLevel, ProviderCtx};
 use db::db::ReadDbState;
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
+use service_state::WriteDbState;
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;
@@ -20,6 +21,7 @@ use super::BATCH_SIZE;
 pub(super) async fn sync_folders(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
+    write_db: &WriteDbState,
 ) -> Result<FolderMap, String> {
     // Phase 1: Resolve well-known aliases to opaque IDs
     let mut resolved = HashMap::new();
@@ -44,7 +46,7 @@ pub(super) async fn sync_folders(
     let folder_map = FolderMap::build(&resolved, &all_folders)?;
 
     // Phase 3: Persist folders to DB
-    persist_folders_and_importance(ctx, &folder_map).await?;
+    persist_folders_and_importance(ctx, write_db, &folder_map).await?;
 
     Ok(folder_map)
 }
@@ -53,6 +55,7 @@ pub(super) async fn sync_folders(
 /// to the DB.
 async fn persist_folders_and_importance(
     ctx: &ProviderCtx<'_>,
+    write_db: &WriteDbState,
     folder_map: &FolderMap,
 ) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
@@ -86,11 +89,10 @@ async fn persist_folders_and_importance(
         .collect();
     let label_rows = importance_label_rows(&aid);
 
-    ctx.db
-        .with_conn(move |conn| {
-            let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+    write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             insert_folders_batch(&tx, &folder_rows)?;
             upsert_labels(&tx, &label_rows)?;

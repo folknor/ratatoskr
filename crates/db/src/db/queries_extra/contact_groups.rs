@@ -2,14 +2,14 @@ use std::collections::HashSet;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::super::{ReadConn, ReadDbState, WriteTransactionTarget};
+use super::super::{ReadConn, WriterPool, WriteTarget, WriteTransactionTarget};
 use super::super::types::{DbContactGroup, DbContactGroupMember};
 use super::contacts::ExpandedGroupContact;
 use crate::db::from_row::FromRow;
 
-pub async fn db_create_contact_group(db: &ReadDbState, id: String, name: String) -> Result<(), String> {
+pub async fn db_create_contact_group(db: &WriterPool, id: String, name: String) -> Result<(), String> {
     log::debug!("Creating contact group: id={id}, name={name}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO contact_groups (id, name) VALUES (?1, ?2)",
             params![id, name],
@@ -20,9 +20,9 @@ pub async fn db_create_contact_group(db: &ReadDbState, id: String, name: String)
     .await
 }
 
-pub async fn db_update_contact_group(db: &ReadDbState, id: String, name: String) -> Result<(), String> {
+pub async fn db_update_contact_group(db: &WriterPool, id: String, name: String) -> Result<(), String> {
     log::debug!("Updating contact group: id={id}, name={name}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE contact_groups SET name = ?1, updated_at = unixepoch() WHERE id = ?2",
             params![name, id],
@@ -33,11 +33,11 @@ pub async fn db_update_contact_group(db: &ReadDbState, id: String, name: String)
     .await
 }
 
-pub async fn db_delete_contact_group(db: &ReadDbState, id: String) -> Result<(), String> {
+pub async fn db_delete_contact_group(db: &WriterPool, id: String) -> Result<(), String> {
     log::debug!("Deleting contact group: id={id}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
 
         // Remove inbound nested-group references from other groups
@@ -61,8 +61,8 @@ pub async fn db_delete_contact_group(db: &ReadDbState, id: String) -> Result<(),
     })
 }
 
-pub async fn db_get_all_contact_groups(db: &ReadDbState) -> Result<Vec<DbContactGroup>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_all_contact_groups(db: &WriterPool) -> Result<Vec<DbContactGroup>, String> {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT g.id, g.name,
@@ -80,8 +80,8 @@ pub async fn db_get_all_contact_groups(db: &ReadDbState) -> Result<Vec<DbContact
     .await
 }
 
-pub async fn db_get_contact_group(db: &ReadDbState, id: String) -> Result<DbContactGroup, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_contact_group(db: &WriterPool, id: String) -> Result<DbContactGroup, String> {
+    db.with_write(move |conn| {
         conn.query_row(
             "SELECT g.id, g.name,
                     (SELECT COUNT(*) FROM contact_group_members WHERE group_id = g.id) AS member_count,
@@ -97,10 +97,10 @@ pub async fn db_get_contact_group(db: &ReadDbState, id: String) -> Result<DbCont
 }
 
 pub async fn db_get_contact_group_members(
-    db: &ReadDbState,
+    db: &WriterPool,
     group_id: String,
 ) -> Result<Vec<DbContactGroupMember>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT member_type, member_value
@@ -118,12 +118,12 @@ pub async fn db_get_contact_group_members(
 }
 
 pub async fn db_add_contact_group_member(
-    db: &ReadDbState,
+    db: &WriterPool,
     group_id: String,
     member_type: String,
     member_value: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized_value = if member_type == "email" {
             member_value.to_lowercase()
         } else {
@@ -149,12 +149,12 @@ pub async fn db_add_contact_group_member(
 }
 
 pub async fn db_remove_contact_group_member(
-    db: &ReadDbState,
+    db: &WriterPool,
     group_id: String,
     member_type: String,
     member_value: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM contact_group_members
              WHERE group_id = ?1 AND member_type = ?2 AND member_value = ?3",
@@ -175,12 +175,12 @@ pub async fn db_remove_contact_group_member(
 }
 
 pub async fn db_search_contact_groups(
-    db: &ReadDbState,
+    db: &WriterPool,
     query: String,
     limit: i64,
 ) -> Result<Vec<DbContactGroup>, String> {
     log::debug!("Searching contact groups: query={query}, limit={limit}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let pattern = format!("%{query}%");
         let mut stmt = conn
             .prepare(
@@ -202,10 +202,10 @@ pub async fn db_search_contact_groups(
 }
 
 pub async fn db_find_contact_group_id_by_name(
-    db: &ReadDbState,
+    db: &WriterPool,
     name: String,
 ) -> Result<Option<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.query_row(
             "SELECT id FROM contact_groups WHERE name = ?1 LIMIT 1",
             params![name],
@@ -240,10 +240,10 @@ pub fn list_contact_groups_for_account_by_source(
 }
 
 pub async fn db_expand_contact_group(
-    db: &ReadDbState,
+    db: &WriterPool,
     group_id: String,
 ) -> Result<Vec<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut visited = HashSet::new();
         let mut emails = HashSet::new();
         expand_recursive(conn, &group_id, &mut visited, &mut emails)?;
@@ -255,10 +255,10 @@ pub async fn db_expand_contact_group(
 }
 
 pub async fn db_expand_contact_group_with_names(
-    db: &ReadDbState,
+    db: &WriterPool,
     group_id: String,
 ) -> Result<Vec<ExpandedGroupContact>, String> {
-    db.with_conn(move |conn| expand_group_with_names_sync(conn, &group_id)).await
+    db.with_write(move |conn| expand_group_with_names_sync(conn, &group_id)).await
 }
 
 /// A group matched against a set of pasted emails.
@@ -274,14 +274,14 @@ pub struct MatchedGroup {
 /// found; if multiple groups have the same member set the choice is
 /// arbitrary but stable per scan order.
 pub async fn db_find_group_matching_emails(
-    db: &ReadDbState,
+    db: &WriterPool,
     emails: Vec<String>,
 ) -> Result<Option<MatchedGroup>, String> {
     let target: HashSet<String> = emails.into_iter().map(|e| e.to_lowercase()).collect();
     if target.is_empty() {
         return Ok(None);
     }
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare("SELECT id, name FROM contact_groups")
             .map_err(|e| e.to_string())?;
@@ -471,11 +471,11 @@ pub fn delete_group_sync(
 }
 
 pub fn expand_group_with_names_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     group_id: &str,
 ) -> Result<Vec<ExpandedGroupContact>, String> {
     fn recurse(
-        conn: &rusqlite::Connection,
+        conn: &impl WriteTarget,
         gid: &str,
         visited: &mut HashSet<String>,
         result: &mut Vec<ExpandedGroupContact>,
@@ -539,7 +539,7 @@ pub fn expand_group_with_names_sync(
 // ---------------------------------------------------------------------------
 
 fn expand_recursive(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     group_id: &str,
     visited: &mut HashSet<String>,
     emails: &mut HashSet<String>,
@@ -594,6 +594,10 @@ mod sync_group_tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     fn group_count(conn: &Connection, group_id: &str) -> i64 {
         conn.query_row(
             "SELECT COUNT(*) FROM contact_groups WHERE id = ?1",
@@ -639,7 +643,7 @@ mod sync_group_tests {
             updated_at: 0,
         };
         save_group_sync(
-            &conn,
+            &write(&conn),
             &entry,
             &["alice@example.com".into(), "bob@example.com".into()],
         )
@@ -661,7 +665,8 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(&conn, &entry, &["alice@example.com".into()]).expect("first save");
+        save_group_sync(
+            &write(&conn), &entry, &["alice@example.com".into()]).expect("first save");
 
         let entry2 = GroupSettingsEntry {
             id: "grp-1".into(),
@@ -671,7 +676,7 @@ mod sync_group_tests {
             updated_at: 0,
         };
         save_group_sync(
-            &conn,
+            &write(&conn),
             &entry2,
             &["bob@example.com".into(), "carol@example.com".into()],
         )
@@ -695,7 +700,8 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(&conn, &entry, &["alice@example.com".into()]).expect("seed");
+        save_group_sync(
+            &write(&conn), &entry, &["alice@example.com".into()]).expect("seed");
 
         let entry2 = GroupSettingsEntry {
             id: "grp-1".into(),
@@ -704,7 +710,8 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(&conn, &entry2, &[]).expect("clear");
+        save_group_sync(
+            &write(&conn), &entry2, &[]).expect("clear");
 
         assert!(member_emails(&conn, "grp-1").is_empty());
         // Group row itself remains.
@@ -722,7 +729,8 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(&conn, &inner, &["alice@example.com".into()]).expect("inner");
+        save_group_sync(
+            &write(&conn), &inner, &["alice@example.com".into()]).expect("inner");
         // Outer group that references the inner one as a member.
         let outer = GroupSettingsEntry {
             id: "grp-outer".into(),
@@ -731,7 +739,8 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(&conn, &outer, &[]).expect("outer");
+        save_group_sync(
+            &write(&conn), &outer, &[]).expect("outer");
         conn.execute(
             "INSERT INTO contact_group_members \
              (group_id, member_type, member_value) \
@@ -740,7 +749,7 @@ mod sync_group_tests {
         )
         .expect("seed nested ref");
 
-        delete_group_sync(&conn, "grp-inner").expect("delete inner");
+        delete_group_sync(&write(&conn), "grp-inner").expect("delete inner");
 
         assert_eq!(group_count(&conn, "grp-inner"), 0, "group row gone");
         let inbound: i64 = conn
@@ -758,8 +767,8 @@ mod sync_group_tests {
     fn delete_group_is_idempotent() {
         let conn = setup_db();
         // No group with this id exists; delete must succeed.
-        delete_group_sync(&conn, "grp-missing").expect("delete missing");
+        delete_group_sync(&write(&conn), "grp-missing").expect("delete missing");
         // Second call also succeeds.
-        delete_group_sync(&conn, "grp-missing").expect("delete again");
+        delete_group_sync(&write(&conn), "grp-missing").expect("delete again");
     }
 }

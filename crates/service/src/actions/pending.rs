@@ -129,7 +129,7 @@ pub async fn enqueue_if_retryable_with_id(
 /// account (one provider per account), and dispatches sequentially.
 /// Respects the in-flight guard - skips threads with active mutations.
 pub async fn process_pending_ops(ctx: &ActionContext) {
-    let ops = match db_pending_ops_get(&ctx.db, None, Some(20)).await {
+    let ops = match db_pending_ops_get(&ctx.write_db.writer_pool(), None, Some(20)).await {
         Ok(ops) => ops,
         Err(e) => {
             log::warn!("[pending_ops] Failed to fetch pending ops: {e}");
@@ -190,15 +190,18 @@ async fn process_account_group(
     account_id: &str,
     ops: Vec<db::db::pending_ops::PendingOperation>,
 ) {
-    use super::provider::create_provider;
+    use super::provider::create_provider_with_writer;
 
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    let provider =
+        match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
+            .await
+        {
         Ok(p) => Some(p),
         Err(e) => {
             log::warn!("[pending_ops] Provider creation failed for {account_id}: {e}");
             None
         }
-    };
+        };
 
     for op in ops {
         // In-flight guard: acquire to block concurrent user mutations,

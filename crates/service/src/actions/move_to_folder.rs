@@ -6,7 +6,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::provider::create_provider_with_writer;
 use db::db::queries_extra::{insert_folder, remove_folder};
 use db::progress::NoopProgressReporter;
 
@@ -102,7 +102,7 @@ pub async fn move_to_folder(
         return outcome;
     }
 
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             move_dispatch(
                 ctx,

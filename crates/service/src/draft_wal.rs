@@ -120,33 +120,20 @@ pub(crate) fn drain(conn: &impl WriteTarget, data_dir: &Path) -> Result<usize, S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
     use std::io::Write;
 
-    fn fresh_conn() -> Connection {
-        let conn = Connection::open_in_memory().expect("open conn");
-        conn.execute_batch(
-            "CREATE TABLE local_drafts (
-                id TEXT PRIMARY KEY,
-                account_id TEXT NOT NULL,
-                to_addresses TEXT,
-                cc_addresses TEXT,
-                bcc_addresses TEXT,
-                subject TEXT,
-                body_html TEXT,
-                reply_to_message_id TEXT,
-                thread_id TEXT,
-                from_email TEXT,
-                signature_id TEXT,
-                remote_draft_id TEXT,
-                attachments TEXT,
-                signature_separator_index INTEGER,
-                updated_at INTEGER NOT NULL,
-                sync_status TEXT NOT NULL
-            )",
-        )
-        .expect("create local_drafts");
-        conn
+    fn fresh_pool(data_dir: &Path) -> db::db::WriterPool {
+        let pool = db::db::open_writer_pool(data_dir).expect("open writer pool");
+        pool.with_write_sync(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider) VALUES (?1, ?2, ?3)",
+                rusqlite::params!["acct-1", "acct-1@example.com", "gmail_api"],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .expect("seed account");
+        pool
     }
 
     /// Pin the wire shape against the canonical golden in
@@ -214,18 +201,28 @@ mod tests {
         f.sync_all().expect("sync");
     }
 
-    fn count_drafts(conn: &Connection) -> i64 {
-        conn.query_row("SELECT count(*) FROM local_drafts", [], |row| row.get(0))
-            .expect("count")
+    fn count_drafts(pool: &db::db::WriterPool) -> i64 {
+        pool.with_read_sync(|conn| {
+            conn.query_row("SELECT count(*) FROM local_drafts", [], |row| row.get(0))
+                .map_err(|e| e.to_string())
+        })
+        .expect("count")
     }
 
-    fn subject_of(conn: &Connection, id: &str) -> Option<String> {
-        conn.query_row(
-            "SELECT subject FROM local_drafts WHERE id = ?",
-            [id],
-            |row| row.get(0),
-        )
-        .ok()
+    fn subject_of(pool: &db::db::WriterPool, id: &str) -> Option<String> {
+        let id = id.to_string();
+        pool.with_read_sync(move |conn| {
+            match conn.query_row(
+                "SELECT subject FROM local_drafts WHERE id = ?",
+                [id],
+                |row| row.get(0),
+            ) {
+                Ok(value) => Ok(Some(value)),
+                Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
+                Err(error) => Err(error.to_string()),
+            }
+        })
+        .expect("subject")
     }
 
     #[test]
@@ -242,20 +239,20 @@ mod tests {
             },
         ];
         write_wal_lines(dir.path(), &entries);
-        let conn = fresh_conn();
-        let replayed = drain(&conn, dir.path()).expect("drain");
+        let pool = fresh_pool(dir.path());
+        let replayed = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("drain");
         assert_eq!(replayed, 2);
-        assert_eq!(count_drafts(&conn), 2);
-        assert_eq!(subject_of(&conn, "draft-a").as_deref(), Some("subj-a"));
-        assert_eq!(subject_of(&conn, "draft-b").as_deref(), Some("subj-b"));
+        assert_eq!(count_drafts(&pool), 2);
+        assert_eq!(subject_of(&pool, "draft-a").as_deref(), Some("subj-a"));
+        assert_eq!(subject_of(&pool, "draft-b").as_deref(), Some("subj-b"));
         assert!(!wal_path(dir.path()).exists(), "active WAL must be rotated");
     }
 
     #[test]
     fn drain_with_no_wal_file_is_ok() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let conn = fresh_conn();
-        let replayed = drain(&conn, dir.path()).expect("drain empty");
+        let pool = fresh_pool(dir.path());
+        let replayed = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("drain empty");
         assert_eq!(replayed, 0);
     }
 
@@ -277,16 +274,16 @@ mod tests {
         writeln!(f, "{}", serde_json::to_string(&good2).expect("ser")).expect("write");
         f.sync_all().expect("sync");
 
-        let conn = fresh_conn();
-        let replayed = drain(&conn, dir.path()).expect("drain");
+        let pool = fresh_pool(dir.path());
+        let replayed = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("drain");
         assert_eq!(replayed, 2);
-        assert_eq!(count_drafts(&conn), 2);
+        assert_eq!(count_drafts(&pool), 2);
     }
 
     #[test]
     fn drain_is_idempotent_under_partial_replay() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let conn = fresh_conn();
+        let pool = fresh_pool(dir.path());
 
         // First drain: WAL has 2 entries, both replay.
         let entries = vec![
@@ -300,7 +297,7 @@ mod tests {
             },
         ];
         write_wal_lines(dir.path(), &entries);
-        let first = drain(&conn, dir.path()).expect("first drain");
+        let first = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("first drain");
         assert_eq!(first, 2);
 
         // Crash and reboot: simulate a fresh WAL containing the same
@@ -317,12 +314,12 @@ mod tests {
             },
         ];
         write_wal_lines(dir.path(), &entries);
-        let second = drain(&conn, dir.path()).expect("second drain");
+        let second = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("second drain");
         assert_eq!(second, 2);
 
-        assert_eq!(count_drafts(&conn), 3);
-        assert_eq!(subject_of(&conn, "dup").as_deref(), Some("second"));
-        assert_eq!(subject_of(&conn, "new").as_deref(), Some("first-new"));
-        assert_eq!(subject_of(&conn, "third").as_deref(), Some("third-new"));
+        assert_eq!(count_drafts(&pool), 3);
+        assert_eq!(subject_of(&pool, "dup").as_deref(), Some("second"));
+        assert_eq!(subject_of(&pool, "new").as_deref(), Some("first-new"));
+        assert_eq!(subject_of(&pool, "third").as_deref(), Some("third-new"));
     }
 }

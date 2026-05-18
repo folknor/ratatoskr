@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::WriterPool;
 use super::super::types::{AttachmentSender, AttachmentWithContext};
 use rusqlite::params;
 
@@ -15,7 +15,7 @@ use rusqlite::params;
 // TODO(refactor): wrap fields in an UpsertAttachmentParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_attachment(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     message_id: String,
     account_id: String,
@@ -26,7 +26,7 @@ pub async fn db_upsert_attachment(
     content_id: Option<String>,
     is_inline: bool,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, size, remote_attachment_id, content_id, is_inline)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -52,12 +52,12 @@ pub async fn db_upsert_attachment(
 }
 
 pub async fn db_get_attachments_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<AttachmentWithContext>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT a.id, a.message_id, a.account_id, a.filename, a.mime_type, a.size,
@@ -98,10 +98,10 @@ pub async fn db_get_attachments_for_account(
 }
 
 pub async fn db_get_attachment_senders(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<AttachmentSender>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT m.from_address, m.from_name, COUNT(*) as count

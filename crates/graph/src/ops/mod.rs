@@ -457,7 +457,7 @@ impl ProviderOps for GraphOps {
         self.client
             .delete(&format!("{me}/mailFolders/{enc_folder_id}"), ctx.db)
             .await?;
-        delete_folder_delta_token(ctx, &graph_folder_id).await?;
+        delete_folder_delta_token(&self.client, ctx, &graph_folder_id).await?;
         refresh_folder_map(&self.client, ctx).await?;
         Ok(())
     }
@@ -687,7 +687,7 @@ impl GraphOps {
         let delegate_email = {
             let aid = ctx.account_id.to_string();
             ctx.db
-                .with_conn(move |conn| {
+                .with_read(move |conn| {
                     conn.query_row(
                         "SELECT email FROM accounts WHERE id = ?1",
                         rusqlite::params![aid],

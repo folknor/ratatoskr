@@ -174,12 +174,12 @@ pub(crate) async fn handle_backfill_kick(
         log::debug!("extract.backfill_kick: ExtractRuntime not installed, skipping");
         return Ok(());
     };
-    let Ok(db) = boot_state.write_db_state() else {
+    let Some(db) = boot_state.read_db_state() else {
         log::debug!("extract.backfill_kick: db_conn missing, skipping");
         return Ok(());
     };
     let rows = db
-        .with_write(move |conn| {
+        .with_read(move |conn| {
             db::db::queries_extra::find_unindexed_cached_attachments(conn, BACKFILL_KICK_LIMIT)
         })
         .await

@@ -7,9 +7,10 @@
 //! worker (Phase 2 task 9) and Phase 1.5's boot recovery
 //! (`recover_on_boot_db_only`) consume.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 
-use super::{WriteTarget, WriteTransactionTarget};
+use super::from_row::QuerySource;
+use super::{FromRow, ToSql, WriteTarget, WriteTransactionTarget};
 
 /// Status of an action job, as reported by `query_job_status`.
 ///
@@ -118,6 +119,20 @@ pub struct JobStatusSnapshot {
     pub summary: Option<Vec<u8>>,
 }
 
+struct JobStatusRow {
+    status:  String,
+    summary: Option<Vec<u8>>,
+}
+
+impl FromRow for JobStatusRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            status:  row.get("status")?,
+            summary: row.get("summary")?,
+        })
+    }
+}
+
 /// Look up the current status (and summary) of a journaled action job.
 ///
 /// Backs the `action.job_status` IPC method (Phase 2 plan scope item
@@ -128,23 +143,20 @@ pub struct JobStatusSnapshot {
 /// Returns `Ok(None)` if no job with `job_id` exists. The 16-byte
 /// `job_id` is a UUIDv7 in raw bytes.
 pub fn query_job_status(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     job_id: &[u8; 16],
 ) -> Result<Option<JobStatusSnapshot>, String> {
-    let row: Option<(String, Option<Vec<u8>>)> = conn
-        .query_row(
-            "SELECT status, summary FROM action_jobs WHERE job_id = ?1",
-            params![job_id.as_slice()],
-            |row| Ok((row.get::<_, String>("status")?, row.get::<_, Option<Vec<u8>>>("summary")?)),
-        )
-        .optional()
-        .map_err(|e| format!("query_job_status: {e}"))?;
-    let Some((status_str, summary)) = row else {
+    let id: &[u8] = job_id.as_slice();
+    let row = conn.query_one::<JobStatusRow>(
+        "SELECT status, summary FROM action_jobs WHERE job_id = ?1",
+        &[&id as &dyn ToSql],
+    )?;
+    let Some(row) = row else {
         return Ok(None);
     };
     Ok(Some(JobStatusSnapshot {
-        status: JobStatus::from_sql(&status_str)?,
-        summary,
+        status: JobStatus::from_sql(&row.status)?,
+        summary: row.summary,
     }))
 }
 
@@ -847,6 +859,7 @@ pub fn terminal_ops_for_plan(
 mod tests {
     use super::*;
     use crate::db::migrations;
+    use rusqlite::Connection;
 
     fn fresh_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory");
@@ -866,6 +879,10 @@ mod tests {
         )
         .expect("seed account");
         conn
+    }
+
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
     }
 
     fn insert_test_job(
@@ -956,7 +973,7 @@ mod tests {
         let mail_plan_id = [6u8; 16];
         insert_test_job(&conn, &mail_plan_id, "queued");
 
-        let live: std::collections::HashSet<[u8; 16]> = live_send_job_ids(&conn)
+        let live: std::collections::HashSet<[u8; 16]> = live_send_job_ids(&write(&conn))
             .expect("query")
             .into_iter()
             .collect();
@@ -972,7 +989,7 @@ mod tests {
     #[test]
     fn live_send_job_ids_returns_empty_on_clean_journal() {
         let conn = fresh_db();
-        let live = live_send_job_ids(&conn).expect("query");
+        let live = live_send_job_ids(&write(&conn)).expect("query");
         assert!(live.is_empty());
     }
 
@@ -1069,7 +1086,7 @@ mod tests {
         insert_test_op(&conn, &job_a, 2, "done");
         insert_test_op(&conn, &job_b, 0, "executing");
 
-        let (jobs_reset, ops_reset) = recover_stale_leases(&conn).expect("recover");
+        let (jobs_reset, ops_reset) = recover_stale_leases(&write(&conn)).expect("recover");
         assert_eq!(jobs_reset, 2, "two non-terminal jobs should reset");
         assert_eq!(ops_reset, 3, "three non-terminal ops should reset");
 
@@ -1131,7 +1148,7 @@ mod tests {
         insert_test_op(&conn, &already_done, 0, "done");
 
         let orphans: std::collections::HashSet<[u8; 16]> =
-            unfinalized_per_op_plan_jobs(&conn)
+            unfinalized_per_op_plan_jobs(&write(&conn))
                 .expect("query")
                 .into_iter()
                 .map(|(id, _kind)| id)
@@ -1155,7 +1172,7 @@ mod tests {
         let send_job = [0xB1; 16];
         insert_send_job(&conn, &send_job, "queued");
 
-        let orphans = unfinalized_per_op_plan_jobs(&conn).expect("query");
+        let orphans = unfinalized_per_op_plan_jobs(&write(&conn)).expect("query");
         assert!(
             orphans.is_empty(),
             "send jobs must not appear in unfinalized_per_op_plan_jobs"
@@ -1173,7 +1190,7 @@ mod tests {
         insert_calendar_test_job(&conn, &stranded_cal, "queued");
         insert_test_op(&conn, &stranded_cal, 0, "done");
 
-        let orphans = unfinalized_per_op_plan_jobs(&conn).expect("query");
+        let orphans = unfinalized_per_op_plan_jobs(&write(&conn)).expect("query");
         assert_eq!(orphans.len(), 1, "calendar_plan stranded job picked up");
         assert_eq!(orphans[0].0, stranded_cal);
         assert_eq!(orphans[0].1, Some(PerOpJobKind::CalendarPlan));
@@ -1192,7 +1209,7 @@ mod tests {
         let conn = fresh_db();
         let job_id = [0xD1; 16];
         let result = insert_quiet_job(
-            &conn,
+            &write(&conn),
             &job_id,
             "mark_chat_read",
             "<chat>",
@@ -1217,7 +1234,7 @@ mod tests {
         insert_test_op(&conn, &leased, 0, "done");
 
         let orphans: std::collections::HashSet<[u8; 16]> =
-            unfinalized_per_op_plan_jobs(&conn)
+            unfinalized_per_op_plan_jobs(&write(&conn))
                 .expect("query")
                 .into_iter()
                 .map(|(id, _kind)| id)
@@ -1232,17 +1249,17 @@ mod tests {
         let job_id = [0x42; 16];
         insert_test_job(&conn, &job_id, "leased");
 
-        let (first, _) = recover_stale_leases(&conn).expect("first recover");
+        let (first, _) = recover_stale_leases(&write(&conn)).expect("first recover");
         assert_eq!(first, 1);
 
-        let (second, _) = recover_stale_leases(&conn).expect("second recover");
+        let (second, _) = recover_stale_leases(&write(&conn)).expect("second recover");
         assert_eq!(second, 0, "second call has nothing to reset");
     }
 
     #[test]
     fn query_job_status_returns_none_for_unknown_job() {
         let conn = fresh_db();
-        let result = query_job_status(&conn, &[0u8; 16]).expect("query");
+        let result = query_job_status(&write(&conn), &[0u8; 16]).expect("query");
         assert!(result.is_none());
     }
 
@@ -1252,7 +1269,7 @@ mod tests {
         let job_id = [0x33; 16];
         insert_test_job(&conn, &job_id, "executing");
 
-        let snapshot = query_job_status(&conn, &job_id)
+        let snapshot = query_job_status(&write(&conn), &job_id)
             .expect("query")
             .expect("present");
         assert_eq!(snapshot.status, JobStatus::Executing);
@@ -1273,7 +1290,7 @@ mod tests {
         )
         .expect("insert");
 
-        let snapshot = query_job_status(&conn, &job_id)
+        let snapshot = query_job_status(&write(&conn), &job_id)
             .expect("query")
             .expect("present");
         assert_eq!(snapshot.status, JobStatus::Completed);
@@ -1298,17 +1315,18 @@ mod tests {
                 operation_blob: b"op-1-blob".to_vec(),
             },
         ];
-        let now = insert_mail_plan(&conn, &plan_id, "acc-1", false, &ops).expect("insert");
+        let now = insert_mail_plan(
+            &write(&conn), &plan_id, "acc-1", false, &ops).expect("insert");
         assert!(now > 0);
 
         // jobs row exists with status='queued'
-        let snapshot = query_job_status(&conn, &plan_id)
+        let snapshot = query_job_status(&write(&conn), &plan_id)
             .expect("status")
             .expect("present");
         assert_eq!(snapshot.status, JobStatus::Queued);
 
         // both ops inserted with status='pending'
-        let counts = count_ops_by_status(&conn, &plan_id).expect("counts");
+        let counts = count_ops_by_status(&write(&conn), &plan_id).expect("counts");
         assert_eq!(counts.pending, 2);
         assert_eq!(counts.terminal(), 0);
     }
@@ -1320,7 +1338,7 @@ mod tests {
         let plan_b = [0xBB; 16];
         // plan_b is created later, so plan_a should be picked first.
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_a,
             "acc-1",
             false,
@@ -1334,7 +1352,7 @@ mod tests {
         .expect("insert a");
         std::thread::sleep(std::time::Duration::from_millis(1100));
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_b,
             "acc-1",
             false,
@@ -1348,7 +1366,7 @@ mod tests {
         .expect("insert b");
 
         let owner = [0xFF; 16];
-        let leased = lease_next_ready_op(&conn, &owner, 60_000)
+        let leased = lease_next_ready_op(&write(&conn), &owner, 60_000)
             .expect("lease")
             .expect("some");
         assert_eq!(leased.plan_id, plan_a, "older job leased first");
@@ -1361,7 +1379,7 @@ mod tests {
     fn lease_next_ready_op_returns_none_when_no_pending() {
         let conn = fresh_db();
         let owner = [0u8; 16];
-        let result = lease_next_ready_op(&conn, &owner, 60_000).expect("lease");
+        let result = lease_next_ready_op(&write(&conn), &owner, 60_000).expect("lease");
         assert!(result.is_none());
     }
 
@@ -1370,7 +1388,7 @@ mod tests {
         let conn = fresh_db();
         let plan_id = [0xCC; 16];
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_id,
             "acc-1",
             false,
@@ -1383,13 +1401,13 @@ mod tests {
         )
         .expect("insert");
         let owner = [0xFF; 16];
-        let first = lease_next_ready_op(&conn, &owner, 60_000)
+        let first = lease_next_ready_op(&write(&conn), &owner, 60_000)
             .expect("first lease")
             .expect("some");
         assert_eq!(first.operation_id, 0);
         // Second lease finds no pending (the one we just leased moved to
         // 'leased', not 'pending').
-        let second = lease_next_ready_op(&conn, &owner, 60_000).expect("second lease");
+        let second = lease_next_ready_op(&write(&conn), &owner, 60_000).expect("second lease");
         assert!(second.is_none());
     }
 
@@ -1398,7 +1416,7 @@ mod tests {
         let conn = fresh_db();
         let plan_id = [0xDD; 16];
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_id,
             "acc-1",
             false,
@@ -1411,12 +1429,12 @@ mod tests {
         )
         .expect("insert");
         let owner = [0xFF; 16];
-        let leased = lease_next_ready_op(&conn, &owner, 60_000)
+        let leased = lease_next_ready_op(&write(&conn), &owner, 60_000)
             .expect("lease")
             .expect("some");
 
         mark_op_terminal(
-            &conn,
+            &write(&conn),
             &leased.plan_id,
             leased.operation_id,
             OpTerminalStatus::Done,
@@ -1424,7 +1442,7 @@ mod tests {
         )
         .expect("mark done");
 
-        let counts = count_ops_by_status(&conn, &plan_id).expect("counts");
+        let counts = count_ops_by_status(&write(&conn), &plan_id).expect("counts");
         assert_eq!(counts.done, 1);
         assert_eq!(counts.non_terminal(), 0);
 
@@ -1446,7 +1464,7 @@ mod tests {
         let conn = fresh_db();
         let plan_id = [0xEE; 16];
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_id,
             "acc-1",
             false,
@@ -1460,14 +1478,14 @@ mod tests {
         .expect("insert");
 
         finalize_job(
-            &conn,
+            &write(&conn),
             &plan_id,
             JobTerminalStatus::Completed,
             b"summary-blob",
         )
         .expect("finalize");
 
-        let snapshot = query_job_status(&conn, &plan_id)
+        let snapshot = query_job_status(&write(&conn), &plan_id)
             .expect("query")
             .expect("present");
         assert_eq!(snapshot.status, JobStatus::Completed);
@@ -1479,7 +1497,7 @@ mod tests {
         let conn = fresh_db();
         let plan_id = [0x12; 16];
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_id,
             "acc-1",
             false,
@@ -1506,9 +1524,11 @@ mod tests {
         )
         .expect("insert");
         // Mark op 0 done, op 1 failed, leave op 2 pending.
-        mark_op_terminal(&conn, &plan_id, 0, OpTerminalStatus::Done, b"o0").expect("done");
-        mark_op_terminal(&conn, &plan_id, 1, OpTerminalStatus::Failed, b"o1").expect("failed");
-        let counts = count_ops_by_status(&conn, &plan_id).expect("counts");
+        mark_op_terminal(
+            &write(&conn), &plan_id, 0, OpTerminalStatus::Done, b"o0").expect("done");
+        mark_op_terminal(
+            &write(&conn), &plan_id, 1, OpTerminalStatus::Failed, b"o1").expect("failed");
+        let counts = count_ops_by_status(&write(&conn), &plan_id).expect("counts");
         assert_eq!(counts.done, 1);
         assert_eq!(counts.failed, 1);
         assert_eq!(counts.pending, 1);
@@ -1524,7 +1544,7 @@ mod tests {
         let plan_done = [0x02; 16];
 
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_active,
             "acc-1",
             false,
@@ -1537,7 +1557,7 @@ mod tests {
         )
         .expect("insert active");
         insert_mail_plan(
-            &conn,
+            &write(&conn),
             &plan_done,
             "acc-1",
             false,
@@ -1551,13 +1571,16 @@ mod tests {
         .expect("insert done");
 
         // Both ops have outcomes, but only plan_active is non-terminal.
-        mark_op_terminal(&conn, &plan_active, 0, OpTerminalStatus::Done, b"o-active")
+        mark_op_terminal(
+            &write(&conn), &plan_active, 0, OpTerminalStatus::Done, b"o-active")
             .expect("active done");
-        mark_op_terminal(&conn, &plan_done, 0, OpTerminalStatus::Done, b"o-done").expect("done");
-        finalize_job(&conn, &plan_done, JobTerminalStatus::Completed, b"sum")
+        mark_op_terminal(
+            &write(&conn), &plan_done, 0, OpTerminalStatus::Done, b"o-done").expect("done");
+        finalize_job(
+            &write(&conn), &plan_done, JobTerminalStatus::Completed, b"sum")
             .expect("finalize done");
 
-        let replayable = unemitted_terminal_ops(&conn).expect("query");
+        let replayable = unemitted_terminal_ops(&write(&conn)).expect("query");
         assert_eq!(replayable.len(), 1);
         assert_eq!(replayable[0].plan_id, plan_active);
         assert_eq!(replayable[0].outcome_blob, b"o-active");

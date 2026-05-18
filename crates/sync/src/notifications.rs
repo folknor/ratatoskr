@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::Connection;
-
 use crate::bundling::AiBundlingCandidate;
 use crate::filters::FilterableMessage;
 use crate::types::NotificationCandidate;
-use db::db::ReadDbState;
+use db::db::{ReadConn, ReadDbState};
 use db::db::queries::load_recent_rule_bundled_threads;
 
 /// Check settings and return threads that need AI bundling
@@ -15,7 +13,7 @@ pub async fn get_ai_bundling_candidates(
     account_id: &str,
 ) -> Result<Vec<AiBundlingCandidate>, String> {
     let account_id = account_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let auto_categorize =
             db::db::queries::get_setting(conn, "ai_auto_categorize").unwrap_or(None);
         if auto_categorize.as_deref() == Some("false") {
@@ -54,12 +52,12 @@ pub async fn evaluate_notifications(
     let account_id = account_id.to_string();
     let messages = messages.to_vec();
     let thread_ids: Vec<String> = messages.iter().map(|msg| msg.thread_id.clone()).collect();
-    db.with_conn(move |conn| evaluate_notifications_sync(conn, &account_id, &messages, &thread_ids))
+    db.with_read(move |conn| evaluate_notifications_sync(conn, &account_id, &messages, &thread_ids))
         .await
 }
 
 fn evaluate_notifications_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     messages: &[FilterableMessage],
     thread_ids: &[String],
@@ -133,7 +131,7 @@ fn bundle_allowed(
     allowed.contains(category)
 }
 
-fn load_vip_senders(conn: &Connection, account_id: &str) -> Result<HashSet<String>, String> {
+fn load_vip_senders(conn: &ReadConn<'_>, account_id: &str) -> Result<HashSet<String>, String> {
     let mut stmt = conn
         .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")
         .map_err(|e| e.to_string())?;
@@ -151,7 +149,7 @@ fn load_vip_senders(conn: &Connection, account_id: &str) -> Result<HashSet<Strin
 }
 
 fn load_muted_thread_ids(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_ids: &[String],
 ) -> Result<HashSet<String>, String> {
@@ -184,7 +182,7 @@ fn load_muted_thread_ids(
 }
 
 fn load_thread_bundles(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_ids: &[String],
 ) -> Result<HashMap<String, String>, String> {

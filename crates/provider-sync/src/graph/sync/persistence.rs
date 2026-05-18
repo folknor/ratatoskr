@@ -83,7 +83,7 @@ pub(super) async fn persist_messages(
         store_bodies(sctx.body_store, messages),
         store_inline_images(sctx.inline_images, messages),
         index_messages(sctx.search, sctx.account_id, messages),
-        seen::ingest_from_messages(sctx.db, sctx.account_id, messages),
+        crate::seen_ingest::ingest_from_messages(sctx.write_db, sctx.account_id, messages),
     );
 
     Ok(())

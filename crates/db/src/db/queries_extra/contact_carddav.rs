@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use rusqlite::{Connection, params};
 
+use crate::db::{WriteTarget, WriteTransactionTarget};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -35,13 +37,13 @@ pub struct CarddavContactUpsert {
 /// The delete uses a 3-way orphan check (carddav, google, graph mapping tables)
 /// to only remove contacts that no provider still claims.
 pub fn persist_carddav_contacts_sync(
-    conn: &Connection,
+    conn: &impl WriteTransactionTarget,
     account_id: &str,
     contacts: &[CarddavContactUpsert],
     deleted_uris: &[String],
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin carddav tx: {e}"))?;
 
     for contact in contacts {
@@ -57,7 +59,7 @@ pub fn persist_carddav_contacts_sync(
 }
 
 fn persist_one(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     contact: &CarddavContactUpsert,
 ) -> Result<(), String> {
@@ -116,7 +118,7 @@ fn persist_one(
     Ok(())
 }
 
-fn delete_one(conn: &Connection, account_id: &str, uri: &str) -> Result<(), String> {
+fn delete_one(conn: &impl WriteTarget, account_id: &str, uri: &str) -> Result<(), String> {
     let email: Option<String> = conn
         .query_row(
             "SELECT contact_email FROM carddav_contact_map \

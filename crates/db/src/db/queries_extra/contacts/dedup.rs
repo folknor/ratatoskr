@@ -1,3 +1,5 @@
+use crate::db::{WriteTarget, WriteTransactionTarget};
+
 /// A raw duplicate pair row from the database.
 #[derive(Debug, Clone)]
 pub struct DuplicatePairRow {
@@ -43,7 +45,7 @@ pub fn find_contact_duplicates_sync(
 /// Update a contact's display name from a seen duplicate (auto-merge).
 /// Only updates if the contact's current display_name is NULL.
 pub fn merge_seen_duplicate_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     contact_id: &str,
     seen_display_name: &str,
 ) -> Result<bool, String> {
@@ -61,12 +63,12 @@ pub fn merge_seen_duplicate_sync(
 /// The keep contact's NULL fields are filled from the merge contact.
 /// Group memberships are migrated. The merge contact is deleted.
 pub fn merge_contact_pair_sync(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTransactionTarget,
     keep_id: &str,
     merge_id: &str,
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin merge tx: {e}"))?;
 
     // Read merge contact's fields

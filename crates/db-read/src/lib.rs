@@ -5,15 +5,15 @@ pub mod progress;
 pub(crate) mod raw;
 
 pub use raw::{
-    ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement, apply_reader_pragmas,
-    open_reader_pool,
+    ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement, open_reader_pool,
 };
 
 pub mod db {
     pub use crate::{
         ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement, open_reader_pool,
     };
-    pub use crate::raw::apply_reader_pragmas;
+    // Re-export read-only rusqlite helpers only. Raw Connection,
+    // Transaction, and Statement types stay out of the read API.
     pub use rusqlite::{Error as SqlError, OptionalExtension, Row, params};
     pub use rusqlite::types::ToSql;
 

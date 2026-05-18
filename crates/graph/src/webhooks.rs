@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool};
 
 use super::client::GraphClient;
 
@@ -141,6 +141,7 @@ pub struct SubscriptionRecord {
 pub async fn create_subscription(
     client: &GraphClient,
     db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     resource: &str,
     notification_url: &str,
@@ -173,7 +174,7 @@ pub async fn create_subscription(
     );
 
     save_graph_subscription(
-        db,
+        writer,
         account_id,
         &response.id,
         resource,
@@ -192,6 +193,7 @@ pub async fn create_subscription(
 pub async fn renew_subscription(
     client: &GraphClient,
     db: &ReadDbState,
+    writer: &WriterPool,
     subscription_id: &str,
     expiration_minutes: Option<u32>,
 ) -> Result<String, String> {
@@ -212,7 +214,7 @@ pub async fn renew_subscription(
         "[Graph webhooks] Renewed subscription {subscription_id} (new expiry: {new_expiry})"
     );
 
-    update_graph_subscription_expiry(db, subscription_id, &new_expiry).await?;
+    update_graph_subscription_expiry(writer, subscription_id, &new_expiry).await?;
 
     Ok(new_expiry)
 }
@@ -223,6 +225,7 @@ pub async fn renew_subscription(
 pub async fn delete_subscription(
     client: &GraphClient,
     db: &ReadDbState,
+    writer: &WriterPool,
     subscription_id: &str,
 ) -> Result<(), String> {
     let path = format!("/subscriptions/{subscription_id}");
@@ -237,7 +240,7 @@ pub async fn delete_subscription(
         log::info!("[Graph webhooks] Subscription {subscription_id} already gone on server (404)");
     }
 
-    delete_graph_subscription_record(db, subscription_id).await?;
+    delete_graph_subscription_record(writer, subscription_id).await?;
 
     log::info!("[Graph webhooks] Deleted subscription {subscription_id}");
     Ok(())
@@ -277,6 +280,7 @@ pub fn parse_notification_payload(body: &str) -> Result<NotificationPayload, Str
 pub async fn check_and_renew_subscriptions(
     client: &GraphClient,
     db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
 ) -> Result<(), String> {
     let subs = load_graph_subscriptions(db, account_id).await?;
@@ -297,7 +301,7 @@ pub async fn check_and_renew_subscriptions(
                 "[Graph webhooks] Subscription {} expired, removing local record",
                 sub.id
             );
-            if let Err(e) = delete_graph_subscription_record(db, &sub.id).await {
+            if let Err(e) = delete_graph_subscription_record(writer, &sub.id).await {
                 log::warn!(
                     "[Graph webhooks] failed to delete expired subscription record {}: {e}",
                     sub.id
@@ -308,7 +312,7 @@ pub async fn check_and_renew_subscriptions(
                 "[Graph webhooks] Subscription {} expires in {minutes_remaining}min, renewing",
                 sub.id
             );
-            match renew_subscription(client, db, &sub.id, None).await {
+            match renew_subscription(client, db, writer, &sub.id, None).await {
                 Ok(new_expiry) => {
                     log::info!(
                         "[Graph webhooks] Renewed subscription {} until {new_expiry}",
@@ -322,7 +326,7 @@ pub async fn check_and_renew_subscriptions(
                     );
                     // If renewal fails (e.g. 404), clean up
                     if e.contains("404")
-                        && let Err(e) = delete_graph_subscription_record(db, &sub.id).await
+                        && let Err(e) = delete_graph_subscription_record(writer, &sub.id).await
                     {
                         log::warn!(
                             "[Graph webhooks] failed to delete stale subscription record {}: {e}",
@@ -453,7 +457,7 @@ pub fn is_expiring_soon(expiration_iso: &str, threshold_minutes: i64) -> bool {
 // ---------------------------------------------------------------------------
 
 async fn save_graph_subscription(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     subscription_id: &str,
     resource: &str,
@@ -468,7 +472,7 @@ async fn save_graph_subscription(
     let cs = client_state.to_string();
     let exp = expiration_date_time.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT OR REPLACE INTO graph_subscriptions \
              (id, account_id, resource, notification_url, client_state, expiration_date_time) \
@@ -487,7 +491,7 @@ pub async fn load_graph_subscriptions(
     account_id: &str,
 ) -> Result<Vec<SubscriptionRecord>, String> {
     let aid = account_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT id, account_id, resource, notification_url, \
@@ -520,11 +524,11 @@ pub async fn load_graph_subscriptions(
 }
 
 async fn delete_graph_subscription_record(
-    db: &ReadDbState,
+    db: &WriterPool,
     subscription_id: &str,
 ) -> Result<(), String> {
     let sid = subscription_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM graph_subscriptions WHERE id = ?1",
             rusqlite::params![sid],
@@ -536,13 +540,13 @@ async fn delete_graph_subscription_record(
 }
 
 async fn update_graph_subscription_expiry(
-    db: &ReadDbState,
+    db: &WriterPool,
     subscription_id: &str,
     new_expiry: &str,
 ) -> Result<(), String> {
     let sid = subscription_id.to_string();
     let exp = new_expiry.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE graph_subscriptions SET expiration_date_time = ?2 WHERE id = ?1",
             rusqlite::params![sid, exp],

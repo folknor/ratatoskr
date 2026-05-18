@@ -1,7 +1,14 @@
 use std::collections::HashMap;
 
-use db::db::{ReadDbState, WriteConn};
-use rusqlite::OptionalExtension;
+use db::db::{ReadDbState, ReadError, WriteConn, WriterPool};
+
+fn optional_read<T>(result: Result<T, ReadError>, context: &str) -> Result<Option<T>, String> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
+        Err(error) => Err(format!("{context}: {error}")),
+    }
+}
 
 /// Synchronous version: update account sync state (history_id column).
 pub fn update_account_sync_state(
@@ -14,16 +21,13 @@ pub fn update_account_sync_state(
 
 /// Async version: update account sync state (history_id column).
 pub async fn save_account_history_id(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     history_id: &str,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let hid = history_id.to_string();
-    db.with_conn(move |conn| {
-        let write = WriteConn::from_raw(conn);
-        update_account_sync_state(&write, &aid, &hid)
-    })
+    db.with_write(move |conn| update_account_sync_state(conn, &aid, &hid))
         .await
 }
 
@@ -32,12 +36,12 @@ pub async fn load_account_history_id(
     account_id: &str,
 ) -> Result<Option<String>, String> {
     let aid = account_id.to_string();
-    db.with_conn(move |conn| db::db::queries_extra::get_account_history_id(conn, &aid))
+    db.with_read(move |conn| db::db::queries_extra::get_account_history_id(conn, &aid))
         .await
 }
 
 pub async fn save_jmap_sync_state(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     state_type: &str,
     state: &str,
@@ -58,7 +62,7 @@ pub async fn load_jmap_sync_state(
 /// `shared_account_id` is `None` for the primary account, `Some(jmap_id)` for
 /// a shared account discovered from the JMAP Session.
 pub async fn save_jmap_sync_state_for(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     shared_account_id: Option<&str>,
     state_type: &str,
@@ -69,7 +73,7 @@ pub async fn save_jmap_sync_state_for(
     let st = state_type.to_string();
     let sv = state.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO jmap_sync_state (account_id, shared_account_id, type, state, updated_at) \
              VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now')) \
@@ -94,22 +98,20 @@ pub async fn load_jmap_sync_state_for(
     let said = shared_account_id.map(String::from);
     let st = state_type.to_string();
 
-    db.with_conn(move |conn| {
-        conn.query_row(
+    db.with_read(move |conn| {
+        optional_read(conn.query_row(
             "SELECT state FROM jmap_sync_state \
              WHERE account_id = ?1 AND type = ?2 \
              AND COALESCE(shared_account_id, '') = COALESCE(?3, '')",
             rusqlite::params![aid, st, said],
             |row| row.get::<_, String>("state"),
-        )
-        .optional()
-        .map_err(|e| format!("load jmap sync state: {e}"))
+        ), "load jmap sync state")
     })
     .await
 }
 
 pub async fn save_graph_delta_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
@@ -118,7 +120,7 @@ pub async fn save_graph_delta_token(
     let fid = folder_id.to_string();
     let dl = delta_link.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT OR REPLACE INTO graph_folder_delta_tokens \
              (account_id, folder_id, delta_link, updated_at) \
@@ -137,7 +139,7 @@ pub async fn load_graph_delta_tokens(
 ) -> Result<HashMap<String, String>, String> {
     let aid = account_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT folder_id, delta_link FROM graph_folder_delta_tokens \
@@ -158,14 +160,14 @@ pub async fn load_graph_delta_tokens(
 }
 
 pub async fn delete_graph_delta_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let fid = folder_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM graph_folder_delta_tokens \
              WHERE account_id = ?1 AND folder_id = ?2",
@@ -178,7 +180,7 @@ pub async fn delete_graph_delta_token(
 }
 
 async fn increment_provider_sync_cycle(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     provider_key: &'static str,
     provider_label: &'static str,
@@ -186,9 +188,9 @@ async fn increment_provider_sync_cycle(
 ) -> Result<u32, String> {
     let key = format!("{provider_key}_sync_cycle:{account_id}");
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin {provider_key} sync cycle tx: {e}"))?;
         let stored = db::db::queries::get_setting(&tx, &key)?;
         let current = match stored.as_deref() {
@@ -216,14 +218,14 @@ async fn increment_provider_sync_cycle(
 }
 
 pub async fn increment_graph_sync_cycle(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
 ) -> Result<u32, String> {
     increment_provider_sync_cycle(db, account_id, "graph", "Graph", 20).await
 }
 
 pub async fn increment_gmail_sync_cycle(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
 ) -> Result<u32, String> {
     increment_provider_sync_cycle(db, account_id, "gmail", "Gmail", 20).await
@@ -232,7 +234,7 @@ pub async fn increment_gmail_sync_cycle(
 // ── Graph contact delta tokens ────────────────────────────
 
 pub async fn save_graph_contact_delta_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
@@ -241,7 +243,7 @@ pub async fn save_graph_contact_delta_token(
     let fid = folder_id.to_string();
     let dl = delta_link.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT OR REPLACE INTO graph_contact_delta_tokens \
              (account_id, folder_id, delta_link, updated_at) \
@@ -260,7 +262,7 @@ pub async fn load_graph_contact_delta_tokens(
 ) -> Result<HashMap<String, String>, String> {
     let aid = account_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT folder_id, delta_link FROM graph_contact_delta_tokens \
@@ -281,14 +283,14 @@ pub async fn load_graph_contact_delta_tokens(
 }
 
 pub async fn delete_graph_contact_delta_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let fid = folder_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM graph_contact_delta_tokens \
              WHERE account_id = ?1 AND folder_id = ?2",
@@ -303,13 +305,13 @@ pub async fn delete_graph_contact_delta_token(
 // ── Google People API contact sync tokens ────────────────
 
 pub async fn save_google_contacts_sync_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     sync_token: &str,
 ) -> Result<(), String> {
     let key = format!("google_contacts_sync_token:{account_id}");
     let val = sync_token.to_string();
-    db.with_conn(move |conn| db::db::queries::set_setting(conn, &key, &val))
+    db.with_write(move |conn| db::db::queries::set_setting(conn, &key, &val))
         .await
 }
 
@@ -319,29 +321,29 @@ pub async fn load_google_contacts_sync_token(
 ) -> Result<Option<String>, String> {
     let key = format!("google_contacts_sync_token:{account_id}");
 
-    db.with_conn(move |conn| db::db::queries::get_setting(conn, &key))
+    db.with_read(move |conn| db::db::queries::get_setting(conn, &key))
         .await
 }
 
 pub async fn delete_google_contacts_sync_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
 ) -> Result<(), String> {
     let key = format!("google_contacts_sync_token:{account_id}");
-    db.with_conn(move |conn| db::db::queries_extra::delete_setting(conn, &key))
+    db.with_write(move |conn| db::db::queries_extra::delete_setting(conn, &key))
         .await
 }
 
 // ── Google People API otherContacts sync tokens ──────────
 
 pub async fn save_google_other_contacts_sync_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     sync_token: &str,
 ) -> Result<(), String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
     let val = sync_token.to_string();
-    db.with_conn(move |conn| db::db::queries::set_setting(conn, &key, &val))
+    db.with_write(move |conn| db::db::queries::set_setting(conn, &key, &val))
         .await
 }
 
@@ -351,23 +353,23 @@ pub async fn load_google_other_contacts_sync_token(
 ) -> Result<Option<String>, String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
 
-    db.with_conn(move |conn| db::db::queries::get_setting(conn, &key))
+    db.with_read(move |conn| db::db::queries::get_setting(conn, &key))
         .await
 }
 
 pub async fn delete_google_other_contacts_sync_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
 ) -> Result<(), String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
-    db.with_conn(move |conn| db::db::queries_extra::delete_setting(conn, &key))
+    db.with_write(move |conn| db::db::queries_extra::delete_setting(conn, &key))
         .await
 }
 
 // ── Graph shared mailbox delta tokens ────────────────────
 
 pub async fn save_shared_mailbox_delta_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
     folder_id: &str,
@@ -378,7 +380,7 @@ pub async fn save_shared_mailbox_delta_token(
     let fid = folder_id.to_string();
     let dl = delta_link.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT OR REPLACE INTO graph_shared_mailbox_delta_tokens \
              (account_id, mailbox_id, folder_id, delta_link, updated_at) \
@@ -399,7 +401,7 @@ pub async fn load_shared_mailbox_delta_tokens(
     let aid = account_id.to_string();
     let mid = mailbox_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT folder_id, delta_link FROM graph_shared_mailbox_delta_tokens \
@@ -420,14 +422,14 @@ pub async fn load_shared_mailbox_delta_tokens(
 }
 
 pub async fn delete_shared_mailbox_delta_tokens(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let mid = mailbox_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM graph_shared_mailbox_delta_tokens \
              WHERE account_id = ?1 AND mailbox_id = ?2",
@@ -441,7 +443,7 @@ pub async fn delete_shared_mailbox_delta_tokens(
 
 /// Delete a single delta token for a specific folder within a shared mailbox.
 pub async fn delete_shared_mailbox_delta_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
     folder_id: &str,
@@ -450,7 +452,7 @@ pub async fn delete_shared_mailbox_delta_token(
     let mid = mailbox_id.to_string();
     let fid = folder_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM graph_shared_mailbox_delta_tokens \
              WHERE account_id = ?1 AND mailbox_id = ?2 AND folder_id = ?3",
@@ -480,7 +482,7 @@ pub async fn get_enabled_shared_mailboxes(
 ) -> Result<Vec<SharedMailboxSyncEntry>, String> {
     let aid = account_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT mailbox_id, display_name, last_synced_at, sync_error \
@@ -505,7 +507,7 @@ pub async fn get_enabled_shared_mailboxes(
 
 /// Update the sync status for a shared mailbox after a sync attempt.
 pub async fn update_shared_mailbox_sync_status(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
     last_synced_at: i64,
@@ -515,7 +517,7 @@ pub async fn update_shared_mailbox_sync_status(
     let mid = mailbox_id.to_string();
     let err = sync_error.map(String::from);
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE shared_mailbox_sync_state \
              SET last_synced_at = ?1, sync_error = ?2 \
@@ -530,7 +532,7 @@ pub async fn update_shared_mailbox_sync_status(
 
 /// Enable sync for a shared mailbox, inserting a row if it doesn't exist.
 pub async fn enable_shared_mailbox_sync(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
     display_name: Option<&str>,
@@ -539,7 +541,7 @@ pub async fn enable_shared_mailbox_sync(
     let mid = mailbox_id.to_string();
     let dn = display_name.map(String::from);
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO shared_mailbox_sync_state \
              (account_id, mailbox_id, display_name, is_sync_enabled) \
@@ -556,14 +558,14 @@ pub async fn enable_shared_mailbox_sync(
 
 /// Disable sync for a shared mailbox.
 pub async fn disable_shared_mailbox_sync(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let mid = mailbox_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE shared_mailbox_sync_state \
              SET is_sync_enabled = 0 \
@@ -578,7 +580,7 @@ pub async fn disable_shared_mailbox_sync(
 
 /// Disable sync for a shared mailbox and record an error message.
 pub async fn disable_shared_mailbox_sync_with_error(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
     error: &str,
@@ -587,7 +589,7 @@ pub async fn disable_shared_mailbox_sync_with_error(
     let mid = mailbox_id.to_string();
     let err = error.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE shared_mailbox_sync_state \
              SET is_sync_enabled = 0, sync_error = ?3 \
@@ -610,7 +612,7 @@ pub async fn get_all_shared_mailbox_ids(
 ) -> Result<Vec<String>, String> {
     let aid = account_id.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT mailbox_id FROM shared_mailbox_sync_state \
@@ -630,7 +632,7 @@ pub async fn get_all_shared_mailbox_ids(
 /// Used by JMAP principal resolution to associate a JMAP shared account
 /// with its owner's email address for send identity auto-selection.
 pub async fn set_shared_mailbox_email(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     mailbox_id: &str,
     email: &str,
@@ -639,7 +641,7 @@ pub async fn set_shared_mailbox_email(
     let mid = mailbox_id.to_string();
     let em = email.to_string();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE shared_mailbox_sync_state \
              SET email_address = ?3 \
@@ -661,15 +663,13 @@ pub async fn get_shared_mailbox_email(
     let aid = account_id.to_string();
     let mid = mailbox_id.to_string();
 
-    db.with_conn(move |conn| {
-        conn.query_row(
+    db.with_read(move |conn| {
+        optional_read(conn.query_row(
             "SELECT email_address FROM shared_mailbox_sync_state \
              WHERE account_id = ?1 AND mailbox_id = ?2",
             rusqlite::params![aid, mid],
             |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| format!("get shared mailbox email: {e}"))
+        ), "get shared mailbox email")
         .map(std::option::Option::flatten)
     })
     .await

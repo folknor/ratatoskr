@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use common::crypto::{StoredSecret, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
-use db::db::ReadDbState;
+use db::db::{ReadConn, ReadDbState, WriterPool};
 
 /// Cached mailbox list entry: (mailbox_id, role, name).
 pub type MailboxListEntry = (String, Option<String>, String);
@@ -28,6 +28,7 @@ pub struct JmapClient {
     db: Option<ReadDbState>,
     account_id: String,
     encryption_key: Option<[u8; 32]>,
+    writer: Option<WriterPool>,
     auth_method: String,
     jmap_url: String,
 }
@@ -93,7 +94,7 @@ impl JmapClient {
             .encryption_key
             .ok_or("JMAP OAuth client missing encryption key")?;
         if let Some(refreshed_access) =
-            refresh_token_in_db_if_expired(db, &self.account_id, &key).await?
+            refresh_token_in_db_if_expired(db, self.writer.as_ref(), &self.account_id, &key).await?
         {
             self.rebuild_client_with_token(&refreshed_access).await?;
         }
@@ -124,13 +125,14 @@ impl JmapClient {
 /// never reached.
 async fn refresh_token_in_db_if_expired(
     db: &ReadDbState,
+    writer: Option<&WriterPool>,
     account_id: &str,
     key: &[u8; 32],
 ) -> Result<Option<String>, String> {
     // Quick check: is the token still valid?
     let aid = account_id.to_string();
     let (expires_at,) = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             conn.query_row(
                 "SELECT token_expires_at FROM accounts WHERE id = ?1",
                 rusqlite::params![aid],
@@ -159,7 +161,7 @@ async fn refresh_token_in_db_if_expired(
         oauth_client_secret,
         oauth_token_url,
     ) = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             conn.query_row(
                 "SELECT access_token, token_expires_at, refresh_token, \
                  oauth_provider, oauth_client_id, oauth_client_secret, oauth_token_url \
@@ -215,10 +217,13 @@ async fn refresh_token_in_db_if_expired(
     let encrypted_access = encrypt_value(key, &refreshed.access_token)?;
     let aid = account_id.to_string();
     let new_expires = refreshed.expires_at;
-    db.with_conn(move |conn| {
-        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access, new_expires)
-    })
-    .await?;
+    let writer = writer
+        .ok_or_else(|| format!("JMAP token refresh for {account_id} requires a writer handle"))?;
+    writer
+        .with_write(move |conn| {
+            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access, new_expires)
+        })
+        .await?;
 
     log::info!("JMAP OAuth token refreshed for account {account_id}");
 
@@ -274,6 +279,25 @@ impl JmapClient {
         account_id: &str,
         encryption_key: &[u8; 32],
     ) -> Result<Self, String> {
+        Self::from_account_inner(db, None, account_id, encryption_key).await
+    }
+
+    /// Create a JMAP client with a writer handle for token refresh persistence.
+    pub async fn from_account_with_writer(
+        db: &ReadDbState,
+        writer: WriterPool,
+        account_id: &str,
+        encryption_key: &[u8; 32],
+    ) -> Result<Self, String> {
+        Self::from_account_inner(db, Some(writer), account_id, encryption_key).await
+    }
+
+    async fn from_account_inner(
+        db: &ReadDbState,
+        writer: Option<WriterPool>,
+        account_id: &str,
+        encryption_key: &[u8; 32],
+    ) -> Result<Self, String> {
         let aid = account_id.to_string();
         let key = *encryption_key;
 
@@ -294,7 +318,7 @@ impl JmapClient {
         // local SQLite.
         let aid_for_method = account_id.to_string();
         let auth_method: String = db
-            .with_conn(move |conn| {
+            .with_read(move |conn| {
                 conn.query_row(
                     "SELECT auth_method FROM accounts WHERE id = ?1",
                     rusqlite::params![aid_for_method],
@@ -304,11 +328,11 @@ impl JmapClient {
             })
             .await?;
         if matches!(auth_method.as_str(), "oauth2" | "bearer") {
-            let _ = refresh_token_in_db_if_expired(db, account_id, &key).await?;
+            let _ = refresh_token_in_db_if_expired(db, writer.as_ref(), account_id, &key).await?;
         }
 
         let creds = db
-            .with_conn(move |conn| read_jmap_credentials(conn, &aid, &key))
+            .with_read(move |conn| read_jmap_credentials(conn, &aid, &key))
             .await?;
 
         let jmap_credentials = match creds.auth_method.as_str() {
@@ -347,6 +371,7 @@ impl JmapClient {
             db: if is_oauth { Some(db.clone()) } else { None },
             account_id: account_id.to_string(),
             encryption_key: if is_oauth { Some(key) } else { None },
+            writer: if is_oauth { writer } else { None },
             auth_method: creds.auth_method,
             jmap_url: creds.jmap_url,
         })
@@ -370,7 +395,7 @@ struct JmapCredentials {
 ///
 /// Returns all fields needed to connect with either Basic or Bearer auth.
 fn read_jmap_credentials(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     key: &[u8; 32],
 ) -> Result<JmapCredentials, String> {

@@ -133,7 +133,7 @@ pub fn save_contact_sync(
 }
 
 /// Delete a contact by ID (synchronous).
-pub fn delete_contact_sync(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
+pub fn delete_contact_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())

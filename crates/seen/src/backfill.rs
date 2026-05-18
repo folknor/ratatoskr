@@ -1,10 +1,11 @@
+use std::future::Future;
+
+use db_read::{ReadConn, ReadDbState};
 use rusqlite::params;
 
-use db::db::ReadDbState;
-
-use super::ingest::{get_self_emails, ingest_observations};
+use super::ingest::get_self_emails;
 use super::parse::extract_observations;
-use super::types::ObservationParams;
+use super::types::{AddressObservation, ObservationParams};
 
 const BATCH_SIZE: i64 = 1000;
 
@@ -13,71 +14,105 @@ const BATCH_SIZE: i64 = 1000;
 /// Processes messages in batches ordered by date ASC. Tracks completion
 /// with a settings key to avoid re-running.
 ///
-/// Returns the number of addresses ingested.
-pub async fn backfill_seen_addresses(db: &ReadDbState, account_id: String) -> Result<u64, String> {
+pub struct BackfillWriteBatch {
+    pub account_id: String,
+    pub settings_key: String,
+    pub observations: Vec<AddressObservation>,
+    pub mark_done: bool,
+}
+
+pub async fn backfill_seen_addresses<F, Fut>(
+    db: &ReadDbState,
+    account_id: String,
+    mut persist_batch: F,
+) -> Result<u64, String>
+where
+    F: FnMut(BackfillWriteBatch) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
     let settings_key = format!("seen_addresses_backfill_{account_id}");
 
-    db.with_conn(move |conn| {
-        // Check if already done
-        let done: bool = conn
-            .query_row(
-                "SELECT COUNT(*) AS cnt FROM settings WHERE key = ?1",
-                params![settings_key],
-                |row| row.get::<_, i64>("cnt"),
-            )
-            .unwrap_or(0)
-            > 0;
+    let done_key = settings_key.clone();
+    let done_account = account_id.clone();
+    let done = db
+        .with_read(move |conn| {
+            let done: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) AS cnt FROM settings WHERE key = ?1",
+                    params![done_key],
+                    |row| row.get::<_, i64>("cnt"),
+                )
+                .unwrap_or(0)
+                > 0;
 
-        if done {
-            log::info!("Seen addresses backfill already completed for {account_id}");
-            return Ok(0);
+            if done {
+                log::info!("Seen addresses backfill already completed for {done_account}");
+            }
+            Ok(done)
+        })
+        .await?;
+
+    if done {
+        return Ok(0);
+    }
+
+    let mut total: u64 = 0;
+    let mut offset: i64 = 0;
+
+    loop {
+        let batch_account = account_id.clone();
+        let observations = db
+            .with_read(move |conn| {
+                let self_emails = get_self_emails(conn, &batch_account)?;
+                let batch = fetch_message_batch(conn, &batch_account, offset)?;
+                let mut observations = Vec::new();
+                for row in &batch {
+                    let params = ObservationParams {
+                        self_emails: &self_emails,
+                        from_address: row.from_address.as_deref(),
+                        from_name: row.from_name.as_deref(),
+                        to_addresses: row.to_addresses.as_deref(),
+                        cc_addresses: row.cc_addresses.as_deref(),
+                        bcc_addresses: row.bcc_addresses.as_deref(),
+                        date_ms: row.date_ms,
+                    };
+                    observations.extend(extract_observations(&params));
+                }
+                Ok((observations, batch.len()))
+            })
+            .await?;
+
+        let (observations, batch_len) = observations;
+        if batch_len == 0 {
+            break;
         }
 
-        let self_emails = get_self_emails(conn, &account_id)?;
-        let mut total: u64 = 0;
-        let mut offset: i64 = 0;
+        let count = observations.len() as u64;
+        persist_batch(BackfillWriteBatch {
+            account_id: account_id.clone(),
+            settings_key: settings_key.clone(),
+            observations,
+            mark_done: false,
+        })
+        .await?;
+        total += count;
+        offset += BATCH_SIZE;
 
-        loop {
-            let batch = fetch_message_batch(conn, &account_id, offset)?;
-            if batch.is_empty() {
-                break;
-            }
-
-            let mut observations = Vec::new();
-            for row in &batch {
-                let params = ObservationParams {
-                    self_emails: &self_emails,
-                    from_address: row.from_address.as_deref(),
-                    from_name: row.from_name.as_deref(),
-                    to_addresses: row.to_addresses.as_deref(),
-                    cc_addresses: row.cc_addresses.as_deref(),
-                    bcc_addresses: row.bcc_addresses.as_deref(),
-                    date_ms: row.date_ms,
-                };
-                observations.extend(extract_observations(&params));
-            }
-
-            let count = observations.len() as u64;
-            ingest_observations(conn, &account_id, &observations)?;
-            total += count;
-            offset += BATCH_SIZE;
-
-            if batch.len() < usize::try_from(BATCH_SIZE).unwrap_or(usize::MAX) {
-                break;
-            }
+        if batch_len < usize::try_from(BATCH_SIZE).unwrap_or(usize::MAX) {
+            break;
         }
+    }
 
-        // Mark as done
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, '1')",
-            params![settings_key],
-        )
-        .map_err(|e| format!("mark backfill done: {e}"))?;
-
-        log::info!("Backfilled {total} seen address observations for {account_id}");
-        Ok(total)
+    persist_batch(BackfillWriteBatch {
+        account_id: account_id.clone(),
+        settings_key,
+        observations: Vec::new(),
+        mark_done: true,
     })
-    .await
+    .await?;
+
+    log::info!("Backfilled {total} seen address observations for {account_id}");
+    Ok(total)
 }
 
 struct MessageRow {
@@ -90,7 +125,7 @@ struct MessageRow {
 }
 
 fn fetch_message_batch(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     offset: i64,
 ) -> Result<Vec<MessageRow>, String> {

@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::WriterPool;
 use super::super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use super::super::types::{
     BundleSummary, BundleSummarySingle, DbBundleRule, ThreadBundleWithManual, ThreadInfoRow,
@@ -9,13 +9,13 @@ use crate::db::{query_as, query_one};
 use rusqlite::params;
 
 pub async fn db_set_thread_bundle(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
     bundle: String,
     is_manual: bool,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO thread_bundles (account_id, thread_id, bundle, is_manual)
                  VALUES (?1, ?2, ?3, ?4)
@@ -29,10 +29,10 @@ pub async fn db_set_thread_bundle(
 }
 
 pub async fn db_get_bundle_rules(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbBundleRule>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         query_as::<DbBundleRule>(
             conn,
             "SELECT * FROM bundle_rules WHERE account_id = ?1",
@@ -43,14 +43,14 @@ pub async fn db_get_bundle_rules(
 }
 
 pub async fn db_get_bundle_summaries(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     categories: Vec<String>,
 ) -> Result<Vec<BundleSummary>, String> {
     if categories.is_empty() {
         return Ok(Vec::new());
     }
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let placeholders = categories
             .iter()
             .enumerate()
@@ -135,10 +135,10 @@ pub async fn db_get_bundle_summaries(
 }
 
 pub async fn db_get_held_thread_ids(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let now = i64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -162,11 +162,11 @@ pub async fn db_get_held_thread_ids(
 }
 
 pub async fn db_get_bundle_rule(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     bundle: String,
 ) -> Result<Option<DbBundleRule>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         query_one::<DbBundleRule>(
             conn,
             "SELECT * FROM bundle_rules WHERE account_id = ?1 AND bundle = ?2",
@@ -177,14 +177,14 @@ pub async fn db_get_bundle_rule(
 }
 
 pub async fn db_set_bundle_rule(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     bundle: String,
     is_bundled: bool,
     delivery_enabled: bool,
     schedule: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO bundle_rules (id, account_id, bundle, is_bundled, delivery_enabled, delivery_schedule)
@@ -200,13 +200,13 @@ pub async fn db_set_bundle_rule(
 }
 
 pub async fn db_hold_thread(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
     bundle: String,
     held_until: Option<i64>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO bundled_threads (account_id, thread_id, bundle, held_until)
                  VALUES (?1, ?2, ?3, ?4)
@@ -221,12 +221,12 @@ pub async fn db_hold_thread(
 }
 
 pub async fn db_is_thread_held(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
     now: i64,
 ) -> Result<bool, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) AS cnt FROM bundled_threads WHERE account_id = ?1 AND thread_id = ?2 AND held_until > ?3",
@@ -240,11 +240,11 @@ pub async fn db_is_thread_held(
 }
 
 pub async fn db_release_held_threads(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     bundle: String,
 ) -> Result<i64, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let affected = conn
             .execute(
                 "DELETE FROM bundled_threads WHERE account_id = ?1 AND bundle = ?2 AND held_until IS NOT NULL",
@@ -257,12 +257,12 @@ pub async fn db_release_held_threads(
 }
 
 pub async fn db_update_last_delivered(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     bundle: String,
     now: i64,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE bundle_rules SET last_delivered_at = ?1 WHERE account_id = ?2 AND bundle = ?3",
             params![now, account_id, bundle],
@@ -274,11 +274,11 @@ pub async fn db_update_last_delivered(
 }
 
 pub async fn db_get_bundle_summary(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     bundle: String,
 ) -> Result<BundleSummarySingle, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(DISTINCT t.id) AS cnt
@@ -323,11 +323,11 @@ pub async fn db_get_bundle_summary(
 }
 
 pub async fn db_get_thread_bundle(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
 ) -> Result<Option<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let result = conn.query_row(
             "SELECT bundle FROM thread_bundles WHERE account_id = ?1 AND thread_id = ?2",
             params![account_id, thread_id],
@@ -343,11 +343,11 @@ pub async fn db_get_thread_bundle(
 }
 
 pub async fn db_get_thread_bundle_with_manual(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
 ) -> Result<Option<ThreadBundleWithManual>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let result = conn.query_row(
             "SELECT bundle, is_manual FROM thread_bundles WHERE account_id = ?1 AND thread_id = ?2",
             params![account_id, thread_id],
@@ -363,11 +363,11 @@ pub async fn db_get_thread_bundle_with_manual(
 }
 
 pub async fn db_get_recent_rule_bundled_thread_ids(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<ThreadInfoRow>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let lim = limit.unwrap_or(20);
         load_recent_rule_bundled_threads(conn, &account_id, lim)
     })
@@ -375,12 +375,12 @@ pub async fn db_get_recent_rule_bundled_thread_ids(
 }
 
 pub async fn db_set_thread_bundles_batch(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     categories: Vec<(String, String)>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    db.with_write(move |conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for (thread_id, bundle) in &categories {
             tx.execute(
                 "INSERT INTO thread_bundles (account_id, thread_id, bundle, is_manual)
@@ -399,11 +399,11 @@ pub async fn db_set_thread_bundles_batch(
 }
 
 pub async fn db_get_unbundled_inbox_thread_ids(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<ThreadInfoRow>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let lim = limit.unwrap_or(20);
         let sql = format!(
             "SELECT t.id, t.subject, t.snippet, m.from_address

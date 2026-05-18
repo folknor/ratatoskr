@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use common::types::{ImportanceLevel, ProviderCtx};
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 
 use crate::client::GraphClient;
@@ -37,12 +37,30 @@ async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<Fol
 
     let all_folders = fetch_all_folders(client, ctx.db).await?;
     let folder_map = FolderMap::build(&resolved, &all_folders)?;
-    persist_folders(ctx, &folder_map).await?;
+    persist_folders(client, ctx, &folder_map).await?;
     Ok(folder_map)
 }
 
-async fn persist_folders(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
-    let aid = ctx.account_id.to_string();
+async fn persist_folders(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    folder_map: &FolderMap,
+) -> Result<(), String> {
+    let Some(writer) = client.writer_pool() else {
+        return Err(format!(
+            "Graph folder persistence for {} requires a writer handle",
+            ctx.account_id
+        ));
+    };
+    persist_folders_with_writer(&writer, ctx.account_id, folder_map).await
+}
+
+async fn persist_folders_with_writer(
+    writer: &WriterPool,
+    account_id: &str,
+    folder_map: &FolderMap,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
 
     let folder_rows: Vec<FolderWriteRow> = folder_map
         .all_mappings()
@@ -73,14 +91,14 @@ async fn persist_folders(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Resul
         .collect();
     let label_rows = importance_label_rows(&aid);
 
-    ctx.db
-        .with_conn(move |conn| {
+    writer
+        .with_write(move |conn| {
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             insert_folders_batch(&tx, &folder_rows)?;
             upsert_labels(&tx, &label_rows)?;
-            tx.commit().map_err(|e| format!("commit labels: {e}"))?;
+            tx.commit().map_err(|e| format!("commit folders: {e}"))?;
             Ok(())
         })
         .await

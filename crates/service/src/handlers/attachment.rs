@@ -80,7 +80,7 @@ pub(crate) async fn handle_fetch(
     // need eviction + GC to clean up.
     let aid_for_deleting = params.account_id.clone();
     let account_is_deleting: bool = read_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             Ok(conn
                 .query_row(
                     "SELECT COALESCE(is_deleting, 0) FROM accounts WHERE id = ?1",
@@ -105,7 +105,7 @@ pub(crate) async fn handle_fetch(
     let lookup_message = params.message_id.clone();
     let lookup_attachment = params.attachment_id.clone();
     let info = read_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             db::db::queries_extra::find_attachment_cache_info(
                 conn,
                 &lookup_account,
@@ -188,7 +188,7 @@ pub(crate) async fn handle_fetch(
         .map_or_else(|| params.attachment_id.clone(), |info| info.id.clone());
 
     let provider =
-        crate::actions::provider::create_provider(&read_db, &params.account_id, key)
+        crate::actions::provider::create_provider_with_writer(&read_db, &write_db, &params.account_id, key)
             .await
             .map_err(ServiceError::Internal)?;
 

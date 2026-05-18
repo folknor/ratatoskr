@@ -98,6 +98,44 @@ fn main_db_state_arc_escape_constructors_stay_deleted() {
     }
 }
 
+#[test]
+fn read_db_state_public_api_does_not_expose_raw_connection() {
+    let raw_path = workspace_path("crates/db-read/src/raw.rs");
+    let raw = std::fs::read_to_string(&raw_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", raw_path.display()));
+
+    let mut in_read_db_state_impl = false;
+    let mut brace_depth: usize = 0;
+    for (idx, line) in raw.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("impl ReadDbState") {
+            in_read_db_state_impl = true;
+            brace_depth = 0;
+        }
+        if in_read_db_state_impl {
+            if trimmed.contains("pub ") && trimmed.contains("fn ")
+                && (trimmed.contains("&Connection") || trimmed.contains("&rusqlite::Connection"))
+            {
+                panic!(
+                    "{}:{} exposes a raw rusqlite connection from ReadDbState",
+                    raw_path.display(),
+                    idx + 1
+                );
+            }
+            for ch in line.chars() {
+                match ch {
+                    '{' => brace_depth += 1,
+                    '}' => brace_depth = brace_depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            if brace_depth == 0 && trimmed.contains('}') {
+                in_read_db_state_impl = false;
+            }
+        }
+    }
+}
+
 fn workspace_path(suffix: &str) -> PathBuf {
     // `CARGO_MANIFEST_DIR` is `crates/service-state`; walk two levels
     // up to reach the workspace root.

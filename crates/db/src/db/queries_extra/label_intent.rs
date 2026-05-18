@@ -458,7 +458,7 @@ mod tests {
     fn confirmed_add_bumps_and_clears_matching_intent() {
         let conn = conn();
         upsert_pending_thread_label_intents(
-            &conn,
+            &crate::db::WriteConn::from_raw(&conn),
             "acc",
             "thr",
             [PendingLabelIntent {
@@ -503,7 +503,7 @@ mod tests {
     fn last_intent_wins_per_label() {
         let conn = conn();
         upsert_pending_thread_label_intents(
-            &conn,
+            &crate::db::WriteConn::from_raw(&conn),
             "acc",
             "thr",
             [PendingLabelIntent {
@@ -514,7 +514,7 @@ mod tests {
         )
         .unwrap();
         upsert_pending_thread_label_intents(
-            &conn,
+            &crate::db::WriteConn::from_raw(&conn),
             "acc",
             "thr",
             [PendingLabelIntent {
@@ -661,7 +661,7 @@ mod tests {
     fn stale_intent_sweep_keeps_live_queue_rows() {
         let conn = conn();
         upsert_pending_thread_label_intents(
-            &conn,
+            &crate::db::WriteConn::from_raw(&conn),
             "acc",
             "thr",
             [PendingLabelIntent {
@@ -682,12 +682,12 @@ mod tests {
         )
         .unwrap();
 
-        let deleted = delete_stale_pending_thread_label_intents(&conn, 1).unwrap();
+        let deleted = delete_stale_pending_thread_label_intents(&crate::db::WriteConn::from_raw(&conn), 1).unwrap();
         assert_eq!(deleted, 0);
 
         conn.execute("DELETE FROM pending_operations WHERE id = 'live'", [])
             .unwrap();
-        let deleted = delete_stale_pending_thread_label_intents(&conn, 1).unwrap();
+        let deleted = delete_stale_pending_thread_label_intents(&crate::db::WriteConn::from_raw(&conn), 1).unwrap();
         assert_eq!(deleted, 1);
     }
 }

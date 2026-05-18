@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool, WriteTarget};
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
 };
@@ -29,22 +29,23 @@ pub async fn sync_google_contacts(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<SyncContactsResult, String> {
     let existing_token = sync_state::load_google_contacts_sync_token(db, account_id).await?;
 
     match existing_token {
-        Some(token) => match incremental_sync(client, account_id, db, &token).await {
+        Some(token) => match incremental_sync(client, account_id, db, writer, &token).await {
             Ok(result) => Ok(result),
             Err(e) if e.contains("410") || e.contains("GONE") || e.contains("syncToken") => {
                 log::warn!(
                     "Google contacts sync token expired for {account_id}, falling back to full sync"
                 );
-                sync_state::delete_google_contacts_sync_token(db, account_id).await?;
-                full_sync(client, account_id, db).await
+                sync_state::delete_google_contacts_sync_token(writer, account_id).await?;
+                full_sync(client, account_id, db, writer).await
             }
             Err(e) => Err(e),
         },
-        None => full_sync(client, account_id, db).await,
+        None => full_sync(client, account_id, db, writer).await,
     }
 }
 
@@ -56,6 +57,7 @@ async fn full_sync(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<SyncContactsResult, String> {
     let mut all_persons = Vec::new();
     let mut page_token: Option<String> = None;
@@ -100,9 +102,9 @@ async fn full_sync(
 
     let aid = account_id.to_string();
     let seen = seen_resource_names;
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
         persist_google_contacts(&tx, &aid, &all_persons)?;
         let pruned = prune_stale_google_contacts(&tx, &aid, &seen)?;
@@ -113,7 +115,7 @@ async fn full_sync(
 
     // Save sync token for future incremental syncs
     if let Some(ref token) = sync_token {
-        sync_state::save_google_contacts_sync_token(db, account_id, token).await?;
+        sync_state::save_google_contacts_sync_token(writer, account_id, token).await?;
     }
 
     log::info!("Google contacts full sync for {account_id}: {synced} contacts with emails");
@@ -129,6 +131,7 @@ async fn incremental_sync(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     sync_token: &str,
 ) -> Result<SyncContactsResult, String> {
     let mut upserts = Vec::new();
@@ -185,9 +188,9 @@ async fn incremental_sync(
     if !upserts.is_empty() || !deleted_resource_names.is_empty() {
         let aid = account_id.to_string();
         let deleted_owned = deleted_resource_names;
-        db.with_conn(move |conn| {
+        writer.with_write(move |conn| {
             let tx = conn
-                .unchecked_transaction()
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             persist_google_contacts(&tx, &aid, &upserts)?;
             for resource_name in &deleted_owned {
@@ -200,7 +203,7 @@ async fn incremental_sync(
     }
 
     if let Some(ref token) = new_sync_token {
-        sync_state::save_google_contacts_sync_token(db, account_id, token).await?;
+        sync_state::save_google_contacts_sync_token(writer, account_id, token).await?;
     }
 
     log::info!(
@@ -219,7 +222,7 @@ async fn incremental_sync(
 // ---------------------------------------------------------------------------
 
 fn persist_google_contacts(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     persons: &[Person],
 ) -> Result<(), String> {
@@ -279,7 +282,7 @@ fn persist_google_contacts(
 }
 
 fn delete_google_contact(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     resource_name: &str,
 ) -> Result<(), String> {
@@ -331,7 +334,7 @@ fn delete_google_contact(
 /// After a full sync, remove mapping rows for resource_names not seen
 /// in the fetch, then delete orphaned source='google' contacts.
 fn prune_stale_google_contacts(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     seen_resource_names: &HashSet<String>,
 ) -> Result<usize, String> {

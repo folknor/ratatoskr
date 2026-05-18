@@ -1,4 +1,6 @@
-use rusqlite::{Connection, params};
+use rusqlite::params;
+
+use crate::db::WriteTarget;
 
 pub struct ContactWriteRow {
     pub id: String,
@@ -14,7 +16,7 @@ pub struct ContactWriteRow {
     pub server_id: Option<String>,
 }
 
-pub fn upsert_contact_sync(conn: &Connection, row: &ContactWriteRow) -> Result<(), String> {
+pub fn upsert_contact_sync(conn: &impl WriteTarget, row: &ContactWriteRow) -> Result<(), String> {
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, email2, phone, company, notes,
                                avatar_url, source, account_id, server_id) \
@@ -71,7 +73,7 @@ pub fn upsert_contact_sync(conn: &Connection, row: &ContactWriteRow) -> Result<(
 }
 
 pub fn delete_contact_by_email_and_source_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     email: &str,
     source: &str,
 ) -> Result<(), String> {
@@ -84,7 +86,7 @@ pub fn delete_contact_by_email_and_source_sync(
 }
 
 pub fn delete_contact_by_server_id_and_source_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     server_id: &str,
     source: &str,

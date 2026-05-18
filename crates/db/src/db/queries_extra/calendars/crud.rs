@@ -1,4 +1,4 @@
-use super::super::super::{ReadConn, ReadDbState, WriteConn};
+use super::super::super::{ReadConn, WriterPool, WriteConn};
 use super::super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
@@ -32,7 +32,7 @@ const REMINDER_COLS: &str = "\
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_calendar(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     provider: String,
     remote_id: String,
@@ -41,7 +41,7 @@ pub async fn db_upsert_calendar(
     is_primary: bool,
     can_edit: bool,
 ) -> Result<String, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit)
@@ -64,10 +64,10 @@ pub async fn db_upsert_calendar(
 }
 
 pub async fn db_get_calendars_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbCalendar>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 \
@@ -83,10 +83,10 @@ pub async fn db_get_calendars_for_account(
 }
 
 pub async fn db_get_visible_calendars(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbCalendar>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
@@ -102,11 +102,11 @@ pub async fn db_get_visible_calendars(
 }
 
 pub async fn db_set_calendar_visibility(
-    db: &ReadDbState,
+    db: &WriterPool,
     calendar_id: String,
     visible: bool,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE calendars SET is_visible = ?1, updated_at = unixepoch() WHERE id = ?2",
             params![visible as i64, calendar_id],
@@ -118,12 +118,12 @@ pub async fn db_set_calendar_visibility(
 }
 
 pub async fn db_update_calendar_sync_token(
-    db: &ReadDbState,
+    db: &WriterPool,
     calendar_id: String,
     sync_token: Option<String>,
     ctag: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE calendars SET sync_token = ?1, ctag = ?2, updated_at = unixepoch() WHERE id = ?3",
             params![sync_token, ctag, calendar_id],
@@ -135,10 +135,10 @@ pub async fn db_update_calendar_sync_token(
 }
 
 pub async fn db_delete_calendars_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM calendars WHERE account_id = ?1",
             params![account_id],
@@ -150,10 +150,10 @@ pub async fn db_delete_calendars_for_account(
 }
 
 pub async fn db_get_calendar_by_id(
-    db: &ReadDbState,
+    db: &WriterPool,
     calendar_id: String,
 ) -> Result<Option<DbCalendar>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let result = conn.query_row(
             &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE id = ?1"),
             params![calendar_id],
@@ -216,7 +216,7 @@ pub struct CalendarReminderWriteRow {
 }
 
 pub async fn db_upsert_calendar_event(
-    db: &ReadDbState,
+    db: &WriterPool,
     p: UpsertCalendarEventParams,
 ) -> Result<(), String> {
     log::info!(
@@ -224,7 +224,7 @@ pub async fn db_upsert_calendar_event(
         p.account_id,
         p.google_event_id
     );
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, \
@@ -280,13 +280,13 @@ pub async fn db_upsert_calendar_event(
 }
 
 pub async fn db_get_calendar_events_in_range(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     start_time: i64,
     end_time: i64,
 ) -> Result<Vec<DbCalendarEvent>, String> {
     log::debug!("Loading calendar events: account_id={account_id}, range={start_time}..{end_time}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {EVENT_COLS} FROM calendar_events \
@@ -306,7 +306,7 @@ pub async fn db_get_calendar_events_in_range(
 }
 
 pub async fn db_get_calendar_events_in_range_multi(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     calendar_ids: Vec<String>,
     start_time: i64,
@@ -315,7 +315,7 @@ pub async fn db_get_calendar_events_in_range_multi(
     if calendar_ids.is_empty() {
         return db_get_calendar_events_in_range(db, account_id, start_time, end_time).await;
     }
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let placeholders = calendar_ids
             .iter()
             .enumerate()
@@ -347,10 +347,10 @@ pub async fn db_get_calendar_events_in_range_multi(
 }
 
 pub async fn db_delete_events_for_calendar(
-    db: &ReadDbState,
+    db: &WriterPool,
     calendar_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         // Cascade: delete attendees and reminders for all events in this calendar.
         conn.execute(
             "DELETE FROM calendar_attendees WHERE event_id IN \
@@ -375,11 +375,11 @@ pub async fn db_delete_events_for_calendar(
 }
 
 pub async fn db_get_event_by_remote_id(
-    db: &ReadDbState,
+    db: &WriterPool,
     calendar_id: String,
     remote_event_id: String,
 ) -> Result<Option<DbCalendarEvent>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let result = conn.query_row(
             &format!("SELECT {EVENT_COLS} FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2"),
             params![calendar_id, remote_event_id],
@@ -395,11 +395,11 @@ pub async fn db_get_event_by_remote_id(
 }
 
 pub async fn db_delete_event_by_remote_id(
-    db: &ReadDbState,
+    db: &WriterPool,
     calendar_id: String,
     remote_event_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         // Cascade: delete attendees and reminders before the event.
         conn.execute(
             "DELETE FROM calendar_attendees WHERE event_id IN \
@@ -423,9 +423,9 @@ pub async fn db_delete_event_by_remote_id(
     .await
 }
 
-pub async fn db_delete_calendar_event(db: &ReadDbState, event_id: String) -> Result<(), String> {
+pub async fn db_delete_calendar_event(db: &WriterPool, event_id: String) -> Result<(), String> {
     log::info!("Deleting calendar event: id={event_id}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         // Cascade: delete attendees and reminders before the event.
         conn.execute(
             "DELETE FROM calendar_attendees WHERE event_id = ?1",
@@ -453,11 +453,11 @@ pub async fn db_delete_calendar_event(db: &ReadDbState, event_id: String) -> Res
 // ── Attendee queries ───────────────────────────────────────
 
 pub async fn db_get_event_attendees(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     event_id: String,
 ) -> Result<Vec<DbCalendarAttendee>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {ATTENDEE_COLS} FROM calendar_attendees \
@@ -474,7 +474,7 @@ pub async fn db_get_event_attendees(
 }
 
 pub async fn db_upsert_event_attendee(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     event_id: String,
     email: String,
@@ -482,7 +482,7 @@ pub async fn db_upsert_event_attendee(
     rsvp_status: Option<String>,
     is_organizer: bool,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -497,11 +497,11 @@ pub async fn db_upsert_event_attendee(
 }
 
 pub async fn db_delete_attendees_for_event(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     event_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
             params![account_id, event_id],
@@ -515,11 +515,11 @@ pub async fn db_delete_attendees_for_event(
 // ── Reminder queries ───────────────────────────────────────
 
 pub async fn db_get_event_reminders(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     event_id: String,
 ) -> Result<Vec<DbCalendarReminder>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {REMINDER_COLS} FROM calendar_reminders \
@@ -536,13 +536,13 @@ pub async fn db_get_event_reminders(
 }
 
 pub async fn db_add_event_reminder(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     event_id: String,
     minutes_before: i64,
     method: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method)
                  VALUES (?1, ?2, ?3, ?4)",
@@ -555,11 +555,11 @@ pub async fn db_add_event_reminder(
 }
 
 pub async fn db_delete_reminders_for_event(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     event_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
             params![account_id, event_id],
@@ -768,8 +768,8 @@ pub fn delete_calendar_event_sync(
 
 // ── All-account calendar queries (for unified calendar) ────
 
-pub async fn db_get_all_visible_calendars(db: &ReadDbState) -> Result<Vec<DbCalendar>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_all_visible_calendars(db: &WriterPool) -> Result<Vec<DbCalendar>, String> {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {CALENDAR_COLS} FROM calendars WHERE is_visible = 1 \

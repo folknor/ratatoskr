@@ -31,6 +31,10 @@ impl WriteDbState {
         Self { pool }
     }
 
+    pub fn writer_pool(&self) -> db::db::WriterPool {
+        self.pool.clone()
+    }
+
     pub async fn with_write<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&db::db::WriteConn<'_>) -> Result<T, String> + Send + 'static,

@@ -11,7 +11,7 @@
 
 use common::ops::ProviderOps;
 use common::types::ProviderCtx;
-use db::db::WriteTarget;
+use db::db::ReadConn;
 use db::db::queries_extra::mdn::{
     ReadReceiptPolicy, mark_mdn_sent_local, resolve_read_receipt_policy,
 };
@@ -114,7 +114,7 @@ pub(crate) async fn send_mdn_responses(
 }
 
 fn collect_candidates_sync(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<Candidate>, String> {
@@ -151,7 +151,7 @@ async fn collect_candidates(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_write(move |conn| collect_candidates_sync(conn, &aid, &tid))
+    db.with_write(move |conn| collect_candidates_sync(&conn.as_read(), &aid, &tid))
         .await
 }
 
@@ -256,7 +256,7 @@ mod tests {
         // Excluded: different thread.
         insert(&conn, "m-other", "t2", Some("e@x"), Some("<mid-5>"), true, false);
 
-        let candidates = collect_candidates_sync(&conn, "acct", "t1").expect("query");
+        let candidates = collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
         let ids: Vec<&str> = candidates.iter().map(|c| c.message_id.as_str()).collect();
         assert_eq!(ids, vec!["m-want"]);
     }
@@ -267,7 +267,7 @@ mod tests {
         insert(&conn, "m1", "t1", Some("a@x"), Some("<1>"), true, false);
         insert(&conn, "m2", "t1", Some("b@x"), Some("<2>"), true, false);
 
-        let candidates = collect_candidates_sync(&conn, "acct", "t1").expect("query");
+        let candidates = collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
         assert_eq!(candidates.len(), 2);
     }
 
@@ -276,7 +276,7 @@ mod tests {
         let conn = setup_db();
         insert(&conn, "m1", "t1", Some("a@x"), Some("<1>"), false, false);
 
-        let candidates = collect_candidates_sync(&conn, "acct", "t1").expect("query");
+        let candidates = collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
         assert!(candidates.is_empty());
     }
 }

@@ -69,7 +69,7 @@ pub struct UnindexedCachedAttachmentRow {
 /// need to scale past that, swap to a paginated query reading from a
 /// cursor.
 pub fn select_all_message_ids_for_rebuild(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
         .prepare(
@@ -100,7 +100,7 @@ pub fn select_all_message_ids_for_rebuild(
 /// pre-PreserveExisting Tantivy schema bump invalidates stale rows
 /// without explicit cleanup.
 pub fn select_extracted_text_status(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     content_hash: &crate::blob_hash::BlobHash,
     schema_version: i64,
 ) -> Result<Option<String>, String> {
@@ -199,7 +199,7 @@ pub fn reset_extracted_text_for_rebuild(conn: &impl WriteTarget) -> Result<(), S
 /// status-aware skip inside the worker. A second kick after the first
 /// finishes returns 0 rows.
 pub fn find_unindexed_cached_attachments(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     limit: usize,
 ) -> Result<Vec<UnindexedCachedAttachmentRow>, String> {
     // Attachments roadmap Phase 3: join against `attachment_blobs` so
@@ -237,7 +237,7 @@ pub fn find_unindexed_cached_attachments(
 /// Distinct `(account_id, message_id)` pairs whose `attachments` rows
 /// reference the given `content_hash`. Uses `idx_attachments_content_hash`.
 pub fn find_message_ids_referencing_content_hash(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     content_hash: &crate::blob_hash::BlobHash,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
@@ -288,7 +288,7 @@ pub fn delete_extracted_text_orphans_since(
 /// message_id)` pairs. Chunks transparently to stay under SQLite's
 /// host-parameter cap.
 pub fn select_messages_for_index_batch(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     pairs: &[(String, String)],
 ) -> Result<Vec<MessageIndexRow>, String> {
     if pairs.is_empty() {
@@ -463,6 +463,14 @@ mod tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
+    fn read(conn: &Connection) -> ReadConn<'_> {
+        ReadConn::from_raw(conn)
+    }
+
     #[test]
     fn find_pairs_returns_distinct() {
         let conn = open_test_db();
@@ -477,7 +485,7 @@ mod tests {
             rusqlite::params![hash_a, hash_b],
         )
         .expect("seed");
-        let mut pairs = find_message_ids_referencing_content_hash(&conn, &hash_a).expect("query");
+        let mut pairs = find_message_ids_referencing_content_hash(&read(&conn), &hash_a).expect("query");
         pairs.sort();
         assert_eq!(
             pairs,
@@ -492,7 +500,7 @@ mod tests {
     fn empty_hash_returns_empty() {
         let conn = open_test_db();
         let pairs =
-            find_message_ids_referencing_content_hash(&conn, &h(b"nope")).expect("query");
+            find_message_ids_referencing_content_hash(&read(&conn), &h(b"nope")).expect("query");
         assert!(pairs.is_empty());
     }
 
@@ -507,7 +515,7 @@ mod tests {
         )
         .expect("seed");
         let pairs = vec![("acc1".into(), "msg1".into())];
-        let rows = select_messages_for_index_batch(&conn, &pairs).expect("query");
+        let rows = select_messages_for_index_batch(&read(&conn), &pairs).expect("query");
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
         assert_eq!(r.message_id, "msg1");
@@ -622,7 +630,7 @@ mod tests {
             None,
         );
 
-        let rows = find_unindexed_cached_attachments(&conn, 1000).expect("query");
+        let rows = find_unindexed_cached_attachments(&read(&conn), 1000).expect("query");
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0].attachment_id, "live_unindexed");
         assert_eq!(rows[0].content_hash, Some(hash_a));
@@ -643,7 +651,7 @@ mod tests {
                 None,
             );
         }
-        let rows = find_unindexed_cached_attachments(&conn, 3).expect("query");
+        let rows = find_unindexed_cached_attachments(&read(&conn), 3).expect("query");
         assert_eq!(rows.len(), 3);
     }
 
@@ -682,7 +690,7 @@ mod tests {
             .expect("seed extracted_text");
         }
         let cursor = 150;
-        let dropped = delete_extracted_text_orphans_since(&conn, cursor).expect("delete");
+        let dropped = delete_extracted_text_orphans_since(&write(&conn), cursor).expect("delete");
         assert_eq!(dropped, 1, "exactly the post-cursor orphan dropped");
 
         // Verify which rows remain.

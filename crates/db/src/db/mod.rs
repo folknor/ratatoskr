@@ -13,7 +13,7 @@ pub mod time;
 pub mod types;
 pub use from_row::{FromRow, query_as, query_one};
 pub use db_read::{
-    ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement, apply_reader_pragmas,
+    ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement,
 };
 pub use rusqlite::Error as SqlError;
 use rusqlite::Connection;
@@ -110,10 +110,6 @@ pub fn apply_writer_pragmas(conn: &Connection) -> Result<(), String> {
          PRAGMA temp_store = MEMORY;",
     )
     .map_err(|e| format!("pragmas: {e}"))
-}
-
-pub fn apply_standard_pragmas(conn: &Connection) -> Result<(), String> {
-    apply_writer_pragmas(conn)
 }
 
 #[derive(Clone)]
@@ -225,7 +221,7 @@ pub trait WriteTransactionTarget: WriteTarget {
 
 impl<'a> WriteConn<'a> {
     #[doc(hidden)]
-    pub fn from_raw(raw: &'a Connection) -> Self {
+    pub(crate) fn from_raw(raw: &'a Connection) -> Self {
         Self { raw }
     }
 
@@ -316,96 +312,6 @@ impl<'a> WriteTransactionTarget for WriteConn<'a> {
     }
 }
 
-impl WriteTarget for Connection {
-    fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
-        Connection::execute(self, sql, params)
-    }
-
-    fn execute_batch(&self, sql: &str) -> rusqlite::Result<()> {
-        Connection::execute_batch(self, sql)
-    }
-
-    fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<WriteStatement<'b>> {
-        Ok(WriteStatement {
-            raw: Connection::prepare(self, sql)?,
-        })
-    }
-
-    fn prepare_cached<'b>(&'b self, sql: &str) -> rusqlite::Result<WriteCachedStatement<'b>> {
-        Ok(WriteCachedStatement {
-            raw: Connection::prepare_cached(self, sql)?,
-        })
-    }
-
-    fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> rusqlite::Result<T>
-    where
-        P: rusqlite::Params,
-        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
-    {
-        Connection::query_row(self, sql, params, f)
-    }
-
-    fn last_insert_rowid(&self) -> i64 {
-        Connection::last_insert_rowid(self)
-    }
-
-    fn changes(&self) -> u64 {
-        Connection::changes(self)
-    }
-}
-
-impl WriteTransactionTarget for Connection {
-    fn transaction<'a>(&'a self) -> rusqlite::Result<WriteTxn<'a>> {
-        Ok(WriteTxn {
-            raw: self.unchecked_transaction()?,
-        })
-    }
-}
-
-impl<'a> WriteTarget for rusqlite::Transaction<'a> {
-    fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
-        std::ops::Deref::deref(self).execute(sql, params)
-    }
-
-    fn execute_batch(&self, sql: &str) -> rusqlite::Result<()> {
-        std::ops::Deref::deref(self).execute_batch(sql)
-    }
-
-    fn prepare<'b>(&'b self, sql: &str) -> rusqlite::Result<WriteStatement<'b>> {
-        Ok(WriteStatement {
-            raw: std::ops::Deref::deref(self).prepare(sql)?,
-        })
-    }
-
-    fn prepare_cached<'b>(&'b self, sql: &str) -> rusqlite::Result<WriteCachedStatement<'b>> {
-        Ok(WriteCachedStatement {
-            raw: std::ops::Deref::deref(self).prepare_cached(sql)?,
-        })
-    }
-
-    fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> rusqlite::Result<T>
-    where
-        P: rusqlite::Params,
-        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
-    {
-        std::ops::Deref::deref(self).query_row(sql, params, f)
-    }
-
-    fn last_insert_rowid(&self) -> i64 {
-        std::ops::Deref::deref(self).last_insert_rowid()
-    }
-
-    fn changes(&self) -> u64 {
-        std::ops::Deref::deref(self).changes()
-    }
-}
-
-impl<'a> WriteConn<'a> {
-    pub fn unchecked_transaction<'b>(&'b self) -> rusqlite::Result<WriteTxn<'b>> {
-        self.transaction()
-    }
-}
-
 pub struct WriteTxn<'a> {
     raw: rusqlite::Transaction<'a>,
 }
@@ -491,6 +397,14 @@ pub struct WriteStatement<'a> {
 }
 
 impl<'a> WriteStatement<'a> {
+    pub fn column_count(&self) -> usize {
+        self.raw.column_count()
+    }
+
+    pub fn column_name(&self, index: usize) -> rusqlite::Result<&str> {
+        self.raw.column_name(index)
+    }
+
     pub fn execute<P: rusqlite::Params>(&mut self, params: P) -> rusqlite::Result<usize> {
         self.raw.execute(params)
     }

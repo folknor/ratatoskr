@@ -1,11 +1,11 @@
-use crate::db::ReadDbState;
+use crate::db::WriterPool;
 use crate::db::FromRow;
 use crate::db::types::{ContactAttachmentRow, ContactStats, RecentThread, SameDomainContact};
 use rusqlite::params;
 
-pub async fn db_get_contact_stats(db: &ReadDbState, email: String) -> Result<ContactStats, String> {
+pub async fn db_get_contact_stats(db: &WriterPool, email: String) -> Result<ContactStats, String> {
     log::debug!("Loading contact stats: email={email}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         conn.query_row(
             "SELECT COUNT(*) as cnt, MIN(date) as first_date, MAX(date) as last_date
@@ -19,11 +19,11 @@ pub async fn db_get_contact_stats(db: &ReadDbState, email: String) -> Result<Con
 }
 
 pub async fn db_get_contacts_from_same_domain(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
     limit: Option<i64>,
 ) -> Result<Vec<SameDomainContact>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         let domain = normalized
             .split('@')
@@ -50,10 +50,10 @@ pub async fn db_get_contacts_from_same_domain(
 }
 
 pub async fn db_get_latest_auth_result(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
 ) -> Result<Option<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         let result = conn
             .query_row(
@@ -70,11 +70,11 @@ pub async fn db_get_latest_auth_result(
 }
 
 pub async fn db_get_recent_threads_with_contact(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
     limit: Option<i64>,
 ) -> Result<Vec<RecentThread>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         let lim = limit.unwrap_or(5);
         let mut stmt = conn
@@ -95,11 +95,11 @@ pub async fn db_get_recent_threads_with_contact(
 }
 
 pub async fn db_get_attachments_from_contact(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
     limit: Option<i64>,
 ) -> Result<Vec<ContactAttachmentRow>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         let lim = limit.unwrap_or(5);
         let mut stmt = conn

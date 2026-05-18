@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::client::list_shared_folders;
 use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::types::{ImapFolder, NamespaceType};
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{
     PublicFolderItemRow, PublicFolderRow, get_public_folder_sync_depth,
     update_public_folder_rights, upsert_public_folder_items, upsert_public_folders,
@@ -75,7 +75,7 @@ pub fn parse_rights(rights: &str) -> ImapFolderRights {
 /// 3. Upserts into the `public_folders` table
 pub async fn discover_imap_public_folders(
     session: &mut ImapSession,
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
 ) -> Result<Vec<ImapPublicFolder>, String> {
     let namespace_info = discover_namespaces(session).await?;
@@ -121,7 +121,7 @@ pub async fn discover_imap_public_folders(
 /// and update the `public_folders` row with the resolved permissions.
 pub async fn check_folder_rights(
     session: &mut ImapSession,
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_path: &str,
 ) -> Result<ImapFolderRights, String> {
@@ -136,7 +136,7 @@ pub async fn check_folder_rights(
     let can_write = rights.can_write;
     let can_delete = rights.can_delete;
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         update_public_folder_rights(conn, &account_id, &folder_path, can_read, can_insert, can_write, can_delete)
     })
     .await?;
@@ -153,6 +153,7 @@ pub async fn check_folder_rights(
 pub async fn sync_imap_public_folder(
     session: &mut ImapSession,
     db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_path: &str,
 ) -> Result<PublicFolderSyncResult, String> {
@@ -178,7 +179,7 @@ pub async fn sync_imap_public_folder(
 
     if search_result.uids.is_empty() {
         log::info!("IMAP public folder {folder_path}: no messages matching SINCE {since_str}");
-        save_sync_state(db, account_id, folder_path, now).await?;
+        save_sync_state(writer, account_id, folder_path, now).await?;
         return Ok(PublicFolderSyncResult {
             folder_id: folder_path.to_string(),
             ..Default::default()
@@ -196,9 +197,9 @@ pub async fn sync_imap_public_folder(
 
     // Persist messages to public_folder_items
     let new_items =
-        upsert_public_folder_items_imap(db, account_id, folder_path, &fetch_result.messages).await?;
+        upsert_public_folder_items_imap(writer, account_id, folder_path, &fetch_result.messages).await?;
 
-    save_sync_state(db, account_id, folder_path, now).await?;
+    save_sync_state(writer, account_id, folder_path, now).await?;
 
     Ok(PublicFolderSyncResult {
         folder_id: folder_path.to_string(),
@@ -214,14 +215,14 @@ pub async fn sync_imap_public_folder(
 /// Uses the decoded folder path as `folder_id` since IMAP folders don't have
 /// opaque IDs like EWS - the path IS the identifier.
 async fn persist_discovered_folders(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folders: &[ImapFolder],
 ) -> Result<(), String> {
     let account_id = account_id.to_string();
     let folders: Vec<ImapFolder> = folders.to_vec();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let rows: Vec<PublicFolderRow> = folders
             .iter()
             .map(|f| {
@@ -258,7 +259,7 @@ async fn load_sync_state(
 ) -> Result<(Option<i64>, Option<i64>), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let result = conn
             .query_row(
                 "SELECT last_sync_timestamp, last_full_scan_at \
@@ -281,14 +282,14 @@ async fn load_sync_state(
 
 /// Save sync state after a sync run.
 async fn save_sync_state(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
     last_sync_timestamp: i64,
 ) -> Result<(), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO public_folder_sync_state (account_id, folder_id, last_sync_timestamp) \
              VALUES (?1, ?2, ?3) \
@@ -310,13 +311,13 @@ async fn load_sync_depth_days(
 ) -> Result<i32, String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| get_public_folder_sync_depth(conn, &account_id, &folder_id))
+    db.with_read(move |conn| get_public_folder_sync_depth(conn, &account_id, &folder_id))
         .await
 }
 
 /// Upsert fetched messages into `public_folder_items`. Returns count of new items.
 async fn upsert_public_folder_items_imap(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
     messages: &[super::types::ImapMessage],
@@ -325,7 +326,7 @@ async fn upsert_public_folder_items_imap(
     let folder_id = folder_id.to_string();
     let messages: Vec<super::types::ImapMessage> = messages.to_vec();
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         // Build rows, skipping messages without a stable Message-ID
         let rows: Vec<PublicFolderItemRow> = messages
             .iter()

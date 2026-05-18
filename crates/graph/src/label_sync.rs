@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::client::GraphClient;
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use label_colors::preset_colors;
 use common::types::{ImportanceLevel, LabelKind};
@@ -29,6 +29,7 @@ pub async fn graph_label_sync(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<usize, String> {
     let response: CategoryListResponse =
         client.get_json("/me/outlook/masterCategories", db).await?;
@@ -38,9 +39,9 @@ pub async fn graph_label_sync(
     let count = categories.len();
     log::info!("[Graph] Label sync for account {account_id}: {count} categories fetched");
 
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("label sync tx: {e}"))?;
 
         let mut rows: Vec<LabelWriteRow> = categories

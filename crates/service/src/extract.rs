@@ -476,7 +476,7 @@ async fn run_extraction_pipeline(
     let hash_for_check = work.content_hash;
     let existing = inner
         .read_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             db::db::queries_extra::select_extracted_text_status(
                 conn,
                 &hash_for_check,
@@ -546,7 +546,7 @@ async fn run_extraction_pipeline(
     let hash_for_meta = work.content_hash;
     let meta = inner
         .read_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT filename, mime_type FROM attachments \
@@ -769,7 +769,7 @@ async fn fan_out_reindex(inner: &Arc<ExtractRuntimeInner>, content_hash: &db::bl
     let hash = *content_hash;
     let pairs_result = inner
         .read_db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             db::db::queries_extra::find_message_ids_referencing_content_hash(conn, &hash)
         })
         .await;
@@ -800,7 +800,7 @@ async fn fan_out_reindex_chunk(
 ) -> Result<(), String> {
     let pairs_for_msgs = pairs.to_vec();
     let pairs_for_atts = pairs.to_vec();
-    let messages_fut = inner.db.with_write(move |conn| {
+    let messages_fut = inner.db.with_read(move |conn| {
         db::db::queries_extra::select_messages_for_index_batch(conn, &pairs_for_msgs)
     });
     let attachments_fut = inner.db.with_read(move |conn| {

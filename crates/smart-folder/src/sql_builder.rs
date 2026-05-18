@@ -1,5 +1,3 @@
-use rusqlite::Connection;
-
 use db_read::db::ReadConn;
 use db_read::db::FromRow;
 use db_read::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
@@ -13,37 +11,6 @@ use super::parser::ParsedQuery;
 /// Query threads matching a parsed smart folder query within the given account scope.
 ///
 /// When `account:` operators are present in the parsed query, they override the scope parameter.
-pub fn query_threads(
-    conn: &Connection,
-    parsed: &ParsedQuery,
-    scope: &AccountScope,
-    limit: Option<i64>,
-    offset: Option<i64>,
-) -> Result<Vec<DbThread>, String> {
-    let lim = limit.unwrap_or(50);
-    let off = offset.unwrap_or(0);
-    let mut ctx = QueryContext::new();
-
-    build_message_clauses(&mut ctx, parsed);
-    build_effective_scope(&mut ctx, parsed, scope);
-    build_thread_flag_clauses(&mut ctx, parsed);
-    build_label_clause(&mut ctx, parsed);
-
-    let where_str = ctx.where_string();
-    let thread_flag_str = ctx.thread_flag_where_string();
-
-    let sql = build_thread_select_sql(&where_str, &thread_flag_str, ctx.next_idx);
-    log::debug!(
-        "Smart folder SQL built: msg_clauses={}, thread_flag_clauses={}",
-        ctx.msg_clauses.len(),
-        ctx.thread_flag_clauses.len()
-    );
-    ctx.params.push(Box::new(lim));
-    ctx.params.push(Box::new(off));
-
-    execute_thread_query(conn, &sql, &ctx.params)
-}
-
 pub fn query_threads_read(
     conn: &ReadConn<'_>,
     parsed: &ParsedQuery,
@@ -76,30 +43,6 @@ pub fn query_threads_read(
 }
 
 /// Count distinct threads matching a parsed query (used for unread counts).
-pub fn count_matching(
-    conn: &Connection,
-    parsed: &ParsedQuery,
-    scope: &AccountScope,
-) -> Result<i64, String> {
-    let mut ctx = QueryContext::new();
-
-    build_message_clauses(&mut ctx, parsed);
-    build_effective_scope(&mut ctx, parsed, scope);
-    build_thread_flag_clauses(&mut ctx, parsed);
-    build_label_clause(&mut ctx, parsed);
-
-    let where_str = ctx.where_string();
-    let thread_flag_str = ctx.thread_flag_where_string();
-
-    let sql = build_count_sql(&where_str, &thread_flag_str);
-
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        ctx.params.iter().map(AsRef::as_ref).collect();
-
-    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
-        .map_err(|e| e.to_string())
-}
-
 pub fn count_matching_read(
     conn: &ReadConn<'_>,
     parsed: &ParsedQuery,
@@ -586,20 +529,6 @@ fn build_count_sql(msg_where: &str, thread_flag_where: &str) -> String {
 
 // ── Execution ───────────────────────────────────────────────
 
-fn execute_thread_query(
-    conn: &Connection,
-    sql: &str,
-    params: &[Box<dyn rusqlite::types::ToSql>],
-) -> Result<Vec<DbThread>, String> {
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(AsRef::as_ref).collect();
-
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    stmt.query_map(param_refs.as_slice(), DbThread::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-}
-
 fn execute_thread_query_read(
     conn: &ReadConn<'_>,
     sql: &str,
@@ -620,6 +549,7 @@ fn execute_thread_query_read(
 mod tests {
     use super::*;
     use crate::parser::parse_query;
+    use rusqlite::Connection;
 
     /// Spin up an in-memory DB with the real migration schema, then seed
     /// minimal data for query testing.
@@ -627,9 +557,112 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragmas");
-        db::db::migrations::run_all(&conn).expect("migrations");
+        create_test_schema(&conn);
         seed_test_data(&conn);
         conn
+    }
+
+    fn create_test_schema(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE accounts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                display_name TEXT,
+                provider TEXT NOT NULL,
+                auth_method TEXT
+             );
+             CREATE TABLE threads (
+                id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                subject TEXT,
+                snippet TEXT,
+                last_message_at INTEGER,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                is_starred INTEGER NOT NULL DEFAULT 0,
+                is_important INTEGER NOT NULL DEFAULT 0,
+                has_attachments INTEGER NOT NULL DEFAULT 0,
+                is_snoozed INTEGER NOT NULL DEFAULT 0,
+                snooze_until INTEGER,
+                is_pinned INTEGER NOT NULL DEFAULT 0,
+                is_muted INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, id)
+             );
+             CREATE TABLE messages (
+                id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                from_address TEXT,
+                from_name TEXT,
+                to_addresses TEXT,
+                subject TEXT,
+                snippet TEXT,
+                date INTEGER NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                is_starred INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, id)
+             );
+             CREATE TABLE folders (
+                id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                imap_folder_path TEXT,
+                PRIMARY KEY (account_id, id)
+             );
+             CREATE TABLE labels (
+                id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                PRIMARY KEY (account_id, id)
+             );
+             CREATE TABLE label_groups (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                color_bg TEXT,
+                color_fg TEXT
+             );
+             CREATE TABLE label_group_members (
+                group_id INTEGER NOT NULL,
+                account_id TEXT NOT NULL,
+                label_id TEXT NOT NULL
+             );
+             CREATE TABLE thread_folders (
+                thread_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL
+             );
+             CREATE TABLE thread_labels (
+                thread_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                label_id TEXT NOT NULL
+             );
+             CREATE TABLE pending_thread_label_intents (
+                account_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                label_id TEXT NOT NULL,
+                op TEXT NOT NULL,
+                generation_seen INTEGER NOT NULL,
+                action_id TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (account_id, thread_id, label_id)
+             );
+             CREATE TABLE attachments (
+                id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                filename TEXT,
+                mime_type TEXT,
+                size INTEGER
+             );
+             CREATE TABLE contacts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                display_name TEXT,
+                frequency INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .expect("test schema");
     }
 
     fn seed_test_data(conn: &Connection) {
@@ -751,7 +784,7 @@ mod tests {
     fn account_filters_by_display_name() {
         let conn = setup_test_db();
         let parsed = parse_query("account:Work");
-        let results = query_threads(&conn, &parsed, &AccountScope::All, None, None);
+        let results = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None);
         let threads = results.expect("query should succeed");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc1");
@@ -761,7 +794,7 @@ mod tests {
     fn account_filters_by_email() {
         let conn = setup_test_db();
         let parsed = parse_query("account:personal.com");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc2");
     }
@@ -772,7 +805,7 @@ mod tests {
         let parsed = parse_query("account:Work");
         // Scope says acc2, but account: operator should override.
         let scope = AccountScope::Single("acc2".to_owned());
-        let threads = query_threads(&conn, &parsed, &scope, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &scope, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc1");
     }
@@ -785,13 +818,13 @@ mod tests {
         // "Receipts" is a folder on acc1. "Projects" is a tag label and label
         // group, so it must not match `folder:`.
         let parsed = parse_query("folder:Receipts");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
 
         let projects = parse_query("folder:Projects");
         let no_threads =
-            query_threads(&conn, &projects, &AccountScope::All, None, None).expect("query");
+            query_threads_read(&ReadConn::from_raw(&conn), &projects, &AccountScope::All, None, None).expect("query");
         assert!(no_threads.is_empty(), "tag labels must not match folder:");
     }
 
@@ -801,7 +834,7 @@ mod tests {
     fn in_inbox_finds_both_accounts() {
         let conn = setup_test_db();
         let parsed = parse_query("in:inbox");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 2);
     }
 
@@ -809,7 +842,7 @@ mod tests {
     fn in_starred_uses_thread_flag() {
         let conn = setup_test_db();
         let parsed = parse_query("in:starred");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert!(threads[0].is_starred);
     }
@@ -821,7 +854,7 @@ mod tests {
 
         let mut parsed = parse_query("is:starred");
         parsed.after = Some(types::DateBound::after(2500));
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
 
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t3");
@@ -848,7 +881,7 @@ mod tests {
     fn is_tagged_finds_threads_with_labels() {
         let conn = setup_test_db();
         let parsed = parse_query("is:tagged");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         // Only t1 renders the Projects label group through its member tag.
         // t2's only membership is INBOX, which is a folder and does not count.
         assert_eq!(threads.len(), 1);
@@ -861,7 +894,7 @@ mod tests {
     fn label_filters_by_label_group_name() {
         let conn = setup_test_db();
         let parsed = parse_query("label:Projects");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -872,7 +905,7 @@ mod tests {
     fn has_contact_filters_by_known_sender() {
         let conn = setup_test_db();
         let parsed = parse_query("has:contact");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         // Only m1's sender (sender@example.com) is in contacts.
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
@@ -884,7 +917,7 @@ mod tests {
     fn has_pdf_filters_attachments() {
         let conn = setup_test_db();
         let parsed = parse_query("has:pdf");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -893,7 +926,7 @@ mod tests {
     fn has_image_filters_attachments() {
         let conn = setup_test_db();
         let parsed = parse_query("has:image");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -902,7 +935,7 @@ mod tests {
     fn type_glob_pattern_matches() {
         let conn = setup_test_db();
         let parsed = parse_query("type:image/jpeg");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
     }
 
@@ -912,7 +945,7 @@ mod tests {
     fn from_matches_contact_display_name() {
         let conn = setup_test_db();
         let parsed = parse_query("from:\"Friendly Sender\"");
-        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -923,7 +956,7 @@ mod tests {
     fn count_matching_returns_correct_count() {
         let conn = setup_test_db();
         let parsed = parse_query("in:inbox");
-        let count = count_matching(&conn, &parsed, &AccountScope::All).expect("count");
+        let count = count_matching_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All).expect("count");
         assert_eq!(count, 2);
     }
 
@@ -935,7 +968,7 @@ mod tests {
         let mut parsed = parse_query("is:starred");
         parsed.after = Some(types::DateBound::after(2500));
         parsed.is_unread = Some(true);
-        let count = count_matching(&conn, &parsed, &AccountScope::All).expect("count");
+        let count = count_matching_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All).expect("count");
 
         assert_eq!(count, 1);
     }

@@ -99,7 +99,7 @@ pub async fn graph_initial_sync(
         db: read_db,
         progress,
     };
-    let folder_map = sync_folders(client, &pctx).await?;
+    let folder_map = sync_folders(client, &pctx, db).await?;
     client.set_folder_map(folder_map.clone()).await;
 
     emit_progress(&sctx, "folders", "", 1, 1, 0);
@@ -159,7 +159,7 @@ pub async fn graph_initial_sync(
     for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
         match bootstrap_delta_token(client, read_db, folder_id).await {
             Ok(delta_link) => {
-                save_delta_token(client, read_db, account_id, folder_id, &delta_link).await?;
+                save_delta_token(client, &db.writer_pool(), account_id, folder_id, &delta_link).await?;
             }
             Err(e) => {
                 log::warn!("Failed to bootstrap delta token for folder {folder_id}: {e}");
@@ -172,7 +172,7 @@ pub async fn graph_initial_sync(
     }
 
     if let Err(e) =
-        super::contact_sync::graph_contacts_initial_sync(client, account_id, read_db).await
+        super::contact_sync::graph_contacts_initial_sync(client, account_id, read_db, &db.writer_pool()).await
     {
         log::warn!("Contact initial sync failed (non-fatal): {e}");
     }
@@ -181,7 +181,7 @@ pub async fn graph_initial_sync(
     // labels. Delta-cadence runs again every 20th cycle from
     // `graph_delta_sync`; without this initial pass, a fresh account
     // would sit without categories for the first 20 delta cycles.
-    if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db).await {
+    if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool()).await {
         log::warn!("Master category initial sync failed (non-fatal): {e}");
     }
 
@@ -249,7 +249,7 @@ pub async fn graph_delta_sync(
         cancellation_token,
     };
 
-    let cycle = sync_state::increment_graph_sync_cycle(read_db, account_id).await?;
+    let cycle = sync_state::increment_graph_sync_cycle(&db.writer_pool(), account_id).await?;
     log::info!(
         "[Graph] Starting delta sync for account {account_id} (cycle={cycle})"
     );
@@ -270,7 +270,7 @@ pub async fn graph_delta_sync(
             db: read_db,
             progress,
         };
-        let map = sync_folders(client, &pctx).await?;
+        let map = sync_folders(client, &pctx, db).await?;
         client.set_folder_map(map.clone()).await;
         client.set_folder_map_synced().await;
 
@@ -283,7 +283,7 @@ pub async fn graph_delta_sync(
                 log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
                 match bootstrap_delta_token_latest(client, read_db, folder_id).await {
                     Ok(delta_link) => {
-                        save_delta_token(client, read_db, account_id, folder_id, &delta_link)
+                        save_delta_token(client, &db.writer_pool(), account_id, folder_id, &delta_link)
                             .await?;
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
@@ -302,7 +302,7 @@ pub async fn graph_delta_sync(
             .collect();
         for stale_id in &stale_ids {
             log::info!("Graph delta sync: removing stale delta token for folder {stale_id}");
-            delete_delta_token(client, read_db, account_id, stale_id).await?;
+            delete_delta_token(client, &db.writer_pool(), account_id, stale_id).await?;
             tokens.remove(stale_id);
         }
 
@@ -315,7 +315,7 @@ pub async fn graph_delta_sync(
             db: read_db,
             progress,
         };
-        let map = sync_folders(client, &pctx).await?;
+        let map = sync_folders(client, &pctx, db).await?;
         client.set_folder_map(map.clone()).await;
         client.set_folder_map_synced().await;
         map
@@ -367,11 +367,11 @@ pub async fn graph_delta_sync(
     // delta runs through `CalendarRuntime` (Phase 5), not from this path.
     if cycle.is_multiple_of(20) {
         if let Err(e) =
-            super::contact_sync::graph_contacts_delta_sync(client, account_id, read_db).await
+            super::contact_sync::graph_contacts_delta_sync(client, account_id, read_db, &db.writer_pool()).await
         {
             log::warn!("Contact delta sync failed (non-fatal): {e}");
         }
-        if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db).await
+        if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool()).await
         {
             log::warn!("Label sync failed (non-fatal): {e}");
         }
@@ -483,7 +483,7 @@ async fn sync_folder_delta(
         if let Some(ref next_link) = page.next_link {
             current_link = next_link.clone();
         } else if let Some(ref new_delta) = page.delta_link {
-            save_delta_token(sctx.client, sctx.db, sctx.account_id, folder_id, new_delta).await?;
+            save_delta_token(sctx.client, &sctx.write_db.writer_pool(), sctx.account_id, folder_id, new_delta).await?;
             break;
         } else {
             // No next or delta link - shouldn't happen, but break to avoid infinite loop

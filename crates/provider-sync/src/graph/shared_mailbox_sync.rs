@@ -46,6 +46,7 @@ pub async fn sync_shared_mailbox(
         sync_state::load_shared_mailbox_delta_tokens(read_db, account_id, mailbox_id).await?;
 
     let now = chrono::Utc::now().timestamp();
+    let writer_pool = db.writer_pool();
 
     if tokens.is_empty() {
         log::info!("Shared mailbox {mailbox_id}: no delta tokens found, running initial sync");
@@ -65,7 +66,7 @@ pub async fn sync_shared_mailbox(
         {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db, account_id, mailbox_id, now, None,
+                    &writer_pool, account_id, mailbox_id, now, None,
                 )
                 .await?;
                 Ok(SyncResult::default())
@@ -73,7 +74,7 @@ pub async fn sync_shared_mailbox(
             Err(e) => {
                 log::warn!("Shared mailbox {mailbox_id} initial sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db,
+                    &writer_pool,
                     account_id,
                     mailbox_id,
                     now,
@@ -103,7 +104,7 @@ pub async fn sync_shared_mailbox(
         {
             Ok(sync_result) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db, account_id, mailbox_id, now, None,
+                    &writer_pool, account_id, mailbox_id, now, None,
                 )
                 .await?;
                 Ok(sync_result)
@@ -111,7 +112,7 @@ pub async fn sync_shared_mailbox(
             Err(e) => {
                 log::warn!("Shared mailbox {mailbox_id} delta sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db,
+                    &writer_pool,
                     account_id,
                     mailbox_id,
                     now,

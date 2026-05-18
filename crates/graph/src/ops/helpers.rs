@@ -75,21 +75,17 @@ pub(super) fn graph_folder_to_mutation(
 }
 
 pub(super) async fn delete_folder_delta_token(
+    client: &GraphClient,
     ctx: &ProviderCtx<'_>,
     folder_id: &str,
 ) -> Result<(), String> {
-    let account_id = ctx.account_id.to_string();
-    let folder_id = folder_id.to_string();
-    ctx.db
-        .with_conn(move |conn| {
-            conn.execute(
-                "DELETE FROM graph_folder_delta_tokens WHERE account_id = ?1 AND folder_id = ?2",
-                rusqlite::params![account_id, folder_id],
-            )
-            .map_err(|e| format!("delete graph folder delta token: {e}"))?;
-            Ok(())
-        })
-        .await
+    let writer = client.writer_pool().ok_or_else(|| {
+        format!(
+            "Graph folder delta token delete for {} requires a writer handle",
+            ctx.account_id
+        )
+    })?;
+    sync::state::delete_graph_delta_token(&writer, ctx.account_id, folder_id).await
 }
 
 /// Query local DB for message IDs belonging to a thread.

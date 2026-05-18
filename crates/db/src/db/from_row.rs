@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use super::ReadConn;
+use super::{ReadConn, WriteConn, WriteTxn};
 
 /// Trait for types that can be constructed from a `rusqlite::Row`.
 pub trait FromRow: Sized {
@@ -178,6 +178,8 @@ macro_rules! impl_query_source {
 
 impl_query_source!(Connection);
 impl_query_source!(ReadConn<'_>);
+impl_query_source!(WriteConn<'_>);
+impl_query_source!(WriteTxn<'_>);
 
 /// Execute a query and map all rows to `T` using `FromRow`.
 pub fn query_as<T: FromRow>(

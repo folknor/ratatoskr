@@ -16,7 +16,7 @@
 
 use rusqlite::params;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, ReadError, WriterPool, WriteTarget};
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_server_id_and_source_sync, upsert_contact_sync,
 };
@@ -196,7 +196,8 @@ fn extract_notes(card: &bifrost_jmap::contact_card::ContactCard) -> Option<Strin
 pub async fn jmap_contacts_initial_sync(
     client: &JmapClient,
     account_id: &str,
-    db: &ReadDbState,
+    _db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<usize, String> {
     log::info!("[JMAP-Contacts] Starting initial sync for account {account_id}");
 
@@ -229,8 +230,8 @@ pub async fn jmap_contacts_initial_sync(
     let count = extracted.len();
 
     let aid = account_id.to_string();
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    writer.with_write(move |conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for contact in &extracted {
             persist_jmap_contact(&tx, &aid, contact)?;
         }
@@ -240,7 +241,7 @@ pub async fn jmap_contacts_initial_sync(
     .await?;
 
     // Save state for delta sync
-    sync_state::save_jmap_sync_state(db, account_id, "ContactCard", &state).await?;
+    sync_state::save_jmap_sync_state(writer, account_id, "ContactCard", &state).await?;
 
     log::info!("[JMAP-Contacts] Initial sync complete for account {account_id}: {count} contacts");
 
@@ -261,13 +262,14 @@ pub async fn jmap_contacts_delta_sync(
     client: &JmapClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<usize, String> {
     let state = sync_state::load_jmap_sync_state(db, account_id, "ContactCard").await?;
     let Some(mut since_state) = state else {
         log::warn!(
             "[JMAP-Contacts] No ContactCard state for account {account_id} - running initial sync"
         );
-        return jmap_contacts_initial_sync(client, account_id, db).await;
+        return jmap_contacts_initial_sync(client, account_id, db, writer).await;
     };
 
     log::info!("[JMAP-Contacts] Starting delta sync for account {account_id}");
@@ -308,8 +310,8 @@ pub async fn jmap_contacts_delta_sync(
 
                 let aid = account_id.to_string();
                 let batch_count = extracted.len();
-                db.with_conn(move |conn| {
-                    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+                writer.with_write(move |conn| {
+                    let tx = conn.transaction().map_err(|e| e.to_string())?;
                     for contact in &extracted {
                         persist_jmap_contact(&tx, &aid, contact)?;
                     }
@@ -327,7 +329,7 @@ pub async fn jmap_contacts_delta_sync(
             let destroyed_ids: Vec<String> = destroyed.to_vec();
             let aid = account_id.to_string();
             let destroy_count = destroyed_ids.len();
-            db.with_conn(move |conn| {
+            writer.with_write(move |conn| {
                 for server_id in &destroyed_ids {
                     delete_jmap_contact(conn, &aid, server_id)?;
                 }
@@ -345,7 +347,7 @@ pub async fn jmap_contacts_delta_sync(
     }
 
     // Save updated state
-    sync_state::save_jmap_sync_state(db, account_id, "ContactCard", &since_state).await?;
+    sync_state::save_jmap_sync_state(writer, account_id, "ContactCard", &since_state).await?;
 
     log::info!(
         "[JMAP-Contacts] Delta sync complete for account {account_id}: {total_affected} affected"
@@ -442,7 +444,7 @@ pub async fn get_jmap_contact_server_info(
     db: &ReadDbState,
     email: String,
 ) -> Result<Option<JmapContactServerInfo>, String> {
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let normalized = email.to_lowercase();
         conn.query_row(
             "SELECT server_id, account_id FROM contacts \
@@ -457,7 +459,7 @@ pub async fn get_jmap_contact_server_info(
         )
         .map(Some)
         .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             other => Err(format!("lookup jmap contact server info: {other}")),
         })
     })
@@ -503,7 +505,7 @@ async fn fetch_contact_batch(
 /// - Respect `display_name_overridden` flag
 /// - Track `server_id` and `account_id` for write-back
 fn persist_jmap_contact(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     contact: &ExtractedContact,
 ) -> Result<(), String> {
@@ -536,7 +538,7 @@ fn persist_jmap_contact(
 /// Only deletes if the contact is still sourced from JMAP (don't remove
 /// user-owned contacts).
 fn delete_jmap_contact(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     server_id: &str,
 ) -> Result<(), String> {

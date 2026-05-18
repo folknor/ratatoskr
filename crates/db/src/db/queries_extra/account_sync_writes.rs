@@ -7,8 +7,9 @@
 //! Each function takes typed writer access; callers wrap in
 //! `WriteDbState::with_write(...)` if they need async dispatch.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
+use crate::db::from_row::{query_one, FromRow, QuerySource};
 use crate::db::{WriteConn, WriteTarget};
 
 /// Mark every `local_drafts` row whose `sync_status = 'sending'` as `'failed'`.
@@ -43,18 +44,28 @@ pub fn set_account_history_id(
 ///
 /// Returns `Ok(None)` when no history cursor has been stored yet (pre-initial-sync).
 pub fn get_account_history_id(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     account_id: &str,
 ) -> Result<Option<String>, String> {
-    use rusqlite::OptionalExtension;
-    conn.query_row(
+    struct HistoryRow {
+        history_id: Option<String>,
+    }
+
+    impl FromRow for HistoryRow {
+        fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+            Ok(Self {
+                history_id: row.get("history_id")?,
+            })
+        }
+    }
+
+    query_one::<HistoryRow>(
+        conn,
         "SELECT history_id FROM accounts WHERE id = ?1",
-        params![account_id],
-        |row| row.get("history_id"),
+        &[&account_id],
     )
-    .optional()
+    .map(|row| row.and_then(|row| row.history_id))
     .map_err(|e| format!("get_account_history_id: {e}"))
-    .map(Option::flatten)
 }
 
 /// Mark `initial_sync_completed = 1` for an account without changing `history_id`.
@@ -128,7 +139,7 @@ pub fn delete_thread_by_account_and_id(
 /// Delete a row from the `settings` table by key.
 ///
 /// Returns `Ok(())` whether or not the key existed.
-pub fn delete_setting(conn: &Connection, key: &str) -> Result<(), String> {
+pub fn delete_setting(conn: &impl WriteTarget, key: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM settings WHERE key = ?1",
         params![key],

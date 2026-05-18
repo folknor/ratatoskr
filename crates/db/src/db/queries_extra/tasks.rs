@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::WriterPool;
 use super::super::types::{DbTask, DbTaskTag};
 use super::dynamic_update;
 use rusqlite::{Row, params};
@@ -36,11 +36,11 @@ fn row_to_task_tag(row: &Row<'_>) -> rusqlite::Result<DbTaskTag> {
 }
 
 pub async fn db_get_tasks_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: Option<String>,
     include_completed: Option<bool>,
 ) -> Result<Vec<DbTask>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         if include_completed.unwrap_or(false) {
             let mut stmt = conn
                 .prepare(
@@ -68,8 +68,8 @@ pub async fn db_get_tasks_for_account(
     .await
 }
 
-pub async fn db_get_task_by_id(db: &ReadDbState, id: String) -> Result<Option<DbTask>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_task_by_id(db: &WriterPool, id: String) -> Result<Option<DbTask>, String> {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare("SELECT * FROM tasks WHERE id = ?1")
             .map_err(|e| e.to_string())?;
@@ -86,11 +86,11 @@ pub async fn db_get_task_by_id(db: &ReadDbState, id: String) -> Result<Option<Db
 }
 
 pub async fn db_get_tasks_for_thread(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
 ) -> Result<Vec<DbTask>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM tasks WHERE thread_account_id = ?1 AND thread_id = ?2
@@ -105,8 +105,8 @@ pub async fn db_get_tasks_for_thread(
     .await
 }
 
-pub async fn db_get_subtasks(db: &ReadDbState, parent_id: String) -> Result<Vec<DbTask>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_subtasks(db: &WriterPool, parent_id: String) -> Result<Vec<DbTask>, String> {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC",
@@ -122,7 +122,7 @@ pub async fn db_get_subtasks(db: &ReadDbState, parent_id: String) -> Result<Vec<
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_insert_task(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     account_id: Option<String>,
     title: String,
@@ -136,7 +136,7 @@ pub async fn db_insert_task(
     recurrence_rule: Option<String>,
     tags_json: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO tasks (id, account_id, title, description, priority, due_date, parent_id, thread_id, thread_account_id, sort_order, recurrence_rule, tags_json)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
@@ -163,7 +163,7 @@ pub async fn db_insert_task(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_update_task(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     title: Option<String>,
     description: Option<String>,
@@ -178,7 +178,7 @@ pub async fn db_update_task(
     clear_recurrence_rule: Option<bool>,
     clear_next_recurrence_at: Option<bool>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
         sets.push(("updated_at", Box::new(chrono::Utc::now().timestamp())));
         if let Some(v) = title {
@@ -219,8 +219,8 @@ pub async fn db_update_task(
     .await
 }
 
-pub async fn db_delete_task(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_delete_task(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -228,8 +228,8 @@ pub async fn db_delete_task(db: &ReadDbState, id: String) -> Result<(), String> 
     .await
 }
 
-pub async fn db_complete_task(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_complete_task(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "UPDATE tasks SET is_completed = 1, completed_at = ?2, updated_at = ?2 WHERE id = ?1",
@@ -241,8 +241,8 @@ pub async fn db_complete_task(db: &ReadDbState, id: String) -> Result<(), String
     .await
 }
 
-pub async fn db_uncomplete_task(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_uncomplete_task(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "UPDATE tasks SET is_completed = 0, completed_at = NULL, updated_at = ?2 WHERE id = ?1",
@@ -254,9 +254,9 @@ pub async fn db_uncomplete_task(db: &ReadDbState, id: String) -> Result<(), Stri
     .await
 }
 
-pub async fn db_reorder_tasks(db: &ReadDbState, task_ids: Vec<String>) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+pub async fn db_reorder_tasks(db: &WriterPool, task_ids: Vec<String>) -> Result<(), String> {
+    db.with_write(move |conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         let now = chrono::Utc::now().timestamp();
         for (i, task_id) in task_ids.iter().enumerate() {
             #[allow(clippy::cast_possible_wrap)]
@@ -274,10 +274,10 @@ pub async fn db_reorder_tasks(db: &ReadDbState, task_ids: Vec<String>) -> Result
 }
 
 pub async fn db_get_incomplete_task_count(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: Option<String>,
 ) -> Result<i64, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.query_row(
             "SELECT COUNT(*) AS cnt FROM tasks WHERE (account_id = ?1 OR account_id IS NULL) AND is_completed = 0",
             params![account_id],
@@ -289,10 +289,10 @@ pub async fn db_get_incomplete_task_count(
 }
 
 pub async fn db_get_task_tags(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: Option<String>,
 ) -> Result<Vec<DbTaskTag>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare("SELECT * FROM task_tags WHERE account_id = ?1 OR account_id IS NULL ORDER BY sort_order ASC")
             .map_err(|e| e.to_string())?;
@@ -305,12 +305,12 @@ pub async fn db_get_task_tags(
 }
 
 pub async fn db_upsert_task_tag(
-    db: &ReadDbState,
+    db: &WriterPool,
     tag: String,
     account_id: Option<String>,
     color: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO task_tags (tag, account_id, color)
                  VALUES (?1, ?2, ?3)
@@ -324,11 +324,11 @@ pub async fn db_upsert_task_tag(
 }
 
 pub async fn db_delete_task_tag(
-    db: &ReadDbState,
+    db: &WriterPool,
     tag: String,
     account_id: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "DELETE FROM task_tags WHERE tag = ?1 AND account_id = ?2",
             params![tag, account_id],

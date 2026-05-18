@@ -184,33 +184,9 @@ impl ReadDbState {
         f(&read)
     }
 
-    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
-    where
-        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
-        T: Send + 'static,
-    {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
-            f(&conn)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
-    }
-
-    pub fn with_conn_sync<F, T>(&self, f: F) -> Result<T, String>
-    where
-        F: FnOnce(&Connection) -> Result<T, String>,
-    {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("db lock poisoned: {e}"))?;
-        f(&conn)
-    }
 }
 
-pub fn apply_reader_pragmas(conn: &Connection) -> Result<(), String> {
+pub(crate) fn apply_reader_pragmas(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA busy_timeout = 15000;
          PRAGMA query_only = ON;

@@ -391,7 +391,7 @@ async fn filter_deleted_messages(docs: &mut Vec<search::SearchDocument>, db_read
     }
     let ids: Vec<String> = docs.iter().map(|d| d.message_id.clone()).collect();
     let result = db_read
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             let mut surviving: std::collections::HashSet<String> =
                 std::collections::HashSet::with_capacity(ids.len());
             for chunk in ids.chunks(500) {

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool, WriteTarget};
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
 };
@@ -21,6 +21,7 @@ pub async fn graph_contacts_initial_sync(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<(), String> {
     log::info!("[Graph] Starting initial contact sync for account {account_id}");
     let folders = fetch_contact_folders(client, db).await?;
@@ -33,11 +34,11 @@ pub async fn graph_contacts_initial_sync(
         folders.len()
     );
 
-    full_sync_contact_folders(client, account_id, db, &folders).await?;
+    full_sync_contact_folders(client, account_id, db, writer, &folders).await?;
 
     for folder in &folders {
         let delta_link = bootstrap_contact_delta_token(client, db, &folder.id).await?;
-        sync_state::save_graph_contact_delta_token(db, account_id, &folder.id, &delta_link).await?;
+        sync_state::save_graph_contact_delta_token(writer, account_id, &folder.id, &delta_link).await?;
     }
 
     Ok(())
@@ -50,6 +51,7 @@ pub async fn graph_contacts_delta_sync(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
 ) -> Result<(), String> {
     let tokens = sync_state::load_graph_contact_delta_tokens(db, account_id).await?;
     if tokens.is_empty() {
@@ -59,13 +61,13 @@ pub async fn graph_contacts_delta_sync(
 
     for (folder_id, delta_link) in &tokens {
         if let Err(e) =
-            sync_contact_folder_delta(client, account_id, db, folder_id, delta_link).await
+            sync_contact_folder_delta(client, account_id, db, writer, folder_id, delta_link).await
         {
             if e.contains("410") {
                 log::warn!(
                     "Contact delta token expired for folder {folder_id}, falling back to full contact sync"
                 );
-                graph_contacts_initial_sync(client, account_id, db).await?;
+                graph_contacts_initial_sync(client, account_id, db, writer).await?;
                 // Full sync rebootstrapped every contact folder token, so
                 // there is nothing useful left for this delta pass to do.
                 return Ok(());
@@ -116,6 +118,7 @@ async fn full_sync_contact_folders(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     folders: &[GraphContactFolder],
 ) -> Result<(), String> {
     let mut contacts = Vec::new();
@@ -128,13 +131,13 @@ async fn full_sync_contact_folders(
     let aid = account_id.to_string();
     let contacts_owned = contacts;
 
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         let seen_ids: HashSet<&str> = contacts_owned
             .iter()
             .map(|contact| contact.id.as_str())
             .collect();
         let tx = conn
-            .unchecked_transaction()
+            .transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
         persist_synced_contacts(&tx, &aid, &contacts_owned)?;
         prune_stale_contacts(&tx, &aid, &seen_ids)?;
@@ -186,6 +189,7 @@ async fn sync_contact_folder_delta(
     client: &GraphClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     folder_id: &str,
     delta_link: &str,
 ) -> Result<(), String> {
@@ -220,9 +224,9 @@ async fn sync_contact_folder_delta(
             let upserts_owned = upserts;
             let deleted_owned = deleted_ids;
 
-            db.with_conn(move |conn| {
+            writer.with_write(move |conn| {
                 let tx = conn
-                    .unchecked_transaction()
+                    .transaction()
                     .map_err(|e| format!("begin tx: {e}"))?;
                 persist_synced_contacts(&tx, &aid, &upserts_owned)?;
                 for graph_contact_id in &deleted_owned {
@@ -238,7 +242,7 @@ async fn sync_contact_folder_delta(
         if let Some(ref next) = page.next_link {
             current_link = next.clone();
         } else if let Some(ref new_delta) = page.delta_link {
-            sync_state::save_graph_contact_delta_token(db, account_id, folder_id, new_delta)
+            sync_state::save_graph_contact_delta_token(writer, account_id, folder_id, new_delta)
                 .await?;
             break;
         } else {
@@ -290,7 +294,7 @@ async fn bootstrap_contact_delta_token(
 // ---------------------------------------------------------------------------
 
 fn persist_synced_contacts(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     contacts: &[GraphContact],
 ) -> Result<(), String> {
@@ -334,7 +338,7 @@ fn persist_synced_contacts(
 }
 
 fn delete_synced_contact(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     graph_contact_id: &str,
 ) -> Result<(), String> {
@@ -385,7 +389,7 @@ fn delete_synced_contact(
 /// After a full sync, remove mapping rows for graph_contact_ids not seen
 /// in the fetch, then delete orphaned source='graph' contacts.
 fn prune_stale_contacts(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     seen_ids: &HashSet<&str>,
 ) -> Result<(), String> {

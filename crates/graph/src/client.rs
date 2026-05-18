@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 use common::crypto;
 use common::http::{self, RetryConfig};
 use common::token::{self, TokenState};
-use db::db::ReadDbState;
+use db::db::{ReadConn, ReadDbState, WriterPool};
 
 use super::folder_mapper::FolderMap;
 
@@ -49,6 +49,7 @@ struct ClientInner {
     semaphore: Arc<Semaphore>,
     folder_map: RwLock<Option<FolderMap>>,
     folder_map_last_sync: RwLock<Option<std::time::Instant>>,
+    writer: Option<WriterPool>,
 }
 
 /// State holding all Graph clients and the encryption key.
@@ -100,11 +101,30 @@ impl GraphClient {
         account_id: &str,
         encryption_key: [u8; 32],
     ) -> Result<Self, String> {
+        Self::from_account_inner(db, None, account_id, encryption_key).await
+    }
+
+    /// Create a Graph client with a writer handle for token refresh and folder persistence.
+    pub async fn from_account_with_writer(
+        db: &ReadDbState,
+        writer: WriterPool,
+        account_id: &str,
+        encryption_key: [u8; 32],
+    ) -> Result<Self, String> {
+        Self::from_account_inner(db, Some(writer), account_id, encryption_key).await
+    }
+
+    async fn from_account_inner(
+        db: &ReadDbState,
+        writer: Option<WriterPool>,
+        account_id: &str,
+        encryption_key: [u8; 32],
+    ) -> Result<Self, String> {
         let aid = account_id.to_string();
         let key = encryption_key;
 
         let (access_token, refresh_token, expires_at, client_id) = db
-            .with_conn(move |conn| read_account_tokens(conn, &aid, &key))
+            .with_read(move |conn| read_account_tokens(conn, &aid, &key))
             .await?;
 
         let token_state = TokenState {
@@ -129,8 +149,13 @@ impl GraphClient {
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
+                writer,
             }),
         })
+    }
+
+    pub fn writer_pool(&self) -> Option<WriterPool> {
+        self.inner.writer.clone()
     }
 
     /// Return the API path prefix: `/me` for the primary mailbox,
@@ -178,6 +203,7 @@ impl GraphClient {
                 semaphore: Arc::clone(&self.inner.semaphore),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
+                writer: self.inner.writer.clone(),
             }),
         }
     }
@@ -562,7 +588,7 @@ impl GraphClient {
     }
 
     /// Perform the actual token refresh, coalesced via mutex.
-    async fn do_refresh(&self, db: &ReadDbState) -> Result<String, String> {
+    async fn do_refresh(&self, _db: &ReadDbState) -> Result<String, String> {
         let _guard = self.inner.refresh_lock.lock().await;
 
         // Double-check: another task might have already refreshed
@@ -596,7 +622,7 @@ impl GraphClient {
         }
 
         persist_refreshed_token(
-            db,
+            self.inner.writer.as_ref(),
             &self.inner.account_id,
             &new_access_token,
             result.expires_at,
@@ -610,7 +636,7 @@ impl GraphClient {
 
 /// Read and decrypt account tokens from the database.
 fn read_account_tokens(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     key: &[u8; 32],
 ) -> Result<(String, String, i64, String), String> {
@@ -651,7 +677,7 @@ fn read_account_tokens(
 
 /// Persist a refreshed access token (encrypted) to the database.
 async fn persist_refreshed_token(
-    db: &ReadDbState,
+    writer: Option<&WriterPool>,
     account_id: &str,
     access_token: &str,
     expires_at: i64,
@@ -659,11 +685,13 @@ async fn persist_refreshed_token(
 ) -> Result<(), String> {
     let encrypted = crypto::encrypt_value(key, access_token)?;
     let aid = account_id.to_string();
-
-    db.with_conn(move |conn| {
-        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
-    })
-    .await
+    let writer = writer
+        .ok_or_else(|| format!("Graph token refresh for {account_id} requires a writer handle"))?;
+    writer
+        .with_write(move |conn| {
+            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
+        })
+        .await
 }
 
 /// Parse a bytes response.
@@ -706,6 +734,7 @@ mod tests {
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
                 folder_map: RwLock::new(None),
                 folder_map_last_sync: RwLock::new(None),
+                writer: None,
             }),
         }
     }

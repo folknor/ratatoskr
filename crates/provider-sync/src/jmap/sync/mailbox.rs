@@ -95,11 +95,10 @@ pub(crate) async fn sync_mailboxes(
     }
 
     // Persist folders to DB
-    ctx.db
-        .with_conn(move |conn| {
-            let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+    ctx.write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             let rows: Vec<FolderWriteRow> = folder_rows
                 .iter()
@@ -163,7 +162,7 @@ pub(super) async fn sync_mailbox_changes(
             if new_state != since_state {
                 // State changed -- re-sync all mailboxes
                 sync_mailboxes(ctx).await?;
-                super::save_sync_state(ctx.db, ctx.account_id, "Mailbox", &new_state).await?;
+                super::save_sync_state(ctx, "Mailbox", &new_state).await?;
             }
         }
         Err(e) => {
@@ -172,7 +171,7 @@ pub(super) async fn sync_mailbox_changes(
                 // Full mailbox refresh
                 let (_, _) = sync_mailboxes(ctx).await?;
                 let new_state = get_mailbox_state(ctx.client).await?;
-                super::save_sync_state(ctx.db, ctx.account_id, "Mailbox", &new_state).await?;
+                super::save_sync_state(ctx, "Mailbox", &new_state).await?;
             } else {
                 return Err(format!("Mailbox/changes: {msg}"));
             }

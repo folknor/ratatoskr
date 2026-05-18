@@ -91,6 +91,7 @@ struct AccountEntry {
 struct PushRuntimeInner {
     accounts: Mutex<HashMap<String, AccountEntry>>,
     read_db: ReadDbState,
+    write_db: service_state::WriteDbState,
     encryption_key: SecretKey,
     sync_runtime: Arc<SyncRuntime>,
     notification_tx: NotificationSender,
@@ -115,6 +116,7 @@ pub struct PushRuntime {
 impl PushRuntime {
     pub fn new(
         read_db: ReadDbState,
+        write_db: service_state::WriteDbState,
         encryption_key: SecretKey,
         sync_runtime: Arc<SyncRuntime>,
         notification_tx: NotificationSender,
@@ -124,6 +126,7 @@ impl PushRuntime {
             inner: Arc::new(PushRuntimeInner {
                 accounts: Mutex::new(HashMap::new()),
                 read_db,
+                write_db,
                 encryption_key,
                 sync_runtime,
                 notification_tx,
@@ -166,7 +169,8 @@ impl PushRuntime {
 
         // Provider gate: no-op for non-JMAP accounts.
         let read_db = self.inner.read_db.clone();
-        let provider = db::db::queries::get_provider_type(&read_db, &account_id).await?;
+        let writer_pool = self.inner.write_db.writer_pool();
+        let provider = db::db::queries::get_provider_type(&writer_pool, &account_id).await?;
         if provider != "jmap" {
             log::debug!(
                 "PushRuntime::start_account: skipping non-JMAP account {account_id} (provider={provider})",
@@ -207,7 +211,13 @@ impl PushRuntime {
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(self.inner.encryption_key.expose().as_slice());
         let client =
-            jmap::client::JmapClient::from_account(&read_db, &account_id, &key_bytes).await?;
+            jmap::client::JmapClient::from_account_with_writer(
+                &read_db,
+                writer_pool.clone(),
+                &account_id,
+                &key_bytes,
+            )
+            .await?;
 
         // Auth resolver: every reconnect re-resolves the bearer via
         // ensure_valid_token. Returning an error counts toward
@@ -227,7 +237,15 @@ impl PushRuntime {
 
         let (state_tx, state_rx) = jmap::push::create_push_channel();
         let manager =
-            jmap::push::start_push(&client, &account_id, &read_db, state_tx, auth_resolver, fresh_start)
+            jmap::push::start_push(
+                &client,
+                &account_id,
+                &read_db,
+                &writer_pool,
+                state_tx,
+                auth_resolver,
+                fresh_start,
+            )
                 .await?;
 
         let cancel = CancellationToken::new();

@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use super::super::client::GmailClient;
 use super::super::types::{GmailLabel, GmailSendAs};
 use super::SyncCtx;
-use db::db::ReadDbState;
+use db::db::{ReadConn, ReadDbState, WriteConn, WriteTarget};
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 
 // ---------------------------------------------------------------------------
@@ -20,19 +20,18 @@ pub(super) async fn sync_labels(ctx: &SyncCtx<'_>) -> Result<(), String> {
     let labels = ctx.client.list_labels(ctx.db).await?;
 
     let aid = ctx.account_id.to_string();
-    ctx.db
-        .with_conn(move |conn| persist_folders_and_labels(conn, &aid, &labels))
+    ctx.write_db
+        .with_write(move |conn| persist_folders_and_labels(conn, &aid, &labels))
         .await
 }
 
 fn persist_folders_and_labels(
-    conn: &rusqlite::Connection,
+    conn: &WriteConn<'_>,
     account_id: &str,
     labels: &[GmailLabel],
 ) -> Result<(), String> {
-    let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+    let tx = conn
+        .transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
     let mut folder_rows = Vec::new();
@@ -137,7 +136,7 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
     let locals: Vec<LocalSignature> = ctx
         .db
-        .with_conn(move |conn| read_local_signatures(conn, &aid))
+        .with_read(move |conn| read_local_signatures(conn, &aid))
         .await?;
 
     // Build a lookup: server_id → LocalSignature
@@ -184,8 +183,8 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
                 #[allow(clippy::cast_possible_wrap)]
                 let sort = i as i64;
 
-                ctx.db
-                    .with_conn(move |conn| {
+                ctx.write_db
+                    .with_write(move |conn| {
                         upsert_signature_from_server(
                             conn, &id, &aid, &name, &html, is_default, sort, &sid, &hash, now,
                         )
@@ -200,8 +199,8 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
                     // After push, update the stored hash to match what we just pushed
                     let local_hash = html_hash(&loc.body_html);
                     let lid = loc.id.clone();
-                    ctx.db
-                        .with_conn(move |conn| {
+                    ctx.write_db
+                        .with_write(move |conn| {
                             conn.execute(
                                 "UPDATE signatures SET server_html_hash = ?1, last_synced_at = ?2 \
                                  WHERE id = ?3",
@@ -271,7 +270,7 @@ async fn push_signature_to_gmail(
 /// Upsert a signature row from server data (pull path).
 #[allow(clippy::too_many_arguments)]
 fn upsert_signature_from_server(
-    conn: &rusqlite::Connection,
+    conn: &impl WriteTarget,
     id: &str,
     account_id: &str,
     name: &str,
@@ -313,7 +312,7 @@ fn upsert_signature_from_server(
 /// Read all local signatures for an account that have a `server_id` (i.e. came
 /// from Gmail sync or were linked to a sendAs alias).
 fn read_local_signatures(
-    conn: &rusqlite::Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<LocalSignature>, String> {
     let mut stmt = conn

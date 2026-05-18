@@ -7,7 +7,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable_with_id;
-use super::provider::{classify_provider_error, create_provider};
+use super::provider::{classify_provider_error, create_provider_with_writer};
 use db::db::WriteTarget;
 use db::progress::NoopProgressReporter;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
@@ -397,7 +397,7 @@ pub async fn add_label(
         }
     };
 
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             add_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, local).await
         }
@@ -580,7 +580,7 @@ pub async fn remove_label(
         }
     };
 
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             remove_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, local).await
         }

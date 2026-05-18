@@ -1,6 +1,8 @@
 //! BIMI cache storage: lookup, upsert, and domain-warming query.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::params;
+
+use crate::db::{ReadConn, ReadError, WriteTarget};
 
 /// A cached BIMI entry from the database.
 #[derive(Debug, Clone)]
@@ -15,7 +17,7 @@ pub struct BimiCacheEntry {
 
 /// Retrieve a cached BIMI entry for a domain, returning `None` if absent or
 /// expired.
-pub fn get_bimi_cache(conn: &Connection, domain: &str) -> Result<Option<BimiCacheEntry>, String> {
+pub fn get_bimi_cache(conn: &ReadConn<'_>, domain: &str) -> Result<Option<BimiCacheEntry>, String> {
     conn.query_row(
         "SELECT domain, has_bimi, logo_uri, authority_uri, fetched_at, expires_at \
          FROM bimi_cache WHERE domain = ?1 AND expires_at > strftime('%s', 'now')",
@@ -31,13 +33,16 @@ pub fn get_bimi_cache(conn: &Connection, domain: &str) -> Result<Option<BimiCach
             })
         },
     )
-    .optional()
-    .map_err(|e| format!("bimi cache query: {e}"))
+    .map(Some)
+    .or_else(|e| match e {
+        ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        other => Err(format!("bimi cache query: {other}")),
+    })
 }
 
 /// Insert or update a BIMI cache entry.
 pub fn upsert_bimi_cache(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     domain: &str,
     has_bimi: bool,
     logo_uri: Option<&str>,
@@ -65,7 +70,7 @@ pub fn upsert_bimi_cache(
 /// `lookback_days` controls how far back to scan messages.
 /// `max_domains` limits the result count.
 pub fn domains_to_warm(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     lookback_days: i64,
     max_domains: i64,
 ) -> Result<Vec<String>, String> {

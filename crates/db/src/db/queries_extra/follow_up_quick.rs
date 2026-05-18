@@ -1,17 +1,17 @@
-use super::super::ReadDbState;
+use super::super::WriterPool;
 use super::super::types::{DbFollowUpReminder, DbQuickStep, TriggeredFollowUp};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
 pub async fn db_insert_follow_up_reminder(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     account_id: String,
     thread_id: String,
     message_id: String,
     remind_at: i64,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'pending')
@@ -26,11 +26,11 @@ pub async fn db_insert_follow_up_reminder(
 }
 
 pub async fn db_get_follow_up_for_thread(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
 ) -> Result<Option<DbFollowUpReminder>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM follow_up_reminders
@@ -50,11 +50,11 @@ pub async fn db_get_follow_up_for_thread(
 }
 
 pub async fn db_cancel_follow_up_for_thread(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE follow_up_reminders SET status = 'cancelled'
                  WHERE account_id = ?1 AND thread_id = ?2 AND status = 'pending'",
@@ -67,14 +67,14 @@ pub async fn db_cancel_follow_up_for_thread(
 }
 
 pub async fn db_get_active_follow_up_thread_ids(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     thread_ids: Vec<String>,
 ) -> Result<Vec<String>, String> {
     if thread_ids.is_empty() {
         return Ok(Vec::new());
     }
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut results = Vec::new();
         for chunk in thread_ids.chunks(100) {
             let placeholders = chunk
@@ -109,8 +109,8 @@ pub async fn db_get_active_follow_up_thread_ids(
     .await
 }
 
-pub async fn db_check_follow_up_reminders(db: &ReadDbState) -> Result<Vec<TriggeredFollowUp>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_check_follow_up_reminders(db: &WriterPool) -> Result<Vec<TriggeredFollowUp>, String> {
+    db.with_write(move |conn| {
         let now = i64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -119,7 +119,7 @@ pub async fn db_check_follow_up_reminders(db: &ReadDbState) -> Result<Vec<Trigge
         )
         .map_err(|_| "current time exceeds i64 range".to_string())?;
 
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         let reminders: Vec<DbFollowUpReminder> = {
             let mut stmt = tx
                 .prepare("SELECT * FROM follow_up_reminders WHERE status = 'pending' AND remind_at <= ?1")
@@ -188,10 +188,10 @@ pub async fn db_check_follow_up_reminders(db: &ReadDbState) -> Result<Vec<Trigge
 }
 
 pub async fn db_get_quick_steps_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbQuickStep>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM quick_steps WHERE account_id = ?1 ORDER BY sort_order, created_at",
@@ -206,10 +206,10 @@ pub async fn db_get_quick_steps_for_account(
 }
 
 pub async fn db_get_enabled_quick_steps_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbQuickStep>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM quick_steps WHERE account_id = ?1 AND is_enabled = 1
@@ -224,8 +224,8 @@ pub async fn db_get_enabled_quick_steps_for_account(
     .await
 }
 
-pub async fn db_insert_quick_step(db: &ReadDbState, step: DbQuickStep) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_insert_quick_step(db: &WriterPool, step: DbQuickStep) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO quick_steps (id, account_id, name, description, shortcut, actions_json, icon, is_enabled, continue_on_error)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -247,8 +247,8 @@ pub async fn db_insert_quick_step(db: &ReadDbState, step: DbQuickStep) -> Result
     .await
 }
 
-pub async fn db_update_quick_step(db: &ReadDbState, step: DbQuickStep) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_update_quick_step(db: &WriterPool, step: DbQuickStep) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE quick_steps SET name = ?2, description = ?3, shortcut = ?4,
                  actions_json = ?5, icon = ?6, is_enabled = ?7, continue_on_error = ?8
@@ -270,8 +270,8 @@ pub async fn db_update_quick_step(db: &ReadDbState, step: DbQuickStep) -> Result
     .await
 }
 
-pub async fn db_delete_quick_step(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_delete_quick_step(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM quick_steps WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())

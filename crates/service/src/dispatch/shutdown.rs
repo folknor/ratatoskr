@@ -163,14 +163,14 @@ async fn maybe_advance_cursors(boot_state: &Arc<BootSharedState>, cause: Shutdow
     }
     let app_data_dir = boot_state.app_data_dir().to_path_buf();
     let result = tokio::task::spawn_blocking(move || {
-        let conn = rusqlite::Connection::open(app_data_dir.join("ratatoskr.db"))
-            .map_err(|e| format!("open ratatoskr.db for cursor write: {e}"))?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|e| format!("busy_timeout: {e}"))?;
-        ::db::db::queries_extra::update_clean_shutdown_cursors(
-            &conn,
-            &["body", "inline", "extract"],
-        )
+        let pool = ::db::db::open_writer_pool(&app_data_dir)
+            .map_err(|e| format!("open writer pool for cursor write: {e}"))?;
+        pool.with_write_sync(|conn| {
+            ::db::db::queries_extra::update_clean_shutdown_cursors(
+                conn,
+                &["body", "inline", "extract"],
+            )
+        })
     })
     .await;
     match result {

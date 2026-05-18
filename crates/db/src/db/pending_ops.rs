@@ -1,4 +1,4 @@
-use super::{ReadDbState, WriteTarget};
+use super::{WriterPool, WriteTarget};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -95,11 +95,11 @@ pub fn db_pending_ops_enqueue_sync(
 }
 
 pub async fn db_pending_ops_get(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<PendingOperation>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let lim = limit.unwrap_or(50);
         let now = i64::try_from(
             std::time::SystemTime::now()
@@ -319,6 +319,10 @@ mod boot_recovery_tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     #[test]
     fn resets_executing_pending_ops_to_pending() {
         let conn = make_conn();
@@ -338,7 +342,7 @@ mod boot_recovery_tests {
         )
         .expect("insert");
 
-        db_pending_ops_recover_on_boot_sync(&conn).expect("recovery");
+        db_pending_ops_recover_on_boot_sync(&write(&conn)).expect("recovery");
 
         let executing: i64 = conn
             .query_row(
@@ -380,7 +384,7 @@ mod boot_recovery_tests {
         )
         .expect("insert");
 
-        db_pending_ops_recover_on_boot_sync(&conn).expect("recovery");
+        db_pending_ops_recover_on_boot_sync(&write(&conn)).expect("recovery");
 
         let sending: i64 = conn
             .query_row(
@@ -411,6 +415,6 @@ mod boot_recovery_tests {
     #[test]
     fn empty_db_is_a_noop() {
         let conn = make_conn();
-        db_pending_ops_recover_on_boot_sync(&conn).expect("recovery on empty");
+        db_pending_ops_recover_on_boot_sync(&write(&conn)).expect("recovery on empty");
     }
 }

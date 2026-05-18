@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use super::from_row::query_as;
 use super::types::DbThread;
-use super::{ReadDbState, WriteTarget, WriteTransactionTarget};
+use super::{WriterPool, WriteTarget, WriteTransactionTarget};
 
 /// Stored pinned-search metadata and snapshot ownership.
 #[derive(Debug, Clone)]
@@ -154,8 +154,8 @@ pub fn db_delete_pinned_search_sync(
     Ok(())
 }
 
-pub async fn db_list_pinned_searches(db: &ReadDbState) -> Result<Vec<DbPinnedSearch>, String> {
-    db.with_conn(|conn| {
+pub async fn db_list_pinned_searches(db: &WriterPool) -> Result<Vec<DbPinnedSearch>, String> {
+    db.with_write(|conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT id, query, created_at, updated_at, scope_account_id
@@ -182,10 +182,10 @@ pub async fn db_list_pinned_searches(db: &ReadDbState) -> Result<Vec<DbPinnedSea
 }
 
 pub async fn db_get_pinned_search_thread_ids(
-    db: &ReadDbState,
+    db: &WriterPool,
     pinned_search_id: i64,
 ) -> Result<Vec<(String, String)>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT thread_id, account_id
@@ -205,14 +205,14 @@ pub async fn db_get_pinned_search_thread_ids(
 }
 
 pub async fn db_get_threads_by_ids(
-    db: &ReadDbState,
+    db: &WriterPool,
     ids: Vec<(String, String)>,
 ) -> Result<Vec<DbThread>, String> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let chunk_size = 400;
         let mut results = Vec::with_capacity(ids.len());
 
@@ -267,10 +267,10 @@ pub async fn db_get_threads_by_ids(
 }
 
 pub async fn db_get_recent_search_queries(
-    db: &ReadDbState,
+    db: &WriterPool,
     limit: usize,
 ) -> Result<Vec<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT query FROM pinned_searches
@@ -337,6 +337,10 @@ mod tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     /// Insert a pinned-search row with explicit `created_at`/`updated_at`
     /// so the staleness window can be exercised deterministically.
     fn insert_pinned_search(
@@ -370,7 +374,7 @@ mod tests {
         insert_pinned_search(&conn, "stale", stale, stale);
 
         let deleted =
-            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("expire");
+            db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("expire");
         assert_eq!(deleted, 1);
         assert_eq!(count_pinned_searches(&conn), 0);
     }
@@ -385,7 +389,7 @@ mod tests {
         insert_pinned_search(&conn, "fresh", now - 60, now - 60);
 
         let deleted =
-            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("expire");
+            db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("expire");
         assert_eq!(deleted, 0);
         assert_eq!(count_pinned_searches(&conn), 1);
     }
@@ -403,7 +407,7 @@ mod tests {
         insert_pinned_search(&conn, "refreshed", created, updated);
 
         let deleted =
-            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("expire");
+            db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("expire");
         assert_eq!(deleted, 0);
         assert_eq!(count_pinned_searches(&conn), 1);
     }
@@ -418,9 +422,9 @@ mod tests {
         insert_pinned_search(&conn, "stale", stale, stale);
 
         let first =
-            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("first");
+            db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("first");
         let second =
-            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("second");
+            db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("second");
         assert_eq!(first, 1);
         assert_eq!(second, 0);
     }

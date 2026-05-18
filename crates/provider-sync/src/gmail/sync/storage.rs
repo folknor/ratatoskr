@@ -5,7 +5,7 @@ use db::db::queries_extra::{
 };
 use common::types::{FolderKind, LabelKind, MailProviderKind};
 use search::SearchDocument;
-use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState};
 use store::inline_image_store::InlineImage;
 
 use super::super::client::GmailClient;
@@ -18,11 +18,13 @@ use crate::thread_membership::replace_thread_membership_from_full_coverage;
 // ---------------------------------------------------------------------------
 
 /// Fetch and store a single thread. Returns its history_id.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn process_single_thread(
     client: &GmailClient,
     thread_id: &str,
     account_id: &str,
     db: &ReadDbState,
+    write_db: &WriteDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
@@ -41,7 +43,7 @@ pub(super) async fn process_single_thread(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let parsed_clone = parsed.clone();
-    db.with_conn(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
+    write_db.with_write(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
         .await?;
 
     // Fire-and-forget post-DB writes - all independent, run concurrently.
@@ -49,7 +51,7 @@ pub(super) async fn process_single_thread(
         store_bodies(body_store, &parsed),
         store_inline_images(inline_images, &parsed),
         index_messages(search, account_id, &parsed),
-        seen::ingest_from_messages(db, account_id, &parsed),
+        crate::seen_ingest::ingest_from_messages(write_db, account_id, &parsed),
     );
 
     Ok(history_id)
@@ -60,14 +62,13 @@ pub(super) async fn process_single_thread(
 // ---------------------------------------------------------------------------
 
 fn store_thread_to_db(
-    conn: &rusqlite::Connection,
+    conn: &db::db::WriteConn<'_>,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
-    let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+    let tx = conn
+        .transaction()
         .map_err(|e| format!("begin tx: {e}"))?;
 
     upsert_thread_record(&tx, account_id, thread_id, messages)?;

@@ -1,5 +1,5 @@
 use crate::db::FromRow;
-use crate::db::ReadDbState;
+use crate::db::WriterPool;
 use crate::db::WriteTarget;
 use crate::db::types::DbContact;
 use rusqlite::{OptionalExtension, params};
@@ -11,12 +11,12 @@ pub struct ExpandedGroupContact {
 }
 
 pub async fn db_get_all_contacts(
-    db: &ReadDbState,
+    db: &WriterPool,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<DbContact>, String> {
     log::debug!("Loading contacts: limit={limit:?}, offset={offset:?}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let lim = limit.unwrap_or(crate::db::DEFAULT_QUERY_LIMIT);
         let off = offset.unwrap_or(0);
         let mut stmt = conn
@@ -33,13 +33,13 @@ pub async fn db_get_all_contacts(
 }
 
 pub async fn db_upsert_contact(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     email: String,
     display_name: Option<String>,
 ) -> Result<(), String> {
     log::info!("Upserting contact: email={email}, display_name={display_name:?}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         conn.execute(
             "INSERT INTO contacts (id, email, display_name, last_contacted_at)
@@ -58,11 +58,11 @@ pub async fn db_upsert_contact(
 }
 
 pub async fn db_update_contact(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     display_name: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE contacts SET \
                display_name = ?1, \
@@ -81,11 +81,11 @@ pub async fn db_update_contact(
 }
 
 pub async fn db_update_contact_notes(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
     notes: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         conn.execute(
             "UPDATE contacts SET notes = ?1, updated_at = unixepoch() WHERE email = ?2",
@@ -98,10 +98,10 @@ pub async fn db_update_contact_notes(
 }
 
 pub async fn db_find_contact_id_by_email(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
 ) -> Result<Option<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.query_row(
             "SELECT id FROM contacts WHERE email = ?1 LIMIT 1",
             params![email],
@@ -167,9 +167,9 @@ pub fn db_upsert_contact_full(
     Ok(())
 }
 
-pub async fn db_delete_contact(db: &ReadDbState, id: String) -> Result<(), String> {
+pub async fn db_delete_contact(db: &WriterPool, id: String) -> Result<(), String> {
     log::info!("Deleting contact: id={id}");
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
             .map_err(|e| {
                 log::error!("Failed to delete contact {id}: {e}");
@@ -181,11 +181,11 @@ pub async fn db_delete_contact(db: &ReadDbState, id: String) -> Result<(), Strin
 }
 
 pub async fn db_update_contact_avatar(
-    db: &ReadDbState,
+    db: &WriterPool,
     email: String,
     avatar_url: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let normalized = email.to_lowercase();
         conn.execute(
             "UPDATE contacts SET avatar_url = ?1, updated_at = unixepoch() WHERE email = ?2",

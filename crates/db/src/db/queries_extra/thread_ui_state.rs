@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn set_and_get() {
         let conn = setup_db();
-        set_attachments_collapsed(&conn, "acc-1", "thread-1", true).expect("set");
+        set_attachments_collapsed(&crate::db::WriteConn::from_raw(&conn), "acc-1", "thread-1", true).expect("set");
         let read = ReadConn::from_raw(&conn);
         let collapsed = get_attachments_collapsed(&read, "acc-1", "thread-1").expect("get");
         assert!(collapsed);
@@ -81,8 +81,8 @@ mod tests {
     #[test]
     fn toggle_back() {
         let conn = setup_db();
-        set_attachments_collapsed(&conn, "acc-1", "thread-1", true).expect("set true");
-        set_attachments_collapsed(&conn, "acc-1", "thread-1", false).expect("set false");
+        set_attachments_collapsed(&crate::db::WriteConn::from_raw(&conn), "acc-1", "thread-1", true).expect("set true");
+        set_attachments_collapsed(&crate::db::WriteConn::from_raw(&conn), "acc-1", "thread-1", false).expect("set false");
         let read = ReadConn::from_raw(&conn);
         let collapsed = get_attachments_collapsed(&read, "acc-1", "thread-1").expect("get");
         assert!(!collapsed);

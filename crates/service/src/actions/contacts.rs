@@ -225,7 +225,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     }
 
     // 3. Delete locally
-    if let Err(e) = db_delete_contact(&ctx.db, contact_id.to_string()).await {
+    if let Err(e) = db_delete_contact(&ctx.write_db.writer_pool(), contact_id.to_string()).await {
         let outcome = ActionOutcome::Failed {
             error: ActionError::db(e),
         };
@@ -262,7 +262,12 @@ async fn dispatch_write_back(
     match source {
         "jmap" => {
             let client =
-                jmap::client::JmapClient::from_account(&ctx.db, account_id, &ctx.encryption_key)
+                jmap::client::JmapClient::from_account_with_writer(
+                    &ctx.db,
+                    ctx.write_db.writer_pool(),
+                    account_id,
+                    &ctx.encryption_key,
+                )
                     .await
                     .map_err(ActionError::remote)?;
             jmap::contacts_sync::jmap_contacts_push_update(
@@ -288,7 +293,12 @@ async fn dispatch_write_back(
             }
 
             let client =
-                gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                gmail::client::GmailClient::from_account_with_writer(
+                    &ctx.db,
+                    ctx.write_db.writer_pool(),
+                    account_id,
+                    ctx.encryption_key,
+                )
                     .await
                     .map_err(ActionError::remote)?;
             let body = build_google_contact_update_body(
@@ -308,7 +318,12 @@ async fn dispatch_write_back(
         }
         "graph" => {
             let client =
-                graph::client::GraphClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                graph::client::GraphClient::from_account_with_writer(
+                    &ctx.db,
+                    ctx.write_db.writer_pool(),
+                    account_id,
+                    ctx.encryption_key,
+                )
                     .await
                     .map_err(ActionError::remote)?;
             let body = build_graph_contact_update_body(phone, company, notes);
@@ -340,7 +355,12 @@ async fn dispatch_delete(
     match source {
         "jmap" => {
             let client =
-                jmap::client::JmapClient::from_account(&ctx.db, account_id, &ctx.encryption_key)
+                jmap::client::JmapClient::from_account_with_writer(
+                    &ctx.db,
+                    ctx.write_db.writer_pool(),
+                    account_id,
+                    &ctx.encryption_key,
+                )
                     .await
                     .map_err(ActionError::remote)?;
             jmap_contact_delete(&client, server_id)
@@ -349,7 +369,12 @@ async fn dispatch_delete(
         }
         "google" => {
             let client =
-                gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                gmail::client::GmailClient::from_account_with_writer(
+                    &ctx.db,
+                    ctx.write_db.writer_pool(),
+                    account_id,
+                    ctx.encryption_key,
+                )
                     .await
                     .map_err(ActionError::remote)?;
             let api_base = gmail::contacts::people_api_base();
@@ -363,7 +388,12 @@ async fn dispatch_delete(
         }
         "graph" => {
             let client =
-                graph::client::GraphClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                graph::client::GraphClient::from_account_with_writer(
+                    &ctx.db,
+                    ctx.write_db.writer_pool(),
+                    account_id,
+                    ctx.encryption_key,
+                )
                     .await
                     .map_err(ActionError::remote)?;
             client

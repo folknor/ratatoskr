@@ -48,7 +48,7 @@ pub(crate) async fn sync_jmap_calendar_account(
         .collect();
     super::sync::upsert_discovered_calendars_impl(write_db, account_id, "jmap", calendars)
         .await?;
-    sync_state::save_jmap_sync_state(read_db, account_id, "Calendar", &calendar_list.state)
+    sync_state::save_jmap_sync_state(&write_db.writer_pool(), account_id, "Calendar", &calendar_list.state)
         .await?;
 
     let visible_calendars = super::sync::load_visible_calendars(read_db, account_id).await?;
@@ -82,7 +82,7 @@ pub(crate) async fn sync_jmap_calendar_account(
             .await?;
     }
 
-    sync_state::save_jmap_sync_state(read_db, account_id, "CalendarEvent", &event_sync.state)
+    sync_state::save_jmap_sync_state(&write_db.writer_pool(), account_id, "CalendarEvent", &event_sync.state)
         .await
 }
 

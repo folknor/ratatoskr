@@ -29,7 +29,7 @@ pub(super) async fn handle(
     let job_id_bytes = *plan_id.0.as_bytes();
 
     let snapshot = db
-        .with_conn(move |conn| query_job_status(conn, &job_id_bytes))
+        .with_read(move |conn| query_job_status(conn, &job_id_bytes))
     .await
     .map_err(ServiceError::Internal)?;
 

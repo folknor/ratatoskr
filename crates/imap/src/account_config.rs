@@ -1,9 +1,7 @@
-use rusqlite::OptionalExtension;
-
 use common::crypto::{StoredSecret, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
-use db::db::ReadDbState;
+use db::db::{ReadDbState, ReadError, WriterPool};
 use smtp::types::SmtpConfig;
 
 use super::types::ImapConfig;
@@ -92,7 +90,7 @@ async fn load_account_record(
 ) -> Result<AccountConfigRecord, String> {
     let aid = account_id.to_string();
     let account_id_for_error = account_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         conn.query_row(
             "SELECT email, imap_host, imap_port, imap_security, smtp_host, smtp_port, \
              smtp_security, imap_username, imap_password, auth_method, accept_invalid_certs, \
@@ -124,8 +122,13 @@ async fn load_account_record(
                 })
             },
         )
-        .optional()
-        .map_err(|e| format!("Failed to read IMAP account config for {account_id_for_error}: {e}"))?
+        .map(Some)
+        .or_else(|e| match e {
+            ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            other => Err(format!(
+                "Failed to read IMAP account config for {account_id_for_error}: {other}"
+            )),
+        })?
         .ok_or_else(|| format!("Account {account_id_for_error} not found"))
     })
     .await
@@ -133,6 +136,7 @@ async fn load_account_record(
 
 async fn ensure_oauth_access_token(
     db: &ReadDbState,
+    writer: Option<&WriterPool>,
     account_id: &str,
     encryption_key: &[u8; 32],
     record: &AccountConfigRecord,
@@ -162,7 +166,7 @@ async fn ensure_oauth_access_token(
     // Double-check after acquiring lock - another task may have already refreshed
     let aid = account_id.to_string();
     let (fresh_access, fresh_expires, fresh_refresh) = db
-        .with_conn(move |conn| {
+        .with_read(move |conn| {
             conn.query_row(
                 "SELECT access_token, token_expires_at, refresh_token FROM accounts WHERE id = ?1",
                 rusqlite::params![aid],
@@ -201,22 +205,26 @@ async fn ensure_oauth_access_token(
     let encrypted_access_token = encrypt_value(encryption_key, &refreshed.access_token)?;
     let aid = account_id.to_string();
     let new_expires = refreshed.expires_at;
-    db.with_conn(move |conn| {
-        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access_token, new_expires)
-    })
-    .await?;
+    let writer = writer
+        .ok_or_else(|| format!("IMAP token refresh for {account_id} requires a writer handle"))?;
+    writer
+        .with_write(move |conn| {
+            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access_token, new_expires)
+        })
+        .await?;
 
     Ok(refreshed.access_token)
 }
 
 async fn resolve_account_password(
     db: &ReadDbState,
+    writer: Option<&WriterPool>,
     account_id: &str,
     encryption_key: &[u8; 32],
     record: &AccountConfigRecord,
 ) -> Result<String, String> {
     if record.auth_method == "oauth2" {
-        ensure_oauth_access_token(db, account_id, encryption_key, record).await
+        ensure_oauth_access_token(db, writer, account_id, encryption_key, record).await
     } else {
         Ok(StoredSecret::decrypt_optional(record.imap_password.clone(), encryption_key)?
             .unwrap_or_default())
@@ -312,9 +320,27 @@ pub async fn load_imap_config(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<ImapConfig, String> {
+    load_imap_config_inner(db, None, account_id, encryption_key).await
+}
+
+pub async fn load_imap_config_with_writer(
+    db: &ReadDbState,
+    writer: &WriterPool,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<ImapConfig, String> {
+    load_imap_config_inner(db, Some(writer), account_id, encryption_key).await
+}
+
+async fn load_imap_config_inner(
+    db: &ReadDbState,
+    writer: Option<&WriterPool>,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<ImapConfig, String> {
     let record = load_account_record(db, account_id).await?;
     let username = username_for_record(&record);
-    let password = resolve_account_password(db, account_id, encryption_key, &record).await?;
+    let password = resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
     imap_config_from_record(account_id, &record, username, password)
 }
 
@@ -323,9 +349,27 @@ pub async fn load_smtp_config(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<SmtpConfig, String> {
+    load_smtp_config_inner(db, None, account_id, encryption_key).await
+}
+
+pub async fn load_smtp_config_with_writer(
+    db: &ReadDbState,
+    writer: &WriterPool,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<SmtpConfig, String> {
+    load_smtp_config_inner(db, Some(writer), account_id, encryption_key).await
+}
+
+async fn load_smtp_config_inner(
+    db: &ReadDbState,
+    writer: Option<&WriterPool>,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<SmtpConfig, String> {
     let record = load_account_record(db, account_id).await?;
     let username = username_for_record(&record);
-    let password = resolve_account_password(db, account_id, encryption_key, &record).await?;
+    let password = resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
     smtp_config_from_record(account_id, &record, username, password)
 }
 
@@ -334,9 +378,27 @@ pub async fn load_both_configs(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<ImapAndSmtpConfig, String> {
+    load_both_configs_inner(db, None, account_id, encryption_key).await
+}
+
+pub async fn load_both_configs_with_writer(
+    db: &ReadDbState,
+    writer: &WriterPool,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<ImapAndSmtpConfig, String> {
+    load_both_configs_inner(db, Some(writer), account_id, encryption_key).await
+}
+
+async fn load_both_configs_inner(
+    db: &ReadDbState,
+    writer: Option<&WriterPool>,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<ImapAndSmtpConfig, String> {
     let record = load_account_record(db, account_id).await?;
     let username = username_for_record(&record);
-    let password = resolve_account_password(db, account_id, encryption_key, &record).await?;
+    let password = resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
     let imap = imap_config_from_record(account_id, &record, username.clone(), password.clone())?;
     let smtp = smtp_config_from_record(account_id, &record, username, password)?;
     Ok(ImapAndSmtpConfig { imap, smtp })

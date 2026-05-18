@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::WriterPool;
 use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature, DbTemplate};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
@@ -6,10 +6,10 @@ use crate::db::{query_as, query_one, WriteTarget, WriteTransactionTarget};
 use rusqlite::params;
 
 pub async fn db_get_templates_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbTemplate>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         query_as::<DbTemplate>(
             conn,
             "SELECT id, account_id, name, subject, body_html, shortcut, sort_order, created_at
@@ -22,7 +22,7 @@ pub async fn db_get_templates_for_account(
 }
 
 pub async fn db_insert_template(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: Option<String>,
     name: String,
     subject: Option<String>,
@@ -31,7 +31,7 @@ pub async fn db_insert_template(
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let ret_id = id.clone();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO templates (id, account_id, name, subject, body_html, shortcut)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -46,7 +46,7 @@ pub async fn db_insert_template(
 // TODO(refactor): wrap fields in an UpdateTemplateParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_update_template(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     name: Option<String>,
     subject: Option<String>,
@@ -55,7 +55,7 @@ pub async fn db_update_template(
     shortcut: Option<String>,
     shortcut_set: bool,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
         if let Some(v) = name {
             sets.push(("name", Box::new(v)));
@@ -74,8 +74,8 @@ pub async fn db_update_template(
     .await
 }
 
-pub async fn db_delete_template(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_delete_template(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM templates WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -91,10 +91,10 @@ const SIG_COLS: &str = "id, account_id, name, body_html, body_text, \
     server_html_hash, last_synced_at, created_at";
 
 pub async fn db_get_signatures_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbSignature>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let sql = format!(
             "SELECT {SIG_COLS} FROM signatures \
              WHERE account_id = ?1 ORDER BY sort_order, created_at"
@@ -105,8 +105,8 @@ pub async fn db_get_signatures_for_account(
 }
 
 /// Get all signatures across all accounts (for the settings UI).
-pub async fn db_get_all_signatures(db: &ReadDbState) -> Result<Vec<DbSignature>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_all_signatures(db: &WriterPool) -> Result<Vec<DbSignature>, String> {
+    db.with_write(move |conn| {
         let sql = format!(
             "SELECT {SIG_COLS} FROM signatures \
              ORDER BY account_id, sort_order, name"
@@ -117,10 +117,10 @@ pub async fn db_get_all_signatures(db: &ReadDbState) -> Result<Vec<DbSignature>,
 }
 
 pub async fn db_get_default_signature(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Option<DbSignature>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let sql = format!(
             "SELECT {SIG_COLS} FROM signatures \
              WHERE account_id = ?1 AND is_default = 1 LIMIT 1"
@@ -133,10 +133,10 @@ pub async fn db_get_default_signature(
 /// Get the reply-default signature for an account. Falls back to
 /// `is_default` if no `is_reply_default` is set.
 pub async fn db_get_reply_signature(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Option<DbSignature>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let sql = format!(
             "SELECT {SIG_COLS} FROM signatures \
              WHERE account_id = ?1 \
@@ -325,12 +325,12 @@ pub fn db_reorder_signatures_sync(
 /// Set the reply-default signature for an account (clears old reply-default
 /// in a transaction).
 pub async fn db_set_reply_default_signature(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     signature_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    db.with_write(move |conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         tx.execute(
             "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
             params![account_id],
@@ -356,7 +356,7 @@ pub async fn db_set_reply_default_signature(
 /// 3. For new compose: use `is_default`.
 /// 4. If no default is set: return `None`.
 pub async fn db_resolve_signature_for_compose(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     from_email: Option<String>,
     is_reply: bool,
@@ -364,7 +364,7 @@ pub async fn db_resolve_signature_for_compose(
     log::debug!(
         "Resolving signature for compose: account_id={account_id}, from_email={from_email:?}, is_reply={is_reply}"
     );
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         // 1. Check alias-level override.
         if let Some(ref email) = from_email {
             let alias_sig_id: Option<String> = conn
@@ -416,10 +416,10 @@ fn get_signature_account_id(
 }
 
 pub async fn db_get_aliases_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbSendAsAlias>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare("SELECT * FROM send_as_aliases WHERE account_id = ?1 ORDER BY is_primary DESC, email")
             .map_err(|e| e.to_string())?;
@@ -434,7 +434,7 @@ pub async fn db_get_aliases_for_account(
 // TODO(refactor): wrap fields in an UpsertAliasParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_alias(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     email: String,
     display_name: Option<String>,
@@ -447,7 +447,7 @@ pub async fn db_upsert_alias(
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let id_clone = id.clone();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO send_as_aliases (id, account_id, email, display_name, reply_to_address, signature_id, is_primary, is_default, treat_as_alias, verification_status)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
@@ -479,10 +479,10 @@ pub async fn db_upsert_alias(
 }
 
 pub async fn db_get_default_alias(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Option<DbSendAsAlias>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let result = conn
             .query_row(
                 "SELECT * FROM send_as_aliases WHERE account_id = ?1 AND is_default = 1 LIMIT 1",
@@ -505,12 +505,12 @@ pub async fn db_get_default_alias(
 }
 
 pub async fn db_set_default_alias(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     alias_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    db.with_write(move |conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         tx.execute(
             "UPDATE send_as_aliases SET is_default = 0 WHERE account_id = ?1",
             params![account_id],
@@ -527,8 +527,8 @@ pub async fn db_set_default_alias(
     .await
 }
 
-pub async fn db_delete_alias(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_delete_alias(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM send_as_aliases WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -599,10 +599,10 @@ fn exec_save_local_draft(
 }
 
 pub async fn db_save_local_draft(
-    db: &ReadDbState,
+    db: &WriterPool,
     params: SaveLocalDraftParams,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| exec_save_local_draft(conn, &params))
+    db.with_write(move |conn| exec_save_local_draft(conn, &params))
         .await
 }
 
@@ -623,18 +623,18 @@ pub fn db_mark_queued_drafts_failed_sync(
     .map_err(|e| e.to_string())
 }
 
-pub async fn db_get_local_draft(db: &ReadDbState, id: String) -> Result<Option<DbLocalDraft>, String> {
-    db.with_conn(move |conn| {
+pub async fn db_get_local_draft(db: &WriterPool, id: String) -> Result<Option<DbLocalDraft>, String> {
+    db.with_write(move |conn| {
         query_one::<DbLocalDraft>(conn, "SELECT * FROM local_drafts WHERE id = ?1", &[&id])
     })
     .await
 }
 
 pub async fn db_get_unsynced_drafts(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbLocalDraft>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         query_as::<DbLocalDraft>(
             conn,
             "SELECT * FROM local_drafts WHERE account_id = ?1 AND sync_status = 'pending' ORDER BY updated_at ASC",
@@ -645,11 +645,11 @@ pub async fn db_get_unsynced_drafts(
 }
 
 pub async fn db_mark_draft_synced(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     remote_draft_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE local_drafts SET sync_status = 'synced', remote_draft_id = ?1 WHERE id = ?2",
             params![remote_draft_id, id],
@@ -660,8 +660,8 @@ pub async fn db_mark_draft_synced(
     .await
 }
 
-pub async fn db_delete_local_draft(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_delete_local_draft(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM local_drafts WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -670,10 +670,10 @@ pub async fn db_delete_local_draft(db: &ReadDbState, id: String) -> Result<(), S
 }
 
 pub async fn db_get_pending_scheduled_emails(
-    db: &ReadDbState,
+    db: &WriterPool,
     now: i64,
 ) -> Result<Vec<DbScheduledEmail>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM scheduled_emails WHERE status = 'pending' AND scheduled_at <= ?1 ORDER BY scheduled_at ASC",
@@ -688,10 +688,10 @@ pub async fn db_get_pending_scheduled_emails(
 }
 
 pub async fn db_get_scheduled_emails_for_account(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<DbScheduledEmail>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM scheduled_emails WHERE account_id = ?1 AND status = 'pending' ORDER BY scheduled_at ASC",
@@ -708,7 +708,7 @@ pub async fn db_get_scheduled_emails_for_account(
 // TODO(refactor): 14 args - migrate to a ScheduledEmailParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_insert_scheduled_email(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     to_addresses: String,
     cc_addresses: Option<String>,
@@ -725,7 +725,7 @@ pub async fn db_insert_scheduled_email(
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let id_clone = id.clone();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO scheduled_emails (id, account_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, reply_to_message_id, thread_id, scheduled_at, signature_id, delegation, from_email, timezone)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
@@ -754,11 +754,11 @@ pub async fn db_insert_scheduled_email(
 }
 
 pub async fn db_update_scheduled_email_status(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     status: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE scheduled_emails SET status = ?1 WHERE id = ?2",
             params![status, id],
@@ -769,8 +769,8 @@ pub async fn db_update_scheduled_email_status(
     .await
 }
 
-pub async fn db_delete_scheduled_email(db: &ReadDbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn db_delete_scheduled_email(db: &WriterPool, id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         conn.execute("DELETE FROM scheduled_emails WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -956,6 +956,10 @@ mod sync_signature_tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     fn count_default_for(conn: &Connection, account_id: &str, col: &str) -> i64 {
         let sql = format!(
             "SELECT COUNT(*) FROM signatures WHERE account_id = ?1 AND {col} = 1"
@@ -990,7 +994,8 @@ mod sync_signature_tests {
             is_default: false,
             is_reply_default: false,
         };
-        let id = db_insert_signature_sync(&conn, &p).expect("insert");
+        let id = db_insert_signature_sync(
+            &write(&conn), &p).expect("insert");
         assert!(!id.is_empty(), "must return a uuid");
         let name: String = conn
             .query_row(
@@ -1007,7 +1012,7 @@ mod sync_signature_tests {
         let conn = setup_db();
         // First sig: default for acc-1.
         let first = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "First".into(),
@@ -1020,7 +1025,7 @@ mod sync_signature_tests {
         .expect("insert first");
         // Second sig: also default. Should flip first row.
         let _second = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "Second".into(),
@@ -1050,7 +1055,7 @@ mod sync_signature_tests {
     fn insert_does_not_clear_default_in_different_account() {
         let conn = setup_db();
         let acc1 = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "A1".into(),
@@ -1062,7 +1067,7 @@ mod sync_signature_tests {
         )
         .expect("insert acc-1 default");
         let _acc2 = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-2".into(),
                 name: "A2".into(),
@@ -1090,7 +1095,7 @@ mod sync_signature_tests {
     fn update_partial_only_changes_named_fields() {
         let conn = setup_db();
         let id = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "Old".into(),
@@ -1104,7 +1109,7 @@ mod sync_signature_tests {
 
         // Update only the name.
         db_update_signature_sync(
-            &conn,
+            &write(&conn),
             UpdateSignatureParams {
                 id: id.clone(),
                 name: Some("New".into()),
@@ -1130,7 +1135,7 @@ mod sync_signature_tests {
     fn update_promotes_to_default_clears_others() {
         let conn = setup_db();
         let _first = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "First".into(),
@@ -1142,7 +1147,7 @@ mod sync_signature_tests {
         )
         .expect("first");
         let second = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "Second".into(),
@@ -1155,7 +1160,7 @@ mod sync_signature_tests {
         .expect("second");
 
         db_update_signature_sync(
-            &conn,
+            &write(&conn),
             UpdateSignatureParams {
                 id: second.clone(),
                 name: None,
@@ -1186,7 +1191,7 @@ mod sync_signature_tests {
     fn delete_removes_row_and_is_idempotent() {
         let conn = setup_db();
         let id = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "X".into(),
@@ -1198,7 +1203,7 @@ mod sync_signature_tests {
         )
         .expect("insert");
 
-        db_delete_signature_sync(&conn, &id).expect("delete");
+        db_delete_signature_sync(&write(&conn), &id).expect("delete");
         let n: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM signatures WHERE id = ?1",
@@ -1209,7 +1214,7 @@ mod sync_signature_tests {
         assert_eq!(n, 0);
 
         // Idempotent: delete-of-missing is Ok.
-        db_delete_signature_sync(&conn, &id).expect("idempotent delete");
+        db_delete_signature_sync(&write(&conn), &id).expect("idempotent delete");
     }
 
     #[test]
@@ -1218,7 +1223,7 @@ mod sync_signature_tests {
         let mut ids = Vec::new();
         for name in ["A", "B", "C"] {
             let id = db_insert_signature_sync(
-                &conn,
+            &write(&conn),
                 &InsertSignatureParams {
                     account_id: "acc-1".into(),
                     name: name.into(),
@@ -1233,7 +1238,7 @@ mod sync_signature_tests {
         }
         // Reorder to C, A, B.
         let new_order = vec![ids[2].clone(), ids[0].clone(), ids[1].clone()];
-        db_reorder_signatures_sync(&conn, &new_order).expect("reorder");
+        db_reorder_signatures_sync(&write(&conn), &new_order).expect("reorder");
 
         assert_eq!(get_sort_order(&conn, &ids[2]), 0);
         assert_eq!(get_sort_order(&conn, &ids[0]), 1);
@@ -1244,7 +1249,7 @@ mod sync_signature_tests {
     fn reorder_leaves_absent_ids_untouched() {
         let conn = setup_db();
         let acc1 = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-1".into(),
                 name: "A1".into(),
@@ -1256,7 +1261,7 @@ mod sync_signature_tests {
         )
         .expect("insert acc-1");
         let acc2 = db_insert_signature_sync(
-            &conn,
+            &write(&conn),
             &InsertSignatureParams {
                 account_id: "acc-2".into(),
                 name: "A2".into(),
@@ -1276,7 +1281,7 @@ mod sync_signature_tests {
         )
         .expect("seed sort_order");
 
-        db_reorder_signatures_sync(&conn, std::slice::from_ref(&acc1)).expect("reorder");
+        db_reorder_signatures_sync(&write(&conn), std::slice::from_ref(&acc1)).expect("reorder");
 
         assert_eq!(get_sort_order(&conn, &acc1), 0);
         assert_eq!(

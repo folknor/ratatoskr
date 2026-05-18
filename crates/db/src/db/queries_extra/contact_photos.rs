@@ -1,10 +1,12 @@
 //! Contact photo cache persistence.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
+
+use crate::db::{ReadConn, ReadError, WriteTarget};
 
 /// Upsert a contact photo cache entry and update the contact's avatar_url.
 pub fn upsert_photo_cache_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     email: &str,
     account_id: &str,
     content_hash: &str,
@@ -39,7 +41,7 @@ pub fn upsert_photo_cache_sync(
 
 /// Get the cached file path for a contact photo, updating last_accessed_at.
 pub fn get_cached_photo_path_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     email: &str,
     account_id: &str,
 ) -> Result<Option<String>, String> {
@@ -66,7 +68,7 @@ pub fn get_cached_photo_path_sync(
 }
 
 /// Get total cache size in bytes.
-pub fn get_cache_total_size_sync(conn: &Connection) -> Result<i64, String> {
+pub fn get_cache_total_size_sync(conn: &ReadConn<'_>) -> Result<i64, String> {
     conn.query_row(
         "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM contact_photo_cache",
         [],
@@ -77,7 +79,7 @@ pub fn get_cache_total_size_sync(conn: &Connection) -> Result<i64, String> {
 
 /// Get the oldest cache entry (by last_accessed_at).
 pub fn get_oldest_cache_entry_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
 ) -> Result<Option<(String, String, String)>, String> {
     conn.query_row(
         "SELECT email, account_id, file_path \
@@ -93,13 +95,16 @@ pub fn get_oldest_cache_entry_sync(
             ))
         },
     )
-    .optional()
-    .map_err(|e| format!("query oldest contact photo: {e}"))
+    .map(Some)
+    .or_else(|e| match e {
+        ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        other => Err(format!("query oldest contact photo: {other}")),
+    })
 }
 
 /// Delete a cache entry.
 pub fn delete_cache_entry_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     email: &str,
     account_id: &str,
 ) -> Result<(), String> {
@@ -113,7 +118,7 @@ pub fn delete_cache_entry_sync(
 
 /// Get Graph contacts that need photo fetching (no cache entry yet).
 pub fn get_uncached_graph_contacts_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
@@ -141,7 +146,7 @@ pub fn get_uncached_graph_contacts_sync(
 
 /// Get Google contacts that need photo fetching (have remote avatar_url, no cache entry yet).
 pub fn get_uncached_google_contacts_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn

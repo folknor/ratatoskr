@@ -1,7 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
-use super::provider::create_provider;
+use super::provider::create_provider_with_writer;
 use db::progress::NoopProgressReporter;
 use crate::send::{
     SendIntent, SendRequest, build_mime_message_base64url, mark_draft_failed,
@@ -84,10 +84,10 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     };
 
     // 2. Provider dispatch
-    let provider = match create_provider(&ctx.db, &account_id_outer, ctx.encryption_key).await {
+    let provider = match create_provider_with_writer(&ctx.db, &ctx.write_db, &account_id_outer, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            let _ = mark_draft_failed(&ctx.db, draft_id_outer).await;
+            let _ = mark_draft_failed(&ctx.write_db, draft_id_outer).await;
             let outcome = ActionOutcome::Failed {
                 error: ActionError::remote(e),
             };
@@ -120,7 +120,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
                     log::warn!("Provider send-intent writeback failed: {e}");
                 }
                 if let Err(e) = mark_send_intent_local(
-                    &ctx.db,
+                    &ctx.write_db,
                     account_id_outer.clone(),
                     source_message_id_outer,
                     send_intent,
@@ -130,12 +130,12 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
                     log::warn!("Local send-intent writeback failed: {e}");
                 }
             }
-            let _ = mark_draft_sent(&ctx.db, draft_id_outer, sent_message_id).await;
+            let _ = mark_draft_sent(&ctx.write_db, draft_id_outer, sent_message_id).await;
             ActionOutcome::Success
         }
         Err(e) => {
             let msg = e.to_string();
-            let _ = mark_draft_failed(&ctx.db, draft_id_outer).await;
+            let _ = mark_draft_failed(&ctx.write_db, draft_id_outer).await;
             ActionOutcome::Failed {
                 error: ActionError::remote(msg),
             }
@@ -179,7 +179,7 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
 
     // 2. Provider delete (best-effort, only if remote_draft_id exists)
     if let Some(remote_draft_id) = remote_id
-        && let Ok(provider) = create_provider(&ctx.db, account_id, ctx.encryption_key).await
+        && let Ok(provider) = create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await
     {
         let provider_ctx = ProviderCtx {
             account_id,

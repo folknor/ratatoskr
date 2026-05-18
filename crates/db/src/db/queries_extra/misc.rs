@@ -1,4 +1,4 @@
-use super::super::ReadDbState;
+use super::super::WriterPool;
 use super::super::types::{
     BackfillRow, ImapMessageRow, SnoozedThread, SpecialFolderRow, SubscriptionEntry,
 };
@@ -18,10 +18,10 @@ SELECT id, account_id, thread_id, from_address, from_name, to_addresses FROM (
 ) WHERE rn = 1";
 
 pub async fn db_get_snoozed_threads_due(
-    db: &ReadDbState,
+    db: &WriterPool,
     now: i64,
 ) -> Result<Vec<SnoozedThread>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT id, account_id FROM threads WHERE is_snoozed = 1 AND snooze_until <= ?1",
@@ -49,7 +49,7 @@ pub fn get_calendar_default_view_sync(conn: &crate::db::ReadConn<'_>) -> Result<
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_record_unsubscribe_action(
-    db: &ReadDbState,
+    db: &WriterPool,
     id: String,
     account_id: String,
     thread_id: String,
@@ -60,7 +60,7 @@ pub async fn db_record_unsubscribe_action(
     status: String,
     now: i64,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "INSERT INTO unsubscribe_actions (id, account_id, thread_id, from_address, from_name, method, unsubscribe_url, status, unsubscribed_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -75,10 +75,10 @@ pub async fn db_record_unsubscribe_action(
 }
 
 pub async fn db_get_subscriptions(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
 ) -> Result<Vec<SubscriptionEntry>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn
             .prepare(
                 "WITH grouped AS (
@@ -132,12 +132,12 @@ pub async fn db_get_subscriptions(
 }
 
 pub async fn db_get_unsubscribe_status(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     from_address: String,
 ) -> Result<Option<String>, String> {
     let from_address = from_address.to_lowercase();
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         Ok(conn
             .query_row(
                 "SELECT status FROM unsubscribe_actions WHERE account_id = ?1 AND from_address = ?2",
@@ -150,14 +150,14 @@ pub async fn db_get_unsubscribe_status(
 }
 
 pub async fn db_get_imap_uids_for_messages(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     message_ids: Vec<String>,
 ) -> Result<Vec<ImapMessageRow>, String> {
     if message_ids.is_empty() {
         return Ok(Vec::new());
     }
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let placeholders: Vec<String> = (0..message_ids.len())
             .map(|i| format!("?{}", i + 2))
             .collect();
@@ -185,12 +185,12 @@ pub async fn db_get_imap_uids_for_messages(
 }
 
 pub async fn db_find_special_folder(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     special_use: String,
     fallback_label_id: Option<String>,
 ) -> Result<Option<String>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let result: Option<SpecialFolderRow> = conn
             .query_row(
                 "SELECT imap_folder_path, name FROM folders WHERE account_id = ?1 AND imap_special_use = ?2 LIMIT 1",
@@ -219,7 +219,7 @@ pub async fn db_find_special_folder(
 }
 
 pub async fn db_update_message_imap_folder(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     message_ids: Vec<String>,
     new_folder: String,
@@ -227,7 +227,7 @@ pub async fn db_update_message_imap_folder(
     if message_ids.is_empty() {
         return Ok(());
     }
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let placeholders: Vec<String> = (0..message_ids.len())
             .map(|i| format!("?{}", i + 3))
             .collect();
@@ -254,12 +254,12 @@ pub async fn db_update_message_imap_folder(
 
 
 pub async fn db_get_inbox_threads_for_backfill(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     batch_size: i64,
     offset: i64,
 ) -> Result<Vec<BackfillRow>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let sql = format!(
             "SELECT t.id AS thread_id, t.subject, t.snippet,
                         m.from_address, m.from_name,
@@ -285,11 +285,11 @@ pub async fn db_get_inbox_threads_for_backfill(
 }
 
 pub async fn db_update_scheduled_email_attachments(
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: String,
     attachment_data: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let id: Option<String> = conn
             .query_row(
                 "SELECT id FROM scheduled_emails WHERE account_id = ?1 ORDER BY created_at DESC LIMIT 1",
@@ -310,11 +310,11 @@ pub async fn db_update_scheduled_email_attachments(
 }
 
 pub async fn db_query_raw_select(
-    db: &ReadDbState,
+    db: &WriterPool,
     sql: String,
     params: Vec<serde_json::Value>,
 ) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let col_count = stmt.column_count();
         let col_names: Vec<String> = (0..col_count)

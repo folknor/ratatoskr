@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::future::Future;
 
-use db::db::{ReadDbState, WriteTxn};
+use db::db::{ReadDbState, WriterPool, WriteTxn};
 use db::db::queries_extra::{delete_seen_address_google_other, upsert_seen_address_google_other};
 use sync::state as sync_state;
 
@@ -25,6 +25,7 @@ pub async fn sync_google_other_contacts<F, Fut>(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     mut write: F,
 ) -> Result<SyncContactsResult, String>
 where
@@ -34,19 +35,19 @@ where
     let existing_token = sync_state::load_google_other_contacts_sync_token(db, account_id).await?;
 
     match existing_token {
-        Some(token) => match incremental_sync(client, account_id, db, &token, &mut write).await {
+        Some(token) => match incremental_sync(client, account_id, db, writer, &token, &mut write).await {
             Ok(result) => Ok(result),
             Err(e) if e.contains("410") || e.contains("GONE") || e.contains("syncToken") => {
                 log::warn!(
                     "Google otherContacts sync token expired for {account_id}, \
                          falling back to full sync"
                 );
-                sync_state::delete_google_other_contacts_sync_token(db, account_id).await?;
-                full_sync(client, account_id, db, &mut write).await
+                sync_state::delete_google_other_contacts_sync_token(writer, account_id).await?;
+                full_sync(client, account_id, db, writer, &mut write).await
             }
             Err(e) => Err(e),
         },
-        None => full_sync(client, account_id, db, &mut write).await,
+        None => full_sync(client, account_id, db, writer, &mut write).await,
     }
 }
 
@@ -71,6 +72,7 @@ async fn full_sync<F, Fut>(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     write: &mut F,
 ) -> Result<SyncContactsResult, String>
 where
@@ -125,7 +127,7 @@ where
     .await?;
 
     if let Some(ref token) = sync_token {
-        sync_state::save_google_other_contacts_sync_token(db, account_id, token).await?;
+        sync_state::save_google_other_contacts_sync_token(writer, account_id, token).await?;
     }
 
     log::info!("Google otherContacts full sync for {account_id}: {synced} contacts with emails");
@@ -141,6 +143,7 @@ async fn incremental_sync<F, Fut>(
     client: &GmailClient,
     account_id: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     sync_token: &str,
     write: &mut F,
 ) -> Result<SyncContactsResult, String>
@@ -209,7 +212,7 @@ where
     }
 
     if let Some(ref token) = new_sync_token {
-        sync_state::save_google_other_contacts_sync_token(db, account_id, token).await?;
+        sync_state::save_google_other_contacts_sync_token(writer, account_id, token).await?;
     }
 
     log::info!(

@@ -8,9 +8,9 @@
 //! Functions use typed DB capabilities; callers wrap them in the
 //! appropriate state helper if they need async dispatch.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
-use crate::db::{WriteTarget, WriteTxn};
+use crate::db::{ReadConn, ReadError, WriteTarget, WriteTxn};
 
 // ---------------------------------------------------------------------------
 // messages table
@@ -48,7 +48,7 @@ pub fn set_message_imap_flags(
 /// Return the `thread_id` for a message matched by
 /// `(account_id, imap_folder, imap_uid)`. Returns `None` if not found.
 pub fn get_thread_id_for_imap_uid(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     folder: &str,
     imap_uid: i64,
@@ -61,10 +61,9 @@ pub fn get_thread_id_for_imap_uid(
     )
     .map(Some)
     .or_else(|e| {
-        if e == rusqlite::Error::QueryReturnedNoRows {
-            Ok(None)
-        } else {
-            Err(format!("get_thread_id_for_imap_uid: {e}"))
+        match e {
+            ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            other => Err(format!("get_thread_id_for_imap_uid: {other}")),
         }
     })
 }
@@ -164,7 +163,7 @@ pub struct AttachmentCacheInfo {
 /// UI callers pass the local `attachments.id`; provider-specific callers can
 /// still pass the remote attachment ID.
 pub fn find_attachment_cache_info(
-    conn: &impl WriteTarget,
+    conn: &ReadConn<'_>,
     account_id: &str,
     message_id: &str,
     remote_attachment_id: &str,
@@ -253,7 +252,7 @@ pub struct PublicFolderRow {
 /// updated; existing permission overrides survive unless the caller explicitly
 /// passes the new values.
 pub fn upsert_public_folders(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     rows: &[PublicFolderRow],
 ) -> Result<(), String> {
     let mut stmt = conn
@@ -297,7 +296,7 @@ pub fn upsert_public_folders(
 
 /// Update the MYRIGHTS-derived permission columns for a single public folder.
 pub fn update_public_folder_rights(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     folder_id: &str,
     can_read: bool,
@@ -346,7 +345,7 @@ pub struct PublicFolderItemRow {
 /// Returns `(new_count, updated_count)` where `updated_count` tracks rows
 /// whose `change_key` differed from the stored value.
 pub fn upsert_public_folder_items(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     rows: &[PublicFolderItemRow],
 ) -> Result<(usize, usize), String> {
     let mut insert_stmt = conn
@@ -416,7 +415,7 @@ pub fn upsert_public_folder_items(
 /// `server_item_ids`. If `server_item_ids` is empty, deletes everything for
 /// the folder. Returns the number of rows deleted.
 pub fn delete_stale_public_folder_items(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     folder_id: &str,
     server_item_ids: &[String],
@@ -457,7 +456,7 @@ pub fn delete_stale_public_folder_items(
 
 /// Delete all `public_folder_items` rows for a folder (used during unpin).
 pub fn delete_all_public_folder_items(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
@@ -476,7 +475,7 @@ pub fn delete_all_public_folder_items(
 /// Pin a public folder for offline sync. Upserts the pin row, setting
 /// `sync_enabled = 1` and updating `sync_depth_days`.
 pub fn pin_public_folder(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     folder_id: &str,
     sync_depth_days: i32,
@@ -495,7 +494,7 @@ pub fn pin_public_folder(
 
 /// Delete the pin row for a public folder.
 pub fn delete_public_folder_pin(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
@@ -510,7 +509,7 @@ pub fn delete_public_folder_pin(
 /// Return the `sync_depth_days` for a pinned folder. Defaults to 30 if
 /// no pin row exists.
 pub fn get_public_folder_sync_depth(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     folder_id: &str,
 ) -> Result<i32, String> {
@@ -528,7 +527,7 @@ pub fn get_public_folder_sync_depth(
 /// Return the IDs of all public folders that have `sync_enabled = 1` for an
 /// account.
 pub fn get_pinned_folder_ids(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<String>, String> {
     let mut stmt = conn

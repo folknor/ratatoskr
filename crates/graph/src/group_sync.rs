@@ -383,7 +383,7 @@ fn persist_group_members(
     let local_id = format!("exchange-{account_id}-{server_group_id}");
 
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin tx: {e}"))?;
 
     // Clear existing members for this group and repopulate
@@ -403,7 +403,7 @@ fn prune_stale_groups(
     seen_server_ids: &HashSet<String>,
 ) -> Result<(), String> {
     let tx = conn
-        .unchecked_transaction()
+        .transaction()
         .map_err(|e| format!("begin prune groups tx: {e}"))?;
     let all_groups = {
         let read = tx.as_read();

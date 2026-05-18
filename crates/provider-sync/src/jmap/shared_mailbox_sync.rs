@@ -41,7 +41,7 @@ pub async fn sync_shared_account(
     client: &JmapClient,
     jmap_account_id: &str,
     account_id: &str,
-    _db: &WriteDbState,
+    db: &WriteDbState,
     read_db: &ReadDbState,
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
@@ -55,6 +55,7 @@ pub async fn sync_shared_account(
         client,
         account_id,
         db: read_db,
+        write_db: db,
         body_store,
         inline_images,
         search,
@@ -64,6 +65,7 @@ pub async fn sync_shared_account(
     };
 
     let now = chrono::Utc::now().timestamp();
+    let writer_pool = db.writer_pool();
 
     // Check if we have existing state tokens - if not, run initial sync.
     let email_state = load_sync_state_ctx(&ctx, "Email").await?;
@@ -73,7 +75,7 @@ pub async fn sync_shared_account(
         match shared_initial_sync(&ctx).await {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db,
+                    &writer_pool,
                     account_id,
                     jmap_account_id,
                     now,
@@ -85,7 +87,7 @@ pub async fn sync_shared_account(
             Err(e) => {
                 log::warn!("Shared JMAP account {jmap_account_id} initial sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db,
+                    &writer_pool,
                     account_id,
                     jmap_account_id,
                     now,
@@ -100,7 +102,7 @@ pub async fn sync_shared_account(
         match shared_delta_sync(&ctx).await {
             Ok(sync_result) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db,
+                    &writer_pool,
                     account_id,
                     jmap_account_id,
                     now,
@@ -112,7 +114,7 @@ pub async fn sync_shared_account(
             Err(e) => {
                 log::warn!("Shared JMAP account {jmap_account_id} delta sync failed: {e}");
                 sync_state::update_shared_mailbox_sync_status(
-                    read_db,
+                    &writer_pool,
                     account_id,
                     jmap_account_id,
                     now,

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool};
 
 use super::super::client::GraphClient;
 use super::super::types::{MESSAGE_SELECT, ODataCollection, REACTIONS_EXPAND};
@@ -56,7 +56,7 @@ pub(super) async fn bootstrap_delta_token(
 /// Routes to shared mailbox storage when the client is scoped to one.
 pub(super) async fn save_delta_token(
     client: &GraphClient,
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
@@ -118,7 +118,7 @@ pub(super) async fn bootstrap_delta_token_latest(
 /// Routes to shared mailbox storage when the client is scoped to one.
 pub(super) async fn delete_delta_token(
     client: &GraphClient,
-    db: &ReadDbState,
+    db: &WriterPool,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {

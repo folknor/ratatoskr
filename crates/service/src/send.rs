@@ -15,8 +15,8 @@ use lettre::message::{
     Attachment, Mailbox, MessageBuilder, MultiPart, SinglePart, header::ContentType,
 };
 
-use db::db::ReadDbState;
 use common::encoding::encode_base64url_nopad;
+use service_state::WriteDbState;
 pub use service_api::actions::{SendAttachment, SendIntent, SendRequest};
 
 /// Errors that can occur during the send pipeline.
@@ -149,11 +149,11 @@ pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendErr
 
 /// Transition a local draft to `'sent'` status after successful provider send.
 pub async fn mark_draft_sent(
-    db: &ReadDbState,
+    db: &WriteDbState,
     draft_id: String,
     sent_message_id: String,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         db::db::queries_extra::draft_lifecycle::mark_draft_sent_sync(
             conn,
             &draft_id,
@@ -164,15 +164,15 @@ pub async fn mark_draft_sent(
 }
 
 /// Transition a local draft to `'failed'` status after a send error.
-pub async fn mark_draft_failed(db: &ReadDbState, draft_id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
+pub async fn mark_draft_failed(db: &WriteDbState, draft_id: String) -> Result<(), String> {
+    db.with_write(move |conn| {
         db::db::queries_extra::draft_lifecycle::mark_draft_failed_sync(conn, &draft_id)
     })
     .await
 }
 
 pub async fn mark_send_intent_local(
-    db: &ReadDbState,
+    db: &WriteDbState,
     account_id: String,
     source_message_id: Option<String>,
     intent: SendIntent,
@@ -187,7 +187,7 @@ pub async fn mark_send_intent_local(
         SendIntent::Forward => (false, true),
     };
 
-    db.with_conn(move |conn| {
+    db.with_write(move |conn| {
         conn.execute(
             "UPDATE messages \
              SET is_replied = CASE WHEN ?3 THEN 1 ELSE is_replied END, \

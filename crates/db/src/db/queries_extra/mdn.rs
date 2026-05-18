@@ -1,7 +1,7 @@
 //! MDN (read receipt) policy lookup and sent-flag tracking.
 
 use crate::db::WriteTarget;
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
 /// Policy that governs whether an MDN (read receipt) should be sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +93,7 @@ fn get_setting_for_write(
 }
 
 /// Check whether an MDN has already been sent for a message.
-pub fn is_mdn_already_sent(conn: &Connection, account_id: &str, message_id: &str) -> bool {
+pub fn is_mdn_already_sent(conn: &impl WriteTarget, account_id: &str, message_id: &str) -> bool {
     conn.query_row(
         "SELECT mdn_sent FROM messages WHERE account_id = ?1 AND id = ?2",
         params![account_id, message_id],
@@ -117,7 +117,7 @@ pub fn mark_mdn_sent_local(
 }
 
 /// Check whether `mdn_requested` is set for a Graph message.
-pub fn is_mdn_requested_graph(conn: &Connection, account_id: &str, message_id: &str) -> bool {
+pub fn is_mdn_requested_graph(conn: &impl WriteTarget, account_id: &str, message_id: &str) -> bool {
     conn.query_row(
         "SELECT mdn_requested FROM messages WHERE account_id = ?1 AND id = ?2",
         params![account_id, message_id],
@@ -169,10 +169,14 @@ mod tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     #[test]
     fn test_default_policy_is_never() {
         let conn = setup_db();
-        let policy = resolve_read_receipt_policy(&conn, "acct1", "sender@example.com");
+        let policy = resolve_read_receipt_policy(&write(&conn), "acct1", "sender@example.com");
         assert_eq!(policy, ReadReceiptPolicy::Never);
     }
 
@@ -184,7 +188,7 @@ mod tests {
             [],
         )
         .expect("update setting");
-        let policy = resolve_read_receipt_policy(&conn, "acct1", "sender@example.com");
+        let policy = resolve_read_receipt_policy(&write(&conn), "acct1", "sender@example.com");
         assert_eq!(policy, ReadReceiptPolicy::Ask);
     }
 
@@ -196,7 +200,7 @@ mod tests {
             [],
         )
         .expect("insert");
-        let policy = resolve_read_receipt_policy(&conn, "acct1", "sender@example.com");
+        let policy = resolve_read_receipt_policy(&write(&conn), "acct1", "sender@example.com");
         assert_eq!(policy, ReadReceiptPolicy::Always);
     }
 
@@ -208,7 +212,7 @@ mod tests {
              INSERT INTO read_receipt_policy (id, account_id, scope, policy) VALUES ('2', 'acct1', 'domain:example.com', 'ask');",
         )
         .expect("insert");
-        let policy = resolve_read_receipt_policy(&conn, "acct1", "sender@example.com");
+        let policy = resolve_read_receipt_policy(&write(&conn), "acct1", "sender@example.com");
         assert_eq!(policy, ReadReceiptPolicy::Ask);
     }
 
@@ -220,7 +224,7 @@ mod tests {
              INSERT INTO read_receipt_policy (id, account_id, scope, policy) VALUES ('2', 'acct1', 'sender:boss@example.com', 'always');",
         )
         .expect("insert");
-        let policy = resolve_read_receipt_policy(&conn, "acct1", "boss@example.com");
+        let policy = resolve_read_receipt_policy(&write(&conn), "acct1", "boss@example.com");
         assert_eq!(policy, ReadReceiptPolicy::Always);
     }
 
@@ -232,7 +236,7 @@ mod tests {
             [],
         )
         .expect("insert");
-        let policy = resolve_read_receipt_policy(&conn, "acct1", "Boss@Example.COM");
+        let policy = resolve_read_receipt_policy(&write(&conn), "acct1", "Boss@Example.COM");
         assert_eq!(policy, ReadReceiptPolicy::Always);
     }
 
@@ -254,38 +258,38 @@ mod tests {
     fn test_is_mdn_already_sent_false_by_default() {
         let conn = setup_db();
         insert_test_message(&conn, "acct1", "msg1", true);
-        assert!(!is_mdn_already_sent(&conn, "acct1", "msg1"));
+        assert!(!is_mdn_already_sent(&write(&conn), "acct1", "msg1"));
     }
 
     #[test]
     fn test_mark_mdn_sent_local() {
         let conn = setup_db();
         insert_test_message(&conn, "acct1", "msg1", true);
-        mark_mdn_sent_local(&conn, "acct1", "msg1").expect("mark sent");
-        assert!(is_mdn_already_sent(&conn, "acct1", "msg1"));
+        mark_mdn_sent_local(&write(&conn), "acct1", "msg1").expect("mark sent");
+        assert!(is_mdn_already_sent(&write(&conn), "acct1", "msg1"));
     }
 
     #[test]
     fn test_is_mdn_already_sent_missing_message() {
         let conn = setup_db();
-        assert!(!is_mdn_already_sent(&conn, "acct1", "nonexistent"));
+        assert!(!is_mdn_already_sent(&write(&conn), "acct1", "nonexistent"));
     }
 
     #[test]
     fn test_is_mdn_requested_graph() {
         let conn = setup_db();
         insert_test_message(&conn, "acct1", "msg1", true);
-        assert!(is_mdn_requested_graph(&conn, "acct1", "msg1"));
+        assert!(is_mdn_requested_graph(&write(&conn), "acct1", "msg1"));
         insert_test_message(&conn, "acct1", "msg2", false);
-        assert!(!is_mdn_requested_graph(&conn, "acct1", "msg2"));
+        assert!(!is_mdn_requested_graph(&write(&conn), "acct1", "msg2"));
     }
 
     #[test]
     fn test_mark_mdn_sent_idempotent() {
         let conn = setup_db();
         insert_test_message(&conn, "acct1", "msg1", true);
-        mark_mdn_sent_local(&conn, "acct1", "msg1").expect("first mark");
-        mark_mdn_sent_local(&conn, "acct1", "msg1").expect("second mark");
-        assert!(is_mdn_already_sent(&conn, "acct1", "msg1"));
+        mark_mdn_sent_local(&write(&conn), "acct1", "msg1").expect("first mark");
+        mark_mdn_sent_local(&write(&conn), "acct1", "msg1").expect("second mark");
+        assert!(is_mdn_already_sent(&write(&conn), "acct1", "msg1"));
     }
 }

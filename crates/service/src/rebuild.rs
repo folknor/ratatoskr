@@ -302,7 +302,7 @@ async fn rebuild_all_messages(
     service_generation: u32,
 ) -> Result<(), String> {
     let pairs = db
-        .with_write(|conn| db::db::queries_extra::select_all_message_ids_for_rebuild(conn))
+        .with_read(db::db::queries_extra::select_all_message_ids_for_rebuild)
         .await
         .map_err(|e| format!("select_all_message_ids_for_rebuild: {e}"))?;
     let total = u64::try_from(pairs.len()).unwrap_or(u64::MAX);
@@ -355,7 +355,7 @@ async fn rebuild_chunk(
 ) -> Result<(), String> {
     let pairs_for_msgs = pairs.to_vec();
     let pairs_for_atts = pairs.to_vec();
-    let messages_fut = db.with_write(move |conn| {
+    let messages_fut = db.with_read(move |conn| {
         db::db::queries_extra::select_messages_for_index_batch(conn, &pairs_for_msgs)
     });
     let attachments_fut = db.with_read(move |conn| {

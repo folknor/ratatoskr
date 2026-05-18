@@ -69,11 +69,15 @@ mod tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     #[test]
     fn missing_cursor_returns_zero() {
         let conn = fresh_conn();
         assert_eq!(
-            get_clean_shutdown_cursor(&conn, "body").expect("get"),
+            get_clean_shutdown_cursor(&write(&conn), "body").expect("get"),
             0
         );
     }
@@ -81,10 +85,10 @@ mod tests {
     #[test]
     fn update_then_read_back() {
         let conn = fresh_conn();
-        update_clean_shutdown_cursors(&conn, &["body", "inline", "extract"]).expect("update");
-        let body = get_clean_shutdown_cursor(&conn, "body").expect("body");
-        let inline = get_clean_shutdown_cursor(&conn, "inline").expect("inline");
-        let extract = get_clean_shutdown_cursor(&conn, "extract").expect("extract");
+        update_clean_shutdown_cursors(&write(&conn), &["body", "inline", "extract"]).expect("update");
+        let body = get_clean_shutdown_cursor(&write(&conn), "body").expect("body");
+        let inline = get_clean_shutdown_cursor(&write(&conn), "inline").expect("inline");
+        let extract = get_clean_shutdown_cursor(&write(&conn), "extract").expect("extract");
         assert!(body > 0);
         assert!(inline > 0);
         assert!(extract > 0);
@@ -96,12 +100,12 @@ mod tests {
     #[test]
     fn update_is_idempotent_and_advances() {
         let conn = fresh_conn();
-        update_clean_shutdown_cursors(&conn, &["body"]).expect("first update");
-        let first = get_clean_shutdown_cursor(&conn, "body").expect("first read");
+        update_clean_shutdown_cursors(&write(&conn), &["body"]).expect("first update");
+        let first = get_clean_shutdown_cursor(&write(&conn), "body").expect("first read");
         // unixepoch() granularity is 1 second; sleep briefly to observe advance.
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        update_clean_shutdown_cursors(&conn, &["body"]).expect("second update");
-        let second = get_clean_shutdown_cursor(&conn, "body").expect("second read");
+        update_clean_shutdown_cursors(&write(&conn), &["body"]).expect("second update");
+        let second = get_clean_shutdown_cursor(&write(&conn), "body").expect("second read");
         assert!(second >= first, "cursor must not move backwards");
     }
 }

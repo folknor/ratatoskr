@@ -115,114 +115,144 @@ fn upsert_keyword_labels(
 mod tests {
     use super::{KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords};
 
-    fn setup_conn(provider: &str) -> rusqlite::Connection {
-        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-        db::db::migrations::run_all(&conn).expect("migrations");
-        conn.execute(
-            "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', ?1)",
-            [provider],
-        )
-        .expect("insert account");
-        conn.execute(
-            "INSERT INTO threads (account_id, id, message_count) VALUES ('acc', 'thread', 2)",
-            [],
-        )
-        .expect("insert thread");
-        for message_id in ["m1", "m2"] {
+    fn setup_pool(provider: &str) -> db::db::WriterPool {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::path::PathBuf::from("target")
+            .join("provider-sync-keyword-tests")
+            .join(unique.to_string());
+        let pool = db::db::open_writer_pool(&dir).expect("open writer pool");
+        let provider = provider.to_string();
+        pool.with_write_sync(move |conn| {
             conn.execute(
-                "INSERT INTO messages (account_id, id, thread_id, date, is_read) \
-                 VALUES ('acc', ?1, 'thread', 1, 1)",
-                [message_id],
+                "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', ?1)",
+                [provider],
             )
-            .expect("insert message");
-        }
-        conn
+            .expect("insert account");
+            conn.execute(
+                "INSERT INTO threads (account_id, id, message_count) VALUES ('acc', 'thread', 2)",
+                [],
+            )
+            .expect("insert thread");
+            for message_id in ["m1", "m2"] {
+                conn.execute(
+                    "INSERT INTO messages (account_id, id, thread_id, date, is_read) \
+                     VALUES ('acc', ?1, 'thread', 1, 1)",
+                    [message_id],
+                )
+                .expect("insert message");
+            }
+            Ok(())
+        })
+        .expect("seed db");
+        pool
     }
 
-    fn thread_label_count(conn: &rusqlite::Connection, label_id: &str) -> i64 {
-        conn.query_row(
-            "SELECT COUNT(*) FROM thread_labels \
-             WHERE account_id = 'acc' AND thread_id = 'thread' AND label_id = ?1",
-            [label_id],
-            |row| row.get(0),
-        )
+    fn thread_label_count(pool: &db::db::WriterPool, label_id: &str) -> i64 {
+        let label_id = label_id.to_string();
+        pool.with_read_sync(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM thread_labels \
+                 WHERE account_id = 'acc' AND thread_id = 'thread' AND label_id = ?1",
+                [label_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())
+        })
         .expect("count thread label")
     }
 
     #[test]
     fn recompute_removes_keyword_absent_from_message_union() {
-        let conn = setup_conn("jmap");
-        let write = db::db::WriteConn::from_raw(&conn);
-        let tx = write.transaction().unwrap();
-        replace_message_keywords(
-            &tx,
-            KeywordProvider::Jmap,
-            "acc",
-            "m1",
-            &[String::from("todo")],
-        )
+        let pool = setup_pool("jmap");
+        pool.with_write_sync(|write| {
+            let tx = write.transaction().unwrap();
+            replace_message_keywords(
+                &tx,
+                KeywordProvider::Jmap,
+                "acc",
+                "m1",
+                &[String::from("todo")],
+            )
+            .unwrap();
+            recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
+            tx.commit().unwrap();
+            Ok(())
+        })
         .unwrap();
-        recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
-        tx.commit().unwrap();
-        assert_eq!(thread_label_count(&conn, "kw:todo"), 1);
+        assert_eq!(thread_label_count(&pool, "kw:todo"), 1);
 
-        let write = db::db::WriteConn::from_raw(&conn);
-        let tx = write.transaction().unwrap();
-        replace_message_keywords(&tx, KeywordProvider::Jmap, "acc", "m1", &[]).unwrap();
-        recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
-        tx.commit().unwrap();
-        assert_eq!(thread_label_count(&conn, "kw:todo"), 0);
+        pool.with_write_sync(|write| {
+            let tx = write.transaction().unwrap();
+            replace_message_keywords(&tx, KeywordProvider::Jmap, "acc", "m1", &[]).unwrap();
+            recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
+            tx.commit().unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(thread_label_count(&pool, "kw:todo"), 0);
     }
 
     #[test]
     fn recompute_keeps_keyword_present_on_sibling_message() {
-        let conn = setup_conn("jmap");
-        let write = db::db::WriteConn::from_raw(&conn);
-        let tx = write.transaction().unwrap();
-        replace_message_keywords(
-            &tx,
-            KeywordProvider::Jmap,
-            "acc",
-            "m1",
-            &[String::from("todo")],
-        )
+        let pool = setup_pool("jmap");
+        pool.with_write_sync(|write| {
+            let tx = write.transaction().unwrap();
+            replace_message_keywords(
+                &tx,
+                KeywordProvider::Jmap,
+                "acc",
+                "m1",
+                &[String::from("todo")],
+            )
+            .unwrap();
+            replace_message_keywords(
+                &tx,
+                KeywordProvider::Jmap,
+                "acc",
+                "m2",
+                &[String::from("todo")],
+            )
+            .unwrap();
+            recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
+            tx.commit().unwrap();
+            Ok(())
+        })
         .unwrap();
-        replace_message_keywords(
-            &tx,
-            KeywordProvider::Jmap,
-            "acc",
-            "m2",
-            &[String::from("todo")],
-        )
-        .unwrap();
-        recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
-        tx.commit().unwrap();
-        assert_eq!(thread_label_count(&conn, "kw:todo"), 1);
+        assert_eq!(thread_label_count(&pool, "kw:todo"), 1);
 
-        let write = db::db::WriteConn::from_raw(&conn);
-        let tx = write.transaction().unwrap();
-        replace_message_keywords(&tx, KeywordProvider::Jmap, "acc", "m1", &[]).unwrap();
-        recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
-        tx.commit().unwrap();
-        assert_eq!(thread_label_count(&conn, "kw:todo"), 1);
+        pool.with_write_sync(|write| {
+            let tx = write.transaction().unwrap();
+            replace_message_keywords(&tx, KeywordProvider::Jmap, "acc", "m1", &[]).unwrap();
+            recompute_thread_keyword_labels(&tx, KeywordProvider::Jmap, "acc", "thread").unwrap();
+            tx.commit().unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(thread_label_count(&pool, "kw:todo"), 1);
     }
 
     #[test]
     fn imap_keywords_use_the_same_recompute_path() {
-        let conn = setup_conn("imap");
-        let write = db::db::WriteConn::from_raw(&conn);
-        let tx = write.transaction().unwrap();
-        replace_message_keywords(
-            &tx,
-            KeywordProvider::Imap,
-            "acc",
-            "m1",
-            &[String::from("todo")],
-        )
+        let pool = setup_pool("imap");
+        pool.with_write_sync(|write| {
+            let tx = write.transaction().unwrap();
+            replace_message_keywords(
+                &tx,
+                KeywordProvider::Imap,
+                "acc",
+                "m1",
+                &[String::from("todo")],
+            )
+            .unwrap();
+            recompute_thread_keyword_labels(&tx, KeywordProvider::Imap, "acc", "thread").unwrap();
+            tx.commit().unwrap();
+            Ok(())
+        })
         .unwrap();
-        recompute_thread_keyword_labels(&tx, KeywordProvider::Imap, "acc", "thread").unwrap();
-        tx.commit().unwrap();
 
-        assert_eq!(thread_label_count(&conn, "kw:todo"), 1);
+        assert_eq!(thread_label_count(&pool, "kw:todo"), 1);
     }
 }

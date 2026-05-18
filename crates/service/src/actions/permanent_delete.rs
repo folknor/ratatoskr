@@ -26,7 +26,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
-use super::provider::{classify_provider_error, create_provider};
+use super::provider::{classify_provider_error, create_provider_with_writer};
 use db::db::queries::delete_thread;
 use db::progress::NoopProgressReporter;
 
@@ -110,7 +110,7 @@ pub async fn permanent_delete(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
 
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => permanent_delete_dispatch(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
             let kind = classify_provider_error(&e);

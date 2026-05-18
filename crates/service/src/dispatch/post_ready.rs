@@ -59,6 +59,7 @@ pub(crate) fn spawn_post_ready_push_startup(
 
         let push_runtime = Arc::new(crate::push::PushRuntime::new(
             boot_state.read_db_state().expect("read db installed after boot.ready"),
+            db_state.clone(),
             encryption_key,
             sync_runtime,
             notification_tx,

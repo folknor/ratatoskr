@@ -5,7 +5,7 @@
 
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
 use crate::parse::parse_iso_datetime;
-use db::db::ReadDbState;
+use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{
     PublicFolderItemRow, PublicFolderRow, delete_all_public_folder_items,
     delete_public_folder_pin, delete_stale_public_folder_items, get_pinned_folder_ids,
@@ -98,7 +98,7 @@ async fn load_sync_state(
 ) -> Result<(Option<i64>, Option<i64>), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare(
                 "SELECT last_sync_timestamp, last_full_scan_at \
@@ -123,7 +123,7 @@ async fn load_sync_state(
 
 /// Save sync state after a sync run.
 async fn save_sync_state(
-    db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_id: &str,
     last_sync_timestamp: i64,
@@ -131,7 +131,7 @@ async fn save_sync_state(
 ) -> Result<(), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         conn.execute(
             "INSERT INTO public_folder_sync_state (account_id, folder_id, last_sync_timestamp, last_full_scan_at) \
              VALUES (?1, ?2, ?3, ?4) \
@@ -148,14 +148,14 @@ async fn save_sync_state(
 
 /// Upsert items into `public_folder_items`. Returns `(new_count, updated_count)`.
 async fn upsert_items(
-    db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_id: &str,
     items: Vec<EwsItem>,
 ) -> Result<(usize, usize), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         let rows: Vec<PublicFolderItemRow> = items
             .iter()
             .map(|item| PublicFolderItemRow {
@@ -179,7 +179,7 @@ async fn upsert_items(
 
 /// Delete local items not present on the server. Returns deletion count.
 async fn delete_stale_items(
-    db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_id: &str,
     server_item_ids: &[String],
@@ -187,7 +187,7 @@ async fn delete_stale_items(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     let server_ids: Vec<String> = server_item_ids.to_vec();
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         delete_stale_public_folder_items(conn, &account_id, &folder_id, &server_ids)
     })
     .await
@@ -201,14 +201,14 @@ async fn load_sync_depth_days(
 ) -> Result<i32, String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| get_public_folder_sync_depth(conn, &account_id, &folder_id))
+    db.with_read(move |conn| get_public_folder_sync_depth(conn, &account_id, &folder_id))
         .await
 }
 
 /// Load all pinned folder IDs with sync_enabled = 1.
 async fn load_pinned_folder_ids(db: &ReadDbState, account_id: &str) -> Result<Vec<String>, String> {
     let account_id = account_id.to_string();
-    db.with_conn(move |conn| get_pinned_folder_ids(conn, &account_id))
+    db.with_read(move |conn| get_pinned_folder_ids(conn, &account_id))
         .await
 }
 
@@ -223,6 +223,7 @@ pub async fn sync_pinned_public_folder(
     ews: &EwsClient,
     access_token: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_id: &str,
     headers: &EwsHeaders,
@@ -254,7 +255,7 @@ pub async fn sync_pinned_public_folder(
     );
 
     // Upsert into DB
-    let (new_items, updated_items) = upsert_items(db, account_id, folder_id, items).await?;
+    let (new_items, updated_items) = upsert_items(writer, account_id, folder_id, items).await?;
 
     // Deletion detection - throttled to once per hour
     let mut deleted_items = 0usize;
@@ -266,7 +267,7 @@ pub async fn sync_pinned_public_folder(
     let full_scan_ts = if should_scan {
         log::info!("Public folder {folder_id}: running deletion scan");
         let server_ids = fetch_all_item_ids(ews, access_token, folder_id, headers).await?;
-        deleted_items = delete_stale_items(db, account_id, folder_id, &server_ids).await?;
+        deleted_items = delete_stale_items(writer, account_id, folder_id, &server_ids).await?;
         if deleted_items > 0 {
             log::info!("Public folder {folder_id}: deleted {deleted_items} stale items");
         }
@@ -276,7 +277,7 @@ pub async fn sync_pinned_public_folder(
     };
 
     // Save sync state
-    save_sync_state(db, account_id, folder_id, now, full_scan_ts).await?;
+    save_sync_state(writer, account_id, folder_id, now, full_scan_ts).await?;
 
     Ok(PublicFolderSyncResult {
         folder_id: folder_id.to_string(),
@@ -294,6 +295,7 @@ pub async fn sync_all_pinned_folders(
     ews: &EwsClient,
     access_token: &str,
     db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     headers: &EwsHeaders,
 ) -> Result<Vec<(String, Result<PublicFolderSyncResult, String>)>, String> {
@@ -313,7 +315,7 @@ pub async fn sync_all_pinned_folders(
 
     for fid in &folder_ids {
         let result =
-            sync_pinned_public_folder(ews, access_token, db, account_id, fid, headers).await;
+            sync_pinned_public_folder(ews, access_token, db, writer, account_id, fid, headers).await;
 
         match &result {
             Ok(sr) => {
@@ -337,7 +339,7 @@ pub async fn sync_all_pinned_folders(
 
 /// Pin a public folder for offline sync.
 pub async fn pin_public_folder(
-    db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_id: &str,
     sync_depth_days: Option<i32>,
@@ -345,20 +347,20 @@ pub async fn pin_public_folder(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     let depth = sync_depth_days.unwrap_or(30);
-    db.with_conn(move |conn| db_pin_public_folder(conn, &account_id, &folder_id, depth))
+    writer.with_write(move |conn| db_pin_public_folder(conn, &account_id, &folder_id, depth))
         .await
 }
 
 /// Unpin a public folder - removes pin, local items, and sync state.
 pub async fn unpin_public_folder(
-    db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
 
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         delete_public_folder_pin(conn, &account_id, &folder_id)?;
         delete_all_public_folder_items(conn, &account_id, &folder_id)?;
         // public_folder_sync_state is sync-owned; keep its SQL here per architecture.md
@@ -379,7 +381,8 @@ pub async fn unpin_public_folder(
 pub async fn browse_public_folders(
     ews: &EwsClient,
     access_token: &str,
-    db: &ReadDbState,
+    _db: &ReadDbState,
+    writer: &WriterPool,
     account_id: &str,
     parent_folder_id: &str,
     headers: &EwsHeaders,
@@ -393,7 +396,7 @@ pub async fn browse_public_folders(
     let parent_id_owned = parent_folder_id.to_string();
     let folders_clone = folders.clone();
 
-    db.with_conn(move |conn| {
+    writer.with_write(move |conn| {
         let rows: Vec<PublicFolderRow> = folders_clone
             .iter()
             .map(|f| PublicFolderRow {

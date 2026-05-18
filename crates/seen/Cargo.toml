@@ -11,7 +11,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-db = { path = "../db" }
+db-read = { path = "../db-read" }
 serde.workspace = true
 rusqlite.workspace = true
 mail-parser = "0.11.3"
@@ -19,5 +19,5 @@ log = "0.4"
 hotpath = { workspace = true, optional = true }
 
 [features]
-hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath"]
-hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc"]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db-read/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db-read/hotpath-alloc"]

@@ -93,6 +93,16 @@ name = "cal-no-app"
 from = "cal"
 forbid = "app"
 
+[[dependency_rule]]
+name = "seen-reader-only"
+from = "seen"
+forbid = ["db"]
+
+[[dependency_rule]]
+name = "smart-folder-reader-only"
+from = "smart-folder"
+forbid = ["db"]
+
 [ratatoskr]
 mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
 fixtures_dir = "crates/app/tests/sync-fixtures"

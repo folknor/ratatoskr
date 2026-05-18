@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 use bifrost_jmap::identity::{IdentityGet, IdentitySet};
 
-use db::db::ReadDbState;
+use db::db::WriterPool;
 
 use super::client::JmapClient;
 
@@ -18,7 +18,7 @@ use super::client::JmapClient;
 pub async fn sync_jmap_identity_signatures(
     client: &JmapClient,
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriterPool,
 ) -> Result<usize, String> {
     let identities = fetch_all_identities(client).await?;
 
@@ -50,8 +50,8 @@ pub async fn sync_jmap_identity_signatures(
 
     let count = rows.len();
 
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    db.with_write(move |conn| {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
 
         // Check whether the account already has a default signature.
         let has_default: bool = tx

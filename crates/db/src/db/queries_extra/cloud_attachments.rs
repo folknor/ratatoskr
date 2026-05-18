@@ -1,7 +1,9 @@
 //! Cloud attachment upload queue persistence.
 
-use rusqlite::{Connection, params};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
+
+use crate::db::{ReadConn, WriteTarget};
 
 /// A row from the `cloud_attachments` table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,7 +47,7 @@ fn row_to_cloud_attachment(row: &rusqlite::Row<'_>) -> Result<CloudAttachment, r
 
 /// Get all pending uploads for an account.
 pub fn get_pending_uploads_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<CloudAttachment>, String> {
     let mut stmt = conn
@@ -63,7 +65,7 @@ pub fn get_pending_uploads_sync(
 
 /// Transition an upload to a new status, optionally updating bytes_uploaded.
 pub fn update_upload_status_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: i64,
     status: &str,
     bytes_uploaded: Option<i64>,
@@ -86,7 +88,7 @@ pub fn update_upload_status_sync(
 
 /// Mark an upload as failed, incrementing retry_count.
 pub fn mark_upload_failed_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: i64,
     new_status: &str,
 ) -> Result<(), String> {
@@ -101,7 +103,7 @@ pub fn mark_upload_failed_sync(
 }
 
 /// On app restart: reset rows stuck in `uploading` back to `pending`.
-pub fn reset_interrupted_uploads_sync(conn: &Connection) -> Result<usize, String> {
+pub fn reset_interrupted_uploads_sync(conn: &impl WriteTarget) -> Result<usize, String> {
     conn.execute(
         "UPDATE cloud_attachments SET upload_status = 'pending' WHERE upload_status = 'uploading'",
         [],
@@ -111,7 +113,7 @@ pub fn reset_interrupted_uploads_sync(conn: &Connection) -> Result<usize, String
 
 /// Create a new outgoing cloud attachment entry. Returns the row ID.
 pub fn create_outgoing_upload_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     provider: &str,
     file_name: &str,
@@ -130,7 +132,7 @@ pub fn create_outgoing_upload_sync(
 
 /// Get uploads that have permanently failed (retry_count >= max_retries).
 pub fn get_permanently_failed_sync(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     max_retries: i32,
 ) -> Result<Vec<CloudAttachment>, String> {
     let mut stmt = conn
@@ -148,7 +150,7 @@ pub fn get_permanently_failed_sync(
 
 /// Insert detected incoming cloud links.
 pub fn insert_incoming_cloud_links_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     message_id: &str,
     account_id: &str,
     links: &[(String, String)], // (provider_str, url)
@@ -177,7 +179,7 @@ pub fn insert_incoming_cloud_links_sync(
 
 /// Update metadata columns of a cloud_attachments row.
 pub fn update_cloud_attachment_metadata_sync(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     id: i64,
     file_name: Option<&str>,
     file_size: Option<i64>,

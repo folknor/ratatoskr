@@ -6,7 +6,7 @@ use super::label;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable_with_id;
-use super::provider::{classify_provider_error, create_provider};
+use super::provider::{classify_provider_error, create_provider_with_writer};
 use db::db::WriteTarget;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
 
@@ -292,7 +292,7 @@ async fn apply_label_group_with_kind(
     kind: DispatchKind,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("apply_label_group", account_id, thread_id);
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             let outcome = apply_label_group_with_provider_kind(
                 ctx,
@@ -459,7 +459,7 @@ async fn remove_label_group_with_kind(
     kind: DispatchKind,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label_group", account_id, thread_id);
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    match create_provider_with_writer(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             let outcome = remove_label_group_with_provider_kind(
                 ctx,

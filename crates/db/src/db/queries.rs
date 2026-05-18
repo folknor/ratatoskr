@@ -1,6 +1,6 @@
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
-use super::from_row::{query_as, query_one, FromRow};
+use super::from_row::{query_as, query_one, FromRow, QuerySource};
 use super::sql_fragments::{
     LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR, validate_thread_bool_column,
 };
@@ -9,26 +9,36 @@ use super::types::{
     ThreadInfoRow,
 };
 use super::queries_extra::validate_label_color_pairs;
-use super::{ReadConn, ReadDbState, WriteTarget};
+use super::{ReadConn, WriterPool, WriteTarget};
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
-pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
-    let result = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            params![key],
-            |row| row.get::<_, String>("value"),
-        )
-        .ok();
-    Ok(result)
+pub fn get_setting(conn: &(impl QuerySource + ?Sized), key: &str) -> Result<Option<String>, String> {
+    struct SettingRow {
+        value: String,
+    }
+
+    impl FromRow for SettingRow {
+        fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+            Ok(Self {
+                value: row.get("value")?,
+            })
+        }
+    }
+
+    query_one::<SettingRow>(
+        conn,
+        "SELECT value FROM settings WHERE key = ?1",
+        &[&key],
+    )
+    .map(|row| row.map(|row| row.value))
 }
 
 /// Persist a refreshed access token to the `accounts` table.
 ///
 /// The caller is responsible for encrypting the token before calling this.
 pub fn persist_refreshed_token(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     encrypted_access_token: &str,
     expires_at: i64,
@@ -43,7 +53,10 @@ pub fn persist_refreshed_token(
 }
 
 /// Get all folders for an account, ordered by sort_order then name.
-pub fn get_folders(conn: &Connection, account_id: &str) -> Result<Vec<DbFolder>, String> {
+pub fn get_folders(
+    conn: &(impl QuerySource + ?Sized),
+    account_id: &str,
+) -> Result<Vec<DbFolder>, String> {
     query_as::<DbFolder>(
         conn,
         "SELECT * FROM folders
@@ -60,7 +73,10 @@ pub fn get_folders(conn: &Connection, account_id: &str) -> Result<Vec<DbFolder>,
 /// classification at ingest, so no SELECT-side exclusion is needed. If a
 /// provider sync path is observed to leak one of those into `labels`, fix
 /// classification at ingest rather than re-adding a filter here.
-pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
+pub fn get_labels(
+    conn: &(impl QuerySource + ?Sized),
+    account_id: &str,
+) -> Result<Vec<DbLabel>, String> {
     query_as::<DbLabel>(
         conn,
         "SELECT * FROM labels
@@ -76,7 +92,7 @@ pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, S
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     account_id: &str,
     label_id: Option<&str>,
     limit: Option<i64>,
@@ -164,7 +180,7 @@ pub fn get_threads_for_bundle(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_thread_by_id(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     account_id: &str,
     thread_id: &str,
 ) -> Result<Option<DbThread>, String> {
@@ -179,7 +195,7 @@ pub fn get_thread_by_id(
 }
 
 pub fn get_thread_label_ids(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<String>, String> {
@@ -196,7 +212,7 @@ pub fn get_thread_label_ids(
 }
 
 pub fn get_thread_folder_ids(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<String>, String> {
@@ -294,7 +310,7 @@ pub fn delete_thread(
 }
 
 pub fn add_thread_label(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     label_id: &str,
@@ -308,7 +324,7 @@ pub fn add_thread_label(
 }
 
 pub fn add_thread_folder(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     folder_id: &str,
@@ -322,7 +338,7 @@ pub fn add_thread_folder(
 }
 
 pub fn remove_thread_label(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     label_id: &str,
@@ -336,7 +352,7 @@ pub fn remove_thread_label(
 }
 
 pub fn remove_thread_folder(
-    conn: &Connection,
+    conn: &impl WriteTarget,
     account_id: &str,
     thread_id: &str,
     folder_id: &str,
@@ -353,7 +369,7 @@ pub fn remove_thread_folder(
 // Label queries
 // ---------------------------------------------------------------------------
 
-pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
+pub fn upsert_label(conn: &impl WriteTarget, label: &DbLabel) -> Result<(), String> {
     validate_label_color_pairs(
         &label.id,
         label.server_color_bg.as_deref(),
@@ -391,7 +407,11 @@ pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
     Ok(())
 }
 
-pub fn delete_label(conn: &Connection, account_id: &str, label_id: &str) -> Result<(), String> {
+pub fn delete_label(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    label_id: &str,
+) -> Result<(), String> {
     conn.execute(
         "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
         params![account_id, label_id],
@@ -419,7 +439,7 @@ pub fn set_setting(conn: &impl WriteTarget, key: &str, value: &str) -> Result<()
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_bundle_unread_counts(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     account_id: &str,
 ) -> Result<Vec<CategoryCount>, String> {
     query_as::<CategoryCount>(
@@ -435,7 +455,7 @@ pub fn get_bundle_unread_counts(
 }
 
 pub fn get_categories_for_threads(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     thread_ids: &[String],
 ) -> Result<Vec<ThreadCategoryRow>, String> {
@@ -482,7 +502,7 @@ pub fn get_categories_for_threads(
 // ---------------------------------------------------------------------------
 
 pub fn get_attachments_for_message(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     account_id: &str,
     message_id: &str,
 ) -> Result<Vec<DbAttachment>, String> {
@@ -495,7 +515,7 @@ pub fn get_attachments_for_message(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn search_contacts(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     query: &str,
     limit: i64,
 ) -> Result<Vec<DbContact>, String> {
@@ -506,7 +526,7 @@ pub fn search_contacts(
 }
 
 fn search_contacts_fts(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     query: &str,
     limit: i64,
 ) -> Result<Vec<DbContact>, String> {
@@ -547,7 +567,7 @@ fn search_contacts_fts(
 }
 
 fn search_contacts_like(
-    conn: &Connection,
+    conn: &(impl QuerySource + ?Sized),
     query: &str,
     limit: i64,
 ) -> Result<Vec<DbContact>, String> {
@@ -581,7 +601,10 @@ fn search_contacts_like(
     query_as::<DbContact>(conn, &sql, &[&pattern, &limit])
 }
 
-pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<DbContact>, String> {
+pub fn get_contact_by_email(
+    conn: &(impl QuerySource + ?Sized),
+    email: &str,
+) -> Result<Option<DbContact>, String> {
     let normalized = email.to_lowercase();
     query_one::<DbContact>(
         conn,
@@ -595,7 +618,7 @@ pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<DbC
 // ---------------------------------------------------------------------------
 
 pub fn get_thread_count(
-    conn: &Connection,
+    conn: &ReadConn<'_>,
     account_id: &str,
     label_id: Option<&str>,
 ) -> Result<i64, String> {
@@ -620,9 +643,9 @@ pub fn get_thread_count(
     }
 }
 
-pub async fn get_provider_type(db: &ReadDbState, account_id: &str) -> Result<String, String> {
+pub async fn get_provider_type(db: &WriterPool, account_id: &str) -> Result<String, String> {
     let aid = account_id.to_string();
-    db.with_conn(move |conn| {
+    db.with_read(move |conn| {
         let mut stmt = conn
             .prepare("SELECT provider FROM accounts WHERE id = ?1")
             .map_err(|e| format!("prepare: {e}"))?;
@@ -632,7 +655,7 @@ pub async fn get_provider_type(db: &ReadDbState, account_id: &str) -> Result<Str
     .await
 }
 
-pub fn get_unread_count(conn: &Connection, account_id: &str) -> Result<i64, String> {
+pub fn get_unread_count(conn: &ReadConn<'_>, account_id: &str) -> Result<i64, String> {
     conn.query_row(
         "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
@@ -649,7 +672,7 @@ pub fn get_unread_count(conn: &Connection, account_id: &str) -> Result<i64, Stri
 // ---------------------------------------------------------------------------
 
 pub fn load_recent_rule_bundled_threads(
-    conn: &Connection,
+    conn: &(impl super::from_row::QuerySource + ?Sized),
     account_id: &str,
     limit: i64,
 ) -> Result<Vec<ThreadInfoRow>, String> {
@@ -664,9 +687,5 @@ pub fn load_recent_rule_bundled_threads(
          ORDER BY t.last_message_at DESC
          LIMIT ?2"
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    stmt.query_map(params![account_id, limit], ThreadInfoRow::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    query_as::<ThreadInfoRow>(conn, &sql, &[&account_id, &limit])
 }

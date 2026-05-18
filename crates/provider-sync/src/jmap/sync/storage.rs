@@ -48,11 +48,10 @@ pub(crate) async fn persist_messages(
         .map(|(tid, msgs)| (tid.to_string(), msgs.into_iter().cloned().collect()))
         .collect();
 
-    ctx.db
-        .with_conn(move |conn| {
-            let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+    ctx.write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
@@ -75,7 +74,7 @@ pub(crate) async fn persist_messages(
         store_bodies(ctx.body_store, messages),
         store_inline_images(ctx, messages),
         index_messages(ctx.search, ctx.account_id, messages),
-        seen::ingest_from_messages(ctx.db, ctx.account_id, messages),
+        crate::seen_ingest::ingest_from_messages(ctx.write_db, ctx.account_id, messages),
     );
 
     Ok(())
@@ -89,11 +88,10 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
     let ids: Vec<String> = message_ids.iter().map(|s| (*s).to_string()).collect();
 
     // Delete from DB and update parent threads
-    ctx.db
-        .with_conn(move |conn| {
-            let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+    ctx.write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
@@ -432,11 +430,10 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
     }
 
     if let Err(error) = ctx
-        .db
-        .with_conn(move |conn| {
-            let write = db::db::WriteConn::from_raw(conn);
-        let tx = write
-            .transaction()
+        .write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
                 .map_err(|e| format!("jmap inline image update tx: {e}"))?;
             for (attachment_row_id, content_hash) in updates {
                 tx.execute(

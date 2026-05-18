@@ -210,6 +210,10 @@ mod tests {
         conn
     }
 
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
     fn insert_account(conn: &Connection, id: &str) {
         conn.execute(
             "INSERT INTO accounts (id, email, provider, is_active) \
@@ -270,7 +274,7 @@ mod tests {
         insert_attachment(&conn, "att1", "acct-a", "m1", Some(&hash1), true);
         insert_attachment(&conn, "att2", "acct-a", "m2", Some(&hash2), false);
 
-        let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
+        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("orchestrate");
 
         assert_eq!(plan.data.message_ids.len(), 2);
         assert!(plan.data.message_ids.contains(&"m1".to_string()));
@@ -316,7 +320,7 @@ mod tests {
         insert_attachment(&conn, "b1", "acct-b", "mb1", Some(&shared), true);
         insert_attachment(&conn, "a2", "acct-a", "ma1", Some(&only_a), true);
 
-        let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
+        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("orchestrate");
 
         assert!(plan.shared_inline_hashes.contains(&shared));
         assert!(!plan.shared_inline_hashes.contains(&only_a));
@@ -340,7 +344,7 @@ mod tests {
         insert_attachment(&conn, "b1", "acct-b", "mb1", Some(&shared_cache), false);
         insert_attachment(&conn, "a2", "acct-a", "ma1", Some(&only_a), false);
 
-        let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
+        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("orchestrate");
 
         assert!(plan.shared_cache_hashes.contains(&shared_cache));
         assert!(!plan.shared_cache_hashes.contains(&only_a));
@@ -360,7 +364,7 @@ mod tests {
         insert_attachment(&conn, "a1", "acct-a", "ma1", Some(&cross), true);
         insert_attachment(&conn, "b1", "acct-b", "mb1", Some(&cross), false);
 
-        let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
+        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("orchestrate");
 
         assert!(!plan.shared_inline_hashes.contains(&cross));
     }
@@ -370,7 +374,7 @@ mod tests {
         let conn = test_db();
         insert_account(&conn, "acct-empty");
 
-        let plan = delete_account_orchestrate_sync(&conn, "acct-empty").expect("orchestrate");
+        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-empty").expect("orchestrate");
 
         assert!(plan.data.message_ids.is_empty());
         assert!(plan.data.cached_hashes.is_empty());
@@ -401,7 +405,7 @@ mod tests {
         )
         .expect("insert pending op");
 
-        let _plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
+        let _plan = delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("orchestrate");
 
         let count: i64 = conn
             .query_row(
@@ -424,7 +428,7 @@ mod tests {
         let real = h(b"real");
         insert_attachment(&conn, "att2", "acct-a", "m1", Some(&real), true);
 
-        let plan = delete_account_orchestrate_sync(&conn, "acct-a").expect("orchestrate");
+        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("orchestrate");
 
         assert_eq!(plan.data.inline_hashes, vec![real]);
         // Null-hash attachments do not contribute to the cleanup list -
