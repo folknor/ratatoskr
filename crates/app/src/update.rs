@@ -241,11 +241,26 @@ impl ReadyApp {
             }
             Message::SearchStateReady(Ok(state)) => {
                 self.search_state = Some(state);
-                Task::none()
+                self.search_state_pending = false;
+                if let Some(pending) = self.pending_search.take() {
+                    self.dispatch_resolved_search(pending)
+                } else {
+                    Task::none()
+                }
             }
             Message::SearchStateReady(Err(e)) => {
                 log::error!("search state async init failed: {e}");
-                Task::none()
+                self.search_state_pending = false;
+                // Init failed; search_state stays None and the dispatch
+                // will fall through to the SQL LIKE fallback (today's
+                // behaviour for the init-failure tail). The pending intent,
+                // if any, is replayed so the user gets *something* back
+                // rather than a stuck-pending state.
+                if let Some(pending) = self.pending_search.take() {
+                    self.dispatch_resolved_search(pending)
+                } else {
+                    Task::none()
+                }
             }
             Message::ServiceNotification(notification) => {
                 // Drop notifications from a dying-but-still-flushing reader

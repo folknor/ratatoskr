@@ -252,7 +252,22 @@ impl ReadyApp {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    fn dispatch_resolved_search(&mut self, resolved: ResolvedSearch) -> Task<Message> {
+    pub(crate) fn dispatch_resolved_search(&mut self, resolved: ResolvedSearch) -> Task<Message> {
+        // Pre-boot race: SearchReadState::init is still in flight. Stash the
+        // resolved intent so SearchStateReady can replay it once init lands,
+        // rather than letting the search pipeline fall through to the SQL
+        // LIKE fallback. The fallback is reserved for true init-failure
+        // recovery (which stays an open design question - see
+        // `docs/search/implementation-spec.md` § "SQL fallback"). Only the
+        // Query variant uses the search index; Snapshot loads stored thread
+        // IDs from `pinned_search_threads` and is safe to run pre-boot.
+        if self.search_state_pending
+            && matches!(resolved.execution, SearchExecution::Query { .. })
+        {
+            self.pending_search = Some(resolved);
+            return Task::none();
+        }
+
         self.apply_search_folder_restore(resolved.completion.folder_restore);
 
         match resolved.execution.clone() {

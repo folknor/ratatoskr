@@ -113,6 +113,17 @@ pub struct ReadyApp {
 
     // Search state
     pub(crate) search_state: Option<Arc<rtsk::search::SearchReadState>>,
+    /// True while `SearchReadState::init` is still in flight at boot.
+    /// Flipped to false on either `SearchStateReady(Ok)` or
+    /// `SearchStateReady(Err)`. While true, search dispatch defers (stores
+    /// the resolved intent in `pending_search`) instead of falling through
+    /// to the SQL fallback - the fallback is meant for true init-failure
+    /// recovery, not for the pre-boot race window.
+    pub(crate) search_state_pending: bool,
+    /// Search dispatch deferred during the pre-boot window. Replayed when
+    /// `SearchStateReady` arrives. Each new dispatch overwrites this so
+    /// rapid typing collapses to the most recent intent.
+    pub(crate) pending_search: Option<crate::handlers::search::ResolvedSearch>,
     /// Phase 3 task 17: stamped on `Notification::IndexCommitted`
     /// arrival; cleared by the 200 ms `ReaderReloadTick` handler
     /// after calling `reader.reload()`. The debounce collapses a
@@ -406,6 +417,8 @@ impl ReadyApp {
             palette: Palette::new(CommandRegistry::new(), resolver),
             undo_stack: UndoStack::default(),
             search_state,
+            search_state_pending: true,
+            pending_search: None,
             service_health: crate::service_client::ServiceHealth::Healthy,
             index_rebuild_progress: None,
             pending_reader_reload: None,
