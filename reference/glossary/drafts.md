@@ -72,7 +72,7 @@ The visual cue is a "Draft" pill rendered in the thread card (`crates/app/src/ui
 
 ## Lifecycle
 
-Today there is no "save as remote draft" path - a local draft stays in `local_drafts` until the user sends it. The synced-as-remote-draft scaffolding (`db_get_unsynced_drafts`, `db_mark_draft_synced`, `db_delete_local_draft` in `crates/db/src/db/queries_extra/compose.rs`) is in place but uncalled, awaiting an outbox/auto-save flow.
+Today there is no "save as remote draft" path - a local draft stays in `local_drafts` until the user sends it. The synced-as-remote-draft scaffolding (`db_get_unsynced_drafts`, `db_mark_draft_synced` in `crates/db/src/db/queries_extra/compose.rs`) is in place but uncalled, awaiting an outbox/auto-save flow. Deletion goes through `delete_draft_sync` on the send path (see § Lifecycle § Send below); there is no separate remote-draft delete helper.
 
 **Save**: the compose flow writes via `SAVE_LOCAL_DRAFT_SQL` (`crates/db/src/db/queries_extra/compose.rs`) with `sync_status = 'pending'`. Subsequent edits upsert the same `id` and reset `sync_status` back to `'pending'`.
 

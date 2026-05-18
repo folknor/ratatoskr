@@ -2,13 +2,14 @@
 
 Implementation plan for unifying the search backend per `docs/search/problem-statement.md`. Work spans three crates: `crates/search/` (Tantivy full-text), `crates/smart-folder/` (operator-based SQL queries), and `crates/core/` (unified pipeline, DB queries, types).
 
-## Current State
+## Current State (2026-05-18)
 
-The unified search pipeline is implemented (Slices 1-4 complete). Entry point: `crates/core/src/search_pipeline.rs`.
+Slices 1-5 are landed. Slice 6 is split: the iced app routes smart-folder selection through the unified pipeline at the dispatch layer, but the legacy `execute_smart_folder_query` facade in `crates/smart-folder/src/lib.rs` is still SQL-only and is no longer on the reachable app path.
 
 - **Tantivy** (`crates/search/src/lib.rs`) - full-text ranked search. Cross-account (multi-account filter via `BooleanQuery`). Returns message-level results with `group_by_thread()` helper.
-- **Smart folder SQL** (`crates/smart-folder/src/`) - operator-based SQL queries. Cross-account via `AccountScope`. Returns thread-level results. Supports all operators below.
-- **Unified pipeline** (`crates/core/src/search_pipeline.rs`) - routes queries through SQL, Tantivy, or both based on parsed content.
+- **Smart folder SQL** (`crates/smart-folder/src/sql_builder.rs`) - operator-based SQL queries via `query_threads_read()` / `count_matching_read()`. Cross-account via `AccountScope`. Returns thread-level results. Supports all operators below.
+- **Unified pipeline** (`crates/core/src/search_pipeline.rs`) - routes queries through SQL, Tantivy, or both based on parsed content. Entry point: `search(query, search_state, conn, scope, body_read) -> Result<SearchResults, String>`, where `SearchResults` is the enum `FullIndex(Vec<UnifiedSearchResult>) | Degraded(Vec<UnifiedSearchResult>)`. `Degraded` is returned when `SearchReadState` is unavailable and the pipeline falls back to a SQL-only `LIKE` path - see "Known semantic issues" below.
+- **App dispatch** (`crates/app/src/handlers/search.rs`) - `SearchIntent` (`AdHoc` / `SmartFolder` / `PinnedActivation` / `PinnedRefresh`) is resolved to a `ResolvedSearch` (`SearchExecution` + `SearchCompletionBehavior`) that drives both query execution and the side-effects on pinned-search persistence and folder-view restoration. All four entry points route through `search_pipeline::search()`.
 
 ## Target State
 
@@ -273,29 +274,35 @@ The existing `SearchParams` struct is an internal detail - the unified API takes
   - `None` -> no account filter (search all)
   - `Some(ids)` -> `BooleanQuery` with `Should` clauses for each account ID
 
-### SearchResult changes
+### UnifiedSearchResult
 
-Current result is message-level. The unified API needs thread-level:
+The implemented type in `crates/core/src/search_pipeline.rs`:
 
 ```rust
-pub struct SearchResult {
+pub struct UnifiedSearchResult {
     pub thread_id: String,
     pub account_id: String,
-    pub subject: String,
-    pub snippet: String,
-    pub from_name: String,
-    pub from_address: String,
-    pub date: i64,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub from_name: Option<String>,
+    pub from_address: Option<String>,
+    pub date: Option<i64>,
     pub is_read: bool,
     pub is_starred: bool,
-    pub message_count: u32,
-    pub rank: f32,
+    pub message_count: Option<i64>,
+    pub rank: f32,                          // BM25, or 0.0 for SQL-only
+    pub match_kind: Option<MatchKind>,      // Phase 7-8 attribution
+    pub also_matched: Vec<MatchKind>,       // secondary fields above 50% of top score
 }
 ```
 
+`match_kind` and `also_matched` are the Phase 7-8 attribution outputs: the pipeline knows whether the hit came from subject, from-name, body, or snippet, and surfaces secondary fields the result also matched. The Tantivy paths optionally re-read body text from the body store (`body_read: Option<&BodyStoreReadState>`) to refine attribution.
+
+`has_attachments` is intentionally absent from `UnifiedSearchResult` and is tracked as an open issue (see "Known semantic issues" below) - the thread card cannot display the attachment indicator from search results today.
+
 For the Tantivy-only path: query returns message-level hits, group by `thread_id`, take the highest score per thread, enrich with thread metadata from SQLite.
 
-For the SQL to Tantivy path: SQL provides the thread metadata, Tantivy provides the score.
+For the SQL-narrowed-Tantivy path: SQL provides the thread metadata, Tantivy provides the score.
 
 ## Slice 4: Unified Pipeline
 
@@ -361,46 +368,28 @@ Search is always cross-account. Account narrowing is controlled entirely by `acc
 
 ## Slice 5: App Integration
 
-The app is a pure iced GUI (`crates/app/`) - there is no Tauri layer and no command wrappers. The iced app calls the unified search function from `crates/core/` (or `crates/search/`) directly, just like any other core function.
+**Status: Landed.** Details live in `docs/search/app-integration-spec.md`. Summary of the implemented shape:
 
-No `scope` parameter - search is always cross-account per the search problem statement. Users narrow via `account:` operators. The `DbState` and `SearchState` types are `Clone` (they wrap `Arc<Mutex<...>>`), so the app passes them into the search call. For blocking work, `DbState::conn()` provides synchronous access to the connection.
+- The iced app calls `search_pipeline::search()` directly from `crates/app/src/handlers/search.rs`.
+- Dispatch goes through `SearchIntent` (`AdHoc` / `SmartFolder` / `PinnedActivation` / `PinnedRefresh`) → `resolve_search_intent` → `ResolvedSearch`, which carries both the execution (Query vs Snapshot) and the completion behavior (pinned-search persistence, folder-restore policy, post-success effects).
+- Generational tracking uses branded `GenerationCounter<Search>` / `GenerationCounter<Nav>` tokens (`rtsk::generation`) instead of a raw `u64`. The `SearchFreshness` enum routes which token gates a given dispatch (queries use `Search`; snapshot activations use `Nav`).
+- `SearchReadState` is initialized once at boot and reused; the app holds it as `Option<Arc<SearchReadState>>`.
 
-The wiring itself is straightforward - call the unified search function from the app's update/message handler. However, making search feel correct during incremental typing requires generational load tracking (see Ecosystem Patterns below): a monotonically increasing counter that tags each search dispatch and silently drops stale results. Without this, rapid typing produces flickering or wrong results. This is not optional polish - it is a correctness requirement for the search UX.
+The scope parameter is real and supplied by the dispatcher (always one of `ViewScope::AllAccounts` / `Account` for ad-hoc; `QueryIntrinsic` for smart folders that encode scope in their query string). Search is still cross-account by default - `ViewScope::AllAccounts` is the default for ad-hoc searches.
 
 ## Slice 6: Smart Folder Migration
 
-Smart folders become thin wrappers around the search pipeline.
+**Status: Split.** Sidebar smart-folder selection in the iced app routes through `search_pipeline::search()` via `handle_smart_folder_selected` → `SearchIntent::SmartFolder` → `resolve_search_intent`. So in practice smart folders already get Tantivy ranking when their query has free text, all new operators, and contact expansion.
 
-### Execution path change
-
-Current: `execute_smart_folder_query` -> parse -> build SQL -> execute SQL -> `Vec<DbThread>`
-New: `execute_smart_folder_query` -> call `unified::search(folder.query, ...)` -> convert back to `Vec<DbThread>`
-
-**Important:** The unified search pipeline returns `Vec<SearchResult>`, but the smart folder API must continue returning `Vec<DbThread>` - the sidebar navigation, thread list, and unread count code all depend on this type. The adapter is straightforward: `SearchResult` contains `thread_id` and `account_id`, which can be used to fetch full `DbThread` records, or the SQL-only path (operators without free text, which covers most smart folders) can return `DbThread` directly without going through `SearchResult` at all. Only smart folders with free text in their query string need the `SearchResult` to `DbThread` conversion.
-
-**Long-term note:** The `SearchResult` vs `DbThread` distinction is a real seam in the domain model. Currently `DbThread` is the thread-list projection and `SearchResult` is the search projection, but they carry largely overlapping data. As more surfaces consume search results (pinned searches, smart folders, the thread list itself), the core query layer should eventually define a unified thread-presentation type rather than maintaining two parallel projections with ad hoc adapters between them.
-
-This means smart folders automatically get:
-- Tantivy ranking (if the query has free text)
-- All new operators
-- Cross-account support (smart folders always run cross-account, independent of sidebar scope - see `docs/sidebar/problem-statement.md`)
-- Contact expansion
+The legacy `execute_smart_folder_query` facade in `crates/smart-folder/src/lib.rs` is still SQL-only - it calls `query_threads_read()` after `migrate_legacy_tokens()` / `parse_query()`. The facade is not on the reachable app path today; cleanup is tracked under "Known semantic issues" below.
 
 ### Token migration
 
-Persisted smart folder queries using `__LAST_7_DAYS__` etc. need migration to offset syntax:
-
-```sql
-UPDATE smart_folders SET query = REPLACE(query, '__LAST_7_DAYS__', '-7');
-UPDATE smart_folders SET query = REPLACE(query, '__LAST_30_DAYS__', '-30');
-UPDATE smart_folders SET query = REPLACE(query, '__TODAY__', '0');
-```
-
-Add as a DB migration. Keep `resolve_query_tokens` as a fallback for one release cycle, then remove.
+`migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` at parse time. A one-time DB migration that rewrites these on disk has not been done; see "Known semantic issues."
 
 ### Unread counts
 
-`count_smart_folder_unread` can reuse the SQL-only path of the unified pipeline (smart folder queries for unread counts don't need ranking - they just need a count of matching unread threads).
+`count_smart_folder_unread` remains SQL-only. Unread counts don't need Tantivy ranking, only a count of matching unread threads. `get_navigation_state()` returns scaffolded zeros for smart-folder unread counts today; wiring `count_smart_folder_unread` into the navigation-state computation is still pending.
 
 ## Prerequisites / Schema Changes
 
@@ -441,4 +430,45 @@ Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that appl
 
 ### Most impactful finding
 
-Bloom's **generational load tracking** is the single most impactful pattern for this spec. The implementation spec treats Slice 5 app integration as "trivial wiring," but without stale-result cancellation the search UX will break during incremental typing. The pattern is simple: a monotonically increasing `u64` counter in the app state, incremented before each search dispatch and checked when results arrive. Any result tagged with a generation older than current is silently dropped. This same pattern appears across nearly every spec in the codebase (calendar, main layout, sidebar, command palette, pinned searches, status bar, contacts) and should be treated as a foundational primitive rather than a per-feature afterthought.
+Bloom's **generational load tracking** is the single most impactful pattern for this spec. The implementation spec treats Slice 5 app integration as "trivial wiring," but without stale-result cancellation the search UX will break during incremental typing. The implemented form uses branded `GenerationCounter<T>` / `GenerationToken<T>` (`rtsk::generation`) rather than raw `u64`, with phantom-type brands preventing cross-counter comparison. The same pattern is used across calendar, main layout, sidebar, command palette, pinned searches, status bar, and contacts.
+
+---
+
+## Known semantic issues
+
+Open items as of 2026-05-18. UI-side items live in `app-integration-spec.md`; pinned-search items live in `pinned-searches-implementation-spec.md`.
+
+### High
+
+1. **Combined path applies free text in SQL before Tantivy ranking.** `search_combined` passes the full parsed query into `query_threads_read()`, which always includes `build_free_text_clause()`. Mixed queries are constrained by a SQL `LIKE` candidate set before ranking, defeating the "SQL narrows by structured operators; Tantivy ranks free text" intent.
+2. **Combined path does a broad Tantivy search, then intersects in application code.** Works correctly but does not implement the "SQL narrows corpus first" performance model.
+3. **Tantivy-only thread cards can show best-matching-message metadata instead of latest-message metadata.** The product spec says thread cards always show the latest message; ranking should only affect order. The Tantivy-only path groups by highest-scoring message per thread and uses that message's subject/snippet/sender. Only the combined path re-enriches from `DbThread`.
+4. **Date boundary semantics differ across engines.** SQL uses strict `<` / `>` for `before:` / `after:`. Tantivy uses inclusive bounds. The same query can include boundary-day messages in one path and exclude them in another.
+5. **`folder:` is still fuzzy substring matching, not true folder-path semantics.** Current SQL lowers `folder:` to `%LIKE%` against `folders.name` or `imap_folder_path`. The spec calls for path-aware folder matching with cross-provider normalization.
+6. **`has_attachments` is missing from `UnifiedSearchResult`.** Search results cannot show the attachment indicator on the thread card. Fix: extend the struct, populate from `DbThread.has_attachments` in SQL paths, default to `false` in the Tantivy-only path.
+7. **SQL fallback search is a real semantics downgrade.** When `SearchReadState` is unavailable, free-text search falls back to a thread-level `LIKE` on subject/snippet. The pipeline marks the result set `SearchResults::Degraded` so callers can warn, but the contract is not the same.
+
+### Medium
+
+8. **`label:` matching is not normalized to the cross-account label model.** Current predicate is `LOWER(lg.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described in `reference/glossary/folders-labels.md`.
+9. **`to:` semantics are incomplete.** SQL checks only `to_addresses` and `cc_addresses`. No `bcc_addresses` coverage. No contact expansion. (Note: `from:` *does* expand via `contacts_fts` - the asymmetry is unintentional.)
+10. **`has:contact` is sender-only.** Implementation checks only `m.from_address IN (SELECT email FROM contacts)`. The product surface implies "any known participant"; sender-vs-any-participant remains unresolved.
+11. **Free-text Tantivy search does not cover all indexed address fields.** The index stores `from_address` and `to_addresses`, but the free-text query parser searches only `subject`, `from_name`, `body_text`, and `snippet`.
+12. **Legacy `execute_smart_folder_query` facade is still SQL-only.** The reachable app path uses the unified pipeline; the facade is leftover. Either delete it or convert it to a thin wrapper around the unified pipeline.
+13. **Legacy date-token migration is still runtime, not a one-time DB migration.** `migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__`-style tokens at execution time. A persisted SQL migration was specified but never written.
+14. **Smart-folder unread counts are scaffolded as 0.** `get_navigation_state()` returns 0 for every smart folder's unread count. Wiring `count_smart_folder_unread` into navigation-state computation is still pending (with batching, to avoid N+1 queries per sidebar refresh).
+15. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Broad searches can truncate in engine-specific ways before paging / refinement exists.
+
+### Low
+
+16. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
+17. **`in:` accepts undocumented shorthands.** `archive` and `important` are matched in code but absent from the documented operator surface in `problem-statement.md`. Decide: extend the docs or drop the shorthands.
+
+## Stale spec content (kept here so it doesn't drift back)
+
+These items appeared in earlier audit notes as "spec says X, code does Y." The current code is the better design; the spec wording has been updated to match:
+
+- Generational tracking uses branded `GenerationCounter<T>` / `GenerationToken<T>` rather than a raw `u64`.
+- The app's search query state is `UndoableText`, not a bare `String`.
+- The async bridge uses `db.with_conn()` / `tokio::task::spawn_blocking`; the pseudo-code in older drafts is illustrative, not normative.
+- Folder-view restoration re-queries from DB rather than restoring a cloned thread list (handled at the dispatch layer via `FolderRestoreBehavior`).

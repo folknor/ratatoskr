@@ -22,14 +22,26 @@ Detailed implementation specification for wiring the unified search pipeline int
 
 ## Phasing
 
-| Phase | Scope | Depends on |
-|-------|-------|------------|
-| **Phase 1** | Search bar widget + execution + generational tracking + result rendering | Backend slices 1-4 (done) |
-| **Phase 2** | Smart folder migration to unified pipeline | Phase 1 |
-| **Phase 3** | Operator typeahead popup | Phase 1 |
-| **Phase 4** | "Search here" sidebar interaction + polish | Phase 1, sidebar Phase 1 |
+| Phase | Scope | Status (2026-05-18) |
+|-------|-------|--------------------|
+| **Phase 1** | Search bar widget + execution + generational tracking + result rendering | Landed - shape differs from original plan; see "Status" below |
+| **Phase 2** | Smart folder migration to unified pipeline | Landed at the dispatch layer; legacy `execute_smart_folder_query` facade is still SQL-only and not on the reachable app path |
+| **Phase 3** | Operator typeahead popup | Landed - `TypeaheadState`, async dispatch, popup rendering all present |
+| **Phase 4** | "Search here" sidebar interaction + polish | Landed - `build_search_here_prefix`, `SidebarEvent::SearchHere`, prefix building for accounts/labels/folders/universal-folders |
 
-Phases 2-4 are independent of each other and can proceed in parallel once Phase 1 is complete.
+## Status as of 2026-05-18
+
+The implemented shape differs from the original plan in several ways - the plan stayed accurate for the contracts and message-flow, less so for the concrete App field names. The headline differences:
+
+- Dispatch goes through a `SearchIntent` resolver (`crates/app/src/handlers/search.rs`), not direct message handlers. `SearchIntent` has four variants: `AdHoc { query, scope }`, `SmartFolder { id, query }`, `PinnedActivation { id }`, `PinnedRefresh { id }`. `resolve_search_intent` returns a `ResolvedSearch` carrying both the execution (`Query` vs `Snapshot`) and a `SearchCompletionBehavior` describing pinned-search persistence, post-success effects, and folder-restore policy. This is a cleaner replacement for the original plan's per-handler branching.
+- Search query state is `UndoableText` (`self.search_query`), not `String` - undo/redo on the search bar is wired through the same mechanism as everywhere else.
+- Generation tracking uses branded tokens: `GenerationCounter<Search>` and `GenerationCounter<Nav>` (`rtsk::generation`). The `SearchFreshness` enum selects which counter gates a given dispatch - `Query` dispatches gate on `Search`; `Snapshot` activations gate on `Nav`. This is stricter than the original raw-`u64` design.
+- `active_smart_folder_id` and `pre_search_threads` were never added. Smart-folder identity is held inside `SearchPinnedStateBehavior::SmartFolder { id }` for the duration of the dispatch; folder-view restoration uses `FolderRestoreBehavior::EnterSearchFromFolderView` to re-navigate via the dispatch layer rather than replaying cached threads.
+- `has_attachments` is still missing from `UnifiedSearchResult` and from the `unified_to_app_thread` conversion - see "Open items" below.
+
+The remainder of this document is the design rationale and the long-form spec for each phase. Treat the App-struct and Message-enum fragments below as illustrative of intent rather than literal current code; the implementation in `crates/app/src/app.rs` and `crates/app/src/message.rs` is the source of truth.
+
+Phases 2-4 are independent of each other and proceeded in parallel after Phase 1.
 
 ---
 
@@ -1266,3 +1278,32 @@ If search ever takes long enough to be perceptible (which would indicate a bug o
 **Phase 4:**
 - `crates/app/src/ui/sidebar.rs` - `SidebarEvent::SearchHere`, right-click handling, `build_search_here_prefix()`
 - `crates/app/src/main.rs` - `SearchHere` event handler
+
+---
+
+## Open items
+
+UI-side open items as of 2026-05-18. Backend semantic issues (folder/label/contact/MIME) live in `implementation-spec.md`; pinned-search items live in `pinned-searches-implementation-spec.md`.
+
+### Result rendering
+
+- **`has_attachments` indicator missing on search results.** `UnifiedSearchResult` has no `has_attachments` field, and `unified_to_app_thread` passes `false` through. Thread cards from search will not show the paperclip until `UnifiedSearchResult` is extended.
+
+### Typeahead
+
+- **No "keep as text" fallback item.** The product spec says the last typeahead suggestion should always let the user keep the raw input. The current popup only shows matched suggestions; if no result matches, the popup hides entirely and the user has no explicit confirmation that the raw text will be used.
+- **`label:` / `folder:` typeahead does not narrow by an existing `account:` filter.** Both operators currently route through the same unscoped label/folder search. There is no account-aware narrowing for folders; `label:` is structurally cross-account by design (label groups have no `account_id`), so the asymmetry is intentional there but undocumented in the popup.
+- **Contact typeahead uses `seen_addresses` instead of `contacts_fts`.** The spec routes `from:` / `to:` typeahead through `contacts_fts` (the existing FTS5 index on contact email + display_name). The current code uses `seen_addresses` with `LIKE`. The fix is a one-line query swap plus result-shape alignment.
+- **Date typeahead has no "Pick a date..." path.** Only static presets are offered. The product spec includes an explicit "Pick a date..." entry that opens a calendar widget for absolute dates.
+
+### Smart folder management
+
+- **CRUD beyond "Save Search" is incomplete.** Rename, delete, and direct-update commands described in the product spec are not registered in the command palette. The only smart-folder command currently exposed is `SmartFolderSave`.
+
+### Search history
+
+- **Search-history UI is missing.** Recent queries are loaded into `App::search_history` from the `pinned_searches` table (`SearchHistoryLoaded` message), but no frontend surface displays them - no ↑-in-empty-bar history dropdown.
+
+### Architectural note
+
+- **`SearchResult` vs `DbThread` vs `Thread` projection seam.** The pipeline still maintains three parallel projections (`UnifiedSearchResult`, `DbThread`, app-level `Thread`) with ad-hoc adapters between them. As more surfaces consume search results (pinned searches, smart folders, the thread list itself), the core query layer should define a single thread-presentation type.

@@ -171,7 +171,8 @@ CREATE TABLE pinned_searches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     query TEXT NOT NULL,
     created_at INTEGER NOT NULL,  -- unix timestamp
-    updated_at INTEGER NOT NULL   -- unix timestamp
+    updated_at INTEGER NOT NULL,  -- unix timestamp
+    scope_account_id TEXT         -- NULL = cross-account; otherwise the account the search was run against
 );
 
 CREATE TABLE pinned_search_threads (
@@ -181,6 +182,8 @@ CREATE TABLE pinned_search_threads (
     PRIMARY KEY (pinned_search_id, thread_id, account_id)
 );
 ```
+
+`scope_account_id` records the sidebar scope active when the search was executed so that re-running the search (PinnedRefresh) hits the same account set as the original. NULL means the search was cross-account.
 
 Thread metadata is not stored - it's fetched live from the threads table when the pinned search is displayed.
 
