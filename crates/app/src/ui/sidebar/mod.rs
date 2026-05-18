@@ -301,11 +301,6 @@ impl Component for Sidebar {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, SidebarMessage> {
-        let show_labels = matches!(
-            self.selected_scope,
-            ViewScope::Account(_) | ViewScope::SharedMailbox { .. }
-        );
-
         // Mode toggle button (tall square spanning dropdown + compose height)
         let mode_btn = container(
             button(
@@ -375,7 +370,7 @@ impl Component for Sidebar {
                 .iter()
                 .any(|f| matches!(f.folder_kind, FolderKind::LabelGroup))
         });
-        if show_labels && has_label_groups {
+        if has_label_groups {
             scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
             scroll_content = scroll_content.push(labels_section(self));
         }
