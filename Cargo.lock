@@ -259,7 +259,7 @@ dependencies = [
  "display-info",
  "dissimilar",
  "env_logger",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "iced",
  "iced-drop",
  "import",
@@ -782,10 +782,10 @@ dependencies = [
  "db-read",
  "gmail",
  "graph",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "jmap",
  "log",
- "quick-xml 0.40.0",
+ "quick-xml 0.40.1",
  "reqwest",
  "rtsk",
  "rusqlite",
@@ -1047,7 +1047,7 @@ dependencies = [
 name = "cmdk"
 version = "0.1.0"
 dependencies = [
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "nucleo-matcher",
  "serde",
  "serde_json",
@@ -1100,7 +1100,7 @@ dependencies = [
  "css-inline",
  "db",
  "getrandom 0.4.2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "lol_html",
  "regex",
@@ -1459,9 +1459,9 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
-version = "6.1.0"
+version = "6.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
 dependencies = [
  "cfg-if",
  "crossbeam-utils",
@@ -1498,7 +1498,7 @@ dependencies = [
  "chrono-tz",
  "db-read",
  "flate2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "label-colors",
  "log",
  "lol_html",
@@ -1521,7 +1521,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "flate2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "lol_html",
  "mail-parser",
@@ -1594,7 +1594,7 @@ dependencies = [
  "chrono",
  "db",
  "flate2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "image",
  "log",
  "rand 0.10.1",
@@ -2452,7 +2452,7 @@ dependencies = [
  "common",
  "db",
  "futures",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "reqwest",
  "rusqlite",
@@ -2515,11 +2515,11 @@ dependencies = [
  "db",
  "futures",
  "getrandom 0.4.2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "label-colors",
  "log",
  "mail-parser",
- "quick-xml 0.40.0",
+ "quick-xml 0.40.1",
  "reqwest",
  "rusqlite",
  "search",
@@ -2750,15 +2750,16 @@ dependencies = [
 
 [[package]]
 name = "hotpath"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0482d7c2c47acfec79b90e55188e8b86c66fd9d541335eac3ce3f73055984643"
+checksum = "bff002d5c53fa1c6891f32156b9451d16654bc8a761894d7660b25c0a332d517"
 dependencies = [
+ "arc-swap",
  "cfg-if",
  "crossbeam-channel",
  "futures-util",
  "hdrhistogram",
- "hotpath-macros 0.16.0",
+ "hotpath-macros 0.16.1",
  "hotpath-meta",
  "libc",
  "pin-project-lite",
@@ -2779,9 +2780,9 @@ checksum = "51066092dc750f8cbcac4afa04592377bf7463a911d1beca430ddd788deb0757"
 
 [[package]]
 name = "hotpath-macros"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0a541a2ab3263fcf42ff399ec68ddd458f4883aa656c6229f59092f94058eb2"
+checksum = "9e2f4ac4534511584b7082657e133dcf3d8727b2f456a6b2a2c3eb02b82c1277"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2790,15 +2791,15 @@ dependencies = [
 
 [[package]]
 name = "hotpath-macros-meta"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08986d10e50e7c6c8e1798fb1bd63cdf275c0b59d6aad05989d5d86a0f2cb06e"
+checksum = "a6a87070853e9402ec79184f8d8d930d7eb86cd274aecdcf973f73b6f40271b0"
 
 [[package]]
 name = "hotpath-meta"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fec29ccaa713ecf406bb6717331972fd2b932d889ddcc2bada67b264693fb9bf"
+checksum = "c31cfef2b9d280ad754c23b40b50cc74676489597f3cebfe0c180389e08a53ed"
 dependencies = [
  "hotpath-macros-meta",
 ]
@@ -2986,7 +2987,7 @@ dependencies = [
 name = "iced-drop"
 version = "0.1.0"
 dependencies = [
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "iced_core",
  "iced_runtime",
  "iced_widget",
@@ -3319,7 +3320,7 @@ dependencies = [
  "db",
  "futures",
  "getrandom 0.4.2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "mail-parser",
  "native-tls",
@@ -3361,8 +3362,8 @@ version = "0.1.0"
 dependencies = [
  "calcard",
  "encoding_rs",
- "hotpath 0.16.0",
- "quick-xml 0.40.0",
+ "hotpath 0.16.1",
+ "quick-xml 0.40.1",
  "zip",
 ]
 
@@ -3515,7 +3516,7 @@ dependencies = [
  "common",
  "db",
  "futures",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "native-tls",
  "reqwest",
@@ -3685,7 +3686,7 @@ dependencies = [
 name = "label-colors"
 version = "0.1.0"
 dependencies = [
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
 ]
 
@@ -3894,7 +3895,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "regex",
  "reqwest",
@@ -4962,9 +4963,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openssl"
-version = "0.10.79"
+version = "0.10.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542"
+checksum = "a45fa2aa886c42762255da344f0a0d313e254066c46aad76f300c3d3da62d967"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
@@ -4993,9 +4994,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.115"
+version = "0.9.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "158fe5b292746440aa6e7a7e690e55aeb72d41505e2804c23c6973ad0e9c9781"
+checksum = "f28a22dc7140cda5f096e5e7724a6962ca81a7f8bfd2979f9b18c11af56318c4"
 dependencies = [
  "cc",
  "libc",
@@ -5642,9 +5643,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.40.0"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b7315c86b26aaef0321fba33c9dcc160da659c6a9d278f0f6a5656d6561c03b"
+checksum = "2474bd2e5029e7ccb6abb2ba48cf2383a333851dedf495901544281590c7da7f"
 dependencies = [
  "memchr",
 ]
@@ -6094,7 +6095,7 @@ name = "rte"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "html5ever 0.39.0",
  "iced",
  "markup5ever 0.39.0",
@@ -6121,7 +6122,7 @@ dependencies = [
  "gmail",
  "graph",
  "hickory-resolver",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "imap",
  "jmap",
  "label-colors",
@@ -6130,7 +6131,7 @@ dependencies = [
  "lol_html",
  "mail-parser",
  "native-tls",
- "quick-xml 0.40.0",
+ "quick-xml 0.40.1",
  "regex",
  "reqwest",
  "resvg 0.47.0",
@@ -6340,7 +6341,7 @@ dependencies = [
 name = "search"
 version = "0.1.0"
 dependencies = [
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "serde",
  "tantivy",
@@ -6377,7 +6378,7 @@ name = "seen"
 version = "0.1.0"
 dependencies = [
  "db-read",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "mail-parser",
  "rusqlite",
@@ -6538,7 +6539,7 @@ dependencies = [
  "pdf-extract",
  "process-lifetime",
  "provider-sync",
- "quick-xml 0.40.0",
+ "quick-xml 0.40.1",
  "rtsk",
  "rusqlite",
  "search",
@@ -6756,7 +6757,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "db-read",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "rusqlite",
  "types",
@@ -6845,7 +6846,7 @@ name = "smtp"
 version = "0.1.0"
 dependencies = [
  "common",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "lettre",
  "log",
  "mail-parser",
@@ -6917,14 +6918,14 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "clap",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "image",
  "libheif-rs",
  "log",
  "lopdf 0.40.0",
  "mozjpeg-rs",
  "oxipng",
- "quick-xml 0.40.0",
+ "quick-xml 0.40.1",
  "thiserror 2.0.18",
  "zip",
 ]
@@ -6961,7 +6962,7 @@ dependencies = [
  "crc32fast",
  "db",
  "flate2",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "rusqlite",
  "serde",
@@ -7105,7 +7106,7 @@ name = "sync"
 version = "0.1.0"
 dependencies = [
  "db",
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "log",
  "rusqlite",
  "search",
@@ -7183,7 +7184,7 @@ dependencies = [
 name = "system-fonts"
 version = "0.1.0"
 dependencies = [
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "tokio",
  "tracing",
  "windows-sys 0.61.2",
@@ -7722,9 +7723,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.10"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d6fdd9f81c2819c9a8b0e0cd91660e7746a8e6ea2ba7c6b2b057985f6bcb51"
+checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
  "bitflags 2.11.1",
  "bytes",
@@ -7860,7 +7861,7 @@ checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 name = "types"
 version = "0.1.0"
 dependencies = [
- "hotpath 0.16.0",
+ "hotpath 0.16.1",
  "serde",
 ]
 

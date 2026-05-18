@@ -114,13 +114,13 @@ reqwest = { version = "0.13", default-features = false, features = ["native-tls"
 base64 = "0.22"
 
 # XML
-quick-xml = "0.40.0"
+quick-xml = "0.40.1"
 
 # Text diffing (for undo/redo)
 dissimilar = "1"
 
 # Profiling
-hotpath = "0.16.0"
+hotpath = "0.16.1"
 
 # Optimized release profile
 [profile.release]

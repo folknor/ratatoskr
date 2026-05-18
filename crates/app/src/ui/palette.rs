@@ -68,6 +68,9 @@ enum PaletteStage {
     CommandSearch,
     /// Stage 2: picking an option for a parameterized command.
     OptionPick,
+    /// Stage 2 for `ParamDef::Text` commands: free-text input. Confirm
+    /// submits the current query as the param value.
+    TextInput,
 }
 
 // ── Component ──────────────────────────────────────────
@@ -93,6 +96,10 @@ pub struct Palette {
     stage2_command_id: Option<CommandId>,
     /// The param label to display in the placeholder (e.g., "Folder", "Label").
     stage2_label: String,
+    /// Placeholder text from the active `ParamDef::Text` (empty otherwise).
+    /// Used by the text-input stage to give a more useful prompt than the
+    /// option-pick "Search <Label>..." pattern.
+    stage2_placeholder: String,
     /// Generation counter to discard stale resolver results.
     option_load_generation: rtsk::generation::GenerationCounter<rtsk::generation::PaletteOptions>,
     /// Whether the resolver is currently loading options.
@@ -113,6 +120,7 @@ impl Palette {
             option_matches: Vec::new(),
             stage2_command_id: None,
             stage2_label: String::new(),
+            stage2_placeholder: String::new(),
             option_load_generation: rtsk::generation::GenerationCounter::new(),
             options_loading: false,
         }
@@ -133,6 +141,7 @@ impl Palette {
         self.option_matches.clear();
         self.stage2_command_id = None;
         self.stage2_label.clear();
+        self.stage2_placeholder.clear();
         self.options_loading = false;
     }
 
@@ -144,12 +153,13 @@ impl Palette {
         self.option_matches.clear();
         self.stage2_command_id = None;
         self.stage2_label.clear();
+        self.stage2_placeholder.clear();
         self.options_loading = false;
     }
 
-    /// Whether the palette is in stage 2 (option picking).
-    fn is_option_pick(&self) -> bool {
-        matches!(self.stage, PaletteStage::OptionPick)
+    /// Whether the palette is in any stage-2 mode (option pick or text input).
+    fn is_stage2(&self) -> bool {
+        !matches!(self.stage, PaletteStage::CommandSearch)
     }
 
     fn confirm(&mut self, ctx: &CommandContext) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
@@ -168,8 +178,8 @@ impl Palette {
                 (Task::none(), Some(PaletteEvent::ExecuteCommand(id)))
             }
             InputMode::Parameterized { schema } => {
-                let param_label = schema
-                    .param_at(0)
+                let first = schema.param_at(0);
+                let param_label = first
                     .map(|p| match p {
                         cmdk::ParamDef::ListPicker { label } => label,
                         cmdk::ParamDef::DateTime { label } => label,
@@ -178,13 +188,20 @@ impl Palette {
                     })
                     .unwrap_or("option");
 
-                // DateTime commands use preset options instead of a full picker
-                if matches!(schema.param_at(0), Some(cmdk::ParamDef::DateTime { .. })) {
-                    let task = self.enter_snooze_stage2(id, param_label);
-                    return (task, None);
+                match first {
+                    // DateTime commands use preset options instead of a full picker
+                    Some(cmdk::ParamDef::DateTime { .. }) => {
+                        let task = self.enter_snooze_stage2(id, param_label);
+                        (task, None)
+                    }
+                    // Free-text params take input from the palette query field
+                    // directly; no resolver call.
+                    Some(cmdk::ParamDef::Text { placeholder, .. }) => {
+                        let task = self.enter_text_stage2(id, param_label, placeholder);
+                        (task, None)
+                    }
+                    _ => self.enter_option_stage2(id, param_label, ctx),
                 }
-
-                self.enter_option_stage2(id, param_label, ctx)
             }
         }
     }
@@ -237,6 +254,42 @@ impl Palette {
         self.option_items = items;
 
         iced::widget::operation::focus::<PaletteMessage>("palette-input".to_string())
+    }
+
+    fn enter_text_stage2(
+        &mut self,
+        id: CommandId,
+        param_label: &str,
+        placeholder: &str,
+    ) -> Task<PaletteMessage> {
+        self.stage = PaletteStage::TextInput;
+        self.query.clear();
+        self.selected_index = 0;
+        self.stage2_command_id = Some(id);
+        self.stage2_label = param_label.to_string();
+        self.stage2_placeholder = placeholder.to_string();
+        self.option_items.clear();
+        self.option_matches.clear();
+        self.options_loading = false;
+
+        iced::widget::operation::focus::<PaletteMessage>("palette-input".to_string())
+    }
+
+    fn confirm_text(&mut self) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+        let Some(id) = self.stage2_command_id else {
+            return (Task::none(), None);
+        };
+        let text = self.query.trim();
+        if text.is_empty() {
+            return (Task::none(), None);
+        }
+        let Some(args) =
+            crate::handlers::commands::build_command_args_from_text(id, text)
+        else {
+            return (Task::none(), None);
+        };
+        self.close();
+        (Task::none(), Some(PaletteEvent::ExecuteParameterized(id, args)))
     }
 
     fn confirm_option(&mut self) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
@@ -313,8 +366,8 @@ impl Component for Palette {
                 (task, None)
             }
             PaletteMessage::Close(ctx) => {
-                // In stage 2, Escape goes back to stage 1 instead of closing.
-                if self.is_option_pick() {
+                // In any stage 2, Escape goes back to stage 1 instead of closing.
+                if self.is_stage2() {
                     self.back_to_stage1();
                     self.results = self.registry.query(&ctx, "");
                     let task = iced::widget::operation::focus::<PaletteMessage>(
@@ -326,24 +379,31 @@ impl Component for Palette {
                 (Task::none(), Some(PaletteEvent::Dismissed))
             }
             PaletteMessage::QueryChanged(query, ctx) => {
-                if self.is_option_pick() {
-                    // Stage 2: filter options with fuzzy search
-                    self.option_matches = cmdk::search_options(&self.option_items, &query);
-                    self.query = query;
-                    self.selected_index = 0;
-                } else {
-                    // Stage 1: query the registry
-                    self.results = self.registry.query(&ctx, &query);
-                    self.query = query;
-                    self.selected_index = 0;
+                match self.stage {
+                    PaletteStage::OptionPick => {
+                        // Stage 2: filter options with fuzzy search
+                        self.option_matches = cmdk::search_options(&self.option_items, &query);
+                        self.query = query;
+                        self.selected_index = 0;
+                    }
+                    PaletteStage::TextInput => {
+                        // Stage 2 (text): the query *is* the param value;
+                        // no filtering, no selection.
+                        self.query = query;
+                    }
+                    PaletteStage::CommandSearch => {
+                        self.results = self.registry.query(&ctx, &query);
+                        self.query = query;
+                        self.selected_index = 0;
+                    }
                 }
                 (Task::none(), None)
             }
             PaletteMessage::SelectNext => {
-                let len = if self.is_option_pick() {
-                    self.option_matches.len()
-                } else {
-                    self.results.len()
+                let len = match self.stage {
+                    PaletteStage::OptionPick => self.option_matches.len(),
+                    PaletteStage::TextInput => 0,
+                    PaletteStage::CommandSearch => self.results.len(),
                 };
                 if len > 0 {
                     self.selected_index = (self.selected_index + 1).min(len - 1);
@@ -353,21 +413,19 @@ impl Component for Palette {
             }
             PaletteMessage::SelectPrev => {
                 self.selected_index = self.selected_index.saturating_sub(1);
-                let len = if self.is_option_pick() {
-                    self.option_matches.len()
-                } else {
-                    self.results.len()
+                let len = match self.stage {
+                    PaletteStage::OptionPick => self.option_matches.len(),
+                    PaletteStage::TextInput => 0,
+                    PaletteStage::CommandSearch => self.results.len(),
                 };
                 let task = scroll_to_selected(self.selected_index, len).discard();
                 (task, None)
             }
-            PaletteMessage::Confirm(ctx) => {
-                if self.is_option_pick() {
-                    self.confirm_option()
-                } else {
-                    self.confirm(&ctx)
-                }
-            }
+            PaletteMessage::Confirm(ctx) => match self.stage {
+                PaletteStage::OptionPick => self.confirm_option(),
+                PaletteStage::TextInput => self.confirm_text(),
+                PaletteStage::CommandSearch => self.confirm(&ctx),
+            },
             PaletteMessage::ClickResult(idx, ctx) => {
                 if idx < self.results.len() {
                     self.selected_index = idx;
@@ -394,6 +452,7 @@ impl Component for Palette {
         match &self.stage {
             PaletteStage::CommandSearch => build_command_search_card(self),
             PaletteStage::OptionPick => build_option_pick_card(self),
+            PaletteStage::TextInput => build_text_input_card(self),
         }
     }
 }
@@ -479,6 +538,21 @@ fn build_results_column(
     }
 
     col.into()
+}
+
+fn build_text_input_card(state: &Palette) -> Element<'_, PaletteMessage> {
+    let input = text_input(&state.stage2_placeholder, &state.query)
+        .on_input(|q| PaletteMessage::QueryChanged(q, CommandContext::default()))
+        .on_submit(PaletteMessage::Confirm(CommandContext::default()))
+        .id("palette-input")
+        .padding(PAD_INPUT)
+        .size(TEXT_LG);
+
+    container(column![input].spacing(SPACE_XXS))
+        .width(PALETTE_WIDTH)
+        .padding(SPACE_XS)
+        .style(ContainerClass::PaletteCard.style())
+        .into()
 }
 
 fn build_options_column<'a>(

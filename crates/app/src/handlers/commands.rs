@@ -1303,7 +1303,6 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
 }
 
 /// Build `CommandArgs` from free text input for Text-param commands.
-#[allow(dead_code)] // Reserved for text-param command path; not wired in yet.
 pub(crate) fn build_command_args_from_text(
     command_id: CommandId,
     text: &str,

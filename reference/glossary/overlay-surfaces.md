@@ -2,9 +2,7 @@
 
 Canonical terminology for overlay-like UI surfaces in Ratatoskr.
 
-This glossary entry defines the semantic surface types used across the app.
-Implementation plans and refactors should reference these terms rather than
-inventing local names like "popup" or overloading primitive names.
+This glossary entry defines the semantic surface types used across the app. Implementation plans and refactors should reference these terms rather than inventing local names like "popup" or overloading primitive names.
 
 ## Canonical Types
 
@@ -43,21 +41,16 @@ Use these terms consistently:
 
 ## Semantic Distinctions
 
-The key distinction between `Dropdown` and `ContextMenu` is purpose, not input
-method:
+The key distinction between `Dropdown` and `ContextMenu` is purpose, not input method:
 
 - `Dropdown` = anchored selection surface
 - `ContextMenu` = anchored action surface
 
-A context menu does not need to be opened by right-click. A trigger-opened
-overflow action list is still a `ContextMenu` if it presents actions rather
-than choices.
+A context menu does not need to be opened by right-click. A trigger-opened overflow action list is still a `ContextMenu` if it presents actions rather than choices.
 
 ## Canonical Behavior Table
 
-These are the fixed behavioral expectations for each semantic type. If an
-implementation deviates, that is a bug or misclassification rather than a cue
-to make the type system more configurable.
+These are the fixed behavioral expectations for each semantic type. If an implementation deviates, that is a bug or misclassification rather than a cue to make the type system more configurable.
 
 | Type | Positioning | Blocks Background | Dismiss | Focus |
 |---|---|---|---|---|
@@ -76,8 +69,7 @@ Current primitive layer terms:
 
 - `AnchoredOverlay`
   - Lower-level anchored placement primitive
-  - Used by higher-level semantic types like `Dropdown`, `ContextMenu`, and
-    some `Popover` or tooltip-like surfaces
+  - Used by higher-level semantic types like `Dropdown`, `ContextMenu`, and some `Popover` or tooltip-like surfaces
 
 - `modal_overlay()`
   - Lower-level blocking stack primitive
@@ -86,8 +78,7 @@ Current primitive layer terms:
 - `iced::widget::tooltip`
   - Native tooltip primitive
 
-Do not call a semantic surface by the name of its primitive unless they are the
-same thing. For example:
+Do not call a semantic surface by the name of its primitive unless they are the same thing. For example:
 
 - do not call a `ContextMenu` a "popover" just because it uses `AnchoredOverlay`
 - do not call a `Modal` a generic "overlay" when its semantic contract is known

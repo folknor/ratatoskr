@@ -426,7 +426,7 @@ Bloom's **generational load tracking** is the single most impactful pattern for 
 
 ## Known semantic issues
 
-Open items as of 2026-05-18. UI-side items live in `app-integration-spec.md`; pinned-search items live in `pinned-searches-implementation-spec.md`.
+Open items as of 2026-05-18. UI-side items live in `app-integration-spec.md`; pinned-search terminology and code layout live in `reference/glossary/pinned-search.md`.
 
 ### High
 

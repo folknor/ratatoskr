@@ -16,7 +16,7 @@ Detailed implementation specification for wiring the unified search pipeline int
 - **Component trait:** `crates/app/src/component.rs` - `Component` trait
 - **App types:** `crates/app/src/db.rs` - `Thread`, `Account`, `Label`
 - **Layout constants:** `crates/app/src/ui/layout.rs` - spacing, text, padding tokens
-- **Pinned searches:** `docs/search/pinned-searches.md` (downstream dependency)
+- **Pinned searches:** `reference/glossary/pinned-search.md` (downstream dependency)
 - **Sidebar spec:** `docs/sidebar/problem-statement.md`
 - **Implementation plan:** `docs/implementation-plan.md`
 
@@ -1142,20 +1142,7 @@ The interaction model when a smart folder is selected:
 
 ### 4.3 Pinned Search Integration Point
 
-Phase 4 establishes the integration point for pinned searches (`docs/search/pinned-searches.md`). Every search execution that produces results creates or updates a pinned search entry. This spec does not implement pinned searches - it defines the hook:
-
-```rust
-Message::SearchResultsLoaded(_, Ok(threads)) if !threads.is_empty() => {
-    // ... existing result handling ...
-
-    // Hook for pinned searches (Phase: pinned-searches spec)
-    // self.upsert_pinned_search(&self.search_query, &thread_ids);
-
-    Task::none()
-}
-```
-
-The pinned search spec will define `upsert_pinned_search`, the sidebar section, and the staleness label.
+Phase 4 establishes the integration point for pinned searches (`reference/glossary/pinned-search.md`). Every search execution that produces results creates or updates a pinned search entry. In the landed design this hook is the `SearchIntent` -> `resolve_search_intent` -> `ResolvedSearch` resolver in `crates/app/src/handlers/search.rs`, with the side-effect carried on `SearchCompletionBehavior.persistence` (`CreatePinnedSnapshot` / `UpdatePinnedSnapshot` / `RefreshPinnedSnapshot` / `None`) rather than a `Message::SearchResultsLoaded` callback.
 
 ### 4.4 Staleness Label for Pinned Searches
 
@@ -1254,7 +1241,7 @@ If search ever takes long enough to be perceptible (which would indicate a bug o
 
 ## Open items
 
-UI-side open items as of 2026-05-18. Backend semantic issues (folder/label/contact/MIME) live in `implementation-spec.md`; pinned-search items live in `pinned-searches-implementation-spec.md`.
+UI-side open items as of 2026-05-18. Backend semantic issues (folder/label/contact/MIME) live in `implementation-spec.md`; pinned-search terminology and code layout live in `reference/glossary/pinned-search.md`.
 
 ### Typeahead
 

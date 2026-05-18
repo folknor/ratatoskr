@@ -1049,12 +1049,27 @@ impl ReadyApp {
                 log::info!("Smart folder saved");
 
                 // Graduation: the smart folder was created from a pinned
-                // search, so the pinned search has been promoted and the
-                // row should not linger. Dismiss it (the ack handler
-                // clears local state and restores the prior folder view)
-                // and reload the navigation state so the new smart
-                // folder appears in the sidebar.
-                let dismiss_task = if let Some(id) = self.editing_pinned_search.take() {
+                // search, so the source pinned search is no longer
+                // needed. We clear the local state inline (rather than
+                // routing through handle_dismiss_pinned_search) for two
+                // reasons: (a) the dismiss-ack would call
+                // restore_folder_view, which bumps nav_generation and
+                // would invalidate the navigation reload we kick off
+                // below, dropping the new smart folder from the
+                // sidebar; (b) after graduation the thread list is
+                // already showing what the smart folder will surface,
+                // so jumping the user back to the prior folder view
+                // would be a regression. The Service-side delete is
+                // still issued; its ack runs through
+                // handle_pinned_search_dismissed but short-circuits
+                // because sidebar.active_pinned_search is now None.
+                let delete_task = if let Some(id) = self.editing_pinned_search.take() {
+                    self.pinned_searches.retain(|ps| ps.id != id);
+                    self.sidebar.pinned_searches.retain(|ps| ps.id != id);
+                    if self.sidebar.active_pinned_search == Some(id) {
+                        self.sidebar.active_pinned_search = None;
+                        self.thread_list.pinned_search_updated_at = None;
+                    }
                     self.handle_dismiss_pinned_search(id)
                 } else {
                     Task::none()
@@ -1062,7 +1077,7 @@ impl ReadyApp {
 
                 let token = self.nav_generation.next();
                 let nav_task = self.fire_navigation_load(token);
-                Task::batch([dismiss_task, nav_task])
+                Task::batch([delete_task, nav_task])
             }
             Err(e) => {
                 log::error!("Save smart folder error: {e}");
