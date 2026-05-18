@@ -211,39 +211,46 @@ fn search_combined(
     conn: &ReadConn<'_>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
-    // Step 1: SQL generates candidate thread IDs.
+    // Step 1: SQL narrows the corpus by structured operators ONLY. Free-text
+    // matching belongs to Tantivy on the combined path - SQL's
+    // `build_free_text_clause` does a subject/snippet/from LIKE that lacks
+    // tokenization and stemming, so if it ran here it would shrink the
+    // candidate set below what Tantivy can usefully rank. We pass a clone of
+    // the parsed query with `free_text` cleared so the SQL builder treats
+    // this as an operators-only query.
+    let mut sql_parsed = parsed.clone();
+    sql_parsed.free_text.clear();
     let scope = build_scope(parsed);
     let sql_threads = query_threads_read(
         conn,
-        parsed,
+        &sql_parsed,
         &scope,
         Some(crate::constants::DEFAULT_QUERY_LIMIT),
         Some(0),
     )?;
-    let candidate_ids: HashSet<(String, String)> = sql_threads
+
+    // Step 2: Build the candidate (account_id, thread_id) set. If it's
+    // empty, the structured operators excluded everything and there's
+    // nothing for Tantivy to rank.
+    let candidate_pairs: Vec<(String, String)> = sql_threads
         .iter()
         .map(|t| (t.account_id.clone(), t.id.clone()))
         .collect();
-
-    // Build a lookup map for enrichment from SQL results.
+    if candidate_pairs.is_empty() {
+        return Ok(Vec::new());
+    }
     let thread_map: HashMap<(String, String), &DbThread> = sql_threads
         .iter()
         .map(|t| ((t.account_id.clone(), t.id.clone()), t))
         .collect();
 
-    // Step 2: Tantivy ranks free-text matches across the full index. Operator
-    // filters (from/to/account/dates/flags/attachment) are intentionally NOT
-    // applied here - SQL has already enforced them in Step 1, and the
-    // candidate-set intersection in Step 3 is the canonical constraint gate.
-    //
-    // Why: SQL's `from:` / `to:` clauses do contact expansion (display name
-    // -> email lookup via the contacts table). Tantivy's `from`/`to` filters
-    // match against indexed text fields (`from_name`, `to_addresses`), so a
-    // SQL hit found via "Alice Smith" -> alice@example.com would be dropped
-    // by Tantivy because "Alice Smith" doesn't appear in `to_addresses`.
-    // Same class of mismatch applies to any operator whose semantics differ
-    // between the two engines. Letting SQL be the sole constraint authority
-    // eliminates the asymmetry.
+    // Step 3: Tantivy ranks free-text matches WITHIN the SQL candidate set.
+    // Operator filters are not re-applied here - SQL is the sole constraint
+    // authority on the combined path (Tantivy's text-match semantics on
+    // those fields don't always agree with SQL's contact-expanded ones).
+    // `thread_filter` pins the response to the candidate set inside the
+    // engine so the result is a true narrow-then-rank rather than
+    // broad-then-intersect.
     let mut params = build_tantivy_params(parsed);
     params.account_ids = None;
     params.from = Vec::new();
@@ -253,23 +260,28 @@ fn search_combined(
     params.is_starred = None;
     params.before = None;
     params.after = None;
-    let tantivy_results = search_state.search_with_filters(&params)?;
-
-    // Step 3: Intersect - keep only Tantivy hits in the SQL candidate set.
-    let mut filtered: Vec<TantivyResult> = tantivy_results
-        .into_iter()
-        .filter(|r| candidate_ids.contains(&(r.account_id.clone(), r.thread_id.clone())))
-        .collect();
+    params.thread_filter = Some(candidate_pairs);
+    let mut tantivy_results = search_state.search_with_filters(&params)?;
 
     // Phase 7-8: per-message match-kind attribution. Runs before
     // grouping so the highest-scoring message's attribution survives
     // thread-grouping intact.
-    enrich_with_attribution(&mut filtered, &parsed.free_text, search_state, conn, body_read);
+    enrich_with_attribution(
+        &mut tantivy_results,
+        &parsed.free_text,
+        search_state,
+        conn,
+        body_read,
+    );
 
     // Step 4: Group by thread, take max score.
-    let grouped = group_by_thread_unified(filtered);
+    let grouped = group_by_thread_unified(tantivy_results);
 
-    // Step 5: Enrich with SQL metadata where available.
+    // Step 5: Enrich with SQL metadata. The thread_filter above guarantees
+    // every Tantivy result has a corresponding SQL row, so the filter_map
+    // is conservative - it's the right shape if the guarantee ever slips
+    // (account-shard race, index/db skew, etc.) but we don't expect
+    // dropouts in practice.
     let mut enriched: Vec<UnifiedSearchResult> = grouped
         .into_iter()
         .filter_map(|r| {
@@ -404,6 +416,7 @@ fn build_tantivy_params(parsed: &ParsedQuery) -> SearchParams {
         is_starred: parsed.is_starred,
         before: parsed.before,
         after: parsed.after,
+        thread_filter: None,
         limit: Some(200),
     }
 }
@@ -512,22 +525,23 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
     }
 }
 
-/// Enrich a unified result with metadata from the matching SQL thread row.
+/// Override display fields with the thread's latest-message metadata per the
+/// product spec; keep Tantivy's `rank` / `match_kind` / `also_matched` so the
+/// hit explains why this thread matched while the card looks the same as in
+/// the inbox.
 fn enrich_from_sql(
     mut result: UnifiedSearchResult,
     thread: &DbThread,
 ) -> UnifiedSearchResult {
-    result.subject = result.subject.or_else(|| thread.subject.clone());
-    result.snippet = result.snippet.or_else(|| thread.snippet.clone());
-    result.from_name = result.from_name.or_else(|| thread.from_name.clone());
-    result.from_address = result.from_address.or_else(|| thread.from_address.clone());
+    result.subject = thread.subject.clone();
+    result.snippet = thread.snippet.clone();
+    result.from_name = thread.from_name.clone();
+    result.from_address = thread.from_address.clone();
+    result.date = thread.last_message_at;
     result.is_read = thread.is_read;
     result.is_starred = thread.is_starred;
     result.has_attachments = thread.has_attachments;
     result.message_count = Some(thread.message_count);
-    if result.date.is_none() {
-        result.date = thread.last_message_at;
-    }
     result
 }
 
@@ -722,33 +736,34 @@ mod tests {
     // -- enrichment --
 
     #[test]
-    fn enrich_fills_missing_fields() {
+    fn enrich_overrides_display_fields_with_latest_message_metadata() {
         let thread = DbThread {
             id: "t1".to_owned(),
             account_id: "acc1".to_owned(),
-            subject: Some("SQL subject".to_owned()),
-            snippet: Some("SQL snippet".to_owned()),
+            subject: Some("Latest subject".to_owned()),
+            snippet: Some("Latest snippet".to_owned()),
             last_message_at: Some(1_700_000_000),
             message_count: 5,
             is_read: true,
             is_starred: true,
             is_important: false,
-            has_attachments: false,
+            has_attachments: true,
             is_snoozed: false,
             snooze_until: None,
             is_pinned: false,
             is_muted: false,
-            from_name: Some("Alice".to_owned()),
-            from_address: Some("alice@test.com".to_owned()),
+            from_name: Some("Latest sender".to_owned()),
+            from_address: Some("latest@test.com".to_owned()),
         };
+        // Tantivy's hit may be on the best-scoring (not latest) message.
         let result = UnifiedSearchResult {
             thread_id: "t1".to_owned(),
             account_id: "acc1".to_owned(),
-            subject: Some("Tantivy subject".to_owned()),
-            snippet: None,
-            from_name: None,
-            from_address: None,
-            date: Some(1000),
+            subject: Some("Best-match subject".to_owned()),
+            snippet: Some("Best-match snippet".to_owned()),
+            from_name: Some("Best-match sender".to_owned()),
+            from_address: Some("bestmatch@test.com".to_owned()),
+            date: Some(1_600_000_000),
             is_read: false,
             is_starred: false,
             has_attachments: false,
@@ -759,16 +774,21 @@ mod tests {
         };
 
         let enriched = enrich_from_sql(result, &thread);
-        // Subject was already set from Tantivy, so it stays.
-        assert_eq!(enriched.subject.as_deref(), Some("Tantivy subject"));
-        // Snippet was None, so it gets filled from SQL.
-        assert_eq!(enriched.snippet.as_deref(), Some("SQL snippet"));
-        // Flags and counts come from SQL.
+
+        // Display fields come from the thread's latest-message metadata.
+        assert_eq!(enriched.subject.as_deref(), Some("Latest subject"));
+        assert_eq!(enriched.snippet.as_deref(), Some("Latest snippet"));
+        assert_eq!(enriched.from_name.as_deref(), Some("Latest sender"));
+        assert_eq!(enriched.from_address.as_deref(), Some("latest@test.com"));
+        assert_eq!(enriched.date, Some(1_700_000_000));
+        // Thread flags and counts come from the SQL thread row.
         assert!(enriched.is_read);
         assert!(enriched.is_starred);
+        assert!(enriched.has_attachments);
         assert_eq!(enriched.message_count, Some(5));
-        // Rank stays from Tantivy.
+        // Ranking metadata stays from Tantivy.
         assert_eq!(enriched.rank, 3.5);
+        assert!(matches!(enriched.match_kind, Some(MatchKind::Body)));
     }
 
     // -- parse_date_string --

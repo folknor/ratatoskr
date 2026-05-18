@@ -258,6 +258,15 @@ pub struct SearchParams {
     pub before: Option<DateBound>,
     #[serde(default, deserialize_with = "deserialize_after_bound")]
     pub after: Option<DateBound>,
+    /// Restrict results to the given (account_id, thread_id) tuples. Used by
+    /// the combined-path pipeline to pin Tantivy's response to the SQL
+    /// candidate set, so that "SQL narrows the corpus, Tantivy ranks within
+    /// it" is realised at the engine level rather than via post-hoc
+    /// intersection in app code. `None` = no thread filter; `Some(empty)` =
+    /// short-circuit to zero results (caller should not invoke Tantivy at
+    /// all in that case).
+    #[serde(default)]
+    pub thread_filter: Option<Vec<(String, String)>>,
     pub limit: Option<usize>,
 }
 
@@ -841,6 +850,40 @@ impl SearchReadState {
             clauses.push((Occur::Must, Box::new(RangeQuery::new(lower, upper))));
         }
 
+        // Thread filter: pin the result set to a given list of
+        // (account_id, thread_id) tuples. Used by the combined-path pipeline
+        // so that Tantivy ranks within the SQL candidate set rather than
+        // returning a broad global top-N that's then intersected in app
+        // code.
+        if let Some(threads) = params.thread_filter.as_deref() {
+            if threads.is_empty() {
+                // Caller signalled "no candidates" - skip Tantivy entirely.
+                return Ok(Vec::new());
+            }
+            let mut thread_clauses: Vec<(Occur, Box<dyn Query>)> =
+                Vec::with_capacity(threads.len());
+            for (account_id, thread_id) in threads {
+                let pair: Vec<(Occur, Box<dyn Query>)> = vec![
+                    (
+                        Occur::Must,
+                        Box::new(TermQuery::new(
+                            Term::from_field_text(self.fields.account_id, account_id),
+                            tantivy::schema::IndexRecordOption::Basic,
+                        )),
+                    ),
+                    (
+                        Occur::Must,
+                        Box::new(TermQuery::new(
+                            Term::from_field_text(self.fields.thread_id, thread_id),
+                            tantivy::schema::IndexRecordOption::Basic,
+                        )),
+                    ),
+                ];
+                thread_clauses.push((Occur::Should, Box::new(BooleanQuery::new(pair))));
+            }
+            clauses.push((Occur::Must, Box::new(BooleanQuery::new(thread_clauses))));
+        }
+
         let limit = params.limit.unwrap_or(50);
 
         if clauses.is_empty() {
@@ -1289,6 +1332,7 @@ mod tests {
             is_starred: None,
             before,
             after,
+            thread_filter: None,
             limit: Some(10),
         }
     }

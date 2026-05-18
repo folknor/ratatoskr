@@ -536,6 +536,7 @@ pub(super) async fn search_index_handle(
             is_starred: None,
             before: None,
             after: None,
+            thread_filter: None,
             limit: Some(limit),
         })
         .map_err(|e| ServiceError::Internal(format!("test.search_index query: {e}")))?;

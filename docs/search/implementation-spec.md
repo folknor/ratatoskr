@@ -345,19 +345,19 @@ No `scope` parameter - search is always cross-account. Account narrowing is done
 2. Apply account scope as Tantivy filter (slice 3)
 3. Collect message-level hits with scores
 4. Group by thread_id, take max score per thread
-5. Enrich with thread metadata from SQLite (subject, snippet, is_read, is_starred, message_count)
+5. Enrich with the thread's latest-message metadata from `DbThread` (subject, snippet, from_name/from_address, date, is_read, is_starred, has_attachments, message_count). The Tantivy hit may be the best-scoring message in the thread, but the displayed card always shows the latest message so search-result cards look the same as the inbox - ranking determines order, not card content. Tantivy's rank / match_kind / also_matched are preserved for ordering and attribution.
 6. Return sorted by rank descending
 
 ### Path 3: Combined (both operators and free text)
 
-1. SQL builder generates candidate thread IDs from operators
-2. Tantivy searches free text across all indexed messages
-3. Intersect: keep only Tantivy hits whose thread_id is in the SQL candidate set
-4. Group by thread_id, take max score per thread
-5. Enrich with thread metadata from SQL results (already fetched in step 1)
-6. Return sorted by rank descending
+1. SQL builder generates candidate (account_id, thread_id) tuples from structured operators only (free-text is cleared on the parsed clone before SQL runs, so the SQL `LIKE` clause stays out of the way).
+2. If the candidate set is empty, short-circuit to zero results - no Tantivy call.
+3. Tantivy ranks free-text matches WITHIN the candidate set via the `thread_filter` `SearchParams` field, which builds a BooleanQuery of `(account_id:X AND thread_id:Y)` Should-clauses. Operator filters (from/to/dates/flags/has_attachment/account_ids) are cleared on the Tantivy side - SQL is the sole constraint authority, so contact-expanded operators and per-engine semantics differences (date inclusivity, text vs exact-string matches) can't drop correct results.
+4. Group by thread_id, take max score per thread.
+5. Enrich with the latest-message metadata from the SQL thread map already in hand (subject, snippet, from_name/from_address, date, is_read, is_starred, has_attachments, message_count). Tantivy's rank / match_kind / also_matched are preserved.
+6. Return sorted by rank descending.
 
-The intersection is done in application code - collect SQL thread IDs into a `HashSet`, filter Tantivy results against it. This is simple and fast for typical result sizes.
+The thread_filter narrowing replaces the previous "broad Tantivy + in-app HashSet intersection" model: the engine ranks within the SQL candidate set directly, so the response's top-N is guaranteed to be inside the constraint set rather than a global top-N that happens to overlap.
 
 ### Account scope resolution
 
@@ -441,23 +441,20 @@ Open items as of 2026-05-18. UI-side items live in `app-integration-spec.md`; pi
 
 ### High
 
-1. **Combined path applies free text in SQL before Tantivy ranking.** `search_combined` passes the full parsed query into `query_threads_read()`, which always includes `build_free_text_clause()`. Mixed queries are constrained by a SQL `LIKE` candidate set before ranking, defeating the "SQL narrows by structured operators; Tantivy ranks free text" intent.
-2. **Combined path does a broad Tantivy search, then intersects in application code.** Works correctly but does not implement the "SQL narrows corpus first" performance model.
-3. **Tantivy-only thread cards can show best-matching-message metadata instead of latest-message metadata.** The product spec says thread cards always show the latest message; ranking should only affect order. The Tantivy-only path groups by highest-scoring message per thread and uses that message's subject/snippet/sender. Only the combined path re-enriches from `DbThread`.
-4. **`folder:` / `in:` merge.** The current split between `folder:` (provider-specific path) and `in:` (universal shorthand) is being retired in favour of a single `in:` operator with fuzzy matching across both surfaces, backed by a typeahead popup that lets the user select the intended folder. The existing `folder:` clause does substring `%LIKE%` against `folders.name` / `imap_folder_path`, which is wrong for path semantics and provider-asymmetric (only IMAP carries `imap_folder_path`); that whole code path goes away with the merge. Implementation deferred - see `problem-statement.md` § "Planned: `in:` / `folder:` merge".
-5. **SQL fallback search is a real semantics downgrade.** When `SearchReadState` is unavailable, free-text search falls back to a thread-level `LIKE` on subject/snippet. The pipeline marks the result set `SearchResults::Degraded` so callers can warn, but the contract is not the same.
+1. **`folder:` / `in:` merge.** The current split between `folder:` (provider-specific path) and `in:` (universal shorthand) is being retired in favour of a single `in:` operator with fuzzy matching across both surfaces, backed by a typeahead popup that lets the user select the intended folder. The existing `folder:` clause does substring `%LIKE%` against `folders.name` / `imap_folder_path`, which is wrong for path semantics and provider-asymmetric (only IMAP carries `imap_folder_path`); that whole code path goes away with the merge. Implementation deferred - see `problem-statement.md` § "Planned: `in:` / `folder:` merge".
+2. **SQL fallback search is a real semantics downgrade.** When `SearchReadState` is unavailable, free-text search falls back to a thread-level `LIKE` on subject/snippet. The pipeline marks the result set `SearchResults::Degraded` so callers can warn, but the contract is not the same.
 
 ### Medium
 
-6. **`label:` matching is not normalized to the cross-account label model.** Current predicate is `LOWER(lg.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described in `reference/glossary/folders-labels.md`.
-7. **Legacy `execute_smart_folder_query` facade is still SQL-only.** The reachable app path uses the unified pipeline; the facade is leftover. Either delete it or convert it to a thin wrapper around the unified pipeline.
-8. **Legacy date-token migration is still runtime, not a one-time DB migration.** `migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__`-style tokens at execution time. A persisted SQL migration was specified but never written.
-9. **Smart-folder unread counts are scaffolded as 0.** `get_navigation_state()` returns 0 for every smart folder's unread count. Wiring `count_smart_folder_unread` into navigation-state computation is still pending (with batching, to avoid N+1 queries per sidebar refresh).
-10. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Broad searches can truncate in engine-specific ways before paging / refinement exists.
+3. **`label:` matching is not normalized to the cross-account label model.** Current predicate is `LOWER(lg.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described in `reference/glossary/folders-labels.md`.
+4. **Legacy `execute_smart_folder_query` facade is still SQL-only.** The reachable app path uses the unified pipeline; the facade is leftover. Either delete it or convert it to a thin wrapper around the unified pipeline.
+5. **Legacy date-token migration is still runtime, not a one-time DB migration.** `migrate_legacy_tokens()` rewrites `__LAST_7_DAYS__`-style tokens at execution time. A persisted SQL migration was specified but never written.
+6. **Smart-folder unread counts are scaffolded as 0.** `get_navigation_state()` returns 0 for every smart folder's unread count. Wiring `count_smart_folder_unread` into navigation-state computation is still pending (with batching, to avoid N+1 queries per sidebar refresh).
+7. **Result limits are fixed and engine-specific.** Combined search uses one SQL candidate limit, Tantivy uses its own, SQL fallback uses another. Broad searches can truncate in engine-specific ways before paging / refinement exists.
 
 ### Low
 
-11. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
+8. **SQL builder relies heavily on `%LIKE%` scans.** Primarily a performance/scale risk for large local stores; tracked as a known limit, not a correctness bug.
 
 ## Stale spec content (kept here so it doesn't drift back)
 
