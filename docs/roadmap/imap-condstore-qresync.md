@@ -1,7 +1,7 @@
 # IMAP CONDSTORE/QRESYNC (RFC 7162)
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: ✅ **Phases 1-2 complete, Phase 3 blocked** - Full CONDSTORE implementation in `crates/imap/`: capability detection and QRESYNC negotiation (`connection.rs::negotiate_condstore_qresync`), HIGHESTMODSEQ tracking via SELECT, fast-path skip when modseq unchanged, `CHANGEDSINCE` flag sync when modseq changes, modseq persisted in `folder_sync_state`, HIGHESTMODSEQ reset detection (server modseq went backwards). iCloud QRESYNC workaround implemented (detects missing `ENABLED` response, falls back to CONDSTORE-only). UID-based deletion detection without QRESYNC implemented (`imap_delta.rs::run_deletion_detection`), throttled per-folder. Phase 3 (QRESYNC VANISHED parsing) blocked on upstream async-imap: https://github.com/chatmail/async-imap/issues/130
+**Status**: ✅ **Phases 1-2 complete, Phase 3 unimplemented (no longer blocked).** The IMAP client primitives live in `crates/imap/`; the sync orchestration that wires them into delta sync lives in `crates/provider-sync/`. Highlights: capability negotiation with iCloud workaround in `crates/imap/src/connection.rs::negotiate_condstore_qresync`; fast-path skip when HIGHESTMODSEQ matches plus reset detection in `crates/imap/src/client/sync.rs::delta_check_folders`; raw `CHANGEDSINCE` FETCH in `crates/imap/src/client/commands.rs::fetch_changed_flags`; sync dispatch in `crates/provider-sync/src/imap/imap_delta.rs`; `modseq` and `last_deletion_check_at` persisted in `folder_sync_state` via `crates/provider-sync/src/imap/sync_pipeline.rs::upsert_folder_sync_state`; UID-based deletion detection and the non-CONDSTORE flag-sync fallback in `crates/provider-sync/src/imap/imap_delta_janitor.rs` (10-min and 5-min throttles). Phase 3 (QRESYNC VANISHED handling) is a feature gap, not a blocker: `imap-proto 0.16.7` already parses `Response::Vanished { earlier, uids }` and `async-imap` re-exports `imap_proto`. The original async-imap issue [chatmail/async-imap#130](https://github.com/chatmail/async-imap/issues/130) was closed `not_planned` after we confirmed CHANGEDSINCE works by appending the modifier to the `uid_fetch` query string.
 
 ---
 
@@ -77,27 +77,24 @@ Our codebase already handles UIDVALIDITY changes in `crates/imap/src/imap_delta.
 
 ### Current codebase state
 
-CONDSTORE is fully implemented (Phases 1-2). All IMAP CONDSTORE/QRESYNC code lives in the `crates/imap/` crate, with DB schema in `crates/db/` and DB types shared via `db`.
+CONDSTORE is fully implemented (Phases 1-2). The IMAP client primitives live in `crates/imap/`; the sync orchestration that drives them lives in `crates/provider-sync/`; DB schema and `DbFolderSyncState` come from `crates/db/`.
 
-**Foundation (in place since early development):**
-- `ImapFolderStatus` struct has `highest_modseq: Option<u64>` (in `crates/imap/src/types.rs`)
+**Foundation:**
+- `ImapFolderStatus` has `highest_modseq: Option<u64>` (`crates/imap/src/types.rs`)
 - `async-imap` parses `HIGHESTMODSEQ` from SELECT responses into `Mailbox.highest_modseq`
-- The `folder_sync_state` table has a `modseq INTEGER` column (migration in `crates/db/src/db/migrations.rs`)
-- `ImapFolderStatus` is populated with `highest_modseq` on every SELECT across `crates/imap/src/client/` (in `mod.rs`, `commands.rs`, and `sync.rs`)
-- The DB types (`DbFolderSyncState` in `crates/db/src/db/types.rs`) include `modseq: Option<i64>`
+- The `folder_sync_state` table has `modseq INTEGER` and `last_deletion_check_at INTEGER` columns (schema in `crates/db/src/db/schema/10_sync.sql`)
+- `ImapFolderStatus` is populated with `highest_modseq` on every SELECT across `crates/imap/src/client/`
+- `DbFolderSyncState` in `crates/db/src/db/types.rs` carries `modseq: Option<i64>` and `last_deletion_check_at: Option<i64>`
 
 **What's been implemented (Phases 1-2 complete):**
-- CONDSTORE/QRESYNC capability detection and negotiation (`crates/imap/src/connection.rs::negotiate_condstore_qresync`) - probes CAPABILITY for `CONDSTORE`/`QRESYNC`, sends `ENABLE QRESYNC` when available, detects iCloud's missing `ENABLED` response and falls back to CONDSTORE-only
-- `FolderSyncState` in `crates/imap/src/sync_pipeline.rs` stores `modseq: Option<u64>` (actively used)
-- `upsert_folder_sync_state()` in `crates/imap/src/sync_pipeline.rs` writes the server's HIGHESTMODSEQ into `folder_sync_state.modseq`
-- `delta_check_folders()` in `crates/imap/src/client/sync.rs` implements CONDSTORE fast-path: compares cached modseq vs server HIGHESTMODSEQ, skips UID SEARCH when unchanged, detects modseq reset (server < cached)
-- CHANGEDSINCE flag sync in `crates/imap/src/imap_delta.rs::process_folder_delta` - when modseq changed, issues `UID FETCH ... (CHANGEDSINCE <cached>)` for efficient flag diff
-- `fetch_flags_changedsince()` in `crates/imap/src/client/commands.rs` - raw IMAP command for CHANGEDSINCE FETCH
-- `apply_flag_changes()` in `crates/imap/src/sync_pipeline.rs` - batch-updates message flags from CHANGEDSINCE results
-- Non-CONDSTORE fallback: `sync_flags_without_condstore()` in `crates/imap/src/imap_delta.rs` - periodic full `UID FETCH 1:* (FLAGS)` for servers without CONDSTORE (Exchange IMAP, Courier, hMailServer)
-- UID-based deletion detection: `run_deletion_detection()` in `crates/imap/src/imap_delta.rs` - throttled per-folder `UID SEARCH ALL` diffed against local UIDs
+- Capability detection and QRESYNC negotiation: `crates/imap/src/connection.rs::negotiate_condstore_qresync` probes CAPABILITY for `CONDSTORE`/`QRESYNC`, sends `ENABLE QRESYNC` when advertised, watches for the `ENABLED QRESYNC` reply, and falls back to CONDSTORE-only when the server (iCloud) omits it. Session-scoped state is `CondstoreQresyncState { condstore: bool, qresync: bool }`.
+- CONDSTORE fast-path: `crates/imap/src/client/sync.rs::delta_check_folders` compares cached modseq vs server `HIGHESTMODSEQ`, skips UID SEARCH when unchanged, and flags modseq reset (server < cached at the same UIDVALIDITY) so the caller triggers a full flag resync.
+- CHANGEDSINCE FETCH: `crates/imap/src/client/commands.rs::fetch_changed_flags` issues `UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE <modseq>)` by appending the modifier to the `uid_fetch` query string — the workaround validated in chatmail/async-imap#130.
+- Sync dispatch: `crates/provider-sync/src/imap/imap_delta.rs::process_folder_delta` calls `fetch_changed_flags` when modseq changed, then writes via `apply_flag_changes` and `upsert_folder_sync_state` in `crates/provider-sync/src/imap/sync_pipeline.rs`.
+- Non-CONDSTORE fallback: `crates/provider-sync/src/imap/imap_delta_janitor.rs::sync_flags_without_condstore` runs periodic full `UID FETCH 1:* (UID FLAGS)` for Exchange IMAP, Courier, hMailServer, etc., throttled by `FLAG_SYNC_INTERVAL_SECS = 300`.
+- UID-based deletion detection: `crates/provider-sync/src/imap/imap_delta_janitor.rs::run_deletion_detection` runs `UID SEARCH ALL` diffed against locally cached UIDs, throttled by `DELETION_CHECK_INTERVAL_SECS = 600` via the `last_deletion_check_at` column.
 
-**Remaining gap (Phase 3):** QRESYNC VANISHED parsing is blocked on upstream async-imap (https://github.com/chatmail/async-imap/issues/130). Without VANISHED response support, deletion detection uses the UID-comparison fallback instead of the more efficient QRESYNC SELECT single-round-trip approach.
+**Remaining gap (Phase 3):** QRESYNC VANISHED handling is unimplemented but no longer blocked. `imap-proto 0.16.7` (re-exported as `async_imap::imap_proto`) parses `* VANISHED [(EARLIER)] <uid-set>` into `Response::Vanished { earlier: bool, uids: Vec<UidSetMember> }`. Nothing in our code currently consumes that variant: the QRESYNC capability is negotiated but never used to drive a `SELECT mailbox (QRESYNC (...))` or a `UID FETCH ... VANISHED` command. The original async-imap issue ([chatmail/async-imap#130](https://github.com/chatmail/async-imap/issues/130)) was closed `not_planned` — it was about CHANGEDSINCE, and that ships today. Per-message `MODSEQ` in FETCH responses is still not parsed by imap-proto, but the mailbox-level `HIGHESTMODSEQ` from SELECT is sufficient for the QRESYNC flow.
 
 ### Rust IMAP crate CONDSTORE support
 
@@ -108,21 +105,21 @@ CONDSTORE is fully implemented (Phases 1-2). All IMAP CONDSTORE/QRESYNC code liv
 - `run_command()` / `run_command_and_check_ok()` / `run_command_untagged()` - raw command execution for anything the typed API doesn't cover.
 - `Mailbox.highest_modseq` - parsed from SELECT OK responses by `imap-proto`.
 
-**Not supported (requires raw commands):**
-- `UID FETCH ... (CHANGEDSINCE ...)` - no typed modifier; must use `run_command()` and parse the response stream manually.
-- `ENABLE QRESYNC` - no typed method; must use `run_command_and_check_ok("ENABLE QRESYNC")`.
+**Not surfaced as typed API (use raw command + response matching):**
+- `UID FETCH ... (CHANGEDSINCE ...)` - no typed modifier, but as of chatmail/async-imap#130 the practical pattern is to append `(CHANGEDSINCE <modseq>)` to the `uid_fetch` query string. The typed `Fetch` stream is fine for consuming the response.
+- `ENABLE QRESYNC` - no typed method; must use `run_command("ENABLE QRESYNC")` and watch for `ENABLED QRESYNC` in the response stream.
 - `SELECT mailbox (QRESYNC (...))` - no typed method; must construct the raw command string.
-- `VANISHED` response parsing - `imap-proto`'s parser does not handle `VANISHED` responses. They will be silently dropped or cause parse errors.
-- `MODSEQ` in FETCH responses - `imap-proto` does not parse the MODSEQ data item from FETCH responses. The per-message mod-sequence is unavailable through the typed API.
-- `STORE UNCHANGEDSINCE` - no typed modifier.
+- `UID FETCH ... (CHANGEDSINCE <m> VANISHED)` - no typed modifier; construct the raw query string.
 
-**Practical approach with async-imap:** CONDSTORE can be partially implemented:
-1. Use `select_condstore()` to get HIGHESTMODSEQ - this works today.
-2. Compare cached HIGHESTMODSEQ to determine if flag sync is needed - pure client logic.
-3. For CHANGEDSINCE FETCH, use `run_command()` to send `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)` and parse the response stream manually.
-4. QRESYNC is impractical - VANISHED response parsing would require extending `imap-proto` or building a custom parser for the raw response bytes.
+**Supported via the re-exported `imap-proto`:**
+- `* VANISHED [(EARLIER)] <uid-set>` response parsing - `imap-proto 0.16.7` parses these into `Response::Vanished { earlier: bool, uids: Vec<UidSetMember> }`. `async-imap` does `pub use imap_proto;`, so consumers can pattern-match the variant directly off the response stream after a raw `run_command`. (Earlier doc revisions claimed this was unsupported - that's no longer true.)
+- `HIGHESTMODSEQ` in SELECT OK responses - parsed into `Mailbox.highest_modseq`.
 
-This hybrid approach (typed API for SELECT, raw commands for CHANGEDSINCE) is the same pattern used by Delta Chat when they need IMAP features beyond `async-imap`'s typed API, and is consistent with our existing `crates/imap/src/raw.rs` fallback pattern.
+**Still not parsed:**
+- `MODSEQ` data item in FETCH responses - imap-proto does not surface the per-message mod-sequence. Not needed for our Phase 3 path (we only need the mailbox-level HIGHESTMODSEQ and the VANISHED UID list), but would block hypothetical `STORE UNCHANGEDSINCE` conflict resolution.
+- `STORE UNCHANGEDSINCE` - no typed modifier and no per-message MODSEQ to compare against.
+
+**Practical approach with async-imap:** the same hybrid pattern works for all three phases - typed API where it exists (`select`, `uid_fetch`), raw-command + response matching where it doesn't (`ENABLE QRESYNC`, `SELECT (QRESYNC (...))`, `VANISHED` responses). This is the same pattern Delta Chat uses and is consistent with our existing `crates/imap/src/raw.rs` fallback path.
 
 #### imap-codec / imap-types (duesee - v2.0.0-alpha)
 
@@ -277,8 +274,33 @@ Implemented in `crates/imap/src/connection.rs` (capability detection, QRESYNC ne
 **Phase 2 - Deletion detection: COMPLETE.**
 UID-based deletion detection without QRESYNC is implemented in `crates/imap/src/imap_delta.rs::run_deletion_detection`. Uses `UID SEARCH ALL` diffed against locally cached UIDs, throttled per-folder (10-minute interval via `last_deletion_check_at` column in `folder_sync_state`).
 
-**Phase 3 - QRESYNC VANISHED parsing: BLOCKED.**
-QRESYNC negotiation is implemented (`ENABLE QRESYNC` with iCloud workaround), but VANISHED response parsing requires upstream async-imap support. Blocked on https://github.com/chatmail/async-imap/issues/130. When unblocked, this would replace the UID-comparison deletion detection with a single-round-trip `SELECT ... (QRESYNC (...))` that returns both flag changes and `VANISHED (EARLIER)` expunge lists. Would also require building a custom VANISHED parser or extending `imap-proto`.
+**Phase 3 - QRESYNC VANISHED handling: NOT BLOCKED, NOT YET IMPLEMENTED.**
+
+QRESYNC negotiation is implemented (`ENABLE QRESYNC` with iCloud workaround). `imap-proto 0.16.7` parses `Response::Vanished { earlier, uids }`. `async-imap` re-exports `imap_proto`. The original blocker is gone; what's left is wiring it up. The Thunderbird history above (years of CONDSTORE/IDLE/expunge bugs, QRESYNC described as "large and complicated") and the iCloud QRESYNC defects mean Phase 3 is high-risk-of-regression. Treat it accordingly:
+
+**Wiring (the easy part):**
+
+1. After `negotiate_condstore_qresync` returns `qresync: true`, replace the plain SELECT in `delta_check_folders` with a raw `SELECT mailbox (QRESYNC (<uidvalidity> <last-modseq>))` via `Session::run_command`. Cached UIDVALIDITY and modseq already live in `folder_sync_state`.
+2. Drain the response stream after the SELECT (and after `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq> VANISHED)` if used as the post-SELECT FETCH form). Pattern-match `async_imap::imap_proto::Response::Vanished { earlier, uids }` and remove the listed UIDs from the local store. UIDs are stable, so for our purposes `EARLIER` and non-`EARLIER` VANISHED are equivalent - we don't track sequence numbers.
+3. When `CondstoreQresyncState.qresync` is true, replace the throttled `run_deletion_detection` UID-comparison path with the QRESYNC results. Keep `run_deletion_detection` as the fallback for CONDSTORE-only servers (notably Gmail IMAP) and servers with neither extension.
+
+**Footguns we must defend against (lessons from `### Implementation patterns in other clients`):**
+
+- **VANISHED-without-IDLE drops (Thunderbird Bug 1124569).** When CONDSTORE was used without IDLE, expunged messages stuck around in the local DB. Root cause: real-time `* VANISHED <uids>` arrives untagged at arbitrary points in the response stream, and code paths that only checked SELECT-time responses missed them. Mitigation: every code path that issues an IMAP command on a QRESYNC-enabled session must drain untagged responses and feed any `Response::Vanished` (earlier or not) through the deletion path - not just SELECT and FETCH.
+
+- **Folder contents drift (Thunderbird Bug 1123094).** Cache-coherence bugs surface when VANISHED is applied but a subsequent EXISTS bump or new-UID FETCH lands without proper bookkeeping. Mitigation: after applying VANISHED + any new FETCHes for a folder, cross-check local UID count against `Mailbox.exists`. On mismatch, fall back to a full `UID SEARCH ALL` reconciliation rather than trusting the QRESYNC delta. Log the divergence loudly - this is a server bug, our bug, or both.
+
+- **Gmail CONDSTORE flakes (Thunderbird Bug 885220).** Gmail doesn't advertise QRESYNC, so Phase 3 doesn't touch it, but the related lesson is "advertised capability + missing response data" is a real failure mode. Treat `mailbox.highest_modseq.is_none()` as "this folder doesn't support persistent mod-sequences here" and skip CONDSTORE for that folder even if the capability was negotiated - already correct in `delta_check_folders`, must remain correct after the QRESYNC SELECT switch.
+
+- **iCloud's "advertised but broken" QRESYNC.** Two known defects: (a) no `ENABLED QRESYNC` after `ENABLE` (already handled - we drop to CONDSTORE-only), (b) negative sequence numbers in FETCH responses during QRESYNC SELECT. Mitigation for (b): if we somehow ENABLE'd against a buggy server, parse failures or out-of-range sequence numbers during the response drain must be treated as a one-shot signal to disable QRESYNC for that session (clear `qresync`, fall back to CONDSTORE-only) rather than retried.
+
+- **Mod-sequence reset without UIDVALIDITY change.** Already detected in `delta_check_folders` via `modseq_reset` (server modseq < cached at same UIDVALIDITY). The QRESYNC SELECT must preserve this: if the server's response carries a HIGHESTMODSEQ lower than our cached value, abandon the QRESYNC parameters and do a full resync.
+
+- **TB's "years to ship" pattern.** Land Phase 3 behind a runtime gate (off by default), validate against Dovecot (gold standard), Stalwart (Rust, RFC-strict), and Cyrus before flipping the default. Keep `run_deletion_detection` reachable as a panic-button fallback per-account, not just per-capability.
+
+- **Delta Chat's deliberate punt.** Delta Chat uses the same async-imap stack we do and explicitly chose not to implement QRESYNC, on the grounds that compatibility risk wasn't worth the upside for their use case (they don't care about expunged messages). Their stance is the strongest "you can stop at Phase 2" argument we have. Our 150 GB cached-mailbox / multi-year history requirement is the reason we don't take that exit - but if Phase 3 keeps regressing in field testing, CONDSTORE-only + `run_deletion_detection` indefinitely is a viable end state, not a failure. Decide that consciously rather than discovering it by attrition.
+
+Per-message `MODSEQ` in FETCH is still unparsed by imap-proto; that doesn't block Phase 3 but would block `STORE UNCHANGEDSINCE` lost-update protection.
 
 ### Sources
 
@@ -290,6 +312,7 @@ QRESYNC negotiation is implemented (`ENABLE QRESYNC` with iCloud workaround), bu
 - [imap-types docs.rs](https://docs.rs/imap-types/latest/imap_types/)
 - [Delta Chat CONDSTORE issue #2941](https://github.com/deltachat/deltachat-core-rust/issues/2941)
 - [Delta Chat CONDSTORE/QRESYNC issue #200](https://github.com/deltachat/deltachat-core/issues/200)
+- [chatmail/async-imap#130 - CHANGEDSINCE typed support](https://github.com/chatmail/async-imap/issues/130) (closed `not_planned`: the conclusion was to append `CHANGEDSINCE` to the `uid_fetch` query string)
 - [Thunderbird QRESYNC Bug 1747311](https://bugzilla.mozilla.org/show_bug.cgi?id=1747311)
 - [Thunderbird CONDSTORE Bug 912216](https://bugzilla.mozilla.org/show_bug.cgi?id=912216)
 - [Thunderbird Android CONDSTORE/QRESYNC PR #2607](https://github.com/thunderbird/thunderbird-android/pull/2607)

@@ -1,7 +1,14 @@
 # Shared / Delegated Mailboxes
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: 🟡 **Partially implemented** - Exchange (Graph) shared mailbox read/write/sync, Autodiscover discovery, and IMAP shared namespace discovery are implemented in core. Sidebar integration done (2026-03-22): shared mailboxes auto-populate in scope dropdown from Autodiscover results. JMAP Sharing in progress. Gmail delegation blocked (API limitation). Remaining: thread loading on shared mailbox selection, compose identity auto-selection, per-mailbox sync config.
+**Status**: 🟡 **Backend done, identity wiring in core, compose UI not connected.** Exchange (Graph) shared mailbox read/write, Autodiscover discovery, per-mailbox delta sync orchestration, and IMAP shared namespace + MYRIGHTS discovery are all implemented. Sidebar integration done (2026-03-22) and thread loading on selection is wired (`SidebarEvent::SharedMailboxSelected` → `load_navigation_and_threads` → `load_shared_mailbox_threads`, `crates/app/src/helpers.rs:354`). JMAP Sharing complete in the provider crate (see `docs/roadmap/jmap-sharing.md`). Gmail delegation blocked (API limitation). **Remaining (all in the app crate):** wire `rtsk::send_identity::select_from_address` into the pop-out compose, expose per-shared-mailbox sync settings UI (the DB column `sync_depth_days` doesn't exist on `shared_mailbox_sync_state` yet - needs a schema add too), and per-delegate notification preferences.
+
+**File-path drift since this doc was written:**
+
+- Shared-mailbox sync orchestration moved to `crates/provider-sync/src/graph/shared_mailbox_sync.rs` (`sync_shared_mailbox`, `sync_all_shared_mailboxes`) during the provider-sync extraction. `crates/graph/src/` no longer contains it.
+- DB tables live in `crates/db/src/db/schema/10_sync.sql` (`graph_shared_mailbox_delta_tokens`, `shared_mailbox_sync_state`) and `crates/db/src/db/schema/02_mail.sql` (`labels.namespace_type` column). `migrations.rs` only carries a top-level comment referencing them - the v51/v54 numbered-migration scheme was replaced by a single v100 schema split across SQL files.
+- `crates/graph/src/sync.rs` is a single file, not a directory. Earlier references to `graph/src/sync/` are stale.
+- Sidebar code split into `crates/app/src/ui/sidebar/` (subdirectory); the scope dropdown specifically lives in `crates/app/src/ui/sidebar/scope.rs`, sidebar state in `mod.rs`.
 
 ---
 
@@ -59,38 +66,40 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 ### Done
 
 **Exchange (Graph) - shared mailbox access and sync:**
-- `*.Shared` OAuth scopes (`Mail.ReadWrite.Shared`, `Mail.Send.Shared`, `Mail.Read.Shared`) requested during auth (`core/src/oauth.rs`, `core/src/discovery/registry.rs`).
-- `GraphClient::for_shared_mailbox(mailbox_id)` creates a scoped client that shares the parent's HTTP client, token, and semaphore but has its own folder map, sync cycle, and category lock (`graph/src/client.rs`).
-- `GraphClient::api_path_prefix()` returns `/me` for primary or `/users/{mailbox_id}` for shared. All operations in `graph/src/ops/` use `self.me()` (delegates to `api_path_prefix()`), and all sync URLs in `graph/src/sync/` use `client.api_path_prefix()` - so every API call (read, write, move, delete, folder list, delta sync) transparently works against shared mailboxes.
-- `send_as_shared_mailbox()` and `send_on_behalf_of()` in `graph/src/ops/mod.rs` implement Send As (only `from` set) and Send on Behalf (`from` + `sender` set) via `POST /users/{shared}/messages` + `/send`.
-- Autodiscover XML discovery (`graph/src/autodiscover.rs`): `discover_shared_mailboxes()` calls `outlook.office365.com/autodiscover/autodiscover.xml` with OAuth token, parses `AlternativeMailbox` elements via `quick-xml`. Returns SMTP address, display name, and type (Delegate, TeamMailbox, etc.).
-- Per-shared-mailbox sync orchestration (`graph/src/shared_mailbox_sync.rs`): `sync_shared_mailbox()` creates a scoped client and runs initial (30-day lookback) or delta sync depending on existing delta tokens. `sync_all_shared_mailboxes()` iterates all enabled shared mailboxes; failures are independent.
-- DB schema (`db/src/db/migrations.rs`): migration v51 adds `graph_shared_mailbox_delta_tokens` (per-mailbox, per-folder delta links) and `shared_mailbox_sync_state` (enable/disable sync, last sync time, error tracking).
-- Sync state management (`sync/src/state.rs`): `enable_shared_mailbox_sync()`, `disable_shared_mailbox_sync()`, `get_enabled_shared_mailboxes()`, `update_shared_mailbox_sync_status()`, plus CRUD for shared mailbox delta tokens.
+- `*.Shared` OAuth scopes (`Mail.ReadWrite.Shared`, `Mail.Send.Shared`, `Mail.Read.Shared`) requested during auth (`crates/core/src/oauth.rs`, `crates/core/src/discovery/registry.rs`).
+- `GraphClient::for_shared_mailbox(mailbox_id)` creates a scoped client that shares the parent's HTTP client, token, and semaphore but has its own folder map, sync cycle, and category lock (`crates/graph/src/client.rs:158`).
+- `GraphClient::api_path_prefix()` (`crates/graph/src/client.rs:145`) returns `/me` for primary or `/users/{mailbox_id}` for shared. All operations in `crates/graph/src/ops/` and all sync URLs in `crates/graph/src/sync.rs` go through `api_path_prefix()` - so every API call (read, write, move, delete, folder list, delta sync) transparently works against shared mailboxes.
+- `send_as_shared_mailbox()` (`crates/graph/src/ops/mod.rs:604`) and `send_on_behalf_of()` (`crates/graph/src/ops/mod.rs:668`) implement Send As (only `from` set) and Send on Behalf (`from` + `sender` set) via `POST /users/{shared}/messages` + `/send`.
+- Autodiscover XML discovery (`crates/graph/src/autodiscover.rs:56`): `discover_shared_mailboxes()` calls `outlook.office365.com/autodiscover/autodiscover.xml` with OAuth token, parses `AlternativeMailbox` elements via `quick-xml`. Returns SMTP address, display name, and type (Delegate, TeamMailbox, etc.). The autodiscover module is also the same one used for public-folder routing - see `docs/roadmap/public-folders.md`.
+- Per-shared-mailbox sync orchestration moved to `crates/provider-sync/src/graph/shared_mailbox_sync.rs` (`sync_shared_mailbox`, `sync_all_shared_mailboxes`) during the provider-sync extraction. `sync_shared_mailbox` creates a scoped client and runs initial (30-day lookback) or delta sync depending on existing delta tokens; failures are independent across mailboxes.
+- DB schema lives in `crates/db/src/db/schema/10_sync.sql`: `graph_shared_mailbox_delta_tokens` (per-mailbox, per-folder delta links) and `shared_mailbox_sync_state` (enable/disable, last-sync, error, display name, email address). The earlier "migration v51" reference is stale - the numbered-migration scheme was replaced by a single v100 schema split across SQL files.
+- Sync state management (`crates/sync/src/state.rs`): `enable_shared_mailbox_sync()` (line 534), `disable_shared_mailbox_sync()` (line 560), `disable_shared_mailbox_sync_with_error()` (line 582), `get_enabled_shared_mailboxes()`, `update_shared_mailbox_sync_status()`, plus CRUD for shared mailbox delta tokens.
 
 **IMAP - namespace and ACL discovery:**
-- NAMESPACE command (RFC 2342): `discover_namespaces()` in `imap/src/connection.rs` sends the raw `NAMESPACE` command and parses the response into `NamespaceInfo` (personal, other_users, shared entries with prefix and delimiter). Full parser with tests for standard, NIL, and multi-entry responses.
+- NAMESPACE command (RFC 2342): `discover_namespaces()` in `crates/imap/src/connection.rs` sends the raw `NAMESPACE` command and parses the response into `NamespaceInfo` (personal, other_users, shared entries with prefix and delimiter). Full parser with tests for standard, NIL, and multi-entry responses.
 - `classify_folder_namespace()` maps a folder path to `NamespaceType` (Personal, OtherUsers, Shared) by prefix matching.
-- `list_shared_folders()` in `imap/src/client/mod.rs` lists folders under other-users and shared namespace prefixes via `LIST {prefix}*`, annotating each with its `NamespaceType`.
-- MYRIGHTS (RFC 4314): `discover_myrights()` in `imap/src/connection.rs` queries the authenticated user's rights on a folder. Parses the `AclRight` variants into a compact rights string.
-- DB schema (`db/src/db/migrations.rs`): migration v54 adds `namespace_type TEXT` column to `labels`, storing the IMAP namespace classification per folder.
-- Types (`imap/src/types.rs`): `NamespaceType` enum, `NamespaceEntry`, `NamespaceInfo` structs. `ImapFolder` has an optional `namespace_type` field.
+- `list_shared_folders()` in `crates/imap/src/client/mod.rs` lists folders under other-users and shared namespace prefixes via `LIST {prefix}*`, annotating each with its `NamespaceType`.
+- MYRIGHTS (RFC 4314): `discover_myrights()` in `crates/imap/src/connection.rs` queries the authenticated user's rights on a folder. Parses the `AclRight` variants into a compact rights string.
+- DB schema: `namespace_type TEXT` column on `labels` lives in `crates/db/src/db/schema/02_mail.sql` (was originally landed as "migration v54" - that numbering is gone now).
+- Types (`crates/imap/src/types.rs`): `NamespaceType` enum, `NamespaceEntry`, `NamespaceInfo` structs. `ImapFolder` has an optional `namespace_type` field.
 
-**Sidebar integration (2026-03-22):**
-- `SharedMailbox` type and `Db::get_shared_mailboxes()` query in app crate (`app/src/db/types.rs`, `app/src/db/accounts.rs`).
+**Sidebar integration and thread loading (2026-03-22):**
+- `SharedMailbox` type and `Db::get_shared_mailboxes()` query in app crate (`crates/app/src/db/types.rs:30`, `crates/app/src/db/accounts.rs:51`).
 - `Db::upsert_shared_mailbox()` for persisting Autodiscover results with auto-enable.
-- Shared mailboxes rendered in sidebar scope dropdown with users icon (`app/src/ui/sidebar.rs`).
-- `SidebarMessage::SelectSharedMailbox` / `SidebarEvent::SharedMailboxSelected` for selection.
-- Shared mailboxes loaded at boot from `shared_mailbox_sync_state` table.
-- When Autodiscover discovers shared mailboxes during Graph sync, they auto-populate in the sidebar.
+- Shared mailboxes rendered in the sidebar scope dropdown (`crates/app/src/ui/sidebar/scope.rs:79`) with state held on `Sidebar::shared_mailboxes` (`crates/app/src/ui/sidebar/mod.rs:128`). Loaded at boot via `Message::SharedMailboxesLoaded` (`crates/app/src/update.rs:899`).
+- Selection emits `SidebarMessage::SelectSharedMailbox` → `SidebarEvent::SharedMailboxSelected` (`crates/app/src/ui/sidebar/mod.rs:269-280`); `crates/app/src/handlers/core.rs:64` handles the event by calling `reset_view_state()` then `load_navigation_and_threads()`.
+- Thread loading is routed by scope in `crates/app/src/helpers.rs`: the `ViewScope::SharedMailbox` arm (line 74) calls `load_shared_mailbox_threads()` (line 354), which queries the shared-mailbox-aware `messages`/`threads` rows with the selected folder/label.
+
+**Send identity selection (core only, not yet wired to compose):**
+- `rtsk::send_identity::select_from_address` (`crates/core/src/send_identity.rs:28`) implements the priority rules: shared-mailbox match → reply-address match (case-insensitive) → primary identity. Takes a `FromSelectionContext { reply_to_addresses, shared_mailbox_id }`.
+- `SendIdentity` rows are queryable via `get_send_identities_read` and `get_all_send_identity_emails_read`.
 
 ### Remaining
 
 - **Gmail delegation**: Account-level delegation is not implementable via public Gmail API (cannot discover inbound delegation; accessing delegated mailbox requires domain-wide delegation or internal session mechanisms). Documented as a known limitation. Send-As aliases work.
 - **JMAP Sharing (RFC 9670)**: All 6 phases implemented - discovery, sync, rights, subscription, notifications, identity resolution. Remaining: app-crate UI integration. See `docs/roadmap/jmap-sharing.md`.
-- **App-level shared mailbox selection handler**: `SharedMailboxSelected` event is emitted but the App doesn't yet load threads for the selected shared mailbox. Needs navigation state scoping.
-- **Compose identity auto-selection**: When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
-- **Configurable sync depth per shared mailbox**: Currently hardcoded to 30 days initial lookback. No per-mailbox sync depth setting.
+- **Compose-time identity selection wiring**: `select_from_address` is implemented and tested in core, but `crates/app/src/pop_out/compose/` does not yet call it. The pop-out compose currently defaults to the account's primary address regardless of whether the user opened compose from a shared-mailbox context. Wiring this up requires (a) capturing the current `ViewScope::SharedMailbox { mailbox_id, .. }` (and the reply's To/Cc addresses, if any) into `FromSelectionContext`, and (b) plumbing the resolved `SendIdentity` into the compose model so the From row reflects it and the send-time payload uses `send_as_shared_mailbox()` / `send_on_behalf_of()`.
+- **Configurable sync depth per shared mailbox**: Currently hardcoded to 30 days initial lookback. `shared_mailbox_sync_state` doesn't carry a `sync_depth_days` column today (`crates/db/src/db/schema/10_sync.sql:46`); contrast with `public_folder_pins` which does. Needs both a schema add and a settings affordance.
 - **Notification routing**: Client-side per-delegate notification preferences not implemented.
 - **Sent Items routing configuration**: `saveToSentItems` behavior not yet configurable per shared mailbox.
 
@@ -340,8 +349,9 @@ Neither `async-imap` nor `imap-codec` support ACL. Custom implementation via raw
 | Per-shared-mailbox delta sync | Medium | Critical | P0 | **Done** |
 | IMAP namespace/ACL discovery | Medium | Medium (Dovecot/Cyrus) | P2 | **Done** |
 | Sidebar integration (scope dropdown) | Low | Critical (baseline) | P0 | **Done** (2026-03-22) - auto-populates from Autodiscover |
-| Thread loading on shared mailbox selection | Medium | Critical for UX | P0 | Not started (App handler for SharedMailboxSelected) |
-| Send identity auto-selection | Medium | Critical for UX | P0 | Not started |
-| Per-mailbox sync depth config | Medium | High for scale | P1 | Not started |
+| Thread loading on shared mailbox selection | Medium | Critical for UX | P0 | **Done** - `SidebarEvent::SharedMailboxSelected` (`handlers/core.rs:64`) → `load_navigation_and_threads()` → `load_shared_mailbox_threads()` (`helpers.rs:354`) reads scoped `threads`/`messages` |
+| Send identity auto-selection (core algorithm) | Medium | Critical for UX | P0 | **Done** - `select_from_address` in `crates/core/src/send_identity.rs` |
+| Send identity wiring into compose UI | Low | Critical for UX | P0 | Not started - `crates/app/src/pop_out/compose/` does not call `select_from_address` yet |
+| Per-mailbox sync depth config | Medium | High for scale | P1 | Not started - needs `sync_depth_days` column on `shared_mailbox_sync_state` and settings UI |
 | JMAP Sharing (RFC 9670) | Medium-High | Medium | P2 | **Done** (all 6 phases). App-crate UI integration remaining. See `docs/roadmap/jmap-sharing.md`. |
 | Gmail delegation | Blocked | Low | P3 | Blocked (API limitation) |

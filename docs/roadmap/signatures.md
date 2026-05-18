@@ -1,7 +1,9 @@
 # Roaming Signatures
 
 **Tier**: 2 - Keeps users from going back
-**Status**: ⚠️ **Backend complete, UI missing** - DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`). Gmail bidirectional sync via `sendAs` (pull server signatures on initial+delta sync, push local edits). JMAP Identity signature sync (`sync_jmap_identity_signatures`). Inline image extraction from signature HTML (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Exchange has no public API for signatures and never will (see Research §1-2). Missing: signature placement in compose UI.
+**Status**: ✅ **Done end-to-end, except Exchange (permanently blocked).** Backend and compose UI both shipped. DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`) in `crates/db/src/db/schema/04_compose.sql`. Gmail bidirectional sync via `sendAs` and JMAP Identity signature sync are both live (sync orchestration moved to `crates/provider-sync/src/gmail/sync/labels.rs::sync_signatures` and `crates/jmap/src/signatures.rs::sync_jmap_identity_signatures` after the provider-sync extraction). Inline image extraction in `crates/common/src/signature_images.rs` (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Compose placement is wired through `crates/rte/src/compose.rs::replace_signature` (separator-aware document mutation with tests for all 6 swap cases) driven from `crates/app/src/pop_out/compose/update.rs:543`; `ComposeState` tracks `active_signature_id` + `signature_separator_index` (`crates/app/src/pop_out/compose/state.rs:97`), and `db_resolve_signature_for_compose` (`crates/db/src/db/queries_extra/compose.rs:358`) picks the right signature on account switch. Draft persistence round-trips both fields - `local_drafts` schema (`04_compose.sql:62-68`) carries `signature_id` and `signature_separator_index` columns, `SaveLocalDraftParams` writes them (`crates/app/src/handlers/pop_out/compose_draft.rs:53,56`), and `ComposeState::from_draft` reads them back. Exchange has no public API for signatures and Microsoft has confirmed there never will be (see Research §1-2).
+
+See `docs/signatures/discrepancies.md` for the audited spec-vs-code reconciliation; nothing in its "Remaining" list is open anymore as of the file-path drift survey done in this pass.
 
 ---
 
@@ -27,13 +29,14 @@
 
 ## Work
 
-- ✅ DB schema extended with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`)
-- ✅ Gmail `sendAs` signature fetch - pulled on initial sync and delta sync (`sync_signatures` in `crates/gmail/src/sync/labels.rs`)
-- ✅ Gmail bidirectional sync - local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs`), conflict resolution by server HTML hash
-- ✅ JMAP Identity signature sync - `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
-- ✅ Inline image handling - `crates/common/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
+- ✅ DB schema extended with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`) in `crates/db/src/db/schema/04_compose.sql`
+- ✅ Gmail `sendAs` signature fetch - pulled on initial sync and delta sync. `sync_signatures` moved to `crates/provider-sync/src/gmail/sync/labels.rs` during the provider-sync extraction; this doc previously pointed at the old `crates/gmail/src/sync/labels.rs` location.
+- ✅ Gmail bidirectional sync - local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs:297`), conflict resolution by server HTML hash
+- ✅ JMAP Identity signature sync - `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs:18`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
+- ✅ Inline image handling - `crates/common/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store via `store_signature_images`
+- ✅ Signature placement in compose - `replace_signature` in `crates/rte/src/compose.rs:229` handles all six swap cases (none↔some, swap, placeholder preservation) with unit tests. `ComposeState::active_signature_id` and `signature_separator_index` drive it; on account switch, `db_resolve_signature_for_compose` (`crates/db/src/db/queries_extra/compose.rs:358`) picks the right signature and the new-message vs reply/forward defaults come from in-editor toggles backed by `is_reply_default` (see `docs/signatures/discrepancies.md`).
+- ✅ Draft round-trip - `signature_id` and `signature_separator_index` are persisted columns on `local_drafts` (`04_compose.sql:62-68`), written through `SaveLocalDraftParams` (`crates/db/src/db/queries_extra/compose.rs:545`) and restored in `ComposeState::from_draft` (`crates/app/src/pop_out/compose/state.rs:196,238`). The earlier "draft restoration with signature state" gap in `docs/signatures/discrepancies.md` is closed.
 - ✗ Exchange - **permanently blocked.** No public API exists and Microsoft has explicitly confirmed there never will be (see Research §1-2). Sent-mail heuristic not worth the effort. Exchange users create their signature locally on first account add.
-- ⬚ Signature placement in compose (iced UI work)
 
 ---
 

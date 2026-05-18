@@ -1,6 +1,6 @@
 # Signatures: Spec vs. Code Discrepancies
 
-Audit date: 2026-05-15
+Audit date: 2026-05-15 (updated 2026-05-18)
 
 ---
 
@@ -14,11 +14,11 @@ Audit date: 2026-05-15
 - Signature edit detection flag (`dirty: bool` on `SignatureEditorState`) ✅
 - Signature list redesigned to mirror the Accounts list: flat list, color-dot + signature name, single "+ Add Signature" button at the bottom. Drag-reorder UI removed (dead `SignatureDragState` plumbing deleted).
 - Signature editor rebuilt on the standard `setting_row` primitives - Account picker (new icon-capable `widgets::select_with_icons`), Name input via `input_row`, locked account for existing signatures (disabled-dropdown variant: no chevron, dimmed label). RTE body adopts the recessed `ContainerClass::EmailBody` + `PAD_CONTENT` styling from the compose pop-out.
+- **Draft restoration with signature state** - both `signature_id` and `signature_separator_index` are persisted columns on `local_drafts` (`crates/db/src/db/schema/04_compose.sql:62-68`); `SaveLocalDraftParams` (`crates/db/src/db/queries_extra/compose.rs:545`) carries them; `compose_draft.rs:53,56` populates them from `ComposeState`; and `ComposeState::from_draft` (`crates/app/src/pop_out/compose/state.rs:196,238`) reads them back on reopen. Verified 2026-05-18.
 
 ## Remaining
 
-### Draft restoration with signature state
-Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed. Tracked in TODO.md.
+(none)
 
 ## Superseded
 

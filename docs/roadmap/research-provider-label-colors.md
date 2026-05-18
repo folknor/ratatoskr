@@ -3,7 +3,19 @@
 > **Superseded by the folders/labels split.** See `reference/glossary/folders-labels.md` for the current model: Exchange categories, IMAP keywords, and JMAP keywords sync to the tag-only `labels` table; user-visible cross-account groupings live in `label_groups`. This roadmap doc is retained for historical context.
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: ✅ **Backend complete** - Unified into labels system (Phases 1-5 of labels unification). - All provider backends implemented. Exchange Graph master category list sync (`crates/graph/src/label_sync.rs`), Gmail label-to-category sync with hex colors (`crates/gmail/src/sync/labels.rs`), JMAP keyword-to-category mapping (`crates/jmap/src/sync/mailbox.rs`, `crates/jmap/src/sync/storage.rs`), IMAP PERMANENTFLAGS detection (`crates/imap/src/client/`, `crates/imap/src/raw.rs`). Unified color model using Exchange's 25 presets as canonical palette with nearest-match mapping (`crates/label-colors/src/category_colors.rs`). `ProviderOps` trait has `apply_category`/`remove_category` mutation methods (`crates/common/src/ops.rs`), implemented in each provider crate (`crates/graph/src/ops/mod.rs`, `crates/gmail/src/ops.rs`, `crates/jmap/src/ops.rs`, `crates/imap/src/ops.rs`). `message_categories` join table populated during sync for all three API providers (Graph, Gmail, JMAP). `categories` table with full schema in `crates/db/src/db/migrations.rs` (display_name, color_preset, color_bg, color_fg, provider_id, sync_state). **Still missing**: category picker UI, user-initiated apply/remove from UI, IMAP keyword write-back for categories.
+**Status**: ✅ **Backend complete; one UI gap remains.** The "categories" concept this doc researched landed as the unified provider-labels + label-groups system - see `reference/glossary/folders-labels.md` for the current shape. Mapping from this doc's vocabulary to the live model:
+
+- "Category" -> raw provider label in the `labels` table (Exchange categories as `cat:{name}`, IMAP/JMAP keywords as `kw:{keyword}`, native Gmail label IDs unprefixed). Schema in `crates/db/src/db/schema/02_mail.sql`.
+- User-visible cross-account grouping -> `label_groups` + `label_group_members` (added after the original research). The thread/message aggregates are `thread_labels`, `message_keywords` (IMAP/JMAP), and `message_labels` (Graph delta reconciliation).
+- "categories table" / "message_categories table" -> never landed under those names; the system split into `labels`, `thread_labels`, `message_keywords`, `message_labels`, plus the later `label_groups` overlay.
+
+Provider sync is live for all four backends: Exchange master-category list in `crates/graph/src/label_sync.rs`; Gmail label CRUD + colors in `crates/gmail/src/api.rs` (`list_labels`, `create_label`, `update_label`) consumed via `crates/gmail/src/ops.rs`; JMAP keyword ingest in `crates/jmap/src/sync.rs` (helpers in `crates/jmap/src/mailbox_mapper.rs`); IMAP PERMANENTFLAGS detection via `mailbox_supports_custom_keywords` in `crates/imap/src/client/`. Preset palette in `crates/label-colors/src/preset_colors.rs` (renamed from `category_colors.rs`).
+
+The `ProviderOps` trait (`crates/common/src/ops.rs`) carries `add_label` / `remove_label`, implemented in `crates/graph/src/ops/mod.rs`, `crates/gmail/src/ops.rs`, `crates/jmap/src/ops.rs`, and `crates/imap/src/ops.rs`. IMAP write-back is live: `add_label`/`remove_label` issue `STORE +FLAGS`/`-FLAGS` for the keyword (this doc previously called it "still missing" - that's stale).
+
+The action pipeline is fully wired: `MailActionIntent::ApplyLabelGroup` / `RemoveLabelGroup` -> `MailOperation::*` -> `WireMailOperation::*` -> service, with optimistic local apply via `pending_thread_label_intents` and full undo coverage (`MailUndoPayload::ApplyLabelGroup` / `RemoveLabelGroup` in `crates/app/src/action_resolve.rs`). The Lua harness exercises both paths.
+
+**Still missing:** a UI affordance to invoke `ApplyLabelGroup` / `RemoveLabelGroup` from the thread view. Today the actions are only reachable via the slash-command dispatch in `crates/app/src/command_dispatch.rs` and the Lua harness; no widget under `crates/app/src/ui/` emits these intents. Sidebar rendering of label groups (`crates/app/src/ui/sidebar/labels.rs`), thread-list chip painting (`crates/app/src/ui/label_paint.rs`), and settings management (`crates/app/src/ui/settings/tabs/labels.rs`) are all in place - only the apply/remove affordance on a selected thread is missing.
 
 ---
 
@@ -257,6 +269,8 @@ Microsoft does not publish official hex values. These are approximations from Ou
 
 **Recommendation**: Option A for initial implementation. Enterprise users (primary audience) are on Exchange. Revisit Option C if user feedback demands it.
 
+**Outcome (2026-05):** Option A landed. The 25-entry preset palette lives in `crates/label-colors/src/preset_colors.rs` (originally `category_colors.rs`); the `crates/label-colors/` crate also exposes the nearest-match helpers used when ingesting non-preset hex from other providers. No `palette` crate dependency was added.
+
 #### How Thunderbird Handles This
 
 Thunderbird's tag system: tags have user-configurable colors stored **locally** in `prefs.js`. Colors do **not** sync - they are per-installation only. No integration with Exchange categories or Gmail label colors. If you use Thunderbird on two machines, you get the same keywords but potentially different colors. We should do better by syncing colors to Exchange/Gmail where the API supports it.
@@ -289,6 +303,16 @@ message_categories
 
 Separate from folder/label tables. Categories and folders are logically distinct even though Gmail conflates them.
 
+**Outcome (2026-05):** The single-table `categories` design did **not** land. The schema split into a layered model in `crates/db/src/db/schema/02_mail.sql`:
+
+- `labels` is the raw provider-label store, keyed on `(account_id, id)`. Exchange categories use ID `cat:{name}`, IMAP/JMAP keywords `kw:{keyword}`, Gmail uses native IDs. This is what the doc called "categories" at the provider boundary.
+- `thread_labels` is the thread-level aggregate (replaces the proposed `message_categories`).
+- `message_keywords` and `message_labels` carry per-message provider truth for IMAP/JMAP and Graph respectively, used for delta reconciliation when providers send partial pages rather than full thread membership.
+- `label_groups` + `label_group_members` was added later as the user-visible cross-account grouping layer - one group can collect raw labels from any number of accounts under a single name and colour. This is the layer the doc's "display_name + colour" columns ended up on.
+- `pending_thread_label_intents` carries optimistic local apply/remove intent until provider truth catches up.
+
+The doc's `provider_id` column doesn't exist as written; the ID-prefixing convention does that work. `sync_state` doesn't exist as a column either - pending-vs-synced lives in `pending_thread_label_intents` instead.
+
 #### Master List Per Account vs Global
 
 **Per account** is the only viable option. Exchange categories are per-user-per-mailbox. Gmail labels are per-account. JMAP keywords are per-account. A "global" list adds many-to-many complexity without benefit.
@@ -312,3 +336,34 @@ No new crates needed:
 - **Gmail**: Existing `GmailClient` has `list_labels`, `create_label`, `update_label`, `delete_label` with color support.
 - **JMAP**: `jmap-client` 0.4 has `.keyword("name", bool)` on Email update builders.
 - **IMAP**: `async-imap` supports `UID STORE +FLAGS`/`-FLAGS`. Need to add PERMANENTFLAGS detection.
+
+---
+
+## What's left: a UI to apply / remove a label group
+
+Everything below the UI layer is done. The remaining task is to give the user a way to actually invoke `MailActionIntent::ApplyLabelGroup` / `RemoveLabelGroup` from a thread.
+
+**Constraint:** UI work must follow `UI.md` at the repo root (Elm-architecture conventions, overlay-surface rules in `reference/glossary/overlay-surfaces.md`). Read both before starting.
+
+**What exists already (so the picker has somewhere to live):**
+
+- The `label_groups` model with name + colour, queried per account or cross-account.
+- `crates/app/src/ui/label_paint.rs` for rendering coloured chips, already used by `thread_list.rs` and `widgets/cards.rs`.
+- `crates/app/src/ui/sidebar/labels.rs` for the LABELS section listing groups.
+- `crates/app/src/ui/settings/tabs/labels.rs` for group CRUD + member management.
+- `crates/app/src/handlers/labels.rs` for async loading of group membership.
+- `crates/app/src/handlers/commands.rs` undo path for both ApplyLabelGroup and RemoveLabelGroup.
+
+**What needs adding:**
+
+1. **A picker overlay.** A popover or sheet (see overlay-surfaces glossary) that lists the user's `label_groups`, shows current membership for the selected thread(s), and lets the user toggle group membership. The picker has to consume `label_groups` plus the thread's current `thread_label_groups` aggregate to render checked / unchecked state.
+2. **An invocation site.** At minimum one of: a button in the thread-detail toolbar, a context-menu entry on a thread-list card, a multi-select bulk-action affordance, and/or a command-palette entry that opens the picker. The slash-command dispatch in `crates/app/src/command_dispatch.rs` already accepts these intents - the UI just needs to emit the same `Message::EmailAction(MailActionIntent::ApplyLabelGroup { .. })` / `RemoveLabelGroup`.
+3. **Optimistic rendering through the existing overlay.** `pending_thread_label_intents` already merges into user-facing reads, so chips on the thread-list update immediately on apply/remove. The picker doesn't need a separate optimistic path - emitting the intent is enough.
+4. **Keyboard binding.** Pick a chord (e.g. `l` for label, mirroring Gmail/Mutt convention). The keybindings system in `~/.claude/keybindings.json` and the action keymap in the app should route to the picker, not to a single hard-coded action.
+
+**Footguns:**
+
+- The composite-group fan-out lives below the picker, in `action_resolve` / service. The UI should emit `ApplyLabelGroup { group_id }` and not try to fan out to raw `(account_id, label_id)` pairs itself - that's the action service's job, and doing it client-side would break the optimistic intent overlay and the undo payload shape.
+- The `label_groups` model is cross-account by design. The picker's filtering by current account scope must be a presentation choice, not a data-model assumption.
+- `importance:high` / `importance:low` synthesised rows are mutually exclusive at the provider level. The settings picker already enforces this for group membership; the apply picker doesn't need to re-enforce it for applying a *group* (groups can contain either, not both, by construction).
+- Don't reach for raw `add_label` / `remove_label` from the UI. Those exist on `ProviderOps` for the action service to call, but the message-UI contract is "operate on label groups, not raw provider labels" (see `reference/glossary/folders-labels.md` § Operations).
