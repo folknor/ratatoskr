@@ -1,0 +1,46 @@
+name = "discovery-autoconfig"
+
+# Stub account for saehrimnir's loader.
+[[account]]
+id = "stub"
+name = "stub@example.test"
+is_personal = true
+
+# Autoconfig XML served at the autoconfig.{domain} prefix - the first URL
+# ratatoskr's autoconfig stage tries. authentication="oauth2" produces an
+# AuthMethod::OAuth2Unsupported result; the cascade then upgrades it to
+# OAuth2 using the OIDC discovery document below (matching email domain).
+[discovery."autoconfig.corp.test".autoconfig]
+raw_body = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<clientConfig version=\"1.1\">
+  <emailProvider id=\"corp.test\">
+    <displayName>Corp</displayName>
+    <domain>corp.test</domain>
+    <incomingServer type=\"imap\">
+      <hostname>imap.corp.test</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <authentication>oauth2</authentication>
+      <username>%EMAILADDRESS%</username>
+    </incomingServer>
+    <outgoingServer type=\"smtp\">
+      <hostname>smtp.corp.test</hostname>
+      <port>587</port>
+      <socketType>STARTTLS</socketType>
+      <authentication>oauth2</authentication>
+      <username>%EMAILADDRESS%</username>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>
+"""
+
+# OIDC document at the email domain root, picked up by the cascade's
+# bare-domain probe. Issuer is absolute - see discovery-oidc-bare-domain
+# for the reasoning.
+[discovery."corp.test".oidc]
+issuer = "https://corp.test"
+authorization_endpoint = "/oauth/authorize"
+token_endpoint = "/oauth/token"
+scopes_supported = ["openid", "email", "profile"]
+code_challenge_methods_supported = ["S256"]
+token_endpoint_auth_methods_supported = ["none"]

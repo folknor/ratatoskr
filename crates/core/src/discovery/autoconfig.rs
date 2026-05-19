@@ -32,7 +32,13 @@ async fn try_fetch_and_parse(url: &str, email: &str) -> Option<Vec<ProtocolOptio
         .build()
         .ok()?;
 
-    let resp = client.get(url).send().await.ok()?;
+    // In production this is a no-op. In test mode the rewrite routes the
+    // probe to saehrimnir; the constructed `source_url` (passed through
+    // to `parse_autoconfig_xml`) keeps the original https:// URL so the
+    // resulting DiscoverySource::AutoconfigXml carries the public-facing
+    // URL, not the test-harness one.
+    let fetch_url = super::rewrite_for_test_harness(url);
+    let resp = client.get(&fetch_url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }

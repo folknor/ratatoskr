@@ -1,0 +1,31 @@
+name = "discovery-oidc-bare-domain"
+
+# Stub account: saehrimnir's fixture loader requires at least one
+# [[account]] block even for discovery-only tests. Never read by this
+# script.
+[[account]]
+id = "stub"
+name = "stub@example.test"
+is_personal = true
+
+# No webfinger table for corp.test - the cascade should hit WebFinger
+# (saehrimnir returns 404), fall through, and probe OIDC directly at the
+# email domain.
+#
+# The issuer field is the absolute URL ratatoskr believes it's talking
+# to ("https://corp.test"), not a path-relative one. Reason: in the
+# bare-domain branch the cascade passes the literal "https://corp.test"
+# to probe_issuer, and that's what gets compared against doc.issuer in
+# the self-claim check. The rewrite to saehrimnir's listener happens
+# under the hood at the HTTP layer; the issuer string lives in
+# pre-rewrite URL space. Path-relative paths are still emit-time
+# prefixed with ${BASE} on the endpoint URLs below, which is exactly
+# what we want for the auth/token endpoints the cascade hands off to
+# downstream OAuth flows.
+[discovery."corp.test".oidc]
+issuer = "https://corp.test"
+authorization_endpoint = "/oauth/authorize"
+token_endpoint = "/oauth/token"
+scopes_supported = ["openid", "email", "profile"]
+code_challenge_methods_supported = ["S256"]
+token_endpoint_auth_methods_supported = ["none"]

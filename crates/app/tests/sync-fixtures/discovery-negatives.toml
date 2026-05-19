@@ -1,0 +1,47 @@
+name = "discovery-negatives"
+
+[[account]]
+id = "stub"
+name = "stub@example.test"
+is_personal = true
+
+# Baseline: positive control so we know the harness wire still works
+# even when the rest of the fixture exercises failure paths.
+[discovery."ok.test".oidc]
+issuer = "https://ok.test"
+authorization_endpoint = "/oauth/authorize"
+token_endpoint = "/oauth/token"
+scopes_supported = ["openid"]
+code_challenge_methods_supported = ["S256"]
+token_endpoint_auth_methods_supported = ["none"]
+
+# Malformed JRD: ratatoskr's WebFinger parser should fail JSON parse,
+# the probe returns None, no chained OIDC fetch happens. The cascade
+# then tries the bare-domain OIDC probe, which 404s (no
+# malformed.test.oidc table), so oidcEndpoints stays None.
+[discovery."malformed.test".webfinger]
+raw_body = "{ this is not valid json"
+
+# Non-HTTPS href: the WebFinger response parses but is_valid_https_url
+# rejects the http:// link before any chained probe attempt. Same
+# outcome as above.
+[discovery."insecure.test".webfinger]
+links = [
+  { rel = "http://openid.net/specs/connect/1.0/issuer", href = "http://attacker.example.com" },
+]
+
+# Issuer self-claim mismatch: WebFinger href is valid HTTPS and points
+# at a real chained issuer prefix in this fixture, but that issuer's
+# OIDC document declares an `issuer` field that doesn't match the URL
+# we fetched it from. probe_issuer rejects the mismatch.
+[discovery."mismatched.test".webfinger]
+links = [
+  { rel = "http://openid.net/specs/connect/1.0/issuer", href = "/wrong-issuer" },
+]
+[discovery."wrong-issuer".oidc]
+issuer = "https://attacker.example.com"
+authorization_endpoint = "/oauth/authorize"
+token_endpoint = "/oauth/token"
+scopes_supported = ["openid"]
+code_challenge_methods_supported = ["S256"]
+token_endpoint_auth_methods_supported = ["none"]
