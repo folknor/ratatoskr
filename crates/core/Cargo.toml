@@ -44,7 +44,6 @@ async-imap = { version = "0.11", default-features = false, features = ["runtime-
 tokio-native-tls = "0.3"
 native-tls = "0.2"
 mail-parser = "0.11.3"
-lettre = { version = "0.11.22", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 socket2 = "0.6"
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }

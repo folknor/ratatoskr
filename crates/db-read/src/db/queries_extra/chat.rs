@@ -61,7 +61,9 @@ pub fn get_chat_inline_images_sync(
         Ok(DbChatInlineImage {
             message_id: row.get("message_id")?,
             account_id: row.get("account_id")?,
-            content_hash: row.get("content_hash")?,
+            content_hash: row
+                .get::<_, crate::blob_hash::BlobHash>("content_hash")?
+                .to_hex(),
             mime_type: row.get("mime_type")?,
         })
     })

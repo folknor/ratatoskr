@@ -75,7 +75,7 @@ fn detect_public_client(auth_methods: &[String]) -> bool {
 /// require: HTTPS scheme, a host present, no embedded userinfo (so a
 /// crafted issuer can't bypass our notion of which host the user authorized),
 /// no fragment.
-fn is_valid_https_url(url: &str) -> bool {
+pub(super) fn is_valid_https_url(url: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
     };

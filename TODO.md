@@ -126,7 +126,7 @@ Week view:
 
 ### Generic OAuth - `docs/generic-oauth/problem-statement.md`
 
-Core OIDC discovery + OAUTHBEARER implemented. **6 discrepancies remain** - see `docs/generic-oauth/discrepancies.md`. Critical: re-auth broken for generic/OIDC providers (registry lookup fails for non-built-in provider IDs). Also no manual issuer URL flow, no client ID entry, JMAP OAuth unsupported.
+Core OIDC discovery + OAUTHBEARER + WebFinger implemented. **5 discrepancies remain** - see `docs/generic-oauth/discrepancies.md` (audit refreshed 2026-05-19; #1 re-auth and #7 WebFinger now resolved). Remaining: no manual issuer URL flow, no client ID entry, JMAP OAuth unsupported, SMTP path is XOAUTH2-only (lettre doesn't expose OAUTHBEARER), no IMAP SASL auto-detect from CAPABILITY. Discovery cascade has no Lua harness coverage (see Test Harness § OIDC discovery harness).
 
 ### Chats - `docs/chats/problem-statement.md`
 
@@ -403,6 +403,21 @@ and mirroring any needed upstream fixtures into
   protocol backed by the same fixture state. Cover at least Graph
   after CalDAV, Google Calendar after Graph, and JMAP Calendar after
   Google Calendar so the shared change-log recurrence path is pinned.
+
+### OIDC discovery harness (pending saehrimnir support)
+
+The entire discovery cascade (`crates/core/src/discovery/`) has no Lua harness coverage today. WebFinger (`webfinger.rs`, shipped 2026-05-19), OIDC discovery (`oidc.rs`), Mozilla autoconfig (`autoconfig.rs`), MX lookup (`mx.rs`), JMAP `.well-known/jmap`, and port probing all run only in unit tests. Existing OAuth harness tests (`jmap-oauth-recovery.lua` etc.) sidestep discovery entirely by pre-seeding accounts with all OAuth fields resolved.
+
+Blocked on saehrimnir extension: HTTP endpoints for `/.well-known/webfinger` and `/.well-known/openid-configuration` (and ideally `/mail/config-v1.1.xml` for autoconfig coverage too), fixture format for per-domain JRD + OIDC documents, and an env-var (`RATATOSKR_TEST_DISCOVERY_BASE`) that lets Ratatoskr's reqwest clients route `https://{domain}/.well-known/...` to saehrimnir over plain HTTP on localhost while bypassing `https_only(true)` in test mode. Feature request sent to saehrimnir maintainer 2026-05-19.
+
+Ratatoskr-side work once saehrimnir lands:
+
+- [ ] **`RATATOSKR_TEST_DISCOVERY_BASE` env-var honoured in discovery probes** - Add a small helper in `crates/core/src/discovery/` that rewrites the constructed URL and relaxes `https_only` when the env var is set. Used by `oidc.rs::probe`, `oidc.rs::probe_issuer`, and `webfinger.rs::probe`. Gate strictly on env-var presence so production paths are unaffected.
+- [ ] **`TestRunDiscovery { email }` service-api request** - Invokes `rtsk::discovery::discover(email)` and returns the full `DiscoveredConfig` (options + diagnostics + oidc_endpoints) for harness assertions.
+- [ ] **`discovery-webfinger.lua`** - Define a fixture JRD pointing at a mock issuer, exercise `TestRunDiscovery`, assert the chained OIDC endpoints land in `DiscoveredConfig.oidc_endpoints`. Also negative cases: WebFinger 404, malformed JRD, non-HTTPS href in response, issuer self-claim mismatch in chained OIDC discovery.
+- [ ] **`discovery-oidc-bare-domain.lua`** - Same fixture format, but WebFinger absent / 404 so the cascade falls back to the bare-domain `.well-known/openid-configuration` probe. Asserts the fallback path works.
+- [ ] **`discovery-autoconfig.lua`** - Mozilla autoconfig XML coverage if saehrimnir adds the endpoint. Pin the `OAuth2Unsupported → OAuth2` upgrade behaviour with a fixture that returns `authentication="oauth2"` and confirm the OIDC stage upgrades it.
+- [ ] **Negative-path coverage** - One script per failure mode (slow response, oversized body, redirect chain past the 3-hop cap, invalid `issuer` self-claim) to lock down the hardening that's currently only unit-tested.
 
 ### Environment-blocked (Windows)
 

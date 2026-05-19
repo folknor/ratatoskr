@@ -6,6 +6,7 @@ pub mod oidc;
 pub mod probe;
 pub mod registry;
 pub mod types;
+pub mod webfinger;
 
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -44,33 +45,56 @@ pub async fn discover(email: &str) -> Result<DiscoveredConfig, String> {
 async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, String> {
     let imap_found = Arc::new(Notify::new());
 
-    // Run OIDC probe in parallel with stages 1-4
-    let d_oidc = domain.to_string();
+    // Run WebFinger + OIDC probe in parallel with stages 1-4. WebFinger lets
+    // the email domain delegate to an IdP at a different host (corp.com →
+    // auth.corp.com); if it returns an issuer we probe that. Otherwise fall
+    // back to the bare-domain `.well-known/openid-configuration` probe.
+    let (d_oidc, e_oidc) = (domain.to_string(), email.to_string());
     let oidc_handle = tokio::spawn(async move {
-        let start = Instant::now();
-        let result = oidc::probe(&d_oidc).await;
-        let diag = StageDiagnostic {
-            stage: "oidc_discovery",
-            duration_ms: elapsed_ms(start),
-            outcome: if result.is_some() {
+        let wf_start = Instant::now();
+        let wf_issuer = webfinger::probe(&d_oidc, &e_oidc).await;
+        let wf_diag = StageDiagnostic {
+            stage: "webfinger",
+            duration_ms: elapsed_ms(wf_start),
+            outcome: if wf_issuer.is_some() {
                 StageOutcome::Found { count: 1 }
             } else {
                 StageOutcome::NotFound
             },
         };
-        (result, diag)
+
+        let oidc_start = Instant::now();
+        let endpoints = match &wf_issuer {
+            Some(issuer) => oidc::probe_issuer(issuer).await,
+            None => oidc::probe(&d_oidc).await,
+        };
+        let oidc_diag = StageDiagnostic {
+            stage: "oidc_discovery",
+            duration_ms: elapsed_ms(oidc_start),
+            outcome: if endpoints.is_some() {
+                StageOutcome::Found { count: 1 }
+            } else {
+                StageOutcome::NotFound
+            },
+        };
+        (endpoints, wf_diag, oidc_diag)
     });
 
     let (stages_1_4, resolved_domain) = run_stages(domain, email, &imap_found).await;
     let stage_5 = run_probe_stage(domain, &imap_found, &stages_1_4).await;
 
-    let (oidc_endpoints, oidc_diag) = oidc_handle
-        .await
-        .unwrap_or_else(|_| (None, err_diag("oidc_discovery")));
+    let (oidc_endpoints, wf_diag, oidc_diag) = oidc_handle.await.unwrap_or_else(|_| {
+        (
+            None,
+            err_diag("webfinger"),
+            err_diag("oidc_discovery"),
+        )
+    });
 
     let (mut all_results, mut diagnostics) = unpack_stages(stages_1_4);
     all_results.push(stage_5.0);
     diagnostics.push(stage_5.1);
+    diagnostics.push(wf_diag);
     diagnostics.push(oidc_diag);
 
     let mut options = merge::merge_and_rank(all_results);

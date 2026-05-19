@@ -6090,7 +6090,6 @@ dependencies = [
  "imap",
  "jmap",
  "label-colors",
- "lettre",
  "log",
  "lol_html",
  "mail-parser",

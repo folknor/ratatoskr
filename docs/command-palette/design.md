@@ -24,11 +24,11 @@ The mechanism is `OptionItem`: a flat list (no trees) with `id`, `label`, option
 
 `CommandRegistry::query()` is stage-1 only - it returns top-level commands, never second-stage options. Parameterized commands appear in query results with `input_mode: InputMode::Parameterized { schema }`; stage 2 is driven separately via the resolver. This keeps the search APIs cleanly typed and lets non-palette surfaces (context menus, toolbars) execute commands without going through stage 2 themselves.
 
-The execution payload is a typed `CommandArgs` enum (one variant per parameterized command), not `serde_json::Value`. Each variant carries exactly the typed fields that command needs (`FolderId`, `LabelId`, `i64` timestamp, `String`). The compiler enforces exhaustive matching in the dispatch function.
+The execution payload is a typed `CommandArgs` enum (one variant per parameterized command), not `serde_json::Value`. Each variant carries exactly the typed fields that command needs (`FolderId`, `LabelGroupId`, `i64` timestamp, `String`). The compiler enforces exhaustive matching in the dispatch function.
 
 ## Identity vs descriptor
 
-`CommandId` is a Rust enum (~70 variants today, growing). The compiler enforces that every command is handled. Adding a new user-facing action means adding a variant - intentional friction, since you have to wire it in `dispatch_command`, register a descriptor, and consider a default keybinding.
+`CommandId` is a Rust enum (~71 variants today, growing). The compiler enforces that every command is handled. Adding a new user-facing action means adding a variant - intentional friction, since you have to wire it in `dispatch_command`, register a descriptor, and consider a default keybinding.
 
 `CommandDescriptor` is the runtime, context-resolved view: resolved label (with toggle text like Star/Unstar), resolved keybinding (user overrides applied), current availability (predicate evaluated against `CommandContext`), category, parameter schema. The palette UI and keyboard dispatch consume descriptors, not raw IDs.
 
@@ -97,7 +97,7 @@ Trade-off: `cmdk` ends up depending on `crates/types/` for `FolderId` and `Label
 
 ### Why `PaletteStage` is a flat enum with state on the parent
 
-The original spec had `PaletteStage::CommandSearch { query, results, selected_index }` as data-carrying. The implementation has a bare unit enum with the fields stored on `Palette` directly. Deliberate shape choice:
+The original spec had `PaletteStage::CommandSearch { query, results, selected_index }` as data-carrying. The implementation has a bare unit enum (today `CommandSearch`, `OptionPick`, and `TextInput`) with the fields stored on `Palette` directly. Deliberate shape choice:
 
 - Most state (query text, results vec, option items, selected index, generation counter) is shared between stages and would have to be duplicated or moved through `Option`s in a data-carrying variant.
 - The flat fields let stage-2-specific data (`option_items`, `option_matches`) coexist with stage-1 data (`results`) without `match` arms in every accessor.
