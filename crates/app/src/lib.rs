@@ -16,6 +16,7 @@
 
 pub(crate) mod action_resolve;
 pub(crate) mod action_wire;
+mod admin_config;
 mod app;
 mod appearance;
 mod command_dispatch;
@@ -51,6 +52,19 @@ use std::path::PathBuf;
 
 pub(crate) static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+
+/// IT-distributable wizard defaults, loaded once at boot from
+/// `~/.config/ratatoskr/config.toml` (or platform equivalent). When no
+/// file exists or it can't be parsed, this holds a `Default` (all
+/// sub-tables `None`, no pre-fill applies).
+pub(crate) static ADMIN_CONFIG: std::sync::OnceLock<admin_config::AdminConfig> =
+    std::sync::OnceLock::new();
+
+/// Returns the loaded admin config, or a default empty one if boot
+/// somehow hasn't set it yet (defensive; tests run without boot).
+pub(crate) fn admin_config() -> &'static admin_config::AdminConfig {
+    ADMIN_CONFIG.get_or_init(admin_config::AdminConfig::default)
+}
 
 pub type RunResult = iced::Result;
 
@@ -118,6 +132,7 @@ pub fn run_app_blocking() -> RunResult {
     font::set_system_ui_font(system_font_family);
 
     let _ = APP_DATA_DIR.set(app_data_dir);
+    let _ = ADMIN_CONFIG.set(admin_config::load().unwrap_or_default());
 
     let mut app = iced::daemon(App::boot, App::update, App::view)
         .title(App::title)

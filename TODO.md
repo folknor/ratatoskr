@@ -126,7 +126,7 @@ Week view:
 
 ### Generic OAuth - `docs/generic-oauth/problem-statement.md`
 
-Core OIDC discovery + OAUTHBEARER + WebFinger + custom-scopes + dynamic-registration + Custom OIDC wizard providers implemented. **2 discrepancies remain** - see `docs/generic-oauth/discrepancies.md` (audit refreshed 2026-05-19). Remaining: SMTP path is XOAUTH2-only (#5 blocked on lettre not exposing OAUTHBEARER), no IMAP SASL auto-detect from CAPABILITY (#6 **in flight**: blocked on an async-imap fork that exposes pre-auth `Client::capabilities()`; plan at `.plans/moonlit-herding-cookie.md` § Slice A). Deferred: #10 IT-distributable config file. Discovery cascade has four passing Lua scripts (happy path, bare-domain fallback, autoconfig upgrade, negatives) covering items 1-6 in Test Harness § OIDC discovery harness.
+Core OIDC discovery + OAUTHBEARER + WebFinger + custom-scopes + dynamic-registration + Custom OIDC wizard providers + IT-distributable config file implemented. **1 discrepancy remains, 1 in flight** - see `docs/generic-oauth/discrepancies.md` (audit refreshed 2026-05-19). Remaining: SMTP path is XOAUTH2-only (#5 blocked on lettre not exposing OAUTHBEARER). In flight: no IMAP SASL auto-detect from CAPABILITY (#6 blocked on an async-imap fork that exposes pre-auth `Client::capabilities()`; plan at `.plans/moonlit-herding-cookie.md` § Slice A). Discovery cascade has four passing Lua scripts (happy path, bare-domain fallback, autoconfig upgrade, negatives) covering items 1-6 in Test Harness § OIDC discovery harness.
 
 ### Chats - `docs/chats/problem-statement.md`
 

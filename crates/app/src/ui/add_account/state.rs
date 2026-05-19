@@ -60,6 +60,32 @@ impl SecurityOption {
     }
 }
 
+/// Tolerant parser for the `security` field in the admin config.
+/// Accepts `"tls"` / `"ssl"` (both map to `Tls`), `"starttls"`, and
+/// `"none"` / `"plain"`. Case-insensitive. Returns `None` for unknown
+/// values so the caller can log a warning instead of silently picking
+/// the wrong setting.
+fn parse_security(s: &str) -> Option<SecurityOption> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "tls" | "ssl" => Some(SecurityOption::Tls),
+        "starttls" => Some(SecurityOption::StartTls),
+        "none" | "plain" => Some(SecurityOption::None),
+        _ => None,
+    }
+}
+
+/// Pre-fill helper: copy `src` into `dst` only when `dst` is empty.
+/// Used by `apply_admin_config` so existing values (e.g. discovery
+/// results) aren't overwritten by static defaults.
+fn apply_str(dst: &mut String, src: Option<&str>) {
+    if dst.is_empty()
+        && let Some(value) = src
+        && !value.is_empty()
+    {
+        *dst = value.to_string();
+    }
+}
+
 // Manual provider
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +153,10 @@ pub struct CustomOidcConfig {
     pub issuer_url: String,
     pub client_id: String,
     pub client_secret: String,
+    /// Space-separated extra OAuth scopes appended to the negotiated set
+    /// at auth-code request time. Populated from the IT admin config
+    /// (`[oidc].extra_scopes`); no wizard UI input for it yet.
+    pub extra_scopes: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,7 +395,9 @@ impl AddAccountWizard {
         db: Arc<Db>,
         service_client: Option<Arc<crate::service_client::ServiceClient>>,
     ) -> Self {
-        Self::new(true, Vec::new(), db, service_client)
+        let mut wizard = Self::new(true, Vec::new(), db, service_client);
+        wizard.apply_admin_config(crate::admin_config());
+        wizard
     }
 
     pub fn new_add_account(
@@ -373,7 +405,63 @@ impl AddAccountWizard {
         db: Arc<Db>,
         service_client: Option<Arc<crate::service_client::ServiceClient>>,
     ) -> Self {
-        Self::new(false, used_colors, db, service_client)
+        let mut wizard = Self::new(false, used_colors, db, service_client);
+        wizard.apply_admin_config(crate::admin_config());
+        wizard
+    }
+
+    /// Pre-fill wizard state from the IT-distributable admin config.
+    /// Only fills empty fields, so a wizard that already has values
+    /// (e.g. a re-auth or post-discovery state) keeps them. Re-auth
+    /// flows skip this entirely - they construct via `new_reauth` which
+    /// then overlays stored-account values.
+    fn apply_admin_config(&mut self, cfg: &crate::admin_config::AdminConfig) {
+        if let Some(oidc) = cfg.oidc.as_ref() {
+            let dst = &mut self.manual_config.custom_oidc;
+            apply_str(&mut dst.issuer_url, oidc.issuer_url.as_deref());
+            apply_str(&mut dst.client_id, oidc.client_id.as_deref());
+            apply_str(&mut dst.client_secret, oidc.client_secret.as_deref());
+            apply_str(&mut dst.extra_scopes, oidc.extra_scopes.as_deref());
+        }
+        if let Some(imap) = cfg.imap.as_ref() {
+            apply_str(&mut self.auth_state.imap_host, imap.host.as_deref());
+            if self.auth_state.imap_port.is_empty()
+                && let Some(port) = imap.port
+            {
+                self.auth_state.imap_port = port.to_string();
+            }
+            if let Some(sec) = imap.security.as_deref() {
+                if let Some(parsed) = parse_security(sec) {
+                    self.auth_state.imap_security = parsed;
+                } else {
+                    log::warn!(
+                        "admin config: unknown imap.security value '{sec}'; \
+                         leaving wizard default"
+                    );
+                }
+            }
+        }
+        if let Some(smtp) = cfg.smtp.as_ref() {
+            apply_str(&mut self.auth_state.smtp_host, smtp.host.as_deref());
+            if self.auth_state.smtp_port.is_empty()
+                && let Some(port) = smtp.port
+            {
+                self.auth_state.smtp_port = port.to_string();
+            }
+            if let Some(sec) = smtp.security.as_deref() {
+                if let Some(parsed) = parse_security(sec) {
+                    self.auth_state.smtp_security = parsed;
+                } else {
+                    log::warn!(
+                        "admin config: unknown smtp.security value '{sec}'; \
+                         leaving wizard default"
+                    );
+                }
+            }
+        }
+        if let Some(jmap) = cfg.jmap.as_ref() {
+            apply_str(&mut self.manual_config.jmap_url, jmap.url.as_deref());
+        }
     }
 
     /// Create a re-auth wizard for an existing account. Looks up the

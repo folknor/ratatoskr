@@ -1,0 +1,52 @@
+# IT-distributable defaults for the Ratatoskr add-account wizard.
+#
+# Copy to ~/.config/ratatoskr/config.toml (Linux), ~/Library/Application
+# Support/ratatoskr/config.toml (macOS), or %APPDATA%\ratatoskr\config.toml
+# (Windows).
+#
+# All sub-tables and all fields are optional. Whichever fields are
+# present pre-fill the matching wizard inputs when the user clicks Add
+# Account. The user can still edit pre-filled fields; this config
+# provides defaults, not locks.
+#
+# Loading is best-effort: a missing file is fine, a malformed file
+# logs a warning and is ignored. Dev-seed wipes the data directory but
+# leaves the config directory alone, so this file survives dev cycles.
+
+[oidc]
+# OIDC issuer URL. The wizard runs probe_issuer() against this and uses
+# the resulting endpoints for the OAuth code flow.
+issuer_url = "https://auth.corp.example"
+
+# Client ID. Leave blank to attempt RFC 7591 dynamic registration when
+# the IdP advertises a registration endpoint.
+client_id = "ratatoskr-corp"
+
+# Client secret. Leave blank for public clients (PKCE only - the
+# default for native apps per RFC 8252).
+# client_secret = "..."
+
+# Space-separated extra OAuth scopes to append to whatever the OIDC
+# discovery document advertises. Useful for provider-specific
+# audience/permission scopes (e.g. https://outlook.office.com/IMAP.AccessAsUser.All).
+extra_scopes = "imap-access offline_access"
+
+[imap]
+host = "imap.corp.example"
+port = 993
+# "tls" / "starttls" / "none". Case-insensitive; "ssl" and "plain" are
+# accepted as aliases for tls / none.
+security = "tls"
+
+[smtp]
+host = "smtp.corp.example"
+port = 587
+security = "starttls"
+
+# Only one of [imap]+[smtp] OR [jmap] is meaningful for a single
+# account: IMAP-and-JMAP-at-the-same-time isn't a thing. The wizard
+# picks based on which provider variant the user selects, so leaving
+# both sub-tables populated here is harmless.
+
+[jmap]
+url = "https://jmap.corp.example/.well-known/jmap"

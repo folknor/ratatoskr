@@ -102,7 +102,10 @@ impl AddAccountWizard {
                 oauth_provider: Some(oauth.oauth_provider.clone()),
                 oauth_client_id: Some(oauth.oauth_client_id.clone()),
                 oauth_client_secret: oauth.oauth_client_secret.clone(),
-                oauth_extra_scopes: None,
+                oauth_extra_scopes: {
+                    let extras = self.manual_config.custom_oidc.extra_scopes.trim();
+                    (!extras.is_empty()).then(|| extras.to_string())
+                },
                 imap_host: is_oidc_imap.then(|| self.auth_state.imap_host.clone()),
                 imap_port,
                 imap_security: is_oidc_imap
