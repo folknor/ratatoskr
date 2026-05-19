@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS read_receipt_policy (
     UNIQUE(account_id, scope)
 );
 
--- ── Filter rules, templates, image allowlist ────────────────
+-- ── Filter rules, image allowlist ───────────────────────────
 
 CREATE TABLE IF NOT EXISTS filter_rules (
     id TEXT PRIMARY KEY,
@@ -61,19 +61,6 @@ CREATE TABLE IF NOT EXISTS filter_rules (
     created_at INTEGER DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_filter_rules_account ON filter_rules(account_id);
-
-CREATE TABLE IF NOT EXISTS templates (
-    id TEXT PRIMARY KEY,
-    account_id TEXT,
-    name TEXT NOT NULL,
-    subject TEXT,
-    body_html TEXT NOT NULL,
-    shortcut TEXT,
-    sort_order INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (unixepoch()),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_templates_account ON templates(account_id);
 
 CREATE TABLE IF NOT EXISTS image_allowlist (
     id TEXT PRIMARY KEY,

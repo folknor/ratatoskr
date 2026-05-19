@@ -550,20 +550,6 @@ pub struct DbPhishingAllowlistEntry {
     pub created_at: i64,
 }
 
-// ── Template ────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbTemplate {
-    pub id: String,
-    pub account_id: Option<String>,
-    pub name: String,
-    pub subject: Option<String>,
-    pub body_html: String,
-    pub shortcut: Option<String>,
-    pub sort_order: i64,
-    pub created_at: i64,
-}
-
 // ── Signature ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

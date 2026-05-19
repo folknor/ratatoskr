@@ -33,6 +33,7 @@
 - ✅ Overdue handling - `check_overdue_scheduled_emails` classifies locally-delegated overdue emails: `SendNow` if <24h, `NeedsReview` if >24h; `process_overdue_emails` applies resolutions
 - ✅ Gmail/IMAP local scheduling (no server API available)
 - ⬚ Schedule picker UI (iced compose work)
+  - Note: the speculative `db_insert_scheduled_email` helper (14 positional args, zero callers) was deleted during a dead-code triage. Write a focused `(WriterPool, ScheduledEmail)` insert helper when the UI lands - the `scheduled_emails` schema in `crates/db/src/db/schema/09_security.sql` and the delegation columns documented above are the source of truth for the row shape.
 - ⬚ "Scheduled" virtual folder view
 
 ---

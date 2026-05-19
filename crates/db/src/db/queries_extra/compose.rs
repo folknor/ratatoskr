@@ -1,87 +1,9 @@
 use super::super::WriterPool;
-use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature, DbTemplate};
+use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
 use crate::db::{query_as, query_one, WriteTarget, WriteTransactionTarget};
 use rusqlite::params;
-
-pub async fn db_get_templates_for_account(
-    db: &WriterPool,
-    account_id: String,
-) -> Result<Vec<DbTemplate>, String> {
-    db.with_write(move |conn| {
-        query_as::<DbTemplate>(
-            conn,
-            "SELECT id, account_id, name, subject, body_html, shortcut, sort_order, created_at
-                 FROM templates WHERE account_id = ?1 OR account_id IS NULL
-                 ORDER BY sort_order, created_at",
-            &[&account_id],
-        )
-    })
-    .await
-}
-
-pub async fn db_insert_template(
-    db: &WriterPool,
-    account_id: Option<String>,
-    name: String,
-    subject: Option<String>,
-    body_html: String,
-    shortcut: Option<String>,
-) -> Result<String, String> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let ret_id = id.clone();
-    db.with_write(move |conn| {
-        conn.execute(
-            "INSERT INTO templates (id, account_id, name, subject, body_html, shortcut)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, account_id, name, subject, body_html, shortcut],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(ret_id)
-    })
-    .await
-}
-
-// TODO(refactor): wrap fields in an UpdateTemplateParams struct.
-#[allow(clippy::too_many_arguments)]
-pub async fn db_update_template(
-    db: &WriterPool,
-    id: String,
-    name: Option<String>,
-    subject: Option<String>,
-    subject_set: bool,
-    body_html: Option<String>,
-    shortcut: Option<String>,
-    shortcut_set: bool,
-) -> Result<(), String> {
-    db.with_write(move |conn| {
-        let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
-        if let Some(v) = name {
-            sets.push(("name", Box::new(v)));
-        }
-        if subject_set {
-            sets.push(("subject", Box::new(subject)));
-        }
-        if let Some(v) = body_html {
-            sets.push(("body_html", Box::new(v)));
-        }
-        if shortcut_set {
-            sets.push(("shortcut", Box::new(shortcut)));
-        }
-        dynamic_update(conn, "templates", "id", &id, sets)
-    })
-    .await
-}
-
-pub async fn db_delete_template(db: &WriterPool, id: String) -> Result<(), String> {
-    db.with_write(move |conn| {
-        conn.execute("DELETE FROM templates WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
 
 // ── Signature column list ────────────────────────────────
 //
@@ -431,53 +353,6 @@ pub async fn db_get_aliases_for_account(
     .await
 }
 
-// TODO(refactor): wrap fields in an UpsertAliasParams struct.
-#[allow(clippy::too_many_arguments)]
-pub async fn db_upsert_alias(
-    db: &WriterPool,
-    account_id: String,
-    email: String,
-    display_name: Option<String>,
-    reply_to_address: Option<String>,
-    signature_id: Option<String>,
-    is_primary: bool,
-    is_default: bool,
-    treat_as_alias: bool,
-    verification_status: String,
-) -> Result<String, String> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let id_clone = id.clone();
-    db.with_write(move |conn| {
-        conn.execute(
-            "INSERT INTO send_as_aliases (id, account_id, email, display_name, reply_to_address, signature_id, is_primary, is_default, treat_as_alias, verification_status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                 ON CONFLICT(account_id, email) DO UPDATE SET
-                   display_name = excluded.display_name,
-                   reply_to_address = excluded.reply_to_address,
-                   signature_id = excluded.signature_id,
-                   is_primary = excluded.is_primary,
-                   treat_as_alias = excluded.treat_as_alias,
-                   verification_status = excluded.verification_status",
-            params![
-                id_clone,
-                account_id,
-                email,
-                display_name,
-                reply_to_address,
-                signature_id,
-                i64::from(is_primary),
-                i64::from(is_default),
-                i64::from(treat_as_alias),
-                verification_status,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await?;
-    Ok(id)
-}
-
 pub async fn db_get_default_alias(
     db: &WriterPool,
     account_id: String,
@@ -694,54 +569,6 @@ pub async fn db_get_scheduled_emails_for_account(
             .map_err(|e| e.to_string())
     })
     .await
-}
-
-// TODO(refactor): 14 args - migrate to a ScheduledEmailParams struct.
-#[allow(clippy::too_many_arguments)]
-pub async fn db_insert_scheduled_email(
-    db: &WriterPool,
-    account_id: String,
-    to_addresses: String,
-    cc_addresses: Option<String>,
-    bcc_addresses: Option<String>,
-    subject: Option<String>,
-    body_html: String,
-    reply_to_message_id: Option<String>,
-    thread_id: Option<String>,
-    scheduled_at: i64,
-    signature_id: Option<String>,
-    delegation: String,
-    from_email: Option<String>,
-    timezone: Option<String>,
-) -> Result<String, String> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let id_clone = id.clone();
-    db.with_write(move |conn| {
-        conn.execute(
-            "INSERT INTO scheduled_emails (id, account_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, reply_to_message_id, thread_id, scheduled_at, signature_id, delegation, from_email, timezone)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                id_clone,
-                account_id,
-                to_addresses,
-                cc_addresses,
-                bcc_addresses,
-                subject,
-                body_html,
-                reply_to_message_id,
-                thread_id,
-                scheduled_at,
-                signature_id,
-                delegation,
-                from_email,
-                timezone,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await?;
-    Ok(id)
 }
 
 pub async fn db_update_scheduled_email_status(

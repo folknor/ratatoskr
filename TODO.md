@@ -191,6 +191,12 @@ Backend complete (server delegation + overdue handling). Missing UI.
 
 Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no public API, Microsoft confirmed no plans).
 
+### Send-As Aliases
+
+Backend reads + default-alias selection work (`db_get_aliases_for_account`, `db_get_default_alias`, `db_set_default_alias`; provider sync populates `send_as_aliases` on Gmail). No roadmap doc yet.
+
+- [ ] **Manual alias edit UI** - Settings surface for creating / editing / deleting send-as aliases independent of provider sync (display name, reply-to, signature binding, treat-as-alias toggle, verification status). The speculative `db_upsert_alias` helper (10 positional args) was deleted during a dead-code triage; the eventual UI work should write a focused `(WriterPool, SendAsAlias)` upsert with a params struct rather than reviving the old shape. Schema is in `crates/db/src/db/schema/04_compose.sql` (`send_as_aliases`); the `(account_id, email)` uniqueness constraint is the conflict target.
+
 ### Auto-Responses - `docs/auto-responses/problem-statement.md`
 
 Read/write API complete on all 3 providers. Remaining:
@@ -438,13 +444,6 @@ The original M1 foundation sketch named these as target surface; the M2-M8 cohor
 ## Refactor Backlog
 
 Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` or `#[allow(clippy::type_complexity)]` so clippy stays clean. Nothing here is blocking - each is a localized API cleanup that would replace a long arg list or nested-Option tuple with a named struct.
-
-**Triage first: dead code in the params-struct backlog.** These are `pub` and re-exported via `pub use ...::*` in `queries_extra.rs`, but have **zero workspace callers**. Decide delete-vs-refactor before doing the params-struct rewrite - polishing dead code has no payoff.
-- [ ] `db_insert_scheduled_email` (14 args) - `crates/db/src/db/queries_extra/compose.rs`
-- [ ] `db_upsert_attachment` (10 args) - `crates/db/src/db/queries_extra/labels_attachments.rs`
-- [ ] `db_upsert_alias` (10 args) - `crates/db/src/db/queries_extra/compose.rs`
-- [ ] `db_upsert_label_coalesce` (9 args) - `crates/db/src/db/queries_extra/labels_attachments.rs`
-- [ ] `db_update_template` (8 args) - `crates/db/src/db/queries_extra/compose.rs`
 
 **Replace long arg lists with a params struct:**
 - [ ] `gmail::ops::send_reaction` (9 args) - `crates/gmail/src/ops.rs:454` -> `ReactionMessage` (headers + threading fields)

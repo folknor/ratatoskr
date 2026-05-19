@@ -382,18 +382,6 @@ impl_from_row!(DbPhishingAllowlistEntry {
     created_at,
 });
 
-// ── Template ────────────────────────────────────────────────
-
-impl_from_row!(DbTemplate {
-    id,
-    account_id,
-    name,
-    subject,
-    body_html,
-    shortcut,
-    sort_order,
-    created_at,
-});
 
 // ── Signature ───────────────────────────────────────────────
 

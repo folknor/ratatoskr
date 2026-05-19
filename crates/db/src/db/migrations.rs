@@ -45,7 +45,7 @@ const SCHEMA_V100: &str = concat!(
     include_str!("schema/08_notifications.sql"),
     "\n",
     // link_scan_results, phishing_allowlist, bimi_cache, message_reactions,
-    // read_receipt_policy, filter_rules, templates, image_allowlist
+    // read_receipt_policy, filter_rules, image_allowlist
     include_str!("schema/09_security.sql"),
     "\n",
     // folder_sync_state, jmap_sync_state, graph_folder_delta_tokens,
