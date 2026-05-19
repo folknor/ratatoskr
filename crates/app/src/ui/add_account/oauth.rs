@@ -9,6 +9,18 @@ use super::state::{
 };
 use super::views::{ghost_button, primary_button};
 
+/// Redirect URI passed to IdPs during RFC 7591 dynamic client registration.
+///
+/// The actual loopback listener bound by `rtsk::oauth::run_oauth_authorization_flow`
+/// formats its redirect URI as `http://127.0.0.1:{actual_port}` (no path
+/// suffix). Defaults to port 17248 - `bind_oauth_listener` tries that
+/// first - so registering with the same string maximises IdP match
+/// probability. If the IdP enforces an exact match and the runtime port
+/// differs (17248 already taken), we fall through to the IdP's reject
+/// path; in practice most loopback-friendly IdPs accept any 127.0.0.1
+/// port per RFC 8252 §7.3.
+const OAUTH_REDIRECT_URI: &str = "http://127.0.0.1:17248";
+
 impl AddAccountWizard {
     /// Start the OAuth flow for re-auth, using the stored provider info.
     ///
@@ -67,7 +79,7 @@ impl AddAccountWizard {
         self.error = None;
         let generation = self.generation.next();
         let provider_id_clone = provider_id.clone();
-        let client_id_clone = client_id.clone();
+        let initial_client_id = client_id.clone();
 
         let Some(client) = self.service_client.as_ref().cloned() else {
             self.error = Some("Service not ready".into());
@@ -76,40 +88,98 @@ impl AddAccountWizard {
         let reauth_account_id = self.reauth_account_id.clone();
         Task::perform(
             async move {
-                // Resolve endpoints: either from registry or OIDC discovery.
-                let (auth_url, token_url, scopes, use_pkce) = if let Some(r) = resolved {
-                    r
-                } else if let Some(issuer) = oidc_issuer {
-                    let endpoints = rtsk::discovery::oidc::probe_issuer(&issuer)
-                        .await
-                        .ok_or_else(|| {
-                            format!(
-                                "OIDC discovery failed for issuer \
-                                         '{issuer}'"
-                            )
-                        })?;
-                    (
-                        endpoints.auth_url,
-                        endpoints.token_url,
-                        endpoints.scopes,
-                        endpoints.supports_pkce_s256,
-                    )
+                // Resolve endpoints: either from the registry (built-in
+                // providers - Gmail / Microsoft 365) or from OIDC
+                // discovery against a user-supplied issuer URL.
+                //
+                // We carry `registration_endpoint` through the OIDC
+                // discovery path so a downstream RFC 7591 dynamic
+                // registration attempt can use it. Registry-resolved
+                // providers don't get dyn-registration; their client IDs
+                // are baked in.
+                let (auth_url, token_url, scopes, use_pkce, registration_endpoint, supports_public_client) =
+                    if let Some(r) = resolved {
+                        (r.0, r.1, r.2, r.3, None, true)
+                    } else if let Some(issuer) = oidc_issuer {
+                        let endpoints =
+                            rtsk::discovery::oidc::probe_issuer(&issuer).await.ok_or_else(
+                                || format!("OIDC discovery failed for issuer '{issuer}'"),
+                            )?;
+                        (
+                            endpoints.auth_url,
+                            endpoints.token_url,
+                            endpoints.scopes,
+                            endpoints.supports_pkce_s256,
+                            endpoints.registration_endpoint,
+                            endpoints.supports_public_client,
+                        )
+                    } else {
+                        return Err::<Result<OAuthSuccess, String>, String>(
+                            "No OAuth configuration available".into(),
+                        );
+                    };
+
+                // RFC 7591 dynamic registration: when the user didn't
+                // provide a client_id and the IdP advertised a
+                // registration endpoint, register Ratatoskr as a public
+                // client and use the resulting credentials.
+                let (resolved_client_id, resolved_client_secret) = if initial_client_id.is_empty() {
+                    if let Some(endpoint) = registration_endpoint.as_deref() {
+                        if !supports_public_client {
+                            return Err::<Result<OAuthSuccess, String>, String>(
+                                "Provider does not support public clients; supply a Client ID."
+                                    .into(),
+                            );
+                        }
+                        let scope = scopes.join(" ");
+                        let req =
+                            rtsk::discovery::dyn_registration::public_client_request(
+                                OAUTH_REDIRECT_URI,
+                                &scope,
+                            );
+                        match rtsk::discovery::dyn_registration::register(endpoint, &req).await {
+                            Some(registered) => {
+                                log::info!(
+                                    "OAuth: dyn-registered client_id={} for {}",
+                                    registered.client_id,
+                                    provider_id_clone,
+                                );
+                                (registered.client_id, registered.client_secret)
+                            }
+                            None => {
+                                return Err::<Result<OAuthSuccess, String>, String>(
+                                    "Dynamic client registration failed; supply a Client ID \
+                                     manually."
+                                        .into(),
+                                );
+                            }
+                        }
+                    } else {
+                        return Err::<Result<OAuthSuccess, String>, String>(
+                            "No Client ID supplied and the provider does not advertise a \
+                             registration endpoint."
+                                .into(),
+                        );
+                    }
                 } else {
-                    return Err("No OAuth configuration available".into());
+                    (initial_client_id, None)
                 };
 
                 let merged_scopes = merge_scopes(&scopes, &extras);
+                let provider_id_for_success = provider_id_clone.clone();
+                let client_id_for_success = resolved_client_id.clone();
+                let client_secret_for_success = resolved_client_secret.clone();
                 let result = run_capture_then_exchange(
                     &client,
                     OauthCaptureConfig {
-                        provider_id: provider_id_clone.clone(),
+                        provider_id: provider_id_clone,
                         auth_url,
                         token_url,
                         scopes: merged_scopes,
                         user_info_url: None,
                         use_pkce,
-                        client_id: client_id_clone.clone(),
-                        client_secret: None,
+                        client_id: resolved_client_id,
+                        client_secret: resolved_client_secret,
                     },
                     reauth_account_id,
                 )
@@ -127,8 +197,9 @@ impl AddAccountWizard {
                         token_expires_at: ack.token_expires_at,
                         user_email: ack.email,
                         user_name: ack.display_name.unwrap_or_default(),
-                        oauth_provider: provider_id_clone,
-                        oauth_client_id: client_id_clone,
+                        oauth_provider: provider_id_for_success,
+                        oauth_client_id: client_id_for_success,
+                        oauth_client_secret: client_secret_for_success,
                     }
                 });
                 Ok(result)

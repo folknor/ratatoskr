@@ -68,6 +68,15 @@ pub enum ManualProvider {
     Microsoft365,
     Jmap,
     Imap,
+    /// Custom OIDC issuer authenticating an IMAP/SMTP account.
+    /// User supplies the issuer URL, optional client ID/secret (otherwise
+    /// dynamic registration via RFC 7591 is attempted), and IMAP+SMTP
+    /// server fields.
+    CustomOidcImap,
+    /// Custom OIDC issuer authenticating a JMAP account.
+    /// User supplies the issuer URL, optional client ID/secret, and the
+    /// JMAP session URL.
+    CustomOidcJmap,
 }
 
 impl ManualProvider {
@@ -76,6 +85,8 @@ impl ManualProvider {
         ManualProvider::Microsoft365,
         ManualProvider::Jmap,
         ManualProvider::Imap,
+        ManualProvider::CustomOidcImap,
+        ManualProvider::CustomOidcJmap,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -84,17 +95,38 @@ impl ManualProvider {
             Self::Microsoft365 => "Microsoft 365",
             Self::Jmap => "JMAP",
             Self::Imap => "IMAP",
+            Self::CustomOidcImap => "Custom (OIDC + IMAP)",
+            Self::CustomOidcJmap => "Custom (OIDC + JMAP)",
         }
     }
 
+    /// Built-in providers map to a static DB string; for `CustomOidc*` the
+    /// actual `provider` column carries the underlying protocol ("imap"
+    /// or "jmap"), and the user's chosen issuer URL is stored separately
+    /// in `oauth_provider` as `oidc:{issuer}`. The submit handler builds
+    /// that string at runtime; this static accessor returns the protocol
+    /// the row carries.
     pub(super) fn to_provider_string(self) -> &'static str {
         match self {
             Self::Gmail => "gmail_api",
             Self::Microsoft365 => "graph",
             Self::Jmap => "jmap",
             Self::Imap => "imap",
+            Self::CustomOidcImap => "imap",
+            Self::CustomOidcJmap => "jmap",
         }
     }
+
+}
+
+/// User-supplied OIDC fields for the `CustomOidc*` provider variants.
+/// All `String`, empty when unset; matches the convention used by
+/// `ManualConfig::jmap_url` etc.
+#[derive(Debug, Clone, Default)]
+pub struct CustomOidcConfig {
+    pub issuer_url: String,
+    pub client_id: String,
+    pub client_secret: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +151,7 @@ pub struct ManualConfig {
     pub selected_provider: Option<ManualProvider>,
     pub jmap_url: String,
     pub auth_method: ManualAuthMethod,
+    pub custom_oidc: CustomOidcConfig,
 }
 
 impl Default for ManualConfig {
@@ -127,6 +160,7 @@ impl Default for ManualConfig {
             selected_provider: None,
             jmap_url: String::new(),
             auth_method: ManualAuthMethod::OAuth,
+            custom_oidc: CustomOidcConfig::default(),
         }
     }
 }
@@ -188,6 +222,11 @@ pub struct OAuthSuccess {
     pub user_name: String,
     pub oauth_provider: String,
     pub oauth_client_id: String,
+    /// Optional client secret carried when RFC 7591 dynamic registration
+    /// returned a confidential client, or when the user supplied one
+    /// manually for the `CustomOidc*` provider variants. Always `None`
+    /// for the built-in providers (Gmail / Microsoft 365).
+    pub oauth_client_secret: Option<String>,
 }
 
 // Messages
@@ -216,6 +255,9 @@ pub enum AddAccountMessage {
     ManualSmtpSecurityChanged(SecurityOption),
     ManualJmapUrlChanged(String),
     ManualAuthMethodChanged(ManualAuthMethod),
+    CustomOidcIssuerChanged(String),
+    CustomOidcClientIdChanged(String),
+    CustomOidcClientSecretChanged(String),
     SubmitManualConfig,
 
     // Step 3: Authentication
@@ -671,6 +713,7 @@ impl AddAccountWizard {
                                 user_name: ack.display_name.unwrap_or_default(),
                                 oauth_provider: provider_id_clone,
                                 oauth_client_id: client_id_clone,
+                                oauth_client_secret: None,
                             }
                         });
                         (generation, result)
@@ -798,6 +841,15 @@ impl AddAccountWizard {
             }
             AddAccountMessage::ManualAuthMethodChanged(v) => {
                 self.manual_config.auth_method = v;
+            }
+            AddAccountMessage::CustomOidcIssuerChanged(v) => {
+                self.manual_config.custom_oidc.issuer_url = v;
+            }
+            AddAccountMessage::CustomOidcClientIdChanged(v) => {
+                self.manual_config.custom_oidc.client_id = v;
+            }
+            AddAccountMessage::CustomOidcClientSecretChanged(v) => {
+                self.manual_config.custom_oidc.client_secret = v;
             }
             AddAccountMessage::AccountNameChanged(v) => self.identity.name = v,
             AddAccountMessage::SelectColor(i) => {

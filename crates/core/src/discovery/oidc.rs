@@ -83,7 +83,7 @@ fn detect_public_client(auth_methods: &[String]) -> bool {
 /// require: HTTPS scheme, a host present, no embedded userinfo (so a
 /// crafted issuer can't bypass our notion of which host the user authorized),
 /// no fragment.
-pub(super) fn is_valid_https_url(url: &str) -> bool {
+pub fn is_valid_https_url(url: &str) -> bool {
     is_valid_url_with_test_base(
         url,
         std::env::var(super::DISCOVERY_TEST_BASE_ENV).ok().as_deref(),

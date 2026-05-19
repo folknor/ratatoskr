@@ -154,6 +154,11 @@ pub struct AccountCreateParams {
     pub oauth_provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
+    /// Confidential-client secret from RFC 7591 dynamic registration or
+    /// from a user-supplied value in the Custom OIDC wizard. None for
+    /// public clients (the common case).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_secret: Option<String>,
     /// Space-separated extra OAuth scopes appended to the negotiated
     /// set during the auth-code request. NULL when no extras.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -331,6 +336,7 @@ mod tests {
             token_expires_at: None,
             oauth_provider: None,
             oauth_client_id: None,
+            oauth_client_secret: None,
             oauth_extra_scopes: None,
             imap_host: Some("imap.example.com".into()),
             imap_port: Some(993),
@@ -372,6 +378,7 @@ mod tests {
             token_expires_at: Some(1_700_000_000),
             oauth_provider: Some("google".into()),
             oauth_client_id: Some("client-id-abc".into()),
+            oauth_client_secret: Some("client-secret-xyz".into()),
             oauth_extra_scopes: Some("custom:scope another:one".into()),
             imap_host: None,
             imap_port: None,

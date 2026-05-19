@@ -18,6 +18,10 @@ pub struct CreateAccountParams {
     pub token_expires_at: Option<i64>,
     pub oauth_provider: Option<String>,
     pub oauth_client_id: Option<String>,
+    /// Set when RFC 7591 dynamic registration produced a confidential
+    /// client, or when the user manually supplied a secret for a
+    /// Custom OIDC provider. NULL otherwise (most public clients).
+    pub oauth_client_secret: Option<String>,
     pub oauth_token_url: Option<String>,
     /// Space-separated extra scopes appended to the negotiated set
     /// during the auth-code request. NULL when no extras.
@@ -83,7 +87,8 @@ pub fn create_account_sync(
         "INSERT INTO accounts (
             id, email, provider, display_name, account_name, account_color,
             auth_method, access_token, refresh_token, token_expires_at,
-            oauth_provider, oauth_client_id, oauth_token_url, oauth_extra_scopes,
+            oauth_provider, oauth_client_id, oauth_client_secret, oauth_token_url,
+            oauth_extra_scopes,
             imap_host, imap_port, imap_security, imap_username, imap_password,
             smtp_host, smtp_port, smtp_security,
             smtp_username, smtp_password,
@@ -91,11 +96,11 @@ pub fn create_account_sync(
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19,
-            ?20, ?21, ?22,
-            ?23, ?24,
-            ?25, ?26, ?27
+            ?11, ?12, ?13, ?14, ?15,
+            ?16, ?17, ?18, ?19, ?20,
+            ?21, ?22, ?23,
+            ?24, ?25,
+            ?26, ?27, ?28
         )",
         params![
             id,
@@ -110,6 +115,7 @@ pub fn create_account_sync(
             params.token_expires_at,
             params.oauth_provider,
             params.oauth_client_id,
+            params.oauth_client_secret,
             params.oauth_token_url,
             params.oauth_extra_scopes,
             params.imap_host,

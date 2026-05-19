@@ -60,6 +60,31 @@ impl AddAccountWizard {
         // envelope is the boundary where future encryption can land
         // without any caller change.
         if let Some(ref oauth) = self.oauth_success {
+            // CustomOidc* providers ship a user-supplied issuer URL and
+            // server config that the OIDC discovery document doesn't
+            // carry (mail server addresses, JMAP session URL). The
+            // built-in providers (Gmail / Microsoft 365) resolve those
+            // via the discovery cascade and leave the server fields
+            // None.
+            use super::state::ManualProvider;
+            let is_oidc_imap = matches!(
+                self.manual_config.selected_provider,
+                Some(ManualProvider::CustomOidcImap)
+            );
+            let is_oidc_jmap = matches!(
+                self.manual_config.selected_provider,
+                Some(ManualProvider::CustomOidcJmap)
+            );
+            let imap_port = if is_oidc_imap {
+                self.auth_state.imap_port.parse::<i64>().ok()
+            } else {
+                None
+            };
+            let smtp_port = if is_oidc_imap {
+                self.auth_state.smtp_port.parse::<i64>().ok()
+            } else {
+                None
+            };
             AccountCreateParams {
                 email: self.email.clone(),
                 provider: self.resolved_provider.clone(),
@@ -76,17 +101,28 @@ impl AddAccountWizard {
                 token_expires_at: oauth.token_expires_at,
                 oauth_provider: Some(oauth.oauth_provider.clone()),
                 oauth_client_id: Some(oauth.oauth_client_id.clone()),
+                oauth_client_secret: oauth.oauth_client_secret.clone(),
                 oauth_extra_scopes: None,
-                imap_host: None,
-                imap_port: None,
-                imap_security: None,
-                imap_username: None,
-                smtp_host: None,
-                smtp_port: None,
-                smtp_security: None,
-                smtp_username: None,
-                jmap_url: None,
-                accept_invalid_certs: false,
+                imap_host: is_oidc_imap.then(|| self.auth_state.imap_host.clone()),
+                imap_port,
+                imap_security: is_oidc_imap
+                    .then(|| self.auth_state.imap_security.to_db_string().to_string()),
+                imap_username: is_oidc_imap.then(|| self.auth_state.username.clone()),
+                smtp_host: is_oidc_imap.then(|| self.auth_state.smtp_host.clone()),
+                smtp_port,
+                smtp_security: is_oidc_imap
+                    .then(|| self.auth_state.smtp_security.to_db_string().to_string()),
+                smtp_username: if is_oidc_imap && self.auth_state.use_separate_smtp_credentials {
+                    Some(self.auth_state.smtp_username.clone())
+                } else {
+                    None
+                },
+                jmap_url: is_oidc_jmap.then(|| self.manual_config.jmap_url.clone()),
+                accept_invalid_certs: if is_oidc_imap {
+                    self.auth_state.accept_invalid_certs
+                } else {
+                    false
+                },
             }
         } else {
             let imap_port = self.auth_state.imap_port.parse::<i64>().ok();
@@ -107,6 +143,7 @@ impl AddAccountWizard {
                 token_expires_at: None,
                 oauth_provider: None,
                 oauth_client_id: None,
+                oauth_client_secret: None,
                 oauth_extra_scopes: None,
                 imap_host: Some(self.auth_state.imap_host.clone()),
                 imap_port,

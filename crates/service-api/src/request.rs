@@ -2906,6 +2906,7 @@ mod tests {
             token_expires_at: None,
             oauth_provider: None,
             oauth_client_id: None,
+            oauth_client_secret: None,
             oauth_extra_scopes: None,
             imap_host: Some("imap.example.com".into()),
             imap_port: Some(993),
