@@ -107,6 +107,7 @@ pub use request::{
     TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
     TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
+    TestRunDiscoveryParams,
     TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
     TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
     TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams,

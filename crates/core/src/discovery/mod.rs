@@ -246,6 +246,126 @@ fn elapsed_ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Env var that, when set, redirects discovery probes to a local test
+/// harness over plain HTTP. Read by `discovery_client` and
+/// `rewrite_for_test_harness`; never set in production builds, so
+/// production paths run with the same hardening as before.
+///
+/// Saehrimnir mounts the discovery routes (WebFinger, OIDC, autoconfig)
+/// on its JMAP HTTP listener, so we reuse the existing
+/// `RATATOSKR_TEST_JMAP_ENDPOINT` plumbing rather than adding a new
+/// brokkr-side env-var slot. Functionally identical.
+const DISCOVERY_TEST_BASE_ENV: &str = "RATATOSKR_TEST_JMAP_ENDPOINT";
+
+/// Build the shared reqwest client for discovery probes
+/// (`webfinger::probe`, `oidc::probe_issuer`, `dyn_registration::register`).
+///
+/// `https_only` is relaxed when `RATATOSKR_TEST_DISCOVERY_BASE` is set so
+/// the probes can reach saehrimnir on plain HTTP localhost. The env var is
+/// the only gate; production builds where it is unset get the same
+/// `https_only(true)` posture they had before this helper existed.
+pub(super) fn discovery_client() -> Option<reqwest::Client> {
+    let test_mode = std::env::var(DISCOVERY_TEST_BASE_ENV).is_ok();
+    reqwest::Client::builder()
+        .https_only(!test_mode)
+        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .user_agent("Ratatoskr/1.0")
+        .build()
+        .ok()
+}
+
+/// If `RATATOSKR_TEST_DISCOVERY_BASE` is set, rewrite an `https://{host}/...`
+/// URL so the request lands on saehrimnir at `${BASE}/{host}/...`. Query and
+/// fragment are preserved. Plain HTTP URLs (which only appear in test mode
+/// for chained-issuer documents whose absolute href already points at the
+/// test base) pass through unchanged. Production: env var unset, function
+/// is a no-op.
+pub(super) fn rewrite_for_test_harness(url: &str) -> String {
+    match std::env::var(DISCOVERY_TEST_BASE_ENV) {
+        Ok(base) => rewrite_with_base(url, &base),
+        Err(_) => url.to_string(),
+    }
+}
+
+/// Pure rewrite given an explicit base URL - separated so tests don't have
+/// to touch process-global env state.
+fn rewrite_with_base(url: &str, base: &str) -> String {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    if parsed.scheme() != "https" {
+        return url.to_string();
+    }
+    let host = parsed.host_str().unwrap_or("");
+    let mut rewritten = String::with_capacity(url.len() + base.len());
+    rewritten.push_str(base.trim_end_matches('/'));
+    rewritten.push('/');
+    rewritten.push_str(host);
+    rewritten.push_str(parsed.path());
+    if let Some(query) = parsed.query() {
+        rewritten.push('?');
+        rewritten.push_str(query);
+    }
+    if let Some(fragment) = parsed.fragment() {
+        rewritten.push('#');
+        rewritten.push_str(fragment);
+    }
+    rewritten
+}
+
+#[cfg(test)]
+mod test_harness_tests {
+    use super::rewrite_with_base;
+
+    #[test]
+    fn rewrite_https_url_preserves_host_path_query() {
+        assert_eq!(
+            rewrite_with_base(
+                "https://corp.test/.well-known/webfinger?resource=acct%3Auser%40corp.test&rel=http%3A%2F%2Fopenid.net%2Fspecs%2Fconnect%2F1.0%2Fissuer",
+                "http://127.0.0.1:12345",
+            ),
+            "http://127.0.0.1:12345/corp.test/.well-known/webfinger?resource=acct%3Auser%40corp.test&rel=http%3A%2F%2Fopenid.net%2Fspecs%2Fconnect%2F1.0%2Fissuer",
+        );
+    }
+
+    #[test]
+    fn rewrite_https_url_trailing_slash_in_base_is_stripped() {
+        assert_eq!(
+            rewrite_with_base(
+                "https://corp.test/.well-known/openid-configuration",
+                "http://127.0.0.1:12345/",
+            ),
+            "http://127.0.0.1:12345/corp.test/.well-known/openid-configuration",
+        );
+    }
+
+    #[test]
+    fn rewrite_passes_through_non_https() {
+        // Plain HTTP at the test base (a chained-issuer URL saehrimnir
+        // already emitted as absolute) must not be rewritten - the request
+        // already points where it needs to go.
+        let original = "http://127.0.0.1:12345/idp/realms/corp/.well-known/openid-configuration";
+        assert_eq!(rewrite_with_base(original, "http://127.0.0.1:12345"), original);
+    }
+
+    #[test]
+    fn rewrite_passes_through_unparseable_url() {
+        assert_eq!(rewrite_with_base("not a url", "http://127.0.0.1:12345"), "not a url");
+    }
+
+    #[test]
+    fn rewrite_preserves_fragment() {
+        assert_eq!(
+            rewrite_with_base(
+                "https://corp.test/.well-known/openid-configuration#section",
+                "http://127.0.0.1:12345",
+            ),
+            "http://127.0.0.1:12345/corp.test/.well-known/openid-configuration#section",
+        );
+    }
+}
+
 fn make_diag(stage: &'static str, start: Instant, results: &[ProtocolOption]) -> StageDiagnostic {
     log::debug!(
         "Discovery stage '{stage}' completed: {} results in {}ms",

@@ -215,6 +215,14 @@ pub struct TestQueryBlobTombstoneStateParams {
     pub content_hash: String,
 }
 
+/// Harness probe params: run the email-discovery cascade for the given
+/// address. The ack is the raw `DiscoveredConfig` serialized to JSON;
+/// the harness inspects fields directly with Lua field access.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestRunDiscoveryParams {
+    pub email: String,
+}
+
 /// Phase 8c harness probe ack. `tombstoned_at` is `None` when the
 /// row is live or absent. `present` distinguishes "absent from
 /// attachment_blobs" from "live in attachment_blobs", since both
@@ -960,6 +968,10 @@ pub enum RequestParams {
     /// clear-cache flows from sync-harness scripts after the
     /// referencing `attachments` rows have cascade-deleted away.
     TestQueryBlobTombstoneState { params: TestQueryBlobTombstoneStateParams },
+    /// Runs the discovery cascade for an email address and returns the
+    /// full `DiscoveredConfig` for harness assertions. Driven against
+    /// saehrimnir via `RATATOSKR_TEST_DISCOVERY_BASE`.
+    TestRunDiscovery { params: TestRunDiscoveryParams },
 }
 
 /// Phase 8-1: idempotency classification for `RequestParams::idempotency()`.
@@ -1046,6 +1058,7 @@ impl RequestParams {
             Self::TestSearchIndex { .. } => "test.search_index",
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
             Self::TestQueryBlobTombstoneState { .. } => "test.query_blob_tombstone_state",
+            Self::TestRunDiscovery { .. } => "test.run_discovery",
         }
     }
 
@@ -1186,6 +1199,12 @@ impl RequestParams {
             | Self::TestQueryBlobTombstoneState { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
+            // Discovery runs the full cascade including DNS / autoconfig HTTP
+            // probes; the cascade itself caps at OVERALL_TIMEOUT (15s), so
+            // give the IPC a generous envelope above that.
+            Self::TestRunDiscovery { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(30))
+            }
             Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
         }
     }
@@ -1275,7 +1294,8 @@ impl RequestParams {
             | Self::TestPendingOpsRead { .. }
             | Self::TestQueryDbState { .. }
             | Self::TestSearchIndex { .. }
-            | Self::TestQueryBlobTombstoneState { .. } => Idempotency::Idempotent,
+            | Self::TestQueryBlobTombstoneState { .. }
+            | Self::TestRunDiscovery { .. } => Idempotency::Idempotent,
 
             Self::TestSeedAccount { .. }
             | Self::TestCrashAfterNWrites { .. }
@@ -1404,6 +1424,9 @@ impl RequestParams {
                 serde_json::json!({ "params": params })
             }
             Self::TestQueryBlobTombstoneState { params } => {
+                serde_json::json!({ "params": params })
+            }
+            Self::TestRunDiscovery { params } => {
                 serde_json::json!({ "params": params })
             }
         }
@@ -1960,6 +1983,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.query_blob_tombstone_state params: {e}"))?;
                 Ok(Self::TestQueryBlobTombstoneState { params: p.params })
+            }
+            "test.run_discovery" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestRunDiscoveryParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.run_discovery params: {e}"))?;
+                Ok(Self::TestRunDiscovery { params: p.params })
             }
             _ => Err(format!("unknown method: {method}")),
         }

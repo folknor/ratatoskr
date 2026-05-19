@@ -213,6 +213,9 @@ pub(crate) async fn dispatch(
         RequestParams::TestQueryBlobTombstoneState { params } => {
             test_helpers::query_blob_tombstone_state_handle(&boot_state, params).await
         }
+        RequestParams::TestRunDiscovery { params } => {
+            test_helpers::run_discovery_handle(params).await
+        }
     }
 }
 

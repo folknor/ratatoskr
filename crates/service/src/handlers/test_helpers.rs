@@ -18,7 +18,8 @@ use service_api::{
     TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
     TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesAck,
-    TestRemoveCachedAttachmentBytesParams, TestSeedAccountAck, TestSeedAccountParams,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSeedAccountAck,
+    TestSeedAccountParams,
     TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams,
     TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams, TestSeedThreadAck,
@@ -697,6 +698,19 @@ pub(super) async fn query_blob_tombstone_state_handle(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// Harness probe: runs `rtsk::discovery::discover` for the given email
+/// and returns the full `DiscoveredConfig` as JSON. Wired against
+/// saehrimnir via `RATATOSKR_TEST_DISCOVERY_BASE`; the cascade's reqwest
+/// clients pick the env var up and route to the local listener.
+pub(super) async fn run_discovery_handle(
+    params: TestRunDiscoveryParams,
+) -> Result<Value, ServiceError> {
+    let config = rtsk::discovery::discover(&params.email)
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(config).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 fn insert_harness_account_rows(

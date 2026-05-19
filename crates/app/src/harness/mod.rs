@@ -21,7 +21,7 @@ use service_api::{
     SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
     SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
-    TestSeedAccountParams,
+    TestRunDiscoveryParams, TestSeedAccountParams,
     TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
     TestSeedRemoteAttachmentParams, TestSearchIndexParams, TestSeedThreadParams,
     TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
@@ -2756,6 +2756,16 @@ fn request_params_from_lua(
                 })?;
             Ok(RequestParams::TestQueryBlobTombstoneState {
                 params: TestQueryBlobTombstoneStateParams { content_hash },
+            })
+        }
+        "TestRunDiscovery" | "test.run_discovery" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestRunDiscovery requires params table"));
+            }
+            let email = get_string_field(state, params_idx, "email")?
+                .ok_or_else(|| lua_error_message("TestRunDiscovery requires params.email"))?;
+            Ok(RequestParams::TestRunDiscovery {
+                params: TestRunDiscoveryParams { email },
             })
         }
         "TestSearchIndex" | "test.search_index" => {

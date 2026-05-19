@@ -1,0 +1,31 @@
+name = "discovery-webfinger"
+
+# Saehrimnir's fixture loader currently requires at least one [[account]]
+# block even for tests that don't exercise account state. This stub is
+# never read by the discovery probe path - it just satisfies the loader.
+[[account]]
+id = "stub"
+name = "stub@example.test"
+is_personal = true
+
+# WebFinger at the email domain delegates to a chained issuer on a
+# different prefix. The chained issuer's OIDC discovery document is
+# served at /idp/realms/corp on the same saehrimnir listener.
+[discovery."corp.test".webfinger]
+links = [
+  { rel = "http://openid.net/specs/connect/1.0/issuer", href = "/idp/realms/corp" },
+]
+
+# OIDC discovery for the chained issuer. Path-relative endpoint URLs are
+# emit-time prefixed with the live listener base; the issuer field follows
+# the same convention so the self-claim check passes against the mount
+# path. authorization_endpoint / token_endpoint deliberately point at the
+# existing saehrimnir OAuth surface (/oauth/...) rather than per-realm
+# duplicates, matching the topology the saehrimnir maintainer settled on.
+[discovery."idp/realms/corp".oidc]
+issuer = "/idp/realms/corp"
+authorization_endpoint = "/oauth/authorize"
+token_endpoint = "/oauth/token"
+scopes_supported = ["openid", "email", "profile", "offline_access"]
+code_challenge_methods_supported = ["S256"]
+token_endpoint_auth_methods_supported = ["none"]

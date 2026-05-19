@@ -84,12 +84,19 @@ fn detect_public_client(auth_methods: &[String]) -> bool {
 /// crafted issuer can't bypass our notion of which host the user authorized),
 /// no fragment.
 pub(super) fn is_valid_https_url(url: &str) -> bool {
+    is_valid_url_with_test_base(
+        url,
+        std::env::var(super::DISCOVERY_TEST_BASE_ENV).ok().as_deref(),
+    )
+}
+
+/// Pure form of `is_valid_https_url` with the test base injected.
+/// Production callers go through `is_valid_https_url` which reads the
+/// env var; tests pass an explicit base (or `None`).
+fn is_valid_url_with_test_base(url: &str, test_base: Option<&str>) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
     };
-    if parsed.scheme() != "https" {
-        return false;
-    }
     if !parsed.has_host() {
         return false;
     }
@@ -99,7 +106,22 @@ pub(super) fn is_valid_https_url(url: &str) -> bool {
     if parsed.fragment().is_some() {
         return false;
     }
-    true
+    match parsed.scheme() {
+        "https" => true,
+        // Test-mode escape: an `http://` URL passes only when it points at
+        // the configured discovery test base (saehrimnir on localhost).
+        // Production builds never set the env var, so this branch is
+        // unreachable outside the harness.
+        "http" => test_base
+            .and_then(|base| url::Url::parse(base).ok())
+            .is_some_and(|base_parsed| {
+                parsed.scheme() == base_parsed.scheme()
+                    && parsed.host_str() == base_parsed.host_str()
+                    && parsed.port_or_known_default()
+                        == base_parsed.port_or_known_default()
+            }),
+        _ => false,
+    }
 }
 
 /// Probe `https://{domain}/.well-known/openid-configuration` for OIDC support.
@@ -118,20 +140,13 @@ pub async fn probe(domain: &str) -> Option<OidcEndpoints> {
 pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     let normalized_issuer = issuer_url.trim_end_matches('/');
     let url = format!("{normalized_issuer}/.well-known/openid-configuration");
+    let url = super::rewrite_for_test_harness(&url);
 
-    // OIDC discovery is required to be HTTPS end-to-end. `https_only(true)`
-    // rejects any redirect or initial request that would land on a non-HTTPS
-    // URL, so the .well-known probe can't be silently downgraded to plaintext
-    // by a misconfigured (or hostile) IdP. Combined with the 3-hop redirect
-    // cap, this also bounds an attacker's ability to redirect-walk the
-    // probe through a chain of internal hosts.
-    let client = reqwest::Client::builder()
-        .https_only(true)
-        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .user_agent("Ratatoskr/1.0")
-        .build()
-        .ok()?;
+    // OIDC discovery is required to be HTTPS end-to-end. The shared client
+    // builder enforces `https_only(true)` in production and relaxes it only
+    // when `RATATOSKR_TEST_DISCOVERY_BASE` is set; the 3-hop redirect cap
+    // bounds redirect-walk attacks in both modes.
+    let client = super::discovery_client()?;
 
     let resp = client.get(&url).send().await.ok()?;
     if !resp.status().is_success() {
@@ -214,6 +229,45 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_valid_url_rejects_userinfo_and_fragment() {
+        assert!(!is_valid_url_with_test_base("https://attacker@victim.com", None));
+        assert!(!is_valid_url_with_test_base("https://victim.com/path#frag", None));
+    }
+
+    #[test]
+    fn is_valid_url_https_passes_regardless_of_test_base() {
+        assert!(is_valid_url_with_test_base("https://idp.example.com", None));
+        assert!(is_valid_url_with_test_base(
+            "https://idp.example.com",
+            Some("http://127.0.0.1:12345"),
+        ));
+    }
+
+    #[test]
+    fn is_valid_url_http_only_passes_against_matching_test_base() {
+        // Same host + port as the test base: allowed.
+        assert!(is_valid_url_with_test_base(
+            "http://127.0.0.1:12345/idp/realms/corp",
+            Some("http://127.0.0.1:12345"),
+        ));
+        // Different host: rejected.
+        assert!(!is_valid_url_with_test_base(
+            "http://attacker.example.com/",
+            Some("http://127.0.0.1:12345"),
+        ));
+        // Same host, different port: rejected.
+        assert!(!is_valid_url_with_test_base(
+            "http://127.0.0.1:9999/",
+            Some("http://127.0.0.1:12345"),
+        ));
+        // No test base at all: rejected.
+        assert!(!is_valid_url_with_test_base(
+            "http://127.0.0.1:12345/",
+            None,
+        ));
+    }
 
     #[test]
     fn negotiate_scopes_intersects_supported() {

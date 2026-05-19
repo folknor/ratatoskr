@@ -76,17 +76,12 @@ pub async fn register(
         log::debug!("dyn_registration: rejecting non-HTTPS endpoint {endpoint}");
         return None;
     }
+    let endpoint_url = super::rewrite_for_test_harness(endpoint);
 
-    let client = reqwest::Client::builder()
-        .https_only(true)
-        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .user_agent("Ratatoskr/1.0")
-        .build()
-        .ok()?;
+    let client = super::discovery_client()?;
 
     let resp = client
-        .post(endpoint)
+        .post(&endpoint_url)
         .header(reqwest::header::ACCEPT, "application/json")
         .json(request)
         .send()

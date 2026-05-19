@@ -80,17 +80,13 @@ fn parse_response(bytes: &[u8]) -> Option<String> {
 /// doesn't advertise an OIDC issuer.
 pub async fn probe(domain: &str, email: &str) -> Option<String> {
     let url = build_query_url(domain, email)?;
+    let url = super::rewrite_for_test_harness(&url);
 
-    // WebFinger is required to be served over HTTPS (RFC 7033 §4.2).
-    // `https_only(true)` rejects any redirect or initial request that would
-    // land on plaintext, and the 3-hop cap bounds redirect-walk attacks.
-    let client = reqwest::Client::builder()
-        .https_only(true)
-        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .user_agent("Ratatoskr/1.0")
-        .build()
-        .ok()?;
+    // WebFinger is required to be served over HTTPS (RFC 7033 §4.2). The
+    // shared client builder enforces `https_only(true)` in production and
+    // relaxes it only when `RATATOSKR_TEST_DISCOVERY_BASE` is set; the
+    // 3-hop redirect cap bounds redirect-walk attacks in both modes.
+    let client = super::discovery_client()?;
 
     let resp = client
         .get(&url)
