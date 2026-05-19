@@ -125,6 +125,7 @@ pub(super) async fn seed_account_handle(
             .oauth_client_id
             .or_else(|| uses_oauth.then(|| "test-client-id".into())))?,
         oauth_token_url: params.oauth_token_url,
+        oauth_extra_scopes: params.oauth_extra_scopes,
         imap_host: Some("imap.example.test".into()),
         imap_port: Some(993),
         imap_security: Some("tls".into()),

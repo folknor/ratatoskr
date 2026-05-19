@@ -23,6 +23,10 @@ pub struct AccountAuthInfo {
     pub auth_method: String,
     pub oauth_provider: Option<String>,
     pub oauth_client_id: Option<String>,
+    /// Space-separated extra OAuth scopes carried into the auth-code
+    /// request on re-auth, so the renewed token covers the same scope
+    /// set the original grant did.
+    pub oauth_extra_scopes: Option<String>,
     pub imap_host: Option<String>,
     pub imap_port: Option<i64>,
     pub imap_security: Option<String>,
@@ -74,6 +78,7 @@ pub fn get_account_auth_info_sync(
 ) -> Result<AccountAuthInfo, String> {
     conn.query_row(
         "SELECT provider, auth_method, oauth_provider, oauth_client_id,
+                oauth_extra_scopes,
                 imap_host, imap_port, imap_security,
                 smtp_host, smtp_port, smtp_security, imap_username
          FROM accounts WHERE id = ?1",
@@ -84,6 +89,7 @@ pub fn get_account_auth_info_sync(
                 auth_method: row.get("auth_method")?,
                 oauth_provider: row.get("oauth_provider")?,
                 oauth_client_id: row.get("oauth_client_id")?,
+                oauth_extra_scopes: row.get("oauth_extra_scopes")?,
                 imap_host: row.get("imap_host")?,
                 imap_port: row.get("imap_port")?,
                 imap_security: row.get("imap_security")?,

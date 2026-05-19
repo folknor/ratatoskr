@@ -22,6 +22,10 @@ struct OidcDiscoveryDocument {
     code_challenge_methods_supported: Vec<String>,
     #[serde(default)]
     token_endpoint_auth_methods_supported: Vec<String>,
+    /// RFC 7591 dynamic client registration endpoint. Optional - many
+    /// production IdPs (especially commercial ones) don't expose it.
+    #[serde(default)]
+    registration_endpoint: Option<String>,
 }
 
 /// Result of a successful OIDC discovery probe.
@@ -35,6 +39,10 @@ pub struct OidcEndpoints {
     pub supports_pkce_s256: bool,
     /// Whether the provider supports `none` token endpoint auth (public clients).
     pub supports_public_client: bool,
+    /// RFC 7591 dynamic client registration endpoint, if the discovery
+    /// document advertised one. `None` for providers that require
+    /// pre-registered clients.
+    pub registration_endpoint: Option<String>,
 }
 
 /// Scopes we request - `offline_access` is critical for refresh tokens.
@@ -175,9 +183,21 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     let supports_pkce_s256 = detect_pkce_s256(&doc.code_challenge_methods_supported);
     let supports_public_client = detect_public_client(&doc.token_endpoint_auth_methods_supported);
 
+    // Only carry forward a registration endpoint we'd actually use - if
+    // the IdP advertises a plaintext or otherwise malformed URL here, we
+    // do not want a later `dyn_registration::register` call to surface
+    // that bug; drop it at discovery time.
+    let registration_endpoint = doc
+        .registration_endpoint
+        .as_deref()
+        .filter(|url| is_valid_https_url(url))
+        .map(str::to_string);
+
     log::info!(
         "OIDC discovery: found endpoints at {normalized_issuer} \
-         (PKCE: {supports_pkce_s256}, public: {supports_public_client})"
+         (PKCE: {supports_pkce_s256}, public: {supports_public_client}, \
+          dyn-reg: {})",
+        registration_endpoint.is_some()
     );
 
     Some(OidcEndpoints {
@@ -187,6 +207,7 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
         scopes,
         supports_pkce_s256,
         supports_public_client,
+        registration_endpoint,
     })
 }
 

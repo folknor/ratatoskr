@@ -126,7 +126,7 @@ Week view:
 
 ### Generic OAuth - `docs/generic-oauth/problem-statement.md`
 
-Core OIDC discovery + OAUTHBEARER + WebFinger implemented. **5 discrepancies remain** - see `docs/generic-oauth/discrepancies.md` (audit refreshed 2026-05-19; #1 re-auth and #7 WebFinger now resolved). Remaining: no manual issuer URL flow, no client ID entry, JMAP OAuth unsupported, SMTP path is XOAUTH2-only (lettre doesn't expose OAUTHBEARER), no IMAP SASL auto-detect from CAPABILITY. Discovery cascade has no Lua harness coverage (see Test Harness § OIDC discovery harness).
+Core OIDC discovery + OAUTHBEARER + WebFinger + custom-scopes + dynamic-registration plumbing implemented. **4 discrepancies remain** - see `docs/generic-oauth/discrepancies.md` (audit refreshed 2026-05-19; #1 re-auth, #7 WebFinger, #8 dynamic registration, and #9 custom scopes now resolved or have plumbing in place). Remaining: no manual issuer URL flow, no client ID entry, JMAP OAuth unsupported, SMTP path is XOAUTH2-only (lettre doesn't expose OAUTHBEARER), no IMAP SASL auto-detect from CAPABILITY, no IT-distributable config file. The plumbing helpers for #8/#9 wait on the wizard surface for "Custom OIDC" provider (gated on widget work). Discovery cascade has no Lua harness coverage (see Test Harness § OIDC discovery harness).
 
 ### Chats - `docs/chats/problem-statement.md`
 

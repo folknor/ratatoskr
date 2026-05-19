@@ -2536,6 +2536,11 @@ fn request_params_from_lua(
                     oauth_provider: get_string_field(state, params_idx, "oauth_provider")?,
                     oauth_client_id: get_string_field(state, params_idx, "oauth_client_id")?,
                     oauth_token_url: get_string_field(state, params_idx, "oauth_token_url")?,
+                    oauth_extra_scopes: get_string_field(
+                        state,
+                        params_idx,
+                        "oauth_extra_scopes",
+                    )?,
                 }
             } else {
                 TestSeedAccountParams::default()

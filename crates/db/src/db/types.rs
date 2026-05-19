@@ -43,6 +43,9 @@ pub struct DbAccount {
     pub oauth_provider: Option<String>,
     pub oauth_client_id: Option<String>,
     pub oauth_client_secret: Option<String>,
+    /// Space-separated extra OAuth scopes appended to the negotiated set
+    /// when requesting an auth code. NULL when no extras.
+    pub oauth_extra_scopes: Option<String>,
     pub imap_username: Option<String>,
     pub smtp_username: Option<String>,
     pub smtp_password: Option<String>,

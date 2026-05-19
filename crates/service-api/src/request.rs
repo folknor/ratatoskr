@@ -71,6 +71,10 @@ pub struct TestSeedAccountParams {
     pub oauth_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_token_url: Option<String>,
+    /// Space-separated extra OAuth scopes appended to the negotiated set.
+    /// Used by IT-distributable config and the (future) custom-OIDC wizard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_extra_scopes: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2870,6 +2874,7 @@ mod tests {
             token_expires_at: None,
             oauth_provider: None,
             oauth_client_id: None,
+            oauth_extra_scopes: None,
             imap_host: Some("imap.example.com".into()),
             imap_port: Some(993),
             imap_security: Some("ssl".into()),
@@ -3467,6 +3472,7 @@ mod tests {
                 oauth_provider: Some("oidc:saehrimnir".into()),
                 oauth_client_id: Some("ratatoskr-harness".into()),
                 oauth_token_url: Some("http://127.0.0.1:12345/oauth/token".into()),
+                oauth_extra_scopes: Some("custom:scope".into()),
             },
         };
         let parsed = RequestParams::from_method_params(

@@ -300,6 +300,7 @@ pub(crate) async fn handle_create(
         oauth_provider: p.oauth_provider,
         oauth_client_id: p.oauth_client_id,
         oauth_token_url: None,
+        oauth_extra_scopes: p.oauth_extra_scopes,
         imap_host: p.imap_host,
         imap_port: p.imap_port,
         imap_security: p.imap_security,

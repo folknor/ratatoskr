@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS accounts (
     oauth_provider TEXT,
     oauth_client_id TEXT,
     oauth_client_secret TEXT,
+    -- Generic OAuth: extra scopes appended to the negotiated set when
+    -- requesting the auth code. Space-separated per RFC 6749 §3.3 (scope
+    -- names cannot contain spaces). NULL when no extras. Populated from
+    -- IT-distributable config or per-account user input (UI gated on
+    -- widget work as of 2026-05-19).
+    oauth_extra_scopes TEXT,
     imap_username TEXT,
     caldav_url TEXT,
     caldav_username TEXT,

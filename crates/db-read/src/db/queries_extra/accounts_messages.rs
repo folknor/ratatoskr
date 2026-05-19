@@ -29,6 +29,7 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
         oauth_provider: row.get("oauth_provider")?,
         oauth_client_id: row.get("oauth_client_id")?,
         oauth_client_secret: row.get("oauth_client_secret")?,
+        oauth_extra_scopes: row.get("oauth_extra_scopes")?,
         imap_username: row.get("imap_username")?,
         smtp_username: row.get("smtp_username")?,
         smtp_password: row.get("smtp_password")?,

@@ -1,4 +1,5 @@
 pub mod autoconfig;
+pub mod dyn_registration;
 pub mod jmap_wellknown;
 pub mod merge;
 pub mod mx;

@@ -1,6 +1,6 @@
 # Generic OAuth: Spec vs. Code Discrepancies
 
-Audit date: 2026-05-19 (previous: 2026-03-30). Item #7 (WebFinger) shipped this pass; remaining items confirmed against current code.
+Audit date: 2026-05-19 (previous: 2026-03-30). Items #7 (WebFinger), #8 (dynamic registration, plumbing only), and #9 (custom scopes, plumbing only) shipped this pass; remaining items confirmed against current code.
 
 ---
 
@@ -22,10 +22,6 @@ Audit date: 2026-05-19 (previous: 2026-03-30). Item #7 (WebFinger) shipped this 
 
 ## Nice-to-have (deferred)
 
-8. **Dynamic client registration (RFC 7591)** - No `registration_endpoint` handling; `grep -r registration_endpoint` returns no hits. Low priority since most on-prem providers require pre-registered clients anyway.
-
-9. **Custom scope entry** - No UI surface for IT admins or users to specify additional provider-specific scopes beyond the negotiated defaults; the scopes come from the registry entry or from the OIDC discovery document's `scopes_supported`, with no override mechanism.
-
 10. **IT-distributable config file** - No `ratatoskr-config.json` / TOML / similar for pre-seeding provider configuration (issuer + mail servers + client ID); the only mention of "admin config" in the codebase is an unrelated `Display name from Autodiscover or admin config` comment at `crates/app/src/db/types.rs:33`.
 
 ## Resolved since spec was written
@@ -35,9 +31,11 @@ Audit date: 2026-05-19 (previous: 2026-03-30). Item #7 (WebFinger) shipped this 
 - **OAUTHBEARER authenticator (RFC 7628)** - IMAP path implemented at `crates/imap/src/connection.rs:68-75` (the `OAuthBearer` SASL struct) and wired into authentication at `connection.rs:349-365`.
 - **Token refresh** - Provider-agnostic, handles rotation, supports public clients (no secret). `crates/common/src/token.rs:43-84` (`refresh_oauth_token`).
 - **WebFinger (RFC 7033)** - Email-based OIDC issuer discovery for email domains that delegate to a different IdP host (e.g. `corp.com` → `auth.corp.com`). `crates/core/src/discovery/webfinger.rs` queries `https://{domain}/.well-known/webfinger?resource=acct:user@domain&rel=http://openid.net/specs/connect/1.0/issuer`, validates the returned `href`, then feeds it into `oidc::probe_issuer`. Wired in `crates/core/src/discovery/mod.rs` as a sequential precursor to the OIDC stage (WebFinger first, bare-domain probe as fallback).
+- **Custom scope override (plumbing)** - `accounts.oauth_extra_scopes TEXT NULL` column stores space-separated extras; `merge_scopes` in `crates/app/src/ui/add_account/oauth.rs` unions negotiated + extras (deduped, order preserved); re-auth reads the column and forwards merged scopes through `OauthCaptureConfig`. Wizard entry surface (user-typed extras, IT config file source) remains gated on widget work and #10.
+- **Dynamic client registration (RFC 7591, plumbing)** - `OidcDiscoveryDocument` and `OidcEndpoints` now carry an optional `registration_endpoint` (validated as HTTPS at discovery time). New module `crates/core/src/discovery/dyn_registration.rs` provides `register()` (RFC 8252 public-client request shape, hardening matching `oidc.rs` / `webfinger.rs`). Helper `resolve_or_register_client` in `crates/app/src/ui/add_account/oauth.rs` is in place but not invoked - the only path that would reach it is the "Custom OIDC" wizard surface, still gated on widget work.
 
 ## Notes for the next pass
 
-- Items #2 and #3 are the load-bearing UX gaps and are tightly coupled - there is no useful "issuer URL only" flow without a client-id input alongside it. Treat them as one piece of work.
+- Items #2 and #3 are the load-bearing UX gaps and are tightly coupled - there is no useful "issuer URL only" flow without a client-id input alongside it. Treat them as one piece of work. The plumbing for both #8 (dynamic registration when the IdP advertises it) and #9 (custom extra scopes) is already in place; the wizard's "Custom OIDC" provider just needs to call into the existing helpers.
 - Item #5 has gotten relatively more important since the original audit: now that IMAP OAUTHBEARER works, a generic OIDC provider can land in a state where IMAP auth succeeds but SMTP submission silently fails for users whose server requires OAUTHBEARER on submission. Worth elevating from "missing feature" to "consistency bug" framing.
 - Item #6 is small and self-contained backend work; would be a sensible single-PR change.

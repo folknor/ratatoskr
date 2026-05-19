@@ -11,10 +11,16 @@ use super::views::{ghost_button, primary_button};
 
 impl AddAccountWizard {
     /// Start the OAuth flow for re-auth, using the stored provider info.
+    ///
+    /// `oauth_extra_scopes` is the raw space-separated value from
+    /// `accounts.oauth_extra_scopes`; parsed and merged with whatever
+    /// scope set discovery or the registry produced for this provider.
+    /// Pass `None` for new-account flows where no account row exists yet.
     pub(super) fn start_reauth_oauth(
         &mut self,
         oauth_provider: Option<&str>,
         oauth_client_id: Option<&str>,
+        oauth_extra_scopes: Option<&str>,
     ) -> Task<AddAccountMessage> {
         let provider_id = oauth_provider.unwrap_or("").to_string();
         let client_id = if oauth_client_id.is_some_and(|c| !c.is_empty()) {
@@ -22,6 +28,7 @@ impl AddAccountWizard {
         } else {
             resolve_client_id(&provider_id)
         };
+        let extras = parse_extra_scopes(oauth_extra_scopes);
 
         // Look up the full OAuth config from the discovery registry.
         let oauth_config = rtsk::discovery::registry::oauth_config_for_provider(&provider_id);
@@ -91,13 +98,14 @@ impl AddAccountWizard {
                     return Err("No OAuth configuration available".into());
                 };
 
+                let merged_scopes = merge_scopes(&scopes, &extras);
                 let result = run_capture_then_exchange(
                     &client,
                     OauthCaptureConfig {
                         provider_id: provider_id_clone.clone(),
                         auth_url,
                         token_url,
-                        scopes,
+                        scopes: merged_scopes,
                         user_info_url: None,
                         use_pkce,
                         client_id: client_id_clone.clone(),
@@ -172,6 +180,7 @@ impl AddAccountWizard {
                     let task = self.start_reauth_oauth(
                         info.oauth_provider.as_deref(),
                         info.oauth_client_id.as_deref(),
+                        info.oauth_extra_scopes.as_deref(),
                     );
                     return (task, None);
                 }
@@ -240,6 +249,74 @@ impl AddAccountWizard {
 
         col.into()
     }
+}
+
+/// Parse the space-separated `oauth_extra_scopes` DB column into a vector.
+///
+/// Empty / whitespace-only input returns an empty vector. RFC 6749 §3.3
+/// scope names cannot contain whitespace, so splitting on whitespace is
+/// safe and matches the OAuth wire format.
+pub(super) fn parse_extra_scopes(raw: Option<&str>) -> Vec<String> {
+    raw.map(|s| {
+        s.split_whitespace()
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Merge negotiated OAuth scopes with extras, preserving order and
+/// deduplicating. Negotiated scopes keep their original order; extras
+/// not already present are appended in input order.
+pub(super) fn merge_scopes(negotiated: &[String], extras: &[String]) -> Vec<String> {
+    let mut merged: Vec<String> = negotiated.to_vec();
+    for s in extras {
+        if !merged.iter().any(|existing| existing == s) {
+            merged.push(s.clone());
+        }
+    }
+    merged
+}
+
+/// Return a usable client_id for an OIDC provider, registering one via
+/// RFC 7591 dynamic client registration when none is provided and the
+/// discovery document advertised a `registration_endpoint`.
+///
+/// Returns `None` when:
+/// - the provided client_id is non-empty (caller already has one, no
+///   registration needed) - caller should use the original.
+/// - the discovery document has no `registration_endpoint`.
+/// - the provider doesn't support public clients (no `none` auth method).
+/// - the registration request itself failed (network, parse, etc.).
+///
+/// Returns `Some(client)` on a successful registration. Callers should
+/// persist `client.client_id` (and `client.client_secret` if any) onto
+/// the account row before continuing with the auth flow.
+///
+/// This helper is not invoked by any current code path - the wizard
+/// surface for a "Custom OIDC" provider that would need it is gated on
+/// the widget-definition work tracked in `docs/focus/problem-statement.md`.
+/// It exists so the future wizard call site has one helper to reach for.
+#[allow(dead_code)]
+pub(super) async fn resolve_or_register_client(
+    endpoints: &rtsk::discovery::oidc::OidcEndpoints,
+    provided_client_id: &str,
+    redirect_uri: &str,
+) -> Option<rtsk::discovery::dyn_registration::RegisteredClient> {
+    if !provided_client_id.is_empty() {
+        return None;
+    }
+    let endpoint = endpoints.registration_endpoint.as_deref()?;
+    if !endpoints.supports_public_client {
+        log::debug!(
+            "dyn_registration: skipping for {} - provider does not support public clients",
+            endpoints.issuer_url
+        );
+        return None;
+    }
+    let scope = endpoints.scopes.join(" ");
+    let request = rtsk::discovery::dyn_registration::public_client_request(redirect_uri, &scope);
+    rtsk::discovery::dyn_registration::register(endpoint, &request).await
 }
 
 pub(super) fn resolve_client_id(provider_id: &str) -> String {
@@ -359,4 +436,74 @@ pub(super) fn open_browser_url(url: &str) -> Result<(), String> {
             .map_err(|e| format!("Failed to open browser: {e}"))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn parse_extra_scopes_none_or_empty() {
+        assert!(parse_extra_scopes(None).is_empty());
+        assert!(parse_extra_scopes(Some("")).is_empty());
+        assert!(parse_extra_scopes(Some("   ")).is_empty());
+    }
+
+    #[test]
+    fn parse_extra_scopes_splits_whitespace() {
+        assert_eq!(
+            parse_extra_scopes(Some("a b c")),
+            v(&["a", "b", "c"])
+        );
+        // Multiple spaces / tabs / mixed whitespace
+        assert_eq!(
+            parse_extra_scopes(Some("a\tb  c\n d")),
+            v(&["a", "b", "c", "d"])
+        );
+    }
+
+    #[test]
+    fn merge_scopes_empty_extras_returns_negotiated() {
+        assert_eq!(
+            merge_scopes(&v(&["openid", "email"]), &[]),
+            v(&["openid", "email"])
+        );
+    }
+
+    #[test]
+    fn merge_scopes_appends_disjoint_extras() {
+        assert_eq!(
+            merge_scopes(&v(&["openid"]), &v(&["offline_access"])),
+            v(&["openid", "offline_access"])
+        );
+    }
+
+    #[test]
+    fn merge_scopes_dedups_overlap() {
+        // "openid" present in both - extras don't double it.
+        assert_eq!(
+            merge_scopes(&v(&["openid", "email"]), &v(&["openid", "profile"])),
+            v(&["openid", "email", "profile"])
+        );
+    }
+
+    #[test]
+    fn merge_scopes_preserves_negotiated_order() {
+        assert_eq!(
+            merge_scopes(&v(&["c", "a", "b"]), &v(&["d", "a"])),
+            v(&["c", "a", "b", "d"])
+        );
+    }
+
+    #[test]
+    fn merge_scopes_empty_negotiated_uses_extras() {
+        assert_eq!(
+            merge_scopes(&[], &v(&["custom:scope"])),
+            v(&["custom:scope"])
+        );
+    }
 }

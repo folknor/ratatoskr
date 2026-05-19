@@ -36,6 +36,7 @@ impl_from_row!(DbAccount {
     oauth_provider,
     oauth_client_id,
     oauth_client_secret,
+    oauth_extra_scopes,
     imap_username,
     smtp_username,
     smtp_password,

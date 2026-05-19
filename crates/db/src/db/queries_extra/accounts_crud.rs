@@ -19,6 +19,9 @@ pub struct CreateAccountParams {
     pub oauth_provider: Option<String>,
     pub oauth_client_id: Option<String>,
     pub oauth_token_url: Option<String>,
+    /// Space-separated extra scopes appended to the negotiated set
+    /// during the auth-code request. NULL when no extras.
+    pub oauth_extra_scopes: Option<String>,
     // IMAP fields
     pub imap_host: Option<String>,
     pub imap_port: Option<i64>,
@@ -80,7 +83,7 @@ pub fn create_account_sync(
         "INSERT INTO accounts (
             id, email, provider, display_name, account_name, account_color,
             auth_method, access_token, refresh_token, token_expires_at,
-            oauth_provider, oauth_client_id, oauth_token_url,
+            oauth_provider, oauth_client_id, oauth_token_url, oauth_extra_scopes,
             imap_host, imap_port, imap_security, imap_username, imap_password,
             smtp_host, smtp_port, smtp_security,
             smtp_username, smtp_password,
@@ -88,11 +91,11 @@ pub fn create_account_sync(
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18,
-            ?19, ?20, ?21,
-            ?22, ?23,
-            ?24, ?25, ?26
+            ?11, ?12, ?13, ?14,
+            ?15, ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22,
+            ?23, ?24,
+            ?25, ?26, ?27
         )",
         params![
             id,
@@ -108,6 +111,7 @@ pub fn create_account_sync(
             params.oauth_provider,
             params.oauth_client_id,
             params.oauth_token_url,
+            params.oauth_extra_scopes,
             params.imap_host,
             params.imap_port,
             params.imap_security,
@@ -580,6 +584,10 @@ pub struct AccountAuthInfo {
     pub auth_method: String,
     pub oauth_provider: Option<String>,
     pub oauth_client_id: Option<String>,
+    /// Space-separated extra OAuth scopes carried into the auth-code
+    /// request on re-auth, so the renewed token covers the same scope
+    /// set the original grant did.
+    pub oauth_extra_scopes: Option<String>,
     // Server fields for password re-auth
     pub imap_host: Option<String>,
     pub imap_port: Option<i64>,
@@ -597,6 +605,7 @@ pub fn get_account_auth_info_sync(
 ) -> Result<AccountAuthInfo, String> {
     conn.query_row(
         "SELECT provider, auth_method, oauth_provider, oauth_client_id,
+                oauth_extra_scopes,
                 imap_host, imap_port, imap_security,
                 smtp_host, smtp_port, smtp_security, imap_username
          FROM accounts WHERE id = ?1",
@@ -607,6 +616,7 @@ pub fn get_account_auth_info_sync(
                 auth_method: row.get("auth_method")?,
                 oauth_provider: row.get("oauth_provider")?,
                 oauth_client_id: row.get("oauth_client_id")?,
+                oauth_extra_scopes: row.get("oauth_extra_scopes")?,
                 imap_host: row.get("imap_host")?,
                 imap_port: row.get("imap_port")?,
                 imap_security: row.get("imap_security")?,

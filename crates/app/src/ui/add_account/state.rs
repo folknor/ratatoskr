@@ -355,6 +355,7 @@ impl AddAccountWizard {
             wizard.start_reauth_oauth(
                 auth_info.oauth_provider.as_deref(),
                 auth_info.oauth_client_id.as_deref(),
+                auth_info.oauth_extra_scopes.as_deref(),
             )
         } else {
             // Pre-populate server fields for password re-auth
