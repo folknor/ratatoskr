@@ -112,8 +112,7 @@ pub async fn enqueue_if_retryable_with_id(
                 }
             })
             .await;
-        if let Err(e) = enqueue_result
-        {
+        if let Err(e) = enqueue_result {
             log::warn!("[pending_ops] Failed to enqueue pending op: {e}");
             return None;
         }
@@ -193,14 +192,12 @@ async fn process_account_group(
     use super::provider::create_provider;
 
     let provider =
-        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
-            .await
-        {
-        Ok(p) => Some(p),
-        Err(e) => {
-            log::warn!("[pending_ops] Provider creation failed for {account_id}: {e}");
-            None
-        }
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+            Ok(p) => Some(p),
+            Err(e) => {
+                log::warn!("[pending_ops] Provider creation failed for {account_id}: {e}");
+                None
+            }
         };
 
     for op in ops {
@@ -368,14 +365,22 @@ async fn dispatch_pending_op(
             super::label::remove_label(ctx, account_id, resource_id, &label_id).await
         }
         "applyLabelGroup" => {
-            let group_id =
-                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            let group_id = common::typed_ids::LabelGroupId(
+                params
+                    .get("groupId")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+            );
             super::label_group::apply_label_group_retry(ctx, account_id, resource_id, group_id)
                 .await
         }
         "removeLabelGroup" => {
-            let group_id =
-                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            let group_id = common::typed_ids::LabelGroupId(
+                params
+                    .get("groupId")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+            );
             super::label_group::remove_label_group_retry(ctx, account_id, resource_id, group_id)
                 .await
         }
@@ -483,8 +488,12 @@ async fn dispatch_pending_op_with_provider(
             .await
         }
         "applyLabelGroup" => {
-            let group_id =
-                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            let group_id = common::typed_ids::LabelGroupId(
+                params
+                    .get("groupId")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+            );
             super::label_group::apply_label_group_with_provider_retry(
                 ctx,
                 provider,
@@ -495,8 +504,12 @@ async fn dispatch_pending_op_with_provider(
             .await
         }
         "removeLabelGroup" => {
-            let group_id =
-                common::typed_ids::LabelGroupId(params.get("groupId").and_then(serde_json::Value::as_i64).unwrap_or(0));
+            let group_id = common::typed_ids::LabelGroupId(
+                params
+                    .get("groupId")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+            );
             super::label_group::remove_label_group_with_provider_retry(
                 ctx,
                 provider,

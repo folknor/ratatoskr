@@ -175,7 +175,7 @@ When the user types an operator followed by a value (`from:ali`), a popup appear
 
 ```
 ┌────────────────────────────────────┐
-│ 🔍 from:ali                    ✕  │
+│  from:ali                    [ ]  │
 │ ┌────────────────────────────┐     │
 │ │ Alice Smith                │     │
 │ │ asmith@corp.com            │     │
@@ -212,7 +212,7 @@ When the user types `before:` or `after:`, a popup appears with common presets a
 
 ```
 ┌────────────────────────────────────┐
-│ 🔍 after:                      ✕  │
+│  after:                      [ ]  │
 │ ┌────────────────────────────┐     │
 │ │ Today                      │     │
 │ │ Yesterday                  │     │
@@ -221,7 +221,7 @@ When the user types `before:` or `after:`, a popup appears with common presets a
 │ │ Last 3 months              │     │
 │ │ Last year                  │     │
 │ │────────────────────────────│     │
-│ │ 📅 Pick a date...          │     │
+│ │  Pick a date...          │     │
 │ └────────────────────────────┘     │
 ├────────────────────────────────────┤
 ```
@@ -325,7 +325,7 @@ The search bar lives above the thread list, inline with the thread list panel. I
 
 ```
 ┌──────────────┬────────────────────────┬──────────────────────┐
-│              │ 🔍 Search...           │                      │
+│              │  Search...           │                      │
 │   Sidebar    │────────────────────────│    Reading Pane      │
 │              │                        │                      │
 │              │   Thread List          │                      │

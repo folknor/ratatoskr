@@ -121,8 +121,12 @@ pub(crate) async fn reap_stale_tmp_files(
             if !meta.is_file() {
                 continue;
             }
-            let Ok(modified) = meta.modified() else { continue };
-            let Ok(age) = now.duration_since(modified) else { continue };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            let Ok(age) = now.duration_since(modified) else {
+                continue;
+            };
             if age.as_secs() < max_age_secs {
                 continue;
             }
@@ -189,8 +193,12 @@ pub(crate) async fn reap_stale_opened_files(
                 (Some(t), None) | (None, Some(t)) => Some(t),
                 (None, None) => None,
             };
-            let Some(last_touch) = last_touch else { continue };
-            let Ok(age) = now.duration_since(last_touch) else { continue };
+            let Some(last_touch) = last_touch else {
+                continue;
+            };
+            let Ok(age) = now.duration_since(last_touch) else {
+                continue;
+            };
             if age.as_secs() < max_age_secs {
                 continue;
             }

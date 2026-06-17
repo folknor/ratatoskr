@@ -99,13 +99,16 @@ pub async fn load_jmap_sync_state_for(
     let st = state_type.to_string();
 
     db.with_read(move |conn| {
-        optional_read(conn.query_row(
-            "SELECT state FROM jmap_sync_state \
+        optional_read(
+            conn.query_row(
+                "SELECT state FROM jmap_sync_state \
              WHERE account_id = ?1 AND type = ?2 \
              AND COALESCE(shared_account_id, '') = COALESCE(?3, '')",
-            rusqlite::params![aid, st, said],
-            |row| row.get::<_, String>("state"),
-        ), "load jmap sync state")
+                rusqlite::params![aid, st, said],
+                |row| row.get::<_, String>("state"),
+            ),
+            "load jmap sync state",
+        )
     })
     .await
 }
@@ -217,17 +220,11 @@ async fn increment_provider_sync_cycle(
     .await
 }
 
-pub async fn increment_graph_sync_cycle(
-    db: &WriterPool,
-    account_id: &str,
-) -> Result<u32, String> {
+pub async fn increment_graph_sync_cycle(db: &WriterPool, account_id: &str) -> Result<u32, String> {
     increment_provider_sync_cycle(db, account_id, "graph", "Graph", 20).await
 }
 
-pub async fn increment_gmail_sync_cycle(
-    db: &WriterPool,
-    account_id: &str,
-) -> Result<u32, String> {
+pub async fn increment_gmail_sync_cycle(db: &WriterPool, account_id: &str) -> Result<u32, String> {
     increment_provider_sync_cycle(db, account_id, "gmail", "Gmail", 20).await
 }
 
@@ -664,12 +661,15 @@ pub async fn get_shared_mailbox_email(
     let mid = mailbox_id.to_string();
 
     db.with_read(move |conn| {
-        optional_read(conn.query_row(
-            "SELECT email_address FROM shared_mailbox_sync_state \
+        optional_read(
+            conn.query_row(
+                "SELECT email_address FROM shared_mailbox_sync_state \
              WHERE account_id = ?1 AND mailbox_id = ?2",
-            rusqlite::params![aid, mid],
-            |row| row.get(0),
-        ), "get shared mailbox email")
+                rusqlite::params![aid, mid],
+                |row| row.get(0),
+            ),
+            "get shared mailbox email",
+        )
         .map(std::option::Option::flatten)
     })
     .await

@@ -324,7 +324,6 @@ impl StatusBar {
         }
     }
 
-
     // ── Inbound data methods (called by App) ────────────
 
     /// Record sync progress for an account. Called when the progress
@@ -670,9 +669,7 @@ fn build_status_row<'a>(
     class: TextClass,
 ) -> Element<'a, StatusBarMessage> {
     let icon_styled = icon_el.size(ICON_MD).style(class.style());
-    let text_styled = text(label.to_string())
-        .size(TEXT_SM)
-        .style(class.style());
+    let text_styled = text(label.to_string()).size(TEXT_SM).style(class.style());
 
     let content_row = row![
         container(icon_styled).align_y(Alignment::Center),

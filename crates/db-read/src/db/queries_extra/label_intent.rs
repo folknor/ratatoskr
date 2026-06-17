@@ -26,11 +26,8 @@ pub fn user_visible_label_group_rendered_fragment(
     thread_column: &str,
     group_predicate: &str,
 ) -> String {
-    let visible_member = user_visible_label_exists_fragment(
-        account_column,
-        thread_column,
-        "lgm.label_id",
-    );
+    let visible_member =
+        user_visible_label_exists_fragment(account_column, thread_column, "lgm.label_id");
     format!(
         "EXISTS (SELECT 1 FROM label_group_members lgm \
            JOIN label_groups lg ON lg.id = lgm.group_id \

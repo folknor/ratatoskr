@@ -66,7 +66,9 @@ pub fn parse_vcf_contacts(data: &[u8]) -> Result<Vec<ImportedContact>, ImportErr
     let vcard_blocks = split_vcards(&text);
 
     if vcard_blocks.is_empty() {
-        return Err(ImportError::ParseError("No vCard entries found".to_string()));
+        return Err(ImportError::ParseError(
+            "No vCard entries found".to_string(),
+        ));
     }
 
     let mut contacts = Vec::with_capacity(vcard_blocks.len());
@@ -187,10 +189,7 @@ fn extract_categories(vcard: &VCard) -> Vec<String> {
     for entry in vcard.properties(&VCardProperty::Categories) {
         for value in &entry.values {
             if let Some(text) = extract_text_value(value) {
-                groups.extend(
-                    text.split([';', ',', '|'])
-                        .filter_map(clean_text),
-                );
+                groups.extend(text.split([';', ',', '|']).filter_map(clean_text));
             }
         }
     }
@@ -248,6 +247,9 @@ mod tests {
         let prepared = prepare_vcf_import(data).expect("should prepare");
         assert_eq!(prepared.contacts.len(), 1);
         assert_eq!(prepared.stats.skipped_duplicate, 1);
-        assert_eq!(prepared.skipped_rows[0].status, crate::types::ImportRowStatus::DuplicateEmail);
+        assert_eq!(
+            prepared.skipped_rows[0].status,
+            crate::types::ImportRowStatus::DuplicateEmail
+        );
     }
 }

@@ -179,8 +179,7 @@ mod tests {
     fn update_ack_round_trips() {
         let original = PinnedSearchUpdateAck;
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: PinnedSearchUpdateAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: PinnedSearchUpdateAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 

@@ -84,13 +84,9 @@ async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, Stri
     let (stages_1_4, resolved_domain) = run_stages(domain, email, &imap_found).await;
     let stage_5 = run_probe_stage(domain, &imap_found, &stages_1_4).await;
 
-    let (oidc_endpoints, wf_diag, oidc_diag) = oidc_handle.await.unwrap_or_else(|_| {
-        (
-            None,
-            err_diag("webfinger"),
-            err_diag("oidc_discovery"),
-        )
-    });
+    let (oidc_endpoints, wf_diag, oidc_diag) = oidc_handle
+        .await
+        .unwrap_or_else(|_| (None, err_diag("webfinger"), err_diag("oidc_discovery")));
 
     let (mut all_results, mut diagnostics) = unpack_stages(stages_1_4);
     all_results.push(stage_5.0);
@@ -346,12 +342,18 @@ mod test_harness_tests {
         // already emitted as absolute) must not be rewritten - the request
         // already points where it needs to go.
         let original = "http://127.0.0.1:12345/idp/realms/corp/.well-known/openid-configuration";
-        assert_eq!(rewrite_with_base(original, "http://127.0.0.1:12345"), original);
+        assert_eq!(
+            rewrite_with_base(original, "http://127.0.0.1:12345"),
+            original
+        );
     }
 
     #[test]
     fn rewrite_passes_through_unparseable_url() {
-        assert_eq!(rewrite_with_base("not a url", "http://127.0.0.1:12345"), "not a url");
+        assert_eq!(
+            rewrite_with_base("not a url", "http://127.0.0.1:12345"),
+            "not a url"
+        );
     }
 
     #[test]
@@ -537,12 +539,12 @@ mod tests {
             "user@10.0.0.5",
             "user@192.168.1.1",
             "user@172.16.0.1",
-            "user@169.254.0.1",  // link-local
-            "user@224.0.0.1",    // multicast
+            "user@169.254.0.1",     // link-local
+            "user@224.0.0.1",       // multicast
             "user@255.255.255.255", // broadcast
-            "user@0.0.0.0",      // unspecified
-            "user@192.0.2.1",    // documentation
-            "user@100.64.0.1",   // CGNAT
+            "user@0.0.0.0",         // unspecified
+            "user@192.0.2.1",       // documentation
+            "user@100.64.0.1",      // CGNAT
         ] {
             assert!(
                 extract_domain(bad).is_err(),
@@ -569,16 +571,16 @@ mod tests {
     #[test]
     fn extract_domain_rejects_url_syntax() {
         for bad in [
-            "user@example.com:8080",       // port
-            "user@example.com/path",       // path
-            "user@example.com?query=1",    // query
-            "user@example.com#frag",       // fragment
-            "user@evil@example.com",       // userinfo (extra @)
-            "user@[::1]",                  // bracketed IPv6
-            "user@[2001:db8::1]",          // bracketed public-looking IPv6
-            "user@example .com",           // whitespace
-            "user@example\tcom",           // tab
-            "user@example.com\n",          // trailing newline / control
+            "user@example.com:8080",    // port
+            "user@example.com/path",    // path
+            "user@example.com?query=1", // query
+            "user@example.com#frag",    // fragment
+            "user@evil@example.com",    // userinfo (extra @)
+            "user@[::1]",               // bracketed IPv6
+            "user@[2001:db8::1]",       // bracketed public-looking IPv6
+            "user@example .com",        // whitespace
+            "user@example\tcom",        // tab
+            "user@example.com\n",       // trailing newline / control
         ] {
             assert!(
                 extract_domain(bad).is_err(),

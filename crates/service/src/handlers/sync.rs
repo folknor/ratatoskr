@@ -46,10 +46,7 @@ pub(crate) async fn handle_start_account(
             // is the right one to pick up. Fresh-start is reserved
             // for boot-time dirty-account recovery and post-re-auth
             // restarts.
-            if let Err(e) = push_runtime
-                .start_account(account_id.clone(), false)
-                .await
-            {
+            if let Err(e) = push_runtime.start_account(account_id.clone(), false).await {
                 log::debug!("[push] piggyback start_account({account_id}) failed: {e}");
             }
         });

@@ -17,8 +17,7 @@ use super::types::*;
 // Each section item is a closure that receives the row's `RowPosition`
 // (Top/Middle/Bottom/Only) so its hover background can match the section's
 // `RADIUS_LG` outer corners while keeping `RADIUS_SM` on inner seams.
-pub(super) type RowBuilder<'a> =
-    Box<dyn FnOnce(RowPosition) -> Element<'a, SettingsMessage> + 'a>;
+pub(super) type RowBuilder<'a> = Box<dyn FnOnce(RowPosition) -> Element<'a, SettingsMessage> + 'a>;
 
 /// Wrap a pre-built `Element` so it can be passed alongside position-aware
 /// row builders. Position is ignored - used for items that don't have hover
@@ -100,9 +99,7 @@ pub(super) fn section_with_help<'a>(
     section_inner(Some(title), None, Some(help), items)
 }
 
-pub(super) fn section_untitled<'a>(
-    items: Vec<RowBuilder<'a>>,
-) -> Element<'a, SettingsMessage> {
+pub(super) fn section_untitled<'a>(items: Vec<RowBuilder<'a>>) -> Element<'a, SettingsMessage> {
     section_inner(None, None, None, items)
 }
 
@@ -148,9 +145,13 @@ fn section_inner<'a>(
             let help_id_unhover = help_id.clone();
             let help_icon = mouse_area(
                 button(
-                    container(icon::help_circle().size(ICON_XL).style(theme::TextClass::Muted.style()))
-                        .align_x(Alignment::Center)
-                        .align_y(Alignment::Center),
+                    container(
+                        icon::help_circle()
+                            .size(ICON_XL)
+                            .style(theme::TextClass::Muted.style()),
+                    )
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
                 )
                 .padding(PAD_ICON_BTN)
                 .style(theme::ButtonClass::BareIcon.style()),
@@ -163,13 +164,12 @@ fn section_inner<'a>(
                 .popup_width(HELP_TOOLTIP_WIDTH);
 
             if help_cfg.visible {
-                pop = pop
-                    .popup(
-                        container(help_cfg.content)
-                            .padding(PAD_SETTINGS_ROW)
-                            .width(Length::Fill)
-                            .style(theme::ContainerClass::Floating.style()),
-                    );
+                pop = pop.popup(
+                    container(help_cfg.content)
+                        .padding(PAD_SETTINGS_ROW)
+                        .width(Length::Fill)
+                        .style(theme::ContainerClass::Floating.style()),
+                );
             }
 
             row![title_text, Space::new().width(Length::Fill), pop,]
@@ -272,9 +272,14 @@ pub(super) fn setting_row_with_description<'a>(
         let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
             column![
                 row![
-                    container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill),
+                    container(
+                        text(label)
+                            .size(TEXT_LG)
+                            .style(text::base)
+                            .wrapping(text::Wrapping::None)
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
                     control,
                 ]
                 .align_y(Alignment::Center)
@@ -295,9 +300,14 @@ pub(super) fn setting_row_with_description<'a>(
             .into()
         } else {
             row![
-                container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill),
+                container(
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .wrapping(text::Wrapping::None)
+                )
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
                 control,
             ]
             .align_y(Alignment::Center)
@@ -565,9 +575,14 @@ pub(super) fn slider_row<'a>(
         // wraps to. Without a description the row stays at
         // `SETTINGS_ROW_HEIGHT`.
         let label_line = row![
-            container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
-                .align_y(Alignment::Center)
-                .width(Length::FillPortion(1)),
+            container(
+                text(label)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .wrapping(text::Wrapping::None)
+            )
+            .align_y(Alignment::Center)
+            .width(Length::FillPortion(1)),
             container(right_content)
                 .align_y(Alignment::Center)
                 .width(Length::FillPortion(1)),
@@ -642,10 +657,15 @@ where
                     .align_y(Alignment::Center)
                     .height(SETTINGS_RADIO_LINE_HEIGHT);
 
-                let label_text = container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
-                    .align_y(Alignment::Center)
-                    .height(SETTINGS_RADIO_LINE_HEIGHT)
-                    .width(Length::Fill);
+                let label_text = container(
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .wrapping(text::Wrapping::None),
+                )
+                .align_y(Alignment::Center)
+                .height(SETTINGS_RADIO_LINE_HEIGHT)
+                .width(Length::Fill);
 
                 let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
                     // Radios put their control (the circle) outside the
@@ -676,7 +696,9 @@ where
                     .padding(PAD_SETTINGS_ROW)
                     .width(Length::Fill);
                 if description.is_none() {
-                    wrapper = wrapper.height(SETTINGS_ROW_HEIGHT).align_y(Alignment::Center);
+                    wrapper = wrapper
+                        .height(SETTINGS_ROW_HEIGHT)
+                        .align_y(Alignment::Center);
                 }
 
                 button(wrapper)
@@ -826,8 +848,8 @@ pub(super) fn editable_list<'a>(
 
         // Divider before Add button (if there are items)
         if !items.is_empty() {
-            col = col
-                .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
         // Add button - label centered
@@ -937,9 +959,14 @@ pub(super) fn action_row<'a>(
         let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
             column![
                 row![
-                    container(text(label).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill),
+                    container(
+                        text(label)
+                            .size(TEXT_LG)
+                            .style(label_style)
+                            .wrapping(text::Wrapping::None)
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
                     container(trailing.size(ICON_XL).style(trailing_style))
                         .align_y(Alignment::Center),
                 ]
@@ -962,11 +989,15 @@ pub(super) fn action_row<'a>(
             .into()
         } else {
             row![
-                container(text(label).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill),
-                container(trailing.size(ICON_XL).style(trailing_style))
-                    .align_y(Alignment::Center),
+                container(
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(label_style)
+                        .wrapping(text::Wrapping::None)
+                )
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                container(trailing.size(ICON_XL).style(trailing_style)).align_y(Alignment::Center),
             ]
             .align_y(Alignment::Center)
             .width(Length::Fill)

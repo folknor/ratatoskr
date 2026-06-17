@@ -9,8 +9,8 @@ use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable_with_id;
 use super::provider::{classify_provider_error, create_provider};
 use db::db::WriteTarget;
-use db::progress::NoopProgressReporter;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
+use db::progress::NoopProgressReporter;
 
 /// Captured shape of a local-step upsert. The dispatcher needs the parsed
 /// label kind (for the provider call), the intent list as actually written
@@ -70,34 +70,41 @@ async fn label_local_step(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let lid = label_id.as_str().to_string();
-    db.with_write_mapped(move |conn| {
-        let label_kind =
-            label_kind_for_account_sync(conn, &aid, &lid).map_err(ActionError::db)?;
+    db.with_write_mapped(
+        move |conn| {
+            let label_kind =
+                label_kind_for_account_sync(conn, &aid, &lid).map_err(ActionError::db)?;
 
-        let exists = db::db::queries_extra::action_helpers::label_exists_sync(&conn.as_read(), &lid, &aid)
+            let exists = db::db::queries_extra::action_helpers::label_exists_sync(
+                &conn.as_read(),
+                &lid,
+                &aid,
+            )
             .map_err(|e| ActionError::db(format!("label lookup: {e}")))?;
-        if !exists {
-            ensure_typed_tag_label(conn, &aid, &label_kind)
-                .map_err(ActionError::db)?
-                .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
-        }
+            if !exists {
+                ensure_typed_tag_label(conn, &aid, &label_kind)
+                    .map_err(ActionError::db)?
+                    .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
+            }
 
-        if matches!(op, PendingLabelIntentOp::Add)
-            && let LabelKind::GraphImportance(level) = label_kind
-        {
-            let opposite = LabelKind::graph_importance(level.opposite());
-            ensure_typed_tag_label(conn, &aid, &opposite).map_err(ActionError::db)?;
-        }
-        let intents = label_intents(&lid, &label_kind, op);
-        let generation_seen = upsert_pending_intents_sync(conn, &aid, &tid, &intents, None)
-            .map_err(ActionError::db)?;
+            if matches!(op, PendingLabelIntentOp::Add)
+                && let LabelKind::GraphImportance(level) = label_kind
+            {
+                let opposite = LabelKind::graph_importance(level.opposite());
+                ensure_typed_tag_label(conn, &aid, &opposite).map_err(ActionError::db)?;
+            }
+            let intents = label_intents(&lid, &label_kind, op);
+            let generation_seen = upsert_pending_intents_sync(conn, &aid, &tid, &intents, None)
+                .map_err(ActionError::db)?;
 
-        Ok(LocalLabelStep {
-            label_kind,
-            intents,
-            generation_seen,
-        })
-    }, ActionError::db)
+            Ok(LocalLabelStep {
+                label_kind,
+                intents,
+                generation_seen,
+            })
+        },
+        ActionError::db,
+    )
     .await
 }
 
@@ -129,10 +136,9 @@ fn upsert_pending_intents_sync(
         conn,
         account_id,
         thread_id,
-        intents.iter().map(|(label_id, op)| PendingLabelIntent {
-            label_id,
-            op: *op,
-        }),
+        intents
+            .iter()
+            .map(|(label_id, op)| PendingLabelIntent { label_id, op: *op }),
         action_id,
     )
 }
@@ -148,20 +154,20 @@ async fn attach_pending_action_id(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    if let Err(e) = db.with_write(move |conn| {
-        db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
-            conn,
-            &aid,
-            &tid,
-            intents.iter().map(|(label_id, op)| PendingLabelIntent {
-                label_id,
-                op: *op,
-            }),
-            generation_seen,
-            &action_id,
-        )
-    })
-    .await
+    if let Err(e) = db
+        .with_write(move |conn| {
+            db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
+                conn,
+                &aid,
+                &tid,
+                intents
+                    .iter()
+                    .map(|(label_id, op)| PendingLabelIntent { label_id, op: *op }),
+                generation_seen,
+                &action_id,
+            )
+        })
+        .await
     {
         log::warn!("[actions] attach pending label intent action id failed: {e}");
     }
@@ -177,19 +183,19 @@ async fn clear_pending_intents_immediate(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    if let Err(e) = db.with_write(move |conn| {
-        db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
-            conn,
-            &aid,
-            &tid,
-            intents.iter().map(|(label_id, op)| PendingLabelIntent {
-                label_id,
-                op: *op,
-            }),
-            generation_seen,
-        )
-    })
-    .await
+    if let Err(e) = db
+        .with_write(move |conn| {
+            db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
+                conn,
+                &aid,
+                &tid,
+                intents
+                    .iter()
+                    .map(|(label_id, op)| PendingLabelIntent { label_id, op: *op }),
+                generation_seen,
+            )
+        })
+        .await
     {
         log::warn!("[actions] clear pending label intent on permanent fail: {e}");
     }
@@ -204,23 +210,25 @@ async fn confirm_provider_intents(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_write_mapped(move |conn| {
-        let tx = conn
-            .transaction()
-            .map_err(|e| ActionError::db(format!("begin confirm tx: {e}")))?;
-        db::db::queries_extra::confirmed_provider_label_intents(
-            &tx,
-            &aid,
-            &tid,
-            intents.iter().map(|(label_id, op)| PendingLabelIntent {
-                label_id,
-                op: *op,
-            }),
-        )
-        .map_err(ActionError::db)?;
-        tx.commit()
-            .map_err(|e| ActionError::db(format!("commit confirm tx: {e}")))
-    }, ActionError::db)
+    db.with_write_mapped(
+        move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| ActionError::db(format!("begin confirm tx: {e}")))?;
+            db::db::queries_extra::confirmed_provider_label_intents(
+                &tx,
+                &aid,
+                &tid,
+                intents
+                    .iter()
+                    .map(|(label_id, op)| PendingLabelIntent { label_id, op: *op }),
+            )
+            .map_err(ActionError::db)?;
+            tx.commit()
+                .map_err(|e| ActionError::db(format!("commit confirm tx: {e}")))
+        },
+        ActionError::db,
+    )
     .await
 }
 
@@ -285,10 +293,7 @@ fn label_write_metadata(label: &LabelKind) -> Option<(String, Option<i64>, bool)
 /// clear the optimistic intent immediately, retryable failures enqueue and
 /// attach the action id.
 fn provider_retryability(error: &str) -> bool {
-    !matches!(
-        classify_provider_error(error),
-        RemoteFailureKind::Permanent,
-    )
+    !matches!(classify_provider_error(error), RemoteFailureKind::Permanent,)
 }
 
 /// Provider dispatch for add-label (assumes local mutation already applied).
@@ -684,7 +689,9 @@ async fn finalize_dispatch_outcome(
     enqueue_pending: bool,
 ) {
     match outcome {
-        ActionOutcome::LocalOnly { retryable: true, .. } => {
+        ActionOutcome::LocalOnly {
+            retryable: true, ..
+        } => {
             if enqueue_pending
                 && let Some(action_id) = enqueue_if_retryable_with_id(
                     ctx,
@@ -707,18 +714,14 @@ async fn finalize_dispatch_outcome(
                 .await;
             }
         }
-        ActionOutcome::LocalOnly { retryable: false, .. } => {
+        ActionOutcome::LocalOnly {
+            retryable: false, ..
+        } => {
             // Permanent failure: the action is over. Tear down the
             // optimistic intent now instead of leaving it for the
             // 48h stale-intent sweep.
-            clear_pending_intents_immediate(
-                ctx,
-                account_id,
-                thread_id,
-                intents,
-                generation_seen,
-            )
-            .await;
+            clear_pending_intents_immediate(ctx, account_id, thread_id, intents, generation_seen)
+                .await;
         }
         ActionOutcome::Success | ActionOutcome::NoOp | ActionOutcome::Failed { .. } => {}
     }

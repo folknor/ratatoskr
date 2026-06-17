@@ -38,9 +38,7 @@ pub fn get_message_body(
     );
     match result {
         Ok(snippet) => Ok((snippet, None)),
-        Err(crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
-            Ok((None, None))
-        }
+        Err(crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok((None, None)),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -96,10 +94,8 @@ pub fn find_unreferenced_message_ids(
         let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| format!("prepare unreferenced lookup: {e}"))?;
-        let params: Vec<&dyn rusqlite::ToSql> = chunk
-            .iter()
-            .map(|s| s as &dyn rusqlite::ToSql)
-            .collect();
+        let params: Vec<&dyn rusqlite::ToSql> =
+            chunk.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
         let live: std::collections::HashSet<String> = stmt
             .query_map(params.as_slice(), |r| r.get::<_, String>(0))
             .map_err(|e| format!("query unreferenced lookup: {e}"))?

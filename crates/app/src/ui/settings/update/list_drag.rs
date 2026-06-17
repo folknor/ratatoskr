@@ -4,7 +4,11 @@ use crate::ui::layout::*;
 use crate::ui::settings::types::*;
 
 impl Settings {
-    pub(super) fn handle_drag_move(&mut self, list_id: &str, point: Point) -> Task<SettingsMessage> {
+    pub(super) fn handle_drag_move(
+        &mut self,
+        list_id: &str,
+        point: Point,
+    ) -> Task<SettingsMessage> {
         let has_drag = self
             .drag_state
             .as_ref()

@@ -71,7 +71,13 @@ mod tests {
 
     #[test]
     fn range_bound_is_exclusive() {
-        assert_eq!(DateBound::before(10).to_range_bound(|ts| ts), Bound::Excluded(10));
-        assert_eq!(DateBound::after(20).to_range_bound(|ts| ts), Bound::Excluded(20));
+        assert_eq!(
+            DateBound::before(10).to_range_bound(|ts| ts),
+            Bound::Excluded(10)
+        );
+        assert_eq!(
+            DateBound::after(20).to_range_bound(|ts| ts),
+            Bound::Excluded(20)
+        );
     }
 }

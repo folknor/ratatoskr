@@ -144,7 +144,11 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
             let on_link: std::rc::Rc<dyn Fn(String) -> M + 'a> = std::rc::Rc::new(on_link_click);
             let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
             for block in blocks {
-                col = col.push(render_block_ref(block, std::rc::Rc::clone(&on_link), inline_images));
+                col = col.push(render_block_ref(
+                    block,
+                    std::rc::Rc::clone(&on_link),
+                    inline_images,
+                ));
             }
             col.into()
         }
@@ -181,7 +185,11 @@ pub fn render_html<'a, M: Clone + 'a>(
     let on_link: std::rc::Rc<dyn Fn(String) -> M + 'a> = std::rc::Rc::new(on_link_click);
     let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
     for block in blocks {
-        col = col.push(render_block(block, std::rc::Rc::clone(&on_link), inline_images));
+        col = col.push(render_block(
+            block,
+            std::rc::Rc::clone(&on_link),
+            inline_images,
+        ));
     }
     col.into()
 }
@@ -220,10 +228,7 @@ impl InlineStyle {
 #[derive(Clone)]
 pub(super) enum InlineSpan {
     /// Styled text.
-    Text {
-        content: String,
-        style: InlineStyle,
-    },
+    Text { content: String, style: InlineStyle },
     /// A hyperlink with display text, target URL, and any inline styling
     /// that was active inside the `<a>...</a>` (so a bold link still
     /// renders bold).
@@ -272,8 +277,7 @@ fn render_spans<'a, M: Clone + 'a>(
     }
 
     let on_click = std::rc::Rc::clone(on_link_click);
-    let mut iced_spans: Vec<iced::widget::text::Span<'_, String>> =
-        Vec::with_capacity(spans.len());
+    let mut iced_spans: Vec<iced::widget::text::Span<'_, String>> = Vec::with_capacity(spans.len());
     for span in spans {
         match span {
             InlineSpan::Text { content, style } => {

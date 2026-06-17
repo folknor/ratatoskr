@@ -2,7 +2,7 @@ use super::super::WriterPool;
 use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
-use crate::db::{query_as, query_one, WriteTarget, WriteTransactionTarget};
+use crate::db::{WriteTarget, WriteTransactionTarget, query_as, query_one};
 use rusqlite::params;
 
 // ── Signature column list ────────────────────────────────
@@ -209,10 +209,7 @@ pub fn db_update_signature_sync(
 /// Delete a signature row by id. Idempotent: delete-of-missing
 /// returns `Ok` (rusqlite's `execute` reports rows-affected but does
 /// not error on zero matches), so callers do not need to pre-check.
-pub fn db_delete_signature_sync(
-    conn: &impl WriteTarget,
-    id: &str,
-) -> Result<(), String> {
+pub fn db_delete_signature_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
     log::info!("Deleting signature: id={id}");
     conn.execute("DELETE FROM signatures WHERE id = ?1", params![id])
         .map_err(|e| {
@@ -434,7 +431,8 @@ pub struct SaveLocalDraftParams {
     pub signature_separator_index: Option<i64>,
 }
 
-const SAVE_LOCAL_DRAFT_SQL: &str = "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+const SAVE_LOCAL_DRAFT_SQL: &str =
+    "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
     subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, \
     remote_draft_id, attachments, signature_separator_index, updated_at, sync_status)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, unixepoch(), 'pending')
@@ -498,7 +496,10 @@ pub fn db_mark_queued_drafts_failed_sync(
     .map_err(|e| e.to_string())
 }
 
-pub async fn db_get_local_draft(db: &WriterPool, id: String) -> Result<Option<DbLocalDraft>, String> {
+pub async fn db_get_local_draft(
+    db: &WriterPool,
+    id: String,
+) -> Result<Option<DbLocalDraft>, String> {
     db.with_write(move |conn| {
         query_one::<DbLocalDraft>(conn, "SELECT * FROM local_drafts WHERE id = ?1", &[&id])
     })
@@ -779,9 +780,7 @@ mod sync_signature_tests {
     }
 
     fn count_default_for(conn: &Connection, account_id: &str, col: &str) -> i64 {
-        let sql = format!(
-            "SELECT COUNT(*) FROM signatures WHERE account_id = ?1 AND {col} = 1"
-        );
+        let sql = format!("SELECT COUNT(*) FROM signatures WHERE account_id = ?1 AND {col} = 1");
         conn.query_row(&sql, params![account_id], |row| row.get(0))
             .expect("count default")
     }
@@ -812,8 +811,7 @@ mod sync_signature_tests {
             is_default: false,
             is_reply_default: false,
         };
-        let id = db_insert_signature_sync(
-            &write(&conn), &p).expect("insert");
+        let id = db_insert_signature_sync(&write(&conn), &p).expect("insert");
         assert!(!id.is_empty(), "must return a uuid");
         let name: String = conn
             .query_row(
@@ -1041,7 +1039,7 @@ mod sync_signature_tests {
         let mut ids = Vec::new();
         for name in ["A", "B", "C"] {
             let id = db_insert_signature_sync(
-            &write(&conn),
+                &write(&conn),
                 &InsertSignatureParams {
                     account_id: "acc-1".into(),
                     name: name.into(),

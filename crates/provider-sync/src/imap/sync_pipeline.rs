@@ -2,20 +2,22 @@ use std::collections::HashMap;
 
 use rusqlite::OptionalExtension;
 
-use db::db::{ReadDbState, WriteConn};
+use crate::keyword_membership::{
+    KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
+};
+use crate::persistence;
 use db::db::queries_extra::{
     AttachmentInsertRow, FolderWriteRow, MessageInsertRow, insert_attachments,
     insert_folders_batch, insert_messages, recompute_thread_read_starred, set_message_imap_flags,
     sync_thread_read_starred_labels,
 };
+use db::db::{ReadDbState, WriteConn};
 use search::SearchDocument;
-use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState};
 use seen::MessageAddresses;
-use store::inline_image_store::InlineImage;
-use crate::keyword_membership::{
-    KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
-use crate::persistence;
+use store::inline_image_store::InlineImage;
 
 use super::convert::ConvertedMessage;
 use super::folder_mapper::map_folder_to_folder;
@@ -161,9 +163,10 @@ impl DbInsertData {
             .map_err(|e| format!("upsert placeholder thread: {e}"))?;
         }
 
-        let invite_idx = self.attachments.iter().position(|att| {
-            common::email_parsing::is_calendar_content_type(&att.mime_type)
-        });
+        let invite_idx = self
+            .attachments
+            .iter()
+            .position(|att| common::email_parsing::is_calendar_content_type(&att.mime_type));
         let invite_method = invite_idx.and_then(|i| {
             common::email_parsing::extract_imip_method(&self.attachments[i].mime_type)
         });
@@ -265,32 +268,31 @@ pub(crate) async fn store_chunk(
         .iter()
         .map(|c| DbInsertData::from_converted(c, account_id))
         .collect();
-    let resolved_ids = db.with_write(move |conn| {
-        let tx = conn
-                .transaction()
-            .map_err(|e| format!("begin tx: {e}"))?;
-        let mut resolved_ids = Vec::with_capacity(db_data.len());
-        for d in &mut db_data {
-            let original_id = d.id.clone();
-            if let Some((existing_id, existing_thread_id)) =
-                existing_imap_message_identity(&tx, &d.account_id, &d.imap_folder, d.imap_uid)?
-            {
-                d.adopt_existing_identity(&existing_id, existing_thread_id);
+    let resolved_ids = db
+        .with_write(move |conn| {
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
+            let mut resolved_ids = Vec::with_capacity(db_data.len());
+            for d in &mut db_data {
+                let original_id = d.id.clone();
+                if let Some((existing_id, existing_thread_id)) =
+                    existing_imap_message_identity(&tx, &d.account_id, &d.imap_folder, d.imap_uid)?
+                {
+                    d.adopt_existing_identity(&existing_id, existing_thread_id);
+                }
+                resolved_ids.push((original_id, d.id.clone()));
+                d.insert(&tx)?;
+                replace_message_keywords(
+                    &tx,
+                    KeywordProvider::Imap,
+                    &d.account_id,
+                    &d.id,
+                    &d.keyword_categories,
+                )?;
             }
-            resolved_ids.push((original_id, d.id.clone()));
-            d.insert(&tx)?;
-            replace_message_keywords(
-                &tx,
-                KeywordProvider::Imap,
-                &d.account_id,
-                &d.id,
-                &d.keyword_categories,
-            )?;
-        }
-        tx.commit().map_err(|e| format!("commit: {e}"))?;
-        Ok(resolved_ids)
-    })
-    .await?;
+            tx.commit().map_err(|e| format!("commit: {e}"))?;
+            Ok(resolved_ids)
+        })
+        .await?;
     let resolved_ids: HashMap<String, String> = resolved_ids.into_iter().collect();
 
     // 2-5. Fire-and-forget post-DB writes - all independent, run concurrently.
@@ -467,7 +469,7 @@ pub fn sync_folders_to_folders(
     folders: &[&ImapFolder],
 ) -> Result<(), String> {
     let tx = conn
-                .transaction()
+        .transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
     // Build path → folder_id map for parent resolution
@@ -662,7 +664,7 @@ pub fn apply_flag_changes(
     }
 
     let tx = conn
-                .transaction()
+        .transaction()
         .map_err(|e| format!("flag change tx: {e}"))?;
 
     let mut updated = 0u64;
@@ -670,17 +672,16 @@ pub fn apply_flag_changes(
 
     for change in changes {
         // Update message flags via shared db helper
-        let count =
-            set_message_imap_flags(
-                &tx,
-                account_id,
-                folder,
-                i64::from(change.uid),
-                change.is_read,
-                change.is_starred,
-                change.is_replied,
-                change.is_forwarded,
-            )?;
+        let count = set_message_imap_flags(
+            &tx,
+            account_id,
+            folder,
+            i64::from(change.uid),
+            change.is_read,
+            change.is_starred,
+            change.is_replied,
+            change.is_forwarded,
+        )?;
         updated += count as u64;
 
         if let Some((message_id, tid)) =
@@ -862,7 +863,7 @@ pub fn remove_deleted_messages(
     }
 
     let tx = conn
-                .transaction()
+        .transaction()
         .map_err(|e| format!("deletion tx: {e}"))?;
 
     let affected_threads =

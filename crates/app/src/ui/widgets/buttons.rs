@@ -99,8 +99,7 @@ pub fn action_icon_button<'a, M: Clone + 'a>(
     button(
         row![
             container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
-            container(text(label).size(TEXT_SM).style(text::secondary))
-                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_SM).style(text::secondary)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),

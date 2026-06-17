@@ -447,10 +447,12 @@ pub fn mini_month<'a, M: 'a + Clone>(
             let dot_style: fn(&Theme) -> text::Style = if has_events && in_month {
                 text::primary
             } else {
-                |_| text::Style { color: Some(Color::TRANSPARENT) }
+                |_| text::Style {
+                    color: Some(Color::TRANSPARENT),
+                }
             };
-            let dot = container(text("\u{2022}").size(4.0).style(dot_style))
-                .align_x(Alignment::Center);
+            let dot =
+                container(text("\u{2022}").size(4.0).style(dot_style)).align_x(Alignment::Center);
             let cell_content: Element<'_, M> = column![label, dot]
                 .spacing(0)
                 .align_x(Alignment::Center)

@@ -389,12 +389,7 @@ pub fn generate_threads(
             {
                 let size_var = att.base_size / 4;
                 let size = att.base_size + rng.random_range(-size_var..size_var);
-                msg_attachment_ids.push((
-                    crate::next_uuid(rng),
-                    att.filename,
-                    att.mime_type,
-                    size,
-                ));
+                msg_attachment_ids.push((crate::next_uuid(rng), att.filename, att.mime_type, size));
             }
 
             if rng.random::<f64>() < 0.20
@@ -514,13 +509,13 @@ pub fn generate_threads(
             for p in &participants {
                 contacts::upsert_contact(conn, rng, &p.email, &p.display_name, &acc.id, msg_date)?;
             }
-
         }
 
         // Update thread with final computed values
-        let (first_aggregate_message, rest_aggregate_messages) = aggregate_messages
-            .split_first()
-            .ok_or_else(|| "seed thread missing aggregate messages".to_string())?;
+        let (first_aggregate_message, rest_aggregate_messages) =
+            aggregate_messages
+                .split_first()
+                .ok_or_else(|| "seed thread missing aggregate messages".to_string())?;
         let aggregate = ThreadAggregate::compute_from_messages(
             first_aggregate_message,
             rest_aggregate_messages,

@@ -1,5 +1,5 @@
-use cmdk::OptionItem;
 use crate::db::ReadConn;
+use cmdk::OptionItem;
 
 use crate::db::queries_extra::command_palette;
 
@@ -8,10 +8,12 @@ pub fn get_user_folders_for_palette(
     conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Vec<OptionItem>, String> {
-    Ok(command_palette::get_user_folders_for_account_sync(conn, account_id)?
-        .into_iter()
-        .map(|r| label_name_to_option_item(r.id, &r.name))
-        .collect())
+    Ok(
+        command_palette::get_user_folders_for_account_sync(conn, account_id)?
+            .into_iter()
+            .map(|r| label_name_to_option_item(r.id, &r.name))
+            .collect(),
+    )
 }
 
 /// All user-visible label groups.
@@ -28,10 +30,12 @@ pub fn get_thread_label_groups_for_palette(
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<OptionItem>, String> {
-    Ok(command_palette::get_thread_label_groups_sync(conn, account_id, thread_id)?
-        .into_iter()
-        .map(|r| label_name_to_option_item(r.id.to_string(), &r.name))
-        .collect())
+    Ok(
+        command_palette::get_thread_label_groups_sync(conn, account_id, thread_id)?
+            .into_iter()
+            .map(|r| label_name_to_option_item(r.id.to_string(), &r.name))
+            .collect(),
+    )
 }
 
 /// Convert a label name to an `OptionItem`, splitting `/`-delimited names

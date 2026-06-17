@@ -229,9 +229,9 @@ pub async fn run_invariant_pass(
             .await
         {
             Ok(()) => stats.history_ids_cleared += 1,
-            Err(e) => log::warn!(
-                "invariant pass: clear_account_history_id({account_id}) failed: {e}"
-            ),
+            Err(e) => {
+                log::warn!("invariant pass: clear_account_history_id({account_id}) failed: {e}")
+            }
         }
 
         // Tantivy orphan iteration scoped to this account. Skipped
@@ -241,17 +241,15 @@ pub async fn run_invariant_pass(
         if let Some(search_read) = search_read {
             match drop_search_orphans(db, search_read, search_write, &account_id).await {
                 Ok(n) => stats.search_orphans_dropped += n,
-                Err(e) => log::warn!(
-                    "invariant pass: search orphan drop for {account_id} failed: {e}"
-                ),
+                Err(e) => {
+                    log::warn!("invariant pass: search orphan drop for {account_id} failed: {e}")
+                }
             }
         }
 
         // Unlink the marker now that per-account repair is complete.
         if let Err(e) = unlink_marker_file(app_data_dir, &account_id).await {
-            log::warn!(
-                "invariant pass: failed to unlink marker for {account_id}: {e}"
-            );
+            log::warn!("invariant pass: failed to unlink marker for {account_id}: {e}");
         }
     }
     stats.search_scan_ms = search_started.elapsed().as_millis();
@@ -403,9 +401,7 @@ async fn drop_search_orphans(
 ) -> Result<u64, String> {
     let aid = account_id.to_string();
     let live: HashSet<String> = db
-        .with_write(move |conn| {
-            ::db::db::queries_extra::list_message_ids_for_account(conn, &aid)
-        })
+        .with_write(move |conn| ::db::db::queries_extra::list_message_ids_for_account(conn, &aid))
         .await?;
     let aid2 = account_id.to_string();
     let read_clone = search_read.clone();
@@ -492,7 +488,11 @@ mod tests {
         dirty.sort();
         assert_eq!(
             dirty,
-            vec!["acc-a".to_string(), "acc-b".to_string(), "acc-c".to_string()]
+            vec![
+                "acc-a".to_string(),
+                "acc-b".to_string(),
+                "acc-c".to_string()
+            ]
         );
     }
 

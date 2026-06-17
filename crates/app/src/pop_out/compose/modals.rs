@@ -101,10 +101,7 @@ pub(super) fn save_as_group_dialog<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
-    let count = state
-        .bulk_paste_banner
-        .as_ref()
-        .map_or(0, |b| b.count);
+    let count = state.bulk_paste_banner.as_ref().map_or(0, |b| b.count);
 
     let name_input = text_input("Group name", &state.save_group_name)
         .on_input(move |s| {
@@ -138,8 +135,7 @@ pub(super) fn save_as_group_dialog<'a>(
         body = body.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
     }
 
-    let save_disabled =
-        state.save_group_name.trim().is_empty() || state.save_group_in_flight;
+    let save_disabled = state.save_group_name.trim().is_empty() || state.save_group_in_flight;
     let save_label = if state.save_group_in_flight {
         "Saving..."
     } else {
@@ -259,10 +255,7 @@ pub(super) fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'
         window_id,
         PopOutMessage::Compose(ComposeMessage::ToggleDiscardConfirm),
     );
-    let discard_msg = Message::PopOut(
-        window_id,
-        PopOutMessage::Compose(ComposeMessage::Discard),
-    );
+    let discard_msg = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Discard));
     alert_dialog(
         "Discard this draft?",
         "Your unsaved changes will be lost.",
@@ -330,10 +323,7 @@ pub(super) fn autocomplete_dropdown<'a>(
                 .member_count
                 .map(|n| format!(" ({n})"))
                 .unwrap_or_default();
-            let name = entry
-                .display_name
-                .as_deref()
-                .unwrap_or(&entry.email);
+            let name = entry.display_name.as_deref().unwrap_or(&entry.email);
             row![
                 icon::users().size(ICON_SM).style(text::secondary),
                 text(format!("{name}{member_suffix}"))
@@ -400,8 +390,7 @@ pub(super) fn link_dialog<'a>(
         .padding(PAD_INPUT);
 
     let body = column![
-        column![text("URL").size(TEXT_SM).style(text::secondary), url_input,]
-            .spacing(SPACE_XXS),
+        column![text("URL").size(TEXT_SM).style(text::secondary), url_input,].spacing(SPACE_XXS),
         column![
             text("Display text").size(TEXT_SM).style(text::secondary),
             text_input_field,

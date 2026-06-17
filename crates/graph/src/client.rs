@@ -765,17 +765,15 @@ mod tests {
     #[test]
     fn test_graph_endpoint_origin_maps_to_api_bases() {
         let (api, beta) =
-            graph_api_bases_from_test_endpoint("http://127.0.0.1:8080")
-                .expect("endpoint maps");
+            graph_api_bases_from_test_endpoint("http://127.0.0.1:8080").expect("endpoint maps");
         assert_eq!(api, "http://127.0.0.1:8080/v1.0");
         assert_eq!(beta, "http://127.0.0.1:8080/beta");
     }
 
     #[test]
     fn test_graph_endpoint_v1_derives_beta_base() {
-        let (api, beta) =
-            graph_api_bases_from_test_endpoint("http://127.0.0.1:8080/v1.0")
-                .expect("endpoint maps");
+        let (api, beta) = graph_api_bases_from_test_endpoint("http://127.0.0.1:8080/v1.0")
+            .expect("endpoint maps");
         assert_eq!(api, "http://127.0.0.1:8080/v1.0");
         assert_eq!(beta, "http://127.0.0.1:8080/beta");
     }

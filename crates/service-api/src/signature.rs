@@ -117,8 +117,7 @@ mod tests {
             is_reply_default: false,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SignatureCreateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SignatureCreateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -147,8 +146,7 @@ mod tests {
             id: "sig-uuid-1".to_string(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SignatureCreateAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SignatureCreateAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -170,8 +168,7 @@ mod tests {
         assert!(!obj.contains_key("body_text"));
         assert!(obj.contains_key("is_default"));
         assert!(!obj.contains_key("is_reply_default"));
-        let recovered: SignatureUpdateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SignatureUpdateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -186,8 +183,7 @@ mod tests {
             is_reply_default: Some(true),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SignatureUpdateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SignatureUpdateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -197,8 +193,7 @@ mod tests {
             id: "sig-1".to_string(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SignatureDeleteParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SignatureDeleteParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -208,8 +203,7 @@ mod tests {
             ordered_ids: vec!["a".to_string(), "b".to_string(), "c".to_string()],
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SignatureReorderParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SignatureReorderParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

@@ -188,8 +188,7 @@ impl ReadyApp {
             }
             CalendarMessage::ExpandPopoverToModal => {
                 // Workflow identity stays the same - only the surface changes.
-                if let CalendarWorkflow::ViewingEvent { surface, .. } =
-                    &mut self.calendar.workflow
+                if let CalendarWorkflow::ViewingEvent { surface, .. } = &mut self.calendar.workflow
                 {
                     *surface = ViewingSurface::FullModal;
                     self.calendar.sync_surfaces();
@@ -308,9 +307,8 @@ impl ReadyApp {
 
                 let Some(client) = self.service_client.as_ref().cloned() else {
                     log::error!("DeleteEvent: service client unavailable");
-                    self.status_bar.show_confirmation(
-                        "Cannot delete: service not connected".to_string(),
-                    );
+                    self.status_bar
+                        .show_confirmation("Cannot delete: service not connected".to_string());
                     return Task::none();
                 };
 
@@ -319,15 +317,16 @@ impl ReadyApp {
                     operations: vec![service_api::CalendarActionWireOperation {
                         operation_id: service_api::OperationId(0),
                         account_id,
-                        operation: service_api::WireCalendarOperation::DeleteEvent {
-                            event_id,
-                        },
+                        operation: service_api::WireCalendarOperation::DeleteEvent { event_id },
                     }],
                 };
                 let plan_id = plan.plan_id;
                 Task::perform(
                     async move {
-                        client.execute_calendar_plan(plan).await.map_err(|e| e.to_string())?;
+                        client
+                            .execute_calendar_plan(plan)
+                            .await
+                            .map_err(|e| e.to_string())?;
                         let completed = client
                             .subscribe_or_consume_calendar_action(plan_id)
                             .await
@@ -358,9 +357,7 @@ impl ReadyApp {
                 }
                 Task::none()
             }
-            CalendarMessage::SwitchToMail => {
-                self.update(Message::SetAppMode(crate::AppMode::Mail))
-            }
+            CalendarMessage::SwitchToMail => self.update(Message::SetAppMode(crate::AppMode::Mail)),
             CalendarMessage::PopOutCalendar => {
                 // Check if a calendar pop-out already exists.
                 let existing = self
@@ -381,12 +378,14 @@ impl ReadyApp {
                 let (id, open_task) = iced::window::open(settings);
                 self.pop_out_windows.insert(
                     id,
-                    crate::pop_out::PopOutWindow::Calendar(crate::pop_out::CalendarPopOutGeometry {
-                        width: initial.width,
-                        height: initial.height,
-                        x: None,
-                        y: None,
-                    }),
+                    crate::pop_out::PopOutWindow::Calendar(
+                        crate::pop_out::CalendarPopOutGeometry {
+                            width: initial.width,
+                            height: initial.height,
+                            x: None,
+                            y: None,
+                        },
+                    ),
                 );
                 // Switch main window back to mail mode.
                 self.app_mode = crate::AppMode::Mail;
@@ -416,12 +415,9 @@ impl ReadyApp {
                 // shows up in practice we surface a status-bar message
                 // instead of silently swallowing the click.
                 let Some(client) = self.service_client.as_ref().cloned() else {
-                    log::warn!(
-                        "calendar.set_visibility: no ServiceClient yet; ignoring toggle"
-                    );
-                    self.status_bar.show_confirmation(
-                        "Service not ready - try again in a moment".to_string(),
-                    );
+                    log::warn!("calendar.set_visibility: no ServiceClient yet; ignoring toggle");
+                    self.status_bar
+                        .show_confirmation("Service not ready - try again in a moment".to_string());
                     return Task::none();
                 };
                 // Eager UI flip for responsiveness, with the prior value
@@ -470,9 +466,7 @@ impl ReadyApp {
                     {
                         cal.is_visible = !requested_value;
                     }
-                    log::warn!(
-                        "calendar.set_visibility failed for {calendar_id}: {e}"
-                    );
+                    log::warn!("calendar.set_visibility failed for {calendar_id}: {e}");
                     self.status_bar
                         .show_confirmation(format!("Could not update calendar: {e}"));
                     Task::none()
@@ -671,7 +665,10 @@ impl ReadyApp {
 
         Task::perform(
             async move {
-                client.execute_calendar_plan(plan).await.map_err(|e| e.to_string())?;
+                client
+                    .execute_calendar_plan(plan)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let completed = client
                     .subscribe_or_consume_calendar_action(plan_id)
                     .await
@@ -702,9 +699,7 @@ impl ReadyApp {
             .calendar
             .calendars
             .iter()
-            .filter(|c| {
-                for_account.is_none_or(|acct| c.account_id == acct)
-            })
+            .filter(|c| for_account.is_none_or(|acct| c.account_id == acct))
             .collect();
         if eligible.len() == 1 {
             event.calendar_id = Some(eligible[0].id.clone());
@@ -858,4 +853,3 @@ fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData
         color: None,
     }
 }
-

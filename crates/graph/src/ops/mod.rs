@@ -11,8 +11,8 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    LabelKind, ProviderProfile, ProviderTestResult, SendIntent,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderFolderEntry,
+    ProviderFolderMutation, ProviderProfile, ProviderTestResult, SendIntent,
 };
 use db::db::ReadDbState;
 
@@ -61,7 +61,11 @@ impl GraphOps {
 // holds the orphan-impl and sync entry-point code.
 #[async_trait]
 impl ProviderOps for GraphOps {
-    async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(
+        &self,
+        ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let archive_id = folder_map
             .resolve_graph_folder_id("archive")
@@ -71,7 +75,11 @@ impl ProviderOps for GraphOps {
         Ok(move_messages(&self.client, ctx, &msg_ids, &archive_id).await?)
     }
 
-    async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(
+        &self,
+        ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let trash_id = folder_map
             .resolve_graph_folder_id("TRASH")
@@ -163,7 +171,9 @@ impl ProviderOps for GraphOps {
         let LabelKind::GraphCategory(category) = label else {
             if let LabelKind::GraphImportance(level) = label {
                 let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-                return Ok(batch_set_importance(&self.client, ctx, &msg_ids, level.graph_value()).await?);
+                return Ok(
+                    batch_set_importance(&self.client, ctx, &msg_ids, level.graph_value()).await?,
+                );
             }
             return Err(ProviderError::Client(format!(
                 "Graph add_label received non-Graph label kind: {label:?}"

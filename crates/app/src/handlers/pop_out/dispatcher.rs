@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use iced::Task;
 
-use crate::pop_out::compose::{ComposeAttachment, ComposeMessage};
 use crate::handlers::attachments::{
     AttachmentRef, OpenAttachmentParams, SaveAllAttachmentsParams, SaveAttachmentParams,
 };
+use crate::pop_out::compose::{ComposeAttachment, ComposeMessage};
 use crate::pop_out::message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
 use crate::{Message, ReadyApp};
@@ -73,10 +73,8 @@ impl ReadyApp {
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
-            ) => self.dispatch_pop_out_action(
-                window_id,
-                crate::action_resolve::MailActionIntent::Trash,
-            ),
+            ) => self
+                .dispatch_pop_out_action(window_id, crate::action_resolve::MailActionIntent::Trash),
             // Attachments roadmap Phase 5: Open / Save / Save All
             // wire through the App-level shared handler so the
             // reading-pane and pop-out surfaces produce identical
@@ -190,10 +188,7 @@ impl ReadyApp {
                 PopOutWindow::Compose(state),
                 PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
             ) => {
-                crate::pop_out::compose::update_compose(
-                    state,
-                    ComposeMessage::GroupSaveConfirm,
-                );
+                crate::pop_out::compose::update_compose(state, ComposeMessage::GroupSaveConfirm);
                 if !state.save_group_in_flight {
                     return Task::none();
                 }
@@ -240,9 +235,7 @@ impl ReadyApp {
                 };
                 // Phase 6a: contacts.group_save IPC.
                 let Some(client) = service_client else {
-                    log::warn!(
-                        "contacts.group_save: no ServiceClient yet; surfacing error"
-                    );
+                    log::warn!("contacts.group_save: no ServiceClient yet; surfacing error");
                     return Task::done(Message::PopOut(
                         window_id,
                         PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(
@@ -292,9 +285,7 @@ impl ReadyApp {
                     ComposeMessage::ContextMenuCopy { field, token_id } => {
                         (*field, *token_id, false)
                     }
-                    ComposeMessage::ContextMenuCut { field, token_id } => {
-                        (*field, *token_id, true)
-                    }
+                    ComposeMessage::ContextMenuCut { field, token_id } => (*field, *token_id, true),
                     _ => return Task::none(),
                 };
                 handle_compose_copy_or_cut(state, &db, field, token_id, is_cut)
@@ -393,9 +384,7 @@ impl ReadyApp {
                         Task::none()
                     };
                 let autocomplete_task = if trigger_autocomplete {
-                    crate::handlers::contacts::dispatch_autocomplete_search(
-                        &db, window_id, state,
-                    )
+                    crate::handlers::contacts::dispatch_autocomplete_search(&db, window_id, state)
                 } else {
                     Task::none()
                 };
@@ -459,11 +448,11 @@ fn build_open_params(
     let row = state.attachments.iter().find(|a| a.id == attachment_id)?;
     Some(OpenAttachmentParams {
         item: AttachmentRef {
-            account_id:    state.account_id.clone(),
-            message_id:    state.message_id.clone(),
+            account_id: state.account_id.clone(),
+            message_id: state.message_id.clone(),
             attachment_id: row.id.clone(),
-            filename:      row.filename.clone(),
-            mime_type:     row.mime_type.clone(),
+            filename: row.filename.clone(),
+            mime_type: row.mime_type.clone(),
         },
     })
 }
@@ -475,12 +464,12 @@ fn build_save_params(
     let row = state.attachments.iter().find(|a| a.id == attachment_id)?;
     Some(SaveAttachmentParams {
         thread_id: state.thread_id.clone(),
-        item:      AttachmentRef {
-            account_id:    state.account_id.clone(),
-            message_id:    state.message_id.clone(),
+        item: AttachmentRef {
+            account_id: state.account_id.clone(),
+            message_id: state.message_id.clone(),
             attachment_id: row.id.clone(),
-            filename:      row.filename.clone(),
-            mime_type:     row.mime_type.clone(),
+            filename: row.filename.clone(),
+            mime_type: row.mime_type.clone(),
         },
     })
 }
@@ -490,11 +479,11 @@ fn build_save_all_params(state: &MessageViewState) -> SaveAllAttachmentsParams {
         .attachments
         .iter()
         .map(|a| AttachmentRef {
-            account_id:    state.account_id.clone(),
-            message_id:    state.message_id.clone(),
+            account_id: state.account_id.clone(),
+            message_id: state.message_id.clone(),
             attachment_id: a.id.clone(),
-            filename:      a.filename.clone(),
-            mime_type:     a.mime_type.clone(),
+            filename: a.filename.clone(),
+            mime_type: a.mime_type.clone(),
         })
         .collect();
     SaveAllAttachmentsParams {

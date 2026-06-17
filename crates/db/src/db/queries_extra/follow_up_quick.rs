@@ -109,7 +109,9 @@ pub async fn db_get_active_follow_up_thread_ids(
     .await
 }
 
-pub async fn db_check_follow_up_reminders(db: &WriterPool) -> Result<Vec<TriggeredFollowUp>, String> {
+pub async fn db_check_follow_up_reminders(
+    db: &WriterPool,
+) -> Result<Vec<TriggeredFollowUp>, String> {
     db.with_write(move |conn| {
         let now = i64::try_from(
             std::time::SystemTime::now()

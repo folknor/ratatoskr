@@ -66,7 +66,7 @@ pub enum WriterCommand {
 
 struct WriteRoutes {
     primary: Option<mpsc::Sender<WriterCommand>>,
-    mirror:  Option<mpsc::Sender<WriterCommand>>,
+    mirror: Option<mpsc::Sender<WriterCommand>>,
 }
 
 /// Cheap `Clone` handle to the Service-side search writer route.

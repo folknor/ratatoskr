@@ -55,8 +55,7 @@ async fn writes_compact_single_line_messages() -> Result<(), Box<dyn std::error:
 }
 
 #[tokio::test]
-async fn bounded_reader_rejects_oversize_while_reading(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn bounded_reader_rejects_oversize_while_reading() -> Result<(), Box<dyn std::error::Error>> {
     let (mut writer, reader) = tokio::io::duplex(128);
     tokio::spawn(async move {
         let _ = writer.write_all(b"aaaaaaaaaaaaaaaaa\n").await;

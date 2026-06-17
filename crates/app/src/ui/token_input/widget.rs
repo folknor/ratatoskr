@@ -318,13 +318,11 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                 // before the context menu opens.
                                 if !state.is_focused {
                                     state.is_focused = true;
-                                    shell.publish(
-                                        (self.on_message)(TokenInputMessage::Focused),
-                                    );
+                                    shell.publish((self.on_message)(TokenInputMessage::Focused));
                                 }
-                                shell.publish((self.on_message)(
-                                    TokenInputMessage::SelectToken(token.id),
-                                ));
+                                shell.publish((self.on_message)(TokenInputMessage::SelectToken(
+                                    token.id,
+                                )));
                                 shell.publish((self.on_message)(
                                     TokenInputMessage::TokenContextMenu(token.id, pos),
                                 ));
@@ -341,9 +339,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                         shell.publish((self.on_message)(TokenInputMessage::Focused));
                     }
                     shell.publish((self.on_message)(TokenInputMessage::DeselectTokens));
-                    shell.publish((self.on_message)(TokenInputMessage::FieldContextMenu(
-                        pos,
-                    )));
+                    shell.publish((self.on_message)(TokenInputMessage::FieldContextMenu(pos)));
                     shell.capture_event();
                     return;
                 }

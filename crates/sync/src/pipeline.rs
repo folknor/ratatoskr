@@ -19,7 +19,8 @@ pub fn cleanup_orphan_threads(
     let mut count: u64 = 0;
     for msg_id in all_message_ids {
         if !final_thread_ids.contains(msg_id) {
-            count += db::db::queries_extra::delete_thread_by_account_and_id(conn, account_id, msg_id)?;
+            count +=
+                db::db::queries_extra::delete_thread_by_account_and_id(conn, account_id, msg_id)?;
         }
     }
     if count > 0 {

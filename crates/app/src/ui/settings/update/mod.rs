@@ -1,5 +1,5 @@
-use iced::time::Instant;
 use iced::Task;
+use iced::time::Instant;
 
 use crate::component::Component;
 use crate::db::DateDisplay;
@@ -104,9 +104,7 @@ impl Component for Settings {
                     .signature_editor
                     .as_ref()
                     .is_none_or(|e| e.signature_id.as_deref() != Some(id.as_str()));
-                if need_open
-                    && let Some(sig) = self.signatures.iter().find(|s| s.id == *id)
-                {
+                if need_open && let Some(sig) = self.signatures.iter().find(|s| s.id == *id) {
                     self.signature_editor = Some(SignatureEditorState {
                         signature_id: Some(sig.id.clone()),
                         account_id: sig.account_id.clone(),
@@ -295,46 +293,41 @@ impl Component for Settings {
             SettingsMessage::FilterFocusUpdated(maybe_id) => {
                 self.focused_filter = maybe_id;
             }
-            SettingsMessage::FilterCleared(id) => {
-                match id {
-                    FilterId::Contacts => {
-                        self.contact_filter.clear();
-                        if self.focused_filter == Some(FilterId::Contacts) {
-                            self.focused_filter = None;
-                        }
-                        return (
-                            Task::none(),
-                            Some(SettingsEvent::LoadContacts(String::new())),
-                        );
+            SettingsMessage::FilterCleared(id) => match id {
+                FilterId::Contacts => {
+                    self.contact_filter.clear();
+                    if self.focused_filter == Some(FilterId::Contacts) {
+                        self.focused_filter = None;
                     }
-                    FilterId::Groups => {
-                        self.group_filter.clear();
-                        if self.focused_filter == Some(FilterId::Groups) {
-                            self.focused_filter = None;
-                        }
-                        return (
-                            Task::none(),
-                            Some(SettingsEvent::LoadGroups(String::new())),
-                        );
+                    return (
+                        Task::none(),
+                        Some(SettingsEvent::LoadContacts(String::new())),
+                    );
+                }
+                FilterId::Groups => {
+                    self.group_filter.clear();
+                    if self.focused_filter == Some(FilterId::Groups) {
+                        self.focused_filter = None;
                     }
-                    FilterId::GroupAddMembers => {
-                        if let Some(ref mut editor) = self.group_editor {
-                            editor.filter.clear();
-                        }
-                        if self.focused_filter == Some(FilterId::GroupAddMembers) {
-                            self.focused_filter = None;
-                        }
+                    return (Task::none(), Some(SettingsEvent::LoadGroups(String::new())));
+                }
+                FilterId::GroupAddMembers => {
+                    if let Some(ref mut editor) = self.group_editor {
+                        editor.filter.clear();
                     }
-                    FilterId::GroupMembers => {
-                        if let Some(ref mut editor) = self.group_editor {
-                            editor.members_filter.clear();
-                        }
-                        if self.focused_filter == Some(FilterId::GroupMembers) {
-                            self.focused_filter = None;
-                        }
+                    if self.focused_filter == Some(FilterId::GroupAddMembers) {
+                        self.focused_filter = None;
                     }
                 }
-            }
+                FilterId::GroupMembers => {
+                    if let Some(ref mut editor) = self.group_editor {
+                        editor.members_filter.clear();
+                    }
+                    if self.focused_filter == Some(FilterId::GroupMembers) {
+                        self.focused_filter = None;
+                    }
+                }
+            },
             SettingsMessage::GroupClick(id) => {
                 self.open_group_editor(&id);
                 return (Task::none(), Some(SettingsEvent::LoadGroupMembers(id)));
@@ -365,10 +358,7 @@ impl Component for Settings {
             SettingsMessage::OpenLabelGroupEditor { group_id } => {
                 self.open_label_group_editor(group_id);
                 if let Some(id) = group_id {
-                    return (
-                        Task::none(),
-                        Some(SettingsEvent::LoadLabelGroupMembers(id)),
-                    );
+                    return (Task::none(), Some(SettingsEvent::LoadLabelGroupMembers(id)));
                 }
                 return (Task::none(), None);
             }
@@ -817,7 +807,10 @@ impl Settings {
             SettingsMessage::GroupSaved(Err(_)) | SettingsMessage::GroupDeleted(Err(_)) => {}
 
             // ── Label editor ────────────────────────────
-            SettingsMessage::OpenLabelEditor { account_id, label_id } => {
+            SettingsMessage::OpenLabelEditor {
+                account_id,
+                label_id,
+            } => {
                 let editor = if account_id.is_empty() && label_id.is_empty() {
                     LabelEditorState::new_create()
                 } else {

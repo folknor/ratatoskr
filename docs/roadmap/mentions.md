@@ -1,7 +1,7 @@
 # @Mentions
 
 **Tier**: 2 - Keeps users from going back
-**Status**: ⚠️ **Rethink needed** - Phase 1 backend (DB table, `is_mentioned` sync, HTML correlation, send mention metadata) was implemented but is unnecessary. @mentions in email are fundamentally a compose-time feature: insert `@Name` text in the body and add the person to To/CC. The Exchange mention metadata (`mentionsPreview`, `mentions` collection, beta API) is a nice-to-have highlight on the recipient side but not worth the complexity. All Phase 1 backend code should be removed. The only work needed is compose @-autocomplete (Phase 2).
+**Status**: [~] **Rethink needed** - Phase 1 backend (DB table, `is_mentioned` sync, HTML correlation, send mention metadata) was implemented but is unnecessary. @mentions in email are fundamentally a compose-time feature: insert `@Name` text in the body and add the person to To/CC. The Exchange mention metadata (`mentionsPreview`, `mentions` collection, beta API) is a nice-to-have highlight on the recipient side but not worth the complexity. All Phase 1 backend code should be removed. The only work needed is compose @-autocomplete (Phase 2).
 
 ---
 
@@ -310,7 +310,7 @@ During Exchange message sync (beta endpoint):
 
 ### 9. Implementation Plan
 
-**Phase 1: Display (read-only)** - ❌ **Remove.** Implemented but unnecessary. @mentions in email are a compose-time feature (insert text + add to recipients), not a display-time feature. The Exchange beta API mention metadata adds complexity for minimal user value. Code to remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column + `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
+**Phase 1: Display (read-only)** - [-] **Remove.** Implemented but unnecessary. @mentions in email are a compose-time feature (insert text + add to recipients), not a display-time feature. The Exchange beta API mention metadata adds complexity for minimal user value. Code to remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column + `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
 
 **Phase 2: Compose** - This is the only phase that matters.
 1. Implement @-autocomplete trigger detection in the compose `text_editor`
@@ -319,7 +319,7 @@ During Exchange message sync (beta endpoint):
 4. Auto-add mentioned person to To: if not already a recipient
 5. On send, convert `@Display Name` to `<a href="mailto:email">@Display Name</a>` in HTML body (cosmetic, works across all providers)
 
-**Phase 3: Polish** - ❌ **Remove.** Mention deletion, count badge, and forward handling were all tied to the Exchange beta API metadata. Not needed.
+**Phase 3: Polish** - [-] **Remove.** Mention deletion, count badge, and forward handling were all tied to the Exchange beta API metadata. Not needed.
 
 ---
 

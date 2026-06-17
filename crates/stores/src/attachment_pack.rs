@@ -96,8 +96,8 @@ pub struct GcStats {
 
 #[derive(Debug, Default, Clone)]
 pub struct RebuildStats {
-    pub packs_walked:        u32,
-    pub frames_indexed:      u64,
+    pub packs_walked: u32,
+    pub frames_indexed: u64,
     pub tombstones_replayed: u64,
 }
 
@@ -116,10 +116,7 @@ enum PutDedup {
     NotPresent,
 }
 
-fn classify_existing_blob(
-    conn: &Connection,
-    hash: &BlobHash,
-) -> Result<PutDedup, PackError> {
+fn classify_existing_blob(conn: &Connection, hash: &BlobHash) -> Result<PutDedup, PackError> {
     let row: Option<(Option<i64>, i64)> = conn
         .query_row(
             "SELECT tombstoned_at, pack_file_id FROM attachment_blobs WHERE content_hash = ?1",
@@ -361,9 +358,7 @@ impl PackStore {
 
             // Rotate if this write would push us past the target.
             let frame_len = FRAME_HEADER_LEN as u64 + payload_len;
-            if writer.offset > 0
-                && writer.offset.saturating_add(frame_len) > inner.target_size
-            {
+            if writer.offset > 0 && writer.offset.saturating_add(frame_len) > inner.target_size {
                 rotate_pack(&inner.packs_dir, &mut writer)?;
             }
 
@@ -456,12 +451,7 @@ impl PackStore {
                 let length_usize = length as usize;
                 let current = (pack_id_u32, offset_u64);
 
-                match read_frame_payload(
-                    &inner.packs_dir,
-                    pack_id_u32,
-                    offset_u64,
-                    length_usize,
-                ) {
+                match read_frame_payload(&inner.packs_dir, pack_id_u32, offset_u64, length_usize) {
                     Ok(bytes) => {
                         let actual_hash = BlobHash::hash(&bytes);
                         if actual_hash != hash {
@@ -517,8 +507,10 @@ impl PackStore {
                 |r| {
                     let live: i64 = r.get(0)?;
                     let tomb: i64 = r.get(1)?;
-                    Ok((u64::try_from(live.max(0)).unwrap_or(0),
-                        u64::try_from(tomb.max(0)).unwrap_or(0)))
+                    Ok((
+                        u64::try_from(live.max(0)).unwrap_or(0),
+                        u64::try_from(tomb.max(0)).unwrap_or(0),
+                    ))
                 },
             )
             .map_err(|e| PackError::Sql(format!("size_breakdown: {e}")))
@@ -617,15 +609,14 @@ impl PackStore {
                     "SELECT content_hash, pack_file_id FROM attachment_blobs \
                      WHERE tombstoned_at IS NULL",
                 )?;
-                stmt
-                    .query_map([], |row| {
-                        let hash: BlobHash = row.get(0)?;
-                        let pack_id: i64 = row.get(1)?;
-                        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                        let pack_id_u32 = pack_id as u32;
-                        Ok((hash, pack_id_u32))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?
+                stmt.query_map([], |row| {
+                    let hash: BlobHash = row.get(0)?;
+                    let pack_id: i64 = row.get(1)?;
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                    let pack_id_u32 = pack_id as u32;
+                    Ok((hash, pack_id_u32))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
             };
 
             if live.is_empty() {
@@ -1212,10 +1203,7 @@ fn run_gc(inner: &Inner, density_threshold: f32) -> Result<GcStats, PackError> {
     Ok(stats)
 }
 
-fn pack_density(
-    conn: &Arc<Mutex<Connection>>,
-    pack_id: u32,
-) -> Result<(u64, u64, i64), PackError> {
+fn pack_density(conn: &Arc<Mutex<Connection>>, pack_id: u32) -> Result<(u64, u64, i64), PackError> {
     let conn = conn
         .lock()
         .map_err(|e| PackError::Sql(format!("conn poisoned: {e}")))?;
@@ -1309,8 +1297,7 @@ fn compact_pack(inner: &Inner, src_pack_id: u32) -> Result<(), PackError> {
         dst_file.write_all(&header)?;
         dst_file.write_all(&payload)?;
         new_offsets.push((hash, dst_offset, length));
-        dst_offset =
-            dst_offset.saturating_add(FRAME_HEADER_LEN as u64 + length as u64);
+        dst_offset = dst_offset.saturating_add(FRAME_HEADER_LEN as u64 + length as u64);
         frame_count = frame_count.saturating_add(1);
     }
 
@@ -1730,12 +1717,17 @@ mod tests {
         // unique. The recovery path tolerates multiple `.open` files
         // but a healthy steady state has at most one.
         let packs = list_packs(dir.path()).unwrap();
-        let opens: Vec<u32> =
-            packs.iter().filter_map(|&(id, sealed)| if sealed { None } else { Some(id) }).collect();
+        let opens: Vec<u32> = packs
+            .iter()
+            .filter_map(|&(id, sealed)| if sealed { None } else { Some(id) })
+            .collect();
         assert_eq!(opens.len(), 1, "expected single .open pack, got {opens:?}");
         // h3 must still be readable; the GC + rotation must not have
         // mangled its index entry.
-        assert_eq!(store.get(&h3).await.unwrap().as_deref(), Some(&b"three"[..]));
+        assert_eq!(
+            store.get(&h3).await.unwrap().as_deref(),
+            Some(&b"three"[..])
+        );
     }
 
     #[tokio::test]
@@ -1843,10 +1835,16 @@ mod tests {
         assert_eq!(stats.packs_compacted, 1, "should compact pack 0");
         assert_eq!(stats.blobs_dropped, 2);
         // h3 still readable, h1/h2 gone, original pack-0 file gone.
-        assert_eq!(store.get(&h3).await.unwrap().as_deref(), Some(&b"three"[..]));
+        assert_eq!(
+            store.get(&h3).await.unwrap().as_deref(),
+            Some(&b"three"[..])
+        );
         assert!(store.get(&h1).await.unwrap().is_none());
         assert!(store.get(&h2).await.unwrap().is_none());
-        assert!(!pack_path_sealed(dir.path(), 0).exists(), "old pack unlinked");
+        assert!(
+            !pack_path_sealed(dir.path(), 0).exists(),
+            "old pack unlinked"
+        );
     }
 
     #[tokio::test]
@@ -1912,16 +1910,36 @@ mod tests {
         }
 
         // Sanity: get(h2) misses with no index.
-        assert!(store.get(&h2).await.unwrap().is_none(), "h2 should miss pre-rebuild");
+        assert!(
+            store.get(&h2).await.unwrap().is_none(),
+            "h2 should miss pre-rebuild"
+        );
 
         let stats = store.rebuild_index().await.expect("rebuild_index");
-        assert!(stats.packs_walked >= 1, "expected sealed packs to walk, got {}", stats.packs_walked);
-        assert!(stats.frames_indexed >= 2, "expected at least 2 frames re-indexed, got {}", stats.frames_indexed);
-        assert!(stats.tombstones_replayed >= 1, "tombstone log should replay h1");
+        assert!(
+            stats.packs_walked >= 1,
+            "expected sealed packs to walk, got {}",
+            stats.packs_walked
+        );
+        assert!(
+            stats.frames_indexed >= 2,
+            "expected at least 2 frames re-indexed, got {}",
+            stats.frames_indexed
+        );
+        assert!(
+            stats.tombstones_replayed >= 1,
+            "tombstone log should replay h1"
+        );
 
         // h2 retrievable, h1 still tombstoned.
-        assert_eq!(store.get(&h2).await.unwrap().as_deref(), Some(&b"bravo"[..]));
-        assert!(store.get(&h1).await.unwrap().is_none(), "h1 should remain tombstoned after rebuild");
+        assert_eq!(
+            store.get(&h2).await.unwrap().as_deref(),
+            Some(&b"bravo"[..])
+        );
+        assert!(
+            store.get(&h1).await.unwrap().is_none(),
+            "h1 should remain tombstoned after rebuild"
+        );
     }
 
     #[tokio::test]
@@ -1943,7 +1961,10 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM attachment_blobs", [], |r| r.get(0))
                 .unwrap()
         };
-        assert_eq!(count_before, count_after, "rebuild on healthy DB must not change row count");
+        assert_eq!(
+            count_before, count_after,
+            "rebuild on healthy DB must not change row count"
+        );
     }
 
     /// Library-level benchmark. Sanity baseline only - no Criterion.
@@ -2048,7 +2069,11 @@ mod tests {
         // Flip a payload byte. Frame layout: 16 B header + payload.
         // Open pack 0 (the .open file since we never rotated).
         let path = pack_path_open(dir.path(), 0);
-        let mut f = OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let mut f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
         f.seek(SeekFrom::Start(16)).unwrap();
         let mut b = [0u8; 1];
         f.read_exact(&mut b).unwrap();
@@ -2073,7 +2098,10 @@ mod tests {
         let hash = store.put(b"persist-me".to_vec()).await.unwrap();
         // Force rotation by writing additional content past the target.
         let _filler = store.put(b"filler-blob-payload".to_vec()).await.unwrap();
-        assert!(pack_path_sealed(_dir.path(), 0).exists(), "pack 0 should be sealed");
+        assert!(
+            pack_path_sealed(_dir.path(), 0).exists(),
+            "pack 0 should be sealed"
+        );
         store.tombstone(&hash).await.unwrap();
         assert!(store.get(&hash).await.unwrap().is_none(), "tombstoned");
 
@@ -2094,7 +2122,10 @@ mod tests {
         }
 
         let stats = store.rebuild_index().await.expect("rebuild_index");
-        assert!(stats.frames_indexed >= 1, "expected at least one frame walked");
+        assert!(
+            stats.frames_indexed >= 1,
+            "expected at least one frame walked"
+        );
         // Both Tombstone and Revive records replayed; final state
         // must be live (revive came after tombstone in the log).
         assert_eq!(
@@ -2220,8 +2251,12 @@ mod tests {
 
         // In parallel, hammer get on the survivors.
         let store_for_get = Arc::clone(&store);
-        let survivors: Vec<BlobHash> =
-            hashes.iter().enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, h)| *h).collect();
+        let survivors: Vec<BlobHash> = hashes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % 2 == 1)
+            .map(|(_, h)| *h)
+            .collect();
         let get_handle = tokio::spawn(async move {
             for _ in 0..50 {
                 for h in &survivors {
@@ -2254,17 +2289,20 @@ mod tests {
         // it would persist indefinitely.
         {
             let conn = store.inner.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM attachment_blobs WHERE pack_file_id = 0",
-                [],
-            )
-            .unwrap();
+            conn.execute("DELETE FROM attachment_blobs WHERE pack_file_id = 0", [])
+                .unwrap();
         }
-        assert!(pack_path_sealed(dir.path(), 0).exists(), "pre-sweep file present");
+        assert!(
+            pack_path_sealed(dir.path(), 0).exists(),
+            "pre-sweep file present"
+        );
 
         let unlinked = store.sweep_orphan_sealed_packs().await.unwrap();
         assert!(unlinked >= 1);
-        assert!(!pack_path_sealed(dir.path(), 0).exists(), "orphan pack should be gone");
+        assert!(
+            !pack_path_sealed(dir.path(), 0).exists(),
+            "orphan pack should be gone"
+        );
     }
 
     /// CRIT-5: an empty sealed pack from post-clear-cache GC is also

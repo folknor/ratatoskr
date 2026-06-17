@@ -10,10 +10,7 @@ pub(super) fn primary_button<'a>(
     label: &'a str,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
-    button(
-        container(text(label).size(TEXT_LG).color(theme::ON_AVATAR))
-            .center_x(Length::Fill),
-    )
+    button(container(text(label).size(TEXT_LG).color(theme::ON_AVATAR)).center_x(Length::Fill))
         .on_press(on_press)
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Primary.style())
@@ -25,10 +22,7 @@ pub(super) fn ghost_button<'a>(
     label: &'a str,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
-    button(
-        container(text(label).size(TEXT_LG).style(text::secondary))
-            .center_x(Length::Fill),
-    )
+    button(container(text(label).size(TEXT_LG).style(text::secondary)).center_x(Length::Fill))
         .on_press(on_press)
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Ghost.style())

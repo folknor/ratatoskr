@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use iced::widget::{Canvas, Space, button, canvas, column, container, row, scrollable, text, text_input};
+use iced::widget::{
+    Canvas, Space, button, canvas, column, container, row, scrollable, text, text_input,
+};
 use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse};
 
 use crate::ui::emoji_picker::{EMOJI_TABLE, EmojiCategory, EmojiEntry};

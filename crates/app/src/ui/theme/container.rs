@@ -2,9 +2,7 @@ use iced::widget::container;
 use iced::{Color, Theme, border};
 
 use super::{EMAIL_BODY_BG_PREF, ON_AVATAR};
-use crate::ui::layout::{
-    CHAT_BUBBLE_RADIUS, RADIO_CIRCLE_SIZE, RADIUS_LG, RADIUS_MD, RADIUS_SM,
-};
+use crate::ui::layout::{CHAT_BUBBLE_RADIUS, RADIO_CIRCLE_SIZE, RADIUS_LG, RADIUS_MD, RADIUS_SM};
 use crate::ui::settings::types::EmailBodyBackground;
 
 /// All custom container styles used in the app.

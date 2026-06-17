@@ -190,7 +190,9 @@ mod tests {
             .expect("data carries the original variant");
         assert!(matches!(
             recovered,
-            ServiceError::BootFailure { code: BootExitCode::KeyLoadFailure }
+            ServiceError::BootFailure {
+                code: BootExitCode::KeyLoadFailure
+            }
         ));
     }
 

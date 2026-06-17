@@ -35,8 +35,7 @@ use super::client::JmapClient;
 /// inside the closure; the legacy in-app resolver in
 /// `crates/core/src/jmap_push.rs` returns the captured header until Phase
 /// 4 task 3 replaces the call site.
-pub type AuthResolver =
-    Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
+pub type AuthResolver = Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // Public types

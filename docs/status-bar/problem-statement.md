@@ -49,20 +49,20 @@ Persistent messages that remain until the underlying issue is resolved. Warnings
 
 **Token expiry:**
 ```
-⚠ alice@corp.com needs re-authentication - click to sign in
+[~] alice@corp.com needs re-authentication - click to sign in
 ```
 
 Clicking the warning opens the re-authentication flow (OAuth or password, depending on the account).
 
 **Connection failure:**
 ```
-⚠ alice@corp.com - connection failed (timeout)
+[~] alice@corp.com - connection failed (timeout)
 ```
 
 **Multiple warnings:** If multiple accounts have issues, cycle through them on the same interval as sync progress, with a count prefix:
 
 ```
-⚠ 2 accounts need attention - alice@corp.com needs re-authentication
+[~] 2 accounts need attention - alice@corp.com needs re-authentication
 ```
 
 ### Transient Confirmations

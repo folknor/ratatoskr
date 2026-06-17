@@ -49,7 +49,9 @@ pub fn get_user_folders_for_account_sync(
 }
 
 /// User-visible label groups.
-pub fn get_label_groups_for_palette_sync(conn: &ReadConn<'_>) -> Result<Vec<LabelGroupRow>, String> {
+pub fn get_label_groups_for_palette_sync(
+    conn: &ReadConn<'_>,
+) -> Result<Vec<LabelGroupRow>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, name FROM label_groups
@@ -89,9 +91,7 @@ pub fn get_thread_label_groups_sync(
          GROUP BY lg_outer.id
          ORDER BY lg_outer.name COLLATE NOCASE ASC"
     );
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     stmt.query_map(params![account_id, thread_id], |row| {
         Ok(LabelGroupRow {

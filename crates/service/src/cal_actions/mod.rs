@@ -57,10 +57,7 @@ pub async fn batch_execute(
 }
 
 /// Dispatch one operation to the matching `cal::actions::*` function.
-async fn run_one(
-    ctx: &CalendarActionContext,
-    op: &CalendarActionWireOperation,
-) -> ActionOutcome {
+async fn run_one(ctx: &CalendarActionContext, op: &CalendarActionWireOperation) -> ActionOutcome {
     match &op.operation {
         WireCalendarOperation::CreateEvent {
             calendar_remote_id,

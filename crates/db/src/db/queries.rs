@@ -1,6 +1,7 @@
 use rusqlite::params;
 
-use super::from_row::{query_as, query_one, FromRow, QuerySource};
+use super::from_row::{FromRow, QuerySource, query_as, query_one};
+use super::queries_extra::validate_label_color_pairs;
 use super::sql_fragments::{
     LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR, validate_thread_bool_column,
 };
@@ -8,12 +9,14 @@ use super::types::{
     CategoryCount, DbAttachment, DbContact, DbFolder, DbLabel, DbThread, ThreadCategoryRow,
     ThreadInfoRow,
 };
-use super::queries_extra::validate_label_color_pairs;
-use super::{ReadConn, WriterPool, WriteTarget};
+use super::{ReadConn, WriteTarget, WriterPool};
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
-pub fn get_setting(conn: &(impl QuerySource + ?Sized), key: &str) -> Result<Option<String>, String> {
+pub fn get_setting(
+    conn: &(impl QuerySource + ?Sized),
+    key: &str,
+) -> Result<Option<String>, String> {
     struct SettingRow {
         value: String,
     }
@@ -26,12 +29,8 @@ pub fn get_setting(conn: &(impl QuerySource + ?Sized), key: &str) -> Result<Opti
         }
     }
 
-    query_one::<SettingRow>(
-        conn,
-        "SELECT value FROM settings WHERE key = ?1",
-        &[&key],
-    )
-    .map(|row| row.map(|row| row.value))
+    query_one::<SettingRow>(conn, "SELECT value FROM settings WHERE key = ?1", &[&key])
+        .map(|row| row.map(|row| row.value))
 }
 
 /// Persist a refreshed access token to the `accounts` table.

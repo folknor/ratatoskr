@@ -45,10 +45,10 @@ pub struct ExtractStatusParams {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtractStatusAck {
-    pub queue_depth:    u64,
-    pub indexed_total:  u64,
-    pub skipped_total:  u64,
-    pub failed_total:   u64,
+    pub queue_depth: u64,
+    pub indexed_total: u64,
+    pub skipped_total: u64,
+    pub failed_total: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ pub enum RebuildPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexRebuildParams {
     pub policy: RebuildPolicy,
-    pub force:  bool,
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,16 +88,20 @@ pub struct IndexRebuildAck {
 /// rapidly produce one indicator update, not N.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtractProgress {
-    pub service_generation:  u32,
+    pub service_generation: u32,
     /// Items still queued or in-flight in the ExtractRuntime.
-    pub remaining:           u64,
+    pub remaining: u64,
     /// Items extracted (status='indexed') in this Service-incarnation.
-    pub indexed_in_session:  u64,
+    pub indexed_in_session: u64,
 }
 
 impl WithGeneration for ExtractProgress {
-    fn generation(&self) -> u32 { self.service_generation }
-    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 /// Final extraction summary. Fired once when the ExtractRuntime queue
@@ -108,12 +112,16 @@ pub struct ExtractCompleted {
     pub service_generation: u32,
     pub indexed: u64,
     pub skipped: u64,
-    pub failed:  u64,
+    pub failed: u64,
 }
 
 impl WithGeneration for ExtractCompleted {
-    fn generation(&self) -> u32 { self.service_generation }
-    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 /// Phase 4 (attachments roadmap): per-tick `PrefetchRuntime` progress.
@@ -123,15 +131,19 @@ impl WithGeneration for ExtractCompleted {
 pub struct PrefetchProgress {
     pub service_generation: u32,
     /// Items still queued or in-flight across both priority queues.
-    pub remaining:          u64,
+    pub remaining: u64,
     /// Items whose bytes were successfully written to PackStore in
     /// this Service-incarnation.
     pub fetched_in_session: u64,
 }
 
 impl WithGeneration for PrefetchProgress {
-    fn generation(&self) -> u32 { self.service_generation }
-    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 /// Phase 4 (attachments roadmap): `PrefetchRuntime` queue-drained-to-
@@ -143,12 +155,16 @@ pub struct PrefetchCompleted {
     pub service_generation: u32,
     pub fetched: u64,
     pub skipped: u64,
-    pub failed:  u64,
+    pub failed: u64,
 }
 
 impl WithGeneration for PrefetchCompleted {
-    fn generation(&self) -> u32 { self.service_generation }
-    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 /// Per-rebuild progress. `Coalesce { key: rebuild_id }`: a viral
@@ -157,14 +173,18 @@ impl WithGeneration for PrefetchCompleted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexRebuildProgress {
     pub service_generation: u32,
-    pub rebuild_id:         String,
-    pub processed:          u64,
-    pub total:              u64,
+    pub rebuild_id: String,
+    pub processed: u64,
+    pub total: u64,
 }
 
 impl WithGeneration for IndexRebuildProgress {
-    fn generation(&self) -> u32 { self.service_generation }
-    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 /// Per-rebuild completion. Fired once when the tracked rebuild task
@@ -173,12 +193,16 @@ impl WithGeneration for IndexRebuildProgress {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexRebuildCompleted {
     pub service_generation: u32,
-    pub rebuild_id:         String,
+    pub rebuild_id: String,
 }
 
 impl WithGeneration for IndexRebuildCompleted {
-    fn generation(&self) -> u32 { self.service_generation }
-    fn set_generation(&mut self, generation: u32) { self.service_generation = generation; }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 #[cfg(test)]
@@ -213,10 +237,22 @@ mod tests {
     #[test]
     fn index_rebuild_params_round_trips() {
         let cases = [
-            IndexRebuildParams { policy: RebuildPolicy::Wipe, force: false },
-            IndexRebuildParams { policy: RebuildPolicy::Wipe, force: true },
-            IndexRebuildParams { policy: RebuildPolicy::PreserveExisting, force: false },
-            IndexRebuildParams { policy: RebuildPolicy::PreserveExisting, force: true },
+            IndexRebuildParams {
+                policy: RebuildPolicy::Wipe,
+                force: false,
+            },
+            IndexRebuildParams {
+                policy: RebuildPolicy::Wipe,
+                force: true,
+            },
+            IndexRebuildParams {
+                policy: RebuildPolicy::PreserveExisting,
+                force: false,
+            },
+            IndexRebuildParams {
+                policy: RebuildPolicy::PreserveExisting,
+                force: true,
+            },
         ];
         for params in cases {
             let json = serde_json::to_value(&params).expect("serialize");
@@ -244,7 +280,9 @@ mod tests {
     fn extract_completed_with_generation_round_trips() {
         let mut completed = ExtractCompleted {
             service_generation: 1,
-            indexed: 100, skipped: 5, failed: 2,
+            indexed: 100,
+            skipped: 5,
+            failed: 2,
         };
         assert_eq!(completed.generation(), 1);
         completed.set_generation(7);

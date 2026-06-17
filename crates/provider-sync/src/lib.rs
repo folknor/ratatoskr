@@ -19,18 +19,18 @@
 //! is satisfied because the trait is local to this crate; the impl
 //! targets are foreign types from the provider crates.
 
+pub mod gmail;
 mod gmail_impl;
+pub mod graph;
 mod graph_impl;
+pub mod imap;
 mod imap_impl;
+pub mod jmap;
 mod jmap_impl;
 mod keyword_membership;
+pub(crate) mod persistence;
 mod seen_ingest;
 mod thread_membership;
-pub mod gmail;
-pub mod graph;
-pub mod imap;
-pub mod jmap;
-pub(crate) mod persistence;
 
 use async_trait::async_trait;
 use common::error::ProviderError;

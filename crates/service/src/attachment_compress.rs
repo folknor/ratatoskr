@@ -66,7 +66,11 @@ pub(crate) async fn maybe_compress(
         }
     };
     let mime_for_squeeze = mime.as_deref().unwrap_or("application/octet-stream");
-    let cfg = if allow_lossy { Config::email_default() } else { Config::lossless() };
+    let cfg = if allow_lossy {
+        Config::email_default()
+    } else {
+        Config::lossless()
+    };
 
     let original_size = bytes.len();
     match squeeze::compress(&bytes, mime_for_squeeze, &cfg) {

@@ -40,7 +40,9 @@ use tokio_util::sync::CancellationToken;
 
 use crypto_key::SecretKey;
 use db::progress::ProgressReporter;
-use service_api::{Notification, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId, SyncStartAck};
+use service_api::{
+    Notification, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId, SyncStartAck,
+};
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
@@ -209,9 +211,7 @@ impl SyncRuntime {
             .await
             .unwrap_or(false);
         if is_deleting {
-            log::info!(
-                "sync start_account({account_id}) rejected: account is being deleted"
-            );
+            log::info!("sync start_account({account_id}) rejected: account is being deleted");
             return SyncStartAck {
                 account_id,
                 run_id: SyncRunId::new_v7(),
@@ -230,7 +230,11 @@ impl SyncRuntime {
                     .as_ref()
                     .map(JoinHandle::is_finished)
                     .unwrap_or(true);
-                if supervisor_finished { Some(k.clone()) } else { None }
+                if supervisor_finished {
+                    Some(k.clone())
+                } else {
+                    None
+                }
             })
             .collect();
         for k in stale_keys {
@@ -266,13 +270,7 @@ impl SyncRuntime {
         let supervisor_account_id = account_id.clone();
         let supervisor_token = cancellation_token.clone();
         let supervisor = tokio::spawn(async move {
-            run_sync_supervised(
-                inner,
-                supervisor_account_id,
-                run_id,
-                supervisor_token,
-            )
-            .await;
+            run_sync_supervised(inner, supervisor_account_id, run_id, supervisor_token).await;
         });
 
         map.insert(
@@ -379,7 +377,8 @@ impl SyncRuntime {
             }
         };
         if let Some(sup) = supervisor {
-            sup.await.map_err(|e| format!("sync supervisor join: {e}"))?;
+            sup.await
+                .map_err(|e| format!("sync supervisor join: {e}"))?;
         }
         // Drop the entry so a re-insert after delete starts fresh.
         self.inner.accounts.lock().await.remove(account_id);
@@ -477,7 +476,10 @@ async fn run_sync(
 
     let result = crate::sync_dispatch::sync_for_account(
         &inner.db,
-        &inner.boot_state.read_db_state().expect("read db installed after boot.ready"),
+        &inner
+            .boot_state
+            .read_db_state()
+            .expect("read db installed after boot.ready"),
         &account_id,
         encryption_key_bytes,
         &inner.body_write,
@@ -545,9 +547,11 @@ async fn run_sync(
         && !account_provider.is_empty()
         && let Some(prefetch) = inner.boot_state.prefetch_runtime()
     {
-        let window_start_unix = match inner.db.with_write(|conn| {
-            Ok(sync::config::get_sync_period_days(conn))
-        }).await {
+        let window_start_unix = match inner
+            .db
+            .with_write(|conn| Ok(sync::config::get_sync_period_days(conn)))
+            .await
+        {
             Ok(days) => chrono::Utc::now().timestamp() - days.saturating_mul(86_400),
             Err(e) => {
                 log::debug!("post-sync prefetch sweep: sync_period_days read failed: {e}");
@@ -568,13 +572,16 @@ async fn run_sync(
         let account_id_for_sweeps = account_id.clone();
         let account_provider_for_sweeps = account_provider.clone();
         tokio::spawn(async move {
-            if let Err(e) = prefetch.enqueue_window_for_account(
-                &account_id_for_sweeps,
-                &account_provider_for_sweeps,
-                window_start_unix,
-                crate::prefetch::PrefetchPriority::Sync,
-                Some(crate::prefetch::SYNC_SWEEP_LIMIT),
-            ).await {
+            if let Err(e) = prefetch
+                .enqueue_window_for_account(
+                    &account_id_for_sweeps,
+                    &account_provider_for_sweeps,
+                    window_start_unix,
+                    crate::prefetch::PrefetchPriority::Sync,
+                    Some(crate::prefetch::SYNC_SWEEP_LIMIT),
+                )
+                .await
+            {
                 log::debug!("post-sync prefetch sweep {account_id_for_sweeps}: {e}");
             }
 
@@ -597,7 +604,8 @@ async fn run_sync(
                     4,
                     epoch_arc,
                     epoch_at_start,
-                ).await;
+                )
+                .await;
             }
         });
     }
@@ -701,10 +709,7 @@ mod tests {
             .await
             .expect("write");
         update_marker_status(dir.path(), "acc-2", MarkerStatus::Completed).await;
-        let recovered = SYNC_MARKERS
-            .read(dir.path(), "acc-2")
-            .await
-            .expect("read");
+        let recovered = SYNC_MARKERS.read(dir.path(), "acc-2").await.expect("read");
         assert!(
             recovered.is_none(),
             "completed status should unlink marker; got {recovered:?}",

@@ -460,7 +460,5 @@ pub enum Message {
     /// fires once during `from_boot_ready`; failure logs and the UI
     /// continues with default preferences (today's silent-fallback
     /// behaviour).
-    BootstrapSnapshotsLoaded(
-        Result<service_api::ReadBootstrapSnapshotsAck, String>,
-    ),
+    BootstrapSnapshotsLoaded(Result<service_api::ReadBootstrapSnapshotsAck, String>),
 }

@@ -5,13 +5,12 @@
 
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
 use crate::parse::parse_iso_datetime;
-use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{
-    PublicFolderItemRow, PublicFolderRow, delete_all_public_folder_items,
-    delete_public_folder_pin, delete_stale_public_folder_items, get_pinned_folder_ids,
-    get_public_folder_sync_depth, pin_public_folder as db_pin_public_folder,
-    upsert_public_folder_items, upsert_public_folders,
+    PublicFolderItemRow, PublicFolderRow, delete_all_public_folder_items, delete_public_folder_pin,
+    delete_stale_public_folder_items, get_pinned_folder_ids, get_public_folder_sync_depth,
+    pin_public_folder as db_pin_public_folder, upsert_public_folder_items, upsert_public_folders,
 };
+use db::db::{ReadDbState, WriterPool};
 
 /// Result of syncing a single pinned public folder.
 #[derive(Debug, Default)]
@@ -155,26 +154,27 @@ async fn upsert_items(
 ) -> Result<(usize, usize), String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    writer.with_write(move |conn| {
-        let rows: Vec<PublicFolderItemRow> = items
-            .iter()
-            .map(|item| PublicFolderItemRow {
-                account_id: account_id.clone(),
-                folder_id: folder_id.clone(),
-                item_id: item.item_id.clone(),
-                change_key: item.change_key.clone(),
-                subject: item.subject.clone(),
-                sender_email: item.sender_email.clone(),
-                sender_name: item.sender_name.clone(),
-                received_at: item.received_at.as_deref().and_then(parse_iso8601_to_unix),
-                body_preview: item.body_preview.clone(),
-                is_read: item.is_read,
-                item_class: item.item_class.clone(),
-            })
-            .collect();
-        upsert_public_folder_items(conn, &rows)
-    })
-    .await
+    writer
+        .with_write(move |conn| {
+            let rows: Vec<PublicFolderItemRow> = items
+                .iter()
+                .map(|item| PublicFolderItemRow {
+                    account_id: account_id.clone(),
+                    folder_id: folder_id.clone(),
+                    item_id: item.item_id.clone(),
+                    change_key: item.change_key.clone(),
+                    subject: item.subject.clone(),
+                    sender_email: item.sender_email.clone(),
+                    sender_name: item.sender_name.clone(),
+                    received_at: item.received_at.as_deref().and_then(parse_iso8601_to_unix),
+                    body_preview: item.body_preview.clone(),
+                    is_read: item.is_read,
+                    item_class: item.item_class.clone(),
+                })
+                .collect();
+            upsert_public_folder_items(conn, &rows)
+        })
+        .await
 }
 
 /// Delete local items not present on the server. Returns deletion count.
@@ -187,10 +187,11 @@ async fn delete_stale_items(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     let server_ids: Vec<String> = server_item_ids.to_vec();
-    writer.with_write(move |conn| {
-        delete_stale_public_folder_items(conn, &account_id, &folder_id, &server_ids)
-    })
-    .await
+    writer
+        .with_write(move |conn| {
+            delete_stale_public_folder_items(conn, &account_id, &folder_id, &server_ids)
+        })
+        .await
 }
 
 /// Load sync_depth_days from `public_folder_pins` for a folder. Returns default 30 if missing.
@@ -315,7 +316,8 @@ pub async fn sync_all_pinned_folders(
 
     for fid in &folder_ids {
         let result =
-            sync_pinned_public_folder(ews, access_token, db, writer, account_id, fid, headers).await;
+            sync_pinned_public_folder(ews, access_token, db, writer, account_id, fid, headers)
+                .await;
 
         match &result {
             Ok(sr) => {
@@ -347,7 +349,8 @@ pub async fn pin_public_folder(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     let depth = sync_depth_days.unwrap_or(30);
-    writer.with_write(move |conn| db_pin_public_folder(conn, &account_id, &folder_id, depth))
+    writer
+        .with_write(move |conn| db_pin_public_folder(conn, &account_id, &folder_id, depth))
         .await
 }
 
@@ -360,18 +363,19 @@ pub async fn unpin_public_folder(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
 
-    writer.with_write(move |conn| {
-        delete_public_folder_pin(conn, &account_id, &folder_id)?;
-        delete_all_public_folder_items(conn, &account_id, &folder_id)?;
-        // public_folder_sync_state is sync-owned; keep its SQL here per architecture.md
-        conn.execute(
-            "DELETE FROM public_folder_sync_state WHERE account_id = ?1 AND folder_id = ?2",
-            rusqlite::params![account_id, folder_id],
-        )
-        .map_err(|e| format!("unpin delete sync_state: {e}"))?;
-        Ok(())
-    })
-    .await
+    writer
+        .with_write(move |conn| {
+            delete_public_folder_pin(conn, &account_id, &folder_id)?;
+            delete_all_public_folder_items(conn, &account_id, &folder_id)?;
+            // public_folder_sync_state is sync-owned; keep its SQL here per architecture.md
+            conn.execute(
+                "DELETE FROM public_folder_sync_state WHERE account_id = ?1 AND folder_id = ?2",
+                rusqlite::params![account_id, folder_id],
+            )
+            .map_err(|e| format!("unpin delete sync_state: {e}"))?;
+            Ok(())
+        })
+        .await
 }
 
 /// Browse public folders under a parent folder via EWS.
@@ -396,26 +400,30 @@ pub async fn browse_public_folders(
     let parent_id_owned = parent_folder_id.to_string();
     let folders_clone = folders.clone();
 
-    writer.with_write(move |conn| {
-        let rows: Vec<PublicFolderRow> = folders_clone
-            .iter()
-            .map(|f| PublicFolderRow {
-                account_id: account_id_owned.clone(),
-                folder_id: f.folder_id.clone(),
-                parent_id: Some(parent_id_owned.clone()),
-                display_name: f.display_name.clone(),
-                folder_class: f.folder_class.clone().unwrap_or_else(|| "IPM.Note".to_string()),
-                unread_count: f.unread_count,
-                total_count: f.total_count,
-                can_read: f.effective_rights.read,
-                can_create_items: f.effective_rights.create_contents,
-                can_modify: f.effective_rights.modify,
-                can_delete: f.effective_rights.delete,
-            })
-            .collect();
-        upsert_public_folders(conn, &rows)
-    })
-    .await?;
+    writer
+        .with_write(move |conn| {
+            let rows: Vec<PublicFolderRow> = folders_clone
+                .iter()
+                .map(|f| PublicFolderRow {
+                    account_id: account_id_owned.clone(),
+                    folder_id: f.folder_id.clone(),
+                    parent_id: Some(parent_id_owned.clone()),
+                    display_name: f.display_name.clone(),
+                    folder_class: f
+                        .folder_class
+                        .clone()
+                        .unwrap_or_else(|| "IPM.Note".to_string()),
+                    unread_count: f.unread_count,
+                    total_count: f.total_count,
+                    can_read: f.effective_rights.read,
+                    can_create_items: f.effective_rights.create_contents,
+                    can_modify: f.effective_rights.modify,
+                    can_delete: f.effective_rights.delete,
+                })
+                .collect();
+            upsert_public_folders(conn, &rows)
+        })
+        .await?;
 
     Ok(folders)
 }

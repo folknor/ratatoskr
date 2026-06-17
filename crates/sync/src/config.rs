@@ -1,4 +1,4 @@
-use db::db::from_row::{query_as, query_one, FromRow, QuerySource};
+use db::db::from_row::{FromRow, QuerySource, query_as, query_one};
 
 /// Account record read from the DB (minimal fields needed for sync).
 pub struct SyncAccount {
@@ -24,7 +24,10 @@ pub struct AutoSyncConfig {
 }
 
 /// Read an account from the DB.
-pub fn get_account(conn: &(impl QuerySource + ?Sized), account_id: &str) -> Result<SyncAccount, String> {
+pub fn get_account(
+    conn: &(impl QuerySource + ?Sized),
+    account_id: &str,
+) -> Result<SyncAccount, String> {
     query_one::<SyncAccount>(
         conn,
         "SELECT provider, calendar_provider, caldav_url FROM accounts WHERE id = ?1",

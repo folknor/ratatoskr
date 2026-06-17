@@ -154,7 +154,9 @@ pub fn build_context(app: &ReadyApp) -> CommandContext {
 /// Returns `(may_remove_items, may_set_seen, may_set_keywords, may_submit)`.
 /// All `None` when the folder has no rights data (provider doesn't report ACL,
 /// or we're in a universal/smart folder view).
-fn current_mailbox_rights(app: &ReadyApp) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+fn current_mailbox_rights(
+    app: &ReadyApp,
+) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
     let rights = app
         .sidebar
         .selection

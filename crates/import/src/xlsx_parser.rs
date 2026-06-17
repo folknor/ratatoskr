@@ -63,7 +63,9 @@ fn load_xlsx_rows(
         .unwrap_or_default();
     let sheets = read_workbook_sheets(&mut archive)?;
     if sheets.is_empty() {
-        return Err(ImportError::ParseError("XLSX workbook has no sheets".to_string()));
+        return Err(ImportError::ParseError(
+            "XLSX workbook has no sheets".to_string(),
+        ));
     }
 
     let selected = sheet_index.unwrap_or(0);
@@ -150,7 +152,9 @@ fn parse_workbook_sheet_list(xml: &str) -> Result<Vec<WorkbookSheet>, ImportErro
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if local_name(e.name().as_ref()) == b"sheet" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if local_name(e.name().as_ref()) == b"sheet" =>
+            {
                 let name = attr_value(&e, b"name").unwrap_or_else(|| {
                     let next = sheets.len() + 1;
                     format!("Sheet {next}")
@@ -185,7 +189,8 @@ fn parse_workbook_relationships(xml: &str) -> Result<HashMap<String, String>, Im
             Ok(Event::Start(e)) | Ok(Event::Empty(e))
                 if local_name(e.name().as_ref()) == b"Relationship" =>
             {
-                if let (Some(id), Some(target)) = (attr_value(&e, b"Id"), attr_value(&e, b"Target")) {
+                if let (Some(id), Some(target)) = (attr_value(&e, b"Id"), attr_value(&e, b"Target"))
+                {
                     rels.insert(id, target);
                 }
             }
@@ -275,12 +280,7 @@ fn parse_sheet_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<Vec<Stri
                 current_cell_type = attr_value(&e, b"t").unwrap_or_default();
                 current_cell_col = attr_value(&e, b"r")
                     .and_then(|r| column_index_from_cell_ref(&r))
-                    .unwrap_or_else(|| {
-                        current_row
-                            .as_ref()
-                            .map(Vec::len)
-                            .unwrap_or_default()
-                    });
+                    .unwrap_or_else(|| current_row.as_ref().map(Vec::len).unwrap_or_default());
             }
             Ok(Event::End(e)) if local_name(e.name().as_ref()) == b"c" => {
                 if let Some(row) = current_row.as_mut() {
@@ -294,8 +294,7 @@ fn parse_sheet_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<Vec<Stri
                 current_cell_type.clear();
             }
             Ok(Event::Start(e))
-                if in_cell
-                    && matches!(local_name(e.name().as_ref()), b"v" | b"t") =>
+                if in_cell && matches!(local_name(e.name().as_ref()), b"v" | b"t") =>
             {
                 in_value_text = true;
             }
@@ -397,7 +396,8 @@ mod tests {
 
     #[test]
     fn parses_shared_strings_with_rich_text_parts() {
-        let xml = r#"<sst><si><t>Alice</t></si><si><r><t>Bob</t></r><r><t> Jones</t></r></si></sst>"#;
+        let xml =
+            r#"<sst><si><t>Alice</t></si><si><r><t>Bob</t></r><r><t> Jones</t></r></si></sst>"#;
         let strings = parse_shared_strings(xml).expect("shared strings");
         assert_eq!(strings, vec!["Alice".to_string(), "Bob Jones".to_string()]);
     }
@@ -407,8 +407,14 @@ mod tests {
         let xml = r#"<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="inlineStr"><is><t>Phone</t></is></c></row><row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2"><v>42</v></c></row></sheetData></worksheet>"#;
         let shared = vec!["Email".to_string(), "alice@example.com".to_string()];
         let rows = parse_sheet_rows(xml, &shared).expect("sheet rows");
-        assert_eq!(rows[0], vec!["Email".to_string(), String::new(), "Phone".to_string()]);
-        assert_eq!(rows[1], vec!["alice@example.com".to_string(), "42".to_string()]);
+        assert_eq!(
+            rows[0],
+            vec!["Email".to_string(), String::new(), "Phone".to_string()]
+        );
+        assert_eq!(
+            rows[1],
+            vec!["alice@example.com".to_string(), "42".to_string()]
+        );
     }
 
     #[test]

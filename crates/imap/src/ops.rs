@@ -8,8 +8,8 @@ use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_i
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    FolderKind, LabelKind, MailProviderKind, ProviderParsedAttachment, ProviderParsedMessage,
+    ActionProviderCtx, FetchedAttachment, FolderKind, LabelKind, MailProviderKind, ProviderCtx,
+    ProviderFolderEntry, ProviderFolderMutation, ProviderParsedAttachment, ProviderParsedMessage,
     ProviderProfile, ProviderTestResult, SendIntent,
 };
 use smtp;
@@ -72,13 +72,8 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<super::types::ImapConfig, String> {
-        crate::account_config::load_imap_config(
-            db,
-            &self.writer,
-            account_id,
-            &self.encryption_key,
-        )
-        .await
+        crate::account_config::load_imap_config(db, &self.writer, account_id, &self.encryption_key)
+            .await
     }
 
     async fn load_smtp_config(
@@ -86,13 +81,8 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<smtp::types::SmtpConfig, String> {
-        crate::account_config::load_smtp_config(
-            db,
-            &self.writer,
-            account_id,
-            &self.encryption_key,
-        )
-        .await
+        crate::account_config::load_smtp_config(db, &self.writer, account_id, &self.encryption_key)
+            .await
     }
 
     async fn load_both_configs(
@@ -100,13 +90,8 @@ impl ImapOps {
         db: &db::db::ReadDbState,
         account_id: &str,
     ) -> Result<crate::account_config::ImapAndSmtpConfig, String> {
-        crate::account_config::load_both_configs(
-            db,
-            &self.writer,
-            account_id,
-            &self.encryption_key,
-        )
-        .await
+        crate::account_config::load_both_configs(db, &self.writer, account_id, &self.encryption_key)
+            .await
     }
 }
 
@@ -549,7 +534,11 @@ async fn execute_folder_action(
 impl ProviderOps for ImapOps {
     // ── Actions ─────────────────────────────────────────────────────────
 
-    async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(
+        &self,
+        ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
@@ -571,7 +560,11 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
-    async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(
+        &self,
+        ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx.db, ctx.account_id).await?;
@@ -587,7 +580,8 @@ impl ProviderOps for ImapOps {
             })
             .await?;
 
-        let moved = execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
+        let moved =
+            execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
         update_message_refs_after_move(&self.writer, account_id, moved).await?;
         Ok(())
     }

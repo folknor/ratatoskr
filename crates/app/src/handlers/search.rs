@@ -41,9 +41,17 @@ pub(crate) enum SearchExecution {
 #[derive(Debug, Clone)]
 pub(crate) enum SearchPersistenceBehavior {
     None,
-    CreatePinnedSnapshot { scope_account_id: Option<String> },
-    UpdatePinnedSnapshot { id: i64, scope_account_id: Option<String> },
-    RefreshPinnedSnapshot { id: i64, scope_account_id: Option<String> },
+    CreatePinnedSnapshot {
+        scope_account_id: Option<String>,
+    },
+    UpdatePinnedSnapshot {
+        id: i64,
+        scope_account_id: Option<String>,
+    },
+    RefreshPinnedSnapshot {
+        id: i64,
+        scope_account_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,7 +64,9 @@ pub(crate) enum PinnedSearchRef {
 #[allow(dead_code)] // Clear variant + id field reserved for upcoming pinned-search edits
 pub(crate) enum SearchPinnedStateBehavior {
     Clear,
-    SmartFolder { id: String },
+    SmartFolder {
+        id: String,
+    },
     PinnedSearch {
         active: PinnedSearchRef,
         editing: PinnedSearchRef,
@@ -181,7 +191,9 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                 .pinned_searches
                 .iter()
                 .find(|ps| ps.id == id)
-                .unwrap_or_else(|| panic!("Pinned refresh intent resolved without pinned search {id}"));
+                .unwrap_or_else(|| {
+                    panic!("Pinned refresh intent resolved without pinned search {id}")
+                });
             let scope = ps
                 .scope_account_id
                 .as_ref()
@@ -261,8 +273,7 @@ impl ReadyApp {
         // `docs/search/implementation-spec.md` § "SQL fallback"). Only the
         // Query variant uses the search index; Snapshot loads stored thread
         // IDs from `pinned_search_threads` and is safe to run pre-boot.
-        if self.search_state_pending
-            && matches!(resolved.execution, SearchExecution::Query { .. })
+        if self.search_state_pending && matches!(resolved.execution, SearchExecution::Query { .. })
         {
             self.pending_search = Some(resolved);
             return Task::none();
@@ -392,7 +403,10 @@ impl ReadyApp {
                                 format!("Search: {label}"),
                                 pinned_search_scope_name(self, ps),
                             );
-                            self.status = format!("{} threads (pinned search)", self.thread_list.threads.len());
+                            self.status = format!(
+                                "{} threads (pinned search)",
+                                self.thread_list.threads.len()
+                            );
                         }
                     }
                     _ => {
@@ -407,7 +421,10 @@ impl ReadyApp {
                     .map(|t| (t.id.clone(), t.account_id.clone()))
                     .collect();
 
-                let persistence_task = match (&result.resolved.completion.persistence, &result.resolved.execution) {
+                let persistence_task = match (
+                    &result.resolved.completion.persistence,
+                    &result.resolved.execution,
+                ) {
                     (SearchPersistenceBehavior::None, _) => Task::none(),
                     (
                         SearchPersistenceBehavior::CreatePinnedSnapshot { scope_account_id },
@@ -451,7 +468,10 @@ impl ReadyApp {
                         }
                     }
                     (
-                        SearchPersistenceBehavior::UpdatePinnedSnapshot { id, scope_account_id },
+                        SearchPersistenceBehavior::UpdatePinnedSnapshot {
+                            id,
+                            scope_account_id,
+                        },
                         SearchExecution::Query { query, .. },
                     ) => {
                         if let Some(client) = self.service_client.as_ref().cloned() {
@@ -480,10 +500,7 @@ impl ReadyApp {
                                         .map(|()| id)
                                 },
                                 move |save_result| {
-                                    Message::PinnedSearchUpdateAck(
-                                        completion.clone(),
-                                        save_result,
-                                    )
+                                    Message::PinnedSearchUpdateAck(completion.clone(), save_result)
                                 },
                             )
                         } else {
@@ -495,7 +512,10 @@ impl ReadyApp {
                         }
                     }
                     (
-                        SearchPersistenceBehavior::RefreshPinnedSnapshot { id, scope_account_id },
+                        SearchPersistenceBehavior::RefreshPinnedSnapshot {
+                            id,
+                            scope_account_id,
+                        },
                         SearchExecution::Query { query, .. },
                     ) => {
                         if let Some(client) = self.service_client.as_ref().cloned() {
@@ -524,10 +544,7 @@ impl ReadyApp {
                                         .map(|()| id)
                                 },
                                 move |save_result| {
-                                    Message::PinnedSearchUpdateAck(
-                                        completion.clone(),
-                                        save_result,
-                                    )
+                                    Message::PinnedSearchUpdateAck(completion.clone(), save_result)
                                 },
                             )
                         } else {
@@ -541,8 +558,10 @@ impl ReadyApp {
                     _ => Task::none(),
                 };
 
-                if matches!(result.resolved.completion.persistence, SearchPersistenceBehavior::None)
-                {
+                if matches!(
+                    result.resolved.completion.persistence,
+                    SearchPersistenceBehavior::None
+                ) {
                     self.apply_search_pinned_state(&result.resolved.completion.pinned_state, None);
                     return self.apply_search_post_success(result.resolved.completion.post_success);
                 }
@@ -602,7 +621,10 @@ impl ReadyApp {
             SearchPostSuccessEffect::None => Task::none(),
             SearchPostSuccessEffect::RefreshPinnedSearchList => {
                 let db = Arc::clone(&self.db);
-                Task::perform(async move { db.list_pinned_searches().await }, Message::PinnedSearchesLoaded)
+                Task::perform(
+                    async move { db.list_pinned_searches().await },
+                    Message::PinnedSearchesLoaded,
+                )
             }
         }
     }
@@ -844,7 +866,10 @@ impl ReadyApp {
         };
         Task::perform(
             async move {
-                let result = client.delete_pinned_search(id).await.map_err(|e| e.to_string());
+                let result = client
+                    .delete_pinned_search(id)
+                    .await
+                    .map_err(|e| e.to_string());
                 (id, result)
             },
             |(id, result)| Message::PinnedSearchDeleteAck(id, result),
@@ -1035,7 +1060,12 @@ impl ReadyApp {
             return Task::none();
         };
         Task::perform(
-            async move { client.create_smart_folder(name, query).await.map_err(|e| e.to_string()) },
+            async move {
+                client
+                    .create_smart_folder(name, query)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
             Message::SmartFolderCreateAck,
         )
     }

@@ -104,9 +104,9 @@ impl ReadyApp {
                     crate::ui::settings::focus_query::find_focused_filter(),
                 )
                 .map(|maybe| {
-                    Message::Settings(
-                        crate::ui::settings::SettingsMessage::FilterFocusUpdated(maybe),
-                    )
+                    Message::Settings(crate::ui::settings::SettingsMessage::FilterFocusUpdated(
+                        maybe,
+                    ))
                 })
             }
             Message::SetDateDisplay(display) => {
@@ -272,10 +272,8 @@ impl ReadyApp {
                     .as_ref()
                     .map(|c| c.current_generation())
                     .unwrap_or(0);
-                if !crate::service_client::notification_should_dispatch(
-                    &notification,
-                    current_gen,
-                ) {
+                if !crate::service_client::notification_should_dispatch(&notification, current_gen)
+                {
                     return Task::none();
                 }
                 match notification {
@@ -323,8 +321,7 @@ impl ReadyApp {
                         // sync by the time we get here; this arm is
                         // purely UI.
                         let label = self.email_for_account(&event.account_id);
-                        self.status_bar
-                            .record_push_event(event.account_id, &label);
+                        self.status_bar.record_push_event(event.account_id, &label);
                         Task::none()
                     }
                     service_api::Notification::CalendarRunCompleted(_) => {
@@ -373,49 +370,63 @@ impl ReadyApp {
                     service_api::Notification::ExtractProgress(p) => {
                         log::debug!(
                             "extract progress: remaining={}, indexed_in_session={}",
-                            p.remaining, p.indexed_in_session,
+                            p.remaining,
+                            p.indexed_in_session,
                         );
                         Task::none()
                     }
                     service_api::Notification::ExtractCompleted(c) => {
                         log::info!(
                             "extract completed: indexed={}, skipped={}, failed={}",
-                            c.indexed, c.skipped, c.failed,
+                            c.indexed,
+                            c.skipped,
+                            c.failed,
                         );
                         Task::none()
                     }
                     service_api::Notification::PrefetchProgress(p) => {
                         log::debug!(
                             "prefetch progress: remaining={}, fetched_in_session={}",
-                            p.remaining, p.fetched_in_session,
+                            p.remaining,
+                            p.fetched_in_session,
                         );
                         Task::none()
                     }
                     service_api::Notification::PrefetchCompleted(c) => {
                         log::info!(
                             "prefetch completed: fetched={}, skipped={}, failed={}",
-                            c.fetched, c.skipped, c.failed,
+                            c.fetched,
+                            c.skipped,
+                            c.failed,
                         );
                         Task::none()
                     }
                     service_api::Notification::EvictionCompleted(c) => {
                         log::info!(
                             "eviction completed: trigger={}, tombstoned={}, pages={}, superseded={}",
-                            c.trigger, c.blobs_tombstoned, c.pages_walked, c.superseded,
+                            c.trigger,
+                            c.blobs_tombstoned,
+                            c.pages_walked,
+                            c.superseded,
                         );
                         Task::none()
                     }
                     service_api::Notification::GcCompleted(c) => {
                         log::info!(
                             "gc completed: trigger={}, packs_compacted={}, blobs_dropped={}, bytes_reclaimed={}",
-                            c.trigger, c.packs_compacted, c.blobs_dropped, c.bytes_reclaimed,
+                            c.trigger,
+                            c.packs_compacted,
+                            c.blobs_dropped,
+                            c.bytes_reclaimed,
                         );
                         Task::none()
                     }
                     service_api::Notification::IndexRebuildProgress(p) => {
                         log::debug!(
                             "index rebuild {}: {}/{}",
-                            p.rebuild_id, p.processed, p.total,
+                            p.rebuild_id,
+                            p.processed,
+                            p.total,
                         );
                         // Phase 8-4: store the latest progress for the
                         // status-bar component. The component renders a
@@ -423,8 +434,8 @@ impl ReadyApp {
                         // IndexRebuildCompleted.
                         self.index_rebuild_progress = Some(crate::app::RebuildProgressState {
                             rebuild_id: p.rebuild_id,
-                            processed:  p.processed,
-                            total:      p.total,
+                            processed: p.processed,
+                            total: p.total,
                         });
                         Task::none()
                     }
@@ -477,16 +488,14 @@ impl ReadyApp {
                 // the editor's ConfirmDiscard returns to the editor with
                 // the draft intact instead of nuking workflow back to Idle.
                 if self.calendar.active_popover.is_some() {
-                    return self
-                        .update(Message::Calendar(Box::new(
-                            crate::ui::calendar::CalendarMessage::ClosePopover,
-                        )));
+                    return self.update(Message::Calendar(Box::new(
+                        crate::ui::calendar::CalendarMessage::ClosePopover,
+                    )));
                 }
                 if self.calendar.active_modal.is_some() {
-                    return self
-                        .update(Message::Calendar(Box::new(
-                            crate::ui::calendar::CalendarMessage::CloseModal,
-                        )));
+                    return self.update(Message::Calendar(Box::new(
+                        crate::ui::calendar::CalendarMessage::CloseModal,
+                    )));
                 }
                 if !matches!(
                     self.calendar.workflow,
@@ -569,9 +578,7 @@ impl ReadyApp {
                 // reload, and chat-view refresh below all assume the account
                 // still exists.
                 if !self.sidebar.accounts.iter().any(|a| a.id == account_id) {
-                    log::debug!(
-                        "Dropping sync result for unknown/deleted account {account_id}"
-                    );
+                    log::debug!("Dropping sync result for unknown/deleted account {account_id}");
                     return Task::none();
                 }
                 match result {
@@ -874,8 +881,12 @@ impl ReadyApp {
                 if outcomes.is_empty() {
                     return Task::none();
                 }
-                let all_failed = outcomes.iter().all(service_api::actions::ActionOutcome::is_failed);
-                let any_failed = outcomes.iter().any(service_api::actions::ActionOutcome::is_failed);
+                let all_failed = outcomes
+                    .iter()
+                    .all(service_api::actions::ActionOutcome::is_failed);
+                let any_failed = outcomes
+                    .iter()
+                    .any(service_api::actions::ActionOutcome::is_failed);
                 if all_failed {
                     self.status_bar
                         .show_confirmation(format!("\u{26A0} Undo failed: {desc}"));

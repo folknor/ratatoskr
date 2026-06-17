@@ -1,6 +1,6 @@
+use crate::db::ReadConn;
 use crate::db::from_row::FromRow;
 use crate::db::types::DbScheduledEmail;
-use crate::db::ReadConn;
 use rusqlite::params;
 
 pub fn get_remote_draft_id_sync(

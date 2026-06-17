@@ -16,8 +16,8 @@ use lettre::message::{
 };
 
 use common::encoding::encode_base64url_nopad;
-use service_state::WriteDbState;
 pub use service_api::actions::{SendAttachment, SendIntent, SendRequest};
+use service_state::WriteDbState;
 
 /// Errors that can occur during the send pipeline.
 #[derive(Debug, Clone)]

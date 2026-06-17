@@ -1,7 +1,7 @@
 # BIMI (Brand Indicators for Message Identification)
 
 **Tier**: 3 - Differentiators and polish
-**Status**: ✅ **Phase 1 complete** - DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `crates/core/src/bimi.rs`
+**Status**: [x] **Phase 1 complete** - DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `crates/core/src/bimi.rs`
 
 ---
 
@@ -261,16 +261,16 @@ For Gmail, JMAP (Fastmail): decode base64 SVG from header, rasterize, cache by d
 
 ### Implementation Plan
 
-**Phase 1 (ship with iced MVP)**: ✅ Done - `crates/core/src/bimi.rs`, migration v38 (`crates/db/src/db/migrations.rs`)
-- ✅ Parse `Authentication-Results` for `dmarc=pass` - `dmarc_passed()` string check
-- ✅ Check `BIMI-Indicator` header first - `decode_bimi_indicator()` base64 decode shortcut
-- ✅ DNS lookup via hickory-resolver - `lookup_bimi_dns()` with org-domain fallback
-- ✅ SVG fetch via reqwest - `fetch_and_validate_svg()` with HTTPS-only, 32KB limit
-- ✅ SVG Tiny PS validation - `validate_svg()` checks baseProfile, rejects external refs
-- ✅ Render with resvg to 128x128 PNG - `rasterize_svg_to_png()` using usvg + tiny-skia
-- ✅ SQLite `bimi_cache` table + filesystem PNG cache with 7d positive / 24h negative TTL
-- ✅ In-memory LRU (500 entries) - `BimiLruCache` avoids DB/FS on every render
-- ✅ Cache warming - `warm_bimi_cache()` scans recent sender domains, concurrent DNS+fetch
+**Phase 1 (ship with iced MVP)**: [x] Done - `crates/core/src/bimi.rs`, migration v38 (`crates/db/src/db/migrations.rs`)
+- [x] Parse `Authentication-Results` for `dmarc=pass` - `dmarc_passed()` string check
+- [x] Check `BIMI-Indicator` header first - `decode_bimi_indicator()` base64 decode shortcut
+- [x] DNS lookup via hickory-resolver - `lookup_bimi_dns()` with org-domain fallback
+- [x] SVG fetch via reqwest - `fetch_and_validate_svg()` with HTTPS-only, 32KB limit
+- [x] SVG Tiny PS validation - `validate_svg()` checks baseProfile, rejects external refs
+- [x] Render with resvg to 128x128 PNG - `rasterize_svg_to_png()` using usvg + tiny-skia
+- [x] SQLite `bimi_cache` table + filesystem PNG cache with 7d positive / 24h negative TTL
+- [x] In-memory LRU (500 entries) - `BimiLruCache` avoids DB/FS on every render
+- [x] Cache warming - `warm_bimi_cache()` scans recent sender domains, concurrent DNS+fetch
 
 **Phase 2 (post-launch)**:
 - VMC/CMC validation using x509-parser + rustls-webpki

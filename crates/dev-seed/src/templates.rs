@@ -692,7 +692,11 @@ pub fn fill_template(template: &str, rng: &mut dyn RngMut, locale: Option<&Local
         .replace("{recipient}", pick(rng, first_names))
 }
 
-pub fn generate_subject(rng: &mut impl RngExt, cat: Category, locale: Option<&LocaleData>) -> String {
+pub fn generate_subject(
+    rng: &mut impl RngExt,
+    cat: Category,
+    locale: Option<&LocaleData>,
+) -> String {
     let templates = if let Some(loc) = locale {
         i18n_subject_templates(loc.key, cat)
     } else {

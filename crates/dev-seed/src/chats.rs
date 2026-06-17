@@ -125,7 +125,7 @@ static CHAT_BODY_SHORT: &[&str] = &[
     "hmm not sure",
     "send it over when you can",
     "can do",
-    "👍",
+    "\u{1F44D}",
     "did you ever hear back from them?",
     "any thoughts on the timing?",
     "I can do Wednesday if that works",
@@ -326,8 +326,16 @@ pub fn seed_chats(
                 let msg_id = crate::next_uuid(rng);
                 let msg_id_header = crate::next_message_id(rng);
 
-                let in_reply_to = if mi == 0 { None } else { msg_refs.last().cloned() };
-                let references = if mi == 0 { None } else { Some(msg_refs.join(" ")) };
+                let in_reply_to = if mi == 0 {
+                    None
+                } else {
+                    msg_refs.last().cloned()
+                };
+                let references = if mi == 0 {
+                    None
+                } else {
+                    Some(msg_refs.join(" "))
+                };
                 msg_refs.push(msg_id_header.clone());
 
                 // Start with the partner (mi=0 is inbound), then alternate.
@@ -363,8 +371,7 @@ pub fn seed_chats(
 
                 // Unread state: trailing `unread_tail_size` partner
                 // messages are unread; everything else is read.
-                let is_in_unread_tail =
-                    unread_tail_size > 0 && mi >= n_msgs - unread_tail_size;
+                let is_in_unread_tail = unread_tail_size > 0 && mi >= n_msgs - unread_tail_size;
                 let msg_is_read = !(from_partner && is_in_unread_tail);
                 if !msg_is_read {
                     thread_is_read = false;

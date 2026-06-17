@@ -60,8 +60,7 @@ fn label_groups_list_builder<'a>(
         for (idx, group) in groups.iter().enumerate() {
             if idx > 0 {
                 sub = sub.push(
-                    iced::widget::rule::horizontal(1)
-                        .style(theme::RuleClass::Subtle.style()),
+                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
                 );
             }
             let row_pos = compose_positions(outer_position, position_for(idx, n));
@@ -72,17 +71,14 @@ fn label_groups_list_builder<'a>(
         let on_end_id = list_id.clone();
         col = col.push(
             mouse_area(sub)
-                .on_move(move |point| {
-                    SettingsMessage::ListDragMove(on_move_id.clone(), point)
-                })
+                .on_move(move |point| SettingsMessage::ListDragMove(on_move_id.clone(), point))
                 .on_release(SettingsMessage::ListDragEnd(on_end_id.clone()))
                 .on_exit(SettingsMessage::ListDragEnd(on_end_id)),
         );
 
         if !groups.is_empty() {
-            col = col.push(
-                iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
-            );
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
         let add_pos = compose_positions(outer_position, position_for(n - 1, n));
         col = col.push(add_label_group_row(add_pos));
@@ -152,9 +148,9 @@ fn label_group_row<'a>(
     .spacing(SPACE_SM)
     .align_y(Alignment::Center);
 
-    let is_being_dragged = drag
-        .as_ref()
-        .is_some_and(|d| d.list_id == "label-groups" && d.dragging_index == sub_index && d.is_dragging);
+    let is_being_dragged = drag.as_ref().is_some_and(|d| {
+        d.list_id == "label-groups" && d.dragging_index == sub_index && d.is_dragging
+    });
 
     let mut inner = container(content)
         .padding(PAD_SETTINGS_ROW)
@@ -202,15 +198,9 @@ fn add_label_group_row<'a>(position: RowPosition) -> Element<'a, SettingsMessage
 
 // ── Bottom section: raw provider labels (informational) ────
 
-fn provider_labels_list_builder<'a>(
-    groups: &'a [AccountLabelsGroup],
-) -> RowBuilder<'a> {
+fn provider_labels_list_builder<'a>(groups: &'a [AccountLabelsGroup]) -> RowBuilder<'a> {
     Box::new(move |outer_position| {
-        let internal_n = groups
-            .iter()
-            .map(|g| 1 + g.labels.len())
-            .sum::<usize>()
-            + 1; // +1 for the trailing Add row
+        let internal_n = groups.iter().map(|g| 1 + g.labels.len()).sum::<usize>() + 1; // +1 for the trailing Add row
         let mut col = column![].width(Length::Fill);
 
         let mut internal_index: usize = 0;
@@ -220,10 +210,8 @@ fn provider_labels_list_builder<'a>(
                     iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
                 );
             }
-            let header_pos = compose_positions(
-                outer_position,
-                position_for(internal_index, internal_n),
-            );
+            let header_pos =
+                compose_positions(outer_position, position_for(internal_index, internal_n));
             col = col.push(account_header_element(group, header_pos));
             internal_index += 1;
 
@@ -231,19 +219,16 @@ fn provider_labels_list_builder<'a>(
                 col = col.push(
                     iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
                 );
-                let row_pos = compose_positions(
-                    outer_position,
-                    position_for(internal_index, internal_n),
-                );
+                let row_pos =
+                    compose_positions(outer_position, position_for(internal_index, internal_n));
                 col = col.push(provider_label_row(lbl)(row_pos));
                 internal_index += 1;
             }
         }
 
         if internal_index > 0 {
-            col = col.push(
-                iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
-            );
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
         let add_pos = compose_positions(
             outer_position,
@@ -448,11 +433,10 @@ fn label_editor_buttons<'a>(editor: &'a LabelEditorState) -> Element<'a, Setting
     let save_label = if is_new { "Create" } else { "Save" };
     let name_filled = !editor.name.trim().is_empty();
     let can_save = name_filled && (is_new || editor.dirty);
-    let mut save_btn =
-        button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))
-            .padding(PAD_BUTTON)
-            .style(theme::ButtonClass::Primary.style())
-            .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+    let mut save_btn = button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Primary.style())
+        .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::LabelEditorSave);
     }
@@ -464,9 +448,7 @@ fn label_editor_buttons<'a>(editor: &'a LabelEditorState) -> Element<'a, Setting
 /// Stub editor sheet for a user-visible label group. The sections here are
 /// placeholders for the real editor; we wire up structure now so we can
 /// iterate on layout/UX without designing in the abstract.
-pub(super) fn label_group_editor_sheet(
-    state: &Settings,
-) -> Element<'_, SettingsMessage> {
+pub(super) fn label_group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let Some(ref editor) = state.editing_label_group else {
         return column![].into();
     };
@@ -587,9 +569,7 @@ fn label_group_add_candidates_panel<'a>(
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
-        let mut col = column![]
-            .spacing(PEOPLE_PILL_SPACING)
-            .width(Length::Fill);
+        let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
         for c in candidates {
             col = col.push(tag_add_candidate_pill(
                 c.label,
@@ -696,9 +676,7 @@ fn label_group_members_panel<'a>(
     editor: &'a LabelGroupEditorState,
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
-    let mut col = column![]
-        .spacing(PEOPLE_PILL_SPACING)
-        .width(Length::Fill);
+    let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
     for (account_id, label_id) in &editor.members {
         let lookup = state
             .labels_by_account
@@ -841,11 +819,10 @@ fn label_group_editor_buttons<'a>(
     let save_label = if is_new { "Create" } else { "Save" };
     let name_filled = !editor.name.trim().is_empty();
     let can_save = name_filled && (is_new || editor.dirty);
-    let mut save_btn =
-        button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))
-            .padding(PAD_BUTTON)
-            .style(theme::ButtonClass::Primary.style())
-            .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+    let mut save_btn = button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Primary.style())
+        .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::LabelGroupEditorSave);
     }

@@ -1,9 +1,9 @@
 //! Orphan impl of `ProviderSyncOps` for `imap::ops::ImapOps`.
 
+use ::imap::ops::ImapOps;
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use ::imap::ops::ImapOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 

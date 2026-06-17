@@ -44,18 +44,15 @@ pub async fn list_sieve_scripts(client: &JmapClient) -> Result<Vec<SieveScript>,
     let inner = client.inner();
 
     // Query all script IDs.
-    let query_response =
-        inner
-            .sieve_script_query(
-                None::<bifrost_jmap::core::query::Filter<bifrost_jmap::sieve::query::Filter>>,
-                None::<
-                    Vec<
-                        bifrost_jmap::core::query::Comparator<bifrost_jmap::sieve::query::Comparator>,
-                    >,
-                >,
-            )
-            .await
-            .map_err(|e| format!("SieveScript/query: {e}"))?;
+    let query_response = inner
+        .sieve_script_query(
+            None::<bifrost_jmap::core::query::Filter<bifrost_jmap::sieve::query::Filter>>,
+            None::<
+                Vec<bifrost_jmap::core::query::Comparator<bifrost_jmap::sieve::query::Comparator>>,
+            >,
+        )
+        .await
+        .map_err(|e| format!("SieveScript/query: {e}"))?;
 
     let ids = query_response.ids();
     if ids.is_empty() {

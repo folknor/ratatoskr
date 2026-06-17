@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use common::types::{FolderKind, MailProviderKind};
 use db::db::queries_extra::{
     AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages,
 };
-use common::types::{FolderKind, MailProviderKind};
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
@@ -50,9 +50,7 @@ pub(crate) async fn persist_messages(
 
     ctx.write_db
         .with_write(move |conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
             let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
                 store_thread_to_db(
@@ -90,9 +88,7 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
     // Delete from DB and update parent threads
     ctx.write_db
         .with_write(move |conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
             sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
@@ -222,9 +218,10 @@ fn upsert_messages(
         .iter()
         .map(|msg| {
             let b = &msg.base;
-            let invite_idx = msg.attachments.iter().position(|att| {
-                common::email_parsing::is_calendar_content_type(&att.mime_type)
-            });
+            let invite_idx = msg
+                .attachments
+                .iter()
+                .position(|att| common::email_parsing::is_calendar_content_type(&att.mime_type));
             let invite_method = invite_idx.and_then(|i| {
                 common::email_parsing::extract_imip_method(&msg.attachments[i].mime_type)
             });
@@ -456,7 +453,11 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(search: &SearchWriteHandle, account_id: &str, messages: &[ParsedJmapMessage]) {
+async fn index_messages(
+    search: &SearchWriteHandle,
+    account_id: &str,
+    messages: &[ParsedJmapMessage],
+) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {

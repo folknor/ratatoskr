@@ -105,7 +105,8 @@ mod tests {
         reporter.emit_json("any", serde_json::json!({}));
         let _ = out_rx.recv().await.expect("pre-fill drained");
         // No second frame arrived (try_send dropped on full).
-        let nothing = tokio::time::timeout(std::time::Duration::from_millis(50), out_rx.recv()).await;
+        let nothing =
+            tokio::time::timeout(std::time::Duration::from_millis(50), out_rx.recv()).await;
         assert!(nothing.is_err());
     }
 

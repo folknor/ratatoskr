@@ -21,9 +21,7 @@ use windows_sys::Win32::System::JobObjects::{
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
     SetInformationJobObject,
 };
-use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-};
+use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
 /// Anonymous Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 /// When the last handle to this Job is released - which happens when the
@@ -50,10 +48,8 @@ impl Job {
 
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let info_size = u32::try_from(
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>(),
-        )
-        .map_err(io::Error::other)?;
+        let info_size = u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+            .map_err(io::Error::other)?;
         // SAFETY: `handle` is a valid Job handle; `info` is fully initialized
         // above; `info_size` matches `info`'s layout.
         let result = unsafe {
@@ -97,16 +93,18 @@ impl Job {
         // PROCESS_SET_QUOTA (Job assignment is a quota operation) plus
         // PROCESS_TERMINATE so the Job actually has the right to enforce
         // KILL_ON_JOB_CLOSE.
-        let process = unsafe {
-            OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, child_pid)
-        };
+        let process =
+            unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, child_pid) };
         if process.is_null() {
             return Err(io::Error::last_os_error());
         }
         // SAFETY: ownership is transferred; OwnedHandle's Drop closes it.
         let process = unsafe { OwnedHandle::from_raw_handle(process as RawHandle) };
         let result = unsafe {
-            AssignProcessToJobObject(self.handle.as_raw_handle() as HANDLE, process.as_raw_handle() as HANDLE)
+            AssignProcessToJobObject(
+                self.handle.as_raw_handle() as HANDLE,
+                process.as_raw_handle() as HANDLE,
+            )
         };
         if result == 0 {
             return Err(io::Error::last_os_error());

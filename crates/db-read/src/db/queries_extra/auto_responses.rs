@@ -28,7 +28,10 @@ pub fn get_auto_response_sync(
     };
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let row = if let Some(folder_id) = folder_id {
-        stmt.query_row(rusqlite::params![account_id, folder_id], auto_response_from_row)
+        stmt.query_row(
+            rusqlite::params![account_id, folder_id],
+            auto_response_from_row,
+        )
     } else {
         stmt.query_row(rusqlite::params![account_id], auto_response_from_row)
     };

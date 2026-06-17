@@ -21,6 +21,5 @@ pub(crate) async fn handle_reorder(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(LabelGroupReorderAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(LabelGroupReorderAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }

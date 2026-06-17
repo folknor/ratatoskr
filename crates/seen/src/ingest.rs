@@ -80,7 +80,9 @@ pub struct DeferredObservation {
     date_ms: i64,
 }
 
-pub fn collect_observations_deferred<T: MessageAddresses>(messages: &[T]) -> Vec<DeferredObservation> {
+pub fn collect_observations_deferred<T: MessageAddresses>(
+    messages: &[T],
+) -> Vec<DeferredObservation> {
     messages
         .iter()
         .map(|m| DeferredObservation {

@@ -85,7 +85,8 @@ mod tests {
     #[test]
     fn update_then_read_back() {
         let conn = fresh_conn();
-        update_clean_shutdown_cursors(&write(&conn), &["body", "inline", "extract"]).expect("update");
+        update_clean_shutdown_cursors(&write(&conn), &["body", "inline", "extract"])
+            .expect("update");
         let body = get_clean_shutdown_cursor(&write(&conn), "body").expect("body");
         let inline = get_clean_shutdown_cursor(&write(&conn), "inline").expect("inline");
         let extract = get_clean_shutdown_cursor(&write(&conn), "extract").expect("extract");

@@ -19,7 +19,7 @@
 use service_api::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
 use service_api::{
     ActionWireOperation, ActionWirePlan, OperationId, OperationResult, PlanId, RemoteFailure,
-    WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId,
+    WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
 };
 use types::{FolderId, LabelGroupId, LabelId};
 
@@ -177,7 +177,9 @@ mod tests {
             MailOperation::RemoveLabelGroup {
                 group_id: LabelGroupId(7),
             },
-            MailOperation::Snooze { until: 1_700_000_000 },
+            MailOperation::Snooze {
+                until: 1_700_000_000,
+            },
             MailOperation::Unsnooze,
         ];
         for op in cases {
@@ -185,8 +187,7 @@ mod tests {
             // Serde round-trip on the wire form keeps us honest about
             // the actual on-the-wire payload.
             let json = serde_json::to_value(&wire).expect("serialize");
-            let recovered: WireMailOperation =
-                serde_json::from_value(json).expect("deserialize");
+            let recovered: WireMailOperation = serde_json::from_value(json).expect("deserialize");
             assert_eq!(wire, recovered);
         }
     }

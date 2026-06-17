@@ -1,5 +1,5 @@
-use super::super::types::{DbLocalDraft, DbSignature};
 use super::super::ReadDbState;
+use super::super::types::{DbLocalDraft, DbSignature};
 use crate::db::{query_as, query_one};
 use rusqlite::params;
 

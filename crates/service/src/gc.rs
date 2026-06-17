@@ -76,7 +76,10 @@ pub async fn run_gc_pass(
         .send(Notification::GcCompleted(payload))
         .await
     {
-        log::warn!("gc pass ({}): notification send failed: {e}", trigger.as_str());
+        log::warn!(
+            "gc pass ({}): notification send failed: {e}",
+            trigger.as_str()
+        );
     }
     log::debug!(
         "gc pass ({}): packs_compacted={} blobs_dropped={} bytes_reclaimed={}",

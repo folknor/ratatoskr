@@ -10,10 +10,7 @@ pub struct ContactUpdate {
     pub notes: Option<Option<String>>,
 }
 
-pub fn get_contact_source_sync(
-    conn: &ReadConn<'_>,
-    email: &str,
-) -> Result<Option<String>, String> {
+pub fn get_contact_source_sync(conn: &ReadConn<'_>, email: &str) -> Result<Option<String>, String> {
     match conn.query_row(
         "SELECT source FROM contacts WHERE email = ?1",
         rusqlite::params![email],

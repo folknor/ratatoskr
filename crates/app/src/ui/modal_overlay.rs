@@ -1,4 +1,4 @@
-use iced::widget::{container, mouse_area, Space};
+use iced::widget::{Space, container, mouse_area};
 use iced::{Element, Length, Padding, mouse};
 
 use super::theme;

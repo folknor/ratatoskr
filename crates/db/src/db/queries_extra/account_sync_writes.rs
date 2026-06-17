@@ -9,7 +9,7 @@
 
 use rusqlite::params;
 
-use crate::db::from_row::{query_one, FromRow, QuerySource};
+use crate::db::from_row::{FromRow, QuerySource, query_one};
 use crate::db::{WriteConn, WriteTarget};
 
 /// Mark every `local_drafts` row whose `sync_status = 'sending'` as `'failed'`.
@@ -87,10 +87,7 @@ pub fn mark_account_initial_sync_completed(
 /// Clear `history_id` and reset `initial_sync_completed = 0` for an account.
 ///
 /// Forces the next sync cycle to run a full initial sync from scratch.
-pub fn clear_account_sync_state(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-) -> Result<(), String> {
+pub fn clear_account_sync_state(conn: &WriteConn<'_>, account_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE accounts SET history_id = NULL, initial_sync_completed = 0, \
          updated_at = unixepoch() WHERE id = ?1",
@@ -140,10 +137,7 @@ pub fn delete_thread_by_account_and_id(
 ///
 /// Returns `Ok(())` whether or not the key existed.
 pub fn delete_setting(conn: &impl WriteTarget, key: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM settings WHERE key = ?1",
-        params![key],
-    )
-    .map_err(|e| format!("delete_setting: {e}"))?;
+    conn.execute("DELETE FROM settings WHERE key = ?1", params![key])
+        .map_err(|e| format!("delete_setting: {e}"))?;
     Ok(())
 }

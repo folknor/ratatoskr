@@ -39,11 +39,11 @@ pub fn handle_save_signature(
         // routes the failure to the same re-list / status path.
         return if req.id.is_some() {
             Task::done(super::SignatureResult::UpdatedAck(Err(
-                "Service not ready".to_string(),
+                "Service not ready".to_string()
             )))
         } else {
             Task::done(super::SignatureResult::CreatedAck(Err(
-                "Service not ready".to_string(),
+                "Service not ready".to_string()
             )))
         };
     };
@@ -111,7 +111,7 @@ pub fn handle_delete_signature(
     let Some(client) = client else {
         log::warn!("signature.delete: no ServiceClient yet; ignoring delete");
         return Task::done(super::SignatureResult::DeletedAck(Err(
-            "Service not ready".to_string(),
+            "Service not ready".to_string()
         )));
     };
     Task::perform(

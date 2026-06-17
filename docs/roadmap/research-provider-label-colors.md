@@ -3,7 +3,7 @@
 > **Superseded by the folders/labels split.** See `reference/glossary/folders-labels.md` for the current model: Exchange categories, IMAP keywords, and JMAP keywords sync to the tag-only `labels` table; user-visible cross-account groupings live in `label_groups`. This roadmap doc is retained for historical context.
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: ✅ **Backend complete; one UI gap remains.** The "categories" concept this doc researched landed as the unified provider-labels + label-groups system - see `reference/glossary/folders-labels.md` for the current shape. Mapping from this doc's vocabulary to the live model:
+**Status**: [x] **Backend complete; one UI gap remains.** The "categories" concept this doc researched landed as the unified provider-labels + label-groups system - see `reference/glossary/folders-labels.md` for the current shape. Mapping from this doc's vocabulary to the live model:
 
 - "Category" -> raw provider label in the `labels` table (Exchange categories as `cat:{name}`, IMAP/JMAP keywords as `kw:{keyword}`, native Gmail label IDs unprefixed). Schema in `crates/db/src/db/schema/02_mail.sql`.
 - User-visible cross-account grouping -> `label_groups` + `label_group_members` (added after the original research). The thread/message aggregates are `thread_labels`, `message_keywords` (IMAP/JMAP), and `message_labels` (Graph delta reconciliation).

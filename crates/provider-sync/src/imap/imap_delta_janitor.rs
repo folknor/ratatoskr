@@ -35,8 +35,15 @@ pub(crate) async fn sync_flags_on_session(
     db: &WriteDbState,
     cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
-    sync_flags_on_session_inner(session, folder_path, account_id, db, cancellation_token, false)
-        .await
+    sync_flags_on_session_inner(
+        session,
+        folder_path,
+        account_id,
+        db,
+        cancellation_token,
+        false,
+    )
+    .await
 }
 
 async fn sync_flags_on_session_inner(
@@ -79,8 +86,10 @@ async fn sync_flags_on_session_inner(
         return Ok(0);
     }
 
-    let local_map: std::collections::HashMap<u32, sync_pipeline::LocalImapFlags> =
-        local_flags.into_iter().map(|flags| (flags.uid, flags)).collect();
+    let local_map: std::collections::HashMap<u32, sync_pipeline::LocalImapFlags> = local_flags
+        .into_iter()
+        .map(|flags| (flags.uid, flags))
+        .collect();
 
     if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
@@ -143,8 +152,14 @@ pub async fn sync_flags_without_condstore(
     cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
     let mut session = connect(config).await?;
-    let result =
-        sync_flags_on_session(&mut session, folder_path, account_id, db, cancellation_token).await;
+    let result = sync_flags_on_session(
+        &mut session,
+        folder_path,
+        account_id,
+        db,
+        cancellation_token,
+    )
+    .await;
     let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }
@@ -314,7 +329,8 @@ pub async fn run_deletion_detection(
             break;
         }
         let force = force_folders.contains(&folder.raw_path);
-        match detect_deleted_on_session(&mut session, &folder.raw_path, account_id, db, force).await {
+        match detect_deleted_on_session(&mut session, &folder.raw_path, account_id, db, force).await
+        {
             Ok(deleted_ids) if !deleted_ids.is_empty() => {
                 // Remove from body store
                 if let Err(e) = body_store.delete(deleted_ids.clone()).await {
@@ -331,7 +347,9 @@ pub async fn run_deletion_detection(
                 let aid = account_id.to_string();
                 let ids = deleted_ids;
                 match db
-                    .with_write(move |conn| sync_pipeline::remove_deleted_messages(conn, &aid, &ids))
+                    .with_write(move |conn| {
+                        sync_pipeline::remove_deleted_messages(conn, &aid, &ids)
+                    })
                     .await
                 {
                     Ok(affected) => all_affected.extend(affected),

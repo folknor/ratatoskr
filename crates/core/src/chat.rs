@@ -106,14 +106,10 @@ pub async fn get_chat_timeline(
                     _ => true,
                 })
                 .collect();
-            let message_ids: Vec<String> =
-                rows.iter().map(|r| r.message_id.clone()).collect();
-            let images = crate::db::queries_extra::chat::get_chat_inline_images_sync(
-                conn,
-                &message_ids,
-            )?;
-            let signatures =
-                crate::db::queries_extra::chat::get_user_signature_texts_sync(conn)?;
+            let message_ids: Vec<String> = rows.iter().map(|r| r.message_id.clone()).collect();
+            let images =
+                crate::db::queries_extra::chat::get_chat_inline_images_sync(conn, &message_ids)?;
+            let signatures = crate::db::queries_extra::chat::get_user_signature_texts_sync(conn)?;
 
             let mut messages: Vec<ChatMessage> = rows
                 .into_iter()
@@ -159,7 +155,10 @@ pub async fn get_chat_timeline(
     let mut by_message: HashMap<String, Vec<&db_read::db::queries_extra::chat::DbChatInlineImage>> =
         HashMap::new();
     for row in &inline_rows {
-        by_message.entry(row.message_id.clone()).or_default().push(row);
+        by_message
+            .entry(row.message_id.clone())
+            .or_default()
+            .push(row);
     }
     // `get_batch_sync` expects `(key_for_result_map, lookup_content_hash)`
     // pairs and is keyed by CID for the reading-pane caller. For chat we
@@ -220,11 +219,7 @@ pub async fn get_chat_timeline(
 /// `ChatMessage::body_text_full` for the "show full message" toggle.
 fn chat_strip_body(raw: &str, user_signatures: &[&str]) -> String {
     let after_quotes = common::signature_strip::collapse_quotes(raw, false);
-    let after_sig = common::signature_strip::strip_signature(
-        &after_quotes,
-        false,
-        user_signatures,
-    );
+    let after_sig = common::signature_strip::strip_signature(&after_quotes, false, user_signatures);
     if after_sig.trim().is_empty() {
         raw.to_string()
     } else {

@@ -68,16 +68,16 @@ impl EmojiCategory {
     /// Representative emoji shown on the category tab.
     pub fn tab_emoji(self) -> &'static str {
         match self {
-            Self::Recent => "\u{1F552}",         // 🕒
-            Self::Smileys => "\u{1F600}",        // 😀
-            Self::People => "\u{1F44B}",         // 👋
-            Self::Nature => "\u{1F338}",         // 🌸
-            Self::Food => "\u{1F354}",           // 🍔
-            Self::Activities => "\u{26BD}",      // ⚽
-            Self::Travel => "\u{2708}\u{FE0F}",  // ✈️
-            Self::Objects => "\u{1F4A1}",        // 💡
-            Self::Symbols => "\u{267B}\u{FE0F}", // ♻️
-            Self::Flags => "\u{1F3F3}\u{FE0F}",  // 🏳️
+            Self::Recent => "\u{1F552}",         // clock
+            Self::Smileys => "\u{1F600}",        // grinning face
+            Self::People => "\u{1F44B}",         // waving hand
+            Self::Nature => "\u{1F338}",         // cherry blossom
+            Self::Food => "\u{1F354}",           // hamburger
+            Self::Activities => "\u{26BD}",      // soccer ball
+            Self::Travel => "\u{2708}\u{FE0F}",  // airplane
+            Self::Objects => "\u{1F4A1}",        // light bulb
+            Self::Symbols => "\u{267B}\u{FE0F}", // recycling symbol
+            Self::Flags => "\u{1F3F3}\u{FE0F}",  // white flag
         }
     }
 
@@ -142,7 +142,7 @@ impl SkinTone {
     /// Display swatch for the skin tone selector.
     pub fn swatch(self) -> &'static str {
         match self {
-            Self::Default => "\u{270B}", // ✋ (default yellow)
+            Self::Default => "\u{270B}", // raised hand (default yellow)
             Self::Light => "\u{270B}\u{1F3FB}",
             Self::MediumLight => "\u{270B}\u{1F3FC}",
             Self::Medium => "\u{270B}\u{1F3FD}",

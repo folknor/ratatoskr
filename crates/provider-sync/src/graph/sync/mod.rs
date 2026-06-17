@@ -8,9 +8,7 @@ use std::collections::HashSet;
 use common::types::{ProviderCtx, SyncResult};
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
-use service_state::{
-    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle,
-};
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use tokio_util::sync::CancellationToken;
 
 use super::client::GraphClient;
@@ -88,9 +86,7 @@ pub async fn graph_initial_sync(
         cancellation_token,
     };
 
-    log::info!(
-        "[Graph] Starting initial sync for account {account_id} (days_back={days_back})"
-    );
+    log::info!("[Graph] Starting initial sync for account {account_id} (days_back={days_back})");
     // Phase 1: Sync folders → labels → build folder map
     emit_progress(&sctx, "folders", "", 0, 1, 0);
 
@@ -135,14 +131,9 @@ pub async fn graph_initial_sync(
             total_messages,
         );
 
-        let messages = fetch_folder_messages(
-            client,
-            read_db,
-            graph_folder_id,
-            &since_iso,
-            &folder_map,
-        )
-        .await?;
+        let messages =
+            fetch_folder_messages(client, read_db, graph_folder_id, &since_iso, &folder_map)
+                .await?;
 
         #[allow(clippy::cast_possible_truncation)]
         let count = messages.len() as u64;
@@ -159,7 +150,14 @@ pub async fn graph_initial_sync(
     for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
         match bootstrap_delta_token(client, read_db, folder_id).await {
             Ok(delta_link) => {
-                save_delta_token(client, &db.writer_pool(), account_id, folder_id, &delta_link).await?;
+                save_delta_token(
+                    client,
+                    &db.writer_pool(),
+                    account_id,
+                    folder_id,
+                    &delta_link,
+                )
+                .await?;
             }
             Err(e) => {
                 log::warn!("Failed to bootstrap delta token for folder {folder_id}: {e}");
@@ -171,8 +169,13 @@ pub async fn graph_initial_sync(
         emit_progress(&sctx, "delta", "", current, total_folders, total_messages);
     }
 
-    if let Err(e) =
-        super::contact_sync::graph_contacts_initial_sync(client, account_id, read_db, &db.writer_pool()).await
+    if let Err(e) = super::contact_sync::graph_contacts_initial_sync(
+        client,
+        account_id,
+        read_db,
+        &db.writer_pool(),
+    )
+    .await
     {
         log::warn!("Contact initial sync failed (non-fatal): {e}");
     }
@@ -181,7 +184,9 @@ pub async fn graph_initial_sync(
     // labels. Delta-cadence runs again every 20th cycle from
     // `graph_delta_sync`; without this initial pass, a fresh account
     // would sit without categories for the first 20 delta cycles.
-    if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool()).await {
+    if let Err(e) =
+        super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool()).await
+    {
         log::warn!("Master category initial sync failed (non-fatal): {e}");
     }
 
@@ -250,16 +255,12 @@ pub async fn graph_delta_sync(
     };
 
     let cycle = sync_state::increment_graph_sync_cycle(&db.writer_pool(), account_id).await?;
-    log::info!(
-        "[Graph] Starting delta sync for account {account_id} (cycle={cycle})"
-    );
+    log::info!("[Graph] Starting delta sync for account {account_id} (cycle={cycle})");
 
     // Load stored delta tokens
     let mut tokens = load_delta_tokens(client, read_db, account_id).await?;
     if tokens.is_empty() {
-        log::error!(
-            "[Graph] No delta tokens for account {account_id} - run initial sync first"
-        );
+        log::error!("[Graph] No delta tokens for account {account_id} - run initial sync first");
         return Err("GRAPH_NO_DELTA_STATE".to_string());
     }
 
@@ -283,8 +284,14 @@ pub async fn graph_delta_sync(
                 log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
                 match bootstrap_delta_token_latest(client, read_db, folder_id).await {
                     Ok(delta_link) => {
-                        save_delta_token(client, &db.writer_pool(), account_id, folder_id, &delta_link)
-                            .await?;
+                        save_delta_token(
+                            client,
+                            &db.writer_pool(),
+                            account_id,
+                            folder_id,
+                            &delta_link,
+                        )
+                        .await?;
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
                     Err(e) => {
@@ -366,29 +373,33 @@ pub async fn graph_delta_sync(
     // Contacts + categories: every 20th cycle (change rarely). Calendar
     // delta runs through `CalendarRuntime` (Phase 5), not from this path.
     if cycle.is_multiple_of(20) {
-        if let Err(e) =
-            super::contact_sync::graph_contacts_delta_sync(client, account_id, read_db, &db.writer_pool()).await
+        if let Err(e) = super::contact_sync::graph_contacts_delta_sync(
+            client,
+            account_id,
+            read_db,
+            &db.writer_pool(),
+        )
+        .await
         {
             log::warn!("Contact delta sync failed (non-fatal): {e}");
         }
-        if let Err(e) = super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool()).await
+        if let Err(e) =
+            super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool())
+                .await
         {
             log::warn!("Label sync failed (non-fatal): {e}");
         }
         let write_db = sctx.write_db.clone();
-        match super::group_sync::sync_exchange_groups(
-            client,
-            read_db,
-            account_id,
-            move |write| {
-                let write_db = write_db.clone();
-                async move {
-                    write_db
-                        .with_write(move |conn| super::group_sync::persist_exchange_group_write(conn, write))
-                        .await
-                }
-            },
-        )
+        match super::group_sync::sync_exchange_groups(client, read_db, account_id, move |write| {
+            let write_db = write_db.clone();
+            async move {
+                write_db
+                    .with_write(move |conn| {
+                        super::group_sync::persist_exchange_group_write(conn, write)
+                    })
+                    .await
+            }
+        })
         .await
         {
             Ok(count) => {
@@ -483,7 +494,14 @@ async fn sync_folder_delta(
         if let Some(ref next_link) = page.next_link {
             current_link = next_link.clone();
         } else if let Some(ref new_delta) = page.delta_link {
-            save_delta_token(sctx.client, &sctx.write_db.writer_pool(), sctx.account_id, folder_id, new_delta).await?;
+            save_delta_token(
+                sctx.client,
+                &sctx.write_db.writer_pool(),
+                sctx.account_id,
+                folder_id,
+                new_delta,
+            )
+            .await?;
             break;
         } else {
             // No next or delta link - shouldn't happen, but break to avoid infinite loop

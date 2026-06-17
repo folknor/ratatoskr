@@ -33,6 +33,5 @@ pub(crate) async fn handle_set(
             .await
             .map_err(ServiceError::Internal)?;
     }
-    serde_json::to_value(ThreadUiStateSetAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(ThreadUiStateSetAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }

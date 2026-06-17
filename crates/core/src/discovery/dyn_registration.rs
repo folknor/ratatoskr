@@ -68,10 +68,7 @@ pub fn public_client_request(redirect_uri: &str, scope: &str) -> RegistrationReq
 /// (network error, non-HTTPS endpoint, non-2xx status, parse error, missing
 /// `client_id` in the response). Best-effort: the caller decides whether to
 /// surface a failure to the user or fall back to a manual flow.
-pub async fn register(
-    endpoint: &str,
-    request: &RegistrationRequest,
-) -> Option<RegisteredClient> {
+pub async fn register(endpoint: &str, request: &RegistrationRequest) -> Option<RegisteredClient> {
     if !super::oidc::is_valid_https_url(endpoint) {
         log::debug!("dyn_registration: rejecting non-HTTPS endpoint {endpoint}");
         return None;
@@ -88,10 +85,7 @@ pub async fn register(
         .await
         .ok()?;
     if !resp.status().is_success() {
-        log::debug!(
-            "dyn_registration: {endpoint} returned {}",
-            resp.status()
-        );
+        log::debug!("dyn_registration: {endpoint} returned {}", resp.status());
         return None;
     }
 
@@ -119,9 +113,7 @@ fn parse_response(bytes: &[u8]) -> Option<RegisteredClient> {
     }
     // Treat an empty-string secret the same as missing - some IdPs serialize
     // it as `""` rather than omitting the field for public clients.
-    let client_secret = parsed
-        .client_secret
-        .filter(|s| !s.trim().is_empty());
+    let client_secret = parsed.client_secret.filter(|s| !s.trim().is_empty());
     Some(RegisteredClient {
         client_id: parsed.client_id,
         client_secret,
@@ -137,10 +129,7 @@ mod tests {
         let req = public_client_request("http://127.0.0.1:17248/callback", "openid email");
         assert_eq!(req.redirect_uris, vec!["http://127.0.0.1:17248/callback"]);
         assert_eq!(req.client_name, "Ratatoskr");
-        assert_eq!(
-            req.grant_types,
-            vec!["authorization_code", "refresh_token"]
-        );
+        assert_eq!(req.grant_types, vec!["authorization_code", "refresh_token"]);
         assert_eq!(req.response_types, vec!["code"]);
         assert_eq!(req.token_endpoint_auth_method, "none");
         assert_eq!(req.scope, "openid email");

@@ -1,7 +1,7 @@
 # Reactions
 
 **Tier**: ~~2 - Keeps users from going back~~ → **Dropped as a user-facing feature.**
-**Status**: ❌ **No UI will be built.** Backend defensive code remains (Phases 1-4) to avoid breaking on reaction data during sync. Exchange is read-only with no write API (permanently blocked). Gmail has full read/write but via a completely different mechanism (MIME). JMAP/IMAP have nothing. There is no unified model - reactions cannot be presented as a consistent cross-provider feature. Unlike labels, there is no useful local-only fallback (reactions are social).
+**Status**: [-] **No UI will be built.** Backend defensive code remains (Phases 1-4) to avoid breaking on reaction data during sync. Exchange is read-only with no write API (permanently blocked). Gmail has full read/write but via a completely different mechanism (MIME). JMAP/IMAP have nothing. There is no unified model - reactions cannot be presented as a consistent cross-provider feature. Unlike labels, there is no useful local-only fallback (reactions are social).
 
 ---
 
@@ -107,7 +107,7 @@ Content-Type: text/plain; charset="UTF-8"
 
 --boundary
 Content-Type: text/vnd.google.email-reaction+json; charset="UTF-8"
-{"emoji":"👍","version":1}
+{"emoji":"","version":1}
 
 --boundary
 Content-Type: text/html; charset="UTF-8"
@@ -179,8 +179,8 @@ Serde's default behavior is to **silently ignore unknown fields** - exactly what
 
 ### 9. Implementation Priority
 
-1. ✅ **Phase 1 (defensive)**: Serde default ignore-unknown-fields handles reaction fields. Gmail `is_reaction` flag on messages prevents reaction MIME from rendering as body text. Reaction-only messages excluded from thread aggregates in `sync/src/persistence.rs`.
-2. ✅ **Phase 2 (Gmail read)**: `extract_reaction_emoji()` in `gmail/src/parse.rs` parses `text/vnd.google.email-reaction+json` MIME parts during sync. `insert_reactions()` in `gmail/src/sync/storage.rs` resolves target via `In-Reply-To` and populates `message_reactions` with `source = 'gmail_mime'`. Migration v37 in `db` crate.
-3. ✅ **Phase 3 (Exchange read)**: `extract_reaction_properties()` in `graph/src/parse.rs` reads `OwnerReactionType` and `ReactionsCount` extended properties (GUID `{41F28F13-...}`). `insert_exchange_reactions()` in `graph/src/sync/persistence.rs` stores owner reaction + count metadata. `refresh_reactions_for_recent_messages()` in the same module polls via `$batch` every 5th sync cycle to catch reaction changes missed by delta queries.
-4. ✅ **Phase 4 (Gmail write)**: `send_reaction()` in `gmail/src/ops.rs` builds correct MIME structure with `build_reaction_mime()` and sends via Gmail API.
+1. [x] **Phase 1 (defensive)**: Serde default ignore-unknown-fields handles reaction fields. Gmail `is_reaction` flag on messages prevents reaction MIME from rendering as body text. Reaction-only messages excluded from thread aggregates in `sync/src/persistence.rs`.
+2. [x] **Phase 2 (Gmail read)**: `extract_reaction_emoji()` in `gmail/src/parse.rs` parses `text/vnd.google.email-reaction+json` MIME parts during sync. `insert_reactions()` in `gmail/src/sync/storage.rs` resolves target via `In-Reply-To` and populates `message_reactions` with `source = 'gmail_mime'`. Migration v37 in `db` crate.
+3. [x] **Phase 3 (Exchange read)**: `extract_reaction_properties()` in `graph/src/parse.rs` reads `OwnerReactionType` and `ReactionsCount` extended properties (GUID `{41F28F13-...}`). `insert_exchange_reactions()` in `graph/src/sync/persistence.rs` stores owner reaction + count metadata. `refresh_reactions_for_recent_messages()` in the same module polls via `$batch` every 5th sync cycle to catch reaction changes missed by delta queries.
+4. [x] **Phase 4 (Gmail write)**: `send_reaction()` in `gmail/src/ops.rs` builds correct MIME structure with `build_reaction_mime()` and sends via Gmail API.
 5. **Phase 5 (Exchange write)**: **Permanently blocked.** No public Graph API exists for adding email reactions (confirmed March 2026). The `chatMessage:setReaction` endpoint is Teams-only. PATCHing `OwnerReactionType` as an extended property only updates the local copy - no server-side propagation to other recipients. The reaction propagation mechanism is internal to Exchange/Outlook's proprietary protocol. Do not reverse-engineer. If Microsoft ever ships a public API, revisit.

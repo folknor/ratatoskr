@@ -73,7 +73,9 @@ impl std::fmt::Debug for SecretKey {
         // Never expose the key bytes via Debug. Many telemetry / logging
         // surfaces bottom out in `format!("{x:?}")`; SecretKey is the
         // last line of defense against an accidental expose.
-        f.debug_struct("SecretKey").field("bytes", &"<redacted>").finish()
+        f.debug_struct("SecretKey")
+            .field("bytes", &"<redacted>")
+            .finish()
     }
 }
 
@@ -89,10 +91,17 @@ pub enum LoadError {
     /// genuinely intended for another user (shared XDG dir
     /// misconfiguration) or substituted by a hostile local user; in
     /// either case we cannot trust it.
-    WrongOwner { path: PathBuf, expected_uid: u32, actual_uid: u32 },
+    WrongOwner {
+        path: PathBuf,
+        expected_uid: u32,
+        actual_uid: u32,
+    },
     /// Filesystem I/O failed while reading the key. The wrapped error
     /// carries the underlying cause.
-    Io { path: PathBuf, error: std::io::Error },
+    Io {
+        path: PathBuf,
+        error: std::io::Error,
+    },
     /// File contents were not valid base64 (whitespace stripped before
     /// decoding).
     InvalidBase64(base64::DecodeError),
@@ -108,9 +117,9 @@ pub enum LoadError {
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotFound => f.write_str(
-                "no encryption key file found (ratatoskr.key or legacy velo.key)",
-            ),
+            Self::NotFound => {
+                f.write_str("no encryption key file found (ratatoskr.key or legacy velo.key)")
+            }
             Self::WrongOwner {
                 path,
                 expected_uid,
@@ -168,9 +177,8 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
     let contents: Zeroizing<String> = Zeroizing::new(open_and_read(&path)?);
 
     let trimmed = contents.trim();
-    let decoded: Zeroizing<Vec<u8>> = Zeroizing::new(
-        STANDARD.decode(trimmed).map_err(LoadError::InvalidBase64)?,
-    );
+    let decoded: Zeroizing<Vec<u8>> =
+        Zeroizing::new(STANDARD.decode(trimmed).map_err(LoadError::InvalidBase64)?);
     if decoded.len() != 32 {
         return Err(LoadError::WrongLength {
             expected: 32,
@@ -280,17 +288,15 @@ mod tests {
     use super::*;
 
     fn temp_dir(suffix: &str) -> std::io::Result<PathBuf> {
-        let path = std::env::current_dir()?
-            .join("target")
-            .join(format!(
-                "crypto-key-test-{}-{}-{}",
-                std::process::id(),
-                suffix,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
+        let path = std::env::current_dir()?.join("target").join(format!(
+            "crypto-key-test-{}-{}-{}",
+            std::process::id(),
+            suffix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path)?;
         Ok(path)
@@ -348,7 +354,10 @@ mod tests {
         let bytes = [0u8; 16];
         std::fs::write(dir.join("ratatoskr.key"), STANDARD.encode(bytes)).expect("write");
         match load_encryption_key(&dir) {
-            Err(LoadError::WrongLength { expected: 32, actual: 16 }) => {}
+            Err(LoadError::WrongLength {
+                expected: 32,
+                actual: 16,
+            }) => {}
             other => panic!("expected WrongLength, got {other:?}"),
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -357,8 +366,7 @@ mod tests {
     #[test]
     fn non_base64_key_is_rejected() {
         let dir = temp_dir("garbage").expect("temp dir");
-        std::fs::write(dir.join("ratatoskr.key"), "this is not base64!!!@@@")
-            .expect("write");
+        std::fs::write(dir.join("ratatoskr.key"), "this is not base64!!!@@@").expect("write");
         match load_encryption_key(&dir) {
             Err(LoadError::InvalidBase64(_)) => {}
             other => panic!("expected InvalidBase64, got {other:?}"),
@@ -376,14 +384,9 @@ mod tests {
         // Set a deliberately too-open mode so the loader has something
         // to repair. The fchmod-via-fd repair runs while the file is
         // open for read.
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
-            .expect("set perms");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("set perms");
         let _ = load_encryption_key(&dir).expect("load");
-        let mode = std::fs::metadata(&path)
-            .expect("stat")
-            .permissions()
-            .mode()
-            & 0o777;
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "loader must fchmod the file to 0o600");
         let _ = std::fs::remove_dir_all(&dir);
     }

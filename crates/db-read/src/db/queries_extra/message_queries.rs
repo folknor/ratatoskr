@@ -38,9 +38,7 @@ pub fn get_message_body(
     );
     match result {
         Ok(snippet) => Ok((snippet, None)),
-        Err(crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
-            Ok((None, None))
-        }
+        Err(crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok((None, None)),
         Err(e) => Err(e.to_string()),
     }
 }

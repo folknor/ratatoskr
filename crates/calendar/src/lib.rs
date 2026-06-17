@@ -18,10 +18,7 @@ pub(crate) const GOOGLE_CALENDAR_RETRY_CONFIG: RetryConfig = RetryConfig {
 pub(crate) fn google_calendar_api_base() -> String {
     if let Ok(value) = std::env::var("RATATOSKR_TEST_GCAL_ENDPOINT")
         && let Some(api_base) =
-            rtsk::provider::test_endpoint::api_base_from_test_endpoint(
-                &value,
-                "calendar/v3",
-            )
+            rtsk::provider::test_endpoint::api_base_from_test_endpoint(&value, "calendar/v3")
     {
         return api_base;
     }

@@ -100,7 +100,10 @@ url = "https://jmap.corp.example/.well-known/jmap"
 "#;
         let cfg: AdminConfig = toml::from_str(toml_str).expect("valid TOML");
         let oidc = cfg.oidc.expect("oidc table");
-        assert_eq!(oidc.issuer_url.as_deref(), Some("https://auth.corp.example"));
+        assert_eq!(
+            oidc.issuer_url.as_deref(),
+            Some("https://auth.corp.example")
+        );
         assert_eq!(oidc.client_id.as_deref(), Some("ratatoskr-corp"));
         assert_eq!(oidc.client_secret.as_deref(), Some("shh"));
         assert_eq!(
@@ -135,7 +138,10 @@ issuer_url = "https://auth.corp.example"
         assert!(cfg.smtp.is_none());
         assert!(cfg.jmap.is_none());
         let oidc = cfg.oidc.expect("oidc table");
-        assert_eq!(oidc.issuer_url.as_deref(), Some("https://auth.corp.example"));
+        assert_eq!(
+            oidc.issuer_url.as_deref(),
+            Some("https://auth.corp.example")
+        );
         assert!(oidc.client_id.is_none());
         assert!(oidc.client_secret.is_none());
         assert!(oidc.extra_scopes.is_none());
@@ -162,9 +168,7 @@ issuer_url = "https://auth.corp.example"
         // dirs::config_dir() returns None on platforms with no
         // convention; otherwise the joined path includes "ratatoskr".
         if let Some(path) = config_path() {
-            assert!(path
-                .to_string_lossy()
-                .contains("ratatoskr"));
+            assert!(path.to_string_lossy().contains("ratatoskr"));
             assert!(path.ends_with("config.toml"));
         }
     }

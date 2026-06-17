@@ -89,9 +89,7 @@ async fn permanent_delete_dispatch(
             let msg = e.to_string();
             let error = ActionError::remote(msg);
             enqueue_permanent_delete_retry(ctx, account_id, thread_id, &error).await;
-            ActionOutcome::Failed {
-                error,
-            }
+            ActionOutcome::Failed { error }
         }
     };
     mlog.emit(&outcome);
@@ -116,9 +114,7 @@ pub async fn permanent_delete(
             let kind = classify_provider_error(&e);
             let error = ActionError::remote_with_kind(kind, e);
             enqueue_permanent_delete_retry(ctx, account_id, thread_id, &error).await;
-            let outcome = ActionOutcome::Failed {
-                error,
-            };
+            let outcome = ActionOutcome::Failed { error };
             mlog.emit(&outcome);
             outcome
         }

@@ -1,10 +1,10 @@
 mod ical;
 
+use db::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
 use rtsk::caldav::client::{AuthMethod, CalDavClient};
 use rtsk::caldav::parse::parse_icalendar;
 use rtsk::db::ReadDbState;
 use service_state::WriteDbState;
-use db::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
 
 use super::types::{CalendarEventDto, CalendarInfoDto};
 
@@ -93,7 +93,15 @@ pub async fn caldav_create_event_impl(
     let event_url = join_calendar_path(calendar_remote_id, &format!("{uid}.ics"))?;
 
     let put_etag = client.put_event(&event_url, &ical_data, None).await?;
-    finalize_event(&client, &event_url, &input, &ical_data, Some(&uid), put_etag).await
+    finalize_event(
+        &client,
+        &event_url,
+        &input,
+        &ical_data,
+        Some(&uid),
+        put_etag,
+    )
+    .await
 }
 
 pub async fn caldav_update_event_impl(
@@ -216,7 +224,9 @@ pub async fn caldav_delete_event_impl(
         Ok(()) => Ok(()),
         Err(err) if etag.is_some() && is_precondition_failed(&err) => {
             let (_ical_data, fresh_etag) = client.get_event_ical(remote_event_id).await?;
-            client.delete_event(remote_event_id, fresh_etag.as_deref()).await
+            client
+                .delete_event(remote_event_id, fresh_etag.as_deref())
+                .await
         }
         Err(err) => Err(err),
     }
@@ -386,9 +396,7 @@ async fn fetch_caldav_event(
     // without failing the operation; the next sync replaces this with the
     // canonical event.
     let Some(parsed) = events.pop() else {
-        log::warn!(
-            "CalDAV: GET {event_url} returned VCALENDAR with no VEVENT; returning stub DTO"
-        );
+        log::warn!("CalDAV: GET {event_url} returned VCALENDAR with no VEVENT; returning stub DTO");
         return Ok(CalendarEventDto {
             remote_event_id: event_url.to_string(),
             etag,
@@ -445,8 +453,7 @@ async fn fetch_caldav_event(
 }
 
 fn join_calendar_path(base: &str, segment: &str) -> Result<String, String> {
-    let mut parsed =
-        reqwest::Url::parse(base).map_err(|e| format!("invalid calendar URL: {e}"))?;
+    let mut parsed = reqwest::Url::parse(base).map_err(|e| format!("invalid calendar URL: {e}"))?;
 
     // Preserve `base`'s query and fragment across the join. The standard
     // `Url::join` for a relative ref drops the base's query/fragment; some

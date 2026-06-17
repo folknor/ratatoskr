@@ -36,7 +36,8 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
     };
     log::debug!("[Gmail] Delta sync from history_id={last_history_id}");
 
-    let cycle = sync_state::increment_gmail_sync_cycle(&ctx.write_db.writer_pool(), ctx.account_id).await?;
+    let cycle =
+        sync_state::increment_gmail_sync_cycle(&ctx.write_db.writer_pool(), ctx.account_id).await?;
 
     // Sync signatures on each delta (lightweight - single API call)
     labels::sync_signatures(ctx).await?;
@@ -46,49 +47,44 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
 
     // Contacts delta sync: every 20th cycle (contacts change rarely)
     if cycle.is_multiple_of(20) {
-        if let Err(e) =
-            super::super::contacts::sync_google_contacts(
-                ctx.client,
-                ctx.account_id,
-                ctx.db,
-                &ctx.write_db.writer_pool(),
-            )
-            .await
+        if let Err(e) = super::super::contacts::sync_google_contacts(
+            ctx.client,
+            ctx.account_id,
+            ctx.db,
+            &ctx.write_db.writer_pool(),
+        )
+        .await
         {
             log::warn!("Google contacts delta sync failed (non-fatal): {e}");
         }
-        if let Err(e) =
-            super::super::contacts::sync_google_other_contacts(
-                ctx.client,
-                ctx.account_id,
-                ctx.db,
-                &ctx.write_db.writer_pool(),
-                {
-                    let write_db = ctx.write_db.clone();
-                    move |write| {
-                        let write_db = write_db.clone();
-                        async move {
-                            write_db
-                                .with_write(move |conn| {
-                                    let tx = conn
-                                        .transaction()
-                                        .map_err(|e| {
-                                            format!("begin google other contacts tx: {e}")
-                                        })?;
-                                    super::super::contacts::persist_google_other_contacts_write(
-                                        &tx, write,
-                                    )?;
-                                    tx.commit().map_err(|e| {
-                                        format!("commit google other contacts tx: {e}")
-                                    })?;
-                                    Ok(())
-                                })
-                                .await
-                        }
+        if let Err(e) = super::super::contacts::sync_google_other_contacts(
+            ctx.client,
+            ctx.account_id,
+            ctx.db,
+            &ctx.write_db.writer_pool(),
+            {
+                let write_db = ctx.write_db.clone();
+                move |write| {
+                    let write_db = write_db.clone();
+                    async move {
+                        write_db
+                            .with_write(move |conn| {
+                                let tx = conn
+                                    .transaction()
+                                    .map_err(|e| format!("begin google other contacts tx: {e}"))?;
+                                super::super::contacts::persist_google_other_contacts_write(
+                                    &tx, write,
+                                )?;
+                                tx.commit()
+                                    .map_err(|e| format!("commit google other contacts tx: {e}"))?;
+                                Ok(())
+                            })
+                            .await
                     }
-                },
-            )
-            .await
+                }
+            },
+        )
+        .await
         {
             log::warn!("Google otherContacts delta sync failed (non-fatal): {e}");
         }
@@ -236,5 +232,6 @@ async fn filter_pending_ops(
 }
 
 async fn update_history_id(ctx: &SyncCtx<'_>, history_id: &str) -> Result<(), String> {
-    sync_state::save_account_history_id(&ctx.write_db.writer_pool(), ctx.account_id, history_id).await
+    sync_state::save_account_history_id(&ctx.write_db.writer_pool(), ctx.account_id, history_id)
+        .await
 }

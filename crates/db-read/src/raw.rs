@@ -30,10 +30,7 @@ impl<'a> ReadConn<'a> {
         Ok(ReadStatement { raw: stmt })
     }
 
-    pub fn prepare_cached<'b>(
-        &'b self,
-        sql: &str,
-    ) -> Result<ReadCachedStatement<'b>, ReadError> {
+    pub fn prepare_cached<'b>(&'b self, sql: &str) -> Result<ReadCachedStatement<'b>, ReadError> {
         let stmt = self.raw.prepare_cached(sql)?;
         if !stmt.readonly() {
             return Err(ReadError::NotReadOnly(sql.to_string()));
@@ -183,7 +180,6 @@ impl ReadDbState {
         let read = ReadConn::from_raw(&conn);
         f(&read)
     }
-
 }
 
 pub(crate) fn apply_reader_pragmas(conn: &Connection) -> Result<(), String> {

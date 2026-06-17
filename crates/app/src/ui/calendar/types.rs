@@ -121,7 +121,8 @@ pub enum CalendarModal {
     /// `EditingEvent` in workflow state is a contract violation.
     EventEditor,
     /// Delete confirmation dialog.
-    #[allow(dead_code)] // event_id + account_id captured here so the modal can dispatch the delete
+    #[allow(dead_code)]
+    // event_id + account_id captured here so the modal can dispatch the delete
     ConfirmDelete {
         event_id: String,
         title: String,
@@ -351,11 +352,7 @@ fn local_midnight_unix(date: NaiveDate) -> i64 {
         // current IANA zone springs forward at 00:00 but the API permits
         // it). The window is approximate so we round up to the next
         // representable minute.
-        .unwrap_or_else(|| {
-            naive
-                .and_utc()
-                .timestamp()
-        })
+        .unwrap_or_else(|| naive.and_utc().timestamp())
 }
 
 /// Persistent calendar state (survives mode switches).
@@ -502,8 +499,7 @@ impl CalendarState {
                     });
                 }
             },
-            CalendarWorkflow::CreatingEvent { .. }
-            | CalendarWorkflow::EditingEvent { .. } => {
+            CalendarWorkflow::CreatingEvent { .. } | CalendarWorkflow::EditingEvent { .. } => {
                 self.active_popover = None;
                 self.active_modal = Some(CalendarModal::EventEditor);
             }

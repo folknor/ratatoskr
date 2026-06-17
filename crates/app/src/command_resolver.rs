@@ -33,9 +33,7 @@ impl CommandInputResolver for AppInputResolver {
                     .ok_or_else(|| "no active account".to_string())?;
                 self.db.get_user_folders_for_palette(account_id)
             }
-            (CommandId::EmailAddLabel, 0) => {
-                self.db.get_label_groups_for_palette()
-            }
+            (CommandId::EmailAddLabel, 0) => self.db.get_label_groups_for_palette(),
             (CommandId::EmailRemoveLabel, 0) => {
                 let account_id = ctx
                     .active_account_id

@@ -18,7 +18,6 @@
 use crate::boot_progress;
 use crate::dispatch::DispatchConfig;
 use crypto_key::SecretKey;
-use tokio_util::sync::CancellationToken;
 use db::db::action_journal::recover_stale_leases;
 use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
 use db::db::queries_extra::{
@@ -26,12 +25,13 @@ use db::db::queries_extra::{
     get_all_accounts_sync, get_all_send_identity_emails_read,
 };
 use db::db::{apply_writer_pragmas, migrations, reconcile_velo_rename};
-use rusqlite::{Connection, OpenFlags};
 use db::progress::ProgressReporter;
+use rusqlite::{Connection, OpenFlags};
 use service_api::{BootExitCode, BootPhase, BootReadyResponse};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Notify, mpsc};
+use tokio_util::sync::CancellationToken;
 
 /// Service-side boot artifacts loaded once at boot. The action worker,
 /// sync runtime, push runtime, calendar runtime, and rebuild path all
@@ -176,8 +176,7 @@ pub(crate) struct BootSharedState {
     /// shared handle is enough: `InlineImageStoreReadState` is `Clone`
     /// (cheap `Arc<Mutex<Connection>>`) so callers can take a clone
     /// without contending the boot-state mutex.
-    inline_image_read:
-        Mutex<Option<store::inline_image_store::InlineImageStoreReadState>>,
+    inline_image_read: Mutex<Option<store::inline_image_store::InlineImageStoreReadState>>,
     /// Phase 7-9: in-flight `index.rebuild` task. Holds the
     /// rebuild_id, the `JoinHandle` for the spawned rebuild, and a
     /// `CancellationToken` the dispatch-side drain can cancel.
@@ -262,8 +261,8 @@ pub(crate) struct BootSharedState {
 /// drain consumes it via `take_rebuild_task` to cancel + await.
 pub(crate) struct RebuildTaskState {
     pub rebuild_id: String,
-    pub cancel:     tokio_util::sync::CancellationToken,
-    pub handle:     tokio::task::JoinHandle<()>,
+    pub cancel: tokio_util::sync::CancellationToken,
+    pub handle: tokio::task::JoinHandle<()>,
 }
 
 impl BootSharedState {
@@ -363,8 +362,7 @@ impl BootSharedState {
     }
 
     fn is_shutting_down(&self) -> bool {
-        self.shutting_down
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.shutting_down.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Phase 7 (C4 fix): record that a rebuild ran to clean
@@ -429,9 +427,7 @@ impl BootSharedState {
     /// `NotificationSender`. Returns `None` if dispatch hasn't
     /// installed the sender yet (boot still in progress) or has
     /// cleared it (drain in progress).
-    pub(crate) fn notification_sender(
-        &self,
-    ) -> Option<crate::boot_progress::NotificationSender> {
+    pub(crate) fn notification_sender(&self) -> Option<crate::boot_progress::NotificationSender> {
         self.out_tx
             .lock()
             .expect("out_tx mutex poisoned")
@@ -443,10 +439,7 @@ impl BootSharedState {
     /// calls this before its `drop(out_tx)` so the writer-handle
     /// await observes EOF.
     pub(crate) fn take_out_tx(&self) -> Option<tokio::sync::mpsc::Sender<Vec<u8>>> {
-        self.out_tx
-            .lock()
-            .expect("out_tx mutex poisoned")
-            .take()
+        self.out_tx.lock().expect("out_tx mutex poisoned").take()
     }
 
     /// Phase 7-4d: install the boot-constructed `SearchWriteHandle`.
@@ -494,10 +487,7 @@ impl BootSharedState {
     /// `OpeningBodyAndInlineStores`. Subsequent installs are logged
     /// and ignored to mirror `install_search_write`.
     pub(crate) fn install_pack_store(&self, store: store::PackStore) {
-        let mut slot = self
-            .pack_store
-            .lock()
-            .expect("pack_store mutex poisoned");
+        let mut slot = self.pack_store.lock().expect("pack_store mutex poisoned");
         if slot.is_some() {
             log::warn!("install_pack_store called twice; second install ignored");
             return;
@@ -568,10 +558,7 @@ impl BootSharedState {
     /// Dropping the runtime here releases the Inner Arc which drops
     /// the clone, unblocking the writer-task EOF.
     #[allow(dead_code)] // 7-4 follow-up wires producers.
-    pub(crate) fn install_extract_runtime(
-        &self,
-        runtime: crate::extract::ExtractRuntime,
-    ) {
+    pub(crate) fn install_extract_runtime(&self, runtime: crate::extract::ExtractRuntime) {
         let mut guard = self
             .extract_runtime
             .lock()
@@ -622,10 +609,7 @@ impl BootSharedState {
     /// `is_shutting_down` so a startup spawn that loses the race
     /// against drain drops the runtime cleanly instead of orphaning
     /// the worker's `NotificationSender` clone.
-    pub(crate) fn install_prefetch_runtime(
-        &self,
-        runtime: crate::prefetch::PrefetchRuntime,
-    ) {
+    pub(crate) fn install_prefetch_runtime(&self, runtime: crate::prefetch::PrefetchRuntime) {
         let mut guard = self
             .prefetch_runtime
             .lock()
@@ -674,7 +658,10 @@ impl BootSharedState {
     /// the handler (with `force == false`) or pre-empted (with
     /// `force == true`).
     pub(crate) fn install_rebuild_task(&self, state: RebuildTaskState) {
-        let mut slot = self.rebuild_task.lock().expect("rebuild_task mutex poisoned");
+        let mut slot = self
+            .rebuild_task
+            .lock()
+            .expect("rebuild_task mutex poisoned");
         if let Some(prev) = slot.take() {
             // The handler is supposed to drain the previous slot
             // before installing; warn if not.
@@ -809,10 +796,7 @@ impl BootSharedState {
     /// constructed it (Phase 5 task 8). Same install-once / first-wins
     /// pattern as `install_push_runtime`.
     #[allow(dead_code)] // wired up in Phase 5 task 8
-    pub(crate) fn install_calendar_runtime(
-        &self,
-        runtime: Arc<crate::calendar::CalendarRuntime>,
-    ) {
+    pub(crate) fn install_calendar_runtime(&self, runtime: Arc<crate::calendar::CalendarRuntime>) {
         let mut guard = self
             .calendar_runtime
             .lock()
@@ -849,9 +833,7 @@ impl BootSharedState {
     /// *before* sync so a calendar runner's writes complete (or cancel
     /// cleanly) before sync teardown begins.
     #[allow(dead_code)] // consumed by drain wire-up in Phase 5 task 7
-    pub(crate) fn take_calendar_runtime(
-        &self,
-    ) -> Option<Arc<crate::calendar::CalendarRuntime>> {
+    pub(crate) fn take_calendar_runtime(&self) -> Option<Arc<crate::calendar::CalendarRuntime>> {
         self.calendar_runtime
             .lock()
             .expect("calendar_runtime mutex poisoned")
@@ -1088,13 +1070,8 @@ pub(crate) async fn run_boot_sequence(
     state: Arc<BootSharedState>,
     had_clean_shutdown: bool,
 ) -> Result<(), BootFailure> {
-    let inner = run_boot_sequence_inner(
-        out_tx,
-        app_data_dir,
-        Arc::clone(&state),
-        had_clean_shutdown,
-    )
-    .await;
+    let inner =
+        run_boot_sequence_inner(out_tx, app_data_dir, Arc::clone(&state), had_clean_shutdown).await;
     let (result, context) = match inner {
         Ok(ctx) => {
             let schema_version = state
@@ -1347,12 +1324,11 @@ async fn run_boot_sequence_inner(
             log::error!("inline image store write init failed: {e}");
             BootFailure::MigrationFailure
         })?;
-    let inline_read =
-        store::inline_image_store::InlineImageStoreReadState::init(&app_data_dir)
-            .map_err(|e| {
-                log::error!("inline image store read init failed: {e}");
-                BootFailure::MigrationFailure
-            })?;
+    let inline_read = store::inline_image_store::InlineImageStoreReadState::init(&app_data_dir)
+        .map_err(|e| {
+            log::error!("inline image store read init failed: {e}");
+            BootFailure::MigrationFailure
+        })?;
     state.install_inline_image_read(inline_read);
 
     // Attachments roadmap Phase 3: open the pack store against the
@@ -1438,19 +1414,18 @@ async fn run_boot_sequence_inner(
     }
 
     let notification_tx = boot_progress::NotificationSender::new(out_tx.clone());
-    let (search_write, search_writer_handle) =
-        match crate::search_writer::spawn(
-            &app_data_dir,
-            db_read.clone(),
-            notification_tx.clone(),
-            0,
-        ) {
-            Ok(pair) => pair,
-            Err(e) => {
-                log::error!("search writer spawn failed: {e}");
-                return Err(BootFailure::MigrationFailure);
-            }
-        };
+    let (search_write, search_writer_handle) = match crate::search_writer::spawn(
+        &app_data_dir,
+        db_read.clone(),
+        notification_tx.clone(),
+        0,
+    ) {
+        Ok(pair) => pair,
+        Err(e) => {
+            log::error!("search writer spawn failed: {e}");
+            return Err(BootFailure::MigrationFailure);
+        }
+    };
     state.install_search_writer_handle(search_writer_handle);
     // Phase 7-4d: stash a clone for the post-ready extract startup to
     // grab after boot.ready. Sync still owns its own clone (moved
@@ -1460,8 +1435,7 @@ async fn run_boot_sequence_inner(
     // Phase 3 task 11: invariant pass. Skipped on clean shutdown.
     boot_progress::emit(&out_tx, BootPhase::RunningInvariantPass, None);
     if !had_clean_shutdown {
-        let dirty =
-            crate::startup_invariants::discover_dirty_accounts(&app_data_dir).await;
+        let dirty = crate::startup_invariants::discover_dirty_accounts(&app_data_dir).await;
         if dirty.is_empty() {
             log::info!(
                 "invariant pass: no dirty markers under {}/sync_markers, skipping",
@@ -1581,8 +1555,8 @@ async fn reconcile_send_vault(
     db: &service_state::WriteDbState,
     app_data_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let live_ids: std::collections::HashSet<service_api::PlanId> =
-        db.with_write(move |conn| -> Result<_, String> {
+    let live_ids: std::collections::HashSet<service_api::PlanId> = db
+        .with_write(move |conn| -> Result<_, String> {
             let ids = db::db::action_journal::live_send_job_ids(conn)?;
             Ok(ids
                 .into_iter()
@@ -1623,10 +1597,7 @@ fn run_backfill_for_all_accounts(conn: &db::db::WriteConn<'_>) -> Result<(), Str
     if accounts.is_empty() {
         return Ok(());
     }
-    let mut user_emails: Vec<String> = accounts
-        .iter()
-        .map(|a| a.email.to_lowercase())
-        .collect();
+    let mut user_emails: Vec<String> = accounts.iter().map(|a| a.email.to_lowercase()).collect();
     for email in get_all_send_identity_emails_read(&read)? {
         let lower = email.to_lowercase();
         if !user_emails.contains(&lower) {
@@ -1688,7 +1659,7 @@ fn open_db_and_migrate(
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-        .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
+    .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
     apply_writer_pragmas(&conn)?;
 
     let mut progress = |current: u32, total: u32| {
@@ -1789,9 +1760,7 @@ pub(crate) fn write_current_search_index_version(
     write_search_index_version_at(&index_dir)
 }
 
-pub(crate) fn write_search_index_version_at(
-    index_dir: &std::path::Path,
-) -> Result<(), String> {
+pub(crate) fn write_search_index_version_at(index_dir: &std::path::Path) -> Result<(), String> {
     let version_path = index_dir.join(".version");
     write_search_index_version(&version_path)
 }
@@ -1866,17 +1835,9 @@ mod tests {
             recovery_warnings: Vec::new(),
         };
         state.signal_ready(Ok(response.clone()), Some(ctx));
-        let got_result = state
-            .result
-            .lock()
-            .expect("result mutex")
-            .clone();
+        let got_result = state.result.lock().expect("result mutex").clone();
         assert!(matches!(got_result, Some(Ok(_))));
-        let context_present = state
-            .context
-            .lock()
-            .expect("context mutex")
-            .is_some();
+        let context_present = state.context.lock().expect("context mutex").is_some();
         assert!(context_present, "success must populate context");
     }
 
@@ -1884,17 +1845,9 @@ mod tests {
     fn signal_ready_symmetry_failure_leaves_context_empty() {
         let state = BootSharedState::new(PathBuf::new(), DispatchConfig::default());
         state.signal_ready(Err(BootFailure::KeyLoadFailure), None);
-        let got_result = state
-            .result
-            .lock()
-            .expect("result mutex")
-            .clone();
+        let got_result = state.result.lock().expect("result mutex").clone();
         assert!(matches!(got_result, Some(Err(BootFailure::KeyLoadFailure))));
-        let context_present = state
-            .context
-            .lock()
-            .expect("context mutex")
-            .is_some();
+        let context_present = state.context.lock().expect("context mutex").is_some();
         assert!(!context_present, "failure must NOT populate context");
     }
 
@@ -1915,11 +1868,7 @@ mod tests {
         state.signal_ready(Ok(response.clone()), None);
         // Second call with a different result: must not overwrite.
         state.signal_ready(Err(BootFailure::MigrationFailure), None);
-        let got_result = state
-            .result
-            .lock()
-            .expect("result mutex")
-            .clone();
+        let got_result = state.result.lock().expect("result mutex").clone();
         assert!(matches!(got_result, Some(Ok(_))));
     }
 

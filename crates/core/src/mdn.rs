@@ -130,5 +130,4 @@ mod tests {
         assert!(text.contains("From: <me@myhost.com>"));
         assert!(text.contains("automatic-action/MDN-sent-automatically;displayed"));
     }
-
 }

@@ -130,17 +130,17 @@ impl SkipReason {
     #[allow(dead_code)] // Consumed in 7-4.
     pub(crate) fn status_string(self) -> &'static str {
         match self {
-            Self::OpaqueMime      => "skipped:opaque",
-            Self::Encrypted       => "skipped:encrypted",
-            Self::OversizeFile    => "skipped:oversize",
-            Self::Timeout         => "skipped:timeout",
+            Self::OpaqueMime => "skipped:opaque",
+            Self::Encrypted => "skipped:encrypted",
+            Self::OversizeFile => "skipped:oversize",
+            Self::Timeout => "skipped:timeout",
             Self::EncodingInvalid => "skipped:encoding",
-            Self::EmptyContent    => "skipped:empty",
-            Self::OcrUnavailable  => "skipped:ocr",
-            Self::BytesGone       => "skipped:bytes_gone",
-            Self::UnknownMime     => "skipped:unknown_mime",
-            Self::PrivacyExempt   => "skipped:privacy",
-            Self::ZipBomb         => "skipped:zipbomb",
+            Self::EmptyContent => "skipped:empty",
+            Self::OcrUnavailable => "skipped:ocr",
+            Self::BytesGone => "skipped:bytes_gone",
+            Self::UnknownMime => "skipped:unknown_mime",
+            Self::PrivacyExempt => "skipped:privacy",
+            Self::ZipBomb => "skipped:zipbomb",
         }
     }
 
@@ -232,12 +232,38 @@ pub(crate) fn is_opaque_by_mime_or_extension(mime: &str, filename: &str) -> bool
         let ext_lower = ext.to_ascii_lowercase();
         if matches!(
             ext_lower.as_str(),
-            "exe" | "dll" | "so" | "dylib"
-            | "zip" | "tar" | "gz" | "tgz" | "7z" | "bz2" | "rar"
-            | "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac"
-            | "mp4" | "mkv" | "mov" | "avi" | "webm"
-            | "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic"
-            | "tiff" | "bmp" | "ico" | "svg"
+            "exe"
+                | "dll"
+                | "so"
+                | "dylib"
+                | "zip"
+                | "tar"
+                | "gz"
+                | "tgz"
+                | "7z"
+                | "bz2"
+                | "rar"
+                | "mp3"
+                | "wav"
+                | "flac"
+                | "ogg"
+                | "m4a"
+                | "aac"
+                | "mp4"
+                | "mkv"
+                | "mov"
+                | "avi"
+                | "webm"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "heic"
+                | "tiff"
+                | "bmp"
+                | "ico"
+                | "svg"
         ) {
             return true;
         }
@@ -252,9 +278,13 @@ pub(crate) fn canonicalize_mime(mime: &str, filename: &str) -> Mime {
     let mime_lower = mime.to_ascii_lowercase();
     let mime_tag = match mime_lower.as_str() {
         "application/pdf" | "application/x-pdf" => Some(Mime::Pdf),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some(Mime::Docx),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+            Some(Mime::Docx)
+        }
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Some(Mime::Xlsx),
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some(Mime::Pptx),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+            Some(Mime::Pptx)
+        }
         "text/plain" | "text/csv" | "text/markdown" | "text/x-markdown" => Some(Mime::PlainText),
         "text/html" | "application/xhtml+xml" => Some(Mime::Html),
         "text/calendar" | "application/ics" => Some(Mime::Calendar),
@@ -266,13 +296,13 @@ pub(crate) fn canonicalize_mime(mime: &str, filename: &str) -> Mime {
     // Fallback by extension (covers missing or generic mime).
     if let Some(ext) = filename.rsplit('.').next() {
         match ext.to_ascii_lowercase().as_str() {
-            "pdf"   => return Mime::Pdf,
-            "docx"  => return Mime::Docx,
-            "xlsx"  => return Mime::Xlsx,
-            "pptx"  => return Mime::Pptx,
+            "pdf" => return Mime::Pdf,
+            "docx" => return Mime::Docx,
+            "xlsx" => return Mime::Xlsx,
+            "pptx" => return Mime::Pptx,
             "txt" | "log" | "csv" | "md" | "markdown" => return Mime::PlainText,
             "html" | "htm" | "xhtml" => return Mime::Html,
-            "ics"   => return Mime::Calendar,
+            "ics" => return Mime::Calendar,
             _ => {}
         }
     }
@@ -297,10 +327,14 @@ fn looks_like_vcalendar(bytes: &[u8]) -> bool {
 #[allow(dead_code)] // Consumed in 7-4.
 pub(crate) fn extract(bytes: &[u8], mime: &str, filename: &str) -> ExtractionOutcome {
     if is_opaque_by_mime_or_extension(mime, filename) {
-        return ExtractionOutcome::Skipped { reason: SkipReason::OpaqueMime };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::OpaqueMime,
+        };
     }
     if bytes.len() > MAX_INPUT_BYTES {
-        return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::OversizeFile,
+        };
     }
     let mut mime_canonical = canonicalize_mime(mime, filename);
     // M9 fix: sniff BEGIN:VCALENDAR for files that landed on the
@@ -318,17 +352,23 @@ pub(crate) fn extract(bytes: &[u8], mime: &str, filename: &str) -> ExtractionOut
     // input bytes lower than the global ceiling bounds the worst-case
     // heap footprint of leaked timeout threads.
     if mime_canonical == Mime::Pdf && bytes.len() > PDF_MAX_INPUT_BYTES {
-        return ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::OversizeFile,
+        };
     }
     let outcome = match mime_canonical {
-        Mime::Pdf       => pdf::extract(bytes),
-        Mime::Docx      => ooxml::extract_docx(bytes),
-        Mime::Xlsx      => ooxml::extract_xlsx(bytes),
-        Mime::Pptx      => ooxml::extract_pptx(bytes),
+        Mime::Pdf => pdf::extract(bytes),
+        Mime::Docx => ooxml::extract_docx(bytes),
+        Mime::Xlsx => ooxml::extract_xlsx(bytes),
+        Mime::Pptx => ooxml::extract_pptx(bytes),
         Mime::PlainText => plain::extract_plain(bytes),
-        Mime::Html      => plain::extract_html(bytes),
-        Mime::Calendar  => ExtractionOutcome::Skipped { reason: SkipReason::PrivacyExempt },
-        Mime::Unknown   => ExtractionOutcome::Skipped { reason: SkipReason::UnknownMime },
+        Mime::Html => plain::extract_html(bytes),
+        Mime::Calendar => ExtractionOutcome::Skipped {
+            reason: SkipReason::PrivacyExempt,
+        },
+        Mime::Unknown => ExtractionOutcome::Skipped {
+            reason: SkipReason::UnknownMime,
+        },
     };
     match outcome {
         ExtractionOutcome::Indexed { text } => ExtractionOutcome::Indexed {
@@ -382,13 +422,23 @@ mod tests {
     #[test]
     fn opaque_mime_skips_image() {
         let outcome = extract(b"fake-png-bytes", "image/png", "x.png");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::OpaqueMime });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::OpaqueMime
+            }
+        );
     }
 
     #[test]
     fn opaque_mime_skips_archive_by_extension() {
         let outcome = extract(b"fake-zip-bytes", "application/octet-stream", "x.zip");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::OpaqueMime });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::OpaqueMime
+            }
+        );
     }
 
     #[test]
@@ -397,19 +447,34 @@ mod tests {
         // strain memory - it stays in a single allocation.
         let big = vec![0u8; MAX_INPUT_BYTES + 1];
         let outcome = extract(&big, "application/pdf", "x.pdf");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::OversizeFile
+            }
+        );
     }
 
     #[test]
     fn calendar_mime_is_privacy_exempt() {
         let outcome = extract(b"BEGIN:VCALENDAR\nEND:VCALENDAR", "text/calendar", "x.ics");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::PrivacyExempt });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::PrivacyExempt
+            }
+        );
     }
 
     #[test]
     fn unknown_mime_is_skipped() {
         let outcome = extract(b"...", "application/x-nobody-knows", "x.bin");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::UnknownMime });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::UnknownMime
+            }
+        );
     }
 
     #[test]
@@ -423,7 +488,10 @@ mod tests {
 
     #[test]
     fn canonicalize_mime_falls_back_to_extension() {
-        assert_eq!(canonicalize_mime("application/octet-stream", "x.docx"), Mime::Docx);
+        assert_eq!(
+            canonicalize_mime("application/octet-stream", "x.docx"),
+            Mime::Docx
+        );
         assert_eq!(canonicalize_mime("", "x.pdf"), Mime::Pdf);
         assert_eq!(canonicalize_mime("application/garbage", "x"), Mime::Unknown);
     }
@@ -471,7 +539,10 @@ mod tests {
             SkipReason::PrivacyExempt,
             SkipReason::ZipBomb,
         ] {
-            assert!(!reason.is_retry_eligible(), "{reason:?} should be permanent");
+            assert!(
+                !reason.is_retry_eligible(),
+                "{reason:?} should be permanent"
+            );
         }
         // Retry-eligible reasons.
         for reason in [SkipReason::Timeout, SkipReason::BytesGone] {

@@ -6,19 +6,19 @@ Audit date: 2026-03-23
 
 ## Resolved
 
-### Core's `get_thread_detail()` - WIRED ✅
+### Core's `get_thread_detail()` - WIRED [x]
 `ThreadDetailLoaded` message exists and is dispatched. `load_thread_detail()` calls core's `get_thread_detail()` with `BodyStoreState`. `body_html`, `body_text`, `is_own_message`, collapsed summaries, and resolved label colors all flow through. Old raw SQL fallback path and `ThreadMessagesLoaded`/`ThreadAttachmentsLoaded` message variants removed (2026-03-23).
 
-### HTML rendering pipeline now fires ✅
+### HTML rendering pipeline now fires [x]
 With `get_thread_detail()` wired, `body_html` is populated from the body store. `render_html()` in `expanded_message_card()` now receives real data.
 
-### Message collapse rule 4 (own messages) now works ✅
+### Message collapse rule 4 (own messages) now works [x]
 `is_own_message` is populated by core's thread detail, so `apply_message_expansion()` rule 4 triggers correctly.
 
-### Attachment collapse persistence fully wired ✅ (2026-03-23)
+### Attachment collapse persistence fully wired [x] (2026-03-23)
 `AttachmentCollapseChanged` event now calls `persist_attachments_collapsed()`. Read path loads via `get_thread_detail()`.
 
-### Label pills in reading pane ✅ (2026-03-23)
+### Label pills in reading pane [x] (2026-03-23)
 `thread_labels` (with resolved colors from core) rendered as colored pills in the thread header row.
 
 ---

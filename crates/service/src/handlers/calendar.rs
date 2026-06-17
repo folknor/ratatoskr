@@ -98,9 +98,7 @@ pub(crate) async fn handle_set_visibility(
 /// `CALENDAR_STALENESS` old. The runtime's `start_account` is
 /// idempotent - already-in-flight accounts are no-ops, the per-runtime
 /// semaphore caps concurrent runners.
-pub(crate) async fn handle_calendar_kick(
-    boot_state: &Arc<BootSharedState>,
-) -> Result<(), String> {
+pub(crate) async fn handle_calendar_kick(boot_state: &Arc<BootSharedState>) -> Result<(), String> {
     let Some(runtime) = boot_state.calendar_runtime() else {
         log::debug!("calendar.kick received before CalendarRuntime installed; ignoring");
         return Ok(());

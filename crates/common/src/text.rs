@@ -26,8 +26,8 @@ mod tests {
 
     #[test]
     fn truncates_without_splitting_grapheme_clusters() {
-        let text = "Hi 🇺🇸 there";
-        assert_eq!(truncate_graphemes(text, 4), "Hi 🇺🇸");
+        let text = "Hi \u{1F1FA}\u{1F1F8} there";
+        assert_eq!(truncate_graphemes(text, 4), "Hi \u{1F1FA}\u{1F1F8}");
     }
 
     #[test]

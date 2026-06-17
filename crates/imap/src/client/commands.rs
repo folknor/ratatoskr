@@ -468,9 +468,7 @@ pub async fn fetch_changed_flags(
                 let keywords: Vec<String> = flags
                     .iter()
                     .filter_map(|f| match f {
-                        Flag::Custom(cow)
-                            if common::folder_roles::is_user_visible_keyword(cow) =>
-                        {
+                        Flag::Custom(cow) if common::folder_roles::is_user_visible_keyword(cow) => {
                             Some(cow.to_string())
                         }
                         _ => None,
@@ -540,9 +538,7 @@ pub async fn fetch_all_flags(
                 let keywords: Vec<String> = flag_list
                     .iter()
                     .filter_map(|f| match f {
-                        Flag::Custom(cow)
-                            if common::folder_roles::is_user_visible_keyword(cow) =>
-                        {
+                        Flag::Custom(cow) if common::folder_roles::is_user_visible_keyword(cow) => {
                             Some(cow.to_string())
                         }
                         _ => None,

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::bundling::AiBundlingCandidate;
 use crate::filters::FilterableMessage;
 use crate::types::NotificationCandidate;
-use db::db::{ReadConn, ReadDbState};
 use db::db::queries::load_recent_rule_bundled_threads;
+use db::db::{ReadConn, ReadDbState};
 
 /// Check settings and return threads that need AI bundling
 /// (inbox classification into Primary/Updates/Promotions/Social/Newsletters).

@@ -38,10 +38,17 @@ fn normalize_event_time_field(
                 .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
         }
         serde_json::Value::Null => None,
-        _ => return Err(format!("{generic_key} must be an integer timestamp or string")),
+        _ => {
+            return Err(format!(
+                "{generic_key} must be an integer timestamp or string"
+            ));
+        }
     };
     if let Some(normalized) = normalized {
-        input.insert(caldav_key.to_string(), serde_json::Value::String(normalized));
+        input.insert(
+            caldav_key.to_string(),
+            serde_json::Value::String(normalized),
+        );
     }
     Ok(())
 }

@@ -1,7 +1,7 @@
 # Cloud Attachment Linking (OneDrive / Google Drive)
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: ⚠️ **Partially implemented** - Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in the `gmail` crate (`crates/gmail/src/gdrive.rs`). OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in the `graph` crate (`crates/graph/src/onedrive.rs` and `crates/graph/src/ops.rs`). Cloud attachment orchestration logic lives in `crates/core/src/cloud_attachments.rs`. Raw reqwest is used for both providers (no SDK crate). `cloud_attachments` DB table exists (migration 39) with full CRUD. Incoming cloud link detection implemented (`detect_cloud_links()` with URL patterns for OneDrive, GDrive, Dropbox, Box - 12 tests). Metadata enrichment for OneDrive (`/shares/{encoded}/driveItem`) and GDrive (`/files/{id}`) implemented. JMAP/IMAP graceful degradation: `supports_cloud_upload()`, `large_attachment_warning()`, `LARGE_ATTACHMENT_THRESHOLD` (25 MB). **Remaining**: wiring `detect_cloud_links()` into sync pipeline, UI for cloud attachment compose flow, offline upload queue, cloud attachment cards in thread detail view.
+**Status**: [~] **Partially implemented** - Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in the `gmail` crate (`crates/gmail/src/gdrive.rs`). OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in the `graph` crate (`crates/graph/src/onedrive.rs` and `crates/graph/src/ops.rs`). Cloud attachment orchestration logic lives in `crates/core/src/cloud_attachments.rs`. Raw reqwest is used for both providers (no SDK crate). `cloud_attachments` DB table exists (migration 39) with full CRUD. Incoming cloud link detection implemented (`detect_cloud_links()` with URL patterns for OneDrive, GDrive, Dropbox, Box - 12 tests). Metadata enrichment for OneDrive (`/shares/{encoded}/driveItem`) and GDrive (`/files/{id}`) implemented. JMAP/IMAP graceful degradation: `supports_cloud_upload()`, `large_attachment_warning()`, `LARGE_ATTACHMENT_THRESHOLD` (25 MB). **Remaining**: wiring `detect_cloud_links()` into sync pipeline, UI for cloud attachment compose flow, offline upload queue, cloud attachment cards in thread detail view.
 
 ---
 
@@ -475,23 +475,23 @@ When the user composes offline with a large attachment destined for cloud upload
 
 ### Recommendations
 
-#### Phase 1: OneDrive for Exchange accounts (highest value) - ✅ upload done
+#### Phase 1: OneDrive for Exchange accounts (highest value) - [x] upload done
 
 ~~This is the Tier 1 blocker. Enterprise Outlook users constantly send and receive OneDrive/SharePoint links.~~
 
-1. **Outgoing**: ✅ Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`crates/graph/src/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`crates/graph/src/ops.rs`). Uses raw reqwest against Graph API - no SDK crate.
+1. **Outgoing**: [x] Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`crates/graph/src/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`crates/graph/src/ops.rs`). Uses raw reqwest against Graph API - no SDK crate.
 
-2. **Incoming**: ❌ Not started. Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
+2. **Incoming**: [-] Not started. Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
 
-3. **Threshold**: ❌ Not started. Default 10 MB, configurable per account. Prompt user on attach: "Upload to OneDrive and share as link?" with a "Always do this for files over X MB" checkbox.
+3. **Threshold**: [-] Not started. Default 10 MB, configurable per account. Prompt user on attach: "Upload to OneDrive and share as link?" with a "Always do this for files over X MB" checkbox.
 
-#### Phase 2: Google Drive for Gmail accounts - ✅ upload done
+#### Phase 2: Google Drive for Gmail accounts - [x] upload done
 
-1. **Outgoing**: ✅ Upload via resumable chunked upload to Drive is implemented (`crates/gmail/src/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest - `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`crates/core/src/oauth.rs`).
+1. **Outgoing**: [x] Upload via resumable chunked upload to Drive is implemented (`crates/gmail/src/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest - `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`crates/core/src/oauth.rs`).
 
-2. **Incoming**: ❌ Not started. Detect `drive.google.com` / `docs.google.com` URLs. Fetch file metadata via Drive API for enrichment.
+2. **Incoming**: [-] Not started. Detect `drive.google.com` / `docs.google.com` URLs. Fetch file metadata via Drive API for enrichment.
 
-3. ~~**Scope**: Use `drive.file` - requires adding this scope to our existing Gmail OAuth flow.~~ ✅ Done.
+3. ~~**Scope**: Use `drive.file` - requires adding this scope to our existing Gmail OAuth flow.~~ [x] Done.
 
 #### Phase 3: Incoming link detection for all providers
 

@@ -126,7 +126,9 @@ pub(crate) fn spawn_handler(
             Ok(_) => "ok",
             Err(error) => error_outcome_kind(error),
         };
-        log::info!("dispatch end method={method} id={id} elapsed_ms={elapsed_ms} outcome={outcome}");
+        log::info!(
+            "dispatch end method={method} id={id} elapsed_ms={elapsed_ms} outcome={outcome}"
+        );
         send_handler_response(&out_tx, id, result).await;
     });
 }

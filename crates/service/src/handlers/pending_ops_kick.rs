@@ -33,12 +33,7 @@ pub(super) async fn handle_cancel_for_resource(
         .write_db_state()
         .map_err(|error| format!("boot context not populated: {error}"))?;
     db.with_write(move |conn| {
-        db_pending_ops_cancel_for_resource_sync(
-            conn,
-            &account_id,
-            &resource_id,
-            &operation_type,
-        )
+        db_pending_ops_cancel_for_resource_sync(conn, &account_id, &resource_id, &operation_type)
     })
     .await
 }

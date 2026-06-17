@@ -41,9 +41,9 @@ pub fn thread_card<'a, M: Clone + 'a>(
     // <filename>" rather than an unrelated body snippet. Otherwise show
     // the message snippet as before.
     let attachment_match = thread.match_kind.as_ref().and_then(|mk| match mk {
-        rtsk::search::MatchKind::Attachment { filename, snippet, .. } => {
-            Some((filename.as_str(), snippet.as_str()))
-        }
+        rtsk::search::MatchKind::Attachment {
+            filename, snippet, ..
+        } => Some((filename.as_str(), snippet.as_str())),
         _ => None,
     });
     let snippet = thread.snippet.as_deref().unwrap_or("");
@@ -145,33 +145,34 @@ pub fn thread_card<'a, M: Clone + 'a>(
     // "in {filename}: {fragment}" (filename italicised, fragment plain)
     // so the user can connect the search hit to the matching file.
     // Other matches show the message snippet as before.
-    let snippet_slot: Element<'_, _> = if let Some((filename, attachment_snippet)) = attachment_match {
-        container(
-            row![
-                text(format!("in {filename}: "))
+    let snippet_slot: Element<'_, _> =
+        if let Some((filename, attachment_snippet)) = attachment_match {
+            container(
+                row![
+                    text(format!("in {filename}: "))
+                        .size(TEXT_SM)
+                        .style(text::secondary)
+                        .font(font::text_italic())
+                        .wrapping(text::Wrapping::None),
+                    text(attachment_snippet.to_string())
+                        .size(TEXT_SM)
+                        .style(text::secondary)
+                        .wrapping(text::Wrapping::None),
+                ]
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .into()
+        } else {
+            container(
+                text(snippet)
                     .size(TEXT_SM)
                     .style(text::secondary)
-                    .font(font::text_italic())
                     .wrapping(text::Wrapping::None),
-                text(attachment_snippet.to_string())
-                    .size(TEXT_SM)
-                    .style(text::secondary)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .into()
-    } else {
-        container(
-            text(snippet)
-                .size(TEXT_SM)
-                .style(text::secondary)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::Fill)
-        .into()
-    };
+            )
+            .width(Length::Fill)
+            .into()
+        };
 
     let snippet_row = row![snippet_slot, indicators].align_y(Alignment::Center);
 

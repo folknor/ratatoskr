@@ -120,8 +120,7 @@ pub(crate) const PAGE_SIZE: u32 = 1000;
 
 pub fn people_api_base() -> String {
     if let Ok(value) = std::env::var("RATATOSKR_TEST_PEOPLE_ENDPOINT")
-        && let Some(api_base) =
-            common::test_endpoint::api_base_from_test_endpoint(&value, "v1")
+        && let Some(api_base) = common::test_endpoint::api_base_from_test_endpoint(&value, "v1")
     {
         return api_base;
     }
@@ -469,5 +468,4 @@ mod tests {
         assert!(response.other_contacts.is_none());
         assert_eq!(response.total_size, Some(0));
     }
-
 }

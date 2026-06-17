@@ -22,7 +22,8 @@ pub fn auto_detect_mappings(
         }
         .or_else(|| detect_from_content(index, sample_rows, &used_fields));
 
-        let (target_field, confidence) = detected.unwrap_or((ContactField::Ignore, MappingConfidence::None));
+        let (target_field, confidence) =
+            detected.unwrap_or((ContactField::Ignore, MappingConfidence::None));
         if target_field != ContactField::Ignore {
             used_fields.push(target_field);
         }
@@ -91,7 +92,8 @@ fn detect_from_content(
             continue;
         };
         non_empty += 1;
-        if is_valid_email(value) || !crate::recipient_parser::parse_recipient_list(value).is_empty() {
+        if is_valid_email(value) || !crate::recipient_parser::parse_recipient_list(value).is_empty()
+        {
             emailish += 1;
         }
         if looks_like_phone(value) {
@@ -162,10 +164,7 @@ fn looks_like_phone(value: &str) -> bool {
         .chars()
         .filter(|ch| {
             ch.is_ascii_digit()
-                || matches!(
-                    ch,
-                    '+' | '-' | '(' | ')' | ' ' | '.' | '\u{00A0}' | '/'
-                )
+                || matches!(ch, '+' | '-' | '(' | ')' | ' ' | '.' | '\u{00A0}' | '/')
         })
         .count();
     allowed_count == trimmed.chars().count()
@@ -383,10 +382,7 @@ mod tests {
 
     #[test]
     fn header_matching_avoids_substring_false_positives() {
-        let headers = vec![
-            "Mailing Address".to_string(),
-            "Email".to_string(),
-        ];
+        let headers = vec!["Mailing Address".to_string(), "Email".to_string()];
 
         let mappings = auto_detect_mappings(&headers, &[], true);
         assert_eq!(mappings[0].target_field, ContactField::Ignore);

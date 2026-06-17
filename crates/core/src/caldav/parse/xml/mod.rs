@@ -161,12 +161,10 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => {
-                match e.decode() {
-                    Ok(text) => buf.push_str(&text),
-                    Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
-                }
-            }
+            Ok(Event::CData(ref e)) => match e.decode() {
+                Ok(text) => buf.push_str(&text),
+                Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
+            },
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -212,9 +210,7 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                             response_can_edit = Some(pending_write_seen);
                         }
                     } else {
-                        log::debug!(
-                            "Skipping propstat with non-2xx status: {propstat_status}"
-                        );
+                        log::debug!("Skipping propstat with non-2xx status: {propstat_status}");
                     }
                     propstat_status.clear();
                     pending_is_calendar = false;
@@ -376,9 +372,7 @@ pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
                 // is_icalendar_resource third-arm fallback would admit them
                 // as event resources. The follow-up REPORT then 403s on the
                 // collection and can fail the whole batch.
-                if name == "collection"
-                    && stack.iter().rev().any(|n| n == "resourcetype")
-                {
+                if name == "collection" && stack.iter().rev().any(|n| n == "resourcetype") {
                     pending_is_collection = true;
                 }
                 stack.push(name);
@@ -388,9 +382,7 @@ pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
                 // Self-closing form: <D:collection/> shows up here, not in
                 // the Start branch.
                 let name = local_name(e.name().as_ref());
-                if name == "collection"
-                    && stack.iter().rev().any(|n| n == "resourcetype")
-                {
+                if name == "collection" && stack.iter().rev().any(|n| n == "resourcetype") {
                     pending_is_collection = true;
                 }
             }
@@ -401,12 +393,10 @@ pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => {
-                match e.decode() {
-                    Ok(text) => buf.push_str(&text),
-                    Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
-                }
-            }
+            Ok(Event::CData(ref e)) => match e.decode() {
+                Ok(text) => buf.push_str(&text),
+                Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
+            },
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -447,9 +437,7 @@ pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
                             response_is_collection = true;
                         }
                     } else {
-                        log::debug!(
-                            "Skipping propstat with non-2xx status: {propstat_status}"
-                        );
+                        log::debug!("Skipping propstat with non-2xx status: {propstat_status}");
                     }
                     propstat_status.clear();
                     pending_etag = None;
@@ -479,8 +467,7 @@ pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
                         // adding them to failed_uris would hold non-event
                         // hrefs in the local cache forever. (Round 3 #51.)
                         let response_level_failed = !response_ok;
-                        let propstat_level_failed =
-                            any_propstat_seen && !any_ok_propstat;
+                        let propstat_level_failed = any_propstat_seen && !any_ok_propstat;
                         if response_level_failed || propstat_level_failed {
                             failed_uris.push(response_href.clone());
                         }
@@ -588,12 +575,10 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => {
-                match e.decode() {
-                    Ok(text) => buf.push_str(&text),
-                    Err(err) => log::warn!("CalDAV multiget CDATA decode failed: {err}"),
-                }
-            }
+            Ok(Event::CData(ref e)) => match e.decode() {
+                Ok(text) => buf.push_str(&text),
+                Err(err) => log::warn!("CalDAV multiget CDATA decode failed: {err}"),
+            },
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -719,10 +704,7 @@ pub fn count_propfind_response_children(xml: &str) -> usize {
 /// silently rewriting those would be worse than leaving them as-is.
 fn normalize_calendar_color(raw: &str) -> String {
     let s = raw.trim();
-    if s.len() == 9
-        && s.starts_with('#')
-        && s.bytes().skip(1).all(|b| b.is_ascii_hexdigit())
-    {
+    if s.len() == 9 && s.starts_with('#') && s.bytes().skip(1).all(|b| b.is_ascii_hexdigit()) {
         // Apple ARGB form: drop the trailing alpha pair. We could also
         // honor opacity by multiplying RGB into the background, but the
         // user-visible UI treats labels as opaque so the rest of the

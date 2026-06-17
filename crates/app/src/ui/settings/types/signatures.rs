@@ -40,4 +40,3 @@ pub struct SignatureEditorState {
     /// Whether fields have been modified since opening the editor.
     pub dirty: bool,
 }
-

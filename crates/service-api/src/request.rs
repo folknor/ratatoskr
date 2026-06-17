@@ -2,38 +2,38 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
-use crate::cal_action::CalendarActionPlan;
-use crate::calendar::{
-    CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
-};
 use crate::account::{
     AccountCreateParams, AccountDeleteParams, AccountReorderParams, AccountUpdateParams,
     AccountUpdateTokensParams,
 };
-use crate::contacts::{
-    ContactDeleteParams, ContactGroupDeleteParams, ContactGroupSaveParams, ContactSaveParams,
-};
-use crate::internal::{
-    DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
-};
+use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::attachment::{
     AttachmentCacheSizeParams, AttachmentClearCacheParams, AttachmentFetchParams,
 };
+use crate::cal_action::CalendarActionPlan;
+use crate::calendar::{
+    CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
+};
+use crate::contacts::{
+    ContactDeleteParams, ContactGroupDeleteParams, ContactGroupSaveParams, ContactSaveParams,
+};
 use crate::extract::{ExtractStatusParams, IndexRebuildParams};
+use crate::internal::{
+    DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
+};
+use crate::label::LabelGroupReorderParams;
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
     PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
     PinnedSearchUpdateParams,
 };
 use crate::settings::SettingsSetParams;
-use crate::label::LabelGroupReorderParams;
 use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
 use crate::smart_folder::SmartFolderCreateParams;
-use crate::thread_ui_state::ThreadUiStateSetParams;
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
+use crate::thread_ui_state::ThreadUiStateSetParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestTimeoutKind {
@@ -229,8 +229,8 @@ pub struct TestRunDiscoveryParams {
 /// produce `tombstoned_at = None`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryBlobTombstoneStateAck {
-    pub present:        bool,
-    pub tombstoned_at:  Option<i64>,
+    pub present: bool,
+    pub tombstoned_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -589,7 +589,9 @@ pub enum RequestParams {
     /// The 5 s timeout is the **handler** budget (validate + insert
     /// rows + signal `tokio::sync::Notify`). The worker has no IPC
     /// timeout - it runs to completion or until respawn.
-    ActionExecutePlan { plan: ActionWirePlan },
+    ActionExecutePlan {
+        plan: ActionWirePlan,
+    },
     /// Look up the journaled status of a previously-submitted plan.
     /// Used by the UI's `AckUnknown` reconciliation path (Phase 2 plan
     /// scope item 11 / 18d): after a `boot.ready` post-respawn, the UI
@@ -598,7 +600,9 @@ pub enum RequestParams {
     ///
     /// Read-only SELECT against the journal; the 5 s timeout is
     /// conservative. Doesn't bypass admission - it's just a fast query.
-    ActionJobStatus { plan_id: PlanId },
+    ActionJobStatus {
+        plan_id: PlanId,
+    },
     /// Phase 6c: submit a resolved calendar-event mutation plan for
     /// Service-side execution. The handler validates the plan,
     /// journals it as `kind = 'calendar_plan'` in `action_jobs` +
@@ -612,13 +616,17 @@ pub enum RequestParams {
     /// dispatcher runs on the worker, with no IPC timeout - it runs
     /// to completion or until respawn. Same shape as
     /// `ActionExecutePlan` (mail's sibling).
-    CalActionExecutePlan { plan: CalendarActionPlan },
+    CalActionExecutePlan {
+        plan: CalendarActionPlan,
+    },
     /// Phase 2 plan scope item 18c: the chat read-on-view side effect
     /// relocates as a quiet journal job. Handler resolves affected
     /// threads, runs the local DB write, journals the affected list
     /// for deterministic replay, returns `MarkChatReadAck`. Worker
     /// dispatches provider mark-read against each thread.
-    ActionMarkChatRead { chat_email: String },
+    ActionMarkChatRead {
+        chat_email: String,
+    },
     /// Phase 2 plan scope item 5: compose-send relocates as a quiet
     /// journal job. Handler validates the request, transfers each
     /// attachment from `<app_data>/staging/<send_id>/` into a
@@ -637,7 +645,9 @@ pub enum RequestParams {
     /// inline-bytes-free `SendWireRequest` is still large (HTML + text
     /// bodies + recipients + attachment metadata for many files) and
     /// would otherwise dominate the enum size.
-    ActionSend { request: Box<SendWireRequest> },
+    ActionSend {
+        request: Box<SendWireRequest>,
+    },
     /// Phase 3 plan scope item 1: kick a sync run for the given account.
     /// The handler returns within microseconds (acquires the per-account
     /// map lock, spawns a runner if one is not already in flight, acks).
@@ -646,7 +656,9 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: the handler is bounded enqueue + spawn work, never
     /// blocking on the network.
-    SyncStartAccount { params: SyncStartAccountParams },
+    SyncStartAccount {
+        params: SyncStartAccountParams,
+    },
     /// Phase 3 plan scope item 1: cancel an in-flight sync run for the
     /// given account. Flips the runner's `CancellationToken`; the runner
     /// observes at the next checkpoint and emits `sync.completed` with
@@ -655,7 +667,9 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: the handler returns immediately after flipping the
     /// token; cancellation propagation is asynchronous.
-    SyncCancelAccount { params: SyncCancelAccountParams },
+    SyncCancelAccount {
+        params: SyncCancelAccountParams,
+    },
     /// Phase 5: explicit-request calendar sync (manual "Sync now",
     /// post-account-add, RSVP-then-resync). The handler returns within
     /// microseconds: it acquires the per-account map, spawns or returns
@@ -691,7 +705,9 @@ pub enum RequestParams {
     /// thread-scoped UI flags can extend without a new method.
     ///
     /// 5 s timeout: handler is one bounded `with_conn` upsert.
-    ThreadUiStateSet { params: ThreadUiStateSetParams },
+    ThreadUiStateSet {
+        params: ThreadUiStateSetParams,
+    },
     /// Phase 6a: write one or more settings rows in a single atomic
     /// transaction. The wire shape carries a typed `Vec<SettingValue>`
     /// so the Service-side handler can match exhaustively per variant
@@ -701,14 +717,18 @@ pub enum RequestParams {
     /// state.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    SettingsSet { params: SettingsSetParams },
+    SettingsSet {
+        params: SettingsSetParams,
+    },
     /// Phase 6a: insert one row into `signatures`. Inside a single
     /// transaction the handler also clears `is_default` /
     /// `is_reply_default` on every other signature for the same
     /// account when the new row claims either flag.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    SignatureCreate { params: SignatureCreateParams },
+    SignatureCreate {
+        params: SignatureCreateParams,
+    },
     /// Phase 6a: partial-update one row in `signatures`. Each
     /// `Option` field is "no change" if absent, else "set to value."
     /// Setting `is_default` / `is_reply_default` to `true` clears the
@@ -716,23 +736,31 @@ pub enum RequestParams {
     /// same transaction.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    SignatureUpdate { params: SignatureUpdateParams },
+    SignatureUpdate {
+        params: SignatureUpdateParams,
+    },
     /// Phase 6a: delete one row from `signatures` by id. Idempotent;
     /// delete-of-missing returns Ok.
     ///
     /// 5 s timeout: handler is one bounded statement.
-    SignatureDelete { params: SignatureDeleteParams },
+    SignatureDelete {
+        params: SignatureDeleteParams,
+    },
     /// Phase 6a: assign `sort_order` to a flat list of signature ids
     /// in one transaction. Per-account ordering hazard documented on
     /// the wire type - stale acks are tolerable today; a generation
     /// token is the documented escape hatch.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    SignatureReorder { params: SignatureReorderParams },
+    SignatureReorder {
+        params: SignatureReorderParams,
+    },
     /// Phase 6a: persist a new ordering for `label_groups`. Conditional
     /// idempotency - replays just re-write the same sort_order. One
     /// bounded transaction; 5 s timeout.
-    LabelGroupReorder { params: LabelGroupReorderParams },
+    LabelGroupReorder {
+        params: LabelGroupReorderParams,
+    },
     /// Phase 6a: UPSERT a contact group + replace its member email
     /// list. The plan's original split (group_create / group_update)
     /// collapsed to one method because today's underlying DB function
@@ -740,13 +768,17 @@ pub enum RequestParams {
     /// `contacts.rs` module doc.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    ContactsGroupSave { params: ContactGroupSaveParams },
+    ContactsGroupSave {
+        params: ContactGroupSaveParams,
+    },
     /// Phase 6a: delete a contact group by id. Idempotent;
     /// member rows and inbound nested-group references are cleaned up
     /// inside the same DB transaction.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    ContactsGroupDelete { params: ContactGroupDeleteParams },
+    ContactsGroupDelete {
+        params: ContactGroupDeleteParams,
+    },
     /// Phase 6a-part-2: UPSERT one contact row, local-only. Used by
     /// the bulk-import path (N calls). UI / import path always pre-
     /// generates the id, so the underlying `save_contact_sync` is a
@@ -755,7 +787,9 @@ pub enum RequestParams {
     /// settings path uses `ContactsContactSaveWithWriteback`.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    ContactsContactSave { params: ContactSaveParams },
+    ContactsContactSave {
+        params: ContactSaveParams,
+    },
     /// Phase 6d-A: full single-contact save pipeline including
     /// provider write-back (JMAP / Google People / Graph) for synced
     /// contacts. Local UPSERT runs first; on local-leg failure the
@@ -768,7 +802,9 @@ pub enum RequestParams {
     ///
     /// 30 s timeout: provider HTTPS round-trip dominates the wall
     /// time on a slow link; the local leg is sub-millisecond.
-    ContactsContactSaveWithWriteback { params: ContactSaveParams },
+    ContactsContactSaveWithWriteback {
+        params: ContactSaveParams,
+    },
     /// Phase 6d-A: full single-contact delete pipeline. Provider-
     /// first for synced JMAP / Google / Graph (matches the pre-6d
     /// UI-side behavior). Provider failure short-circuits before the
@@ -780,7 +816,9 @@ pub enum RequestParams {
     ///
     /// 30 s timeout: same shape as the writeback save; provider
     /// HTTPS dominates.
-    ContactsContactDelete { params: ContactDeleteParams },
+    ContactsContactDelete {
+        params: ContactDeleteParams,
+    },
     /// Phase 6a: partial-update an account row's editable metadata
     /// fields. Each Option is "no change" if absent, else "set to
     /// value." Out of scope: provider tokens / mailbox passwords -
@@ -788,12 +826,16 @@ pub enum RequestParams {
     /// `internal.encrypt_for_storage` path.
     ///
     /// 5 s timeout: handler is one bounded `dynamic_update`.
-    AccountUpdate { params: AccountUpdateParams },
+    AccountUpdate {
+        params: AccountUpdateParams,
+    },
     /// Phase 6a: batch-reassign `sort_order` for accounts. Account
     /// ids absent from `orders` keep their existing `sort_order`.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    AccountReorder { params: AccountReorderParams },
+    AccountReorder {
+        params: AccountReorderParams,
+    },
     /// Phase 6a: insert a new account row + companion records.
     /// Credentials carried in a typed `Plaintext | Encrypted` envelope
     /// so 6b's two-step OAuth flow can extend the variant set without
@@ -805,7 +847,9 @@ pub enum RequestParams {
     /// `large_enum_variant` flagged it.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    AccountCreate { params: Box<AccountCreateParams> },
+    AccountCreate {
+        params: Box<AccountCreateParams>,
+    },
     /// Phase 6a-part-2: re-authentication token persist. Re-issued
     /// from the OAuth or password re-auth flow when an access /
     /// refresh token / IMAP / SMTP password rotates. Service-side
@@ -814,7 +858,9 @@ pub enum RequestParams {
     /// whose `Option` is `Some` are touched.
     ///
     /// 5 s timeout: handler is one bounded UPDATE.
-    AccountUpdateTokens { params: Box<AccountUpdateTokensParams> },
+    AccountUpdateTokens {
+        params: Box<AccountUpdateTokensParams>,
+    },
     /// Phase 6a-part-2: orchestrated account deletion. The handler
     /// runs cancel-and-await for sync/push/calendar runners (so the
     /// runner-quiescence invariant closes Service-side rather than
@@ -827,38 +873,50 @@ pub enum RequestParams {
     /// and routinely runs longer than 5 s on a heavily-cached
     /// account. The 5 s default would surface as spurious timeouts
     /// while the Service is still cleaning up correctly.
-    AccountDelete { params: AccountDeleteParams },
+    AccountDelete {
+        params: AccountDeleteParams,
+    },
     /// Phase 6a-part-2: query-keyed UPSERT into `pinned_searches` +
     /// replacement of the `pinned_search_threads` member rows. The UI
     /// fires this on `SearchPersistenceBehavior::CreatePinnedSnapshot`.
     /// Returns the row id in the ack.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    PinnedSearchCreateOrUpdate { params: PinnedSearchCreateOrUpdateParams },
+    PinnedSearchCreateOrUpdate {
+        params: PinnedSearchCreateOrUpdateParams,
+    },
     /// Phase 6a-part-2: id-keyed UPDATE into `pinned_searches` with a
     /// query-conflict cleanup step. The UI fires this on
     /// `SearchPersistenceBehavior::UpdatePinnedSnapshot` and
     /// `RefreshPinnedSnapshot`.
     ///
     /// 5 s timeout: handler is one bounded transaction.
-    PinnedSearchUpdate { params: PinnedSearchUpdateParams },
+    PinnedSearchUpdate {
+        params: PinnedSearchUpdateParams,
+    },
     /// Phase 6a-part-2: delete a pinned-search row + its member-thread
     /// rows. Idempotent.
     ///
     /// 5 s timeout: handler is one bounded statement.
-    PinnedSearchDelete { params: PinnedSearchDeleteParams },
+    PinnedSearchDelete {
+        params: PinnedSearchDeleteParams,
+    },
     /// Phase 6a-part-2: clear all pinned searches. Used by the
     /// settings-side "Clear all pinned searches" affordance.
     /// Returns the row count in the ack.
     ///
     /// 5 s timeout: handler is one bounded statement.
-    PinnedSearchDeleteAll { params: PinnedSearchDeleteAllParams },
+    PinnedSearchDeleteAll {
+        params: PinnedSearchDeleteAllParams,
+    },
     /// Phase 6a-part-2: insert a new `smart_folders` row. Service
     /// mints the UUID; UI passes only `name` + `query`. Used by the
     /// "Save as smart folder" affordance.
     ///
     /// 5 s timeout: handler is one bounded statement.
-    SmartFolderCreate { params: SmartFolderCreateParams },
+    SmartFolderCreate {
+        params: SmartFolderCreateParams,
+    },
     /// Phase 6a-part-2 (encryption-key handle): cold-boot read of the
     /// UI + settings bootstrap snapshots, decrypted Service-side. The
     /// handler runs `get_ui_bootstrap_snapshot` and
@@ -869,7 +927,9 @@ pub enum RequestParams {
     /// 10 s timeout: cold-disk read + AES key-stretch under
     /// contention. Generous because this IPC sits on the cold-boot
     /// critical path and we cannot retry behind the user.
-    ReadBootstrapSnapshots { params: ReadBootstrapSnapshotsParams },
+    ReadBootstrapSnapshots {
+        params: ReadBootstrapSnapshotsParams,
+    },
     /// Phase 6a-part-2 (encryption-key handle): one-shot encrypt for
     /// credential persistence. Returns the existing
     /// `iv:ciphertext_with_tag` string format that `encrypt_value`
@@ -877,13 +937,17 @@ pub enum RequestParams {
     /// the rare hand-built persistence in tests.
     ///
     /// 5 s timeout: handler is one in-memory AES encrypt.
-    EncryptForStorage { params: EncryptForStorageParams },
+    EncryptForStorage {
+        params: EncryptForStorageParams,
+    },
     /// Phase 6a-part-2 (encryption-key handle): one-shot decrypt for
     /// the re-auth wizard pre-fill. Returns the plaintext as
     /// `RedactedString` so wire-debug logs cannot leak it.
     ///
     /// 5 s timeout: handler is one in-memory AES decrypt.
-    DecryptForStorage { params: DecryptForStorageParams },
+    DecryptForStorage {
+        params: DecryptForStorageParams,
+    },
     /// Phase 6b: OAuth code-exchange + userinfo round-trips run
     /// Service-side. UI binds the listener and captures the code
     /// locally (the listener has to live in the visible app), then
@@ -896,7 +960,9 @@ pub enum RequestParams {
     /// Joins `bypasses_admission()` so the OAuth round-trip is not
     /// queued behind heavy traffic. 30 s timeout: provider token
     /// endpoints are slow under load.
-    OauthExchangeCode { params: Box<OauthExchangeCodeParams> },
+    OauthExchangeCode {
+        params: Box<OauthExchangeCodeParams>,
+    },
     /// Phase 6b: cache-miss attachment fetch. Service ensures the
     /// bytes are present in `attachment_cache/<content_hash>`
     /// (cache hit -> immediate ack; cache miss -> provider fetch +
@@ -908,70 +974,116 @@ pub enum RequestParams {
     /// 60 s timeout: cache-miss path runs the provider's
     /// fetch_attachment which can be slow on large attachments
     /// over slow links.
-    AttachmentFetch { params: AttachmentFetchParams },
+    AttachmentFetch {
+        params: AttachmentFetchParams,
+    },
     /// Attachments roadmap Phase 6: settings-UI cache-size readout.
     /// Sums live + tombstoned `attachment_blobs.length` for the
     /// "Cache using X.Y GB" indicator.
-    AttachmentCacheSize { params: AttachmentCacheSizeParams },
+    AttachmentCacheSize {
+        params: AttachmentCacheSizeParams,
+    },
     /// Attachments roadmap Phase 8c: settings-UI "Clear cache now"
     /// action. Tombstones every live blob in bulk and chains a GC
     /// pass to physically reclaim the bytes. Returns counts.
-    AttachmentClearCache { params: AttachmentClearCacheParams },
+    AttachmentClearCache {
+        params: AttachmentClearCacheParams,
+    },
     /// Phase 7-4: read the ExtractRuntime's running status counters
     /// (queue depth + indexed/skipped/failed totals) for the
     /// status-bar polling.
-    ExtractStatus { params: ExtractStatusParams },
+    ExtractStatus {
+        params: ExtractStatusParams,
+    },
     /// Phase 7-4: trigger a search-index rebuild. The handler spawns
     /// a tracked task and acks immediately with the `rebuild_id`; the
     /// UI subscribes via `index.rebuild_progress` /
     /// `index.rebuild_completed` notifications.
-    IndexRebuild { params: IndexRebuildParams },
+    IndexRebuild {
+        params: IndexRebuildParams,
+    },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     TestPanic,
     /// Returns a `HealthPingResponse` with the requested protocol version.
     /// Used to drive `ClientError::VersionMismatch` from the handshake.
-    TestVersion { version: u32 },
+    TestVersion {
+        version: u32,
+    },
     /// Sleeps for `millis` before responding. Used to verify the in-flight
     /// semaphore cap and the heartbeat-bypasses-semaphore property.
-    TestSlow { millis: u64 },
+    TestSlow {
+        millis: u64,
+    },
     /// Calls `println!` (or its global-stdout-handle equivalent on Windows)
     /// before responding. Used to verify the stdio corruption defense.
-    TestPrintln { message: String },
+    TestPrintln {
+        message: String,
+    },
     /// Creates a FK-valid account fixture plus baseline labels.
-    TestSeedAccount { params: TestSeedAccountParams },
+    TestSeedAccount {
+        params: TestSeedAccountParams,
+    },
     /// Reads a service-side test counter by name.
-    TestCounterRead { counter: String },
+    TestCounterRead {
+        counter: String,
+    },
     /// Arms a crash rule that exits after the Nth matching write.
-    TestCrashAfterNWrites { params: TestCrashAfterNWritesParams },
+    TestCrashAfterNWrites {
+        params: TestCrashAfterNWritesParams,
+    },
     /// Creates a FK-valid thread fixture under a seeded account.
-    TestSeedThread { params: TestSeedThreadParams },
+    TestSeedThread {
+        params: TestSeedThreadParams,
+    },
     /// Inserts a cached attachment fixture under an existing message.
-    TestSeedCachedAttachment { params: TestSeedCachedAttachmentParams },
+    TestSeedCachedAttachment {
+        params: TestSeedCachedAttachmentParams,
+    },
     /// Inserts an uncached attachment row and registers provider bytes for attachment.fetch.
-    TestSeedRemoteAttachment { params: TestSeedRemoteAttachmentParams },
+    TestSeedRemoteAttachment {
+        params: TestSeedRemoteAttachmentParams,
+    },
     /// Deletes a cached attachment fixture's backing bytes without changing DB metadata.
-    TestRemoveCachedAttachmentBytes { params: TestRemoveCachedAttachmentBytesParams },
+    TestRemoveCachedAttachmentBytes {
+        params: TestRemoveCachedAttachmentBytesParams,
+    },
     /// Reads back thread flags and labels for harness assertions.
-    TestThreadRead { params: TestThreadReadParams },
+    TestThreadRead {
+        params: TestThreadReadParams,
+    },
     /// Reads pending retry-queue rows for harness assertions.
-    TestPendingOpsRead { params: TestPendingOpsReadParams },
+    TestPendingOpsRead {
+        params: TestPendingOpsReadParams,
+    },
     /// Starts the real sync runtime from sync-harness scripts.
-    TestStartSync { params: TestStartSyncParams },
+    TestStartSync {
+        params: TestStartSyncParams,
+    },
     /// Reads a small DB snapshot for sync-harness assertions.
-    TestQueryDbState { params: TestQueryDbStateParams },
+    TestQueryDbState {
+        params: TestQueryDbStateParams,
+    },
     /// Flushes and queries the test search index.
-    TestSearchIndex { params: TestSearchIndexParams },
+    TestSearchIndex {
+        params: TestSearchIndexParams,
+    },
     /// Arms a one-shot delay at a named write/crash hook.
-    TestDelayNextWrite { params: TestDelayNextWriteParams },
+    TestDelayNextWrite {
+        params: TestDelayNextWriteParams,
+    },
     /// Phase 8c harness probe: reads `attachment_blobs.tombstoned_at`
     /// for a single content_hash. Used to verify account-delete /
     /// clear-cache flows from sync-harness scripts after the
     /// referencing `attachments` rows have cascade-deleted away.
-    TestQueryBlobTombstoneState { params: TestQueryBlobTombstoneStateParams },
+    TestQueryBlobTombstoneState {
+        params: TestQueryBlobTombstoneStateParams,
+    },
     /// Runs the discovery cascade for an email address and returns the
     /// full `DiscoveredConfig` for harness assertions. Driven against
     /// saehrimnir via `RATATOSKR_TEST_DISCOVERY_BASE`.
-    TestRunDiscovery { params: TestRunDiscoveryParams },
+    TestRunDiscovery {
+        params: TestRunDiscoveryParams,
+    },
 }
 
 /// Phase 8-1: idempotency classification for `RequestParams::idempotency()`.
@@ -1020,9 +1132,7 @@ impl RequestParams {
             Self::ContactsGroupSave { .. } => "contacts.group_save",
             Self::ContactsGroupDelete { .. } => "contacts.group_delete",
             Self::ContactsContactSave { .. } => "contacts.contact_save",
-            Self::ContactsContactSaveWithWriteback { .. } => {
-                "contacts.contact_save_with_writeback"
-            }
+            Self::ContactsContactSaveWithWriteback { .. } => "contacts.contact_save_with_writeback",
             Self::ContactsContactDelete { .. } => "contacts.contact_delete",
             Self::AccountUpdate { .. } => "account.update",
             Self::AccountReorder { .. } => "account.reorder",
@@ -1048,9 +1158,7 @@ impl RequestParams {
             Self::TestSeedThread { .. } => "test.seed_thread",
             Self::TestSeedCachedAttachment { .. } => "test.seed_cached_attachment",
             Self::TestSeedRemoteAttachment { .. } => "test.seed_remote_attachment",
-            Self::TestRemoveCachedAttachmentBytes { .. } => {
-                "test.remove_cached_attachment_bytes"
-            }
+            Self::TestRemoveCachedAttachmentBytes { .. } => "test.remove_cached_attachment_bytes",
             Self::TestThreadRead { .. } => "test.thread_read",
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             Self::TestStartSync { .. } => "test.start_sync",
@@ -1082,9 +1190,7 @@ impl RequestParams {
             Self::ActionExecutePlan { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Same handler-only budget as ActionExecutePlan (mail's
             // sibling): validate + journal + signal worker.
-            Self::CalActionExecutePlan { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(5))
-            }
+            Self::CalActionExecutePlan { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::ActionJobStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
@@ -1098,8 +1204,7 @@ impl RequestParams {
             // Phase 6d-A: provider HTTPS round-trip dominates. Same
             // shape as ActionSend - the local DB leg is sub-ms; the
             // upstream call is the slow part.
-            Self::ContactsContactSaveWithWriteback { .. }
-            | Self::ContactsContactDelete { .. } => {
+            Self::ContactsContactSaveWithWriteback { .. } | Self::ContactsContactDelete { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(30))
             }
             // Handler-only budget: enqueue + spawn (or look up an
@@ -1117,7 +1222,9 @@ impl RequestParams {
             Self::CalendarCancelAccountSync { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
-            Self::CalendarSetVisibility { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::CalendarSetVisibility { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
             Self::ThreadUiStateSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::SettingsSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::SignatureCreate { .. }
@@ -1136,9 +1243,7 @@ impl RequestParams {
             | Self::PinnedSearchUpdate { .. }
             | Self::PinnedSearchDelete { .. }
             | Self::PinnedSearchDeleteAll { .. }
-            | Self::SmartFolderCreate { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(5))
-            }
+            | Self::SmartFolderCreate { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // External-store cleanup is the bulk of the work and
             // routinely exceeds the 5 s default on a heavily-cached
             // account. 60 s absorbs that without converting correct
@@ -1154,19 +1259,13 @@ impl RequestParams {
             // Provider token endpoints can be slow under load; the
             // round-trip is two HTTPS calls (token + userinfo) plus
             // optional re-auth DB write.
-            Self::OauthExchangeCode { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(30))
-            }
+            Self::OauthExchangeCode { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
             // Cache miss runs the provider's fetch_attachment, which
             // can be slow on large attachments over slow links.
-            Self::AttachmentFetch { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(60))
-            }
+            Self::AttachmentFetch { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
             // Single SQL aggregate over `attachment_blobs`; sub-second
             // on any realistic cache.
-            Self::AttachmentCacheSize { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(5))
-            }
+            Self::AttachmentCacheSize { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Phase 8c: bulk tombstone + GC pass. Both are typically
             // sub-second on a small mailbox but can grow with cache
             // size; allow plenty of headroom so an honest IPC ack
@@ -1202,9 +1301,7 @@ impl RequestParams {
             // Discovery runs the full cascade including DNS / autoconfig HTTP
             // probes; the cascade itself caps at OVERALL_TIMEOUT (15s), so
             // give the IPC a generous envelope above that.
-            Self::TestRunDiscovery { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(30))
-            }
+            Self::TestRunDiscovery { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
             Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
         }
     }
@@ -1795,8 +1892,8 @@ impl RequestParams {
                     #[serde(default)]
                     params: AttachmentCacheSizeParams,
                 }
-                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                    .unwrap_or_default();
+                let p: P =
+                    serde_json::from_value(params.unwrap_or(Value::Null)).unwrap_or_default();
                 Ok(Self::AttachmentCacheSize { params: p.params })
             }
             "attachment.clear_cache" => {
@@ -1805,8 +1902,8 @@ impl RequestParams {
                     #[serde(default)]
                     params: AttachmentClearCacheParams,
                 }
-                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                    .unwrap_or_default();
+                let p: P =
+                    serde_json::from_value(params.unwrap_or(Value::Null)).unwrap_or_default();
                 Ok(Self::AttachmentClearCache { params: p.params })
             }
             "extract.status" => {
@@ -2086,17 +2183,15 @@ mod tests {
 
         let plan = ActionWirePlan {
             plan_id: PlanId::new_v7(),
-            operations: vec![
-                ActionWireOperation {
-                    operation_id: OperationId(0),
-                    account_id: "acc-1".into(),
-                    thread_id: "thr-9".into(),
-                    operation: WireMailOperation::MoveToFolder {
-                        dest: WireFolderId("inbox".into()),
-                        source: Some(WireFolderId("archive".into())),
-                    },
+            operations: vec![ActionWireOperation {
+                operation_id: OperationId(0),
+                account_id: "acc-1".into(),
+                thread_id: "thr-9".into(),
+                operation: WireMailOperation::MoveToFolder {
+                    dest: WireFolderId("inbox".into()),
+                    source: Some(WireFolderId("archive".into())),
                 },
-            ],
+            }],
         };
         let original = RequestParams::ActionExecutePlan { plan };
         let parsed = RequestParams::from_method_params(

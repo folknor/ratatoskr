@@ -543,11 +543,7 @@ async fn filter_pending_ops(
 // Sync state persistence (jmap_sync_state table)
 // ---------------------------------------------------------------------------
 
-async fn save_sync_state(
-    ctx: &SyncCtx<'_>,
-    state_type: &str,
-    state: &str,
-) -> Result<(), String> {
+async fn save_sync_state(ctx: &SyncCtx<'_>, state_type: &str, state: &str) -> Result<(), String> {
     let writer_pool = ctx.write_db.writer_pool();
     sync_state::save_jmap_sync_state(&writer_pool, ctx.account_id, state_type, state).await
 }
@@ -647,7 +643,9 @@ pub(crate) async fn discover_shared_accounts(ctx: &SyncCtx<'_>) {
         } else {
             Some(display_name.as_str())
         };
-        if let Err(e) = sync_state::enable_shared_mailbox_sync(&writer_pool, account_id, jmap_id, dn).await {
+        if let Err(e) =
+            sync_state::enable_shared_mailbox_sync(&writer_pool, account_id, jmap_id, dn).await
+        {
             log::warn!("[JMAP] Failed to enable shared account {jmap_id} for {account_id}: {e}");
         }
     }
@@ -705,9 +703,7 @@ pub(crate) async fn discover_shared_accounts(ctx: &SyncCtx<'_>) {
 ///
 /// Requires `urn:ietf:params:jmap:principals` capability. Skips silently
 /// if the server doesn't support it.
-pub(crate) async fn resolve_shared_account_identities(
-    ctx: &SyncCtx<'_>,
-) {
+pub(crate) async fn resolve_shared_account_identities(ctx: &SyncCtx<'_>) {
     let client = ctx.client;
     let account_id = ctx.account_id;
     let writer_pool = ctx.write_db.writer_pool();
@@ -796,7 +792,8 @@ pub(crate) async fn resolve_shared_account_identities(
         };
 
         if let Err(e) =
-            sync_state::set_shared_mailbox_email(&writer_pool, account_id, jmap_account_id, &email).await
+            sync_state::set_shared_mailbox_email(&writer_pool, account_id, jmap_account_id, &email)
+                .await
         {
             log::warn!("[JMAP] Failed to cache shared account email: {e}");
         } else {
@@ -880,9 +877,13 @@ pub(crate) async fn poll_share_notifications(ctx: &SyncCtx<'_>) {
     if since_state.is_none() {
         match get_share_notification_state(client).await {
             Ok(state) => {
-                if let Err(e) =
-                    sync_state::save_jmap_sync_state(&writer_pool, account_id, "ShareNotification", &state)
-                        .await
+                if let Err(e) = sync_state::save_jmap_sync_state(
+                    &writer_pool,
+                    account_id,
+                    "ShareNotification",
+                    &state,
+                )
+                .await
                 {
                     log::warn!("[JMAP] Failed to save initial ShareNotification state: {e}");
                 }
@@ -986,7 +987,8 @@ pub(crate) async fn poll_share_notifications(ctx: &SyncCtx<'_>) {
 
     // Save updated state.
     if let Err(e) =
-        sync_state::save_jmap_sync_state(&writer_pool, account_id, "ShareNotification", &new_state).await
+        sync_state::save_jmap_sync_state(&writer_pool, account_id, "ShareNotification", &new_state)
+            .await
     {
         log::warn!("[JMAP] Failed to save ShareNotification state: {e}");
     }

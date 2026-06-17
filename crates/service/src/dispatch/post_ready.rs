@@ -58,7 +58,9 @@ pub(crate) fn spawn_post_ready_push_startup(
         let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
 
         let push_runtime = Arc::new(crate::push::PushRuntime::new(
-            boot_state.read_db_state().expect("read db installed after boot.ready"),
+            boot_state
+                .read_db_state()
+                .expect("read db installed after boot.ready"),
             db_state.clone(),
             encryption_key,
             sync_runtime,
@@ -159,7 +161,9 @@ pub(crate) fn spawn_post_ready_calendar_startup(
 
         let calendar_runtime = Arc::new(crate::calendar::CalendarRuntime::new(
             db_state,
-            boot_state.read_db_state().expect("read db installed after boot.ready"),
+            boot_state
+                .read_db_state()
+                .expect("read db installed after boot.ready"),
             &encryption_key,
             notification_tx,
             0,
@@ -197,9 +201,7 @@ pub(crate) fn spawn_post_ready_extract_startup(
             }
         };
         let Some(search_write) = boot_state.take_search_write() else {
-            log::error!(
-                "post-ready extract startup: search_write slot empty (shutdown raced)",
-            );
+            log::error!("post-ready extract startup: search_write slot empty (shutdown raced)",);
             return;
         };
         let body_read = match store::body_store::BodyStoreReadState::init(&app_data_dir) {
@@ -221,7 +223,9 @@ pub(crate) fn spawn_post_ready_extract_startup(
         let cancellation = boot_state.shutdown_token().child_token();
         let extract_runtime = crate::extract::ExtractRuntime::new(
             db_state,
-            boot_state.read_db_state().expect("read db installed after boot.ready"),
+            boot_state
+                .read_db_state()
+                .expect("read db installed after boot.ready"),
             app_data_dir,
             Arc::clone(&boot_state),
             search_write,
@@ -282,9 +286,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
         boot_state.install_prefetch_runtime(runtime);
         let Some(runtime) = boot_state.prefetch_runtime() else {
             // Lost the race with drain. Nothing to do.
-            log::debug!(
-                "post-ready prefetch startup: runtime was drained before backfill kick",
-            );
+            log::debug!("post-ready prefetch startup: runtime was drained before backfill kick",);
             return;
         };
 
@@ -304,8 +306,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 return;
             }
         };
-        let window_start_unix = chrono::Utc::now().timestamp()
-            - window_days.saturating_mul(86_400);
+        let window_start_unix = chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
 
         // Attachments roadmap Phase 8a: eviction sweep BEFORE the
         // backfill kick, so we don't pre-fetch bytes only to tombstone
@@ -324,7 +325,8 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 128,
                 epoch_arc,
                 epoch_at_start,
-            ).await;
+            )
+            .await;
 
             // Attachments roadmap Phase 8b: reclaim bytes from packs
             // that were tombstoned in a previous session (or by the
@@ -338,7 +340,8 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 0,
                 crate::gc::GcTrigger::Startup,
                 crate::gc::DEFAULT_DENSITY_THRESHOLD,
-            ).await;
+            )
+            .await;
         }
 
         // Attachments roadmap Phase 8c: opened-files reaper. Walks
@@ -352,7 +355,9 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
             Ok(Some(s)) => s.parse::<i64>().unwrap_or(7).max(1),
             _ => 7,
         };
-        let max_age_secs: u64 = u64::try_from(cleanup_days).unwrap_or(7).saturating_mul(86_400);
+        let max_age_secs: u64 = u64::try_from(cleanup_days)
+            .unwrap_or(7)
+            .saturating_mul(86_400);
         let boot_state_for_reap = Arc::clone(&boot_state);
         tokio::spawn(async move {
             match crate::attachment_materialize::reap_stale_opened_files(
@@ -407,9 +412,7 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 .kick_backfill_account(&account_id, &provider, window_start_unix)
                 .await
             {
-                log::debug!(
-                    "post-ready prefetch startup: backfill kick {account_id} failed: {e}",
-                );
+                log::debug!("post-ready prefetch startup: backfill kick {account_id} failed: {e}",);
             }
         }
     })
@@ -455,7 +458,7 @@ pub(crate) fn spawn_post_ready_schema_rebuild(
         } else {
             let params = service_api::IndexRebuildParams {
                 policy: service_api::RebuildPolicy::PreserveExisting,
-                force:  false,
+                force: false,
             };
             match crate::handlers::extract::handle_rebuild(&boot_state, params).await {
                 Ok(value) => match value

@@ -86,7 +86,9 @@ fn detect_public_client(auth_methods: &[String]) -> bool {
 pub fn is_valid_https_url(url: &str) -> bool {
     is_valid_url_with_test_base(
         url,
-        std::env::var(super::DISCOVERY_TEST_BASE_ENV).ok().as_deref(),
+        std::env::var(super::DISCOVERY_TEST_BASE_ENV)
+            .ok()
+            .as_deref(),
     )
 }
 
@@ -117,8 +119,7 @@ fn is_valid_url_with_test_base(url: &str, test_base: Option<&str>) -> bool {
             .is_some_and(|base_parsed| {
                 parsed.scheme() == base_parsed.scheme()
                     && parsed.host_str() == base_parsed.host_str()
-                    && parsed.port_or_known_default()
-                        == base_parsed.port_or_known_default()
+                    && parsed.port_or_known_default() == base_parsed.port_or_known_default()
             }),
         _ => false,
     }
@@ -232,8 +233,14 @@ mod tests {
 
     #[test]
     fn is_valid_url_rejects_userinfo_and_fragment() {
-        assert!(!is_valid_url_with_test_base("https://attacker@victim.com", None));
-        assert!(!is_valid_url_with_test_base("https://victim.com/path#frag", None));
+        assert!(!is_valid_url_with_test_base(
+            "https://attacker@victim.com",
+            None
+        ));
+        assert!(!is_valid_url_with_test_base(
+            "https://victim.com/path#frag",
+            None
+        ));
     }
 
     #[test]
@@ -336,9 +343,7 @@ mod tests {
         // Embedded credentials in the issuer's endpoint URL would let the
         // server bypass our notion of "which host the user authorized."
         assert!(!is_valid_https_url("https://attacker@victim.example/path"));
-        assert!(!is_valid_https_url(
-            "https://user:pass@victim.example/path"
-        ));
+        assert!(!is_valid_https_url("https://user:pass@victim.example/path"));
         // Non-HTTPS schemes are rejected (RFC 8414 mandates HTTPS).
         assert!(!is_valid_https_url("javascript:alert(1)"));
         assert!(!is_valid_https_url("data:text/plain,foo"));

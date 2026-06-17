@@ -145,8 +145,7 @@ pub(crate) async fn handle_set(
         }
     }
 
-    serde_json::to_value(SettingsSetAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(SettingsSetAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 /// Walk every active non-deleting JMAP account with caching enabled
@@ -198,8 +197,7 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
             return;
         }
     };
-    let window_start_unix =
-        chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
+    let window_start_unix = chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
     for (account_id, provider) in accounts {
         if provider.is_empty() {
             continue;
@@ -254,7 +252,8 @@ async fn kick_window_shrink(boot_state: &Arc<BootSharedState>, window_days: i64)
         128,
         epoch_arc,
         epoch_at_start,
-    ).await;
+    )
+    .await;
 
     // Attachments roadmap Phase 8b: chain GC after a window-shrink
     // that actually tombstoned something. Without this, the
@@ -266,6 +265,7 @@ async fn kick_window_shrink(boot_state: &Arc<BootSharedState>, window_days: i64)
             0,
             crate::gc::GcTrigger::PostEviction,
             crate::gc::DEFAULT_DENSITY_THRESHOLD,
-        ).await;
+        )
+        .await;
     }
 }

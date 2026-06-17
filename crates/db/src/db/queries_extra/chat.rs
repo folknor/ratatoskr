@@ -25,9 +25,7 @@ pub fn designate_chat_contact_sync(
     email: &str,
     user_emails: &[String],
 ) -> Result<(), String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
 
     tx.execute(
         "INSERT OR IGNORE INTO chat_contacts (email) VALUES (?1)",
@@ -68,9 +66,7 @@ pub fn undesignate_chat_contact_sync(
     conn: &impl WriteTransactionTarget,
     email: &str,
 ) -> Result<(), String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
 
     tx.execute(
         "UPDATE threads SET is_chat_thread = 0 \
@@ -83,11 +79,8 @@ pub fn undesignate_chat_contact_sync(
     )
     .map_err(|e| format!("clear chat flags: {e}"))?;
 
-    tx.execute(
-        "DELETE FROM chat_contacts WHERE email = ?1",
-        params![email],
-    )
-    .map_err(|e| format!("delete chat_contact: {e}"))?;
+    tx.execute("DELETE FROM chat_contacts WHERE email = ?1", params![email])
+        .map_err(|e| format!("delete chat_contact: {e}"))?;
 
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())
@@ -105,9 +98,7 @@ pub fn mark_chat_read_local_sync(
     conn: &impl WriteTransactionTarget,
     email: &str,
 ) -> Result<Vec<(String, String)>, String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
 
     let affected: Vec<(String, String)> = {
         let mut stmt = tx
@@ -192,7 +183,8 @@ fn set_chat_thread_flags(
          )"
     );
 
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(1 + user_emails.len());
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+        Vec::with_capacity(1 + user_emails.len());
     params.push(Box::new(email.to_string()));
     for ue in user_emails {
         params.push(Box::new(ue.clone()));

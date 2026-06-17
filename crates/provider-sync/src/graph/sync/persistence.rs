@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
+use common::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind};
 use db::db::ReadDbState;
 use db::db::queries_extra::{
-    AttachmentInsertRow, MessageInsertRow, delete_message_reaction, insert_attachments,
-    insert_messages, upsert_message_reaction, upsert_message_reaction_update_type, LabelWriteRow,
-    upsert_labels,
+    AttachmentInsertRow, LabelWriteRow, MessageInsertRow, delete_message_reaction,
+    insert_attachments, insert_messages, upsert_labels, upsert_message_reaction,
+    upsert_message_reaction_update_type,
 };
-use common::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind};
 
 use super::super::client::GraphClient;
 use super::super::parse::ParsedGraphMessage;
@@ -58,9 +58,7 @@ pub(super) async fn persist_messages(
 
     sctx.write_db
         .with_write(move |conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
             let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
                 store_thread_to_db(
@@ -105,9 +103,7 @@ pub(super) async fn delete_messages(
     // Delete from DB and update parent threads
     sctx.write_db
         .with_write(move |conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
             sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
@@ -558,9 +554,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
             let email = owner_email.clone();
             let batch_updated = write_db
                 .with_write(move |conn| {
-                    let tx = conn
-                .transaction()
-                        .map_err(|e| format!("begin tx: {e}"))?;
+                    let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
 
                     let mut count: usize = 0;
                     for (msg_id, owner_reaction, reactions_count) in &reaction_updates {
@@ -593,7 +587,8 @@ pub(super) async fn refresh_reactions_for_recent_messages(
                         }
                     }
 
-                    tx.commit().map_err(|e| format!("commit reaction refresh: {e}"))?;
+                    tx.commit()
+                        .map_err(|e| format!("commit reaction refresh: {e}"))?;
                     Ok(count)
                 })
                 .await?;

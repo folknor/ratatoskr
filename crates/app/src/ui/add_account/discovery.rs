@@ -6,13 +6,9 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 
-use rtsk::discovery::types::{
-    DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption,
-};
+use rtsk::discovery::types::{DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption};
 
-use super::state::{
-    AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard,
-};
+use super::state::{AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard};
 use super::views::{ghost_button, primary_button};
 
 impl AddAccountWizard {

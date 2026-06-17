@@ -44,10 +44,7 @@ pub fn find_focused_filter() -> impl Operation<Option<FilterId>> {
             }
         }
 
-        fn traverse(
-            &mut self,
-            operate: &mut dyn FnMut(&mut dyn Operation<Option<FilterId>>),
-        ) {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<FilterId>>)) {
             operate(self);
         }
 

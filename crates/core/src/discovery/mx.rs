@@ -19,13 +19,14 @@ pub async fn lookup(domain: &str, email: &str) -> (Vec<ProtocolOption>, Option<S
 }
 
 async fn lookup_inner(domain: &str, email: &str) -> (Vec<ProtocolOption>, Option<String>) {
-    let resolver = match TokioResolver::builder_tokio().and_then(hickory_resolver::ResolverBuilder::build) {
-        Ok(r) => r,
-        Err(e) => {
-            log::debug!("MX resolver creation failed: {e}");
-            return (Vec::new(), None);
-        }
-    };
+    let resolver =
+        match TokioResolver::builder_tokio().and_then(hickory_resolver::ResolverBuilder::build) {
+            Ok(r) => r,
+            Err(e) => {
+                log::debug!("MX resolver creation failed: {e}");
+                return (Vec::new(), None);
+            }
+        };
 
     let mx_records = match resolver.mx_lookup(domain).await {
         Ok(records) => records,

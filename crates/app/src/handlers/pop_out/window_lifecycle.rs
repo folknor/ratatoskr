@@ -1,8 +1,8 @@
 use iced::{Size, Task};
 
+use crate::pop_out::PopOutWindow;
 use crate::pop_out::compose::{ComposeMode, ComposeState};
 use crate::pop_out::message_view::{MessageViewMessage, MessageViewState};
-use crate::pop_out::PopOutWindow;
 use crate::ui::layout::{
     COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH, COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH,
     MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
@@ -122,8 +122,7 @@ impl ReadyApp {
                 ref account_id,
                 ref mailbox_id,
             } = self.sidebar.selected_scope
-            && let Ok(Some(shared_email)) =
-                self.db.get_shared_mailbox_email(account_id, mailbox_id)
+            && let Ok(Some(shared_email)) = self.db.get_shared_mailbox_email(account_id, mailbox_id)
         {
             state.set_shared_mailbox_from(account_id, &shared_email);
         }

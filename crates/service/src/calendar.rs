@@ -70,10 +70,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crypto_key::SecretKey;
+use db::db::ReadDbState;
 use gmail::client::GmailState;
 use graph::client::GraphState;
 use jmap::client::JmapState;
-use db::db::ReadDbState;
 use service_api::{
     CalendarCancelAck, CalendarChanged, CalendarRunCompleted, CalendarRunId, CalendarStartAck,
     CalendarSyncResult, Notification,
@@ -179,10 +179,7 @@ impl CalendarRuntime {
     /// Diverging is a refactor smell. Returns
     /// `Result<CalendarStartAck, String>` so post-shutdown calls produce
     /// a testable `Err`, not a silently-dropped start.
-    pub async fn start_account(
-        &self,
-        account_id: String,
-    ) -> Result<CalendarStartAck, String> {
+    pub async fn start_account(&self, account_id: String) -> Result<CalendarStartAck, String> {
         if self.inner.closed.load(Ordering::Acquire) {
             return Err("CalendarRuntime is shutting down".into());
         }
@@ -325,11 +322,7 @@ impl CalendarRuntime {
         // Drop the entry + last_completed so a re-create after delete
         // starts fresh.
         self.inner.accounts.lock().await.remove(account_id);
-        self.inner
-            .last_completed
-            .lock()
-            .await
-            .remove(account_id);
+        self.inner.last_completed.lock().await.remove(account_id);
         Ok(())
     }
 
@@ -574,6 +567,9 @@ mod tests {
         let (runtime, _rx, _tmp) = fresh_runtime();
         runtime.shutdown().await;
         let result = runtime.start_account("acc-1".into()).await;
-        assert!(result.is_err(), "expected Err after shutdown, got {result:?}");
+        assert!(
+            result.is_err(),
+            "expected Err after shutdown, got {result:?}"
+        );
     }
 }

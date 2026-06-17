@@ -113,7 +113,12 @@ pub fn alert_dialog<'a, M: Clone + 'a>(
         .size(TEXT_MD)
         .style(iced::widget::text::secondary)
         .into();
-    build_dialog_card(title.into(), body_text, actions, width.unwrap_or(DIALOG_CONFIRM_WIDTH))
+    build_dialog_card(
+        title.into(),
+        body_text,
+        actions,
+        width.unwrap_or(DIALOG_CONFIRM_WIDTH),
+    )
 }
 
 /// Build a form dialog (title + custom body element + action row).
@@ -127,7 +132,12 @@ pub fn form_dialog<'a, M: Clone + 'a>(
     actions: Vec<DialogAction<M>>,
     width: Option<f32>,
 ) -> Element<'a, M> {
-    build_dialog_card(title.into(), body.into(), actions, width.unwrap_or(DIALOG_FORM_WIDTH))
+    build_dialog_card(
+        title.into(),
+        body.into(),
+        actions,
+        width.unwrap_or(DIALOG_FORM_WIDTH),
+    )
 }
 
 fn build_dialog_card<'a, M: Clone + 'a>(

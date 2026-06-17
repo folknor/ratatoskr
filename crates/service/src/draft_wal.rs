@@ -28,8 +28,8 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use db::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
 use db::db::WriteTarget;
+use db::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
 use serde::{Deserialize, Serialize};
 
 pub(crate) use service_api::WAL_FILENAME;
@@ -89,10 +89,7 @@ pub(crate) fn drain(conn: &impl WriteTarget, data_dir: &Path) -> Result<usize, S
         let entry: WalEntry = match serde_json::from_str(&line) {
             Ok(e) => e,
             Err(e) => {
-                log::warn!(
-                    "drafts.wal: skipping unparseable line {}: {e}",
-                    idx + 1,
-                );
+                log::warn!("drafts.wal: skipping unparseable line {}: {e}", idx + 1,);
                 continue;
             }
         };
@@ -240,7 +237,9 @@ mod tests {
         ];
         write_wal_lines(dir.path(), &entries);
         let pool = fresh_pool(dir.path());
-        let replayed = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("drain");
+        let replayed = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("drain");
         assert_eq!(replayed, 2);
         assert_eq!(count_drafts(&pool), 2);
         assert_eq!(subject_of(&pool, "draft-a").as_deref(), Some("subj-a"));
@@ -252,7 +251,9 @@ mod tests {
     fn drain_with_no_wal_file_is_ok() {
         let dir = tempfile::tempdir().expect("tempdir");
         let pool = fresh_pool(dir.path());
-        let replayed = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("drain empty");
+        let replayed = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("drain empty");
         assert_eq!(replayed, 0);
     }
 
@@ -275,7 +276,9 @@ mod tests {
         f.sync_all().expect("sync");
 
         let pool = fresh_pool(dir.path());
-        let replayed = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("drain");
+        let replayed = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("drain");
         assert_eq!(replayed, 2);
         assert_eq!(count_drafts(&pool), 2);
     }
@@ -297,7 +300,9 @@ mod tests {
             },
         ];
         write_wal_lines(dir.path(), &entries);
-        let first = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("first drain");
+        let first = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("first drain");
         assert_eq!(first, 2);
 
         // Crash and reboot: simulate a fresh WAL containing the same
@@ -314,7 +319,9 @@ mod tests {
             },
         ];
         write_wal_lines(dir.path(), &entries);
-        let second = pool.with_write_sync(|conn| drain(conn, dir.path())).expect("second drain");
+        let second = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("second drain");
         assert_eq!(second, 2);
 
         assert_eq!(count_drafts(&pool), 3);

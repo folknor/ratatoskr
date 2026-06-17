@@ -1,5 +1,5 @@
-use db_read::db::ReadConn;
 use db_read::db::FromRow;
+use db_read::db::ReadConn;
 use db_read::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use db_read::db::types::{AccountScope, DbThread};
 use types::SystemFolderId;
@@ -505,10 +505,7 @@ impl LabelGroupRenderGrain {
 /// provider truth in `thread_labels` merged with pending local label
 /// intent. The old `thread_label_groups` shortcut is intentionally not
 /// consulted; group composites now fan out to per-member label intent.
-fn label_group_rendered_fragment(
-    grain: LabelGroupRenderGrain,
-    group_predicate: &str,
-) -> String {
+fn label_group_rendered_fragment(grain: LabelGroupRenderGrain, group_predicate: &str) -> String {
     let account_column = grain.account_column();
     let thread_column = grain.thread_column();
 
@@ -862,7 +859,13 @@ mod tests {
     fn account_filters_by_display_name() {
         let conn = setup_test_db();
         let parsed = parse_query("account:Work");
-        let results = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None);
+        let results = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        );
         let threads = results.expect("query should succeed");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc1");
@@ -872,7 +875,14 @@ mod tests {
     fn account_filters_by_email() {
         let conn = setup_test_db();
         let parsed = parse_query("account:personal.com");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc2");
     }
@@ -883,7 +893,8 @@ mod tests {
         let parsed = parse_query("account:Work");
         // Scope says acc2, but account: operator should override.
         let scope = AccountScope::Single("acc2".to_owned());
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &scope, None, None).expect("query");
+        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &scope, None, None)
+            .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc1");
     }
@@ -896,13 +907,26 @@ mod tests {
         // "Receipts" is a folder on acc1. "Projects" is a tag label and label
         // group, so it must not match `folder:`.
         let parsed = parse_query("folder:Receipts");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
 
         let projects = parse_query("folder:Projects");
-        let no_threads =
-            query_threads_read(&ReadConn::from_raw(&conn), &projects, &AccountScope::All, None, None).expect("query");
+        let no_threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &projects,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert!(no_threads.is_empty(), "tag labels must not match folder:");
     }
 
@@ -912,7 +936,14 @@ mod tests {
     fn in_inbox_finds_both_accounts() {
         let conn = setup_test_db();
         let parsed = parse_query("in:inbox");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 2);
     }
 
@@ -920,7 +951,14 @@ mod tests {
     fn in_starred_uses_thread_flag() {
         let conn = setup_test_db();
         let parsed = parse_query("in:starred");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert!(threads[0].is_starred);
     }
@@ -932,7 +970,14 @@ mod tests {
 
         let mut parsed = parse_query("is:starred");
         parsed.after = Some(types::DateBound::after(2500));
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
 
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t3");
@@ -942,14 +987,12 @@ mod tests {
 
     #[test]
     fn label_group_rendered_fragment_uses_named_grains() {
-        let thread_fragment =
-            label_group_rendered_fragment(LabelGroupRenderGrain::Thread, "1=1");
+        let thread_fragment = label_group_rendered_fragment(LabelGroupRenderGrain::Thread, "1=1");
         assert!(thread_fragment.contains("tl.account_id = t.account_id"));
         assert!(thread_fragment.contains("tl.thread_id = t.id"));
         assert!(thread_fragment.contains("pli_add.account_id = t.account_id"));
 
-        let message_fragment =
-            label_group_rendered_fragment(LabelGroupRenderGrain::Message, "1=1");
+        let message_fragment = label_group_rendered_fragment(LabelGroupRenderGrain::Message, "1=1");
         assert!(message_fragment.contains("tl.account_id = m.account_id"));
         assert!(message_fragment.contains("tl.thread_id = m.thread_id"));
         assert!(message_fragment.contains("pli_add.account_id = m.account_id"));
@@ -959,7 +1002,14 @@ mod tests {
     fn is_tagged_finds_threads_with_labels() {
         let conn = setup_test_db();
         let parsed = parse_query("is:tagged");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         // Only t1 renders the Projects label group through its member tag.
         // t2's only membership is INBOX, which is a folder and does not count.
         assert_eq!(threads.len(), 1);
@@ -972,7 +1022,14 @@ mod tests {
     fn label_filters_by_label_group_name() {
         let conn = setup_test_db();
         let parsed = parse_query("label:Projects");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -983,7 +1040,14 @@ mod tests {
     fn has_contact_filters_by_known_sender() {
         let conn = setup_test_db();
         let parsed = parse_query("has:contact");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         // Only m1's sender (sender@example.com) is in contacts.
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
@@ -995,7 +1059,14 @@ mod tests {
     fn has_pdf_filters_attachments() {
         let conn = setup_test_db();
         let parsed = parse_query("has:pdf");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -1004,7 +1075,14 @@ mod tests {
     fn has_image_filters_attachments() {
         let conn = setup_test_db();
         let parsed = parse_query("has:image");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -1013,7 +1091,14 @@ mod tests {
     fn type_glob_pattern_matches() {
         let conn = setup_test_db();
         let parsed = parse_query("type:image/jpeg");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
     }
 
@@ -1023,7 +1108,14 @@ mod tests {
     fn from_matches_contact_display_name() {
         let conn = setup_test_db();
         let parsed = parse_query("from:\"Friendly Sender\"");
-        let threads = query_threads_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All, None, None).expect("query");
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -1034,7 +1126,8 @@ mod tests {
     fn count_matching_returns_correct_count() {
         let conn = setup_test_db();
         let parsed = parse_query("in:inbox");
-        let count = count_matching_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All).expect("count");
+        let count = count_matching_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All)
+            .expect("count");
         assert_eq!(count, 2);
     }
 
@@ -1046,7 +1139,8 @@ mod tests {
         let mut parsed = parse_query("is:starred");
         parsed.after = Some(types::DateBound::after(2500));
         parsed.is_unread = Some(true);
-        let count = count_matching_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All).expect("count");
+        let count = count_matching_read(&ReadConn::from_raw(&conn), &parsed, &AccountScope::All)
+            .expect("count");
 
         assert_eq!(count, 1);
     }

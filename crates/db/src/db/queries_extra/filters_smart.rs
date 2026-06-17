@@ -1,8 +1,8 @@
 use super::super::WriterPool;
 use super::super::types::{DbFilterRule, DbSmartFolder, DbSmartLabelRule, SortOrderItem};
 use super::dynamic_update;
-use crate::db::from_row::FromRow;
 use crate::db::WriteTarget;
+use crate::db::from_row::FromRow;
 use rusqlite::params;
 
 pub async fn db_get_filters_for_account(

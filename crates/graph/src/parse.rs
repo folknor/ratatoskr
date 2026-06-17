@@ -141,8 +141,7 @@ pub fn parse_graph_message(
             // are skipped.
             !matches!(
                 kind,
-                "#microsoft.graph.referenceAttachment"
-                    | "#microsoft.graph.itemAttachment"
+                "#microsoft.graph.referenceAttachment" | "#microsoft.graph.itemAttachment"
             )
         })
         .map(|a| {
@@ -159,9 +158,7 @@ pub fn parse_graph_message(
             };
 
             ParsedGraphAttachment {
-                content_hash: inline_data
-                    .as_deref()
-                    .map(db::blob_hash::BlobHash::hash),
+                content_hash: inline_data.as_deref().map(db::blob_hash::BlobHash::hash),
                 inline_data,
                 id: a.id.clone(),
                 filename: a.name.clone(),

@@ -5,8 +5,8 @@ use iced::Task;
 use crate::command_dispatch;
 use crate::{APP_DATA_DIR, Message, ReadyApp};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use service_api::actions::{ActionOutcome, FolderId, LabelGroupId};
 use rtsk::scope::ViewScope;
+use service_api::actions::{ActionOutcome, FolderId, LabelGroupId};
 
 #[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
 impl ReadyApp {
@@ -199,8 +199,7 @@ impl ReadyApp {
         // undo takes N Ctrl+Z presses; that's a minor UX wart and
         // beats the alternative (Service rejects, optimistic state
         // already applied, user lands in a confusing partial state).
-        let mut accounts: std::collections::BTreeSet<&str> =
-            std::collections::BTreeSet::new();
+        let mut accounts: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
         for (account_id, _, _) in &plan.operations {
             accounts.insert(account_id.as_str());
         }
@@ -327,8 +326,10 @@ impl ReadyApp {
 
         // Group operations by account, preserving original order
         // within each group.
-        let mut ops_by_account: BTreeMap<String, Vec<(String, String, service_api::actions::MailOperation)>> =
-            BTreeMap::new();
+        let mut ops_by_account: BTreeMap<
+            String,
+            Vec<(String, String, service_api::actions::MailOperation)>,
+        > = BTreeMap::new();
         for op in plan.operations {
             ops_by_account.entry(op.0.clone()).or_default().push(op);
         }
@@ -392,9 +393,7 @@ impl ReadyApp {
                     // Plan disappeared between dispatch and ack - the
                     // ActionCompleted notification raced ahead (plan
                     // already drained). Nothing to do.
-                    log::debug!(
-                        "ActionDispatched(Acked) for plan {plan_id:?} - already drained",
-                    );
+                    log::debug!("ActionDispatched(Acked) for plan {plan_id:?} - already drained",);
                 }
                 Task::none()
             }
@@ -480,12 +479,7 @@ impl ReadyApp {
             .map(|plan_id| {
                 let client = Arc::clone(&client);
                 Task::perform(
-                    async move {
-                        client
-                            .job_status(plan_id)
-                            .await
-                            .map_err(|e| e.to_string())
-                    },
+                    async move { client.job_status(plan_id).await.map_err(|e| e.to_string()) },
                     move |result| Message::JobStatusResolved { plan_id, result },
                 )
             })
@@ -563,9 +557,7 @@ impl ReadyApp {
             }
             Ok(service_api::JobStatusResponse::NotFound) => {
                 if let Some(state) = self.pending_action_plans.remove(&plan_id) {
-                    log::info!(
-                        "reconcile plan {plan_id}: NotFound; rolling back optimistic state",
-                    );
+                    log::info!("reconcile plan {plan_id}: NotFound; rolling back optimistic state",);
                     for (account_id, thread_id, _) in &state.plan.operations {
                         self.action_throttle
                             .remove(&(account_id.clone(), thread_id.clone()));
@@ -635,7 +627,9 @@ impl ReadyApp {
             return Task::none();
         }
         let action_outcome = crate::action_wire::wire_outcome_to_action_outcome(outcome.result);
-        state.outcomes.push((outcome.operation_id.0, action_outcome));
+        state
+            .outcomes
+            .push((outcome.operation_id.0, action_outcome));
         Task::none()
     }
 
@@ -1003,7 +997,10 @@ fn undo_payload_to_ops(
     use crate::action_resolve::MailUndoPayload;
     use service_api::actions::MailOperation;
     match payload {
-        MailUndoPayload::Archive { account_id, thread_ids } => {
+        MailUndoPayload::Archive {
+            account_id,
+            thread_ids,
+        } => {
             // Undo-archive is "put the thread back in INBOX". INBOX is the
             // canonical inbox folder ID across all four providers, so this
             // routes through MoveToFolder rather than AddLabel - the typed
@@ -1024,7 +1021,11 @@ fn undo_payload_to_ops(
                 })
                 .collect()
         }
-        MailUndoPayload::Trash { account_id, thread_ids, source } => thread_ids
+        MailUndoPayload::Trash {
+            account_id,
+            thread_ids,
+            source,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 let dest = source.clone().unwrap_or_else(|| FolderId::from("INBOX"));
@@ -1035,7 +1036,11 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::MoveToFolder { account_id, thread_ids, source } => thread_ids
+        MailUndoPayload::MoveToFolder {
+            account_id,
+            thread_ids,
+            source,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
@@ -1048,7 +1053,11 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::SetSpam { account_id, thread_ids, was_spam } => thread_ids
+        MailUndoPayload::SetSpam {
+            account_id,
+            thread_ids,
+            was_spam,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
@@ -1058,7 +1067,11 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::SetRead { account_id, thread_ids, was_read } => thread_ids
+        MailUndoPayload::SetRead {
+            account_id,
+            thread_ids,
+            was_read,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
@@ -1068,7 +1081,11 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::SetStarred { account_id, thread_ids, was_starred } => thread_ids
+        MailUndoPayload::SetStarred {
+            account_id,
+            thread_ids,
+            was_starred,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
@@ -1078,7 +1095,11 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::SetPinned { account_id, thread_ids, was_pinned } => thread_ids
+        MailUndoPayload::SetPinned {
+            account_id,
+            thread_ids,
+            was_pinned,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
@@ -1088,7 +1109,11 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::SetMuted { account_id, thread_ids, was_muted } => thread_ids
+        MailUndoPayload::SetMuted {
+            account_id,
+            thread_ids,
+            was_muted,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
@@ -1098,55 +1123,76 @@ fn undo_payload_to_ops(
                 )
             })
             .collect(),
-        MailUndoPayload::AddLabel { account_id, thread_ids, label_id } => thread_ids
+        MailUndoPayload::AddLabel {
+            account_id,
+            thread_ids,
+            label_id,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
                     account_id.clone(),
                     tid.clone(),
-                    MailOperation::RemoveLabel { label_id: label_id.clone() },
+                    MailOperation::RemoveLabel {
+                        label_id: label_id.clone(),
+                    },
                 )
             })
             .collect(),
-        MailUndoPayload::RemoveLabel { account_id, thread_ids, label_id } => thread_ids
+        MailUndoPayload::RemoveLabel {
+            account_id,
+            thread_ids,
+            label_id,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
                     account_id.clone(),
                     tid.clone(),
-                    MailOperation::AddLabel { label_id: label_id.clone() },
+                    MailOperation::AddLabel {
+                        label_id: label_id.clone(),
+                    },
                 )
             })
             .collect(),
-        MailUndoPayload::ApplyLabelGroup { account_id, thread_ids, group_id } => thread_ids
+        MailUndoPayload::ApplyLabelGroup {
+            account_id,
+            thread_ids,
+            group_id,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
                     account_id.clone(),
                     tid.clone(),
-                    MailOperation::RemoveLabelGroup { group_id: *group_id },
+                    MailOperation::RemoveLabelGroup {
+                        group_id: *group_id,
+                    },
                 )
             })
             .collect(),
-        MailUndoPayload::RemoveLabelGroup { account_id, thread_ids, group_id } => thread_ids
+        MailUndoPayload::RemoveLabelGroup {
+            account_id,
+            thread_ids,
+            group_id,
+        } => thread_ids
             .iter()
             .map(|tid| {
                 (
                     account_id.clone(),
                     tid.clone(),
-                    MailOperation::ApplyLabelGroup { group_id: *group_id },
+                    MailOperation::ApplyLabelGroup {
+                        group_id: *group_id,
+                    },
                 )
             })
             .collect(),
-        MailUndoPayload::Snooze { account_id, thread_ids } => thread_ids
+        MailUndoPayload::Snooze {
+            account_id,
+            thread_ids,
+        } => thread_ids
             .iter()
-            .map(|tid| {
-                (
-                    account_id.clone(),
-                    tid.clone(),
-                    MailOperation::Unsnooze,
-                )
-            })
+            .map(|tid| (account_id.clone(), tid.clone(), MailOperation::Unsnooze))
             .collect(),
     }
 }
@@ -1160,32 +1206,55 @@ fn undo_cancel_targets(
 ) -> Vec<(String, String, &'static str)> {
     use crate::action_resolve::MailUndoPayload;
     let (account_id, thread_ids, op_type): (&String, &Vec<String>, &'static str) = match payload {
-        MailUndoPayload::Archive { account_id, thread_ids } => (account_id, thread_ids, "archive"),
-        MailUndoPayload::Trash { account_id, thread_ids, .. } => (account_id, thread_ids, "trash"),
-        MailUndoPayload::MoveToFolder { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "moveToFolder")
-        }
-        MailUndoPayload::SetSpam { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "spam")
-        }
-        MailUndoPayload::SetRead { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "markRead")
-        }
-        MailUndoPayload::SetStarred { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "star")
-        }
-        MailUndoPayload::AddLabel { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "addLabel")
-        }
-        MailUndoPayload::RemoveLabel { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "removeLabel")
-        }
-        MailUndoPayload::ApplyLabelGroup { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "applyLabelGroup")
-        }
-        MailUndoPayload::RemoveLabelGroup { account_id, thread_ids, .. } => {
-            (account_id, thread_ids, "removeLabelGroup")
-        }
+        MailUndoPayload::Archive {
+            account_id,
+            thread_ids,
+        } => (account_id, thread_ids, "archive"),
+        MailUndoPayload::Trash {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "trash"),
+        MailUndoPayload::MoveToFolder {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "moveToFolder"),
+        MailUndoPayload::SetSpam {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "spam"),
+        MailUndoPayload::SetRead {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "markRead"),
+        MailUndoPayload::SetStarred {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "star"),
+        MailUndoPayload::AddLabel {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "addLabel"),
+        MailUndoPayload::RemoveLabel {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "removeLabel"),
+        MailUndoPayload::ApplyLabelGroup {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "applyLabelGroup"),
+        MailUndoPayload::RemoveLabelGroup {
+            account_id,
+            thread_ids,
+            ..
+        } => (account_id, thread_ids, "removeLabelGroup"),
         // Pin/Mute/Snooze are local-only: they never enqueue into
         // pending_operations, so there is nothing to cancel.
         MailUndoPayload::SetPinned { .. }

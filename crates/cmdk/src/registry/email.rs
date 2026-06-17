@@ -3,9 +3,7 @@ use crate::id::CommandId;
 use crate::input::{InputSchema, ParamDef};
 use crate::keybinding::KeyBinding;
 
-use super::builders::{
-    desc, desc_kw, parameterized, toggle, undoable, with_docs, with_keywords,
-};
+use super::builders::{desc, desc_kw, parameterized, toggle, undoable, with_docs, with_keywords};
 use super::scoring::{always, needs_selection, needs_single_selection};
 
 pub(super) fn register_email(out: &mut Vec<CommandDescriptor>) {

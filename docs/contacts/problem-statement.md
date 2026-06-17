@@ -128,13 +128,13 @@ Two stacked lists, each compact - roughly 5 entries visible at a glance without 
 │ │ Company: Springfield Inc                             │ │
 │ │ Notes: Prefers email over calls                      │ │
 │ │ Groups: [Engineering] [Project X]                    │ │
-│ │ [🔵 Work Account] [🟢 Gmail]                        │ │
+│ │ [(blue) Work Account] [(green) Gmail]                        │ │
 │ └──────────────────────────────────────────────────────┘ │
 │ ┌──────────────────────────────────────────────────────┐ │
 │ │ Lenny Leonard                   lenny@corp.com       │ │
 │ │ Company: Springfield Inc                             │ │
 │ │ Groups: [Engineering]                                │ │
-│ │ [🔵 Work Account]                                   │ │
+│ │ [(blue) Work Account]                                   │ │
 │ └──────────────────────────────────────────────────────┘ │
 │ ┌──────────────────────────────────────────────────────┐ │
 │ │ ...                                                  │ │
@@ -202,11 +202,11 @@ Clicking a group card slides in a group editor that covers the entire settings U
 │                                                          │
 │ ┌──────────────────────────────────────────────────────┐ │
 │ │ Carl Carlson                     carl@corp.com       │ │
-│ │ [🔵 Work Account]                                   │ │
+│ │ [(blue) Work Account]                                   │ │
 │ └──────────────────────────────────────────────────────┘ │
 │ ┌──────────────────────────────────────────────────────┐ │
 │ │ Moe Szyslak                      moe@corp.com       │ │
-│ │ [🔵 Work Account]                                   │ │
+│ │ [(blue) Work Account]                                   │ │
 │ └──────────────────────────────────────────────────────┘ │
 │                                                          │
 │─ Members (12) ───────────────────────────────────────────│

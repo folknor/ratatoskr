@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use common::types::{ImportanceLevel, ProviderCtx};
-use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
+use db::db::{ReadDbState, WriterPool};
 
 use crate::client::GraphClient;
 use crate::folder_mapper::FolderMap;
@@ -59,38 +59,34 @@ async fn persist_folders_with_writer(
 
     let folder_rows: Vec<FolderWriteRow> = folder_map
         .all_mappings()
-        .map(|m| {
-            FolderWriteRow {
-                id: m.folder_id.clone(),
-                account_id: aid.clone(),
-                name: m.folder_name.clone(),
-                visible: None,
-                sort_order: None,
-                imap_folder_path: None,
-                imap_special_use: None,
-                namespace_type: None,
-                parent_id: m.parent_folder_id.clone(),
-                right_read: None,
-                right_add: None,
-                right_remove: None,
-                right_set_seen: None,
-                right_set_keywords: None,
-                right_create_child: None,
-                right_rename: None,
-                right_delete: None,
-                right_submit: None,
-                is_subscribed: None,
-                is_undeletable: m.folder_type == "system",
-            }
+        .map(|m| FolderWriteRow {
+            id: m.folder_id.clone(),
+            account_id: aid.clone(),
+            name: m.folder_name.clone(),
+            visible: None,
+            sort_order: None,
+            imap_folder_path: None,
+            imap_special_use: None,
+            namespace_type: None,
+            parent_id: m.parent_folder_id.clone(),
+            right_read: None,
+            right_add: None,
+            right_remove: None,
+            right_set_seen: None,
+            right_set_keywords: None,
+            right_create_child: None,
+            right_rename: None,
+            right_delete: None,
+            right_submit: None,
+            is_subscribed: None,
+            is_undeletable: m.folder_type == "system",
         })
         .collect();
     let label_rows = importance_label_rows(&aid);
 
     writer
         .with_write(move |conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
             insert_folders_batch(&tx, &folder_rows)?;
             upsert_labels(&tx, &label_rows)?;
             tx.commit().map_err(|e| format!("commit folders: {e}"))?;
@@ -101,20 +97,20 @@ async fn persist_folders_with_writer(
 
 fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
     ImportanceLevel::ALL
-    .into_iter()
-    .map(|level| LabelWriteRow {
-        id: level.label_id().to_string(),
-        account_id: account_id.to_string(),
-        name: level.display_name().to_string(),
-        visible: None,
-        sort_order: Some(level.sort_order()),
-        server_color_bg: None,
-        server_color_fg: None,
-        user_color_bg: None,
-        user_color_fg: None,
-        is_undeletable: true,
-    })
-    .collect()
+        .into_iter()
+        .map(|level| LabelWriteRow {
+            id: level.label_id().to_string(),
+            account_id: account_id.to_string(),
+            name: level.display_name().to_string(),
+            visible: None,
+            sort_order: Some(level.sort_order()),
+            server_color_bg: None,
+            server_color_fg: None,
+            user_color_bg: None,
+            user_color_fg: None,
+            is_undeletable: true,
+        })
+        .collect()
 }
 
 async fn fetch_all_folders(

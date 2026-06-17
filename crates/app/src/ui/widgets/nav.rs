@@ -86,10 +86,8 @@ pub fn nav_button<'a, M: Clone + 'a>(
             .push(container(ico.size(icon_size).style(icon_style)).align_y(Alignment::Center));
     }
 
-    content = content.push(
-        container(text(label).size(text_size).style(label_style))
-            .align_y(Alignment::Center),
-    );
+    content = content
+        .push(container(text(label).size(text_size).style(label_style)).align_y(Alignment::Center));
 
     if let Some(count) = badge.map(NavBadge::as_i64)
         && count > 0

@@ -157,9 +157,7 @@ fn group_add_candidates_panel<'a>(
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
-        let mut col = column![]
-            .spacing(PEOPLE_PILL_SPACING)
-            .width(Length::Fill);
+        let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
         for contact in candidates {
             col = col.push(group_add_candidate_pill(contact));
         }
@@ -280,9 +278,7 @@ fn group_members_list_panel<'a>(
             .into();
     }
 
-    let mut col = column![]
-        .spacing(PEOPLE_PILL_SPACING)
-        .width(Length::Fill);
+    let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
     for email in visible {
         col = col.push(member_pill(email, state));
     }

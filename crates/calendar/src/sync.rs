@@ -4,17 +4,16 @@ use rusqlite::{Row, params};
 use service_state::WriteDbState;
 use tokio_util::sync::CancellationToken;
 
+use db::db::WriteTxn;
+use db::db::queries_extra::calendar_contacts_writes::{
+    CalDavAttendee, CalDavReminder, CalendarEventRow, DiscoveredCalendar, delete_caldav_events,
+    delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id, reap_orphan_overrides,
+    sync_caldav_attendees, sync_caldav_reminders, update_calendar_sync_token,
+    upsert_caldav_event_map, upsert_calendar_event_row, upsert_discovered_calendar,
+};
 use gmail::client::GmailState;
 use graph::client::GraphState;
 use jmap::client::JmapState;
-use db::db::WriteTxn;
-use db::db::queries_extra::calendar_contacts_writes::{
-    CalDavAttendee, CalDavReminder, CalendarEventRow, DiscoveredCalendar,
-    delete_caldav_events, delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id,
-    reap_orphan_overrides, sync_caldav_attendees, sync_caldav_reminders,
-    update_calendar_sync_token, upsert_caldav_event_map, upsert_calendar_event_row,
-    upsert_discovered_calendar,
-};
 use rtsk::caldav::client::CalDavClient;
 use rtsk::caldav::parse;
 use rtsk::db::ReadDbState;
@@ -53,10 +52,11 @@ pub async fn calendar_sync_account_impl(
         };
     }
     let provider_result = read_db
-        .with_read_mapped({
-            let account_id = account_id.to_string();
-            move |conn| {
-                let row = match conn.query_row(
+        .with_read_mapped(
+            {
+                let account_id = account_id.to_string();
+                move |conn| {
+                    let row = match conn.query_row(
                     "SELECT provider, calendar_provider, caldav_url FROM accounts WHERE id = ?1",
                     params![account_id],
                     |row| {
@@ -71,30 +71,34 @@ pub async fn calendar_sync_account_impl(
                     Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => None,
                     Err(e) => return Err(e.to_string()),
                 };
-                Ok(row.and_then(|(provider, calendar_provider, caldav_url)| {
-                    let has_caldav_url = caldav_url
-                        .as_deref()
-                        .is_some_and(|value| !value.trim().is_empty());
+                    Ok(row.and_then(|(provider, calendar_provider, caldav_url)| {
+                        let has_caldav_url = caldav_url
+                            .as_deref()
+                            .is_some_and(|value| !value.trim().is_empty());
 
-                    if calendar_provider.as_deref() == Some("google_api") || provider == "gmail_api"
-                    {
-                        Some("google_api")
-                    } else if calendar_provider.as_deref() == Some("graph") || provider == "graph" {
-                        Some("graph")
-                    } else if calendar_provider.as_deref() == Some("caldav")
-                        || (provider == "caldav" && has_caldav_url)
-                    {
-                        Some("caldav")
-                    } else if calendar_provider.as_deref() == Some("jmap") || provider == "jmap" {
-                        Some("jmap")
-                    } else {
-                        None
-                    }
-                }))
-            }
-        },
-        |e| e,
-    )
+                        if calendar_provider.as_deref() == Some("google_api")
+                            || provider == "gmail_api"
+                        {
+                            Some("google_api")
+                        } else if calendar_provider.as_deref() == Some("graph")
+                            || provider == "graph"
+                        {
+                            Some("graph")
+                        } else if calendar_provider.as_deref() == Some("caldav")
+                            || (provider == "caldav" && has_caldav_url)
+                        {
+                            Some("caldav")
+                        } else if calendar_provider.as_deref() == Some("jmap") || provider == "jmap"
+                        {
+                            Some("jmap")
+                        } else {
+                            None
+                        }
+                    }))
+                }
+            },
+            |e| e,
+        )
         .await;
 
     let provider = match provider_result {
@@ -200,8 +204,10 @@ pub async fn apply_calendar_sync_result_impl(
     let account_id = account_id.to_string();
     let calendar_remote_id = calendar_remote_id.to_string();
     db.with_write(move |conn| {
-        let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
-            .ok_or_else(|| format!("calendar not found: account={account_id} remote={calendar_remote_id}"))?;
+        let calendar_id: String =
+            get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?.ok_or_else(
+                || format!("calendar not found: account={account_id} remote={calendar_remote_id}"),
+            )?;
 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -264,8 +270,10 @@ pub async fn delete_provider_event_impl(
     let calendar_remote_id = calendar_remote_id.to_string();
     let remote_event_id = remote_event_id.to_string();
     db.with_write(move |conn| {
-        let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
-            .ok_or_else(|| format!("calendar not found: account={account_id} remote={calendar_remote_id}"))?;
+        let calendar_id: String =
+            get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?.ok_or_else(
+                || format!("calendar not found: account={account_id} remote={calendar_remote_id}"),
+            )?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         delete_calendar_event_by_remote_id(&tx, &calendar_id, &remote_event_id)?;
         tx.commit().map_err(|e| e.to_string())?;
@@ -359,7 +367,8 @@ async fn sync_google_calendar_account(
             cancellation_token,
         )
         .await?;
-        apply_calendar_sync_result_impl(write_db, account_id, &calendar.remote_id, sync_result).await?;
+        apply_calendar_sync_result_impl(write_db, account_id, &calendar.remote_id, sync_result)
+            .await?;
     }
 
     Ok(())
@@ -398,7 +407,8 @@ async fn sync_graph_calendar_account(
             cancellation_token,
         )
         .await?;
-        apply_calendar_sync_result_impl(write_db, account_id, &calendar.remote_id, sync_result).await?;
+        apply_calendar_sync_result_impl(write_db, account_id, &calendar.remote_id, sync_result)
+            .await?;
     }
 
     Ok(())
@@ -412,8 +422,7 @@ async fn sync_caldav_calendar_account(
     cancellation_token: &CancellationToken,
     mutated: &mut bool,
 ) -> Result<(), String> {
-    let config =
-        super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
+    let config = super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
     let used_persisted = !(config.home_url().is_none() && config.principal_url().is_none());
 
     // Both the client construction and the actual sync can fail when the
@@ -444,8 +453,8 @@ async fn sync_caldav_calendar_account(
                  clearing principal/home and rediscovering"
             );
             super::caldav::clear_persisted_caldav_urls(write_db, account_id).await;
-            let refreshed = super::caldav::load_caldav_account_config(db, encryption_key, account_id)
-                .await?;
+            let refreshed =
+                super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
             // After clearing, both URLs are None so this branch always runs
             // discovery; pass `true` to persist the freshly discovered values.
             run_caldav_sync_attempt(
@@ -482,14 +491,12 @@ async fn run_caldav_sync_attempt(
         )
         .await;
     }
-    let outcome = sync_caldav_calendars(&client, write_db, db, account_id, cancellation_token)
-        .await?;
+    let outcome =
+        sync_caldav_calendars(&client, write_db, db, account_id, cancellation_token).await?;
     // Any non-zero CalDAV write counts means we touched the calendar tables.
     // `calendars_discovered` triggers `db_upsert_calendar` per row even when
     // the ctag turns out unchanged afterwards, so we conservatively flag it.
-    if outcome.calendars_discovered > 0
-        || outcome.events_upserted > 0
-        || outcome.events_deleted > 0
+    if outcome.calendars_discovered > 0 || outcome.events_upserted > 0 || outcome.events_deleted > 0
     {
         *mutated = true;
     }
@@ -772,12 +779,7 @@ async fn sync_caldav_calendar_events(
                             )?;
                         }
                         if !seen_keys.is_empty() {
-                            reap_orphan_overrides(
-                                &tx,
-                                &calendar_id_owned,
-                                &uri_owned,
-                                &seen_keys,
-                            )?;
+                            reap_orphan_overrides(&tx, &calendar_id_owned, &uri_owned, &seen_keys)?;
                         }
 
                         tx.commit()
@@ -990,10 +992,8 @@ mod tests {
     #[test]
     fn make_google_event_id_override_includes_recurrence_id() {
         let master = make_google_event_id("uid-123@example.com", None);
-        let override_a =
-            make_google_event_id("uid-123@example.com", Some("20260315T100000Z"));
-        let override_b =
-            make_google_event_id("uid-123@example.com", Some("20260322T100000Z"));
+        let override_a = make_google_event_id("uid-123@example.com", Some("20260315T100000Z"));
+        let override_b = make_google_event_id("uid-123@example.com", Some("20260322T100000Z"));
         assert_ne!(master, override_a);
         assert_ne!(master, override_b);
         assert_ne!(override_a, override_b);
@@ -1001,10 +1001,8 @@ mod tests {
 
     #[test]
     fn make_google_event_id_keys_are_host_tz_independent() {
-        let floating =
-            make_google_event_id("uid-1@example.com", Some("20260315T100000"));
-        let all_day =
-            make_google_event_id("uid-1@example.com", Some("20260315"));
+        let floating = make_google_event_id("uid-1@example.com", Some("20260315T100000"));
+        let all_day = make_google_event_id("uid-1@example.com", Some("20260315"));
         assert!(
             floating
                 .strip_prefix("caldav:uid-1@example.com::recurrence-id=")

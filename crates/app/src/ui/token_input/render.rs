@@ -74,8 +74,7 @@ pub(super) fn draw_text_area(
     palette: &iced::theme::Palette,
     bounds: Rectangle,
 ) {
-    let (text_x, text_y) =
-        text_area_origin(&state.token_bounds, bounds.width, state.chip_v_offset);
+    let (text_x, text_y) = text_area_origin(&state.token_bounds, bounds.width, state.chip_v_offset);
 
     let display_text = if widget.text.is_empty() && widget.tokens.is_empty() {
         widget.placeholder
@@ -110,10 +109,7 @@ pub(super) fn draw_text_area(
                 ellipsis: iced::advanced::text::Ellipsis::None,
                 hint_factor: None,
             },
-            Point::new(
-                bounds.x + text_x,
-                bounds.y + text_y + TOKEN_HEIGHT / 2.0,
-            ),
+            Point::new(bounds.x + text_x, bounds.y + text_y + TOKEN_HEIGHT / 2.0),
             text_color,
             Rectangle {
                 x: bounds.x + text_x,

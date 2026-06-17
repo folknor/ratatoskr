@@ -43,11 +43,8 @@ pub use common::types::ProviderFolderMutation;
 pub use context::ActionContext;
 pub use folder::{create_folder, delete_folder, rename_folder};
 pub use label::{add_label, remove_label};
-pub use mark_read::mark_read;
-pub use service_api::actions::{
-    FolderId, LabelGroupId, LabelId, SendAttachment, SendIntent, SendRequest,
-};
 pub use log::MutationLog;
+pub use mark_read::mark_read;
 pub use move_to_folder::move_to_folder;
 pub use mute::mute;
 pub use operation::MailOperation;
@@ -55,6 +52,9 @@ pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 pub use permanent_delete::permanent_delete;
 pub use pin::pin;
 pub use send::{delete_draft, send_email};
+pub use service_api::actions::{
+    FolderId, LabelGroupId, LabelId, SendAttachment, SendIntent, SendRequest,
+};
 // create_provider is pub(crate) - only accessible within core, not to downstream crates.
 // The app must use action functions or sync_dispatch/jmap_push helpers.
 pub use snooze::{snooze, unsnooze};

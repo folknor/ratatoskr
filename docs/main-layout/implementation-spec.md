@@ -8,10 +8,10 @@ Backend prerequisites for the initial main layout UI per `docs/main-layout/probl
 
 | Slice | Status | Commits |
 |-------|--------|---------|
-| Slice 1: Label Color Fallback | ✅ Complete | `286bc92` |
-| Slice 2: Thread Detail Data Layer | ✅ Complete | `d1b70d0` |
-| Slice 3: Attachment Collapse Persistence | ✅ Complete | `286bc92` |
-| Slice 4: FocusedRegion on CommandContext | ✅ Complete | `286bc92` |
+| Slice 1: Label Color Fallback | [x] Complete | `286bc92` |
+| Slice 2: Thread Detail Data Layer | [x] Complete | `d1b70d0` |
+| Slice 3: Attachment Collapse Persistence | [x] Complete | `286bc92` |
+| Slice 4: FocusedRegion on CommandContext | [x] Complete | `286bc92` |
 | Phase 3: Auto-Advance | ⏳ Not started | Deferred until Phase 3 UI work begins |
 | ~~Tauri command wrappers~~ | N/A | Tauri/React frontend permanently removed; iced calls core directly |
 

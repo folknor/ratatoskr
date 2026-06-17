@@ -2,31 +2,29 @@ use crate::notification_queue::NotificationQueue;
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use service_api::{
-    BootClassification, BootExitCode, BootReadyResponse, BoundedLineReader,
-    CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
-    CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
-    JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams,
     AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
-    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams,
-    AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentFetchAck,
-    AttachmentFetchParams, ContactDeleteAck, ContactDeleteParams, ContactGroupDeleteAck,
-    ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck,
-    ContactSaveParams, ContactSaveWithWritebackAck, OauthExchangeCodeAck, OauthExchangeCodeParams,
-    WritebackOutcome,
-    DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
-    PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
-    PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
-    PinnedSearchUpdateAck, PinnedSearchUpdateParams,
-    ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams, RedactedString,
-    RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
+    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, AttachmentCacheSizeAck,
+    AttachmentCacheSizeParams, AttachmentFetchAck, AttachmentFetchParams, BootClassification,
+    BootExitCode, BootReadyResponse, BoundedLineReader, CalendarRunCompleted, CalendarRunId,
+    CalendarSetVisibilityAck, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
+    CalendarStartAck, CalendarSyncResult, ContactDeleteAck, ContactDeleteParams,
+    ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+    ContactSaveAck, ContactSaveParams, ContactSaveWithWritebackAck, DecryptForStorageAck,
+    DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams, HealthPingResponse,
+    JsonRpcErrorObject, JsonRpcRequest, LabelGroupReorderAck, LabelGroupReorderParams,
+    Notification, OauthExchangeCodeAck, OauthExchangeCodeParams, PROTOCOL_VERSION,
+    ParsedServiceMessage, PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams,
+    PinnedSearchDeleteAck, PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams,
+    PinnedSearchDeleteParams, PinnedSearchUpdateAck, PinnedSearchUpdateParams,
+    ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams, RedactedString, RequestParams,
+    RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
-    LabelGroupReorderAck, LabelGroupReorderParams,
     SignatureUpdateAck, SignatureUpdateParams, SmartFolderCreateAck, SmartFolderCreateParams,
-    SyncCancelAccountParams, SyncCancelAck,
-    SyncCompleted, SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck,
-    ThreadUiStateSetAck, ThreadUiStateSetParams, encode_message, parse_service_message,
+    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
+    SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck, ThreadUiStateSetParams,
+    WritebackOutcome, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, hash_map::Entry};
 use std::io::Write as StdWrite;
@@ -173,7 +171,9 @@ fn redact_frame(raw: &[u8]) -> String {
     if raw.len() > INLINE_LIMIT {
         return format!("<redacted len={} sha256={}>", raw.len(), sha256_hex(raw));
     }
-    String::from_utf8_lossy(raw).trim_end_matches('\n').to_string()
+    String::from_utf8_lossy(raw)
+        .trim_end_matches('\n')
+        .to_string()
 }
 
 fn sha256_hex(raw: &[u8]) -> String {
@@ -241,8 +241,7 @@ enum PendingCalendarAction {
     },
 }
 
-type PendingCalendarActions =
-    Arc<Mutex<HashMap<service_api::PlanId, PendingCalendarAction>>>;
+type PendingCalendarActions = Arc<Mutex<HashMap<service_api::PlanId, PendingCalendarAction>>>;
 
 /// Drain every entry: `Pending` senders are dropped (subscribers
 /// receive `RecvError::Closed` and surface as
@@ -461,9 +460,7 @@ impl BootFailureReason {
     ///   paths.
     pub(crate) fn from_client_error(error: &ClientError) -> Self {
         match error {
-            ClientError::BootFailure { classification } => {
-                Self::Classified(*classification)
-            }
+            ClientError::BootFailure { classification } => Self::Classified(*classification),
             ClientError::Service(ServiceError::BootFailure { code }) => {
                 Self::Classified(BootClassification::BootFailure { code: *code })
             }
@@ -481,23 +478,20 @@ impl BootFailureReason {
 pub(crate) fn terminal_failure_user_message(reason: &BootFailureReason) -> String {
     match reason {
         BootFailureReason::Classified(BootClassification::BootFailure { code }) => match code {
-            BootExitCode::AnotherInstanceRunning => {
-                "Ratatoskr is already running.".to_string()
-            }
+            BootExitCode::AnotherInstanceRunning => "Ratatoskr is already running.".to_string(),
             BootExitCode::KeyLoadFailure => "Encryption key load failed.".to_string(),
             BootExitCode::MigrationFailure => "Database migration failed.".to_string(),
             BootExitCode::HandshakeFailure => "Service handshake failed.".to_string(),
             BootExitCode::LockIoFailure => {
                 "Could not acquire the Ratatoskr instance lock (check disk space and \
-                 directory permissions).".to_string()
+                 directory permissions)."
+                    .to_string()
             }
         },
-        BootFailureReason::Classified(BootClassification::UnexpectedExit { code }) => {
-            match code {
-                Some(code) => format!("Service exited unexpectedly (code {code})."),
-                None => "Service exited unexpectedly (no exit code; signaled).".to_string(),
-            }
-        }
+        BootFailureReason::Classified(BootClassification::UnexpectedExit { code }) => match code {
+            Some(code) => format!("Service exited unexpectedly (code {code})."),
+            None => "Service exited unexpectedly (no exit code; signaled).".to_string(),
+        },
         BootFailureReason::Other(detail) => format!("Service boot failed: {detail}"),
     }
 }
@@ -569,10 +563,7 @@ pub enum ServiceHealth {
     /// Service crashed; the respawn loop is sleeping `next_delay`
     /// before the next attempt. `attempt` counts unbroken crashes; on
     /// successful boot both fields reset.
-    Respawning {
-        attempt: u32,
-        next_delay: Duration,
-    },
+    Respawning { attempt: u32, next_delay: Duration },
     /// `CRASHLOOP_THRESHOLD` unbroken crashes occurred without a
     /// successful boot. The respawn loop has stopped; the user must
     /// take action (typically: check logs, resolve the underlying
@@ -742,9 +733,7 @@ impl ServiceClient {
             let exe = match exe {
                 Ok(exe) => exe,
                 Err(error) => {
-                    let _ = tx
-                        .send(SpawnEvent::Terminal(ClientError::Io(error)))
-                        .await;
+                    let _ = tx.send(SpawnEvent::Terminal(ClientError::Io(error))).await;
                     return;
                 }
             };
@@ -822,9 +811,8 @@ impl ServiceClient {
         trace: Option<Arc<ServiceTraceSink>>,
     ) -> Result<Arc<Self>, ClientError> {
         let process_guard = process_lifetime::ProcessGuard::new()?;
-        let pending: Arc<
-            DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
-        > = Arc::new(DashMap::new());
+        let pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>> =
+            Arc::new(DashMap::new());
         let next_id = Arc::new(AtomicU64::new(1));
         let notifications: Arc<NotificationQueue> =
             Arc::new(NotificationQueue::new(NOTIFICATION_QUEUE_CAP));
@@ -839,8 +827,7 @@ impl ServiceClient {
         // store(1) below is now idempotent rather than load-bearing.
         let pending_syncs: PendingSyncs = Arc::new(Mutex::new(HashMap::new()));
         let pending_calendars: PendingCalendars = Arc::new(Mutex::new(HashMap::new()));
-        let pending_calendar_actions: PendingCalendarActions =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending_calendar_actions: PendingCalendarActions = Arc::new(Mutex::new(HashMap::new()));
         let client = Arc::new(Self {
             state: Mutex::new(None),
             pending: Arc::clone(&pending),
@@ -911,10 +898,7 @@ impl ServiceClient {
         self.request_value(params).await
     }
 
-    pub(crate) fn set_respawn_extra_args_for_harness(
-        &self,
-        extra_args: Vec<String>,
-    ) -> bool {
+    pub(crate) fn set_respawn_extra_args_for_harness(&self, extra_args: Vec<String>) -> bool {
         let Some(respawn) = self.respawn_config.as_ref() else {
             return false;
         };
@@ -1054,15 +1038,12 @@ impl ServiceClient {
             tokio::time::timeout(abort_budget, heartbeat_handle),
         );
 
-        let Some(status) = wait_with_kill_watchdog(&mut child, Duration::from_secs(1)).await
-        else {
+        let Some(status) = wait_with_kill_watchdog(&mut child, Duration::from_secs(1)).await else {
             return original;
         };
 
         let classification = BootClassification::from_exit_code(status.code());
-        log::info!(
-            "elevated initial-boot error to {classification:?} (original: {original})",
-        );
+        log::info!("elevated initial-boot error to {classification:?} (original: {original})",);
         ClientError::BootFailure { classification }
     }
 
@@ -1102,7 +1083,8 @@ impl ServiceClient {
         &self,
         plan: service_api::ActionWirePlan,
     ) -> Result<service_api::ActionPlanAck, ClientError> {
-        self.request(RequestParams::ActionExecutePlan { plan }).await
+        self.request(RequestParams::ActionExecutePlan { plan })
+            .await
     }
 
     /// Phase 6c task 9: submit a resolved calendar action plan for
@@ -1138,7 +1120,8 @@ impl ServiceClient {
         &self,
         plan_id: service_api::PlanId,
     ) -> Result<service_api::JobStatusResponse, ClientError> {
-        self.request(RequestParams::ActionJobStatus { plan_id }).await
+        self.request(RequestParams::ActionJobStatus { plan_id })
+            .await
     }
 
     /// Mark every unread message in a contact's chat threads as read
@@ -1222,7 +1205,9 @@ impl ServiceClient {
         // shutdown races with reader-EOF (the Service is exiting; the EOF
         // would otherwise look like a crash).
         self.is_shutting_down.store(true, Ordering::SeqCst);
-        let request_result = self.request::<ShutdownResponse>(RequestParams::Shutdown).await;
+        let request_result = self
+            .request::<ShutdownResponse>(RequestParams::Shutdown)
+            .await;
         match request_result {
             Ok(_) => {
                 if self.wait_for_exit(Duration::from_secs(2)).await {
@@ -1308,9 +1293,7 @@ impl ServiceClient {
     /// Phase 7-9: snapshot the extract-runtime counters. Used by the
     /// status bar to surface "extracting N attachments" while a
     /// backfill is in flight.
-    pub async fn extract_status(
-        &self,
-    ) -> Result<service_api::ExtractStatusAck, ClientError> {
+    pub async fn extract_status(&self) -> Result<service_api::ExtractStatusAck, ClientError> {
         self.request(RequestParams::ExtractStatus {
             params: service_api::ExtractStatusParams {},
         })
@@ -1393,10 +1376,7 @@ impl ServiceClient {
     /// to value." Setting `is_default` / `is_reply_default` to
     /// `Some(true)` clears the same flag on every other signature for
     /// the same account inside the transaction.
-    pub async fn update_signature(
-        &self,
-        params: SignatureUpdateParams,
-    ) -> Result<(), ClientError> {
+    pub async fn update_signature(&self, params: SignatureUpdateParams) -> Result<(), ClientError> {
         let _ack: SignatureUpdateAck = self
             .request(RequestParams::SignatureUpdate { params })
             .await?;
@@ -1418,10 +1398,7 @@ impl ServiceClient {
     /// `signature.reorder` IPC. Per-account ordering hazard for rapid
     /// drag-reorder is documented on the wire type; today's caller
     /// tolerates the staleness (next reload reconciles).
-    pub async fn reorder_signatures(
-        &self,
-        ordered_ids: Vec<String>,
-    ) -> Result<(), ClientError> {
+    pub async fn reorder_signatures(&self, ordered_ids: Vec<String>) -> Result<(), ClientError> {
         let _ack: SignatureReorderAck = self
             .request(RequestParams::SignatureReorder {
                 params: SignatureReorderParams { ordered_ids },
@@ -1433,10 +1410,7 @@ impl ServiceClient {
     /// Phase 6a: persist label-group order via `label_group.reorder`.
     /// Pairs are `(label_groups.id, sort_order)`; the Service writes
     /// the whole batch in one transaction.
-    pub async fn reorder_label_groups(
-        &self,
-        orders: Vec<(i64, i64)>,
-    ) -> Result<(), ClientError> {
+    pub async fn reorder_label_groups(&self, orders: Vec<(i64, i64)>) -> Result<(), ClientError> {
         let _ack: LabelGroupReorderAck = self
             .request(RequestParams::LabelGroupReorder {
                 params: LabelGroupReorderParams { orders },
@@ -1523,10 +1497,7 @@ impl ServiceClient {
 
     /// Phase 6a: partial-update an account row's editable metadata
     /// via the `account.update` IPC.
-    pub async fn update_account(
-        &self,
-        params: AccountUpdateParams,
-    ) -> Result<(), ClientError> {
+    pub async fn update_account(&self, params: AccountUpdateParams) -> Result<(), ClientError> {
         let _ack: AccountUpdateAck = self
             .request(RequestParams::AccountUpdate { params })
             .await?;
@@ -1537,10 +1508,7 @@ impl ServiceClient {
     /// IPC. Returns the new account id. Credentials carried in the
     /// typed envelope on `params`; today both Plaintext and Encrypted
     /// variants pass through to the DB verbatim.
-    pub async fn create_account(
-        &self,
-        params: AccountCreateParams,
-    ) -> Result<String, ClientError> {
+    pub async fn create_account(&self, params: AccountCreateParams) -> Result<String, ClientError> {
         let ack: AccountCreateAck = self
             .request(RequestParams::AccountCreate {
                 params: Box::new(params),
@@ -1578,9 +1546,7 @@ impl ServiceClient {
     /// breakdown for the settings-UI cache-size readout. Returns
     /// `(live_bytes, tombstoned_bytes)`. The values are a snapshot of
     /// the index at request time; concurrent writes move the truth.
-    pub async fn attachment_cache_size(
-        &self,
-    ) -> Result<AttachmentCacheSizeAck, ClientError> {
+    pub async fn attachment_cache_size(&self) -> Result<AttachmentCacheSizeAck, ClientError> {
         let ack: AttachmentCacheSizeAck = self
             .request(RequestParams::AttachmentCacheSize {
                 params: AttachmentCacheSizeParams::default(),
@@ -1652,10 +1618,7 @@ impl ServiceClient {
     /// `account.reorder` IPC. The flat `(id, sort_order)` list is
     /// translated to the wire's `AccountReorderEntry` shape here so
     /// callers can stay close to the underlying tuple form.
-    pub async fn reorder_accounts(
-        &self,
-        orders: Vec<(String, i64)>,
-    ) -> Result<(), ClientError> {
+    pub async fn reorder_accounts(&self, orders: Vec<(String, i64)>) -> Result<(), ClientError> {
         let entries: Vec<AccountReorderEntry> = orders
             .into_iter()
             .map(|(account_id, sort_order)| AccountReorderEntry {
@@ -1741,9 +1704,7 @@ impl ServiceClient {
     /// `SettingsBootstrapSnapshot` shapes. `warnings` is reserved for
     /// per-field decrypt failures that the helpers may surface in a
     /// future change; today it is always empty.
-    pub async fn read_bootstrap_snapshots(
-        &self,
-    ) -> Result<ReadBootstrapSnapshotsAck, ClientError> {
+    pub async fn read_bootstrap_snapshots(&self) -> Result<ReadBootstrapSnapshotsAck, ClientError> {
         let ack: ReadBootstrapSnapshotsAck = self
             .request(RequestParams::ReadBootstrapSnapshots {
                 params: ReadBootstrapSnapshotsParams::default(),
@@ -1795,10 +1756,7 @@ impl ServiceClient {
     /// account-deletion path's DB DELETE cannot race a calendar runner
     /// mid-write. The sync result is what's returned (the calendar
     /// outcome is best-effort - logged on failure but not surfaced).
-    pub async fn cancel_and_await(
-        &self,
-        account_id: &str,
-    ) -> Result<SyncResult, ClientError> {
+    pub async fn cancel_and_await(&self, account_id: &str) -> Result<SyncResult, ClientError> {
         let ack: SyncCancelAck = self
             .request(RequestParams::SyncCancelAccount {
                 params: SyncCancelAccountParams {
@@ -1834,10 +1792,7 @@ impl ServiceClient {
         sync_result
     }
 
-    async fn subscribe_or_consume(
-        &self,
-        run_id: SyncRunId,
-    ) -> Result<SyncResult, ClientError> {
+    async fn subscribe_or_consume(&self, run_id: SyncRunId) -> Result<SyncResult, ClientError> {
         sweep_latched_completed(&self.pending_syncs);
         let rx_to_await = {
             let mut guard = self
@@ -2016,9 +1971,7 @@ impl ServiceClient {
                     e.remove();
                 }
                 PendingCalendarAction::Completed { .. } => {
-                    log::warn!(
-                        "duplicate CalendarActionCompleted for plan_id {plan_id}; dropping",
-                    );
+                    log::warn!("duplicate CalendarActionCompleted for plan_id {plan_id}; dropping",);
                 }
             },
             Entry::Vacant(v) => {
@@ -2102,10 +2055,7 @@ impl ServiceClient {
         state.child.id()
     }
 
-    async fn request_value(
-        &self,
-        params: RequestParams,
-    ) -> Result<serde_json::Value, ClientError> {
+    async fn request_value(&self, params: RequestParams) -> Result<serde_json::Value, ClientError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let request = JsonRpcRequest::new(id, &params);
         let bytes = encode_message(&request)?;
@@ -2296,9 +2246,7 @@ impl ServiceClient {
             }
         };
         let Some(dying_state) = dying_state else {
-            log::debug!(
-                "handle_crash(gen={dying_generation}): state already replaced; bailing",
-            );
+            log::debug!("handle_crash(gen={dying_generation}): state already replaced; bailing",);
             return;
         };
 
@@ -2343,9 +2291,7 @@ impl ServiceClient {
         let _ = tokio::time::timeout(abort_budget, reader_handle).await;
         let _ = tokio::time::timeout(abort_budget, writer_handle).await;
         let _ = tokio::time::timeout(abort_budget, heartbeat_handle).await;
-        log::warn!(
-            "service crashed (gen={dying_generation}, exit_status={exit_status:?})",
-        );
+        log::warn!("service crashed (gen={dying_generation}, exit_status={exit_status:?})",);
 
         if self.is_shutting_down.load(Ordering::SeqCst) {
             log::debug!("client is shutting down; not respawning");
@@ -2690,17 +2636,13 @@ impl ServiceClient {
                 heartbeat_handle,
                 ..
             } = state;
-            log::warn!(
-                "tearing down respawned Service after post-install failure: {reason}",
-            );
+            log::warn!("tearing down respawned Service after post-install failure: {reason}",);
             reader_handle.abort();
             writer_handle.abort();
             heartbeat_handle.abort();
             drop(stdin_tx);
             if let Err(error) = child.start_kill() {
-                log::warn!(
-                    "start_kill on post-install-failed child failed: {error}",
-                );
+                log::warn!("start_kill on post-install-failed child failed: {error}",);
             }
             let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
         }
@@ -2756,8 +2698,7 @@ impl Drop for ServiceClient {
             // Some). Test single-shot clients use the short budget
             // unconditionally - they assert tight kill-escalation
             // bounds and don't have respawn semantics anyway.
-            let booting_recent = self.respawn_config.is_some()
-                && self.last_boot_progress_recent();
+            let booting_recent = self.respawn_config.is_some() && self.last_boot_progress_recent();
             let exit_deadline = if booting_recent {
                 DROP_EXIT_DEADLINE_BOOTING
             } else {
@@ -3039,8 +2980,9 @@ async fn run_spawn_flow_with_trace(
         // gave up on this spawn. Nothing useful to do; let the client drop.
         return;
     }
-    let response: Result<BootReadyResponse, ClientError> =
-        client.request_or_observe_child_exit(RequestParams::BootReady).await;
+    let response: Result<BootReadyResponse, ClientError> = client
+        .request_or_observe_child_exit(RequestParams::BootReady)
+        .await;
     match response {
         Ok(response) => {
             // Stash for the schema-version sanity check on every subsequent
@@ -3106,138 +3048,139 @@ async fn reader_task<R>(
                     trace_sink.record_frame("in", line.as_bytes());
                 }
                 match parse_service_message(&line) {
-                Ok(parsed) => {
-                    consecutive_parse_errors = 0;
-                    match parsed {
-                        ParsedServiceMessage::Response {
-                            id: Some(id),
-                            response,
-                        } => {
-                            dispatch_response(&pending, id, response);
-                        }
-                        ParsedServiceMessage::Response { id: None, response } => {
-                            // An uncorrelated response means the Service
-                            // answered a request whose id was null (parse
-                            // error before the dispatch could correlate).
-                            // Log only the discriminant and, for errors,
-                            // the JSON-RPC code/message - never the
-                            // success payload, which can carry user
-                            // content (message bodies, search queries,
-                            // etc.) once Phase 2+ methods land.
-                            match response {
-                                ServiceResponse::Success(_) => {
-                                    log::warn!(
-                                        "service returned uncorrelated success (payload redacted)",
-                                    );
-                                }
-                                ServiceResponse::Error(error) => {
-                                    log::warn!(
-                                        "service returned uncorrelated error code={} message={}",
-                                        error.code,
-                                        error.message,
-                                    );
+                    Ok(parsed) => {
+                        consecutive_parse_errors = 0;
+                        match parsed {
+                            ParsedServiceMessage::Response {
+                                id: Some(id),
+                                response,
+                            } => {
+                                dispatch_response(&pending, id, response);
+                            }
+                            ParsedServiceMessage::Response { id: None, response } => {
+                                // An uncorrelated response means the Service
+                                // answered a request whose id was null (parse
+                                // error before the dispatch could correlate).
+                                // Log only the discriminant and, for errors,
+                                // the JSON-RPC code/message - never the
+                                // success payload, which can carry user
+                                // content (message bodies, search queries,
+                                // etc.) once Phase 2+ methods land.
+                                match response {
+                                    ServiceResponse::Success(_) => {
+                                        log::warn!(
+                                            "service returned uncorrelated success (payload redacted)",
+                                        );
+                                    }
+                                    ServiceResponse::Error(error) => {
+                                        log::warn!(
+                                            "service returned uncorrelated error code={} message={}",
+                                            error.code,
+                                            error.message,
+                                        );
+                                    }
                                 }
                             }
-                        }
-                        ParsedServiceMessage::Notification(notification) => {
-                            let upgraded = weak_client.upgrade();
-                            let live = upgraded.as_ref().map(|c| c.current_generation());
-                            if !reader_should_enqueue(generation, live) {
-                                log::debug!(
-                                    "reader_task(gen={generation}): dropping stale notification \
+                            ParsedServiceMessage::Notification(notification) => {
+                                let upgraded = weak_client.upgrade();
+                                let live = upgraded.as_ref().map(|c| c.current_generation());
+                                if !reader_should_enqueue(generation, live) {
+                                    log::debug!(
+                                        "reader_task(gen={generation}): dropping stale notification \
                                      (current_generation now {live:?})",
-                                );
-                                continue;
-                            }
-                            // Phase 3 task 14: SyncCompleted is consumed
-                            // by `start_sync` / `cancel_and_await`
-                            // futures via `pending_syncs`, not by the
-                            // notification queue. Route + skip enqueue
-                            // so a stray UI consumer does not see the
-                            // raw frame.
-                            if let Notification::SyncCompleted(c) = notification {
-                                if let Some(client) = upgraded {
-                                    client.route_sync_completed(c);
+                                    );
+                                    continue;
                                 }
-                                continue;
-                            }
-                            // Phase 5 task 9b: same routing for calendar
-                            // run completions. Per-run_id awaiters
-                            // (`start_calendar_sync`, `cancel_and_await`)
-                            // resolve via `pending_calendars`. The UI
-                            // never sees the raw frame; CalendarChanged
-                            // is the dispatched-to-UI signal for view
-                            // reload.
-                            if let Notification::CalendarRunCompleted(c) = notification {
-                                if let Some(client) = upgraded {
-                                    client.route_calendar_run_completed(c);
-                                }
-                                continue;
-                            }
-                            // Phase 6c task 9: same routing for the
-                            // calendar action pipeline. Per-plan_id
-                            // awaiters resolve via
-                            // `pending_calendar_actions`. The
-                            // accompanying CalendarOperationOutcome
-                            // notifications (per-op, before the
-                            // completion) still flow through the UI
-                            // dispatcher for log-and-drop today; Phase
-                            // 6d revisits if richer per-op handling is
-                            // needed.
-                            if let Notification::CalendarActionCompleted(c) = notification {
-                                if let Some(client) = upgraded {
-                                    client.route_calendar_action_completed(c);
-                                }
-                                continue;
-                            }
-                            // Phase 8-1: tap SyncProgress to elongate the
-                            // next heartbeat timeout, and tap BootProgress
-                            // to extend the user-quit Drop watchdog's
-                            // exit deadline during boot phases. Both
-                            // watermarks are unix epoch ms; the
-                            // consumers compare against their own
-                            // recent-window constant. The notification
-                            // still flows to the UI dispatcher below.
-                            if let Some(client) = upgraded.as_ref() {
-                                match &notification {
-                                    Notification::SyncProgress(_) => {
-                                        let now_ms = chrono::Utc::now().timestamp_millis();
-                                        client
-                                            .last_sync_progress_at_ms
-                                            .store(now_ms, Ordering::Relaxed);
+                                // Phase 3 task 14: SyncCompleted is consumed
+                                // by `start_sync` / `cancel_and_await`
+                                // futures via `pending_syncs`, not by the
+                                // notification queue. Route + skip enqueue
+                                // so a stray UI consumer does not see the
+                                // raw frame.
+                                if let Notification::SyncCompleted(c) = notification {
+                                    if let Some(client) = upgraded {
+                                        client.route_sync_completed(c);
                                     }
-                                    Notification::BootProgress(_) => {
-                                        let now_ms = chrono::Utc::now().timestamp_millis();
-                                        client
-                                            .last_boot_progress_at_ms
-                                            .store(now_ms, Ordering::Relaxed);
-                                    }
-                                    _ => {}
+                                    continue;
                                 }
+                                // Phase 5 task 9b: same routing for calendar
+                                // run completions. Per-run_id awaiters
+                                // (`start_calendar_sync`, `cancel_and_await`)
+                                // resolve via `pending_calendars`. The UI
+                                // never sees the raw frame; CalendarChanged
+                                // is the dispatched-to-UI signal for view
+                                // reload.
+                                if let Notification::CalendarRunCompleted(c) = notification {
+                                    if let Some(client) = upgraded {
+                                        client.route_calendar_run_completed(c);
+                                    }
+                                    continue;
+                                }
+                                // Phase 6c task 9: same routing for the
+                                // calendar action pipeline. Per-plan_id
+                                // awaiters resolve via
+                                // `pending_calendar_actions`. The
+                                // accompanying CalendarOperationOutcome
+                                // notifications (per-op, before the
+                                // completion) still flow through the UI
+                                // dispatcher for log-and-drop today; Phase
+                                // 6d revisits if richer per-op handling is
+                                // needed.
+                                if let Notification::CalendarActionCompleted(c) = notification {
+                                    if let Some(client) = upgraded {
+                                        client.route_calendar_action_completed(c);
+                                    }
+                                    continue;
+                                }
+                                // Phase 8-1: tap SyncProgress to elongate the
+                                // next heartbeat timeout, and tap BootProgress
+                                // to extend the user-quit Drop watchdog's
+                                // exit deadline during boot phases. Both
+                                // watermarks are unix epoch ms; the
+                                // consumers compare against their own
+                                // recent-window constant. The notification
+                                // still flows to the UI dispatcher below.
+                                if let Some(client) = upgraded.as_ref() {
+                                    match &notification {
+                                        Notification::SyncProgress(_) => {
+                                            let now_ms = chrono::Utc::now().timestamp_millis();
+                                            client
+                                                .last_sync_progress_at_ms
+                                                .store(now_ms, Ordering::Relaxed);
+                                        }
+                                        Notification::BootProgress(_) => {
+                                            let now_ms = chrono::Utc::now().timestamp_millis();
+                                            client
+                                                .last_boot_progress_at_ms
+                                                .store(now_ms, Ordering::Relaxed);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                let tagged =
+                                    tag_notification_with_generation(notification, generation);
+                                notifications.enqueue(tagged).await;
                             }
-                            let tagged = tag_notification_with_generation(notification, generation);
-                            notifications.enqueue(tagged).await;
                         }
                     }
-                }
-                Err(error) => {
-                    consecutive_parse_errors = consecutive_parse_errors.saturating_add(1);
-                    log::warn!(
-                        "failed to parse service message ({consecutive_parse_errors} consecutive): {error}",
-                    );
-                    if consecutive_parse_errors >= MAX_CONSECUTIVE_PARSE_ERRORS {
-                        log::error!(
-                            "reader_task(gen={generation}): {MAX_CONSECUTIVE_PARSE_ERRORS} \
-                             consecutive parse errors; treating as Service crash",
+                    Err(error) => {
+                        consecutive_parse_errors = consecutive_parse_errors.saturating_add(1);
+                        log::warn!(
+                            "failed to parse service message ({consecutive_parse_errors} consecutive): {error}",
                         );
-                        fail_pending(&pending);
-                        fail_syncs_via_client(&weak_client);
-                        trigger_crash_handler(&weak_client, generation);
-                        return;
+                        if consecutive_parse_errors >= MAX_CONSECUTIVE_PARSE_ERRORS {
+                            log::error!(
+                                "reader_task(gen={generation}): {MAX_CONSECUTIVE_PARSE_ERRORS} \
+                             consecutive parse errors; treating as Service crash",
+                            );
+                            fail_pending(&pending);
+                            fail_syncs_via_client(&weak_client);
+                            trigger_crash_handler(&weak_client, generation);
+                            return;
+                        }
                     }
                 }
             }
-            },
             Ok(None) => {
                 fail_pending(&pending);
                 fail_syncs_via_client(&weak_client);
@@ -3430,8 +3373,7 @@ async fn writer_task<W>(
     mut stdin: W,
     mut stdin_rx: mpsc::Receiver<Vec<u8>>,
     trace: Option<Arc<ServiceTraceSink>>,
-)
-where
+) where
     W: AsyncWrite + Unpin,
 {
     while let Some(bytes) = stdin_rx.recv().await {
@@ -3637,9 +3579,7 @@ impl Drop for PendingGuard<'_> {
     }
 }
 
-fn fail_pending(
-    pending: &DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
-) {
+fn fail_pending(pending: &DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>) {
     let ids: Vec<u64> = pending.iter().map(|entry| *entry.key()).collect();
     for id in ids {
         if let Some((_, sender)) = pending.remove(&id) {
@@ -3982,16 +3922,14 @@ mod tests {
     /// (Some(n)) so the diagnostic in the log files isn't ambiguous.
     #[test]
     fn terminal_message_for_unexpected_exit_includes_code() {
-        let with_code = BootFailureReason::Classified(BootClassification::UnexpectedExit {
-            code: Some(42),
-        });
+        let with_code =
+            BootFailureReason::Classified(BootClassification::UnexpectedExit { code: Some(42) });
         assert!(
             terminal_failure_user_message(&with_code).contains("42"),
             "unexpected-exit message should contain the code",
         );
-        let signal = BootFailureReason::Classified(BootClassification::UnexpectedExit {
-            code: None,
-        });
+        let signal =
+            BootFailureReason::Classified(BootClassification::UnexpectedExit { code: None });
         assert!(
             terminal_failure_user_message(&signal).contains("signaled"),
             "no-code path should mention 'signaled' so log readers know it was a signal",
@@ -4004,9 +3942,7 @@ mod tests {
     #[test]
     fn terminal_message_for_other_includes_detail() {
         let reason = BootFailureReason::Other("specific upstream failure".to_string());
-        assert!(
-            terminal_failure_user_message(&reason).contains("specific upstream failure"),
-        );
+        assert!(terminal_failure_user_message(&reason).contains("specific upstream failure"),);
     }
 
     /// `BootFailureReason::from_client_error` keeps the structured
@@ -4194,7 +4130,10 @@ mod tests {
                 assert_eq!(bp.service_generation, 2);
                 assert!(matches!(
                     bp.phase,
-                    service_api::BootPhase::Migrating { current: 5, total: 10 }
+                    service_api::BootPhase::Migrating {
+                        current: 5,
+                        total: 10
+                    }
                 ));
             }
             other => panic!("expected BootProgress; got {other:?}"),
@@ -4349,7 +4288,10 @@ mod tests {
         }
         sweep_latched_completed(&map);
         let g = map.lock().expect("test mutex");
-        assert!(!g.contains_key(&stale_id), "stale Completed must be dropped");
+        assert!(
+            !g.contains_key(&stale_id),
+            "stale Completed must be dropped"
+        );
         assert!(g.contains_key(&fresh_id), "fresh Completed must survive");
         assert!(g.contains_key(&pending_id), "Pending must survive");
     }

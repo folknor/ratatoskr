@@ -66,7 +66,11 @@ pub async fn sync_shared_mailbox(
         {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    &writer_pool, account_id, mailbox_id, now, None,
+                    &writer_pool,
+                    account_id,
+                    mailbox_id,
+                    now,
+                    None,
                 )
                 .await?;
                 Ok(SyncResult::default())
@@ -104,7 +108,11 @@ pub async fn sync_shared_mailbox(
         {
             Ok(sync_result) => {
                 sync_state::update_shared_mailbox_sync_status(
-                    &writer_pool, account_id, mailbox_id, now, None,
+                    &writer_pool,
+                    account_id,
+                    mailbox_id,
+                    now,
+                    None,
                 )
                 .await?;
                 Ok(sync_result)
@@ -233,5 +241,4 @@ mod tests {
         assert!(entry.sync_error.is_some());
         assert!(entry.display_name.is_none());
     }
-
 }

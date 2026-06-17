@@ -1,9 +1,9 @@
 //! Orphan impl of `ProviderSyncOps` for `graph::ops::GraphOps`.
 
+use ::graph::ops::GraphOps;
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use ::graph::ops::GraphOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 

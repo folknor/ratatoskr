@@ -590,11 +590,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let store = BodyStoreReadState::init(dir.path()).expect("init");
         store
-            .put(
-                "m1".to_string(),
-                Some("<p>hi</p>".to_string()),
-                None,
-            )
+            .put("m1".to_string(), Some("<p>hi</p>".to_string()), None)
             .await
             .expect("put");
         let conn = Connection::open(dir.path().join("bodies.db")).expect("open");

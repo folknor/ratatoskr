@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use db::db::{ReadDbState, WriterPool, WriteTarget};
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
 };
+use db::db::{ReadDbState, WriteTarget, WriterPool};
 use sync::state as sync_state;
 
 use super::client::GraphClient;
@@ -38,7 +38,8 @@ pub async fn graph_contacts_initial_sync(
 
     for folder in &folders {
         let delta_link = bootstrap_contact_delta_token(client, db, &folder.id).await?;
-        sync_state::save_graph_contact_delta_token(writer, account_id, &folder.id, &delta_link).await?;
+        sync_state::save_graph_contact_delta_token(writer, account_id, &folder.id, &delta_link)
+            .await?;
     }
 
     Ok(())
@@ -131,20 +132,19 @@ async fn full_sync_contact_folders(
     let aid = account_id.to_string();
     let contacts_owned = contacts;
 
-    writer.with_write(move |conn| {
-        let seen_ids: HashSet<&str> = contacts_owned
-            .iter()
-            .map(|contact| contact.id.as_str())
-            .collect();
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("begin tx: {e}"))?;
-        persist_synced_contacts(&tx, &aid, &contacts_owned)?;
-        prune_stale_contacts(&tx, &aid, &seen_ids)?;
-        tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-        Ok(())
-    })
-    .await
+    writer
+        .with_write(move |conn| {
+            let seen_ids: HashSet<&str> = contacts_owned
+                .iter()
+                .map(|contact| contact.id.as_str())
+                .collect();
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
+            persist_synced_contacts(&tx, &aid, &contacts_owned)?;
+            prune_stale_contacts(&tx, &aid, &seen_ids)?;
+            tx.commit().map_err(|e| format!("commit tx: {e}"))?;
+            Ok(())
+        })
+        .await
 }
 
 async fn fetch_folder_contacts(
@@ -224,18 +224,17 @@ async fn sync_contact_folder_delta(
             let upserts_owned = upserts;
             let deleted_owned = deleted_ids;
 
-            writer.with_write(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| format!("begin tx: {e}"))?;
-                persist_synced_contacts(&tx, &aid, &upserts_owned)?;
-                for graph_contact_id in &deleted_owned {
-                    delete_synced_contact(&tx, &aid, graph_contact_id)?;
-                }
-                tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-                Ok(())
-            })
-            .await?;
+            writer
+                .with_write(move |conn| {
+                    let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
+                    persist_synced_contacts(&tx, &aid, &upserts_owned)?;
+                    for graph_contact_id in &deleted_owned {
+                        delete_synced_contact(&tx, &aid, graph_contact_id)?;
+                    }
+                    tx.commit().map_err(|e| format!("commit tx: {e}"))?;
+                    Ok(())
+                })
+                .await?;
         }
 
         // Follow pagination or store new delta link

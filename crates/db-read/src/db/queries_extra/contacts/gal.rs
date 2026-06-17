@@ -10,10 +10,7 @@ pub struct GalEntry {
     pub department: Option<String>,
 }
 
-pub fn gal_cache_age_sync(
-    conn: &ReadConn<'_>,
-    account_id: &str,
-) -> Result<Option<i64>, String> {
+pub fn gal_cache_age_sync(conn: &ReadConn<'_>, account_id: &str) -> Result<Option<i64>, String> {
     let key = format!("gal_refresh_{account_id}");
     match conn.query_row(
         "SELECT value FROM settings WHERE key = ?1",

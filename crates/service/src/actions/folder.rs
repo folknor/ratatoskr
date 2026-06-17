@@ -4,8 +4,8 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
-use db::progress::NoopProgressReporter;
 use common::types::{ProviderCtx, ProviderFolderMutation};
+use db::progress::NoopProgressReporter;
 
 /// Build a `ProviderCtx` from an `ActionContext` and account ID.
 ///
@@ -47,27 +47,22 @@ pub async fn create_folder(
     let mut mlog = MutationLog::begin("create_folder", account_id, "(pending)");
 
     // 1. Provider dispatch first - we need the provider-assigned ID
-    let provider = match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed {
-                error: ActionError::remote(e),
-            };
-            mlog.emit(&outcome);
-            return (outcome, None);
-        }
-    };
+    let provider =
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => {
+                let outcome = ActionOutcome::Failed {
+                    error: ActionError::remote(e),
+                };
+                mlog.emit(&outcome);
+                return (outcome, None);
+            }
+        };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     let mutation = match provider
-        .create_folder(
-            &provider_ctx,
-            name,
-            parent_id,
-            text_color,
-            bg_color,
-        )
+        .create_folder(&provider_ctx, name, parent_id, text_color, bg_color)
         .await
     {
         Ok(m) => m,
@@ -90,19 +85,22 @@ pub async fn create_folder(
     let m = mutation.clone();
     let parent_id_for_db = parent_id.map(|id| id.as_str().to_string());
     let local_result = db
-        .with_write_mapped(move |conn| {
-            db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
-                conn,
-                &m.id,
-                &aid,
-                &m.name,
-                Some(m.path.as_str()),
-                m.special_use.as_deref(),
-                parent_id_for_db.as_deref(),
-            )
-            .map_err(ActionError::db)?;
-            Ok(())
-        }, ActionError::db)
+        .with_write_mapped(
+            move |conn| {
+                db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+                    conn,
+                    &m.id,
+                    &aid,
+                    &m.name,
+                    Some(m.path.as_str()),
+                    m.special_use.as_deref(),
+                    parent_id_for_db.as_deref(),
+                )
+                .map_err(ActionError::db)?;
+                Ok(())
+            },
+            ActionError::db,
+        )
         .await;
 
     if let Err(e) = local_result {
@@ -131,27 +129,22 @@ pub async fn rename_folder(
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
     let mlog = MutationLog::begin("rename_folder", account_id, folder_id.as_str());
 
-    let provider = match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed {
-                error: ActionError::remote(e),
-            };
-            mlog.emit(&outcome);
-            return (outcome, None);
-        }
-    };
+    let provider =
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => {
+                let outcome = ActionOutcome::Failed {
+                    error: ActionError::remote(e),
+                };
+                mlog.emit(&outcome);
+                return (outcome, None);
+            }
+        };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     let mutation = match provider
-        .rename_folder(
-            &provider_ctx,
-            folder_id,
-            new_name,
-            text_color,
-            bg_color,
-        )
+        .rename_folder(&provider_ctx, folder_id, new_name, text_color, bg_color)
         .await
     {
         Ok(m) => m,
@@ -171,19 +164,22 @@ pub async fn rename_folder(
     let fid = folder_id.as_str().to_string();
     let m = mutation.clone();
     let local_result = db
-        .with_write_mapped(move |conn| {
-            db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
-                conn,
-                &fid,
-                &aid,
-                &m.name,
-                Some(m.path.as_str()),
-                m.special_use.as_deref(),
-                None, // parent folder is not changed in rename
-            )
-            .map_err(ActionError::db)?;
-            Ok(())
-        }, ActionError::db)
+        .with_write_mapped(
+            move |conn| {
+                db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+                    conn,
+                    &fid,
+                    &aid,
+                    &m.name,
+                    Some(m.path.as_str()),
+                    m.special_use.as_deref(),
+                    None, // parent folder is not changed in rename
+                )
+                .map_err(ActionError::db)?;
+                Ok(())
+            },
+            ActionError::db,
+        )
         .await;
 
     if let Err(e) = local_result {
@@ -207,16 +203,17 @@ pub async fn delete_folder(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("delete_folder", account_id, folder_id.as_str());
 
-    let provider = match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed {
-                error: ActionError::remote(e),
-            };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
+    let provider =
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => {
+                let outcome = ActionOutcome::Failed {
+                    error: ActionError::remote(e),
+                };
+                mlog.emit(&outcome);
+                return outcome;
+            }
+        };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
@@ -234,11 +231,14 @@ pub async fn delete_folder(
     let aid = account_id.to_string();
     let fid = folder_id.as_str().to_string();
     let local_result = db
-        .with_write_mapped(move |conn| {
-            db::db::queries_extra::action_helpers::delete_folder_sync(conn, &aid, &fid)
-                .map_err(ActionError::db)?;
-            Ok(())
-        }, ActionError::db)
+        .with_write_mapped(
+            move |conn| {
+                db::db::queries_extra::action_helpers::delete_folder_sync(conn, &aid, &fid)
+                    .map_err(ActionError::db)?;
+                Ok(())
+            },
+            ActionError::db,
+        )
         .await;
 
     if let Err(e) = local_result {

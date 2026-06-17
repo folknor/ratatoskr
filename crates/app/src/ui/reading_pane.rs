@@ -46,7 +46,7 @@ pub enum ReadingPaneMessage {
     Forward(usize),
     /// Open the inline contact editor popover for the given email address.
     EditContact(String),
-    /// Create a calendar event from this message (📅 button).
+    /// Create a calendar event from this message (calendar button).
     CreateEventFromEmail(usize),
     /// Navigate to the next message in the thread (expand it).
     NextMessage,
@@ -85,7 +85,7 @@ pub enum ReadingPaneEvent {
     EditContact {
         email: String,
     },
-    /// User clicked 📅 on a message to create a calendar event.
+    /// User clicked the calendar button on a message to create a calendar event.
     CreateEventFromEmail {
         message_index: usize,
     },
@@ -166,11 +166,11 @@ impl ReadingPane {
             .iter()
             .find(|a| a.id == attachment_id)?;
         let item = crate::handlers::attachments::AttachmentRef {
-            account_id:    thread.account_id.clone(),
-            message_id:    row.message_id.clone(),
+            account_id: thread.account_id.clone(),
+            message_id: row.message_id.clone(),
             attachment_id: row.id.clone(),
-            filename:      row.filename.clone(),
-            mime_type:     row.mime_type.clone(),
+            filename: row.filename.clone(),
+            mime_type: row.mime_type.clone(),
         };
         Some(match action {
             AttachmentAction::Open => ReadingPaneEvent::OpenAttachment(
@@ -413,11 +413,11 @@ impl Component for ReadingPane {
                     .thread_attachments
                     .iter()
                     .map(|a| crate::handlers::attachments::AttachmentRef {
-                        account_id:    thread.account_id.clone(),
-                        message_id:    a.message_id.clone(),
+                        account_id: thread.account_id.clone(),
+                        message_id: a.message_id.clone(),
                         attachment_id: a.id.clone(),
-                        filename:      a.filename.clone(),
-                        mime_type:     a.mime_type.clone(),
+                        filename: a.filename.clone(),
+                        mime_type: a.mime_type.clone(),
                     })
                     .collect();
                 if items.is_empty() {

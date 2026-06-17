@@ -91,7 +91,12 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 
     // Store history ID for delta sync
     if !history_id.is_empty() {
-        sync_state::save_account_history_id(&ctx.write_db.writer_pool(), ctx.account_id, &history_id).await?;
+        sync_state::save_account_history_id(
+            &ctx.write_db.writer_pool(),
+            ctx.account_id,
+            &history_id,
+        )
+        .await?;
     }
 
     // Phase 4: Sync Google contacts (non-fatal)
@@ -119,7 +124,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
                 write_db
                     .with_write(move |conn| {
                         let tx = conn
-                .transaction()
+                            .transaction()
                             .map_err(|e| format!("begin google other contacts tx: {e}"))?;
                         super::contacts::persist_google_other_contacts_write(&tx, write)?;
                         tx.commit()

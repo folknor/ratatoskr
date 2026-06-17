@@ -464,7 +464,7 @@ fn strip_amp_elements(html: &str) -> String {
     // Strip amp4email attribute from <html> tag
     handlers.push(element!("html", |el| {
         el.remove_attribute("amp4email");
-        el.remove_attribute("⚡4email");
+        el.remove_attribute("\u{26A1}4email");
         Ok(())
     }));
 

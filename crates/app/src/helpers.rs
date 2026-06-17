@@ -24,10 +24,7 @@ impl ReadyApp {
         &self.sidebar.selected_scope
     }
 
-    pub(crate) fn fire_navigation_load(
-        &self,
-        load_gen: GenerationToken<Nav>,
-    ) -> Task<Message> {
+    pub(crate) fn fire_navigation_load(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
         Task::perform(
@@ -226,8 +223,10 @@ async fn load_threads_scoped(
                 .into_iter()
                 .map(db_thread_to_app_thread)
                 .collect();
-            let local_threads: Vec<Thread> =
-                local_drafts.into_iter().map(local_draft_to_app_thread).collect();
+            let local_threads: Vec<Thread> = local_drafts
+                .into_iter()
+                .map(local_draft_to_app_thread)
+                .collect();
             threads.extend(local_threads);
             threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
             apply_thread_decorations(conn, &mut threads)?;
@@ -264,10 +263,7 @@ async fn load_threads_for_label_group_view(
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-async fn load_threads_starred(
-    db: Arc<Db>,
-    scope: AccountScope,
-) -> Result<Vec<Thread>, String> {
+async fn load_threads_starred(db: Arc<Db>, scope: AccountScope) -> Result<Vec<Thread>, String> {
     db.with_read(move |conn| {
         let db_threads = get_starred_threads(conn, &scope, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
@@ -281,10 +277,7 @@ async fn load_threads_starred(
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-async fn load_threads_snoozed(
-    db: Arc<Db>,
-    scope: AccountScope,
-) -> Result<Vec<Thread>, String> {
+async fn load_threads_snoozed(db: Arc<Db>, scope: AccountScope) -> Result<Vec<Thread>, String> {
     db.with_read(move |conn| {
         let db_threads = get_snoozed_threads(conn, &scope, Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
@@ -382,12 +375,8 @@ async fn load_shared_mailbox_starred(
     mailbox_id: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_read(move |conn| {
-        let db_threads = get_threads_for_shared_mailbox_starred(
-            conn,
-            &account_id,
-            &mailbox_id,
-            Some(1000),
-        )?;
+        let db_threads =
+            get_threads_for_shared_mailbox_starred(conn, &account_id, &mailbox_id, Some(1000))?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
@@ -405,12 +394,8 @@ async fn load_shared_mailbox_snoozed(
     mailbox_id: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_read(move |conn| {
-        let db_threads = get_threads_for_shared_mailbox_snoozed(
-            conn,
-            &account_id,
-            &mailbox_id,
-            Some(1000),
-        )?;
+        let db_threads =
+            get_threads_for_shared_mailbox_snoozed(conn, &account_id, &mailbox_id, Some(1000))?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)

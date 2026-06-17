@@ -168,8 +168,7 @@ pub fn parse_markdown(file: impl Into<PathBuf>, source: &str) -> Catalog {
                 file: file.clone(),
                 line: line_number,
                 kind: DiagnosticKind::MisplacedMarker,
-                message: "coverage marker must be placed immediately after its heading"
-                    .to_string(),
+                message: "coverage marker must be placed immediately after its heading".to_string(),
             });
             continue;
         }
@@ -646,7 +645,10 @@ mod tests {
 
         assert!(parsed.diagnostics.is_empty());
         assert_eq!(parsed.contracts[0].status, ContractStatus::Gap);
-        assert_eq!(parsed.contracts[0].enforcement, Some(Enforcement::LuaHarness));
+        assert_eq!(
+            parsed.contracts[0].enforcement,
+            Some(Enforcement::LuaHarness)
+        );
     }
 
     #[test]
@@ -796,8 +798,12 @@ mod tests {
 
     #[test]
     fn validates_contract_id_grammar() {
-        assert!(is_valid_contract_id("architecture.action_service_as_mutation_gate"));
-        assert!(is_valid_contract_id("cmdk.requirements.fuzzy_search_word_boundary_weighting"));
+        assert!(is_valid_contract_id(
+            "architecture.action_service_as_mutation_gate"
+        ));
+        assert!(is_valid_contract_id(
+            "cmdk.requirements.fuzzy_search_word_boundary_weighting"
+        ));
         assert!(!is_valid_contract_id("architecture"));
         assert!(!is_valid_contract_id("Architecture.action"));
         assert!(!is_valid_contract_id("architecture.action-service"));

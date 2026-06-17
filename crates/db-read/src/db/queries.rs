@@ -1,6 +1,6 @@
 use crate::{ReadConn, ReadDbState};
 
-use super::from_row::{query_as, query_one, FromRow};
+use super::from_row::{FromRow, query_as, query_one};
 use super::sql_fragments::{LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR};
 use super::types::{
     CategoryCount, DbAttachment, DbContact, DbFolder, DbLabel, DbThread, ThreadCategoryRow,
@@ -344,10 +344,7 @@ fn search_contacts_like(
     query_as::<DbContact>(conn, &sql, &[&pattern, &limit])
 }
 
-pub fn get_contact_by_email(
-    conn: &ReadConn<'_>,
-    email: &str,
-) -> Result<Option<DbContact>, String> {
+pub fn get_contact_by_email(conn: &ReadConn<'_>, email: &str) -> Result<Option<DbContact>, String> {
     let normalized = email.to_lowercase();
     query_one::<DbContact>(
         conn,
@@ -423,8 +420,11 @@ pub fn load_recent_rule_bundled_threads(
          LIMIT ?2"
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    stmt.query_map(rusqlite::params![account_id, limit], ThreadInfoRow::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    stmt.query_map(
+        rusqlite::params![account_id, limit],
+        ThreadInfoRow::from_row,
+    )
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }

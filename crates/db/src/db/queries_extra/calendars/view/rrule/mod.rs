@@ -498,9 +498,7 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
         } else if let Some(val) = part.strip_prefix("INTERVAL=") {
             let raw = val.parse::<i64>().unwrap_or(1);
             if raw < 1 {
-                log::debug!(
-                    "RRULE INTERVAL={raw} (RFC 5545 requires >=1); clamping to 1"
-                );
+                log::debug!("RRULE INTERVAL={raw} (RFC 5545 requires >=1); clamping to 1");
             }
             out.interval = raw.max(1);
         } else if let Some(val) = part.strip_prefix("COUNT=") {
@@ -847,12 +845,7 @@ fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
 ///   negative: from end). Returns no days if the n-th doesn't exist.
 /// - BYMONTHDAY: explicit days (negative counts from end of month).
 /// - Both set: intersection (RFC 5545 § 3.3.10).
-fn collect_monthly_days(
-    year: i32,
-    month: u32,
-    byday: &[ByDay],
-    bymonthday: &[i32],
-) -> Vec<u32> {
+fn collect_monthly_days(year: i32, month: u32, byday: &[ByDay], bymonthday: &[i32]) -> Vec<u32> {
     let dim = days_in_month(year, month);
 
     // reviewed (R3 verified non-issue): mixed BYDAY shapes resolve correctly
@@ -927,12 +920,7 @@ fn weekday_occurrences_in_month(year: i32, month: u32, weekday: chrono::Weekday)
 
 /// The n-th occurrence of `weekday` in `year`/`month`. Positive `n` counts
 /// from the start of the month; negative counts from the end.
-fn nth_weekday_in_month(
-    year: i32,
-    month: u32,
-    weekday: chrono::Weekday,
-    n: i32,
-) -> Option<u32> {
+fn nth_weekday_in_month(year: i32, month: u32, weekday: chrono::Weekday, n: i32) -> Option<u32> {
     let occurrences = weekday_occurrences_in_month(year, month, weekday);
     if n > 0 {
         let idx = usize::try_from(n - 1).ok()?;

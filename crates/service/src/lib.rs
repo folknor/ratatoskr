@@ -4,14 +4,14 @@ mod attachment_compress;
 mod attachment_materialize;
 mod boot;
 mod boot_progress;
-mod eviction;
-mod extract;
-mod gc;
-mod prefetch;
 pub(crate) mod cal_actions;
 pub(crate) mod calendar;
 mod draft_wal;
+mod eviction;
+mod extract;
+mod gc;
 mod markers;
+mod prefetch;
 pub(crate) mod progress;
 pub(crate) mod push;
 pub(crate) mod rebuild;
@@ -62,10 +62,7 @@ pub fn run_service_blocking() -> ! {
             // `eprintln!` that could land mid-byte on the JSON-RPC pipe
             // if stdout/stderr were swapped underneath us.
             let line = format!("[service] failed to claim service stdio: {error}\n");
-            let _ = std::io::Write::write_all(
-                &mut std::io::stderr().lock(),
-                line.as_bytes(),
-            );
+            let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
             std::process::exit(1);
         }
     };

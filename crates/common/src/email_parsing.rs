@@ -28,7 +28,9 @@ pub struct CalendarAttachmentInfo {
 /// strings. The MIME type may include parameters (`text/calendar; method=REQUEST`).
 /// Used by provider sync paths that already collect attachment metadata.
 pub fn find_calendar_attachment(mime_types: &[&str]) -> Option<usize> {
-    mime_types.iter().position(|mt| is_calendar_content_type(mt))
+    mime_types
+        .iter()
+        .position(|mt| is_calendar_content_type(mt))
 }
 
 /// Extract the `method=` parameter from a `text/calendar` MIME type string.

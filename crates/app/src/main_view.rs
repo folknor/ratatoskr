@@ -5,9 +5,7 @@ use crate::message::Message;
 use crate::pop_out::{self, PopOutWindow};
 use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
-use crate::ui::layout::{
-    READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
-};
+use crate::ui::layout::{READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
 use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Task};
@@ -337,10 +335,7 @@ impl ReadyApp {
     pub(crate) fn status_bar_view(&self) -> Element<'_, Message> {
         if self.settings.sync_status_bar {
             self.status_bar
-                .view_with_system_status(
-                    &self.service_health,
-                    self.index_rebuild_progress.as_ref(),
-                )
+                .view_with_system_status(&self.service_health, self.index_rebuild_progress.as_ref())
                 .map(Message::StatusBar)
         } else {
             Space::new().width(0).height(0).into()

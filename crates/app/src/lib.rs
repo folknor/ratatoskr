@@ -41,12 +41,12 @@ mod ui;
 mod update;
 mod window_state;
 
-pub use app::{App, AppMode, Divider, ReadyApp};
-pub use ui::label_paint::LabelPaint;
 pub(crate) use app::PendingChord;
+pub use app::{App, AppMode, Divider, ReadyApp};
 pub(crate) use helpers::load_accounts;
 pub use message::Message;
 pub use service_client::ServiceClient;
+pub use ui::label_paint::LabelPaint;
 
 use std::path::PathBuf;
 

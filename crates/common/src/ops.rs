@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use super::error::ProviderError;
 use super::typed_ids::FolderId;
 use super::types::{
-    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SendIntent, LabelKind,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderFolderEntry,
+    ProviderFolderMutation, ProviderParsedMessage, ProviderProfile, ProviderTestResult, SendIntent,
 };
 
 /// Common operations that every email provider must support.

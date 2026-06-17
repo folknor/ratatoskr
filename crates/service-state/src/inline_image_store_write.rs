@@ -242,11 +242,7 @@ mod tests {
             .expect("reader init");
 
         writer
-            .put(
-                "h1".into(),
-                vec![1, 2, 3],
-                "image/png".into(),
-            )
+            .put("h1".into(), vec![1, 2, 3], "image/png".into())
             .await
             .expect("put");
 
@@ -273,7 +269,10 @@ mod tests {
             .await
             .expect("put_batch");
 
-        let removed = writer.delete_hashes(vec!["h1".into()]).await.expect("delete");
+        let removed = writer
+            .delete_hashes(vec!["h1".into()])
+            .await
+            .expect("delete");
         assert_eq!(removed, 1);
 
         let got = reader.get("h1".into()).await.expect("get");

@@ -196,9 +196,7 @@ impl LabelEditorState {
         }
     }
 
-    pub fn from_row(
-        row: &rtsk::db::queries_extra::navigation::AccountLabelRow,
-    ) -> Self {
+    pub fn from_row(row: &rtsk::db::queries_extra::navigation::AccountLabelRow) -> Self {
         let presets = label_colors::preset_colors::all_presets();
         let color_index = label_colors::preset_colors::nearest_exchange_preset(&row.color_bg)
             .and_then(|name| presets.iter().position(|(n, _, _)| *n == name));
@@ -267,9 +265,7 @@ impl LabelGroupEditorState {
         }
     }
 
-    pub fn from_row(
-        row: &rtsk::db::queries_extra::navigation::SettingsLabelGroupRow,
-    ) -> Self {
+    pub fn from_row(row: &rtsk::db::queries_extra::navigation::SettingsLabelGroupRow) -> Self {
         // Snap the stored hex to the nearest preset so the grid has a
         // selected swatch even for legacy / arbitrary hex values.
         let presets = label_colors::preset_colors::all_presets();
@@ -628,8 +624,7 @@ impl Settings {
         // Both targets share the same editor teardown; only their final
         // state diverges.
         self.active_sheet = None;
-        self.sheet_anim
-            .go_mut(false, iced::time::Instant::now());
+        self.sheet_anim.go_mut(false, iced::time::Instant::now());
         self.signature_editor = None;
         self.editing_account = None;
         self.contact_editor = None;

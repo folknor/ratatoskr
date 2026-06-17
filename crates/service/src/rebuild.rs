@@ -391,9 +391,9 @@ async fn rebuild_chunk(
         let attachments: Vec<AttachmentDocFragment> = attachment_rows
             .into_iter()
             .map(|r| AttachmentDocFragment {
-                attachment_id:  r.attachment_id,
-                filename:       r.filename,
-                mime:           r.mime_type,
+                attachment_id: r.attachment_id,
+                filename: r.filename,
+                mime: r.mime_type,
                 extracted_text: r.extracted_text,
             })
             .collect();

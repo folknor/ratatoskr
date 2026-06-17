@@ -59,7 +59,10 @@ pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     set_nonblocking_fd(&stdin_fd)?;
     set_nonblocking_fd(&stdout_fd)?;
 
-    let devnull = OpenOptions::new().read(true).write(true).open("/dev/null")?;
+    let devnull = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/null")?;
     let devnull_fd = std::os::fd::AsRawFd::as_raw_fd(&devnull);
     if unsafe { libc::dup2(devnull_fd, libc::STDIN_FILENO) } < 0 {
         return Err(io::Error::last_os_error());
@@ -68,7 +71,10 @@ pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
         return Err(io::Error::last_os_error());
     }
 
-    Ok(SavedStdio { stdin_fd, stdout_fd })
+    Ok(SavedStdio {
+        stdin_fd,
+        stdout_fd,
+    })
 }
 
 /// Wrap the saved descriptors into tokio I/O types. Must run inside a tokio
@@ -136,9 +142,7 @@ pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     use std::fs::OpenOptions;
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::System::Console::{
-        STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
-    };
+    use windows_sys::Win32::System::Console::{STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle};
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
     // SAFETY: GetCurrentProcess returns a pseudo-handle that is always valid
@@ -214,7 +218,9 @@ fn redirect_crt_fds_to_nul() -> io::Result<()> {
         // SAFETY: nul_handle came from a valid File we just dropped via
         // into_raw_handle; ownership is unchanged.
         unsafe {
-            drop(std::os::windows::io::OwnedHandle::from_raw_handle(nul_handle));
+            drop(std::os::windows::io::OwnedHandle::from_raw_handle(
+                nul_handle,
+            ));
         }
         return Err(io::Error::other("_open_osfhandle failed"));
     }
@@ -239,12 +245,10 @@ pub(crate) fn adopt_into_runtime(
     // SAFETY: `stdin_handle` / `stdout_handle` are owned handles produced by
     // DuplicateHandle; `into_raw_handle` transfers ownership into the new
     // `std::fs::File` which then owns the close.
-    let stdin_file = unsafe {
-        std::fs::File::from_raw_handle(saved.stdin_handle.into_raw_handle())
-    };
-    let stdout_file = unsafe {
-        std::fs::File::from_raw_handle(saved.stdout_handle.into_raw_handle())
-    };
+    let stdin_file =
+        unsafe { std::fs::File::from_raw_handle(saved.stdin_handle.into_raw_handle()) };
+    let stdout_file =
+        unsafe { std::fs::File::from_raw_handle(saved.stdout_handle.into_raw_handle()) };
     Ok((
         tokio::fs::File::from_std(stdin_file),
         tokio::fs::File::from_std(stdout_file),

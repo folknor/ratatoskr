@@ -106,7 +106,7 @@ Each card is a fixed-height three-line layout. All text lines start from the sam
 
 **Line 3: Snippet + Indicators**
 - **Snippet** (left) - preview of the most recent message body. Muted/tertiary text color. Truncated to make room for indicators.
-- **Indicators** (right, inline) - small colored label dots + attachment icon (📎). Indicators are right-aligned; snippet truncates earlier when indicators are present. If no labels and no attachment, the snippet gets the full width.
+- **Indicators** (right, inline) - small colored label dots + attachment icon (). Indicators are right-aligned; snippet truncates earlier when indicators are present. If no labels and no attachment, the snippet gets the full width.
 
 ### Thread Card States
 
@@ -122,7 +122,7 @@ Each card is a fixed-height three-line layout. All text lines start from the sam
 
 **Label color availability:** Gmail syncs real `color_bg`/`color_fg` hex values from the API (see `gmail/sync/labels.rs`). All other providers - IMAP, JMAP, and Graph (Exchange) - store `color_bg: None, color_fg: None`. No deterministic hash-based color assignment exists in the codebase. **Requires new work:** a fallback color assignment strategy for non-Gmail labels (e.g., deterministic hash of label name → color from a fixed palette). Without this, label dots in the thread list will only work for Gmail accounts.
 
-**Attachment icon:** a small paperclip (📎) in the lower right of line 3, after any label dots. Only shown if the thread has attachments.
+**Attachment icon:** a small paperclip () in the lower right of line 3, after any label dots. Only shown if the thread has attachments.
 
 **No hover effects on indicators.** No tooltips. The thread card is a pure scan surface.
 
@@ -140,7 +140,7 @@ Each card is a fixed-height three-line layout. All text lines start from the sam
 ┌──────────────────────────────────────────────────┐
 │ Sender Name                            3:42 PM  │
 │ Subject line truncated with ellipsis...          │
-│ Snippet preview text in muted...    🔵 🟢 📎    │
+│ Snippet preview text in muted...    (blue) (green)     │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -149,7 +149,7 @@ Starred variant (golden background):
 ┌══════════════════════════════════════════════════┐
 ║ Sender Name                            3:42 PM  ║
 ║ Subject line truncated with ellipsis...          ║
-║ Snippet preview text in muted...    🔵 📎       ║
+║ Snippet preview text in muted...    (blue)        ║
 └══════════════════════════════════════════════════┘
 ```
 
@@ -172,21 +172,21 @@ The search bar area is two lines: the input field and a context line below it. *
 ```
 Idle:
 ┌─────────────────────────────────────┐
-│ 🔍 Search...                       │
+│  Search...                       │
 │ Inbox                     Foo Corp │
 ├─────────────────────────────────────┤
 │ [thread cards...]                   │
 
 Searching:
 ┌─────────────────────────────────────┐
-│ 🔍 from:alice meeting              │
+│  from:alice meeting              │
 │ 47 results                    All ↗│
 ├─────────────────────────────────────┤
 │ [search results...]                 │
 
 Idle, all accounts scope:
 ┌─────────────────────────────────────┐
-│ 🔍 Search...                       │
+│  Search...                       │
 │ Inbox                          All │
 ├─────────────────────────────────────┤
 │ [thread cards...]                   │
@@ -218,17 +218,17 @@ Attachments are individual multi-line cards inside a group container:
 ┌─ Attachments (3) ──────────────────── [Save All ↓] ┐
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │ 📄 Q2 Report.pdf                            │    │
+│  │  Q2 Report.pdf                            │    │
 │  │ PDF · 2.4 MB · Mar 14 from Alice            │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │ 📊 Budget.xlsx              ▸ 2 versions    │    │
+│  │  Budget.xlsx              ▸ 2 versions    │    │
 │  │ Excel · 847 KB · Mar 14 from Alice          │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │ 🖼 Site Photo.jpg                            │    │
+│  │  Site Photo.jpg                            │    │
 │  │ Image · 1.1 MB · Mar 12 from Bob            │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │
@@ -251,7 +251,7 @@ The date is especially important in the versioning view, where dates distinguish
 
 ```
   ┌─────────────────────────────────────────────┐
-  │ 📊 Budget.xlsx              ▾ 2 versions    │
+  │  Budget.xlsx              ▾ 2 versions    │
   │ Excel · 847 KB · Mar 14 from Alice          │
   │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │
   │   847 KB · Mar 14 from Alice (latest)       │
@@ -360,7 +360,7 @@ Reply, Reply All, and Forward appear at the bottom of each expanded message card
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Alice Smith · Mar 14, 2:34 PM          📅   │
+│ Alice Smith · Mar 14, 2:34 PM             │
 │ to me, Bob                                  │
 │                                             │
 │ Hey, can we reschedule to Thursday?         │
@@ -373,7 +373,7 @@ These are convenience shortcuts for palette actions, scoped to *this* message. T
 
 #### Calendar Event Creation (per-message header, expanded only)
 
-The "create calendar event" action (📅) appears in the message header area, right-aligned, only on expanded messages. It's elevated to header level because it's a different kind of action - it creates something in another system, not just email manipulation. Not every message warrants it, but when an email says "let's meet Thursday at 2," the action needs to be right there.
+The "create calendar event" action () appears in the message header area, right-aligned, only on expanded messages. It's elevated to header level because it's a different kind of action - it creates something in another system, not just email manipulation. Not every message warrants it, but when an email says "let's meet Thursday at 2," the action needs to be right there.
 
 #### Message Selection
 
@@ -414,7 +414,7 @@ A collapsible right sidebar that shows cross-cutting state alongside the main em
 │  14:00  Client call      │
 │  16:30  1:1 with Alice   │
 │──────────────────────────│
-│  ★ Pinned Items          │
+│   Pinned Items          │
 │  Contract review (Inbox) │
 │  Q2 budget sign-off      │
 │  Reply to legal re: NDA  │

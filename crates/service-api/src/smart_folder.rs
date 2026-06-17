@@ -53,8 +53,7 @@ mod tests {
             query: "is:unread from:vip@example.com".into(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SmartFolderCreateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SmartFolderCreateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -64,8 +63,7 @@ mod tests {
             id: "11111111-2222-3333-4444-555555555555".into(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: SmartFolderCreateAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: SmartFolderCreateAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

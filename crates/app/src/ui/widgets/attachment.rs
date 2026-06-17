@@ -6,10 +6,9 @@ use iced::{Alignment, Element, Length};
 use crate::db::ThreadAttachment;
 use crate::icon;
 use crate::ui::layout::{
-    ATTACHMENT_ACTION_BTN_HEIGHT, ATTACHMENT_CARD_MAIN_ROW_HEIGHT,
-    ATTACHMENT_CARD_META_ROW_HEIGHT, ATTACHMENT_ICON_BTN_WIDTH, ICON_ATTACHMENT_FILE, ICON_MD,
-    ICON_XS, PAD_ICON_BTN, PAD_NAV_ITEM, SPACE_MD, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD,
-    TEXT_SM, TEXT_XS,
+    ATTACHMENT_ACTION_BTN_HEIGHT, ATTACHMENT_CARD_MAIN_ROW_HEIGHT, ATTACHMENT_CARD_META_ROW_HEIGHT,
+    ATTACHMENT_ICON_BTN_WIDTH, ICON_ATTACHMENT_FILE, ICON_MD, ICON_XS, PAD_ICON_BTN, PAD_NAV_ITEM,
+    SPACE_MD, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_SM, TEXT_XS,
 };
 use crate::ui::theme;
 
@@ -114,12 +113,8 @@ pub fn attachment_card<'a, M: 'a + Clone>(
 
     let main_row = container(
         row![
-            container(
-                file_icon
-                    .size(ICON_ATTACHMENT_FILE)
-                    .style(text::secondary),
-            )
-            .align_y(Alignment::Center),
+            container(file_icon.size(ICON_ATTACHMENT_FILE).style(text::secondary),)
+                .align_y(Alignment::Center),
             text_col,
         ]
         .spacing(SPACE_MD)

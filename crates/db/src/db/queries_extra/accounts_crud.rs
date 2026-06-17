@@ -1,4 +1,4 @@
-use super::super::{ReadConn, WriterPool, WriteTarget};
+use super::super::{ReadConn, WriteTarget, WriterPool};
 use super::dynamic_update;
 use rusqlite::params;
 use types::MailProviderKind;
@@ -193,7 +193,10 @@ pub fn update_account_sync(
         sets.push(("caldav_password", Box::new(v)));
     }
     if let Some(v) = params.cache_attachments_enabled {
-        sets.push(("cache_attachments_enabled", Box::new(if v { 1i64 } else { 0i64 })));
+        sets.push((
+            "cache_attachments_enabled",
+            Box::new(if v { 1i64 } else { 0i64 }),
+        ));
     }
     dynamic_update(conn, "accounts", "id", id, sets)
 }
@@ -221,7 +224,11 @@ pub async fn db_update_account_color(
 }
 
 /// Update only the account name.
-pub async fn db_update_account_name(db: &WriterPool, id: String, name: String) -> Result<(), String> {
+pub async fn db_update_account_name(
+    db: &WriterPool,
+    id: String,
+    name: String,
+) -> Result<(), String> {
     db.with_write(move |conn| {
         conn.execute(
             "UPDATE accounts SET account_name = ?1 WHERE id = ?2",
@@ -332,7 +339,10 @@ pub struct StoredOAuthCredentials {
     pub oauth_client_secret: Option<String>,
 }
 
-pub fn check_gmail_duplicate_sync(conn: &ReadConn<'_>, email: &str) -> Result<Option<String>, String> {
+pub fn check_gmail_duplicate_sync(
+    conn: &ReadConn<'_>,
+    email: &str,
+) -> Result<Option<String>, String> {
     conn.query_row(
         "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
         params![email],
@@ -649,7 +659,10 @@ pub fn get_account_provider_sync(
 ///
 /// This is for explicit boundary code such as harness-provider handling.
 /// Normal mail-provider callers should use `get_account_provider_sync`.
-pub fn get_account_provider_raw_sync(conn: &ReadConn<'_>, account_id: &str) -> Result<String, String> {
+pub fn get_account_provider_raw_sync(
+    conn: &ReadConn<'_>,
+    account_id: &str,
+) -> Result<String, String> {
     conn.query_row(
         "SELECT provider FROM accounts WHERE id = ?1",
         params![account_id],
@@ -732,7 +745,10 @@ mod sync_account_tests {
         )
         .expect("update");
 
-        assert_eq!(get_text_col(&conn, "acc-a", "account_name"), Some("New".into()));
+        assert_eq!(
+            get_text_col(&conn, "acc-a", "account_name"),
+            Some("New".into())
+        );
         assert_eq!(
             get_text_col(&conn, "acc-a", "display_name"),
             Some("Old D".into()),
@@ -763,17 +779,11 @@ mod sync_account_tests {
         let conn = setup_db();
         // Set acc-c to a sentinel value; reorder only acc-a and
         // acc-b; assert acc-c is unchanged.
-        conn.execute(
-            "UPDATE accounts SET sort_order = 99 WHERE id = 'acc-c'",
-            [],
-        )
-        .expect("seed sort_order");
+        conn.execute("UPDATE accounts SET sort_order = 99 WHERE id = 'acc-c'", [])
+            .expect("seed sort_order");
 
-        update_account_sort_order_sync(
-            &write(&conn),
-            &[("acc-b".into(), 0), ("acc-a".into(), 1)],
-        )
-        .expect("reorder");
+        update_account_sort_order_sync(&write(&conn), &[("acc-b".into(), 0), ("acc-a".into(), 1)])
+            .expect("reorder");
 
         assert_eq!(get_sort_order(&conn, "acc-b"), 0);
         assert_eq!(get_sort_order(&conn, "acc-a"), 1);

@@ -35,8 +35,8 @@ pub(super) async fn handle(
     let ops = serialize_ops(plan)?;
 
     db.with_write(move |conn| insert_calendar_plan(conn, &plan_id_bytes, &account_id, &ops))
-    .await
-    .map_err(ServiceError::Internal)?;
+        .await
+        .map_err(ServiceError::Internal)?;
 
     state.notify_action_worker();
 
@@ -62,19 +62,13 @@ fn validate_plan(plan: &CalendarActionPlan) -> Result<(), ServiceError> {
         if &op.account_id != account_id {
             return Err(ServiceError::InvalidParams {
                 method: "cal_action.execute_plan".into(),
-                message: format!(
-                    "plan crosses accounts: {} != {}",
-                    op.account_id, account_id
-                ),
+                message: format!("plan crosses accounts: {} != {}", op.account_id, account_id),
             });
         }
         if !seen_op_ids.insert(op.operation_id) {
             return Err(ServiceError::InvalidParams {
                 method: "cal_action.execute_plan".into(),
-                message: format!(
-                    "duplicate operation_id {:?} in plan",
-                    op.operation_id
-                ),
+                message: format!("duplicate operation_id {:?} in plan", op.operation_id),
             });
         }
     }
@@ -128,9 +122,7 @@ fn serialize_ops(plan: CalendarActionPlan) -> Result<Vec<PlanOpInsert>, ServiceE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use service_api::{
-        CalendarActionWireOperation, OperationId, PlanId, WireCalendarEventInput,
-    };
+    use service_api::{CalendarActionWireOperation, OperationId, PlanId, WireCalendarEventInput};
 
     fn op(account: &str, op_id: u32, op: WireCalendarOperation) -> CalendarActionWireOperation {
         CalendarActionWireOperation {

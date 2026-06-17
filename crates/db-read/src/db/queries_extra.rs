@@ -1,7 +1,7 @@
 pub use super::queries::load_recent_rule_bundled_threads;
 
-pub mod action_helpers;
 mod accounts_crud;
+pub mod action_helpers;
 pub mod auto_responses;
 pub mod chat;
 pub mod command_palette;
@@ -28,18 +28,18 @@ pub mod contacts;
 
 pub use accounts_crud::*;
 pub use accounts_messages::*;
-pub use ai_state::*;
-pub use calendars::*;
-pub use compose::*;
-pub use contact_groups::*;
-pub use contacts::*;
 pub use action_helpers::*;
+pub use ai_state::*;
 pub use auto_responses::*;
+pub use calendars::*;
 pub use chat::*;
 pub use command_palette::*;
+pub use compose::*;
 pub use contact_carddav::*;
+pub use contact_groups::*;
 pub use contact_photos::*;
 pub use contact_search::*;
+pub use contacts::*;
 pub use draft_lifecycle::*;
 pub use extract_reindex::*;
 pub use label_intent::*;

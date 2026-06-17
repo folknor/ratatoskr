@@ -105,11 +105,11 @@ pub enum SettingsMessage {
     DeleteAccountConfirmed(String),
     DeleteAccountCancelled,
     // Signatures
-    SignatureEdit(String),            // signature_id - open editor sheet
-    SignatureCreate,                  // open editor for a new signature (no account preselected)
-    SignatureDelete(String),          // signature_id - request delete (shows confirm)
+    SignatureEdit(String),                 // signature_id - open editor sheet
+    SignatureCreate, // open editor for a new signature (no account preselected)
+    SignatureDelete(String), // signature_id - request delete (shows confirm)
     SignatureDeleteConfirmed(String), // signature_id - confirmed delete
-    SignatureDeleteCancelled,         // cancel pending delete
+    SignatureDeleteCancelled, // cancel pending delete
     SignatureEditorAccountChanged(String), // account_id selected in the editor's account picker
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),

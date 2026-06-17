@@ -3,12 +3,12 @@ use std::future::Future;
 
 use serde::Deserialize;
 
-use db::db::{ReadDbState, WriteConn};
 use db::db::queries_extra::{
     ContactGroupRow, delete_contact_group_by_id, delete_contact_group_members,
     delete_contact_groups_for_account_by_source, insert_contact_group_member_email,
     list_contact_groups_for_account_by_source, upsert_contact_group,
 };
+use db::db::{ReadDbState, WriteConn};
 
 use super::client::GraphClient;
 
@@ -382,9 +382,7 @@ fn persist_group_members(
 ) -> Result<(), String> {
     let local_id = format!("exchange-{account_id}-{server_group_id}");
 
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin tx: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
 
     // Clear existing members for this group and repopulate
     delete_contact_group_members(&tx, &local_id)?;

@@ -79,7 +79,11 @@ pub fn parse_recipient_paste(payload: &RecipientPastePayload) -> RecipientPasteR
         }
     }
 
-    if let Some(text) = payload.plain_text.as_deref().filter(|s| !s.trim().is_empty()) {
+    if let Some(text) = payload
+        .plain_text
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
         return finish_paste_result(
             parse_recipient_list(text),
             RecipientPasteSourceFormat::PlainText,
@@ -233,7 +237,8 @@ fn extract_html_rows(table_html: &str) -> Vec<Vec<String>> {
     let mut cursor = 0usize;
 
     while let Some((row_start, row_content_start)) = find_open_tag(table_html, "tr", cursor) {
-        let row_end = find_close_tag(table_html, "tr", row_content_start).unwrap_or(table_html.len());
+        let row_end =
+            find_close_tag(table_html, "tr", row_content_start).unwrap_or(table_html.len());
         let cells = extract_html_cells(&table_html[row_content_start..row_end]);
         if !cells.is_empty() {
             rows.push(cells);
@@ -248,7 +253,9 @@ fn extract_html_cells(row_html: &str) -> Vec<String> {
     let mut cells = Vec::new();
     let mut cursor = 0usize;
 
-    while let Some((tag, cell_start, cell_content_start)) = find_next_cell_open_tag(row_html, cursor) {
+    while let Some((tag, cell_start, cell_content_start)) =
+        find_next_cell_open_tag(row_html, cursor)
+    {
         let cell_end = find_close_tag(row_html, tag, cell_content_start).unwrap_or(row_html.len());
         let text = html_to_text(&row_html[cell_content_start..cell_end]);
         cells.push(clean_text(&text).unwrap_or_default());
@@ -384,10 +391,12 @@ fn decode_html_entity(entity: &str) -> Option<String> {
         "quot" => Some("\"".to_string()),
         "apos" | "#39" => Some("'".to_string()),
         "nbsp" => Some(" ".to_string()),
-        _ if entity.starts_with("#x") || entity.starts_with("#X") => u32::from_str_radix(&entity[2..], 16)
-            .ok()
-            .and_then(char::from_u32)
-            .map(|ch| ch.to_string()),
+        _ if entity.starts_with("#x") || entity.starts_with("#X") => {
+            u32::from_str_radix(&entity[2..], 16)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|ch| ch.to_string())
+        }
         _ if entity.starts_with('#') => entity[1..]
             .parse::<u32>()
             .ok()
@@ -480,7 +489,10 @@ fn consume_rtf_control(chars: &[char], index: &mut usize, out: &mut String) {
         "cell" | "tab" => out.push('\t'),
         "row" | "par" | "line" => out.push('\n'),
         "u" => {
-            if let Some(value) = number.and_then(|n| u32::try_from(n).ok()).and_then(char::from_u32) {
+            if let Some(value) = number
+                .and_then(|n| u32::try_from(n).ok())
+                .and_then(char::from_u32)
+            {
                 out.push(value);
             }
         }
@@ -557,7 +569,10 @@ fn trim_glued_name_suffix(input: &str, domain_start: usize, domain_end: usize) -
     };
     let suffix_start = domain_start + last_dot + 1;
     let suffix = &input[suffix_start..domain_end];
-    if COMMON_TLDS.iter().any(|tld| suffix.eq_ignore_ascii_case(tld)) {
+    if COMMON_TLDS
+        .iter()
+        .any(|tld| suffix.eq_ignore_ascii_case(tld))
+    {
         return domain_end;
     }
     for tld in COMMON_TLDS {
@@ -577,7 +592,10 @@ fn trim_email_span(input: &str, span: Range<usize>) -> Range<usize> {
         let Some(ch) = input[..end].chars().next_back() else {
             break;
         };
-        if matches!(ch, '.' | ',' | ';' | ':' | ')' | ']' | '}' | '>' | '"' | '\'') {
+        if matches!(
+            ch,
+            '.' | ',' | ';' | ':' | ')' | ']' | '}' | '>' | '"' | '\''
+        ) {
             end -= ch.len_utf8();
         } else {
             break;
@@ -586,7 +604,11 @@ fn trim_email_span(input: &str, span: Range<usize>) -> Range<usize> {
     span.start..end
 }
 
-fn extract_display_name(input: &str, previous_email_end: usize, email_start: usize) -> Option<String> {
+fn extract_display_name(
+    input: &str,
+    previous_email_end: usize,
+    email_start: usize,
+) -> Option<String> {
     if previous_email_end >= email_start {
         return None;
     }
@@ -629,12 +651,11 @@ fn clean_display_name(name: &str) -> Option<String> {
         }
     }
 
-    let without_wrapping_quote =
-        if trimmed.starts_with('"') || trimmed.starts_with('\'') {
-            &trimmed[1..]
-        } else {
-            trimmed
-        };
+    let without_wrapping_quote = if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+        &trimmed[1..]
+    } else {
+        trimmed
+    };
     let without_wrapping_quote =
         if without_wrapping_quote.ends_with('"') || without_wrapping_quote.ends_with('\'') {
             &without_wrapping_quote[..without_wrapping_quote.len() - 1]
@@ -679,9 +700,8 @@ mod tests {
 
     #[test]
     fn parses_missing_quotes_and_angles() {
-        let parsed = parse_recipient_list(
-            "\"Alice Smith <alice@example.com Bob Jones bob@example.com",
-        );
+        let parsed =
+            parse_recipient_list("\"Alice Smith <alice@example.com Bob Jones bob@example.com");
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].email, "alice@example.com");
         assert_eq!(parsed[0].display_name.as_deref(), Some("Alice Smith"));
@@ -701,9 +721,7 @@ mod tests {
 
     #[test]
     fn trims_glued_capitalized_name_after_common_tld() {
-        let parsed = parse_recipient_list(
-            "Alice alice@example.comBob Jones <bob@example.com>",
-        );
+        let parsed = parse_recipient_list("Alice alice@example.comBob Jones <bob@example.com>");
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].email, "alice@example.com");
         assert_eq!(parsed[1].email, "bob@example.com");
@@ -741,7 +759,10 @@ mod tests {
         let result = parse_recipient_paste(&payload);
         assert_eq!(result.source_format, RecipientPasteSourceFormat::Html);
         assert_eq!(result.recipients.len(), 2);
-        assert_eq!(result.recipients[0].display_name.as_deref(), Some("Alice Smith"));
+        assert_eq!(
+            result.recipients[0].display_name.as_deref(),
+            Some("Alice Smith")
+        );
         assert_eq!(result.recipients[1].email, "bob@example.com");
     }
 
@@ -754,7 +775,10 @@ mod tests {
         let end = html.len();
         html.push_str("<!--EndFragment--></body></html>");
         html = html
-            .replace("StartFragment:0000000000", &format!("StartFragment:{start:010}"))
+            .replace(
+                "StartFragment:0000000000",
+                &format!("StartFragment:{start:010}"),
+            )
             .replace("EndFragment:0000000000", &format!("EndFragment:{end:010}"));
 
         let result = parse_recipient_paste(&RecipientPastePayload {
@@ -781,7 +805,10 @@ mod tests {
         let result = parse_recipient_paste(&payload);
         assert_eq!(result.source_format, RecipientPasteSourceFormat::Rtf);
         assert_eq!(result.recipients.len(), 2);
-        assert_eq!(result.recipients[0].display_name.as_deref(), Some("Alice Smith"));
+        assert_eq!(
+            result.recipients[0].display_name.as_deref(),
+            Some("Alice Smith")
+        );
     }
 
     #[test]
@@ -792,6 +819,9 @@ mod tests {
 
         assert_eq!(result.recipients.len(), 1);
         assert_eq!(result.skipped.len(), 1);
-        assert_eq!(result.skipped[0].reason, RecipientSkipReason::DuplicateEmail);
+        assert_eq!(
+            result.skipped[0].reason,
+            RecipientSkipReason::DuplicateEmail
+        );
     }
 }

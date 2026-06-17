@@ -85,9 +85,7 @@ pub enum ActionOutcome {
         retryable: bool,
     },
     /// The action failed entirely (local not applied).
-    Failed {
-        error: ActionError,
-    },
+    Failed { error: ActionError },
 }
 
 impl ActionOutcome {

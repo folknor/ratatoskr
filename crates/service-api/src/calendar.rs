@@ -265,8 +265,7 @@ mod tests {
         ];
         for ack in cases {
             let json = serde_json::to_value(&ack).expect("serialize");
-            let recovered: CalendarCancelAck =
-                serde_json::from_value(json).expect("deserialize");
+            let recovered: CalendarCancelAck = serde_json::from_value(json).expect("deserialize");
             assert_eq!(ack, recovered);
         }
     }

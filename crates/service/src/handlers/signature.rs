@@ -77,8 +77,7 @@ pub(crate) async fn handle_update(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(SignatureUpdateAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(SignatureUpdateAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_delete(
@@ -90,8 +89,7 @@ pub(crate) async fn handle_delete(
         .with_write(move |conn| db::db::queries_extra::db_delete_signature_sync(conn, &params.id))
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(SignatureDeleteAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(SignatureDeleteAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_reorder(
@@ -105,6 +103,5 @@ pub(crate) async fn handle_reorder(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(SignatureReorderAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(SignatureReorderAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }

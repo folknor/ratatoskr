@@ -11,12 +11,10 @@ pub mod queries_extra;
 pub mod sql_fragments;
 pub mod time;
 pub mod types;
+pub use db_read::{ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement};
 pub use from_row::{FromRow, query_as, query_one};
-pub use db_read::{
-    ReadCachedStatement, ReadConn, ReadDbState, ReadError, ReadStatement,
-};
-pub use rusqlite::Error as SqlError;
 use rusqlite::Connection;
+pub use rusqlite::Error as SqlError;
 use rusqlite::OpenFlags;
 pub use rusqlite::OptionalExtension;
 pub use rusqlite::Row;
@@ -488,7 +486,7 @@ pub fn open_writer_pool(app_data_dir: &Path) -> Result<WriterPool, String> {
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-        .map_err(|e| format!("open write db {}: {e}", db_path.display()))?;
+    .map_err(|e| format!("open write db {}: {e}", db_path.display()))?;
     apply_writer_pragmas(&conn)?;
     migrations::run_all(&conn)?;
     Ok(WriterPool {

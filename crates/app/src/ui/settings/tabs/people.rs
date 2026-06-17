@@ -1,4 +1,6 @@
-use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text, text_input};
+use iced::widget::{
+    Space, button, column, container, mouse_area, row, scrollable, text, text_input,
+};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
@@ -108,8 +110,7 @@ pub(super) fn filter_row<'a>(
     };
 
     let content = row![
-        container(icon::search().size(ICON_MD).style(text::secondary))
-            .align_y(Alignment::Center),
+        container(icon::search().size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
         text_input(placeholder, &value_owned)
             .id(id_owned)
             .on_input(on_input)
@@ -152,9 +153,7 @@ fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
-        let mut col = column![]
-            .spacing(PEOPLE_PILL_SPACING)
-            .width(Length::Fill);
+        let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
         for contact in &state.contacts {
             col = col.push(contact_card(contact, &state.managed_accounts));
         }
@@ -199,9 +198,7 @@ fn contact_card<'a>(
         container(text(name).size(TEXT_LG).style(text::base))
             .align_y(Alignment::Center)
             .width(Length::Fill),
-        text(&contact.email)
-            .size(TEXT_SM)
-            .style(text::secondary),
+        text(&contact.email).size(TEXT_SM).style(text::secondary),
     ]
     .spacing(SPACE_SM)
     .align_y(Alignment::Center);
@@ -412,9 +409,7 @@ fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
-        let mut col = column![]
-            .spacing(PEOPLE_PILL_SPACING)
-            .width(Length::Fill);
+        let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
         for group in &state.groups {
             col = col.push(group_card(group));
         }

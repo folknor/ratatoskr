@@ -48,7 +48,9 @@ const TAIL_SCAN_BYTES: usize = 64 * 1024;
 #[allow(dead_code)] // Consumed in 7-4 by ExtractRuntime worker.
 pub(crate) fn extract(bytes: &[u8]) -> ExtractionOutcome {
     if bytes.is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
     if !looks_like_pdf(bytes) {
         return ExtractionOutcome::Failed {
@@ -56,15 +58,21 @@ pub(crate) fn extract(bytes: &[u8]) -> ExtractionOutcome {
         };
     }
     if has_encrypt_dict(bytes) {
-        return ExtractionOutcome::Skipped { reason: SkipReason::Encrypted };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::Encrypted,
+        };
     }
     match pdf_extract::extract_text_from_mem(bytes) {
         Ok(text) => {
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+                return ExtractionOutcome::Skipped {
+                    reason: SkipReason::EmptyContent,
+                };
             }
-            ExtractionOutcome::Indexed { text: trimmed.to_string() }
+            ExtractionOutcome::Indexed {
+                text: trimmed.to_string(),
+            }
         }
         Err(e) => {
             // H7 fix: when pdf-extract reports an encryption-related
@@ -79,10 +87,13 @@ pub(crate) fn extract(bytes: &[u8]) -> ExtractionOutcome {
             // file would re-extract on every backfill kick forever.
             let err_str = format!("pdf-extract: {e}");
             let lower = err_str.to_lowercase();
-            if lower.contains("encrypt") || lower.contains("password")
+            if lower.contains("encrypt")
+                || lower.contains("password")
                 || lower.contains("not authorized")
             {
-                return ExtractionOutcome::Skipped { reason: SkipReason::Encrypted };
+                return ExtractionOutcome::Skipped {
+                    reason: SkipReason::Encrypted,
+                };
             }
             ExtractionOutcome::Failed { error: err_str }
         }
@@ -137,7 +148,12 @@ mod tests {
     #[test]
     fn empty_input_skips_empty() {
         let outcome = extract(b"");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]
@@ -157,7 +173,12 @@ mod tests {
         let mut bytes = b"%PDF-1.4\n".to_vec();
         bytes.extend_from_slice(b"1 0 obj\n<<\n/Encrypt 99 0 R\n/Pages 2 0 R\n>>\nendobj\n");
         let outcome = extract(&bytes);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::Encrypted });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::Encrypted
+            }
+        );
     }
 
     #[test]
@@ -166,9 +187,15 @@ mod tests {
         // PDF layout. Pad the middle so the head scan does not see it.
         let mut bytes = b"%PDF-1.4\n".to_vec();
         bytes.extend(std::iter::repeat_n(b' ', 8 * 1024)); // 8 KB filler
-        bytes.extend_from_slice(b"trailer\n<<\n/Size 5\n/Encrypt 99 0 R\n>>\nstartxref\n0\n%%EOF\n");
+        bytes
+            .extend_from_slice(b"trailer\n<<\n/Size 5\n/Encrypt 99 0 R\n>>\nstartxref\n0\n%%EOF\n");
         let outcome = extract(&bytes);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::Encrypted });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::Encrypted
+            }
+        );
     }
 
     #[test]
@@ -184,7 +211,9 @@ mod tests {
             matches!(
                 outcome,
                 ExtractionOutcome::Failed { .. }
-                    | ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent }
+                    | ExtractionOutcome::Skipped {
+                        reason: SkipReason::EmptyContent
+                    }
             ),
             "got {outcome:?}",
         );

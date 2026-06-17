@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::future::Future;
 
-use db::db::{ReadDbState, WriterPool, WriteTxn};
 use db::db::queries_extra::{delete_seen_address_google_other, upsert_seen_address_google_other};
+use db::db::{ReadDbState, WriteTxn, WriterPool};
 use sync::state as sync_state;
 
 use super::super::client::GmailClient;
@@ -35,18 +35,20 @@ where
     let existing_token = sync_state::load_google_other_contacts_sync_token(db, account_id).await?;
 
     match existing_token {
-        Some(token) => match incremental_sync(client, account_id, db, writer, &token, &mut write).await {
-            Ok(result) => Ok(result),
-            Err(e) if e.contains("410") || e.contains("GONE") || e.contains("syncToken") => {
-                log::warn!(
-                    "Google otherContacts sync token expired for {account_id}, \
+        Some(token) => {
+            match incremental_sync(client, account_id, db, writer, &token, &mut write).await {
+                Ok(result) => Ok(result),
+                Err(e) if e.contains("410") || e.contains("GONE") || e.contains("syncToken") => {
+                    log::warn!(
+                        "Google otherContacts sync token expired for {account_id}, \
                          falling back to full sync"
-                );
-                sync_state::delete_google_other_contacts_sync_token(writer, account_id).await?;
-                full_sync(client, account_id, db, writer, &mut write).await
+                    );
+                    sync_state::delete_google_other_contacts_sync_token(writer, account_id).await?;
+                    full_sync(client, account_id, db, writer, &mut write).await
+                }
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
-        },
+        }
         None => full_sync(client, account_id, db, writer, &mut write).await,
     }
 }

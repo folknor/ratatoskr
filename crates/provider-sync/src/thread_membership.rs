@@ -2,8 +2,7 @@ use common::types::{FolderKind, LabelKind};
 use db::db::queries_extra::{
     delete_thread_folder_rows, delete_thread_label_rows, insert_full_thread_folders,
     insert_full_thread_labels, recompute_thread_folders_from_messages,
-    recompute_thread_labels_from_messages, replace_message_folder_rows,
-    replace_message_label_rows,
+    recompute_thread_labels_from_messages, replace_message_folder_rows, replace_message_label_rows,
 };
 
 pub(crate) fn replace_thread_membership_from_full_coverage(

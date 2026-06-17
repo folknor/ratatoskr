@@ -6,9 +6,7 @@ use crate::ui::token_input::{self, TokenId};
 use super::messages::ComposeMessage;
 use super::state::ComposeState;
 use super::token_handlers::handle_recipient_token_input;
-use super::types::{
-    ComposeTokenDrag, ContextMenuKind, RecipientField, TokenContextMenuState,
-};
+use super::types::{ComposeTokenDrag, ContextMenuKind, RecipientField, TokenContextMenuState};
 
 /// Update compose state for a given message.
 ///
@@ -50,8 +48,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 || !state.cc.tokens.is_empty()
                 || !state.bcc.tokens.is_empty();
             if !has_recipients {
-                state.recipients_error =
-                    Some("Add at least one recipient.".to_string());
+                state.recipients_error = Some("Add at least one recipient.".to_string());
                 return;
             }
             state.recipients_error = None;

@@ -16,10 +16,10 @@ mod protocol;
 
 pub use protocol::{create_event_remote, delete_event_remote, update_event_remote};
 
+use persist::jmap_event_record;
 pub use persist::{
     JmapCalendarAttendeeRecord, JmapCalendarEventRecord, JmapCalendarReminderRecord,
 };
-use persist::jmap_event_record;
 use protocol::fetch_event_batch;
 
 const EVENT_BATCH_SIZE: usize = 50;
@@ -100,7 +100,6 @@ pub async fn fetch_all_events(
     account_id: &str,
     cal_map: &HashMap<&str, &str>,
 ) -> Result<JmapCalendarEventSync, String> {
-
     // Fetch ALL events (no filter) - the server returns them all with state
     let inner = client.inner();
     let mut request = inner.build();

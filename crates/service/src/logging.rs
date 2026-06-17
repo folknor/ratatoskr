@@ -83,11 +83,15 @@ fn cleanup_stale_logs_with(app_data_dir: &Path, now: SystemTime, max_age: Durati
         if pid == current_pid {
             continue;
         }
-        let Ok(meta) = entry.metadata() else { continue; };
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
         if !meta.is_file() {
             continue;
         }
-        let Ok(modified) = meta.modified() else { continue; };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         let age = now.duration_since(modified).unwrap_or_default();
         if age < max_age {
             continue;
@@ -225,17 +229,15 @@ mod tests {
     use super::*;
 
     fn temp_data_dir(suffix: &str) -> std::io::Result<PathBuf> {
-        let path = std::env::current_dir()?
-            .join("target")
-            .join(format!(
-                "logging-cleanup-{}-{}-{}",
-                std::process::id(),
-                suffix,
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
+        let path = std::env::current_dir()?.join("target").join(format!(
+            "logging-cleanup-{}-{}-{}",
+            std::process::id(),
+            suffix,
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(path.join("logs"))?;
         Ok(path)

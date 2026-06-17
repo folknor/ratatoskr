@@ -163,11 +163,13 @@ impl Db {
         group_id: String,
     ) -> Result<Vec<(String, Option<String>)>, String> {
         let db = self.read_db_state();
-        Ok(rtsk::db::queries_extra::db_expand_contact_group_with_names(&db, group_id)
-            .await?
-            .into_iter()
-            .map(|row| (row.email, row.display_name))
-            .collect())
+        Ok(
+            rtsk::db::queries_extra::db_expand_contact_group_with_names(&db, group_id)
+                .await?
+                .into_iter()
+                .map(|row| (row.email, row.display_name))
+                .collect(),
+        )
     }
 
     /// Find a contact group whose recursively-expanded member set is
@@ -181,5 +183,4 @@ impl Db {
         let db = self.read_db_state();
         rtsk::db::queries_extra::db_find_group_matching_emails(&db, emails).await
     }
-
 }

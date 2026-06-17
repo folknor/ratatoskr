@@ -16,10 +16,10 @@
 
 use rusqlite::params;
 
-use db::db::{ReadDbState, ReadError, WriterPool, WriteTarget};
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_server_id_and_source_sync, upsert_contact_sync,
 };
+use db::db::{ReadDbState, ReadError, WriteTarget, WriterPool};
 use sync::state as sync_state;
 
 use super::client::JmapClient;
@@ -230,15 +230,16 @@ pub async fn jmap_contacts_initial_sync(
     let count = extracted.len();
 
     let aid = account_id.to_string();
-    writer.with_write(move |conn| {
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        for contact in &extracted {
-            persist_jmap_contact(&tx, &aid, contact)?;
-        }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await?;
+    writer
+        .with_write(move |conn| {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            for contact in &extracted {
+                persist_jmap_contact(&tx, &aid, contact)?;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await?;
 
     // Save state for delta sync
     sync_state::save_jmap_sync_state(writer, account_id, "ContactCard", &state).await?;
@@ -310,15 +311,16 @@ pub async fn jmap_contacts_delta_sync(
 
                 let aid = account_id.to_string();
                 let batch_count = extracted.len();
-                writer.with_write(move |conn| {
-                    let tx = conn.transaction().map_err(|e| e.to_string())?;
-                    for contact in &extracted {
-                        persist_jmap_contact(&tx, &aid, contact)?;
-                    }
-                    tx.commit().map_err(|e| e.to_string())?;
-                    Ok(())
-                })
-                .await?;
+                writer
+                    .with_write(move |conn| {
+                        let tx = conn.transaction().map_err(|e| e.to_string())?;
+                        for contact in &extracted {
+                            persist_jmap_contact(&tx, &aid, contact)?;
+                        }
+                        tx.commit().map_err(|e| e.to_string())?;
+                        Ok(())
+                    })
+                    .await?;
 
                 total_affected += batch_count;
             }
@@ -329,13 +331,14 @@ pub async fn jmap_contacts_delta_sync(
             let destroyed_ids: Vec<String> = destroyed.to_vec();
             let aid = account_id.to_string();
             let destroy_count = destroyed_ids.len();
-            writer.with_write(move |conn| {
-                for server_id in &destroyed_ids {
-                    delete_jmap_contact(conn, &aid, server_id)?;
-                }
-                Ok(())
-            })
-            .await?;
+            writer
+                .with_write(move |conn| {
+                    for server_id in &destroyed_ids {
+                        delete_jmap_contact(conn, &aid, server_id)?;
+                    }
+                    Ok(())
+                })
+                .await?;
             total_affected += destroy_count;
         }
 

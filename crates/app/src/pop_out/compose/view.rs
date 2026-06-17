@@ -317,7 +317,12 @@ fn from_account_picker<'a>(
         ))
         .padding(PAD_INPUT)
         .width(Length::Fill)
-        .style(theme::ButtonClass::Dropdown { selected: is_selected }.style());
+        .style(
+            theme::ButtonClass::Dropdown {
+                selected: is_selected,
+            }
+            .style(),
+        );
         items = items.push(item);
     }
 
@@ -404,12 +409,11 @@ fn build_recipient_row_inner<'a>(
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
 
-    let mut overlay = crate::ui::anchored_overlay::anchored_overlay(field).on_dismiss(
-        Message::PopOut(
+    let mut overlay =
+        crate::ui::anchored_overlay::anchored_overlay(field).on_dismiss(Message::PopOut(
             window_id,
             PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
-        ),
-    );
+        ));
     if let Some(dropdown) = autocomplete_dropdown {
         overlay = overlay.popup(dropdown);
     }
@@ -594,12 +598,9 @@ fn compose_footer<'a>(
     .padding(PAD_BUTTON);
 
     let save_btn = button(
-        row![
-            icon::download().size(ICON_LG),
-            text("Save").size(TEXT_LG),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
+        row![icon::download().size(ICON_LG), text("Save").size(TEXT_LG),]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
     )
     .style(theme::ButtonClass::Action.style())
     .on_press(Message::PopOut(

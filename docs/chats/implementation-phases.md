@@ -176,7 +176,7 @@ Build stripping as a reusable module in `common` - it's useful beyond chats.
 - "Sending..." indicator on the bubble until provider confirms
 
 **Emoji shortcodes:**
-- Inline translation (`:thumbsup:` → 👍)
+- Inline translation (`:thumbsup:` → )
 - Small shortcode table (50-100 common ones)
 - Defer emoji picker to Phase 6
 

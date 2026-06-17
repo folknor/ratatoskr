@@ -49,8 +49,7 @@ pub(crate) async fn handle_group_save(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(ContactGroupSaveAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(ContactGroupSaveAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_group_delete(
@@ -62,8 +61,7 @@ pub(crate) async fn handle_group_delete(
         .with_write(move |conn| db::db::queries_extra::delete_group_sync(conn, &params.id))
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(ContactGroupDeleteAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(ContactGroupDeleteAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_contact_save(

@@ -54,10 +54,10 @@ use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::provider::{classify_provider_error, create_provider};
 use super::wire_conversion::wire_to_mail;
-use common::types::ActionProviderCtx;
-use db::progress::NoopProgressReporter;
 use crate::boot::BootSharedState;
 use crate::boot_progress::send_must_deliver_notification;
+use common::types::ActionProviderCtx;
+use db::progress::NoopProgressReporter;
 
 /// Lease duration for ops the worker is currently executing. The next
 /// boot's `recover_stale_leases` resets any lease whose
@@ -201,9 +201,14 @@ async fn drain_mark_chat_read_jobs(
             let write_db = ctx.write_db.clone();
             let _ = write_db
                 .with_write(move |conn| {
-                    finalize_job(conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
+                    finalize_job(
+                        conn,
+                        &job_id_bytes,
+                        JobTerminalStatus::Failed,
+                        &summary_blob,
+                    )
                 })
-            .await;
+                .await;
         }
     }
 }
@@ -247,7 +252,12 @@ async fn run_mark_chat_read(
     let job_id_bytes = job.job_id;
     ctx.write_db
         .with_write(move |conn| {
-            finalize_job(conn, &job_id_bytes, JobTerminalStatus::Completed, &summary_blob)
+            finalize_job(
+                conn,
+                &job_id_bytes,
+                JobTerminalStatus::Completed,
+                &summary_blob,
+            )
         })
         .await?;
 
@@ -307,9 +317,14 @@ async fn drain_send_jobs(
             let write_db = ctx.write_db.clone();
             let _ = write_db
                 .with_write(move |conn| {
-                    finalize_job(conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
+                    finalize_job(
+                        conn,
+                        &job_id_bytes,
+                        JobTerminalStatus::Failed,
+                        &summary_blob,
+                    )
                 })
-            .await;
+                .await;
 
             // Best-effort vault cleanup. If the deserialize failed we
             // never learned the send_id, but the job_id IS the
@@ -400,9 +415,8 @@ async fn build_send_request(
     tokio::task::spawn_blocking(move || {
         let mut attachments = Vec::with_capacity(payload.attachments.len());
         for att in payload.attachments {
-            let data = std::fs::read(&att.vault_path).map_err(|e| {
-                format!("read vault file {}: {e}", att.vault_path.display())
-            })?;
+            let data = std::fs::read(&att.vault_path)
+                .map_err(|e| format!("read vault file {}: {e}", att.vault_path.display()))?;
             attachments.push(crate::send::SendAttachment {
                 filename: att.filename,
                 mime_type: att.mime,
@@ -477,11 +491,7 @@ pub(crate) fn build_action_context(
 /// one op, dispatches via `batch_execute`, persists the outcome, and
 /// emits the wire notifications. Returns when `lease_next_ready_op`
 /// returns `None` (no more pending rows).
-async fn drain_one_pass(
-    ctx: &ActionContext,
-    out_tx: &mpsc::Sender<Vec<u8>>,
-    owner: &[u8; 16],
-) {
+async fn drain_one_pass(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>, owner: &[u8; 16]) {
     // Sweep mail-plan jobs whose ops are all terminal but whose parent
     // job_status is not. This is the recovery path for a crash between
     // mark_op_terminal (clears the op lease) and finalize_job (writes
@@ -534,8 +544,8 @@ async fn drain_one_pass(
                         retryable: false,
                     },
                 };
-                let _ = persist_and_emit(ctx, out_tx, &leased, OpTerminalStatus::Failed, result)
-                    .await;
+                let _ =
+                    persist_and_emit(ctx, out_tx, &leased, OpTerminalStatus::Failed, result).await;
             }
         }
 
@@ -585,10 +595,7 @@ async fn run_one(
             );
             let result = OperationResult::RemoteFailure {
                 failure: RemoteFailure {
-                    provider_message: format!(
-                        "JournalCorrupt: unknown kind {:?}",
-                        op.raw_kind,
-                    ),
+                    provider_message: format!("JournalCorrupt: unknown kind {:?}", op.raw_kind,),
                     http_status: None,
                     retryable: false,
                 },
@@ -669,11 +676,8 @@ async fn run_one_calendar(
             result: cal_result,
             service_generation: 0,
         };
-        send_must_deliver_notification(
-            out_tx,
-            &Notification::CalendarOperationOutcome(outcome),
-        )
-        .await;
+        send_must_deliver_notification(out_tx, &Notification::CalendarOperationOutcome(outcome))
+            .await;
     }
     Ok(())
 }
@@ -685,8 +689,8 @@ async fn persist_and_emit(
     status: OpTerminalStatus,
     result: OperationResult,
 ) -> Result<(), String> {
-    let outcome_blob = serde_json::to_vec(&result)
-        .map_err(|e| format!("serialize OperationResult: {e}"))?;
+    let outcome_blob =
+        serde_json::to_vec(&result).map_err(|e| format!("serialize OperationResult: {e}"))?;
     let plan_id = op.plan_id;
     let operation_id = op.operation_id;
     let blob_for_blocking = outcome_blob.clone();
@@ -758,8 +762,7 @@ async fn maybe_finalize(
     // partial-failure state to the user (e.g. "create event when
     // offline" -> `LocalOnly { reason }` -> "not synced" indicator)
     // rather than collapsing every terminal plan to `Ok(())`.
-    let needs_cal_completion =
-        matches!(kind, Some(PerOpJobKind::CalendarPlan) | None);
+    let needs_cal_completion = matches!(kind, Some(PerOpJobKind::CalendarPlan) | None);
     let cal_results = if needs_cal_completion {
         let plan_id_for_blocking = *plan_id_bytes;
         let rows: Vec<(u32, Vec<u8>)> = ctx
@@ -768,8 +771,8 @@ async fn maybe_finalize(
             .await?;
         let mut outcomes = Vec::with_capacity(rows.len());
         for (operation_id, blob) in rows {
-            let result: service_api::CalendarOperationResult =
-                serde_json::from_slice(&blob).map_err(|e| {
+            let result: service_api::CalendarOperationResult = serde_json::from_slice(&blob)
+                .map_err(|e| {
                     format!("deserialize CalendarOperationResult for op {operation_id}: {e}")
                 })?;
             outcomes.push(CalendarOperationOutcome {
@@ -826,8 +829,10 @@ async fn maybe_finalize(
 }
 
 async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
-    let result: Result<Vec<ReplayableOp>, String> =
-        ctx.write_db.with_write(|conn| unemitted_terminal_ops(conn)).await;
+    let result: Result<Vec<ReplayableOp>, String> = ctx
+        .write_db
+        .with_write(|conn| unemitted_terminal_ops(conn))
+        .await;
     let ops = match result {
         Ok(ops) => ops,
         Err(error) => {
@@ -838,7 +843,10 @@ async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
     if ops.is_empty() {
         return;
     }
-    log::info!("action worker: replaying {} unemitted terminal outcomes", ops.len());
+    log::info!(
+        "action worker: replaying {} unemitted terminal outcomes",
+        ops.len()
+    );
     for op in ops {
         if op.quiet {
             continue;
@@ -867,19 +875,19 @@ async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
                     .await;
             }
             Some(PerOpJobKind::CalendarPlan) => {
-                let result: CalendarOperationResult =
-                    match serde_json::from_slice(&op.outcome_blob) {
-                        Ok(r) => r,
-                        Err(error) => {
-                            log::warn!(
-                                "action worker: failed to deserialize CalendarOperationResult \
+                let result: CalendarOperationResult = match serde_json::from_slice(&op.outcome_blob)
+                {
+                    Ok(r) => r,
+                    Err(error) => {
+                        log::warn!(
+                            "action worker: failed to deserialize CalendarOperationResult \
                                  replay outcome for {:?}/{}: {error}",
-                                op.plan_id,
-                                op.operation_id,
-                            );
-                            continue;
-                        }
-                    };
+                            op.plan_id,
+                            op.operation_id,
+                        );
+                        continue;
+                    }
+                };
                 let outcome = CalendarOperationOutcome {
                     plan_id: PlanId(uuid::Uuid::from_bytes(op.plan_id)),
                     operation_id: OperationId(op.operation_id),
@@ -914,9 +922,7 @@ fn action_outcome_to_wire(outcome: ActionOutcome) -> (OpTerminalStatus, Operatio
         ActionOutcome::Success | ActionOutcome::NoOp => {
             (OpTerminalStatus::Done, OperationResult::Success)
         }
-        ActionOutcome::LocalOnly { .. } => {
-            (OpTerminalStatus::Done, OperationResult::LocalOnly)
-        }
+        ActionOutcome::LocalOnly { .. } => (OpTerminalStatus::Done, OperationResult::LocalOnly),
         ActionOutcome::Failed { error } => match error {
             ActionError::NotFound(detail) | ActionError::InvalidState(detail) => (
                 OpTerminalStatus::Conflict,
@@ -971,33 +977,31 @@ async fn mark_chat_read_remote(ctx: &ActionContext, affected: Vec<(String, Strin
     }
     for (account_id, thread_ids) in by_account {
         let provider =
-            match create_provider(&ctx.db, &ctx.write_db, &account_id, ctx.encryption_key)
-                .await
-            {
-            Ok(p) => p,
-            Err(error) => {
-                let kind = classify_provider_error(&error);
-                let retryable = matches!(
-                    kind,
-                    RemoteFailureKind::Transient | RemoteFailureKind::Unknown
-                );
-                for thread_id in &thread_ids {
-                    let outcome = ActionOutcome::LocalOnly {
-                        reason: ActionError::remote_with_kind(kind, error.clone()),
-                        retryable,
-                    };
-                    enqueue_if_retryable(
-                        ctx,
-                        &outcome,
-                        &account_id,
-                        "markRead",
-                        thread_id,
-                        r#"{"read":true}"#,
-                    )
-                    .await;
+            match create_provider(&ctx.db, &ctx.write_db, &account_id, ctx.encryption_key).await {
+                Ok(p) => p,
+                Err(error) => {
+                    let kind = classify_provider_error(&error);
+                    let retryable = matches!(
+                        kind,
+                        RemoteFailureKind::Transient | RemoteFailureKind::Unknown
+                    );
+                    for thread_id in &thread_ids {
+                        let outcome = ActionOutcome::LocalOnly {
+                            reason: ActionError::remote_with_kind(kind, error.clone()),
+                            retryable,
+                        };
+                        enqueue_if_retryable(
+                            ctx,
+                            &outcome,
+                            &account_id,
+                            "markRead",
+                            thread_id,
+                            r#"{"read":true}"#,
+                        )
+                        .await;
+                    }
+                    continue;
                 }
-                continue;
-            }
             };
         for thread_id in thread_ids {
             let provider_ctx = ActionProviderCtx {

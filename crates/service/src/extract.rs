@@ -41,8 +41,10 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::boot_progress::NotificationSender;
-use crate::text_extract::{ExtractionOutcome, MAX_INPUT_BYTES, PER_EXTRACTION_TIMEOUT_SECS,
-    SkipReason, extract as run_extractor, truncate_on_char_boundary, MAX_EXTRACTED_TEXT_BYTES};
+use crate::text_extract::{
+    ExtractionOutcome, MAX_EXTRACTED_TEXT_BYTES, MAX_INPUT_BYTES, PER_EXTRACTION_TIMEOUT_SECS,
+    SkipReason, extract as run_extractor, truncate_on_char_boundary,
+};
 
 /// Bounded concurrency for in-flight extractions. Per the plan: cap 4
 /// keeps PDF / OOXML CPU pressure manageable without serializing too
@@ -58,9 +60,9 @@ const COMMAND_QUEUE_CAPACITY: usize = 256;
 /// Single extraction work item.
 #[derive(Debug, Clone)]
 pub(crate) struct ExtractWork {
-    pub content_hash:  db::blob_hash::BlobHash,
-    pub account_id:    String,
-    pub message_id:    String,
+    pub content_hash: db::blob_hash::BlobHash,
+    pub account_id: String,
+    pub message_id: String,
     #[allow(dead_code)] // Surfaced in 7-7's re-index fan-out + 7-8's attribution.
     pub attachment_id: String,
 }
@@ -202,7 +204,11 @@ impl ExtractRuntime {
                 // queue-depth + dedupe insertion so accounting stays
                 // consistent.
                 self.inner.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                self.inner.in_flight_hashes.lock().await.remove(&work.content_hash);
+                self.inner
+                    .in_flight_hashes
+                    .lock()
+                    .await
+                    .remove(&work.content_hash);
                 Err("ExtractRuntime worker exited".into())
             }
         }
@@ -291,10 +297,7 @@ impl ExtractRuntime {
     }
 }
 
-async fn run_worker(
-    inner: Arc<ExtractRuntimeInner>,
-    mut rx: mpsc::Receiver<ExtractWork>,
-) {
+async fn run_worker(inner: Arc<ExtractRuntimeInner>, mut rx: mpsc::Receiver<ExtractWork>) {
     let semaphore = Arc::new(Semaphore::new(WORKER_CONCURRENCY));
     let cancellation = inner.cancellation.clone();
     // H1 fix: track per-item tasks in a JoinSet so the worker can
@@ -526,7 +529,9 @@ async fn run_extraction_pipeline(
         if status == "indexed" {
             fan_out_reindex(inner, &work.content_hash).await;
         }
-        return ExtractionOutcome::AlreadyResolved { previous_status: status };
+        return ExtractionOutcome::AlreadyResolved {
+            previous_status: status,
+        };
     }
 
     // Fetch metadata for this attachment (filename + mime), needed by
@@ -555,13 +560,12 @@ async fn run_extraction_pipeline(
                 )
                 .map_err(|e| format!("prepare attachment meta: {e}"))?;
             let mut rows = stmt
-                .query_map(
-                    rusqlite::params![hash_for_meta],
-                    |row| Ok((
+                .query_map(rusqlite::params![hash_for_meta], |row| {
+                    Ok((
                         row.get::<_, Option<String>>(0)?,
                         row.get::<_, Option<String>>(1)?,
-                    )),
-                )
+                    ))
+                })
                 .map_err(|e| format!("query attachment meta: {e}"))?;
             let first = rows.next().transpose().map_err(|e| e.to_string())?;
             Ok::<Option<(Option<String>, Option<String>)>, String>(first)
@@ -593,10 +597,14 @@ async fn run_extraction_pipeline(
                 inner,
                 &work.content_hash,
                 &mime_type,
-                &ExtractionOutcome::Skipped { reason: SkipReason::BytesGone },
+                &ExtractionOutcome::Skipped {
+                    reason: SkipReason::BytesGone,
+                },
             )
             .await;
-            return ExtractionOutcome::Skipped { reason: SkipReason::BytesGone };
+            return ExtractionOutcome::Skipped {
+                reason: SkipReason::BytesGone,
+            };
         }
     };
     let bytes = match tokio::fs::read(&materialized.path).await {
@@ -606,10 +614,14 @@ async fn run_extraction_pipeline(
                 inner,
                 &work.content_hash,
                 &mime_type,
-                &ExtractionOutcome::Skipped { reason: SkipReason::BytesGone },
+                &ExtractionOutcome::Skipped {
+                    reason: SkipReason::BytesGone,
+                },
             )
             .await;
-            return ExtractionOutcome::Skipped { reason: SkipReason::BytesGone };
+            return ExtractionOutcome::Skipped {
+                reason: SkipReason::BytesGone,
+            };
         }
         Err(e) => {
             log::warn!("read {} failed: {e}", materialized.path.display());
@@ -617,15 +629,21 @@ async fn run_extraction_pipeline(
                 inner,
                 &work.content_hash,
                 &mime_type,
-                &ExtractionOutcome::Failed { error: format!("read: {e}") },
+                &ExtractionOutcome::Failed {
+                    error: format!("read: {e}"),
+                },
             )
             .await;
-            return ExtractionOutcome::Failed { error: format!("read: {e}") };
+            return ExtractionOutcome::Failed {
+                error: format!("read: {e}"),
+            };
         }
     };
 
     if bytes.len() > MAX_INPUT_BYTES {
-        let outcome = ExtractionOutcome::Skipped { reason: SkipReason::OversizeFile };
+        let outcome = ExtractionOutcome::Skipped {
+            reason: SkipReason::OversizeFile,
+        };
         persist_outcome_row(inner, &work.content_hash, &mime_type, &outcome).await;
         return outcome;
     }
@@ -650,16 +668,22 @@ async fn run_extraction_pipeline(
         Ok(Err(join_err)) => {
             log::error!(
                 "extractor JoinError on hash {} ({} bytes, mime {mime_type}): {join_err:?}",
-                work.content_hash, bytes_len,
+                work.content_hash,
+                bytes_len,
             );
-            ExtractionOutcome::Failed { error: format!("join: {join_err}") }
+            ExtractionOutcome::Failed {
+                error: format!("join: {join_err}"),
+            }
         }
         Err(_) => {
             log::warn!(
                 "extractor timeout on hash {} ({} bytes, mime {mime_type})",
-                work.content_hash, bytes_len,
+                work.content_hash,
+                bytes_len,
             );
-            ExtractionOutcome::Skipped { reason: SkipReason::Timeout }
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::Timeout,
+            }
         }
     };
 
@@ -837,9 +861,9 @@ async fn fan_out_reindex_chunk(
         let attachments: Vec<AttachmentDocFragment> = attachment_rows
             .into_iter()
             .map(|r| AttachmentDocFragment {
-                attachment_id:  r.attachment_id,
-                filename:       r.filename,
-                mime:           r.mime_type,
+                attachment_id: r.attachment_id,
+                filename: r.filename,
+                mime: r.mime_type,
                 extracted_text: r.extracted_text,
             })
             .collect();
@@ -1008,7 +1032,11 @@ mod tests {
         };
         let result = runtime.enqueue(work).await;
         assert!(result.is_ok(), "dedupe path should be Ok no-op");
-        assert_eq!(runtime.status_snapshot().0, 0, "queue_depth should not increment on dedupe");
+        assert_eq!(
+            runtime.status_snapshot().0,
+            0,
+            "queue_depth should not increment on dedupe"
+        );
         runtime.shutdown().await;
     }
 
@@ -1143,16 +1171,17 @@ mod tests {
             CancellationToken::new(),
         );
 
-        fan_out_reindex(&runtime.inner, &db::blob_hash::BlobHash::hash(b"no-such-hash")).await;
+        fan_out_reindex(
+            &runtime.inner,
+            &db::blob_hash::BlobHash::hash(b"no-such-hash"),
+        )
+        .await;
 
         // The worker task holds an Arc<inner> that keeps the
         // SearchWriteHandle alive, so `recv()` never returns None.
         // Use a short timeout instead and assert nothing arrived.
-        let timed = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            search_rx.recv(),
-        )
-        .await;
+        let timed =
+            tokio::time::timeout(std::time::Duration::from_millis(50), search_rx.recv()).await;
         assert!(
             timed.is_err(),
             "no command should be sent for an empty fan-out (got {:?})",

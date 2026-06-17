@@ -46,7 +46,9 @@ async fn try_inline_image_materialize(
         .get(content_hash.to_hex())
         .await
         .map_err(|e| ServiceError::Internal(format!("inline image get: {e}")))?;
-    let Some((bytes, _mime)) = hit else { return Ok(None) };
+    let Some((bytes, _mime)) = hit else {
+        return Ok(None);
+    };
     let materialized =
         attachment_materialize::write_bytes_to_tmp(boot_state, content_hash, bytes).await?;
     Ok(Some(materialized))
@@ -160,8 +162,8 @@ pub(crate) async fn handle_fetch(
                 boot_state,
                 crate::extract::ExtractWork {
                     content_hash,
-                    account_id:   params.account_id.clone(),
-                    message_id:   params.message_id.clone(),
+                    account_id: params.account_id.clone(),
+                    message_id: params.message_id.clone(),
                     attachment_id: info.id.clone(),
                 },
             );
@@ -217,7 +219,8 @@ pub(crate) async fn handle_fetch(
         attachment.bytes,
         boot_state.compress_attachments_enabled(),
         boot_state.allow_lossy_compression_enabled(),
-    ).await;
+    )
+    .await;
 
     let pack_store = boot_state.pack_store().ok_or_else(|| {
         ServiceError::Internal(
@@ -235,11 +238,7 @@ pub(crate) async fn handle_fetch(
         let id = info.id;
         write_db
             .with_write(move |conn| {
-                db::db::queries_extra::update_attachment_cache_fields(
-                    conn,
-                    &id,
-                    &content_hash,
-                )
+                db::db::queries_extra::update_attachment_cache_fields(conn, &id, &content_hash)
             })
             .await
             .map_err(ServiceError::Internal)?;
@@ -255,8 +254,8 @@ pub(crate) async fn handle_fetch(
         boot_state,
         crate::extract::ExtractWork {
             content_hash,
-            account_id:    params.account_id.clone(),
-            message_id:    params.message_id.clone(),
+            account_id: params.account_id.clone(),
+            message_id: params.message_id.clone(),
             attachment_id: local_attachment_id,
         },
     );
@@ -335,7 +334,10 @@ pub(crate) async fn handle_cache_size(
         .size_breakdown()
         .await
         .map_err(|e| ServiceError::Internal(format!("attachment.cache_size: {e}")))?;
-    let ack = AttachmentCacheSizeAck { live_bytes, tombstoned_bytes };
+    let ack = AttachmentCacheSizeAck {
+        live_bytes,
+        tombstoned_bytes,
+    };
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
@@ -366,9 +368,7 @@ pub(crate) async fn handle_clear_cache(
 
     let notification_tx = boot_state
         .notification_sender()
-        .ok_or_else(|| {
-            ServiceError::Internal("notification sender not installed".into())
-        })?;
+        .ok_or_else(|| ServiceError::Internal("notification sender not installed".into()))?;
     // service_generation is wire-reserved for the UI: the Service emits
     // 0 here and the UI's reader stamps the real value at enqueue time.
     // See `boot_progress.rs` module docs.
@@ -378,7 +378,8 @@ pub(crate) async fn handle_clear_cache(
         0,
         crate::gc::GcTrigger::ClearCache,
         crate::gc::DEFAULT_DENSITY_THRESHOLD,
-    ).await;
+    )
+    .await;
     let ack = AttachmentClearCacheAck {
         blobs_tombstoned,
         bytes_reclaimed: gc_stats.bytes_reclaimed,
@@ -386,12 +387,8 @@ pub(crate) async fn handle_clear_cache(
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
-pub(crate) async fn handle_eviction_kick(
-    _boot_state: &Arc<BootSharedState>,
-) -> Result<(), String> {
-    log::debug!(
-        "attachment.eviction_kick: no-op (Phase 3 retired the LRU sweep; Phase 8 reuses)"
-    );
+pub(crate) async fn handle_eviction_kick(_boot_state: &Arc<BootSharedState>) -> Result<(), String> {
+    log::debug!("attachment.eviction_kick: no-op (Phase 3 retired the LRU sweep; Phase 8 reuses)");
     Ok(())
 }
 

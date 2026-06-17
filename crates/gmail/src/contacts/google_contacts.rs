@@ -2,17 +2,16 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use db::db::{ReadDbState, WriterPool, WriteTarget};
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
 };
+use db::db::{ReadDbState, WriteTarget, WriterPool};
 use sync::state as sync_state;
 
 use super::super::client::GmailClient;
 use super::{
-    PAGE_SIZE, PeopleConnectionsResponse, Person, SyncContactsResult,
-    extract_avatar_url, extract_display_name, extract_primary_email,
-    people_api_base,
+    PAGE_SIZE, PeopleConnectionsResponse, Person, SyncContactsResult, extract_avatar_url,
+    extract_display_name, extract_primary_email, people_api_base,
 };
 
 const PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,photos,metadata";
@@ -102,16 +101,15 @@ async fn full_sync(
 
     let aid = account_id.to_string();
     let seen = seen_resource_names;
-    writer.with_write(move |conn| {
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("begin tx: {e}"))?;
-        persist_google_contacts(&tx, &aid, &all_persons)?;
-        let pruned = prune_stale_google_contacts(&tx, &aid, &seen)?;
-        tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-        Ok(pruned)
-    })
-    .await?;
+    writer
+        .with_write(move |conn| {
+            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
+            persist_google_contacts(&tx, &aid, &all_persons)?;
+            let pruned = prune_stale_google_contacts(&tx, &aid, &seen)?;
+            tx.commit().map_err(|e| format!("commit tx: {e}"))?;
+            Ok(pruned)
+        })
+        .await?;
 
     // Save sync token for future incremental syncs
     if let Some(ref token) = sync_token {
@@ -188,18 +186,17 @@ async fn incremental_sync(
     if !upserts.is_empty() || !deleted_resource_names.is_empty() {
         let aid = account_id.to_string();
         let deleted_owned = deleted_resource_names;
-        writer.with_write(move |conn| {
-            let tx = conn
-                .transaction()
-                .map_err(|e| format!("begin tx: {e}"))?;
-            persist_google_contacts(&tx, &aid, &upserts)?;
-            for resource_name in &deleted_owned {
-                delete_google_contact(&tx, &aid, resource_name)?;
-            }
-            tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-            Ok(())
-        })
-        .await?;
+        writer
+            .with_write(move |conn| {
+                let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
+                persist_google_contacts(&tx, &aid, &upserts)?;
+                for resource_name in &deleted_owned {
+                    delete_google_contact(&tx, &aid, resource_name)?;
+                }
+                tx.commit().map_err(|e| format!("commit tx: {e}"))?;
+                Ok(())
+            })
+            .await?;
     }
 
     if let Some(ref token) = new_sync_token {

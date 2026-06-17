@@ -55,7 +55,9 @@ pub(super) async fn fetch_mailbox_list_from_server(
 }
 
 /// Get the first identity ID for email submission.
-pub async fn get_first_identity_id(client: &bifrost_jmap::client::Client) -> Result<String, String> {
+pub async fn get_first_identity_id(
+    client: &bifrost_jmap::client::Client,
+) -> Result<String, String> {
     log::debug!("[JMAP] Fetching identity for email submission");
     let mut request = client.build();
     let account_id = request.default_account_id().to_string();

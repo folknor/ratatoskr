@@ -134,7 +134,10 @@ pub enum BootPhaseKind {
 pub enum BootPhase {
     LoadingKey,
     OpeningDatabase,
-    Migrating { current: u32, total: u32 },
+    Migrating {
+        current: u32,
+        total: u32,
+    },
     RecoveringPendingOps,
     SweepingQueuedDrafts,
     BackfillingThreadParticipants,

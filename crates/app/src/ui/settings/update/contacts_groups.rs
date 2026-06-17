@@ -1,5 +1,5 @@
-use iced::time::Instant;
 use iced::Task;
+use iced::time::Instant;
 
 use crate::ui::settings::types::*;
 use crate::ui::undoable::UndoableText;
@@ -221,7 +221,10 @@ impl Settings {
         Task::none()
     }
 
-    pub(super) fn handle_import_toggle_header(&mut self, has_header: bool) -> Task<SettingsMessage> {
+    pub(super) fn handle_import_toggle_header(
+        &mut self,
+        has_header: bool,
+    ) -> Task<SettingsMessage> {
         let Some(ref mut wizard) = self.import_wizard else {
             return Task::none();
         };
@@ -253,7 +256,9 @@ impl Settings {
         Task::none()
     }
 
-    pub(super) fn handle_import_execute(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    pub(super) fn handle_import_execute(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let Some(ref mut wizard) = self.import_wizard else {
             return (Task::none(), None);
         };

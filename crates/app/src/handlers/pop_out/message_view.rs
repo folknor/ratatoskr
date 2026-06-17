@@ -70,8 +70,7 @@ pub(super) fn handle_message_view_update(
         // `dispatcher.rs::handle_pop_out_message` so they can reach
         // the App-level shared handler. If they arrive here it's a
         // routing regression - log and drop.
-        MessageViewMessage::OpenAttachment(att_id)
-        | MessageViewMessage::SaveAttachment(att_id) => {
+        MessageViewMessage::OpenAttachment(att_id) | MessageViewMessage::SaveAttachment(att_id) => {
             log::warn!(
                 "MessageViewMessage::{{Open,Save}}Attachment({att_id}) reached \
                  message_view.rs - dispatcher routing regression",

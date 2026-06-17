@@ -122,8 +122,7 @@ impl ReadyApp {
         let Some(client) = self.service_client.as_ref().cloned() else {
             if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
                 state.sending = false;
-                state.status =
-                    Some("Send unavailable \u{2014} Service not connected".to_string());
+                state.status = Some("Send unavailable \u{2014} Service not connected".to_string());
             }
             return Task::none();
         };
@@ -140,8 +139,7 @@ impl ReadyApp {
         let wire = match stage_and_build_wire(&app_data_dir, send_id, request) {
             Ok(w) => w,
             Err(error) => {
-                if let Some(PopOutWindow::Compose(state)) =
-                    self.pop_out_windows.get_mut(&window_id)
+                if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
                     state.status = Some(format!("Send failed: {error}"));
@@ -154,8 +152,7 @@ impl ReadyApp {
         // can fire SendCompleted against this window.
         self.in_flight_sends.insert(send_id, window_id);
 
-        let staging_dir =
-            app_data_dir.join("staging").join(send_id.to_string());
+        let staging_dir = app_data_dir.join("staging").join(send_id.to_string());
         Task::perform(
             async move {
                 let result = client.send_email(wire).await;
@@ -184,9 +181,7 @@ impl ReadyApp {
                     Err(error) => Message::SendCompleted {
                         window_id,
                         outcome: service_api::actions::ActionOutcome::Failed {
-                            error: service_api::actions::ActionError::remote(format!(
-                                "{error}"
-                            )),
+                            error: service_api::actions::ActionError::remote(format!("{error}")),
                         },
                     },
                 }
@@ -201,7 +196,8 @@ impl ReadyApp {
         outcome: &service_api::actions::ActionOutcome,
     ) -> Task<Message> {
         match outcome {
-            service_api::actions::ActionOutcome::Success | service_api::actions::ActionOutcome::NoOp => {
+            service_api::actions::ActionOutcome::Success
+            | service_api::actions::ActionOutcome::NoOp => {
                 self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
@@ -237,9 +233,7 @@ fn stage_and_build_wire(
     send_id: service_api::PlanId,
     request: service_api::actions::SendRequest,
 ) -> Result<service_api::SendWireRequest, String> {
-    let staging_dir: PathBuf = app_data_dir
-        .join("staging")
-        .join(send_id.to_string());
+    let staging_dir: PathBuf = app_data_dir.join("staging").join(send_id.to_string());
     if let Err(error) = std::fs::create_dir_all(&staging_dir) {
         return Err(format!(
             "create staging dir {}: {error}",
@@ -253,10 +247,7 @@ fn stage_and_build_wire(
         let staged_path = staging_dir.join(&relative);
         if let Err(error) = write_atomic(&staged_path, &att.data) {
             let _ = std::fs::remove_dir_all(&staging_dir);
-            return Err(format!(
-                "write staging {}: {error}",
-                staged_path.display()
-            ));
+            return Err(format!("write staging {}: {error}", staged_path.display()));
         }
         let content_hash = *rtsk::blob_hash::BlobHash::hash(&att.data).as_bytes();
         let size = att.data.len() as u64;

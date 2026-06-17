@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use mail_parser::MessageParser;
 use crate::db::{WriteConn, WriteTxn};
+use mail_parser::MessageParser;
 
 use crate::db::lookups;
 
@@ -595,12 +595,8 @@ pub fn delete_messages_and_cleanup_threads(
         } else {
             let aggregate = compute_thread_aggregate(tx, account_id, tid)?;
             upsert_thread_aggregate(tx, account_id, tid, &aggregate, None, None)?;
-            super::message_membership::recompute_thread_folders_from_messages(
-                tx, account_id, tid,
-            )?;
-            super::message_membership::recompute_thread_labels_from_messages(
-                tx, account_id, tid,
-            )?;
+            super::message_membership::recompute_thread_folders_from_messages(tx, account_id, tid)?;
+            super::message_membership::recompute_thread_labels_from_messages(tx, account_id, tid)?;
 
             tx.execute(
                 "DELETE FROM thread_participants WHERE account_id = ?1 AND thread_id = ?2",
@@ -698,17 +694,14 @@ pub fn reassign_messages_and_repair_threads(
         return Ok(());
     }
 
-    let old_thread_ids = query_old_thread_ids_for_messages(tx, account_id, new_thread_id, message_ids)?;
+    let old_thread_ids =
+        query_old_thread_ids_for_messages(tx, account_id, new_thread_id, message_ids)?;
     update_message_thread_ids(tx, account_id, new_thread_id, message_ids)?;
 
     for old_tid in &old_thread_ids {
         repair_thread_after_message_reassignment(tx, account_id, old_tid, user_emails)?;
-        super::message_membership::recompute_thread_folders_from_messages(
-            tx, account_id, old_tid,
-        )?;
-        super::message_membership::recompute_thread_labels_from_messages(
-            tx, account_id, old_tid,
-        )?;
+        super::message_membership::recompute_thread_folders_from_messages(tx, account_id, old_tid)?;
+        super::message_membership::recompute_thread_labels_from_messages(tx, account_id, old_tid)?;
     }
 
     rebuild_thread_participants(tx, account_id, new_thread_id)?;
@@ -868,9 +861,7 @@ pub fn backfill_thread_participants_for_account_sync(
     account_id: &str,
     user_emails: &[String],
 ) -> Result<usize, String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin: {e}"))?;
 
     let thread_ids: Vec<String> = {
         let mut stmt = tx

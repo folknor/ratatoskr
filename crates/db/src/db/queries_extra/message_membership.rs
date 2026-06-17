@@ -140,8 +140,16 @@ pub fn insert_full_thread_folders(
     thread_id: &str,
     folders: &[FolderKind],
 ) -> Result<(), String> {
-    let folder_ids = folders.iter().map(FolderKind::storage_id).collect::<Vec<_>>();
-    insert_thread_folder_rows(tx, account_id, thread_id, folder_ids.iter().map(String::as_str))
+    let folder_ids = folders
+        .iter()
+        .map(FolderKind::storage_id)
+        .collect::<Vec<_>>();
+    insert_thread_folder_rows(
+        tx,
+        account_id,
+        thread_id,
+        folder_ids.iter().map(String::as_str),
+    )
 }
 
 pub fn insert_full_thread_labels(
@@ -151,7 +159,12 @@ pub fn insert_full_thread_labels(
     labels: &[LabelKind],
 ) -> Result<(), String> {
     let label_ids = labels.iter().map(LabelKind::storage_id).collect::<Vec<_>>();
-    insert_thread_label_rows(tx, account_id, thread_id, label_ids.iter().map(String::as_str))
+    insert_thread_label_rows(
+        tx,
+        account_id,
+        thread_id,
+        label_ids.iter().map(String::as_str),
+    )
 }
 
 #[cfg(test)]

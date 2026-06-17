@@ -4,8 +4,8 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    LabelKind, ProviderProfile, ProviderTestResult,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderFolderEntry,
+    ProviderFolderMutation, ProviderProfile, ProviderTestResult,
 };
 use db::db::ReadDbState;
 
@@ -31,7 +31,11 @@ impl GmailOps {
 // holds the orphan-impl and sync entry-point code.
 #[async_trait]
 impl ProviderOps for GmailOps {
-    async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(
+        &self,
+        ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let remove = vec!["INBOX".to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
@@ -39,7 +43,11 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(
+        &self,
+        ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let add = vec!["TRASH".to_string()];
         let remove = vec!["INBOX".to_string()];
         self.client
@@ -226,8 +234,8 @@ impl ProviderOps for GmailOps {
             .client
             .get_attachment(message_id, attachment_id, ctx.db)
             .await?;
-        let bytes = common::encoding::decode_base64url_nopad(&att.data)
-            .map_err(ProviderError::Client)?;
+        let bytes =
+            common::encoding::decode_base64url_nopad(&att.data).map_err(ProviderError::Client)?;
         let size = bytes.len() as u64;
         Ok(FetchedAttachment { bytes, size })
     }
@@ -423,7 +431,7 @@ fn build_reaction_mime(
 ///   or an empty string if none.
 /// * `original_subject` - The `Subject` of the original message (used for `Re:` prefix).
 /// * `thread_id` - Gmail thread ID to keep the reaction in the same thread.
-/// * `emoji` - The emoji character to react with (e.g. "👍").
+/// * `emoji` - The emoji character to react with (e.g. a thumbs-up).
 // TODO(refactor): wrap headers/threading fields in a ReactionMessage struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_reaction(

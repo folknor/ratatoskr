@@ -73,7 +73,8 @@ pub fn append(data_dir: &Path, params: &SaveLocalDraftParams) -> Result<(), Stri
         epoch_ms: epoch_millis_now(),
         params: params.clone(),
     };
-    let mut line = serde_json::to_string(&entry).map_err(|e| format!("serialize wal entry: {e}"))?;
+    let mut line =
+        serde_json::to_string(&entry).map_err(|e| format!("serialize wal entry: {e}"))?;
     line.push('\n');
     let path = wal_path(data_dir);
     let first_creation = !path.exists();
@@ -91,9 +92,8 @@ pub fn append(data_dir: &Path, params: &SaveLocalDraftParams) -> Result<(), Stri
     drop(file);
     #[cfg(unix)]
     if first_creation {
-        let dir_handle = std::fs::File::open(data_dir).map_err(|e| {
-            format!("open {} for fsync: {e}", data_dir.display())
-        })?;
+        let dir_handle = std::fs::File::open(data_dir)
+            .map_err(|e| format!("open {} for fsync: {e}", data_dir.display()))?;
         dir_handle
             .sync_all()
             .map_err(|e| format!("fsync {}: {e}", data_dir.display()))?;

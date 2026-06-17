@@ -252,8 +252,8 @@ mod tests {
 
     #[test]
     fn from_method_params_accepts_null_and_missing_params() {
-        let n = ClientNotification::from_method_params("pending_ops.kick", &None)
-            .expect("missing ok");
+        let n =
+            ClientNotification::from_method_params("pending_ops.kick", &None).expect("missing ok");
         assert_eq!(n, ClientNotification::PendingOpsKick);
         let n = ClientNotification::from_method_params("pending_ops.kick", &Some(Value::Null))
             .expect("null ok");

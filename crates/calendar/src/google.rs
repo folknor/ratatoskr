@@ -469,7 +469,10 @@ fn normalize_google_event_body(mut event: serde_json::Value) -> Result<serde_jso
                 "start".to_string(),
                 google_datetime_object(start_ts, &timezone)?,
             );
-            obj.insert("end".to_string(), google_datetime_object(end_ts, &timezone)?);
+            obj.insert(
+                "end".to_string(),
+                google_datetime_object(end_ts, &timezone)?,
+            );
         }
     }
 
@@ -640,10 +643,7 @@ mod tests {
             json!("2026-02-03T10:00:00Z")
         );
         assert_eq!(normalized["start"]["timeZone"], json!("UTC"));
-        assert_eq!(
-            normalized["end"]["dateTime"],
-            json!("2026-02-03T10:30:00Z")
-        );
+        assert_eq!(normalized["end"]["dateTime"], json!("2026-02-03T10:30:00Z"));
         assert_eq!(normalized["recurrence"], json!(["RRULE:FREQ=WEEKLY"]));
         assert_eq!(normalized["transparency"], json!("transparent"));
         assert_eq!(normalized["visibility"], json!("public"));

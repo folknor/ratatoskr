@@ -13,10 +13,10 @@ mod accounts;
 mod ai;
 mod behavior;
 mod contacts;
+mod filters;
 mod general;
 mod groups;
 mod import;
-mod filters;
 mod labels;
 mod people;
 mod reference;
@@ -171,10 +171,7 @@ fn discard_changes_dialog<'a>() -> Element<'a, SettingsMessage> {
                 "Keep editing",
                 SettingsMessage::CancelDiscardEditorChanges,
             ),
-            DialogAction::destructive(
-                "Discard",
-                SettingsMessage::ConfirmDiscardEditorChanges,
-            ),
+            DialogAction::destructive("Discard", SettingsMessage::ConfirmDiscardEditorChanges),
         ],
         None,
     )
@@ -185,10 +182,7 @@ fn delete_account_dialog(account_id: &str) -> Element<'_, SettingsMessage> {
         "Delete account?",
         "All cached email, attachments, calendar entries and contacts for this account will be permanently removed from this device. This cannot be undone.",
         vec![
-            DialogAction::default_action(
-                "Cancel",
-                SettingsMessage::DeleteAccountCancelled,
-            ),
+            DialogAction::default_action("Cancel", SettingsMessage::DeleteAccountCancelled),
             DialogAction::destructive(
                 "Delete",
                 SettingsMessage::DeleteAccountConfirmed(account_id.to_string()),

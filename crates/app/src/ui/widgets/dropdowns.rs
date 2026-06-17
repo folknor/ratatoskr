@@ -17,10 +17,7 @@ use super::avatars::{account_avatar_circle, color_dot_sized, radio_circle};
 /// Element internally - callers never pass pre-built UI.
 pub enum DropdownIcon<'a> {
     /// Renders an avatar circle from a name string.
-    Avatar {
-        name: &'a str,
-        color: Option<Color>,
-    },
+    Avatar { name: &'a str, color: Option<Color> },
     /// Renders an icon glyph from a codepoint char.
     Icon(char),
     /// Renders a filled color dot.
@@ -250,8 +247,7 @@ pub fn select_with_icons<'a, M: Clone + 'a>(
     on_toggle: M,
     on_select: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
-    let selected_idx = selected_value
-        .and_then(|v| options.iter().position(|o| o.value == v));
+    let selected_idx = selected_value.and_then(|v| options.iter().position(|o| o.value == v));
 
     let (trigger_icon, trigger_label) = match selected_idx {
         Some(i) => (options[i].icon, options[i].label),
@@ -305,8 +301,8 @@ pub fn select_with_icons<'a, M: Clone + 'a>(
             let is_selected = selected_value == Some(opt.value.as_str());
             let mut item_row = row![].spacing(SPACE_XS).align_y(Alignment::Center);
             if let Some(kind) = opt.icon {
-                item_row = item_row
-                    .push(container(kind.into_element::<M>()).align_y(Alignment::Center));
+                item_row =
+                    item_row.push(container(kind.into_element::<M>()).align_y(Alignment::Center));
             }
             item_row = item_row.push(
                 container(text(opt.label).size(TEXT_MD).style(text::base))

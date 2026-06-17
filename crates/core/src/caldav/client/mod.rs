@@ -6,10 +6,10 @@ use super::parse;
 mod helpers;
 
 use helpers::{
-    PROPFIND_CALENDAR_HOME, PROPFIND_CALENDARS, PROPFIND_CTAG, PROPFIND_EVENTS,
-    PROPFIND_PRINCIPAL, ensure_collection_trailing_slash, extract_first_href_property,
-    extract_hrefs_property, prepare_if_match_etag, relativize_for_multiget_parsed,
-    response_content_type, response_etag, xml_escape_text,
+    PROPFIND_CALENDAR_HOME, PROPFIND_CALENDARS, PROPFIND_CTAG, PROPFIND_EVENTS, PROPFIND_PRINCIPAL,
+    ensure_collection_trailing_slash, extract_first_href_property, extract_hrefs_property,
+    prepare_if_match_etag, relativize_for_multiget_parsed, response_content_type, response_etag,
+    xml_escape_text,
 };
 
 /// Authentication method for the CalDAV server.
@@ -94,9 +94,8 @@ impl CalDavClient {
                     && prev.scheme() == "https"
                     && attempt.url().scheme() == "http"
                 {
-                    return attempt.error(
-                        "CalDAV refusing https -> http scheme downgrade redirect",
-                    );
+                    return attempt
+                        .error("CalDAV refusing https -> http scheme downgrade redirect");
                 }
                 attempt.follow()
             }))
@@ -212,8 +211,7 @@ impl CalDavClient {
                         );
                     }
                     if let Some(home) = homes.into_iter().next() {
-                        self.calendar_home_url =
-                            Some(self.resolve_url_against(&principal, &home));
+                        self.calendar_home_url = Some(self.resolve_url_against(&principal, &home));
                     } else {
                         // The principal returned a valid 207 but no
                         // home-set. Either the persisted principal is
@@ -555,7 +553,10 @@ impl CalDavClient {
         let resp = self
             .http
             .get(&url)
-            .header(reqwest::header::ACCEPT, "text/calendar, application/calendar+xml, */*")
+            .header(
+                reqwest::header::ACCEPT,
+                "text/calendar, application/calendar+xml, */*",
+            )
             .headers(self.auth_headers())
             .send()
             .await

@@ -8,7 +8,9 @@ use crate::ui::widgets;
 use super::state::{
     AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard, SecurityOption,
 };
-use super::views::{ghost_button, labeled_input, primary_button, security_selector, server_port_row};
+use super::views::{
+    ghost_button, labeled_input, primary_button, security_selector, server_port_row,
+};
 
 impl AddAccountWizard {
     pub(super) fn handle_submit_credentials(

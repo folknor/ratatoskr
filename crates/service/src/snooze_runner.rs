@@ -20,13 +20,16 @@ use super::actions::{ActionContext, ActionOutcome, unsnooze};
 
 pub(crate) async fn drain_due_snoozes(ctx: &ActionContext) {
     let now = chrono::Utc::now().timestamp();
-    let due = match db::db::queries_extra::db_get_snoozed_threads_due(&ctx.write_db.writer_pool(), now).await {
-        Ok(threads) => threads,
-        Err(error) => {
-            log::warn!("snooze runner: query failed: {error}");
-            return;
-        }
-    };
+    let due =
+        match db::db::queries_extra::db_get_snoozed_threads_due(&ctx.write_db.writer_pool(), now)
+            .await
+        {
+            Ok(threads) => threads,
+            Err(error) => {
+                log::warn!("snooze runner: query failed: {error}");
+                return;
+            }
+        };
     if due.is_empty() {
         return;
     }

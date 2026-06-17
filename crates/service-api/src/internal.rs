@@ -151,8 +151,7 @@ mod tests {
             plaintext: RedactedString::new("hunter2"),
         };
         let json = serde_json::to_value(&params).expect("serialize");
-        let recovered: EncryptForStorageParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: EncryptForStorageParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(params, recovered);
     }
 
@@ -172,8 +171,7 @@ mod tests {
             ciphertext: "AAAA:BBBB".to_string(),
         };
         let json = serde_json::to_value(&params).expect("serialize");
-        let recovered: DecryptForStorageParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: DecryptForStorageParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(params, recovered);
     }
 

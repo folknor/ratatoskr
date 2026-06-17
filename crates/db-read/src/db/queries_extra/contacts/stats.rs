@@ -1,5 +1,5 @@
-use crate::db::ReadDbState;
 use crate::db::FromRow;
+use crate::db::ReadDbState;
 use crate::db::types::{ContactAttachmentRow, ContactStats, RecentThread, SameDomainContact};
 use rusqlite::params;
 

@@ -30,8 +30,8 @@ pub(super) async fn handle(
 
     let snapshot = db
         .with_read(move |conn| query_job_status(conn, &job_id_bytes))
-    .await
-    .map_err(ServiceError::Internal)?;
+        .await
+        .map_err(ServiceError::Internal)?;
 
     let response = match snapshot {
         None => JobStatusResponse::NotFound,

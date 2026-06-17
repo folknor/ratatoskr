@@ -39,8 +39,8 @@ pub(super) async fn handle(
     }
 
     db.with_write(move |conn| insert_mail_plan(conn, &plan_id_bytes, &account_id, false, &ops))
-    .await
-    .map_err(ServiceError::Internal)?;
+        .await
+        .map_err(ServiceError::Internal)?;
 
     crate::test_counters::record("action.journal_write");
 
@@ -78,19 +78,13 @@ fn validate_plan(plan: &ActionWirePlan) -> Result<(), ServiceError> {
         if &op.account_id != account_id {
             return Err(ServiceError::InvalidParams {
                 method: "action.execute_plan".into(),
-                message: format!(
-                    "plan crosses accounts: {} != {}",
-                    op.account_id, account_id
-                ),
+                message: format!("plan crosses accounts: {} != {}", op.account_id, account_id),
             });
         }
         if !seen_op_ids.insert(op.operation_id) {
             return Err(ServiceError::InvalidParams {
                 method: "action.execute_plan".into(),
-                message: format!(
-                    "duplicate operation_id {:?} in plan",
-                    op.operation_id
-                ),
+                message: format!("duplicate operation_id {:?} in plan", op.operation_id),
             });
         }
     }
@@ -146,9 +140,7 @@ fn serialize_ops(plan: ActionWirePlan) -> Result<Vec<PlanOpInsert>, ServiceError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use service_api::{
-        ActionWireOperation, OperationId, PlanId, WireFolderId, WireMailOperation,
-    };
+    use service_api::{ActionWireOperation, OperationId, PlanId, WireFolderId, WireMailOperation};
 
     fn op(account: &str, op_id: u32, op: WireMailOperation) -> ActionWireOperation {
         ActionWireOperation {

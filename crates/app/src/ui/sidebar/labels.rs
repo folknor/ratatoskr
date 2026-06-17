@@ -1,5 +1,5 @@
-use iced::widget::mouse_area;
 use iced::Element;
+use iced::widget::mouse_area;
 
 use crate::ui::label_paint::LabelPaint;
 use crate::ui::widgets;

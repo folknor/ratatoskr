@@ -62,9 +62,7 @@ pub(crate) fn configure_crash(kind: String, n: u64) -> Result<(), String> {
     let trigger_at = start
         .checked_add(n)
         .ok_or_else(|| format!("counter threshold overflow for {kind:?}"))?;
-    let mut rules = crash_rules()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut rules = crash_rules().lock().unwrap_or_else(PoisonError::into_inner);
     rules.retain(|rule| rule.kind != kind);
     rules.push(CrashRule { kind, trigger_at });
     Ok(())
@@ -75,9 +73,7 @@ pub(crate) fn configure_delay(kind: String, millis: u64) -> Result<(), String> {
         return Err("millis must be greater than zero".into());
     }
     read(&kind).ok_or_else(|| format!("unknown counter kind {kind:?}"))?;
-    let mut rules = delay_rules()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut rules = delay_rules().lock().unwrap_or_else(PoisonError::into_inner);
     rules.retain(|rule| rule.kind != kind);
     rules.push(DelayRule { kind, millis });
     Ok(())
@@ -85,9 +81,7 @@ pub(crate) fn configure_delay(kind: String, millis: u64) -> Result<(), String> {
 
 pub(crate) async fn delay_if_configured(kind: &str) {
     let rule = {
-        let mut rules = delay_rules()
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut rules = delay_rules().lock().unwrap_or_else(PoisonError::into_inner);
         rules
             .iter()
             .position(|rule| rule.kind == kind)
@@ -105,9 +99,7 @@ pub(crate) async fn delay_if_configured(kind: &str) {
 
 fn maybe_crash(kind: &str, value: u64) {
     let rule = {
-        let mut rules = crash_rules()
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut rules = crash_rules().lock().unwrap_or_else(PoisonError::into_inner);
         rules
             .iter()
             .position(|rule| rule.kind == kind && value >= rule.trigger_at)

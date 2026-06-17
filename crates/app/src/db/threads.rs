@@ -174,7 +174,6 @@ pub async fn load_thread_detail(
     .map_err(|e| format!("spawn_blocking: {e}"))?
 }
 
-
 // ── Per-message queries - delegated to core ─────────────
 //
 // These thin wrappers call core's `message_queries` module and convert
@@ -190,8 +189,10 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<(Option<String>, Option<String>), String> {
-        self.with_read(move |conn| message_queries::get_message_body(conn, &account_id, &message_id))
-            .await
+        self.with_read(move |conn| {
+            message_queries::get_message_body(conn, &account_id, &message_id)
+        })
+        .await
     }
 
     /// Load attachments for a single message (used by pop-out windows).
@@ -201,7 +202,8 @@ impl Db {
         message_id: String,
     ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
         self.with_read(move |conn| {
-            let core_atts = message_queries::get_message_attachments(conn, &account_id, &message_id)?;
+            let core_atts =
+                message_queries::get_message_attachments(conn, &account_id, &message_id)?;
             Ok(core_atts
                 .into_iter()
                 .map(|a| super::types::MessageViewAttachment {
@@ -221,8 +223,10 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<String, String> {
-        self.with_read(move |conn| message_queries::get_message_raw_source(conn, &account_id, &message_id))
-            .await
+        self.with_read(move |conn| {
+            message_queries::get_message_raw_source(conn, &account_id, &message_id)
+        })
+        .await
     }
 }
 

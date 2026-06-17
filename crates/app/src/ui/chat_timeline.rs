@@ -207,10 +207,7 @@ impl Component for ChatTimeline {
 /// button on the right. The button is disabled when there are no
 /// messages to view, since there'd be nothing to pop into the
 /// message-view window.
-fn chat_header<'a>(
-    contact_email: &'a str,
-    has_messages: bool,
-) -> Element<'a, ChatTimelineMessage> {
+fn chat_header<'a>(contact_email: &'a str, has_messages: bool) -> Element<'a, ChatTimelineMessage> {
     let label = text(contact_email)
         .size(TEXT_LG)
         .style(theme::TextClass::Default.style());
@@ -227,7 +224,9 @@ fn chat_header<'a>(
     }
 
     let row = iced::widget::row![
-        container(label).width(Length::Fill).align_y(Alignment::Center),
+        container(label)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
         view_btn,
     ]
     .align_y(Alignment::Center)

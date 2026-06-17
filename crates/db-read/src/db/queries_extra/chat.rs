@@ -40,7 +40,9 @@ pub fn get_chat_inline_images_sync(
         return Ok(Vec::new());
     }
 
-    let placeholders: Vec<String> = (0..message_ids.len()).map(|i| format!("?{}", i + 1)).collect();
+    let placeholders: Vec<String> = (0..message_ids.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect();
     let placeholders_csv = placeholders.join(", ");
     let sql = format!(
         "SELECT message_id, account_id, content_hash, mime_type

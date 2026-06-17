@@ -158,11 +158,7 @@ impl PushRuntime {
     /// (Phase 8-3 hardening, mirroring the Phase 3 `history_id`
     /// clear), and `handle_exchange_code` after a re-auth completes
     /// (the new session may not honour the old session's cursor).
-    pub async fn start_account(
-        &self,
-        account_id: String,
-        fresh_start: bool,
-    ) -> Result<(), String> {
+    pub async fn start_account(&self, account_id: String, fresh_start: bool) -> Result<(), String> {
         if self.inner.closed.load(Ordering::Acquire) {
             return Err("PushRuntime is shutting down".into());
         }
@@ -210,14 +206,13 @@ impl PushRuntime {
         // accounts; one slow provider would block all the others).
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(self.inner.encryption_key.expose().as_slice());
-        let client =
-            jmap::client::JmapClient::from_account(
-                &read_db,
-                writer_pool.clone(),
-                &account_id,
-                &key_bytes,
-            )
-            .await?;
+        let client = jmap::client::JmapClient::from_account(
+            &read_db,
+            writer_pool.clone(),
+            &account_id,
+            &key_bytes,
+        )
+        .await?;
 
         // Auth resolver: every reconnect re-resolves the bearer via
         // ensure_valid_token. Returning an error counts toward
@@ -236,17 +231,16 @@ impl PushRuntime {
         });
 
         let (state_tx, state_rx) = jmap::push::create_push_channel();
-        let manager =
-            jmap::push::start_push(
-                &client,
-                &account_id,
-                &read_db,
-                &writer_pool,
-                state_tx,
-                auth_resolver,
-                fresh_start,
-            )
-                .await?;
+        let manager = jmap::push::start_push(
+            &client,
+            &account_id,
+            &read_db,
+            &writer_pool,
+            state_tx,
+            auth_resolver,
+            fresh_start,
+        )
+        .await?;
 
         let cancel = CancellationToken::new();
         let bridge_account_id = account_id.clone();
@@ -255,7 +249,14 @@ impl PushRuntime {
         let supervisor_account_id = account_id.clone();
         let supervisor = tokio::spawn(async move {
             let bridge_handle = tokio::spawn(async move {
-                run_bridge(bridge_inner, bridge_account_id, manager, state_rx, bridge_cancel).await;
+                run_bridge(
+                    bridge_inner,
+                    bridge_account_id,
+                    manager,
+                    state_rx,
+                    bridge_cancel,
+                )
+                .await;
             });
             match bridge_handle.await {
                 Ok(()) => {}
@@ -445,7 +446,10 @@ async fn coalesce_burst(
 /// delay the sync kick because the sync call is awaited *before* the
 /// emit.
 async fn kick_sync_and_emit(inner: &Arc<PushRuntimeInner>, account_id: &str) {
-    let _ack = inner.sync_runtime.start_account(account_id.to_string()).await;
+    let _ack = inner
+        .sync_runtime
+        .start_account(account_id.to_string())
+        .await;
     let notif = Notification::PushEvent(PushEvent {
         account_id: account_id.to_string(),
         service_generation: inner.service_generation,

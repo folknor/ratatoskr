@@ -162,8 +162,8 @@ mod tests {
 
     #[test]
     fn utc_zone_passes_through() {
-        let ts = resolve_local_to_timestamp(naive(2024, 6, 15, 10, 30), &chrono::Utc)
-            .expect("resolves");
+        let ts =
+            resolve_local_to_timestamp(naive(2024, 6, 15, 10, 30), &chrono::Utc).expect("resolves");
         let expected = NaiveDate::from_ymd_opt(2024, 6, 15)
             .and_then(|d| d.and_hms_opt(10, 30, 0))
             .map(|d| d.and_utc().timestamp())

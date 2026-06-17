@@ -23,7 +23,9 @@
 //! match zero rows are no-ops; file unlinks tolerate `NotFound`).
 
 use serde::{Deserialize, Serialize};
-use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState};
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -82,8 +84,7 @@ pub(crate) struct CleanupReport {
     pub search_cleaned: bool,
 }
 
-const MARKERS: MarkerFile<AccountDeletionMarker> =
-    MarkerFile::new("account_delete_markers");
+const MARKERS: MarkerFile<AccountDeletionMarker> = MarkerFile::new("account_delete_markers");
 
 /// Initial entry point: gather data, write the marker, then drive
 /// the cleanup steps forward. Called by the `account.delete`
@@ -244,9 +245,7 @@ async fn drive_steps(
                             Ok(()) => report.cache_files_deleted += 1,
                             Err(e) => {
                                 let hex = hash.to_hex();
-                                report
-                                    .cache_file_errors
-                                    .push(format!("{hex}: {e}"));
+                                report.cache_file_errors.push(format!("{hex}: {e}"));
                             }
                         }
                     }
@@ -318,9 +317,7 @@ async fn drive_steps(
             // Final step succeeded; drop the marker.
             MARKERS.unlink(app_data, &marker.account_id).await?;
         } else {
-            MARKERS
-                .write(app_data, &marker.account_id, &marker)
-                .await?;
+            MARKERS.write(app_data, &marker.account_id, &marker).await?;
         }
     }
 

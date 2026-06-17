@@ -109,7 +109,10 @@ fn report(args: &[String]) -> ExitCode {
     }
     if !report.lua_claims.diagnostics.is_empty() {
         println!();
-        println!("lua claim diagnostics: {}", report.lua_claims.diagnostics.len());
+        println!(
+            "lua claim diagnostics: {}",
+            report.lua_claims.diagnostics.len()
+        );
         print_diagnostics(&report.lua_claims.diagnostics);
     }
 
@@ -119,7 +122,12 @@ fn report(args: &[String]) -> ExitCode {
         uncovered_contracts.len()
     );
     for contract in &uncovered_contracts {
-        println!("{} {}:{}", contract.id, contract.file.display(), contract.line);
+        println!(
+            "{} {}:{}",
+            contract.id,
+            contract.file.display(),
+            contract.line
+        );
     }
 
     println!();
@@ -172,9 +180,7 @@ fn parse_report_args(args: &[String]) -> Option<ReportArgs> {
         if arg == "--area" {
             index += 1;
             let Some(value) = args.get(index) else {
-                eprintln!(
-                    "usage: ratatoskr-coverage report [ROOT] [--area ID_PREFIX] [--strict]"
-                );
+                eprintln!("usage: ratatoskr-coverage report [ROOT] [--area ID_PREFIX] [--strict]");
                 return None;
             };
             area = Some(value.clone());
@@ -214,12 +220,7 @@ fn optional_path_arg(args: &[String], command: &str, default: PathBuf) -> Option
         eprintln!("usage: ratatoskr-coverage {command} [PATH]");
         return None;
     }
-    Some(
-        args.iter()
-            .next()
-            .map(PathBuf::from)
-            .unwrap_or(default),
-    )
+    Some(args.iter().next().map(PathBuf::from).unwrap_or(default))
 }
 
 fn strict_lua_diagnostic_count(report: &coverage::CoverageReport) -> usize {

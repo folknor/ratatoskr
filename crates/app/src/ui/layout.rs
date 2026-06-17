@@ -83,8 +83,7 @@ pub const ATTACHMENT_ACTION_BTN_HEIGHT: f32 = ATTACHMENT_CARD_MAIN_ROW_HEIGHT + 
 /// button (Save All). Has to equal the file row's [Open, Save] cluster
 /// width (`2 * ATTACHMENT_ICON_BTN_WIDTH + SPACE_XS`) so the header's
 /// title area ends where the bordered file card ends.
-pub const ATTACHMENT_HEADER_ACTION_WIDTH: f32 =
-    2.0 * ATTACHMENT_ICON_BTN_WIDTH + SPACE_XS;
+pub const ATTACHMENT_HEADER_ACTION_WIDTH: f32 = 2.0 * ATTACHMENT_ICON_BTN_WIDTH + SPACE_XS;
 /// Fixed width for each Open / Save icon button on a file row. Together
 /// with `SPACE_XS` between them and `ATTACHMENT_HEADER_ACTION_WIDTH` on
 /// Save All, this is what aligns the right edges of the title area and

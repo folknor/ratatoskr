@@ -143,7 +143,11 @@ impl AddAccountWizard {
         self.resolved_provider = format!("oidc:{issuer}");
         self.resolved_auth_method = "oauth2".to_string();
         let client_id = self.manual_config.custom_oidc.client_id.clone();
-        let task = self.start_reauth_oauth(Some(&self.resolved_provider.clone()), Some(&client_id), None);
+        let task = self.start_reauth_oauth(
+            Some(&self.resolved_provider.clone()),
+            Some(&client_id),
+            None,
+        );
         (task, None)
     }
 
@@ -166,7 +170,11 @@ impl AddAccountWizard {
         self.resolved_provider = format!("oidc:{issuer}");
         self.resolved_auth_method = "oauth2".to_string();
         let client_id = self.manual_config.custom_oidc.client_id.clone();
-        let task = self.start_reauth_oauth(Some(&self.resolved_provider.clone()), Some(&client_id), None);
+        let task = self.start_reauth_oauth(
+            Some(&self.resolved_provider.clone()),
+            Some(&client_id),
+            None,
+        );
         (task, None)
     }
 
@@ -179,8 +187,7 @@ impl AddAccountWizard {
         }
         if !rtsk::discovery::oidc::is_valid_https_url(trimmed) {
             return Err(
-                "Issuer URL must be HTTPS, with no embedded credentials or fragment."
-                    .to_string(),
+                "Issuer URL must be HTTPS, with no embedded credentials or fragment.".to_string(),
             );
         }
         Ok(())

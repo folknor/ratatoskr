@@ -51,7 +51,9 @@ impl Settings {
         (Task::none(), None)
     }
 
-    pub(super) fn handle_account_drag_end(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    pub(super) fn handle_account_drag_end(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let was_dragging = self.account_drag.as_ref().is_some_and(|d| d.is_dragging);
         self.account_drag = None;
 
@@ -88,12 +90,8 @@ impl Settings {
         self.editing_account = Some(AccountEditor {
             account_id: account.id.clone(),
             account_email: account.email.clone(),
-            account_name: UndoableText::with_initial(
-                account.account_name.as_deref().unwrap_or(""),
-            ),
-            display_name: UndoableText::with_initial(
-                account.display_name.as_deref().unwrap_or(""),
-            ),
+            account_name: UndoableText::with_initial(account.account_name.as_deref().unwrap_or("")),
+            display_name: UndoableText::with_initial(account.display_name.as_deref().unwrap_or("")),
             account_color_index: color_index,
             caldav_url: UndoableText::new(),
             caldav_username: UndoableText::new(),
@@ -105,7 +103,9 @@ impl Settings {
         self.sheet_anim.go_mut(true, Instant::now());
     }
 
-    pub(super) fn handle_account_editor_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    pub(super) fn handle_account_editor_save(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let Some(ref editor) = self.editing_account else {
             return (Task::none(), None);
         };

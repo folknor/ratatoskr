@@ -46,8 +46,8 @@ fn accounts_section_body<'a>(state: &'a Settings) -> RowBuilder<'a> {
         }
 
         if n_accounts > 0 {
-            col = col
-                .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
         let add_internal_pos = position_for(internal_n.saturating_sub(1), internal_n);

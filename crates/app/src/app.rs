@@ -56,8 +56,8 @@ pub(crate) struct PendingChord {
 #[allow(dead_code)] // status-bar render is a small follow-up; data wired through update.rs
 pub struct RebuildProgressState {
     pub rebuild_id: String,
-    pub processed:  u64,
-    pub total:      u64,
+    pub processed: u64,
+    pub total: u64,
 }
 
 pub struct ReadyApp {
@@ -207,8 +207,7 @@ pub struct ReadyApp {
     /// back). Maps to the compose window so the completion handler
     /// can fire `Message::SendCompleted` against the right window.
     /// Entries are removed on completion arrival.
-    pub(crate) in_flight_sends:
-        std::collections::HashMap<service_api::PlanId, iced::window::Id>,
+    pub(crate) in_flight_sends: std::collections::HashMap<service_api::PlanId, iced::window::Id>,
 
     /// Client-side action throttle keyed by `(account_id, thread_id)`.
     ///
@@ -223,8 +222,7 @@ pub struct ReadyApp {
     /// notifications are lost). 200 ms is the user-perception window
     /// for an intentional second click - faster than that is a
     /// double-click.
-    pub(crate) action_throttle:
-        std::collections::HashMap<(String, String), std::time::Instant>,
+    pub(crate) action_throttle: std::collections::HashMap<(String, String), std::time::Instant>,
 }
 
 /// Tri-state for an in-flight action plan per Phase 2 plan scope item 14.
@@ -305,9 +303,7 @@ impl ReadyApp {
             );
         }
         let data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
-        let db = Arc::new(
-            Db::open(data_dir).expect("UI-side DB open after Service handshake"),
-        );
+        let db = Arc::new(Db::open(data_dir).expect("UI-side DB open after Service handshake"));
         let db_ref = Arc::clone(&db);
         let db_ref2 = Arc::clone(&db);
         let db_ref3 = Arc::clone(&db);
@@ -343,8 +339,7 @@ impl ReadyApp {
         // until then; the gap is well under 100 ms on warm hardware
         // and the splash transition no longer freezes during it.
         let body_store: Option<rtsk::body_store::BodyStoreReadState> = None;
-        let inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState> =
-            None;
+        let inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState> = None;
 
         // Phase 6a-part-2: the bootstrap-snapshot decrypt path flows
         // through `internal.read_bootstrap_snapshots` (one IPC, both
@@ -459,10 +454,7 @@ impl ReadyApp {
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
         let load_gen = app.nav_generation.next();
-        let bootstrap_client = app
-            .service_client
-            .as_ref()
-            .map(Arc::clone);
+        let bootstrap_client = app.service_client.as_ref().map(Arc::clone);
         let mut boot_tasks = vec![
             Task::perform(
                 async move { (load_gen, crate::helpers::load_accounts(db_ref).await) },
@@ -620,9 +612,7 @@ fn spawn_event_stream(
                         }
                         crate::service_client::SpawnEvent::Terminal(error) => {
                             Message::ServiceBootFailed(
-                                crate::service_client::BootFailureReason::from_client_error(
-                                    &error,
-                                ),
+                                crate::service_client::BootFailureReason::from_client_error(&error),
                             )
                         }
                         crate::service_client::SpawnEvent::HealthChanged(health) => {
@@ -717,8 +707,7 @@ impl BootingApp {
             Message::ServiceChildSpawned(client) => {
                 self.service_notifications = Some(client.notifications());
                 self.service_client = Some(client);
-                self.splash.message =
-                    Some("Service connected, awaiting boot.ready...".to_string());
+                self.splash.message = Some("Service connected, awaiting boot.ready...".to_string());
                 BootingUpdate::Stay(Task::none())
             }
             Message::ServiceBootReady(response) => {
@@ -747,10 +736,8 @@ impl BootingApp {
                     .as_ref()
                     .map(|c| c.current_generation())
                     .unwrap_or(0);
-                if !crate::service_client::notification_should_dispatch(
-                    &notification,
-                    current_gen,
-                ) {
+                if !crate::service_client::notification_should_dispatch(&notification, current_gen)
+                {
                     return BootingUpdate::Stay(Task::none());
                 }
                 match notification {
@@ -822,10 +809,7 @@ impl BootingApp {
                 // (ThreadDetailLoaded, etc.) that would noisily fill the
                 // log on every drop. The variant name is the useful signal.
                 let debug = format!("{other:?}");
-                let name = debug
-                    .split(['(', '{', ' '])
-                    .next()
-                    .unwrap_or("?");
+                let name = debug.split(['(', '{', ' ']).next().unwrap_or("?");
                 log::debug!(
                     "BootingApp dropped message variant {name} (whitelist per phase-1.5-plan scope item 21)",
                 );
@@ -847,14 +831,12 @@ impl BootingApp {
         // appended `(0/N)` reads as a contradiction. For other phases,
         // fall back to the optional message, then a generic placeholder.
         let detail = match self.splash.phase {
-            Some(service_api::BootPhase::Migrating { current: 0, total }) => match self
-                .splash
-                .message
-                .as_deref()
-            {
-                Some(msg) => msg.to_string(),
-                None => format!("Starting migration 1 of {total}"),
-            },
+            Some(service_api::BootPhase::Migrating { current: 0, total }) => {
+                match self.splash.message.as_deref() {
+                    Some(msg) => msg.to_string(),
+                    None => format!("Starting migration 1 of {total}"),
+                }
+            }
             Some(service_api::BootPhase::Migrating { current, total }) => {
                 match self.splash.message.as_deref() {
                     Some(msg) => format!("{msg} ({current}/{total})"),
@@ -936,10 +918,9 @@ impl App {
         // Two-phase Service spawn. The receiver emits ChildSpawned ->
         // BootReady (or Terminal on failure). BootingApp::update consumes
         // those messages and triggers the Booting -> Ready transition.
-        let spawn_stream =
-            spawn_event_stream(crate::service_client::ServiceClient::spawn_with_events(
-                data_dir.clone(),
-            ));
+        let spawn_stream = spawn_event_stream(
+            crate::service_client::ServiceClient::spawn_with_events(data_dir.clone()),
+        );
 
         (
             App::Booting(booting),
@@ -1047,7 +1028,10 @@ mod booting_update_tests {
         assert!(booting.appearance_mode.is_none());
         let outcome = booting.update(Message::AppearanceChanged(crate::appearance::Mode::Light));
         assert_stay_noop(&outcome);
-        assert_eq!(booting.appearance_mode, Some(crate::appearance::Mode::Light));
+        assert_eq!(
+            booting.appearance_mode,
+            Some(crate::appearance::Mode::Light)
+        );
     }
 
     /// Modal-key + window-geometry events are explicit-drop arms in the
@@ -1076,7 +1060,10 @@ mod booting_update_tests {
             // None of these messages should populate appearance_mode or the
             // service-client slot. The splash should also stay in its
             // default state since no BootProgress arrived.
-            assert!(booting.appearance_mode.is_none(), "{label} mutated appearance");
+            assert!(
+                booting.appearance_mode.is_none(),
+                "{label} mutated appearance"
+            );
             assert!(booting.service_client.is_none(), "{label} populated client");
             assert!(booting.splash.phase.is_none(), "{label} mutated splash");
         }
@@ -1145,14 +1132,23 @@ mod splash_tests {
             (BootPhase::LoadingKey, "Loading encryption key..."),
             (BootPhase::OpeningDatabase, "Opening database..."),
             (
-                BootPhase::Migrating { current: 0, total: 1 },
+                BootPhase::Migrating {
+                    current: 0,
+                    total: 1,
+                },
                 "Migrating database...",
             ),
             (
-                BootPhase::Migrating { current: 5, total: 10 },
+                BootPhase::Migrating {
+                    current: 5,
+                    total: 10,
+                },
                 "Migrating database...",
             ),
-            (BootPhase::RecoveringPendingOps, "Recovering pending operations..."),
+            (
+                BootPhase::RecoveringPendingOps,
+                "Recovering pending operations...",
+            ),
             (BootPhase::SweepingQueuedDrafts, "Sweeping queued drafts..."),
             (
                 BootPhase::BackfillingThreadParticipants,
@@ -1178,12 +1174,18 @@ mod splash_tests {
     fn apply_overwrites_phase_and_message() {
         let mut splash = SplashState::default();
         splash.apply(progress(
-            BootPhase::Migrating { current: 1, total: 5 },
+            BootPhase::Migrating {
+                current: 1,
+                total: 5,
+            },
             Some("Applied migration 1 of 5"),
         ));
         assert_eq!(
             splash.phase,
-            Some(BootPhase::Migrating { current: 1, total: 5 })
+            Some(BootPhase::Migrating {
+                current: 1,
+                total: 5
+            })
         );
         assert_eq!(splash.message.as_deref(), Some("Applied migration 1 of 5"));
 

@@ -365,7 +365,10 @@ pub fn seed_accounts(
                     ],
                 )
                 .map_err(|e| format!("insert importance synth: {e}"))?;
-                labels.push((level.display_name().to_string(), level.label_id().to_string()));
+                labels.push((
+                    level.display_name().to_string(),
+                    level.label_id().to_string(),
+                ));
             }
         }
 
@@ -374,10 +377,7 @@ pub fn seed_accounts(
             "<p>Best regards,<br><strong>{}</strong><br>{}</p>",
             preset.display_name, preset.email
         );
-        let sig_text = format!(
-            "Best regards,\n{}\n{}",
-            preset.display_name, preset.email
-        );
+        let sig_text = format!("Best regards,\n{}\n{}", preset.display_name, preset.email);
         conn.execute(
             "INSERT INTO signatures (id, account_id, name, body_html, body_text, is_default) \
              VALUES (?1, ?2, 'Default', ?3, ?4, 1)",

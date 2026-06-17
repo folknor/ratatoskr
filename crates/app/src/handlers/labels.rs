@@ -46,19 +46,14 @@ pub fn load_visible_labels_async(db: &Arc<Db>) -> Task<LabelOp> {
 /// Load `(account_id, label_id)` members for one `label_groups` row.
 /// Dispatched when the user opens the label-group editor sheet on an
 /// existing group; populates `LabelGroupEditorState::members`.
-pub fn load_label_group_members_async(
-    db: &Arc<Db>,
-    group_id: i64,
-) -> Task<crate::Message> {
+pub fn load_label_group_members_async(db: &Arc<Db>, group_id: i64) -> Task<crate::Message> {
     let db = Arc::clone(db);
     Task::perform(
         async move {
             let core_db = db.read_db_state();
             core_db
                 .with_read(move |conn| {
-                    rtsk::db::queries_extra::navigation::query_label_group_members(
-                        conn, group_id,
-                    )
+                    rtsk::db::queries_extra::navigation::query_label_group_members(conn, group_id)
                 })
                 .await
         },
@@ -119,7 +114,7 @@ pub fn rename_label_async(account_id: &str, label_id: &LabelId, new_name: &str) 
         "rename_label not implemented yet: account={account_id} label={label_id} -> {new_name}"
     );
     Task::done(LabelOp::RenamedAck(Err(
-        "label rename not yet implemented".to_owned(),
+        "label rename not yet implemented".to_owned()
     )))
 }
 

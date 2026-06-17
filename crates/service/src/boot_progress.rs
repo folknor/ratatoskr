@@ -118,10 +118,7 @@ pub(crate) fn emit(out_tx: &mpsc::Sender<Vec<u8>>, phase: BootPhase, message: Op
 /// can keep using this helper because the queue's coalesce policy
 /// already collapses repeats, so a try_send drop in the rare full-
 /// queue case is no worse than a coalesce hit.
-pub(crate) fn enqueue_notification(
-    out_tx: &mpsc::Sender<Vec<u8>>,
-    notification: &Notification,
-) {
+pub(crate) fn enqueue_notification(out_tx: &mpsc::Sender<Vec<u8>>, notification: &Notification) {
     let method_name = notification.method_name();
     if matches!(notification.class(), NotificationClass::MustDeliver) {
         log::error!(
@@ -170,9 +167,7 @@ pub(crate) async fn send_must_deliver_notification(
         }
     };
     if let Err(error) = out_tx.send(bytes).await {
-        log::warn!(
-            "MustDeliver {method_name} dropped (receiver gone): {error}"
-        );
+        log::warn!("MustDeliver {method_name} dropped (receiver gone): {error}");
     }
 }
 
@@ -277,8 +272,8 @@ mod tests {
         // sender finishes its try_send.
         let _ = out_rx.recv().await.expect("pre-fill drained");
         // No second frame should arrive - the emit was dropped.
-        let nothing = tokio::time::timeout(std::time::Duration::from_millis(50), out_rx.recv())
-            .await;
+        let nothing =
+            tokio::time::timeout(std::time::Duration::from_millis(50), out_rx.recv()).await;
         assert!(nothing.is_err(), "no frame should follow the dropped emit");
     }
 

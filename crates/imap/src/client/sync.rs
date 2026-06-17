@@ -133,7 +133,8 @@ pub async fn delta_check_folders(
                 vec![]
             }
         };
-        let modseq_unchanged = modseq_claims_unchanged && new_uids.is_empty() && !pinned_modseq_seed;
+        let modseq_unchanged =
+            modseq_claims_unchanged && new_uids.is_empty() && !pinned_modseq_seed;
         if modseq_unchanged {
             log::debug!(
                 "delta_check: {} modseq unchanged ({}) and no new UIDs",

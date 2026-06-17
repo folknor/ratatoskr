@@ -282,7 +282,7 @@ pub async fn imap_initial_sync(
             let read = conn.as_read();
             sync::pending::get_blocked_thread_ids(&read, &aid, &tids)
         })
-            .await?
+        .await?
     };
 
     let affected_thread_ids = {
@@ -310,8 +310,10 @@ pub async fn imap_initial_sync(
     let msg_ids: HashSet<String> = all_meta.keys().cloned().collect();
     let orphans = {
         let aid = account_id.to_string();
-        db.with_write(move |conn| pipeline::cleanup_orphan_threads(conn, &aid, &msg_ids, &final_ids))
-            .await?
+        db.with_write(move |conn| {
+            pipeline::cleanup_orphan_threads(conn, &aid, &msg_ids, &final_ids)
+        })
+        .await?
     };
     if orphans > 0 {
         log::info!("[sync] Cleaned up {orphans} orphaned placeholder threads");
@@ -414,9 +416,8 @@ async fn sync_single_folder(
         // Per-chunk cancellation checkpoint: each chunk is its own UID FETCH
         // round-trip, the natural break for an IMAP point-check.
         if cancellation_token.is_cancelled() {
-            let _ =
-                tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
-                    .await;
+            let _ = tokio::time::timeout(super::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
+                .await;
             return Err("sync cancelled".to_string());
         }
         let chunk_end = (chunk_start + CHUNK_SIZE).min(uids.len());

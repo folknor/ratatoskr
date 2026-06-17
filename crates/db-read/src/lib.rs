@@ -14,8 +14,8 @@ pub mod db {
     };
     // Re-export read-only rusqlite helpers only. Raw Connection,
     // Transaction, and Statement types stay out of the read API.
-    pub use rusqlite::{Error as SqlError, OptionalExtension, Row, params};
     pub use rusqlite::types::ToSql;
+    pub use rusqlite::{Error as SqlError, OptionalExtension, Row, params};
 
     pub const DEFAULT_QUERY_LIMIT: i64 = 500;
 

@@ -44,8 +44,8 @@ fn signatures_section_body<'a>(state: &'a Settings) -> RowBuilder<'a> {
         }
 
         if n_sigs > 0 {
-            col = col
-                .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
         let add_internal_pos = position_for(internal_n.saturating_sub(1), internal_n);
@@ -171,9 +171,11 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
                     weight: iced::font::Weight::Bold,
                     ..crate::font::text()
                 }),
-            text("Signature changes are not saved automatically. Use the Save button at the bottom.")
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
+            text(
+                "Signature changes are not saved automatically. Use the Save button at the bottom."
+            )
+            .size(TEXT_SM)
+            .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXS),
     );
@@ -330,7 +332,9 @@ fn signature_account_row<'a>(
 
     setting_row_with_description(
         "Account",
-        Some("When supported, signatures are stored with your cloud provider, and each signature is exclusive to its selected account."),
+        Some(
+            "When supported, signatures are stored with your cloud provider, and each signature is exclusive to its selected account.",
+        ),
         dropdown,
         SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
     )

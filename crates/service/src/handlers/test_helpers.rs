@@ -10,20 +10,17 @@ use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
-    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
-    TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
-    TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
-    TestDelayNextWriteAck,
-    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
-    TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
-    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesAck,
-    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSeedAccountAck,
-    TestSeedAccountParams,
-    TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
-    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams,
-    TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams, TestSeedThreadAck,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck, TestThreadReadParams,
+    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow,
+    TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow, TestDbFolderRow, TestDbLabelRow,
+    TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck,
+    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
+    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
+    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
+    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadAck, TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -70,9 +67,11 @@ pub(super) async fn seed_account_handle(
     let caldav_url = params.caldav_url;
     let caldav_username = params.caldav_username;
     let caldav_password = params.caldav_password;
-    let encryption_key = boot_state.encryption_key().ok_or_else(|| ServiceError::Internal(
-        "test.seed_account received before encryption key was available".into(),
-    ))?;
+    let encryption_key = boot_state.encryption_key().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.seed_account received before encryption key was available".into(),
+        )
+    })?;
     let encrypt_secret = |value: Option<String>| -> Result<Option<String>, ServiceError> {
         value
             .map(|secret| common::crypto::encrypt_value(&encryption_key, &secret))
@@ -112,19 +111,25 @@ pub(super) async fn seed_account_handle(
                 "password".into()
             }
         }),
-        access_token: encrypt_secret(params
-            .access_token
-            .or_else(|| uses_oauth.then(|| "test-access-token".into())))?,
-        refresh_token: encrypt_secret(params
-            .refresh_token
-            .or_else(|| uses_oauth.then(|| "test-refresh-token".into())))?,
+        access_token: encrypt_secret(
+            params
+                .access_token
+                .or_else(|| uses_oauth.then(|| "test-access-token".into())),
+        )?,
+        refresh_token: encrypt_secret(
+            params
+                .refresh_token
+                .or_else(|| uses_oauth.then(|| "test-refresh-token".into())),
+        )?,
         token_expires_at: params
             .token_expires_at
             .or_else(|| uses_oauth.then(|| chrono::Utc::now().timestamp() + 3_600)),
         oauth_provider,
-        oauth_client_id: encrypt_secret(params
-            .oauth_client_id
-            .or_else(|| uses_oauth.then(|| "test-client-id".into())))?,
+        oauth_client_id: encrypt_secret(
+            params
+                .oauth_client_id
+                .or_else(|| uses_oauth.then(|| "test-client-id".into())),
+        )?,
         oauth_client_secret: None,
         oauth_token_url: params.oauth_token_url,
         oauth_extra_scopes: params.oauth_extra_scopes,
@@ -144,8 +149,7 @@ pub(super) async fn seed_account_handle(
     let ack_email = email.clone();
     let (account_id, label_count) = write_db
         .with_write(move |conn| {
-            let account_id =
-                db::db::queries_extra::create_account_sync(conn, &create_params)?;
+            let account_id = db::db::queries_extra::create_account_sync(conn, &create_params)?;
             if caldav_url.is_some() || caldav_username.is_some() || caldav_password.is_some() {
                 conn.execute(
                     "UPDATE accounts
@@ -153,12 +157,7 @@ pub(super) async fn seed_account_handle(
                          caldav_username = ?2,
                          caldav_password = ?3
                      WHERE id = ?4",
-                    params![
-                        caldav_url,
-                        caldav_username,
-                        caldav_password,
-                        &account_id
-                    ],
+                    params![caldav_url, caldav_username, caldav_password, &account_id],
                 )
                 .map_err(|e| format!("seed account caldav config: {e}"))?;
             }
@@ -176,12 +175,11 @@ pub(super) async fn seed_account_handle(
 }
 
 pub(super) async fn counter_read_handle(counter: String) -> Result<Value, ServiceError> {
-    let value = crate::test_counters::read(&counter).ok_or_else(|| {
-        ServiceError::InvalidParams {
+    let value =
+        crate::test_counters::read(&counter).ok_or_else(|| ServiceError::InvalidParams {
             method: "test.counter_read".into(),
             message: format!("unknown counter {counter:?}"),
-        }
-    })?;
+        })?;
     serde_json::to_value(TestCounterReadAck { counter, value })
         .map_err(|error| ServiceError::Internal(error.to_string()))
 }
@@ -262,9 +260,7 @@ pub(super) async fn seed_cached_attachment_handle(
     }
     let write_db = boot_state.write_db_state()?;
     let pack_store = boot_state.pack_store().ok_or_else(|| {
-        ServiceError::Internal(
-            "pack store not installed; UI must wait for boot.ready".into(),
-        )
+        ServiceError::Internal("pack store not installed; UI must wait for boot.ready".into())
     })?;
     let attachment_id = params
         .attachment_id
@@ -403,9 +399,7 @@ pub(super) async fn remove_cached_attachment_bytes_handle(
     // hash out of it and tombstone the blob in PackStore so subsequent
     // `attachment.fetch` calls go through the cache-miss path.
     let pack_store = boot_state.pack_store().ok_or_else(|| {
-        ServiceError::Internal(
-            "pack store not installed; UI must wait for boot.ready".into(),
-        )
+        ServiceError::Internal("pack store not installed; UI must wait for boot.ready".into())
     })?;
     let hash_hex = params
         .relative_path
@@ -468,9 +462,7 @@ pub(super) async fn start_sync_handle(
         });
     }
     let runtime = boot_state.sync_runtime().ok_or_else(|| {
-        ServiceError::Internal(
-            "test.start_sync received before SyncRuntime was installed".into(),
-        )
+        ServiceError::Internal("test.start_sync received before SyncRuntime was installed".into())
     })?;
     let ack = runtime.start_account(params.account_id).await;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
@@ -507,10 +499,11 @@ pub(super) async fn search_index_handle(
     // The sync-runtime fallback covers older harness boot shapes and
     // tests that construct sync first, where the same writer handle is
     // reachable through the runtime.
-    if let Some(search_write) = boot_state
-        .search_write()
-        .or_else(|| boot_state.sync_runtime().map(|runtime| runtime.search_write()))
-    {
+    if let Some(search_write) = boot_state.search_write().or_else(|| {
+        boot_state
+            .sync_runtime()
+            .map(|runtime| runtime.search_write())
+    }) {
         search_write
             .flush_now()
             .await
@@ -603,7 +596,8 @@ async fn enrich_test_search_results(
     let inputs = write_db
         .with_write(move |conn| {
             let read = conn.as_read();
-            let fragments = db::db::queries_extra::select_attachment_fragments_batch(&read, &pairs)?;
+            let fragments =
+                db::db::queries_extra::select_attachment_fragments_batch(&read, &pairs)?;
             let mut body_by_mid: HashMap<String, String> = HashMap::new();
             for body in body_read.get_batch_sync(&message_ids)? {
                 if let Some(text) = body.body_text {
@@ -619,9 +613,9 @@ async fn enrich_test_search_results(
                     .map(|rows| {
                         rows.iter()
                             .map(|row| search::AttachmentAttributionInput {
-                                attachment_id:  row.attachment_id.clone(),
-                                filename:       row.filename.clone(),
-                                mime:           row.mime_type.clone(),
+                                attachment_id: row.attachment_id.clone(),
+                                filename: row.filename.clone(),
+                                mime: row.mime_type.clone(),
                                 extracted_text: row.extracted_text.clone(),
                             })
                             .collect()
@@ -668,14 +662,14 @@ pub(super) async fn query_blob_tombstone_state_handle(
     params: TestQueryBlobTombstoneStateParams,
 ) -> Result<Value, ServiceError> {
     let hex = params.content_hash;
-    let hash = db::blob_hash::BlobHash::from_hex(&hex)
-        .map_err(|e| ServiceError::InvalidParams {
+    let hash =
+        db::blob_hash::BlobHash::from_hex(&hex).map_err(|e| ServiceError::InvalidParams {
             method: "test.query_blob_tombstone_state".into(),
             message: format!("content_hash: {e}"),
         })?;
-    let db_state = boot_state.write_db_state().map_err(|_| {
-        ServiceError::Internal("write_db_state unavailable".into())
-    })?;
+    let db_state = boot_state
+        .write_db_state()
+        .map_err(|_| ServiceError::Internal("write_db_state unavailable".into()))?;
     let ack: TestQueryBlobTombstoneStateAck = db_state
         .with_write(move |conn| {
             let row: Option<Option<i64>> = conn
@@ -687,11 +681,11 @@ pub(super) async fn query_blob_tombstone_state_handle(
                 .ok();
             Ok(match row {
                 Some(ts) => TestQueryBlobTombstoneStateAck {
-                    present:       true,
+                    present: true,
                     tombstoned_at: ts,
                 },
                 None => TestQueryBlobTombstoneStateAck {
-                    present:       false,
+                    present: false,
                     tombstoned_at: None,
                 },
             })
@@ -1043,7 +1037,9 @@ fn read_harness_thread(
         )
         .map_err(|e| format!("prepare labels: {e}"))?;
     let label_ids = stmt
-        .query_map(params![params.account_id, params.thread_id], |row| row.get(0))
+        .query_map(params![params.account_id, params.thread_id], |row| {
+            row.get(0)
+        })
         .map_err(|e| format!("query labels: {e}"))?
         .collect::<Result<Vec<String>, _>>()
         .map_err(|e| format!("collect labels: {e}"))?;
@@ -1134,13 +1130,8 @@ fn read_harness_pending_ops(
             .count(),
     )
     .map_err(|e| e.to_string())?;
-    let failed = u64::try_from(
-        operations
-            .iter()
-            .filter(|op| op.status == "failed")
-            .count(),
-    )
-    .map_err(|e| e.to_string())?;
+    let failed = u64::try_from(operations.iter().filter(|op| op.status == "failed").count())
+        .map_err(|e| e.to_string())?;
 
     Ok(TestPendingOpsReadAck {
         total,
@@ -1291,10 +1282,8 @@ fn credential_summary(
             sha256: None,
         });
     };
-    let (encrypted, plaintext) =
-        decrypt_if_service_ciphertext(value, encryption_key)?.unwrap_or_else(|| {
-            (false, value.to_string())
-        });
+    let (encrypted, plaintext) = decrypt_if_service_ciphertext(value, encryption_key)?
+        .unwrap_or_else(|| (false, value.to_string()));
     let mut hasher = Sha256::new();
     hasher.update(plaintext.as_bytes());
     Ok(CredentialSummary {
@@ -1480,7 +1469,10 @@ fn decrypt_if_service_ciphertext(
     }
 }
 
-fn count_accounts(conn: &impl db::db::WriteTransactionTarget, account_id: Option<&str>) -> Result<u64, String> {
+fn count_accounts(
+    conn: &impl db::db::WriteTransactionTarget,
+    account_id: Option<&str>,
+) -> Result<u64, String> {
     let count = match account_id {
         Some(account_id) => conn.query_row(
             "SELECT COUNT(*) FROM accounts WHERE id = ?1",
@@ -1851,9 +1843,7 @@ fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbM
     })
 }
 
-fn test_db_local_draft_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<TestDbLocalDraftRow> {
+fn test_db_local_draft_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbLocalDraftRow> {
     Ok(TestDbLocalDraftRow {
         id: row.get(0)?,
         account_id: row.get(1)?,
@@ -1873,9 +1863,7 @@ fn test_db_local_draft_from_row(
     })
 }
 
-fn test_db_attachment_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<TestDbAttachmentRow> {
+fn test_db_attachment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbAttachmentRow> {
     Ok(TestDbAttachmentRow {
         id: row.get(0)?,
         account_id: row.get(1)?,

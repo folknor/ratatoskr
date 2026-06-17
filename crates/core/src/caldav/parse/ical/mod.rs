@@ -507,10 +507,7 @@ fn score_datetime_candidate(entry: &ICalendarEntry) -> u8 {
     if is_date_only {
         return 4;
     }
-    if entry
-        .tz_id()
-        .is_some_and(|s| !s.trim().is_empty())
-    {
+    if entry.tz_id().is_some_and(|s| !s.trim().is_empty()) {
         return 3;
     }
     let has_offset = matches!(
@@ -625,10 +622,7 @@ fn extract_recurrence_id_canonical(
 /// duration math. Bailing here lets the caller fall through to its
 /// `_ => Some(end)` arm and keep the original timed end_time, which is
 /// the safer reading for a malformed feed.
-fn extract_all_day_date(
-    entry: &ICalendarEntry,
-    is_date_only: bool,
-) -> Option<chrono::NaiveDate> {
+fn extract_all_day_date(entry: &ICalendarEntry, is_date_only: bool) -> Option<chrono::NaiveDate> {
     if !is_date_only {
         return None;
     }

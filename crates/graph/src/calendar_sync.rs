@@ -409,9 +409,7 @@ pub async fn graph_create_event(
         Err(error) => {
             if response.get("echoedRequest").is_some() {
                 return graph_event_from_create_echo(&response, event)
-                    .ok_or_else(|| {
-                        format!("Failed to parse Graph create echo response: {error}")
-                    })
+                    .ok_or_else(|| format!("Failed to parse Graph create echo response: {error}"))
                     .and_then(map_graph_event);
             }
             Err(format!("Failed to parse Graph create response: {error}"))?
@@ -749,8 +747,10 @@ fn parse_graph_datetime(
         let naive = date
             .and_hms_opt(0, 0, 0)
             .ok_or_else(|| format!("Invalid all-day {label} time"))?;
-        return Ok(common::time::resolve_local_to_timestamp(naive, &chrono::Local)
-            .unwrap_or_else(|| naive.and_utc().timestamp()));
+        return Ok(
+            common::time::resolve_local_to_timestamp(naive, &chrono::Local)
+                .unwrap_or_else(|| naive.and_utc().timestamp()),
+        );
     }
 
     // Try RFC 3339 first (with timezone offset)
@@ -949,7 +949,10 @@ mod tests {
             time_zone: "Eastern Standard Time".to_string(),
         };
         let date = parse_graph_all_day_date(&dt).expect("parses");
-        assert_eq!(date, chrono::NaiveDate::from_ymd_opt(2024, 3, 10).expect("valid"));
+        assert_eq!(
+            date,
+            chrono::NaiveDate::from_ymd_opt(2024, 3, 10).expect("valid")
+        );
     }
 
     #[test]

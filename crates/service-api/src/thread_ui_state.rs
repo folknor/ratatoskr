@@ -38,8 +38,7 @@ mod tests {
             attachments_collapsed: Some(true),
         };
         let json = serde_json::to_value(&params).expect("serialize");
-        let recovered: ThreadUiStateSetParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ThreadUiStateSetParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(params, recovered);
     }
 
@@ -51,8 +50,7 @@ mod tests {
             attachments_collapsed: None,
         };
         let json = serde_json::to_value(&params).expect("serialize");
-        let recovered: ThreadUiStateSetParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ThreadUiStateSetParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(params, recovered);
     }
 
@@ -60,7 +58,6 @@ mod tests {
     fn thread_ui_state_set_ack_round_trips_through_serde() {
         let ack = ThreadUiStateSetAck;
         let json = serde_json::to_value(&ack).expect("serialize");
-        let _recovered: ThreadUiStateSetAck =
-            serde_json::from_value(json).expect("deserialize");
+        let _recovered: ThreadUiStateSetAck = serde_json::from_value(json).expect("deserialize");
     }
 }

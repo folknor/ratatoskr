@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use super::client::list_shared_folders;
 use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::types::{ImapFolder, NamespaceType};
-use db::db::{ReadDbState, WriterPool};
 use db::db::queries_extra::{
     PublicFolderItemRow, PublicFolderRow, get_public_folder_sync_depth,
     update_public_folder_rights, upsert_public_folder_items, upsert_public_folders,
 };
+use db::db::{ReadDbState, WriterPool};
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -137,7 +137,15 @@ pub async fn check_folder_rights(
     let can_delete = rights.can_delete;
 
     db.with_write(move |conn| {
-        update_public_folder_rights(conn, &account_id, &folder_path, can_read, can_insert, can_write, can_delete)
+        update_public_folder_rights(
+            conn,
+            &account_id,
+            &folder_path,
+            can_read,
+            can_insert,
+            can_write,
+            can_delete,
+        )
     })
     .await?;
 
@@ -197,7 +205,8 @@ pub async fn sync_imap_public_folder(
 
     // Persist messages to public_folder_items
     let new_items =
-        upsert_public_folder_items_imap(writer, account_id, folder_path, &fetch_result.messages).await?;
+        upsert_public_folder_items_imap(writer, account_id, folder_path, &fetch_result.messages)
+            .await?;
 
     save_sync_state(writer, account_id, folder_path, now).await?;
 

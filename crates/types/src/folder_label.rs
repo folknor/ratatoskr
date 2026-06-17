@@ -233,7 +233,9 @@ impl GmailLabelId {
             || raw.starts_with(CATEGORY_PREFIX)
             || raw.starts_with("importance:")
         {
-            return Err(format!("Gmail label id `{raw}` is reserved for another kind"));
+            return Err(format!(
+                "Gmail label id `{raw}` is reserved for another kind"
+            ));
         }
         Ok(Self(raw.to_string()))
     }
@@ -433,9 +435,9 @@ impl LabelKind {
                 if let Some(level) = ImportanceLevel::parse_label_id(raw) {
                     return Ok(Self::GraphImportance(level));
                 }
-                let category = raw
-                    .strip_prefix(CATEGORY_PREFIX)
-                    .ok_or_else(|| format!("Graph label id `{raw}` is not a category or importance label"))?;
+                let category = raw.strip_prefix(CATEGORY_PREFIX).ok_or_else(|| {
+                    format!("Graph label id `{raw}` is not a category or importance label")
+                })?;
                 CategoryName::parse(category).map(Self::GraphCategory)
             }
             MailProviderKind::Jmap => {
@@ -606,11 +608,26 @@ mod tests {
     #[test]
     fn label_kinds_storage_round_trip() {
         let cases = [
-            (LabelKind::gmail_user("Label_1").unwrap(), MailProviderKind::Gmail),
-            (LabelKind::graph_category("Blue").unwrap(), MailProviderKind::Graph),
-            (LabelKind::graph_importance(ImportanceLevel::High), MailProviderKind::Graph),
-            (LabelKind::jmap_keyword("todo").unwrap(), MailProviderKind::Jmap),
-            (LabelKind::imap_keyword("todo").unwrap(), MailProviderKind::Imap),
+            (
+                LabelKind::gmail_user("Label_1").unwrap(),
+                MailProviderKind::Gmail,
+            ),
+            (
+                LabelKind::graph_category("Blue").unwrap(),
+                MailProviderKind::Graph,
+            ),
+            (
+                LabelKind::graph_importance(ImportanceLevel::High),
+                MailProviderKind::Graph,
+            ),
+            (
+                LabelKind::jmap_keyword("todo").unwrap(),
+                MailProviderKind::Jmap,
+            ),
+            (
+                LabelKind::imap_keyword("todo").unwrap(),
+                MailProviderKind::Imap,
+            ),
         ];
         for (label, provider) in cases {
             let id = label.storage_id();
@@ -623,11 +640,26 @@ mod tests {
     #[test]
     fn folder_kinds_storage_round_trip() {
         let cases = [
-            (FolderKind::graph_user("AAMkAD").unwrap(), MailProviderKind::Graph),
-            (FolderKind::jmap_user("Mb-1").unwrap(), MailProviderKind::Jmap),
-            (FolderKind::imap_user("INBOX/Work").unwrap(), MailProviderKind::Imap),
-            (FolderKind::System(SystemFolderId::Inbox), MailProviderKind::Imap),
-            (FolderKind::System(SystemFolderId::Archive), MailProviderKind::Gmail),
+            (
+                FolderKind::graph_user("AAMkAD").unwrap(),
+                MailProviderKind::Graph,
+            ),
+            (
+                FolderKind::jmap_user("Mb-1").unwrap(),
+                MailProviderKind::Jmap,
+            ),
+            (
+                FolderKind::imap_user("INBOX/Work").unwrap(),
+                MailProviderKind::Imap,
+            ),
+            (
+                FolderKind::System(SystemFolderId::Inbox),
+                MailProviderKind::Imap,
+            ),
+            (
+                FolderKind::System(SystemFolderId::Archive),
+                MailProviderKind::Gmail,
+            ),
             (
                 FolderKind::gmail_system("CHAT").unwrap(),
                 MailProviderKind::Gmail,

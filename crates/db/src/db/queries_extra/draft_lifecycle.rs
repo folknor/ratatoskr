@@ -9,8 +9,8 @@
 
 use rusqlite::{Connection, params};
 
-use crate::db::WriteTarget;
 use super::super::from_row::FromRow;
+use crate::db::WriteTarget;
 
 /// Persist a draft as 'pending' (upsert - retries update the existing row).
 #[allow(clippy::too_many_arguments)]
@@ -154,10 +154,7 @@ pub fn mark_scheduled_failed_sync(
 
 /// Delete a local draft by ID.
 pub fn delete_draft_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM local_drafts WHERE id = ?1",
-        params![draft_id],
-    )
-    .map_err(|e| format!("draft delete: {e}"))?;
+    conn.execute("DELETE FROM local_drafts WHERE id = ?1", params![draft_id])
+        .map_err(|e| format!("draft delete: {e}"))?;
     Ok(())
 }

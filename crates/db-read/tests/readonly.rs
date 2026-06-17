@@ -35,7 +35,10 @@ fn prepare_rejects_insert_returning() {
 fn prepare_accepts_plain_select() {
     let conn = open_test_db();
     let read = db_read::ReadConn::from_raw(&conn);
-    assert!(read.prepare("SELECT id FROM messages WHERE seen = ?1").is_ok());
+    assert!(
+        read.prepare("SELECT id FROM messages WHERE seen = ?1")
+            .is_ok()
+    );
 }
 
 #[test]

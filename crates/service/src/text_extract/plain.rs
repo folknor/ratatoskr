@@ -30,7 +30,9 @@ const MAX_CONTROL_CHAR_RATIO: f32 = 0.10;
 #[allow(dead_code)] // Consumed in 7-4.
 pub(crate) fn extract_plain(bytes: &[u8]) -> ExtractionOutcome {
     if bytes.is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
 
     // 1. BOM-prefixed inputs use the encoding the BOM declares. Strip
@@ -40,7 +42,9 @@ pub(crate) fn extract_plain(bytes: &[u8]) -> ExtractionOutcome {
         if let Some((encoding, bom_len)) = Encoding::for_bom(bytes) {
             let (text, _, had_errors) = encoding.decode(&bytes[bom_len..]);
             if had_errors && text.is_empty() {
-                return ExtractionOutcome::Skipped { reason: SkipReason::EncodingInvalid };
+                return ExtractionOutcome::Skipped {
+                    reason: SkipReason::EncodingInvalid,
+                };
             }
             text
         } else {
@@ -64,7 +68,9 @@ pub(crate) fn extract_plain(bytes: &[u8]) -> ExtractionOutcome {
     // (mp3, png mistakenly typed `text/plain`; or null-byte streams
     // that happen to be valid ASCII) lights this up.
     if control_char_ratio(&decoded) > MAX_CONTROL_CHAR_RATIO {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EncodingInvalid };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EncodingInvalid,
+        };
     }
     finish_decoded(&decoded)
 }
@@ -76,7 +82,9 @@ pub(crate) fn extract_plain(bytes: &[u8]) -> ExtractionOutcome {
 #[allow(dead_code)] // Consumed in 7-4.
 pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
     if bytes.is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
 
     use quick_xml::Reader;
@@ -162,7 +170,9 @@ pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
     }
 
     if out.is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
     ExtractionOutcome::Indexed { text: out }
 }
@@ -189,9 +199,13 @@ fn decode_to_utf8_if_needed(bytes: &[u8]) -> Option<Vec<u8>> {
 fn finish_decoded(text: &str) -> ExtractionOutcome {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
-    ExtractionOutcome::Indexed { text: trimmed.to_string() }
+    ExtractionOutcome::Indexed {
+        text: trimmed.to_string(),
+    }
 }
 
 fn control_char_ratio(text: &str) -> f32 {
@@ -210,10 +224,7 @@ fn control_char_ratio(text: &str) -> f32 {
     // a payload passed the ratio guard and got indexed as garbage.
     let bad = text
         .chars()
-        .filter(|c| {
-            (c.is_control() && *c != '\n' && *c != '\r' && *c != '\t')
-                || *c == '\u{FFFD}'
-        })
+        .filter(|c| (c.is_control() && *c != '\n' && *c != '\r' && *c != '\t') || *c == '\u{FFFD}')
         .count();
     #[allow(clippy::cast_precision_loss)]
     let ratio = (bad as f32) / (total as f32);
@@ -228,14 +239,24 @@ mod tests {
     fn plain_utf8_round_trips() {
         let bytes = "hello world".as_bytes();
         let outcome = extract_plain(bytes);
-        assert_eq!(outcome, ExtractionOutcome::Indexed { text: "hello world".into() });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Indexed {
+                text: "hello world".into()
+            }
+        );
     }
 
     #[test]
     fn plain_utf8_with_multibyte_chars() {
         let bytes = "café \u{1F600}".as_bytes();
         let outcome = extract_plain(bytes);
-        assert_eq!(outcome, ExtractionOutcome::Indexed { text: "café \u{1F600}".into() });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Indexed {
+                text: "café \u{1F600}".into()
+            }
+        );
     }
 
     #[test]
@@ -250,13 +271,23 @@ mod tests {
     #[test]
     fn plain_empty_input_skips_empty() {
         let outcome = extract_plain(b"");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]
     fn plain_whitespace_only_skips_empty() {
         let outcome = extract_plain(b"   \n\n\t  ");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]
@@ -302,12 +333,18 @@ mod tests {
         // declared as text/plain.
         let bytes: &[u8] = &[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07];
         let outcome = extract_plain(bytes);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EncodingInvalid });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EncodingInvalid
+            }
+        );
     }
 
     #[test]
     fn html_extracts_visible_text_only() {
-        let bytes = b"<html><head><title>T</title></head><body><p>Hello <b>world</b></p></body></html>";
+        let bytes =
+            b"<html><head><title>T</title></head><body><p>Hello <b>world</b></p></body></html>";
         match extract_html(bytes) {
             ExtractionOutcome::Indexed { text } => {
                 // Order should preserve document order; spacing collapsed.
@@ -338,14 +375,24 @@ mod tests {
     #[test]
     fn html_empty_input_skips() {
         let outcome = extract_html(b"");
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]
     fn html_no_text_content_skips() {
         let bytes = b"<html><head></head><body></body></html>";
         let outcome = extract_html(bytes);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]

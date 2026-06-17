@@ -1,5 +1,5 @@
-use std::path::Path;
 use rtsk::db::{ReadConn, ReadDbState};
+use std::path::Path;
 
 // ── DB connection ───────────────────────────────────────
 

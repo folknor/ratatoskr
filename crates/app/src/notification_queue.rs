@@ -106,9 +106,11 @@ impl<T: Classifiable> NotificationQueue<T> {
                     return;
                 }
                 if state.items.len() < self.capacity {
-                    state
-                        .items
-                        .push_back(pending.take().expect("pending was just verified to be Some"));
+                    state.items.push_back(
+                        pending
+                            .take()
+                            .expect("pending was just verified to be Some"),
+                    );
                     self.item_available.notify_one();
                     return;
                 }
@@ -288,13 +290,21 @@ mod tests {
 
         let queue: NotificationQueue<Notification> = NotificationQueue::new(16);
         queue
-            .enqueue(boot_progress(BootPhase::Migrating { current: 1, total: 10 }))
+            .enqueue(boot_progress(BootPhase::Migrating {
+                current: 1,
+                total: 10,
+            }))
             .await;
         queue.enqueue(boot_progress(BootPhase::LoadingKey)).await;
         queue
-            .enqueue(boot_progress(BootPhase::Migrating { current: 5, total: 10 }))
+            .enqueue(boot_progress(BootPhase::Migrating {
+                current: 5,
+                total: 10,
+            }))
             .await;
-        queue.enqueue(boot_progress(BootPhase::OpeningDatabase)).await;
+        queue
+            .enqueue(boot_progress(BootPhase::OpeningDatabase))
+            .await;
 
         // Migrating(1, 10) was replaced in-slot by Migrating(5, 10), so the
         // first slot now carries the latter. LoadingKey and OpeningDatabase
@@ -312,7 +322,10 @@ mod tests {
         assert_eq!(
             phases,
             vec![
-                BootPhase::Migrating { current: 5, total: 10 },
+                BootPhase::Migrating {
+                    current: 5,
+                    total: 10
+                },
                 BootPhase::LoadingKey,
                 BootPhase::OpeningDatabase,
             ],

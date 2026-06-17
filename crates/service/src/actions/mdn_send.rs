@@ -39,9 +39,7 @@ pub(crate) async fn send_mdn_responses(
         Ok(c) if c.is_empty() => return,
         Ok(c) => c,
         Err(e) => {
-            log::warn!(
-                "[mdn] candidate lookup failed for {account_id}/{thread_id}: {e}"
-            );
+            log::warn!("[mdn] candidate lookup failed for {account_id}/{thread_id}: {e}");
             return;
         }
     };
@@ -65,8 +63,7 @@ pub(crate) async fn send_mdn_responses(
     };
 
     for candidate in candidates {
-        let policy =
-            resolve_policy(ctx, account_id, &candidate.from_address).await;
+        let policy = resolve_policy(ctx, account_id, &candidate.from_address).await;
         if !matches!(policy, ReadReceiptPolicy::Always) {
             // Ask is treated as Never until the prompt UI ships.
             continue;
@@ -173,11 +170,7 @@ async fn load_account_identity(
     .await
 }
 
-async fn resolve_policy(
-    ctx: &ActionContext,
-    account_id: &str,
-    sender: &str,
-) -> ReadReceiptPolicy {
+async fn resolve_policy(ctx: &ActionContext, account_id: &str, sender: &str) -> ReadReceiptPolicy {
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let sender = sender.to_string();
@@ -186,11 +179,7 @@ async fn resolve_policy(
         .unwrap_or(ReadReceiptPolicy::Never)
 }
 
-async fn mark_sent(
-    ctx: &ActionContext,
-    account_id: &str,
-    message_id: &str,
-) -> Result<(), String> {
+async fn mark_sent(ctx: &ActionContext, account_id: &str, message_id: &str) -> Result<(), String> {
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let mid = message_id.to_string();
@@ -244,19 +233,52 @@ mod tests {
     fn collects_only_pending_requested_messages() {
         let conn = setup_db();
         // Wanted: requested, not sent, both fields populated.
-        insert(&conn, "m-want", "t1", Some("a@x"), Some("<mid-1>"), true, false);
+        insert(
+            &conn,
+            "m-want",
+            "t1",
+            Some("a@x"),
+            Some("<mid-1>"),
+            true,
+            false,
+        );
         // Excluded: already sent.
-        insert(&conn, "m-sent", "t1", Some("b@x"), Some("<mid-2>"), true, true);
+        insert(
+            &conn,
+            "m-sent",
+            "t1",
+            Some("b@x"),
+            Some("<mid-2>"),
+            true,
+            true,
+        );
         // Excluded: not requested.
-        insert(&conn, "m-norq", "t1", Some("c@x"), Some("<mid-3>"), false, false);
+        insert(
+            &conn,
+            "m-norq",
+            "t1",
+            Some("c@x"),
+            Some("<mid-3>"),
+            false,
+            false,
+        );
         // Excluded: missing message_id_header.
         insert(&conn, "m-nomid", "t1", Some("d@x"), None, true, false);
         // Excluded: missing from_address.
         insert(&conn, "m-nofrom", "t1", None, Some("<mid-4>"), true, false);
         // Excluded: different thread.
-        insert(&conn, "m-other", "t2", Some("e@x"), Some("<mid-5>"), true, false);
+        insert(
+            &conn,
+            "m-other",
+            "t2",
+            Some("e@x"),
+            Some("<mid-5>"),
+            true,
+            false,
+        );
 
-        let candidates = collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
+        let candidates =
+            collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
         let ids: Vec<&str> = candidates.iter().map(|c| c.message_id.as_str()).collect();
         assert_eq!(ids, vec!["m-want"]);
     }
@@ -267,7 +289,8 @@ mod tests {
         insert(&conn, "m1", "t1", Some("a@x"), Some("<1>"), true, false);
         insert(&conn, "m2", "t1", Some("b@x"), Some("<2>"), true, false);
 
-        let candidates = collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
+        let candidates =
+            collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
         assert_eq!(candidates.len(), 2);
     }
 
@@ -276,7 +299,8 @@ mod tests {
         let conn = setup_db();
         insert(&conn, "m1", "t1", Some("a@x"), Some("<1>"), false, false);
 
-        let candidates = collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
+        let candidates =
+            collect_candidates_sync(&ReadConn::from_raw(&conn), "acct", "t1").expect("query");
         assert!(candidates.is_empty());
     }
 }

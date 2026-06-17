@@ -85,9 +85,7 @@ fn detect_archive_signature(data: &[u8]) -> Option<SignedMarker> {
         if name.starts_with("_xmlsignatures/") {
             return Some(SignedMarker::OoxmlXmlSignatures);
         }
-        if name == "META-INF/documentsignatures.xml"
-            || name == "META-INF/macrosignatures.xml"
-        {
+        if name == "META-INF/documentsignatures.xml" || name == "META-INF/macrosignatures.xml" {
             return Some(SignedMarker::OdfDocumentSignatures);
         }
     }

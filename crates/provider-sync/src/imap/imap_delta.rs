@@ -25,11 +25,11 @@ const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
 const CIRCUIT_BREAKER_DELAY_MS: u64 = 15_000;
 const CIRCUIT_BREAKER_MAX_FAILURES: u32 = 5;
 
-use super::is_connection_error;
 use super::imap_delta_janitor::sync_flags_on_session;
 use super::imap_delta_janitor::{
     run_deletion_detection, sync_flags_without_condstore, sync_flags_without_condstore_forced,
 };
+use super::is_connection_error;
 
 fn compute_since_date(days_back: i64) -> String {
     use chrono::{Duration, Utc};
@@ -307,7 +307,7 @@ pub async fn imap_delta_sync(
             let read = conn.as_read();
             sync::pending::get_blocked_thread_ids(&read, &aid, &t)
         })
-            .await?
+        .await?
     };
 
     let mut affected = {

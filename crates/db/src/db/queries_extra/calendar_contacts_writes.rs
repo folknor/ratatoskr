@@ -9,11 +9,11 @@
 //! Writer-side functions take `&WriteConn` or `&WriteTxn` so Service code
 //! cannot accidentally route calendar mutations through a read handle.
 
-use crate::db::{WriteConn, WriteTxn};
-use rusqlite::{OptionalExtension, params};
 pub use super::calendars::{
     CalendarAttendeeWriteRow, CalendarReminderWriteRow, LocalCalendarEventParams,
 };
+use crate::db::{WriteConn, WriteTxn};
+use rusqlite::{OptionalExtension, params};
 
 // ---------------------------------------------------------------------------
 // `calendars` table helpers
@@ -251,7 +251,12 @@ pub fn replace_event_reminders(
         conn.execute(
             "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method)
                  VALUES (?1, ?2, ?3, ?4)",
-            params![event_id, account_id, reminder.minutes_before, reminder.method],
+            params![
+                event_id,
+                account_id,
+                reminder.minutes_before,
+                reminder.method
+            ],
         )
         .map_err(|e| format!("insert reminder: {e}"))?;
     }
@@ -380,7 +385,9 @@ pub fn sync_caldav_attendees(
 
     if let Some(org_email) = organizer_email {
         let org_lower = org_email.to_lowercase();
-        let already_present = attendees.iter().any(|a| a.email.to_lowercase() == org_lower);
+        let already_present = attendees
+            .iter()
+            .any(|a| a.email.to_lowercase() == org_lower);
         if !already_present {
             conn.execute(
                 "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer) \
@@ -605,10 +612,7 @@ pub fn set_account_caldav_discovered_urls(
 
 /// Clear the persisted CalDAV principal / home URLs for an account, forcing
 /// full RFC 6764 discovery on the next sync.
-pub fn clear_account_caldav_urls(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-) -> Result<(), String> {
+pub fn clear_account_caldav_urls(conn: &WriteConn<'_>, account_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE accounts \
          SET caldav_principal_url = NULL, \
@@ -638,10 +642,7 @@ pub struct ContactGroupRow {
 }
 
 /// Upsert a contact group row (INSERT OR UPDATE on conflict by id).
-pub fn upsert_contact_group(
-    conn: &WriteConn<'_>,
-    row: &ContactGroupRow,
-) -> Result<(), String> {
+pub fn upsert_contact_group(conn: &WriteConn<'_>, row: &ContactGroupRow) -> Result<(), String> {
     conn.execute(
         "INSERT INTO contact_groups (id, name, source, account_id, server_id, email, group_type) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
@@ -666,10 +667,7 @@ pub fn upsert_contact_group(
 
 /// Delete all member rows for a contact group (replace pattern: delete then
 /// re-insert).
-pub fn delete_contact_group_members(
-    conn: &WriteTxn<'_>,
-    group_id: &str,
-) -> Result<(), String> {
+pub fn delete_contact_group_members(conn: &WriteTxn<'_>, group_id: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM contact_group_members WHERE group_id = ?1",
         params![group_id],
@@ -694,10 +692,7 @@ pub fn insert_contact_group_member_email(
 }
 
 /// Delete a single contact group by its local id (members cascade via FK).
-pub fn delete_contact_group_by_id(
-    conn: &WriteTxn<'_>,
-    group_id: &str,
-) -> Result<(), String> {
+pub fn delete_contact_group_by_id(conn: &WriteTxn<'_>, group_id: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM contact_groups WHERE id = ?1",
         params![group_id],
@@ -741,7 +736,14 @@ pub fn upsert_message_reaction(
          VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6) \
          ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
            reacted_at = ?5",
-        params![message_id, account_id, reactor_email, reaction_type, reacted_at, source],
+        params![
+            message_id,
+            account_id,
+            reactor_email,
+            reaction_type,
+            reacted_at,
+            source
+        ],
     )
     .map_err(|e| format!("upsert_message_reaction: {e}"))?;
     Ok(())

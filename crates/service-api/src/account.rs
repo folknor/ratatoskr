@@ -269,8 +269,7 @@ mod tests {
             cache_attachments_enabled: Some(false),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountUpdateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountUpdateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -294,8 +293,7 @@ mod tests {
         assert!(!obj.contains_key("caldav_url"));
         assert!(!obj.contains_key("caldav_username"));
         assert!(!obj.contains_key("caldav_password"));
-        let recovered: AccountUpdateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountUpdateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -314,8 +312,7 @@ mod tests {
             ],
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountReorderParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountReorderParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -355,8 +352,7 @@ mod tests {
     fn account_create_plaintext_round_trip() {
         let original = sample_create_plaintext();
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountCreateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountCreateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -392,8 +388,7 @@ mod tests {
             accept_invalid_certs: false,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountCreateParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountCreateParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -426,8 +421,7 @@ mod tests {
             id: "acc-uuid-1".into(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountCreateAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountCreateAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -470,8 +464,7 @@ mod tests {
             account_id: "acc-uuid-1".into(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountDeleteParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountDeleteParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -485,8 +478,7 @@ mod tests {
             search_cleaned: true,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: AccountDeleteAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: AccountDeleteAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 

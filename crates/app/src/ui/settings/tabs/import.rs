@@ -169,9 +169,7 @@ fn import_column_mapping_row(
             cycle_import_field(current),
         ))
         .padding(0)
-        .style(move |theme, status| {
-            theme::style_settings_row_button(theme, status, position)
-        })
+        .style(move |theme, status| theme::style_settings_row_button(theme, status, position))
         .width(Length::Fill)
         .into()
     })
@@ -205,11 +203,19 @@ fn import_sample_row(row: &::import::ImportPreviewRow) -> RowBuilder<'_> {
         row![
             text(display)
                 .size(TEXT_SM)
-                .style(if status.is_importable() { text::secondary } else { text::danger })
+                .style(if status.is_importable() {
+                    text::secondary
+                } else {
+                    text::danger
+                })
                 .width(Length::Fill),
             text(status.label())
                 .size(TEXT_SM)
-                .style(if status.is_importable() { text::secondary } else { text::danger }),
+                .style(if status.is_importable() {
+                    text::secondary
+                } else {
+                    text::danger
+                }),
         ]
         .spacing(SPACE_SM)
         .align_y(Alignment::Center),

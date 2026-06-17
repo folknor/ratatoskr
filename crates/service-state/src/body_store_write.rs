@@ -259,12 +259,12 @@ mod tests {
             .await
             .expect("put_batch");
 
-        let removed = writer
-            .delete(vec!["m1".into()])
-            .await
-            .expect("delete");
+        let removed = writer.delete(vec!["m1".into()]).await.expect("delete");
         assert_eq!(removed, 1);
-        let got = reader.get_batch(vec!["m1".into()]).await.expect("get_batch");
+        let got = reader
+            .get_batch(vec!["m1".into()])
+            .await
+            .expect("get_batch");
         assert!(got.is_empty(), "row should be gone");
     }
 }

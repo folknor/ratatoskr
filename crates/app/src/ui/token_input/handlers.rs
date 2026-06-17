@@ -1,7 +1,7 @@
+use iced::Rectangle;
 use iced::advanced::{Clipboard, Shell};
 use iced::keyboard;
 use iced::mouse;
-use iced::Rectangle;
 
 use super::layout::selected_index;
 use super::types::TokenInputMessage;

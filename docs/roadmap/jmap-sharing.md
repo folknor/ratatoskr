@@ -1,7 +1,7 @@
 # JMAP Sharing (RFC 9670)
 
 **Tier**: 2 - Enhances JMAP provider parity
-**Status**: 🟢 **All 6 phases implemented** - Full JMAP Sharing pipeline: Session discovery + revocation (Phase 1), shared account sync with independent state tokens (Phase 2), `myRights` persistence (Phase 3), subscription management (Phase 4), ShareNotification polling (Phase 5), principal-based identity resolution (Phase 6). Remaining: UI-side integration (app crate) for rights gating, subscription toggle, and compose identity auto-selection.
+**Status**: (green) **All 6 phases implemented** - Full JMAP Sharing pipeline: Session discovery + revocation (Phase 1), shared account sync with independent state tokens (Phase 2), `myRights` persistence (Phase 3), subscription management (Phase 4), ShareNotification polling (Phase 5), principal-based identity resolution (Phase 6). Remaining: UI-side integration (app crate) for rights gating, subscription toggle, and compose identity auto-selection.
 
 ---
 

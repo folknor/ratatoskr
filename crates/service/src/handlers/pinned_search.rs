@@ -112,8 +112,7 @@ pub(crate) async fn handle_update(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(PinnedSearchUpdateAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(PinnedSearchUpdateAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_delete(
@@ -127,8 +126,7 @@ pub(crate) async fn handle_delete(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(PinnedSearchDeleteAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(PinnedSearchDeleteAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_delete_all(
@@ -137,9 +135,7 @@ pub(crate) async fn handle_delete_all(
 ) -> Result<Value, ServiceError> {
     let write_db = boot_state.write_db_state()?;
     let deleted = write_db
-        .with_write(move |conn| {
-            db::db::pinned_searches::db_delete_all_pinned_searches_sync(conn)
-        })
+        .with_write(move |conn| db::db::pinned_searches::db_delete_all_pinned_searches_sync(conn))
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(PinnedSearchDeleteAllAck { deleted })

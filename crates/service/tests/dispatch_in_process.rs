@@ -22,17 +22,15 @@ struct TestDataDir {
 
 impl TestDataDir {
     fn new(suffix: &str) -> std::io::Result<Self> {
-        let path = std::env::current_dir()?
-            .join("target")
-            .join(format!(
-                "dispatch-in-process-{}-{}-{}",
-                std::process::id(),
-                suffix,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
+        let path = std::env::current_dir()?.join("target").join(format!(
+            "dispatch-in-process-{}-{}-{}",
+            std::process::id(),
+            suffix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path)?;
         write_dummy_key(&path)?;
@@ -40,17 +38,15 @@ impl TestDataDir {
     }
 
     fn without_key(suffix: &str) -> std::io::Result<Self> {
-        let path = std::env::current_dir()?
-            .join("target")
-            .join(format!(
-                "dispatch-in-process-nokey-{}-{}-{}",
-                std::process::id(),
-                suffix,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
+        let path = std::env::current_dir()?.join("target").join(format!(
+            "dispatch-in-process-nokey-{}-{}-{}",
+            std::process::id(),
+            suffix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path)?;
         Ok(Self { path })
@@ -161,7 +157,8 @@ async fn invalid_utf8_returns_parse_error_and_loop_continues() -> TestResult {
 #[tokio::test(flavor = "multi_thread")]
 async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
     let mut harness = spawn_harness();
-    let bogus = br#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{"unexpected":"value"}}"#;
+    let bogus =
+        br#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{"unexpected":"value"}}"#;
     harness.stdin.write_all(bogus).await?;
     harness.stdin.write_all(b"\n").await?;
     let (id, response) = read_response(&mut harness.stdout).await?;
@@ -333,11 +330,7 @@ async fn boot_sequence_returns_migration_failure_when_db_is_corrupt() -> TestRes
     Ok(())
 }
 
-async fn write_request(
-    stdin: &mut DuplexStream,
-    id: u64,
-    params: RequestParams,
-) -> TestResult {
+async fn write_request(stdin: &mut DuplexStream, id: u64, params: RequestParams) -> TestResult {
     write_message(&JsonRpcRequest::new(id, &params), stdin).await?;
     Ok(())
 }

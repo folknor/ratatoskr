@@ -163,7 +163,10 @@ mod tests {
 
     #[test]
     fn bool_setting_renders_as_true_false_string() {
-        assert_eq!(SettingValue::ShowSyncStatus(true).render_for_storage(), "true");
+        assert_eq!(
+            SettingValue::ShowSyncStatus(true).render_for_storage(),
+            "true"
+        );
         assert_eq!(
             SettingValue::ShowSyncStatus(false).render_for_storage(),
             "false"

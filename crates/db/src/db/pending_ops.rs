@@ -1,4 +1,4 @@
-use super::{WriterPool, WriteTarget};
+use super::{WriteTarget, WriterPool};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -181,12 +181,21 @@ pub fn db_pending_ops_cancel_for_resource_sync(
     Ok(())
 }
 
-pub fn db_pending_ops_increment_retry_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
+pub fn db_pending_ops_increment_retry_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+) -> Result<(), String> {
     let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
         .query_row(
             "SELECT retry_count, max_retries, operation_type FROM pending_operations WHERE id = ?1",
             params![id],
-            |row| Ok((row.get("retry_count")?, row.get("max_retries")?, row.get("operation_type")?)),
+            |row| {
+                Ok((
+                    row.get("retry_count")?,
+                    row.get("max_retries")?,
+                    row.get("operation_type")?,
+                ))
+            },
         )
         .map_err(|e| format!("get retry info: {e}"))?;
 
@@ -197,9 +206,7 @@ pub fn db_pending_ops_increment_retry_sync(conn: &impl WriteTarget, id: &str) ->
             params![new_count, id],
         )
         .map_err(|e| format!("mark failed: {e}"))?;
-        crate::db::queries_extra::delete_pending_thread_label_intents_for_action(
-            conn, id,
-        )?;
+        crate::db::queries_extra::delete_pending_thread_label_intents_for_action(conn, id)?;
         log::warn!(
             "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
              {new_count}/{max_retries} - left for sync reconciliation"
@@ -261,9 +268,7 @@ pub fn db_pending_ops_recover_executing_sync(conn: &impl WriteTarget) -> Result<
 /// `service::actions::pending::recover_on_boot` is the async sister that
 /// Phase 2's relocated periodic drainer continues to call against the
 /// `ActionContext`-shaped API.
-pub fn db_pending_ops_recover_on_boot_sync(
-    conn: &impl WriteTarget,
-) -> Result<(), String> {
+pub fn db_pending_ops_recover_on_boot_sync(conn: &impl WriteTarget) -> Result<(), String> {
     let pending_count = conn
         .execute(
             "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
@@ -271,9 +276,7 @@ pub fn db_pending_ops_recover_on_boot_sync(
         )
         .map_err(|e| format!("recover executing ops: {e}"))?;
     if pending_count > 0 {
-        log::info!(
-            "[pending_ops] Recovered {pending_count} stranded executing operations on boot"
-        );
+        log::info!("[pending_ops] Recovered {pending_count} stranded executing operations on boot");
     }
 
     let drafts_count = conn

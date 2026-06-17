@@ -14,18 +14,17 @@ use dellingr::error::ErrorKind;
 use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, AttachmentFetchParams,
-    BootClassification, BootExitCode, BootPhaseKind, CalendarActionPlan, CalendarActionWireOperation,
-    ClientNotification, ContactDeleteParams, ContactSaveParams, ExtractStatusParams,
-    IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId, PlanId,
-    ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
-    SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest, SettingValue,
-    SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
+    BootClassification, BootExitCode, BootPhaseKind, CalendarActionPlan,
+    CalendarActionWireOperation, ClientNotification, ContactDeleteParams, ContactSaveParams,
+    ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
+    PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
+    SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
+    SettingValue, SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
     TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
-    TestRunDiscoveryParams, TestSeedAccountParams,
-    TestRemoveCachedAttachmentBytesParams, TestSeedCachedAttachmentParams,
-    TestSeedRemoteAttachmentParams, TestSearchIndexParams, TestSeedThreadParams,
-    TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation,
-    WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
+    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
+    WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
 };
 use std::collections::HashMap;
 use std::io::{BufWriter, Write as _};
@@ -64,7 +63,11 @@ pub fn run(script: PathBuf) -> HarnessResult {
     match rx.recv_timeout(ceiling) {
         Ok(result) => {
             let success = result.is_ok();
-            finish_context(&context, success, result.as_ref().err().map(ToString::to_string));
+            finish_context(
+                &context,
+                success,
+                result.as_ref().err().map(ToString::to_string),
+            );
             result
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -152,7 +155,12 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "http_delete", lua_http_delete)?;
     set_field_fn(state, table_idx, "http", lua_http)?;
     set_field_fn(state, table_idx, "env", lua_env)?;
-    set_field_number(state, table_idx, "protocol_version", service_api::PROTOCOL_VERSION as f64)?;
+    set_field_number(
+        state,
+        table_idx,
+        "protocol_version",
+        service_api::PROTOCOL_VERSION as f64,
+    )?;
     state.set_global("harness");
     Ok(())
 }
@@ -347,10 +355,7 @@ fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
     };
     let refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
     let result = handle.block_on(ServiceClient::spawn_for_harness(
-        &binary,
-        &data_dir,
-        &refs,
-        trace,
+        &binary, &data_dir, &refs, trace,
     ));
     state.set_top(0);
     match result {
@@ -448,9 +453,10 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
             .map_err(|_| {
                 std::io::Error::other("parent_death_helper did not print pid in time")
             })??;
-            let service_pid = line.trim().parse::<u32>().map_err(|e| {
-                std::io::Error::other(format!("parse helper pid {line:?}: {e}"))
-            })?;
+            let service_pid = line
+                .trim()
+                .parse::<u32>()
+                .map_err(|e| std::io::Error::other(format!("parse helper pid {line:?}: {e}")))?;
             Ok::<_, std::io::Error>((child, helper_pid, service_pid))
         })
         .map_err(lua_io)?;
@@ -500,7 +506,9 @@ fn lua_kill(state: &mut State) -> dellingr::Result<u8> {
     #[cfg(not(unix))]
     {
         let _ = (pid, signal);
-        return Err(lua_error_message("harness.kill is only implemented on unix"));
+        return Err(lua_error_message(
+            "harness.kill is only implemented on unix",
+        ));
     }
     if let Ok(ctx) = context(state) {
         ctx.lock()
@@ -586,7 +594,9 @@ fn lua_write_summary(state: &mut State) -> dellingr::Result<u8> {
     }
     let value = lua_table_to_json(state, 1)?;
     if !value.is_object() {
-        return Err(lua_error_message("write_summary root must be a JSON object"));
+        return Err(lua_error_message(
+            "write_summary root must be a JSON object",
+        ));
     }
     let text = serde_json::to_string_pretty(&value).map_err(lua_json)?;
     let path = {
@@ -696,8 +706,8 @@ fn lua_repeat_byte(state: &mut State) -> dellingr::Result<u8> {
     }
     let len = state.to_number(2)? as usize;
     // byte < 0x80, so `vec![byte; len]` is valid UTF-8.
-    let repeated = String::from_utf8(vec![byte; len])
-        .map_err(|error| lua_error_message(error.to_string()))?;
+    let repeated =
+        String::from_utf8(vec![byte; len]).map_err(|error| lua_error_message(error.to_string()))?;
     state.set_top(0);
     state.push_string(repeated);
     Ok(1)
@@ -709,9 +719,7 @@ fn lua_stage_attachment(state: &mut State) -> dellingr::Result<u8> {
     let send_id = parse_plan_id(&send_id_value)?;
     let index = state.to_number(3)? as usize;
     let relative_path = format!("{index}.bin");
-    let staging_dir = app_data_dir
-        .join("staging")
-        .join(send_id.to_string());
+    let staging_dir = app_data_dir.join("staging").join(send_id.to_string());
     std::fs::create_dir_all(&staging_dir).map_err(lua_io)?;
     // 50 MB attachments hit this path - wrap the file in a BufWriter so the
     // 8 KiB chunk loop below collapses to a handful of syscalls instead of
@@ -1049,15 +1057,7 @@ fn lua_http(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.handle.clone()
     };
-    let response = http_request_text(
-        handle,
-        method,
-        url,
-        body,
-        content_type,
-        if_match,
-        "http",
-    )?;
+    let response = http_request_text(handle, method, url, body, content_type, if_match, "http")?;
     state.set_top(0);
     push_json(state, &response)?;
     Ok(1)
@@ -1159,9 +1159,10 @@ fn latency_per_protocol_field(
                 };
                 let value = match key {
                     Ok(key) => match state.typ(-1) {
-                        LuaType::Number => latency_u64(state.to_number(-1)?, &format!(
-                            "set_latency.per_protocol.{key}"
-                        ))
+                        LuaType::Number => latency_u64(
+                            state.to_number(-1)?,
+                            &format!("set_latency.per_protocol.{key}"),
+                        )
                         .map(|value| (key, value)),
                         other => Err(lua_error_message(format!(
                             "set_latency.per_protocol.{key} must be a non-negative integer, got {}",
@@ -1239,9 +1240,7 @@ fn http_json_body_from_field(
         LuaType::String => state.to_string(-1).map(Some),
         LuaType::Boolean | LuaType::Number | LuaType::Table => {
             let value = lua_value_to_json(state, -1)?;
-            serde_json::to_string(&value)
-                .map(Some)
-                .map_err(lua_json)
+            serde_json::to_string(&value).map(Some).map_err(lua_json)
         }
         other => Err(lua_error_message(format!(
             "http_json request.{key} must be nil, string, or JSON-like value, got {}",
@@ -1255,9 +1254,7 @@ fn http_json_body_from_field(
 fn parse_http_method(method: &str, operation: &'static str) -> dellingr::Result<reqwest::Method> {
     let method = method.to_ascii_uppercase();
     reqwest::Method::from_bytes(method.as_bytes()).map_err(|error| {
-        lua_error_message(format!(
-            "{operation} invalid method {method:?}: {error}"
-        ))
+        lua_error_message(format!("{operation} invalid method {method:?}: {error}"))
     })
 }
 
@@ -1451,8 +1448,8 @@ fn lua_client_notify(state: &mut State) -> dellingr::Result<u8> {
             "client:notify currently supports only params-less notifications",
         ));
     }
-    let notification = ClientNotification::from_method_params(&method, &None)
-        .map_err(lua_error_message)?;
+    let notification =
+        ClientNotification::from_method_params(&method, &None).map_err(lua_error_message)?;
     let ctx = context(state)?;
     let (handle, client) = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1505,9 +1502,7 @@ fn lua_client_child_pid(state: &mut State) -> dellingr::Result<u8> {
     if let Some(pid) = pid
         && let Ok(ctx) = context(state)
     {
-        ctx.lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .last_pid = Some(pid);
+        ctx.lock().unwrap_or_else(PoisonError::into_inner).last_pid = Some(pid);
     }
     state.set_top(0);
     match pid {
@@ -1694,7 +1689,9 @@ fn lua_client_start_calendar_sync(state: &mut State) -> dellingr::Result<u8> {
 fn lua_client_execute_calendar_plan(state: &mut State) -> dellingr::Result<u8> {
     let id = resource_id(state, 1)?;
     if state.get_top() < 2 {
-        return Err(lua_error_message("execute_calendar_plan requires plan table"));
+        return Err(lua_error_message(
+            "execute_calendar_plan requires plan table",
+        ));
     }
     let plan = parse_calendar_action_plan(state, 2)?;
     let seconds = if state.get_top() >= 3 {
@@ -1710,17 +1707,16 @@ fn lua_client_execute_calendar_plan(state: &mut State) -> dellingr::Result<u8> {
     let result = handle.block_on(async {
         tokio::time::timeout(duration_from_seconds(seconds), async move {
             let ack = client.execute_calendar_plan(plan).await?;
-            client.subscribe_or_consume_calendar_action(ack.plan_id).await
+            client
+                .subscribe_or_consume_calendar_action(ack.plan_id)
+                .await
         })
         .await
     });
     state.set_top(0);
     match result {
         Ok(Ok(completed)) => {
-            push_json(
-                state,
-                &serde_json::to_value(&completed).map_err(lua_json)?,
-            )?;
+            push_json(state, &serde_json::to_value(&completed).map_err(lua_json)?)?;
             state.push_nil();
         }
         Ok(Err(error)) => {
@@ -1762,7 +1758,9 @@ fn lua_notifications_recv(state: &mut State) -> dellingr::Result<u8> {
     let (handle, queue) = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(HarnessResource::Notifications(queue)) = guard.resources.get(&id) else {
-            return Err(lua_error_message(format!("no notification queue resource {id}")));
+            return Err(lua_error_message(format!(
+                "no notification queue resource {id}"
+            )));
         };
         (guard.handle.clone(), Arc::clone(queue))
     };
@@ -1784,7 +1782,9 @@ fn lua_notifications_drain_for(state: &mut State) -> dellingr::Result<u8> {
     let (handle, queue) = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(HarnessResource::Notifications(queue)) = guard.resources.get(&id) else {
-            return Err(lua_error_message(format!("no notification queue resource {id}")));
+            return Err(lua_error_message(format!(
+                "no notification queue resource {id}"
+            )));
         };
         (guard.handle.clone(), Arc::clone(queue))
     };
@@ -1869,9 +1869,8 @@ fn lua_request_await(state: &mut State) -> dellingr::Result<u8> {
         };
         (guard.handle.clone(), task)
     };
-    let result = handle.block_on(async {
-        tokio::time::timeout(duration_from_seconds(seconds), task).await
-    });
+    let result =
+        handle.block_on(async { tokio::time::timeout(duration_from_seconds(seconds), task).await });
     state.set_top(0);
     match result {
         Ok(Ok(request_result)) => push_result_pair(state, request_result)?,
@@ -2025,7 +2024,12 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
     set_field_fn(state, idx, "notify", lua_client_notify)?;
     set_field_fn(state, idx, "shutdown", lua_client_shutdown)?;
     set_field_fn(state, idx, "child_pid", lua_client_child_pid)?;
-    set_field_fn(state, idx, "current_generation", lua_client_current_generation)?;
+    set_field_fn(
+        state,
+        idx,
+        "current_generation",
+        lua_client_current_generation,
+    )?;
     set_field_fn(
         state,
         idx,
@@ -2093,7 +2097,12 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 boot_phase_kind_name(progress.phase.coalesce_discriminant()),
             )?;
             set_field_string(state, idx, "phase", &format!("{:?}", progress.phase))?;
-            set_field_number(state, idx, "service_generation", progress.service_generation as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                progress.service_generation as f64,
+            )?;
         }
         Notification::OperationOutcome(outcome) => {
             set_field_string(state, idx, "type", "OperationOutcome")?;
@@ -2109,12 +2118,7 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
         Notification::ActionCompleted(completed) => {
             set_field_string(state, idx, "type", "ActionCompleted")?;
             set_field_string(state, idx, "plan_id", &completed.plan_id.to_string())?;
-            set_field_number(
-                state,
-                idx,
-                "summary_total",
-                completed.summary.total as f64,
-            )?;
+            set_field_number(state, idx, "summary_total", completed.summary.total as f64)?;
             set_field_number(
                 state,
                 idx,
@@ -2150,12 +2154,7 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
             set_field_string(state, idx, "type", "SyncCompleted")?;
             set_field_string(state, idx, "account_id", &completed.account_id)?;
             set_field_string(state, idx, "run_id", &completed.run_id.to_string())?;
-            set_field_string(
-                state,
-                idx,
-                "result",
-                sync_result_name(&completed.result),
-            )?;
+            set_field_string(state, idx, "result", sync_result_name(&completed.result))?;
             set_field_number(
                 state,
                 idx,
@@ -2216,7 +2215,12 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
         Notification::EvictionCompleted(completed) => {
             set_field_string(state, idx, "type", "EvictionCompleted")?;
             set_field_string(state, idx, "trigger", &completed.trigger)?;
-            set_field_number(state, idx, "blobs_tombstoned", completed.blobs_tombstoned as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "blobs_tombstoned",
+                completed.blobs_tombstoned as f64,
+            )?;
             set_field_number(state, idx, "pages_walked", completed.pages_walked as f64)?;
             set_field_bool(state, idx, "superseded", completed.superseded)?;
             set_field_number(
@@ -2229,9 +2233,19 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
         Notification::GcCompleted(completed) => {
             set_field_string(state, idx, "type", "GcCompleted")?;
             set_field_string(state, idx, "trigger", &completed.trigger)?;
-            set_field_number(state, idx, "packs_compacted", completed.packs_compacted as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "packs_compacted",
+                completed.packs_compacted as f64,
+            )?;
             set_field_number(state, idx, "blobs_dropped", completed.blobs_dropped as f64)?;
-            set_field_number(state, idx, "bytes_reclaimed", completed.bytes_reclaimed as f64)?;
+            set_field_number(
+                state,
+                idx,
+                "bytes_reclaimed",
+                completed.bytes_reclaimed as f64,
+            )?;
             set_field_number(
                 state,
                 idx,
@@ -2243,7 +2257,10 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
             set_field_string(state, idx, "type", other.method_name())?;
         }
     }
-    push_json(state, &serde_json::to_value(notification).map_err(lua_json)?)?;
+    push_json(
+        state,
+        &serde_json::to_value(notification).map_err(lua_json)?,
+    )?;
     set_pushed_field(state, idx, "raw")?;
     Ok(())
 }
@@ -2349,14 +2366,18 @@ fn request_params_from_lua(
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("OauthExchangeCode requires params table"));
             }
-            let provider_id = get_string_field(state, params_idx, "provider_id")?
-                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.provider_id"))?;
+            let provider_id =
+                get_string_field(state, params_idx, "provider_id")?.ok_or_else(|| {
+                    lua_error_message("OauthExchangeCode requires params.provider_id")
+                })?;
             let token_url = get_string_field(state, params_idx, "token_url")?
                 .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.token_url"))?;
             let client_id = get_string_field(state, params_idx, "client_id")?
                 .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.client_id"))?;
-            let redirect_uri = get_string_field(state, params_idx, "redirect_uri")?
-                .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.redirect_uri"))?;
+            let redirect_uri =
+                get_string_field(state, params_idx, "redirect_uri")?.ok_or_else(|| {
+                    lua_error_message("OauthExchangeCode requires params.redirect_uri")
+                })?;
             let code = get_string_field(state, params_idx, "code")?
                 .ok_or_else(|| lua_error_message("OauthExchangeCode requires params.code"))?;
             Ok(RequestParams::OauthExchangeCode {
@@ -2379,11 +2400,9 @@ fn request_params_from_lua(
         "SettingsSet" | "settings.set" => Ok(RequestParams::SettingsSet {
             params: parse_settings_set_params(state, params_idx)?,
         }),
-        "ContactsContactSave" | "contacts.contact_save" => {
-            Ok(RequestParams::ContactsContactSave {
-                params: parse_contact_save_params(state, params_idx)?,
-            })
-        }
+        "ContactsContactSave" | "contacts.contact_save" => Ok(RequestParams::ContactsContactSave {
+            params: parse_contact_save_params(state, params_idx)?,
+        }),
         "ContactsContactSaveWithWriteback" | "contacts.contact_save_with_writeback" => {
             Ok(RequestParams::ContactsContactSaveWithWriteback {
                 params: parse_contact_save_params(state, params_idx)?,
@@ -2420,8 +2439,8 @@ fn request_params_from_lua(
                 .ok_or_else(|| lua_error_message("AttachmentFetch requires params.account_id"))?;
             let message_id = get_string_field(state, params_idx, "message_id")?
                 .ok_or_else(|| lua_error_message("AttachmentFetch requires params.message_id"))?;
-            let attachment_id = get_string_field(state, params_idx, "attachment_id")?
-                .ok_or_else(|| {
+            let attachment_id =
+                get_string_field(state, params_idx, "attachment_id")?.ok_or_else(|| {
                     lua_error_message("AttachmentFetch requires params.attachment_id")
                 })?;
             Ok(RequestParams::AttachmentFetch {
@@ -2486,7 +2505,7 @@ fn request_params_from_lua(
             };
             Ok(RequestParams::TestPrintln { message })
         }
-"AccountUpdate" | "account.update" => {
+        "AccountUpdate" | "account.update" => {
             if state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("AccountUpdate params must be table"));
             }
@@ -2494,12 +2513,12 @@ fn request_params_from_lua(
                 .ok_or_else(|| lua_error_message("AccountUpdate requires params.id"))?;
             let params = service_api::AccountUpdateParams {
                 id,
-                account_name:              get_string_field(state, params_idx, "account_name")?,
-                display_name:              get_string_field(state, params_idx, "display_name")?,
-                account_color:             get_string_field(state, params_idx, "account_color")?,
-                caldav_url:                get_string_field(state, params_idx, "caldav_url")?,
-                caldav_username:           get_string_field(state, params_idx, "caldav_username")?,
-                caldav_password:           get_string_field(state, params_idx, "caldav_password")?,
+                account_name: get_string_field(state, params_idx, "account_name")?,
+                display_name: get_string_field(state, params_idx, "display_name")?,
+                account_color: get_string_field(state, params_idx, "account_color")?,
+                caldav_url: get_string_field(state, params_idx, "caldav_url")?,
+                caldav_username: get_string_field(state, params_idx, "caldav_username")?,
+                caldav_password: get_string_field(state, params_idx, "caldav_password")?,
                 cache_attachments_enabled: get_bool_field(
                     state,
                     params_idx,
@@ -2508,11 +2527,9 @@ fn request_params_from_lua(
             };
             Ok(RequestParams::AccountUpdate { params })
         }
-        "AttachmentCacheSize" | "attachment.cache_size" => {
-            Ok(RequestParams::AttachmentCacheSize {
-                params: service_api::AttachmentCacheSizeParams::default(),
-            })
-        }
+        "AttachmentCacheSize" | "attachment.cache_size" => Ok(RequestParams::AttachmentCacheSize {
+            params: service_api::AttachmentCacheSizeParams::default(),
+        }),
         "TestSeedAccount" | "test.seed_account" => {
             let params = if state.get_top() >= params_idx as usize
                 && state.typ(params_idx) != LuaType::Nil
@@ -2536,11 +2553,7 @@ fn request_params_from_lua(
                     oauth_provider: get_string_field(state, params_idx, "oauth_provider")?,
                     oauth_client_id: get_string_field(state, params_idx, "oauth_client_id")?,
                     oauth_token_url: get_string_field(state, params_idx, "oauth_token_url")?,
-                    oauth_extra_scopes: get_string_field(
-                        state,
-                        params_idx,
-                        "oauth_extra_scopes",
-                    )?,
+                    oauth_extra_scopes: get_string_field(state, params_idx, "oauth_extra_scopes")?,
                 }
             } else {
                 TestSeedAccountParams::default()
@@ -2605,12 +2618,14 @@ fn request_params_from_lua(
                     "TestSeedCachedAttachment requires params table",
                 ));
             }
-            let account_id = get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
-                lua_error_message("TestSeedCachedAttachment requires params.account_id")
-            })?;
-            let message_id = get_string_field(state, params_idx, "message_id")?.ok_or_else(|| {
-                lua_error_message("TestSeedCachedAttachment requires params.message_id")
-            })?;
+            let account_id =
+                get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
+                    lua_error_message("TestSeedCachedAttachment requires params.account_id")
+                })?;
+            let message_id =
+                get_string_field(state, params_idx, "message_id")?.ok_or_else(|| {
+                    lua_error_message("TestSeedCachedAttachment requires params.message_id")
+                })?;
             let content = get_string_field(state, params_idx, "content")?.ok_or_else(|| {
                 lua_error_message("TestSeedCachedAttachment requires params.content")
             })?;
@@ -2632,17 +2647,17 @@ fn request_params_from_lua(
                     "TestSeedRemoteAttachment requires params table",
                 ));
             }
-            let account_id = get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
-                lua_error_message("TestSeedRemoteAttachment requires params.account_id")
-            })?;
-            let message_id = get_string_field(state, params_idx, "message_id")?.ok_or_else(|| {
-                lua_error_message("TestSeedRemoteAttachment requires params.message_id")
-            })?;
-            let content_base64 =
-                get_string_field(state, params_idx, "content_base64")?.ok_or_else(|| {
-                    lua_error_message(
-                        "TestSeedRemoteAttachment requires params.content_base64",
-                    )
+            let account_id =
+                get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
+                    lua_error_message("TestSeedRemoteAttachment requires params.account_id")
+                })?;
+            let message_id =
+                get_string_field(state, params_idx, "message_id")?.ok_or_else(|| {
+                    lua_error_message("TestSeedRemoteAttachment requires params.message_id")
+                })?;
+            let content_base64 = get_string_field(state, params_idx, "content_base64")?
+                .ok_or_else(|| {
+                    lua_error_message("TestSeedRemoteAttachment requires params.content_base64")
                 })?;
             Ok(RequestParams::TestSeedRemoteAttachment {
                 params: TestSeedRemoteAttachmentParams {
@@ -2750,8 +2765,8 @@ fn request_params_from_lua(
                     "TestQueryBlobTombstoneState requires params table",
                 ));
             }
-            let content_hash = get_string_field(state, params_idx, "content_hash")?
-                .ok_or_else(|| {
+            let content_hash =
+                get_string_field(state, params_idx, "content_hash")?.ok_or_else(|| {
                     lua_error_message("TestQueryBlobTombstoneState requires params.content_hash")
                 })?;
             Ok(RequestParams::TestQueryBlobTombstoneState {
@@ -2784,7 +2799,9 @@ fn request_params_from_lua(
         }
         "TestDelayNextWrite" | "test.delay_next_write" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
-                return Err(lua_error_message("TestDelayNextWrite requires params table"));
+                return Err(lua_error_message(
+                    "TestDelayNextWrite requires params table",
+                ));
             }
             let kind = get_string_field(state, params_idx, "kind")?
                 .ok_or_else(|| lua_error_message("TestDelayNextWrite requires params.kind"))?;
@@ -2877,27 +2894,27 @@ fn parse_setting_value(state: &mut State, value_idx: isize) -> dellingr::Result<
         "phishingdetectionenabled" => Ok(SettingValue::PhishingDetectionEnabled(
             required_setting_bool(state, value_idx, &kind)?,
         )),
-        "phishingsensitivity" => Ok(SettingValue::PhishingSensitivity(
-            required_setting_string(state, value_idx, &kind)?,
-        )),
+        "phishingsensitivity" => Ok(SettingValue::PhishingSensitivity(required_setting_string(
+            state, value_idx, &kind,
+        )?)),
         "theme" => Ok(SettingValue::Theme(required_setting_string(
             state, value_idx, &kind,
         )?)),
         "fontsize" => Ok(SettingValue::FontSize(required_setting_string(
             state, value_idx, &kind,
         )?)),
-        "readingpaneposition" => Ok(SettingValue::ReadingPanePosition(
-            required_setting_string(state, value_idx, &kind)?,
-        )),
-        "syncperioddays" => Ok(SettingValue::SyncPeriodDays(
-            required_setting_string(state, value_idx, &kind)?,
-        )),
-        "compressattachments" => Ok(SettingValue::CompressAttachments(
-            required_setting_bool(state, value_idx, &kind)?,
-        )),
-        "allowlossycompression" => Ok(SettingValue::AllowLossyCompression(
-            required_setting_bool(state, value_idx, &kind)?,
-        )),
+        "readingpaneposition" => Ok(SettingValue::ReadingPanePosition(required_setting_string(
+            state, value_idx, &kind,
+        )?)),
+        "syncperioddays" => Ok(SettingValue::SyncPeriodDays(required_setting_string(
+            state, value_idx, &kind,
+        )?)),
+        "compressattachments" => Ok(SettingValue::CompressAttachments(required_setting_bool(
+            state, value_idx, &kind,
+        )?)),
+        "allowlossycompression" => Ok(SettingValue::AllowLossyCompression(required_setting_bool(
+            state, value_idx, &kind,
+        )?)),
         "openedfilescleanupdays" => Ok(SettingValue::OpenedFilesCleanupDays(
             required_setting_string(state, value_idx, &kind)?,
         )),
@@ -2907,20 +2924,12 @@ fn parse_setting_value(state: &mut State, value_idx: isize) -> dellingr::Result<
     }
 }
 
-fn required_setting_bool(
-    state: &mut State,
-    idx: isize,
-    kind: &str,
-) -> dellingr::Result<bool> {
+fn required_setting_bool(state: &mut State, idx: isize, kind: &str) -> dellingr::Result<bool> {
     get_bool_field(state, idx, "value")?
         .ok_or_else(|| lua_error_message(format!("{kind} requires value")))
 }
 
-fn required_setting_string(
-    state: &mut State,
-    idx: isize,
-    kind: &str,
-) -> dellingr::Result<String> {
+fn required_setting_string(state: &mut State, idx: isize, kind: &str) -> dellingr::Result<String> {
     get_string_field(state, idx, "value")?
         .ok_or_else(|| lua_error_message(format!("{kind} requires value")))
 }
@@ -2957,7 +2966,9 @@ fn parse_calendar_action_plan(
     params_idx: isize,
 ) -> dellingr::Result<CalendarActionPlan> {
     if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
-        return Err(lua_error_message("CalActionExecutePlan requires params table"));
+        return Err(lua_error_message(
+            "CalActionExecutePlan requires params table",
+        ));
     }
 
     let top = state.get_top();
@@ -3005,10 +3016,7 @@ fn parse_plan_id(value: &str) -> dellingr::Result<PlanId> {
         .map_err(|error| lua_error_message(format!("invalid plan_id {value:?}: {error}")))
 }
 
-fn parse_send_request(
-    state: &mut State,
-    params_idx: isize,
-) -> dellingr::Result<SendWireRequest> {
+fn parse_send_request(state: &mut State, params_idx: isize) -> dellingr::Result<SendWireRequest> {
     if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
         return Err(lua_error_message("ActionSend requires params table"));
     }
@@ -3030,10 +3038,7 @@ fn parse_send_request(
     })
 }
 
-fn parse_send_message(
-    state: &mut State,
-    request_idx: isize,
-) -> dellingr::Result<SendWireMessage> {
+fn parse_send_message(state: &mut State, request_idx: isize) -> dellingr::Result<SendWireMessage> {
     let top = state.get_top();
     state.push_string("message");
     state.get_table(request_idx)?;
@@ -3144,8 +3149,8 @@ fn parse_send_attachment_source(
         state.set_top(top as isize);
         att_idx
     };
-    let kind = get_string_field(state, source_idx, "kind")?
-        .unwrap_or_else(|| "staging_file".to_string());
+    let kind =
+        get_string_field(state, source_idx, "kind")?.unwrap_or_else(|| "staging_file".to_string());
     if kind != "staging_file" {
         state.set_top(top as isize);
         return Err(lua_error_message(format!(
@@ -3155,7 +3160,11 @@ fn parse_send_attachment_source(
     let relative_path = get_string_field(state, source_idx, "relative_path")?
         .ok_or_else(|| lua_error_message("ActionSend source requires relative_path"))?;
     let content_hash = get_content_hash_field(state, source_idx, "content_hash")?
-        .or_else(|| get_content_hash_field(state, source_idx, "content_hash_hex").ok().flatten())
+        .or_else(|| {
+            get_content_hash_field(state, source_idx, "content_hash_hex")
+                .ok()
+                .flatten()
+        })
         .ok_or_else(|| lua_error_message("ActionSend source requires content_hash"))?;
     state.set_top(top as isize);
     Ok(SendAttachmentSource::StagingFile {
@@ -3237,7 +3246,9 @@ fn parse_action_operations(
     state.get_table(plan_idx)?;
     if state.typ(-1) != LuaType::Table {
         state.set_top(top as isize);
-        return Err(lua_error_message("ActionExecutePlan requires operations table"));
+        return Err(lua_error_message(
+            "ActionExecutePlan requires operations table",
+        ));
     }
     let operations_idx = state.get_top() as isize;
     let len = state.table_len(operations_idx);
@@ -3343,10 +3354,12 @@ fn parse_wire_calendar_operation(
     match normalize_name(op_name).as_str() {
         "createevent" | "create" => {
             let calendar_id = get_string_field(state, op_idx, "calendar_id")?
-                .or_else(|| get_string_field(state, op_idx, "calendar_remote_id").ok().flatten())
-                .ok_or_else(|| {
-                    lua_error_message("CreateEvent requires calendar_id")
-                })?;
+                .or_else(|| {
+                    get_string_field(state, op_idx, "calendar_remote_id")
+                        .ok()
+                        .flatten()
+                })
+                .ok_or_else(|| lua_error_message("CreateEvent requires calendar_id"))?;
             Ok(WireCalendarOperation::CreateEvent {
                 calendar_remote_id: calendar_id,
                 input: parse_wire_calendar_event_input(state, op_idx, op_name)?,
@@ -3404,8 +3417,11 @@ fn parse_wire_calendar_event_input(
             .or_else(|| get_bool_field(state, input_idx, "isAllDay").ok().flatten())
             .unwrap_or(false),
         timezone: get_string_field(state, input_idx, "timezone")?,
-        recurrence_rule: get_string_field(state, input_idx, "recurrence_rule")?
-            .or_else(|| get_string_field(state, input_idx, "recurrenceRule").ok().flatten()),
+        recurrence_rule: get_string_field(state, input_idx, "recurrence_rule")?.or_else(|| {
+            get_string_field(state, input_idx, "recurrenceRule")
+                .ok()
+                .flatten()
+        }),
         availability: get_string_field(state, input_idx, "availability")?,
         visibility: get_string_field(state, input_idx, "visibility")?,
     };
@@ -3960,11 +3976,7 @@ fn app_binary_path() -> std::io::Result<PathBuf> {
     std::env::current_exe()
 }
 
-fn finish_context(
-    context: &Arc<Mutex<HarnessContext>>,
-    success: bool,
-    error: Option<String>,
-) {
+fn finish_context(context: &Arc<Mutex<HarnessContext>>, success: bool, error: Option<String>) {
     context
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -4019,7 +4031,10 @@ fn linux_pid_has_live_state(pid: u32) -> std::io::Result<Option<bool>> {
     let Some(end_comm) = stat.rfind(") ") else {
         return Ok(None);
     };
-    Ok(stat[end_comm + 2..].chars().next().map(|state| state != 'Z'))
+    Ok(stat[end_comm + 2..]
+        .chars()
+        .next()
+        .map(|state| state != 'Z'))
 }
 
 #[cfg(not(unix))]

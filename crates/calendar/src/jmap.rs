@@ -11,8 +11,8 @@ use db::db::queries_extra::calendar_contacts_writes::{
     delete_event_by_account_remote_id, replace_event_attendees, replace_event_reminders,
     upsert_calendar_event_row,
 };
-use jmap::client::{JmapClient, JmapState};
 use jmap::calendar_sync::{JmapCalendarEventRecord, JmapDiscoveredCalendar};
+use jmap::client::{JmapClient, JmapState};
 use rtsk::db::ReadDbState;
 use service_state::WriteDbState;
 use sync::state as sync_state;
@@ -47,10 +47,14 @@ pub(crate) async fn sync_jmap_calendar_account(
         .iter()
         .map(jmap_calendar_info)
         .collect();
-    super::sync::upsert_discovered_calendars_impl(write_db, account_id, "jmap", calendars)
-        .await?;
-    sync_state::save_jmap_sync_state(&write_db.writer_pool(), account_id, "Calendar", &calendar_list.state)
-        .await?;
+    super::sync::upsert_discovered_calendars_impl(write_db, account_id, "jmap", calendars).await?;
+    sync_state::save_jmap_sync_state(
+        &write_db.writer_pool(),
+        account_id,
+        "Calendar",
+        &calendar_list.state,
+    )
+    .await?;
 
     let visible_calendars = super::sync::load_visible_calendars(read_db, account_id).await?;
     let cal_map: HashMap<&str, &str> = visible_calendars
@@ -58,7 +62,8 @@ pub(crate) async fn sync_jmap_calendar_account(
         .map(|calendar| (calendar.remote_id.as_str(), calendar.id.as_str()))
         .collect();
 
-    let event_state = sync_state::load_jmap_sync_state(read_db, account_id, "CalendarEvent").await?;
+    let event_state =
+        sync_state::load_jmap_sync_state(read_db, account_id, "CalendarEvent").await?;
     let event_sync = if let Some(since_state) = event_state {
         jmap::calendar_sync::fetch_events_delta(&client, account_id, &cal_map, since_state).await?
     } else {
@@ -83,8 +88,13 @@ pub(crate) async fn sync_jmap_calendar_account(
             .await?;
     }
 
-    sync_state::save_jmap_sync_state(&write_db.writer_pool(), account_id, "CalendarEvent", &event_sync.state)
-        .await
+    sync_state::save_jmap_sync_state(
+        &write_db.writer_pool(),
+        account_id,
+        "CalendarEvent",
+        &event_sync.state,
+    )
+    .await
 }
 
 fn jmap_calendar_info(calendar: &JmapDiscoveredCalendar) -> super::types::CalendarInfoDto {

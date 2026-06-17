@@ -78,10 +78,7 @@ fn query_policy(
     .map(|v| ReadReceiptPolicy::from_str(&v))
 }
 
-fn get_setting_for_write(
-    conn: &impl WriteTarget,
-    key: &str,
-) -> Result<Option<String>, String> {
+fn get_setting_for_write(conn: &impl WriteTarget, key: &str) -> Result<Option<String>, String> {
     let result = conn
         .query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -240,12 +237,7 @@ mod tests {
         assert_eq!(policy, ReadReceiptPolicy::Always);
     }
 
-    fn insert_test_message(
-        conn: &Connection,
-        account_id: &str,
-        msg_id: &str,
-        mdn_requested: bool,
-    ) {
+    fn insert_test_message(conn: &Connection, account_id: &str, msg_id: &str, mdn_requested: bool) {
         conn.execute(
             "INSERT INTO messages (id, account_id, thread_id, mdn_requested, mdn_sent) \
              VALUES (?1, ?2, 'thread1', ?3, 0)",

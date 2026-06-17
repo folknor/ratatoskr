@@ -150,7 +150,11 @@ pub(super) fn response_content_type(resp: &reqwest::Response) -> Option<String> 
     let raw = resp.headers().get(reqwest::header::CONTENT_TYPE)?;
     let s = raw.to_str().ok()?;
     let trimmed = s.split(';').next()?.trim().to_ascii_lowercase();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// Escape `&`, `<`, and `>` for safe inclusion in XML element content.
@@ -209,7 +213,10 @@ pub(super) fn xml_escape_text(s: &str) -> std::borrow::Cow<'_, str> {
 /// Append a trailing slash to a CalDAV collection base URL when the path
 /// lacks one and the relative reference about to be joined would otherwise
 /// drop the last path segment. See `resolve_url_against` for context.
-pub(super) fn ensure_collection_trailing_slash<'a>(base: &'a str, href: &str) -> std::borrow::Cow<'a, str> {
+pub(super) fn ensure_collection_trailing_slash<'a>(
+    base: &'a str,
+    href: &str,
+) -> std::borrow::Cow<'a, str> {
     if href.starts_with('/') || href.is_empty() {
         return std::borrow::Cow::Borrowed(base);
     }

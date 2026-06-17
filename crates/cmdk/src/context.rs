@@ -212,8 +212,17 @@ mod tests {
             ProviderKind::from(MailProviderKind::Gmail),
             ProviderKind::Gmail
         );
-        assert_eq!(ProviderKind::from(MailProviderKind::Graph), ProviderKind::Graph);
-        assert_eq!(ProviderKind::from(MailProviderKind::Jmap), ProviderKind::Jmap);
-        assert_eq!(ProviderKind::from(MailProviderKind::Imap), ProviderKind::Imap);
+        assert_eq!(
+            ProviderKind::from(MailProviderKind::Graph),
+            ProviderKind::Graph
+        );
+        assert_eq!(
+            ProviderKind::from(MailProviderKind::Jmap),
+            ProviderKind::Jmap
+        );
+        assert_eq!(
+            ProviderKind::from(MailProviderKind::Imap),
+            ProviderKind::Imap
+        );
     }
 }

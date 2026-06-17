@@ -2,12 +2,16 @@ use std::collections::HashSet;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::super::{ReadConn, WriterPool, WriteTarget, WriteTransactionTarget};
 use super::super::types::{DbContactGroup, DbContactGroupMember};
+use super::super::{ReadConn, WriteTarget, WriteTransactionTarget, WriterPool};
 use super::contacts::ExpandedGroupContact;
 use crate::db::from_row::FromRow;
 
-pub async fn db_create_contact_group(db: &WriterPool, id: String, name: String) -> Result<(), String> {
+pub async fn db_create_contact_group(
+    db: &WriterPool,
+    id: String,
+    name: String,
+) -> Result<(), String> {
     log::debug!("Creating contact group: id={id}, name={name}");
     db.with_write(move |conn| {
         conn.execute(
@@ -20,7 +24,11 @@ pub async fn db_create_contact_group(db: &WriterPool, id: String, name: String) 
     .await
 }
 
-pub async fn db_update_contact_group(db: &WriterPool, id: String, name: String) -> Result<(), String> {
+pub async fn db_update_contact_group(
+    db: &WriterPool,
+    id: String,
+    name: String,
+) -> Result<(), String> {
     log::debug!("Updating contact group: id={id}, name={name}");
     db.with_write(move |conn| {
         conn.execute(
@@ -36,9 +44,7 @@ pub async fn db_update_contact_group(db: &WriterPool, id: String, name: String) 
 pub async fn db_delete_contact_group(db: &WriterPool, id: String) -> Result<(), String> {
     log::debug!("Deleting contact group: id={id}");
     db.with_write(move |conn| {
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("begin tx: {e}"))?;
+        let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
 
         // Remove inbound nested-group references from other groups
         tx.execute(
@@ -258,7 +264,8 @@ pub async fn db_expand_contact_group_with_names(
     db: &WriterPool,
     group_id: String,
 ) -> Result<Vec<ExpandedGroupContact>, String> {
-    db.with_write(move |conn| expand_group_with_names_sync(conn, &group_id)).await
+    db.with_write(move |conn| expand_group_with_names_sync(conn, &group_id))
+        .await
 }
 
 /// A group matched against a set of pasted emails.
@@ -437,19 +444,13 @@ pub fn save_group_sync(
                 .map_err(|e| e.to_string())?;
         }
     }
-    tx.commit()
-        .map_err(|e| format!("save_group commit: {e}"))?;
+    tx.commit().map_err(|e| format!("save_group commit: {e}"))?;
     Ok(())
 }
 
 /// Delete a group and clean up inbound refs (synchronous).
-pub fn delete_group_sync(
-    conn: &impl WriteTransactionTarget,
-    group_id: &str,
-) -> Result<(), String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin tx: {e}"))?;
+pub fn delete_group_sync(conn: &impl WriteTransactionTarget, group_id: &str) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
 
     // Remove inbound nested-group references from other groups
     tx.execute(
@@ -665,8 +666,7 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(
-            &write(&conn), &entry, &["alice@example.com".into()]).expect("first save");
+        save_group_sync(&write(&conn), &entry, &["alice@example.com".into()]).expect("first save");
 
         let entry2 = GroupSettingsEntry {
             id: "grp-1".into(),
@@ -700,8 +700,7 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(
-            &write(&conn), &entry, &["alice@example.com".into()]).expect("seed");
+        save_group_sync(&write(&conn), &entry, &["alice@example.com".into()]).expect("seed");
 
         let entry2 = GroupSettingsEntry {
             id: "grp-1".into(),
@@ -710,8 +709,7 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(
-            &write(&conn), &entry2, &[]).expect("clear");
+        save_group_sync(&write(&conn), &entry2, &[]).expect("clear");
 
         assert!(member_emails(&conn, "grp-1").is_empty());
         // Group row itself remains.
@@ -729,8 +727,7 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(
-            &write(&conn), &inner, &["alice@example.com".into()]).expect("inner");
+        save_group_sync(&write(&conn), &inner, &["alice@example.com".into()]).expect("inner");
         // Outer group that references the inner one as a member.
         let outer = GroupSettingsEntry {
             id: "grp-outer".into(),
@@ -739,8 +736,7 @@ mod sync_group_tests {
             created_at: 0,
             updated_at: 0,
         };
-        save_group_sync(
-            &write(&conn), &outer, &[]).expect("outer");
+        save_group_sync(&write(&conn), &outer, &[]).expect("outer");
         conn.execute(
             "INSERT INTO contact_group_members \
              (group_id, member_type, member_value) \

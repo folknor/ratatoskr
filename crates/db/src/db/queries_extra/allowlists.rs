@@ -116,7 +116,10 @@ pub async fn db_is_vip_sender(
     .await
 }
 
-pub async fn db_get_vip_senders(db: &WriterPool, account_id: String) -> Result<Vec<String>, String> {
+pub async fn db_get_vip_senders(
+    db: &WriterPool,
+    account_id: String,
+) -> Result<Vec<String>, String> {
     db.with_write(move |conn| {
         let mut stmt = conn
             .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")

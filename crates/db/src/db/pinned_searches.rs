@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use super::from_row::query_as;
 use super::types::DbThread;
-use super::{WriterPool, WriteTarget, WriteTransactionTarget};
+use super::{WriteTarget, WriteTransactionTarget, WriterPool};
 
 /// Stored pinned-search metadata and snapshot ownership.
 #[derive(Debug, Clone)]
@@ -145,10 +145,7 @@ pub fn db_update_pinned_search_sync(
 /// Delete one pinned-search row by id. Idempotent; delete-of-missing
 /// is `Ok`. Sync helper called from the Service-side
 /// `pinned_search.delete` handler.
-pub fn db_delete_pinned_search_sync(
-    conn: &impl WriteTarget,
-    id: i64,
-) -> Result<(), String> {
+pub fn db_delete_pinned_search_sync(conn: &impl WriteTarget, id: i64) -> Result<(), String> {
     conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -255,8 +252,10 @@ pub async fn db_get_threads_by_ids(
                     ]
                 })
                 .collect();
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(std::convert::AsRef::as_ref).collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+                .iter()
+                .map(std::convert::AsRef::as_ref)
+                .collect();
 
             results.extend(query_as::<DbThread>(conn, &sql, param_refs.as_slice())?);
         }
@@ -279,10 +278,12 @@ pub async fn db_get_recent_search_queries(
             )
             .map_err(|e| e.to_string())?;
 
-        stmt.query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| row.get(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| e.to_string())
+        stmt.query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+            row.get(0)
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -290,9 +291,7 @@ pub async fn db_get_recent_search_queries(
 /// Delete every row from `pinned_searches`. Returns the deleted count.
 /// Sync helper called from the Service-side `pinned_search.delete_all`
 /// handler.
-pub fn db_delete_all_pinned_searches_sync(
-    conn: &impl WriteTarget,
-) -> Result<u64, String> {
+pub fn db_delete_all_pinned_searches_sync(conn: &impl WriteTarget) -> Result<u64, String> {
     let deleted = conn
         .execute("DELETE FROM pinned_searches", [])
         .map_err(|e| e.to_string())?;
@@ -421,8 +420,7 @@ mod tests {
         let stale = now - 1_209_600 - 1;
         insert_pinned_search(&conn, "stale", stale, stale);
 
-        let first =
-            db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("first");
+        let first = db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("first");
         let second =
             db_expire_stale_pinned_searches_sync(&write(&conn), 1_209_600).expect("second");
         assert_eq!(first, 1);

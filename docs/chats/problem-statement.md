@@ -120,10 +120,10 @@ section numbering used across other docs (sections 2-4) is unaffected -
 Chats is inserted above them.
 
 ```
-[📅] [Scope Dropdown    ]
+[] [Scope Dropdown    ]
 [  ] [   Compose        ]
 
- from:alice ha..  ✕       ← Pinned searches
+ from:alice ha..  [ ]       ← Pinned searches
  2 hours ago
 
 CHATS                      ← Chats (new)
@@ -229,7 +229,7 @@ should reflect the chat context:
   The input box expands upward as the user adds lines (overlaying the
   chat timeline above it, not pushing it down), up to a reasonable
   maximum before scrolling internally.
-- Emoji shortcode translation (`:thumbsup:` → 👍, `:)` → 😊) inline as the
+- Emoji shortcode translation (`:thumbsup:` → , `:)` → ) inline as the
   user types, consistent with Teams/Slack/Discord behavior. (This should
   eventually be available in the regular compose editor too.)
 - Drag-and-drop or paste for attachments/images

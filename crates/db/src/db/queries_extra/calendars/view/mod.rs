@@ -119,7 +119,8 @@ pub fn load_view_event_rows_sync(
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// Expand recurring rows into concrete instances and clip to the visible
@@ -149,8 +150,7 @@ pub fn expand_view_events(
     // it when it lands in this set.
     let mut overrides_by_series: HashMap<(String, String), HashSet<String>> = HashMap::new();
     for ev in &rows {
-        if let (Some(uid), Some(canonical)) =
-            (ev.uid.as_ref(), ev.recurrence_id_canonical.as_ref())
+        if let (Some(uid), Some(canonical)) = (ev.uid.as_ref(), ev.recurrence_id_canonical.as_ref())
         {
             overrides_by_series
                 .entry((ev.account_id.clone(), uid.clone()))
@@ -165,9 +165,7 @@ pub fn expand_view_events(
             let overrides = ev
                 .uid
                 .as_ref()
-                .and_then(|uid| {
-                    overrides_by_series.get(&(ev.account_id.clone(), uid.clone()))
-                })
+                .and_then(|uid| overrides_by_series.get(&(ev.account_id.clone(), uid.clone())))
                 .cloned()
                 .unwrap_or_default();
             for inst in expand_recurrence_with_overrides(&ev, rrule, &overrides) {

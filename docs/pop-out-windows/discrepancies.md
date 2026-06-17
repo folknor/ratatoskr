@@ -45,7 +45,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    `handlers/pop_out/compose_*`. Attachments are sent as-is.
 
 3. **Compose header is missing a Print button.** Problem statement
-   §"Actions" lists `[📎 Attach][🖨 Print][💾 Save][Send]`. The footer
+   §"Actions" lists `[ Attach][ Print][ Save][Send]`. The footer
    ships Discard, Attach, Save, and Send - Print is the remaining gap.
    No OS print dialog integration exists anywhere in the project (see
    Medium #11 for the cross-cutting Print blocker).

@@ -56,22 +56,22 @@ impl FolderMap {
                 .and_then(|pid| graph_to_folder_id.get(pid))
                 .cloned();
 
-            let mapping = if let Some(&(folder_id, folder_name)) = resolved_wellknown.get(&folder.id)
-            {
-                FolderMapping {
-                    folder_id: folder_id.to_string(),
-                    folder_name: folder_name.to_string(),
-                    folder_type: "system",
-                    parent_folder_id,
-                }
-            } else {
-                FolderMapping {
-                    folder_id: FolderKind::graph_user(&folder.id)?.storage_id(),
-                    folder_name: folder.display_name.clone(),
-                    folder_type: "user",
-                    parent_folder_id,
-                }
-            };
+            let mapping =
+                if let Some(&(folder_id, folder_name)) = resolved_wellknown.get(&folder.id) {
+                    FolderMapping {
+                        folder_id: folder_id.to_string(),
+                        folder_name: folder_name.to_string(),
+                        folder_type: "system",
+                        parent_folder_id,
+                    }
+                } else {
+                    FolderMapping {
+                        folder_id: FolderKind::graph_user(&folder.id)?.storage_id(),
+                        folder_name: folder.display_name.clone(),
+                        folder_type: "user",
+                        parent_folder_id,
+                    }
+                };
 
             by_folder_id.insert(mapping.folder_id.clone(), folder.id.clone());
             by_graph_id.insert(folder.id.clone(), mapping);

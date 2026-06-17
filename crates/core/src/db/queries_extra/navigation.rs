@@ -445,7 +445,10 @@ fn scope_clause_for_threads(
                 .collect();
             let params: Vec<Box<dyn ToSql>> =
                 ids.iter().map(|id| Box::new(id.clone()) as _).collect();
-            (format!("t.account_id IN ({})", placeholders.join(", ")), params)
+            (
+                format!("t.account_id IN ({})", placeholders.join(", ")),
+                params,
+            )
         }
         AccountScope::All => ("1=1".to_owned(), Vec::new()),
     }
@@ -480,8 +483,7 @@ fn load_label_group_unread_counts(
          )
          GROUP BY group_id"
     );
-    let params: Vec<&dyn ToSql> =
-        scope_params.iter().map(AsRef::as_ref).collect();
+    let params: Vec<&dyn ToSql> = scope_params.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params.as_slice(), |row| {
@@ -523,9 +525,7 @@ fn load_label_group_unread_counts_for_shared_mailbox(
          )
          GROUP BY group_id"
     );
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![account_id, mailbox_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
@@ -585,7 +585,9 @@ pub fn get_shared_mailbox_navigation(
                 id: (*id).to_owned(),
                 name: (*name).to_owned(),
                 folder_kind: FolderKind::Universal,
-                unread_count: NavigationUnreadCount::Universal(UniversalUnreadCount::from_synced_thread_count(unread)),
+                unread_count: NavigationUnreadCount::Universal(
+                    UniversalUnreadCount::from_synced_thread_count(unread),
+                ),
                 account_id: None,
                 parent_id: None,
                 query: None,
@@ -918,9 +920,7 @@ pub struct AccountLabelsGroup {
 
 /// Return all raw labels grouped by account, in account `sort_order`
 /// then label `sort_order`. Drives the Mail Rules > Labels settings list.
-pub fn query_labels_by_account(
-    conn: &ReadConn<'_>,
-) -> Result<Vec<AccountLabelsGroup>, String> {
+pub fn query_labels_by_account(conn: &ReadConn<'_>) -> Result<Vec<AccountLabelsGroup>, String> {
     let mut acc_stmt = conn
         .prepare(
             "SELECT id, COALESCE(account_name, email) AS name, \
@@ -979,8 +979,17 @@ pub fn query_labels_by_account(
         .map_err(|e| e.to_string())?;
 
     for r in lbl_rows {
-        let (label_id, account_id, name, server_color_bg, server_color_fg, user_color_bg, user_color_fg, sort_order, is_undeletable) =
-            r.map_err(|e| e.to_string())?;
+        let (
+            label_id,
+            account_id,
+            name,
+            server_color_bg,
+            server_color_fg,
+            user_color_bg,
+            user_color_fg,
+            sort_order,
+            is_undeletable,
+        ) = r.map_err(|e| e.to_string())?;
 
         let user_pair = label_colors::LabelStyleHex::from_optional_pair(
             user_color_bg.as_deref(),
@@ -992,12 +1001,7 @@ pub fn query_labels_by_account(
             server_color_fg.as_deref(),
         )?;
 
-        let style = label_colors::resolve_label_color(
-            &name,
-            &account_id,
-            user_pair,
-            server_pair,
-        );
+        let style = label_colors::resolve_label_color(&name, &account_id, user_pair, server_pair);
         let bg = style.bg().to_owned();
         let fg = style.fg().to_owned();
 

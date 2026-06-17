@@ -207,8 +207,9 @@ fn handle_token_input_message(
             *selected = None;
         }
         TokenInputMessage::TokenizeText(text) => {
-            let parsed =
-                import::parse_recipient_paste(&import::RecipientPastePayload::from_plain_text(text));
+            let parsed = import::parse_recipient_paste(
+                &import::RecipientPastePayload::from_plain_text(text),
+            );
             if push_parsed_recipients(value, parsed.recipients) > 0 {
                 value.text.clear();
             }
@@ -221,8 +222,7 @@ fn handle_token_input_message(
             }
         }
         TokenInputMessage::Focused | TokenInputMessage::Blurred => {}
-        TokenInputMessage::TokenContextMenu(_, _)
-        | TokenInputMessage::FieldContextMenu(_) => {
+        TokenInputMessage::TokenContextMenu(_, _) | TokenInputMessage::FieldContextMenu(_) => {
             // Handled at the compose level via handle_recipient_token_input
         }
         TokenInputMessage::CopyToken(_) | TokenInputMessage::CutToken(_) => {

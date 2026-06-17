@@ -65,7 +65,10 @@ pub fn seed_calendars(
     Ok(())
 }
 
-fn secondary_calendar_for_account(rng: &mut impl RngExt, account: &Account) -> Option<SeededCalendar> {
+fn secondary_calendar_for_account(
+    rng: &mut impl RngExt,
+    account: &Account,
+) -> Option<SeededCalendar> {
     let (name, color) = match account.account_name.as_str() {
         "Personal" => ("Travel", "#00acc1"),
         "Work" => ("Team", "#7e57c2"),
@@ -76,7 +79,11 @@ fn secondary_calendar_for_account(rng: &mut impl RngExt, account: &Account) -> O
         id: crate::next_uuid(rng),
         account_id: account.id.clone(),
         provider: account.provider.clone(),
-        remote_id: format!("{}-{}", account.account_name.to_lowercase(), name.to_lowercase()),
+        remote_id: format!(
+            "{}-{}",
+            account.account_name.to_lowercase(),
+            name.to_lowercase()
+        ),
         display_name: name.to_string(),
         color: color.to_string(),
         is_primary: false,
@@ -95,44 +102,45 @@ fn seed_primary_events(
 ) -> Result<(), String> {
     let base_day = today + Duration::days(i64::try_from(idx).unwrap_or(0));
 
-    let (title, location, start_h, start_m, end_h, end_m, description) = match account.account_name.as_str() {
-        "Personal" => (
-            "Dinner with Nora",
-            "Grunerlokka",
-            18,
-            30,
-            20,
-            0,
-            "Catch up over dinner and plan the weekend.",
-        ),
-        "Work" => (
-            "Sprint Planning",
-            "HQ - Fjord Room",
-            9,
-            30,
-            10,
-            30,
-            "Review priorities for the next sprint and confirm owners.",
-        ),
-        "Office" => (
-            "Budget Review",
-            "Teams",
-            14,
-            0,
-            15,
-            0,
-            "Quarterly budget review with finance and operations.",
-        ),
-        _ => (
-            "Design Crit",
-            "Studio",
-            11,
-            0,
-            12,
-            0,
-            "Walk through the latest product work and collect feedback.",
-        ),
-    };
+    let (title, location, start_h, start_m, end_h, end_m, description) =
+        match account.account_name.as_str() {
+            "Personal" => (
+                "Dinner with Nora",
+                "Grunerlokka",
+                18,
+                30,
+                20,
+                0,
+                "Catch up over dinner and plan the weekend.",
+            ),
+            "Work" => (
+                "Sprint Planning",
+                "HQ - Fjord Room",
+                9,
+                30,
+                10,
+                30,
+                "Review priorities for the next sprint and confirm owners.",
+            ),
+            "Office" => (
+                "Budget Review",
+                "Teams",
+                14,
+                0,
+                15,
+                0,
+                "Quarterly budget review with finance and operations.",
+            ),
+            _ => (
+                "Design Crit",
+                "Studio",
+                11,
+                0,
+                12,
+                0,
+                "Walk through the latest product work and collect feedback.",
+            ),
+        };
 
     let event = SeededEvent {
         id: crate::next_uuid(rng),

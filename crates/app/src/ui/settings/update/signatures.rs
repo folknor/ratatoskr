@@ -1,10 +1,12 @@
-use iced::time::Instant;
 use iced::Task;
+use iced::time::Instant;
 
 use crate::ui::settings::types::*;
 
 impl Settings {
-    pub(super) fn handle_signature_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    pub(super) fn handle_signature_save(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let Some(ref editor) = self.signature_editor else {
             return (Task::none(), None);
         };

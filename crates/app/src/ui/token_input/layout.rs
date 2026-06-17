@@ -22,8 +22,7 @@ pub(super) fn estimate_token_width(token: &Token) -> f32 {
     use iced::advanced::text::{
         Alignment, Ellipsis, LineHeight, Paragraph as ParagraphTrait, Shaping, Wrapping,
     };
-    type IcedParagraph =
-        <iced::Renderer as iced::advanced::text::Renderer>::Paragraph;
+    type IcedParagraph = <iced::Renderer as iced::advanced::text::Renderer>::Paragraph;
 
     let display = chip_display_label(token);
     let text = iced::advanced::text::Text {

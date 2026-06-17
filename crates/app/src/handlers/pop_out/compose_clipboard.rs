@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use iced::Task;
 
-use crate::db::Db;
-use crate::pop_out::compose::ComposeMessage;
-use crate::pop_out::PopOutMessage;
 use crate::Message;
+use crate::db::Db;
+use crate::pop_out::PopOutMessage;
+use crate::pop_out::compose::ComposeMessage;
 
 /// Shared implementation for "copy / cut a token" - whether the trigger is
 /// the right-click context menu or the Ctrl+C / Ctrl+X key chords. Mutates
@@ -27,13 +27,7 @@ pub(super) fn handle_compose_copy_or_cut(
         RecipientField::Bcc => &state.bcc.tokens,
     };
     let token = tokens.iter().find(|t| t.id == token_id);
-    let group_id = token.and_then(|t| {
-        if t.is_group {
-            t.group_id.clone()
-        } else {
-            None
-        }
-    });
+    let group_id = token.and_then(|t| if t.is_group { t.group_id.clone() } else { None });
     let direct_string = token.and_then(token_clipboard_string);
     let mutate_msg = if is_cut {
         ComposeMessage::ContextMenuCut { field, token_id }
@@ -162,10 +156,12 @@ fn token_clipboard_string(t: &crate::ui::token_input::Token) -> Option<String> {
 fn group_members_clipboard_string(members: &[(String, Option<String>)]) -> String {
     members
         .iter()
-        .map(|(email, name)| match name.as_deref().filter(|n| !n.is_empty()) {
-            Some(n) => format!("{n} <{email}>"),
-            None => email.clone(),
-        })
+        .map(
+            |(email, name)| match name.as_deref().filter(|n| !n.is_empty()) {
+                Some(n) => format!("{n} <{email}>"),
+                None => email.clone(),
+            },
+        )
         .collect::<Vec<_>>()
         .join(", ")
 }

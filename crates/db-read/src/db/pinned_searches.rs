@@ -1,8 +1,8 @@
 use rusqlite::params;
 
+use super::ReadDbState;
 use super::from_row::query_as;
 use super::types::DbThread;
-use super::ReadDbState;
 
 /// Stored pinned-search metadata and snapshot ownership.
 #[derive(Debug, Clone)]
@@ -116,8 +116,10 @@ pub async fn db_get_threads_by_ids(
                     ]
                 })
                 .collect();
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(std::convert::AsRef::as_ref).collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+                .iter()
+                .map(std::convert::AsRef::as_ref)
+                .collect();
 
             results.extend(query_as::<DbThread>(conn, &sql, param_refs.as_slice())?);
         }

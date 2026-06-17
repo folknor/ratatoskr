@@ -96,7 +96,12 @@ pub fn jmap_event_record(
 
 fn jmap_recurrence_rules_to_rrule(rules: &serde_json::Value) -> Option<String> {
     let rule = rules.as_array()?.first()?.as_object()?;
-    let frequency = match rule.get("frequency")?.as_str()?.to_ascii_lowercase().as_str() {
+    let frequency = match rule
+        .get("frequency")?
+        .as_str()?
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "daily" => "DAILY",
         "weekly" => "WEEKLY",
         "monthly" => "MONTHLY",
@@ -113,10 +118,7 @@ fn jmap_recurrence_rules_to_rrule(rules: &serde_json::Value) -> Option<String> {
         parts.push(format!("INTERVAL={interval}"));
     }
     if let Some(days) = rule.get("byDay").and_then(serde_json::Value::as_array) {
-        let by_day: Vec<String> = days
-            .iter()
-            .filter_map(jmap_by_day_to_rrule)
-            .collect();
+        let by_day: Vec<String> = days.iter().filter_map(jmap_by_day_to_rrule).collect();
         if !by_day.is_empty() {
             parts.push(format!("BYDAY={}", by_day.join(",")));
         }
@@ -139,15 +141,12 @@ fn jmap_recurrence_rules_to_rrule(rules: &serde_json::Value) -> Option<String> {
         let by_month: Vec<String> = months
             .iter()
             .filter_map(|value| {
-                value
-                    .as_u64()
-                    .map(|month| month.to_string())
-                    .or_else(|| {
-                        value
-                            .as_str()
-                            .and_then(|s| s.trim_end_matches('L').parse::<u32>().ok())
-                            .map(|month| month.to_string())
-                    })
+                value.as_u64().map(|month| month.to_string()).or_else(|| {
+                    value
+                        .as_str()
+                        .and_then(|s| s.trim_end_matches('L').parse::<u32>().ok())
+                        .map(|month| month.to_string())
+                })
             })
             .collect();
         if !by_month.is_empty() {

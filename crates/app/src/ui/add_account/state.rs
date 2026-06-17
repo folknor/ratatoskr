@@ -5,9 +5,7 @@ use iced::{Element, Task};
 use crate::component::Component;
 use crate::db::Db;
 
-use rtsk::discovery::types::{
-    AuthMethod, DiscoveredConfig, ProtocolOption, Security,
-};
+use rtsk::discovery::types::{AuthMethod, DiscoveredConfig, ProtocolOption, Security};
 
 // Step enum
 
@@ -142,7 +140,6 @@ impl ManualProvider {
             Self::CustomOidcJmap => "jmap",
         }
     }
-
 }
 
 /// User-supplied OIDC fields for the `CustomOidc*` provider variants.
@@ -639,8 +636,7 @@ impl Component for AddAccountWizard {
                         refresh_token: None,
                         token_expires_at: None,
                         imap_password: Some(service_api::RedactedString::new(imap_password)),
-                        smtp_password: smtp_password
-                            .map(service_api::RedactedString::new),
+                        smtp_password: smtp_password.map(service_api::RedactedString::new),
                     };
                     let generation = self.generation.next();
                     let task = Task::perform(

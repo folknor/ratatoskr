@@ -160,7 +160,8 @@ Written purely against the ideal bifrost from Track A. No adapters around
 warts, no per-provider branches.
 
 - B1. Dependency wiring plus construction plumbing. Add path deps on the
-  bifrost crates; introduce bifrost types into `service` / `core`; build the
+  bifrost crates (pointing at `../bifrost/`, relative to this repo's top-level
+  folder - see § 11); introduce bifrost types into `service` / `core`; build the
   `AccountFactory` impl that reads encrypted token rows and constructs bifrost
   accounts, wiring a `TokenSource` that refreshes and writes rotated tokens
   back to the DB; build the `AccountError`-to-`OperationResult` mapping.
@@ -250,3 +251,31 @@ This document is the source TODO the spec-loop consumes. Each B-item, and each
 A-item in the bifrost repo, becomes one technical-implementation-spec, run
 through the orchestrate.md seven steps. Items are processed serially, the tree
 green at every boundary, nothing deferred.
+
+## 11. Bifrost source and dependency paths
+
+Bifrost lives in two places relative to this repo's top-level folder, and they
+serve two distinct purposes - do not conflate them:
+
+- Reading-reference: `./research/bifrost`. This is where agents inspect bifrost
+  source - to verify a Track A item against bifrost's current shape, to read the
+  `Account` / `AccountError` / `SyncEngine` surface a Track B spec is written
+  against, or to confirm a type signature before speccing. Spec authors and
+  reviewers read here; it is the ground a bifrost-facing spec is judged against.
+- Dependency path: `../bifrost/`. This is what Cargo `path = "..."` deps resolve
+  to. When B1 (and any later item) adds path deps on the bifrost crates, they
+  point at `../bifrost/`, not at the reading-reference copy.
+
+A spec that touches bifrost cites `./research/bifrost` as required reading for
+its implementers and reviewers, and any spec that adds or changes a bifrost
+dependency pins the `../bifrost/` path explicitly.
+
+Track A is complete: the reading-reference `./research/bifrost` is at commit
+`416cbd4` (the A8-closing commit). Each Track B spec records, in its ground
+survey, the exact `../bifrost` commit it was authored and gated against, and
+`../bifrost` stays frozen at that commit for the full duration of the item -
+including the hours a step-4 implement run can take. This is load-bearing: the
+dependency compiles from source, so a `../bifrost` that is red OR merely
+mutating underneath an in-flight ratatoskr step makes every ratatoskr gate
+meaningless, and a later bifrost change would silently shift the surface the
+spec was built against.

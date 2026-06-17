@@ -1,7 +1,7 @@
 # Scheduled Send
 
 **Tier**: 2 - Keeps users from going back
-**Status**: ✅ **Done** - Full implementation with server-native delegation. `crates/core/src/scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). DB schema and queries in `crates/db/` (migrations, types) and `crates/core/src/db/queries_extra/compose.rs`. Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `crates/graph/src/ops/mod.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `crates/jmap/src/ops.rs`). Gmail/IMAP use local timer.
+**Status**: [x] **Done** - Full implementation with server-native delegation. `crates/core/src/scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). DB schema and queries in `crates/db/` (migrations, types) and `crates/core/src/db/queries_extra/compose.rs`. Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `crates/graph/src/ops/mod.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `crates/jmap/src/ops.rs`). Gmail/IMAP use local timer.
 
 ---
 
@@ -26,12 +26,12 @@
 
 ## Work
 
-- ✅ DB schema with delegation columns (`delegation`, `remote_message_id`, `remote_status`, `timezone`, `from_email`, `error_message`, `retry_count`)
-- ✅ Delegation routing - `determine_send_delegation_for_account` maps provider type to `SendDelegation` enum (`Local`/`Exchange`/`Jmap`)
-- ✅ Exchange deferred delivery - `schedule_send` sets `PidTagDeferredSendTime` (0x3FEF) extended property; `cancel_scheduled_send` deletes draft; `reschedule_send` PATCHes timestamp
-- ✅ JMAP FUTURERELEASE - `schedule_send_jmap` creates `EmailSubmission` with `HOLDUNTIL` parameter; `cancel_scheduled_send_jmap` sets `undoStatus` to `canceled`; checks `maxDelayedSend` capability
-- ✅ Overdue handling - `check_overdue_scheduled_emails` classifies locally-delegated overdue emails: `SendNow` if <24h, `NeedsReview` if >24h; `process_overdue_emails` applies resolutions
-- ✅ Gmail/IMAP local scheduling (no server API available)
+- [x] DB schema with delegation columns (`delegation`, `remote_message_id`, `remote_status`, `timezone`, `from_email`, `error_message`, `retry_count`)
+- [x] Delegation routing - `determine_send_delegation_for_account` maps provider type to `SendDelegation` enum (`Local`/`Exchange`/`Jmap`)
+- [x] Exchange deferred delivery - `schedule_send` sets `PidTagDeferredSendTime` (0x3FEF) extended property; `cancel_scheduled_send` deletes draft; `reschedule_send` PATCHes timestamp
+- [x] JMAP FUTURERELEASE - `schedule_send_jmap` creates `EmailSubmission` with `HOLDUNTIL` parameter; `cancel_scheduled_send_jmap` sets `undoStatus` to `canceled`; checks `maxDelayedSend` capability
+- [x] Overdue handling - `check_overdue_scheduled_emails` classifies locally-delegated overdue emails: `SendNow` if <24h, `NeedsReview` if >24h; `process_overdue_emails` applies resolutions
+- [x] Gmail/IMAP local scheduling (no server API available)
 - ⬚ Schedule picker UI (iced compose work)
   - Note: the speculative `db_insert_scheduled_email` helper (14 positional args, zero callers) was deleted during a dead-code triage. Write a focused `(WriterPool, ScheduledEmail)` insert helper when the UI lands - the `scheduled_emails` schema in `crates/db/src/db/schema/09_security.sql` and the delegation columns documented above are the source of truth for the row shape.
 - ⬚ "Scheduled" virtual folder view

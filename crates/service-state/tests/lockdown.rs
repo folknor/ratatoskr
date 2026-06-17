@@ -28,8 +28,8 @@ fn app_crate_must_not_directly_depend_on_service_state() {
     let app_cargo = workspace_path("crates/app/Cargo.toml");
     let raw = std::fs::read_to_string(&app_cargo)
         .unwrap_or_else(|e| panic!("read {}: {e}", app_cargo.display()));
-    let manifest: toml::Value = toml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("parse {}: {e}", app_cargo.display()));
+    let manifest: toml::Value =
+        toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", app_cargo.display()));
 
     let deps = manifest
         .get("dependencies")
@@ -42,9 +42,7 @@ fn app_crate_must_not_directly_depend_on_service_state() {
          happen Service-side. Re-route through a Service IPC instead.",
     );
 
-    let dev_deps = manifest
-        .get("dev-dependencies")
-        .and_then(|v| v.as_table());
+    let dev_deps = manifest.get("dev-dependencies").and_then(|v| v.as_table());
     if let Some(table) = dev_deps {
         assert!(
             !table.contains_key("service-state"),
@@ -63,8 +61,8 @@ fn service_crate_can_still_construct_write_state() {
     let svc_cargo = workspace_path("crates/service/Cargo.toml");
     let raw = std::fs::read_to_string(&svc_cargo)
         .unwrap_or_else(|e| panic!("read {}: {e}", svc_cargo.display()));
-    let manifest: toml::Value = toml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("parse {}: {e}", svc_cargo.display()));
+    let manifest: toml::Value =
+        toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", svc_cargo.display()));
     let deps = manifest
         .get("dependencies")
         .and_then(|v| v.as_table())
@@ -113,7 +111,8 @@ fn read_db_state_public_api_does_not_expose_raw_connection() {
             brace_depth = 0;
         }
         if in_read_db_state_impl {
-            if trimmed.contains("pub ") && trimmed.contains("fn ")
+            if trimmed.contains("pub ")
+                && trimmed.contains("fn ")
                 && (trimmed.contains("&Connection") || trimmed.contains("&rusqlite::Connection"))
             {
                 panic!(
@@ -201,8 +200,8 @@ fn app_crate_must_not_transitively_depend_on_cal() {
         }
         let raw = std::fs::read_to_string(&manifest)
             .unwrap_or_else(|e| panic!("read {}: {e}", manifest.display()));
-        let parsed: toml::Value = toml::from_str(&raw)
-            .unwrap_or_else(|e| panic!("parse {}: {e}", manifest.display()));
+        let parsed: toml::Value =
+            toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", manifest.display()));
         let crate_name = parsed
             .get("package")
             .and_then(|p| p.get("name"))
@@ -233,12 +232,9 @@ fn app_crate_must_not_transitively_depend_on_cal() {
     let blessed: std::collections::HashSet<&str> = ["service"].iter().copied().collect();
     let target = "cal";
     let start = "app";
-    let mut parent: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    let mut queue: std::collections::VecDeque<String> =
-        std::collections::VecDeque::new();
-    let mut visited: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut parent: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     queue.push_back(start.to_string());
     visited.insert(start.to_string());
     while let Some(current) = queue.pop_front() {
@@ -294,8 +290,8 @@ fn app_crate_must_not_transitively_depend_on_service_state() {
         }
         let raw = std::fs::read_to_string(&manifest)
             .unwrap_or_else(|e| panic!("read {}: {e}", manifest.display()));
-        let parsed: toml::Value = toml::from_str(&raw)
-            .unwrap_or_else(|e| panic!("parse {}: {e}", manifest.display()));
+        let parsed: toml::Value =
+            toml::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", manifest.display()));
         let crate_name = parsed
             .get("package")
             .and_then(|p| p.get("name"))
@@ -321,12 +317,9 @@ fn app_crate_must_not_transitively_depend_on_service_state() {
 
     let target = "service-state";
     let start = "app";
-    let mut parent: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    let mut queue: std::collections::VecDeque<String> =
-        std::collections::VecDeque::new();
-    let mut visited: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut parent: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     queue.push_back(start.to_string());
     visited.insert(start.to_string());
     while let Some(current) = queue.pop_front() {

@@ -14,7 +14,7 @@
 //! requires.
 
 use common::typed_ids::{FolderId, LabelGroupId, LabelId};
-use service_api::{WireFolderId, WireLabelGroupId, WireMailOperation, WireLabelId};
+use service_api::{WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation};
 
 use super::operation::MailOperation;
 
@@ -164,7 +164,9 @@ mod tests {
             WireMailOperation::RemoveLabelGroup {
                 group_id: WireLabelGroupId(7),
             },
-            WireMailOperation::Snooze { until: 1_700_000_000 },
+            WireMailOperation::Snooze {
+                until: 1_700_000_000,
+            },
             WireMailOperation::Unsnooze,
         ];
         for w in cases {
@@ -209,7 +211,9 @@ mod tests {
             MailOperation::RemoveLabelGroup {
                 group_id: LabelGroupId(7),
             },
-            MailOperation::Snooze { until: 1_700_000_000 },
+            MailOperation::Snooze {
+                until: 1_700_000_000,
+            },
             MailOperation::Unsnooze,
         ];
         for m in cases {

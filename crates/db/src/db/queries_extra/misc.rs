@@ -35,7 +35,9 @@ pub async fn db_get_snoozed_threads_due(
     .await
 }
 
-pub fn get_calendar_default_view_sync(conn: &crate::db::ReadConn<'_>) -> Result<Option<String>, String> {
+pub fn get_calendar_default_view_sync(
+    conn: &crate::db::ReadConn<'_>,
+) -> Result<Option<String>, String> {
     match conn.query_row(
         "SELECT value FROM settings WHERE key = 'calendar_default_view'",
         [],
@@ -251,7 +253,6 @@ pub async fn db_update_message_imap_folder(
     })
     .await
 }
-
 
 pub async fn db_get_inbox_threads_for_backfill(
     db: &WriterPool,

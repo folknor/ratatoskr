@@ -1,18 +1,20 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use bifrost_jmap::Set;
 use bifrost_jmap::core::set::SetObject;
 use bifrost_jmap::email::EmailSet;
 use bifrost_jmap::email::import::EmailImportRequest;
-use bifrost_jmap::email_submission::{Address as SubmissionAddress, EmailSubmissionSet, UndoStatus};
+use bifrost_jmap::email_submission::{
+    Address as SubmissionAddress, EmailSubmissionSet, UndoStatus,
+};
 use bifrost_jmap::mailbox::Role;
+use chrono::{DateTime, Utc};
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    FolderKind, LabelKind, ProviderProfile, ProviderTestResult, SendIntent,
+    ActionProviderCtx, FetchedAttachment, FolderKind, LabelKind, ProviderCtx, ProviderFolderEntry,
+    ProviderFolderMutation, ProviderProfile, ProviderTestResult, SendIntent,
 };
 
 use super::client::JmapClient;
@@ -41,7 +43,11 @@ impl JmapOps {
 // holds the orphan-impl and sync entry-point code.
 #[async_trait]
 impl ProviderOps for JmapOps {
-    async fn archive(&self, _ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(
+        &self,
+        _ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox")
@@ -73,7 +79,11 @@ impl ProviderOps for JmapOps {
         Ok(())
     }
 
-    async fn trash(&self, _ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(
+        &self,
+        _ctx: &ActionProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let trash_id = find_mailbox_id_by_role(&mailboxes, "trash")

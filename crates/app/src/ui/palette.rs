@@ -237,11 +237,7 @@ impl Palette {
         (Task::batch([focus_task, load_task]), None)
     }
 
-    fn enter_snooze_stage2(
-        &mut self,
-        id: CommandId,
-        param_label: &str,
-    ) -> Task<PaletteMessage> {
+    fn enter_snooze_stage2(&mut self, id: CommandId, param_label: &str) -> Task<PaletteMessage> {
         self.stage = PaletteStage::OptionPick;
         self.query.clear();
         self.selected_index = 0;
@@ -283,13 +279,14 @@ impl Palette {
         if text.is_empty() {
             return (Task::none(), None);
         }
-        let Some(args) =
-            crate::handlers::commands::build_command_args_from_text(id, text)
-        else {
+        let Some(args) = crate::handlers::commands::build_command_args_from_text(id, text) else {
             return (Task::none(), None);
         };
         self.close();
-        (Task::none(), Some(PaletteEvent::ExecuteParameterized(id, args)))
+        (
+            Task::none(),
+            Some(PaletteEvent::ExecuteParameterized(id, args)),
+        )
     }
 
     fn confirm_option(&mut self) -> (Task<PaletteMessage>, Option<PaletteEvent>) {

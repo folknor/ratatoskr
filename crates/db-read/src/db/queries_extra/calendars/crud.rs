@@ -1,7 +1,7 @@
+use super::super::super::ReadConn;
 use super::super::super::types::{
     DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder,
 };
-use super::super::super::ReadConn;
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
@@ -77,9 +77,7 @@ pub fn get_event_reminders_sync(
         .map_err(|e| e.to_string())
 }
 
-pub fn load_calendars_for_sidebar_sync(
-    conn: &ReadConn<'_>,
-) -> Result<Vec<DbCalendar>, String> {
+pub fn load_calendars_for_sidebar_sync(conn: &ReadConn<'_>) -> Result<Vec<DbCalendar>, String> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {CALENDAR_COLS} FROM calendars

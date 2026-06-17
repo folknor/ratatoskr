@@ -20,19 +20,19 @@ The two layers are connected: the mini-calendar sidebar is the entry point to th
 
 3. **Speed over chrome.** A week view with 50 events must render instantly. No loading spinners, no progressive rendering. The calendar is a glance surface - if it's slow, users will keep a browser tab open to Google Calendar instead.
 
-4. **The calendar is not a separate app.** It shares the window, the theme, the command palette, the keyboard shortcut system. Creating an event from an email (the 📅 button) should feel like a single action, not a context switch.
+4. **The calendar is not a separate app.** It shares the window, the theme, the command palette, the keyboard shortcut system. Creating an event from an email (the  button) should feel like a single action, not a context switch.
 
 ## Mode Switcher
 
 ### The Button
 
-A single square icon button in the top-left of the sidebar header area. In mail mode it shows a calendar icon (📅). In calendar mode it shows a mail icon (✉). Click to toggle between modes. That's it - no tab bar, no mode labels, no extra chrome.
+A single square icon button in the top-left of the sidebar header area. In mail mode it shows a calendar icon (). In calendar mode it shows a mail icon (). Click to toggle between modes. That's it - no tab bar, no mode labels, no extra chrome.
 
 **Mail mode:** The button sits to the left of the existing account dropdown and compose button. It is a square whose height matches the combined height of the dropdown + gap + compose button (~76px). The dropdown and compose button are squeezed into the remaining sidebar width to its right.
 
 ```
 ┌────────────────────────┬──────────┬─────────────────────┐
-│ [📅]  Account ▾        │          │                     │
+│ []  Account ▾        │          │                     │
 │ [    ] [ Compose     ] │ Thread   │ Reading             │
 │────────────────────────│ List     │ Pane                │
 │ Inbox                  │          │                     │
@@ -42,18 +42,18 @@ A single square icon button in the top-left of the sidebar header area. In mail 
 └────────────────────────┴──────────┴─────────────────────┘
 ```
 
-**Calendar mode:** The button shows a mail icon (✉) and occupies the same square dimensions in the same position. To its right, the space freed by the absent dropdown/compose is filled with the view switcher buttons and the pop-out button - all full height (~76px), arranged horizontally.
+**Calendar mode:** The button shows a mail icon () and occupies the same square dimensions in the same position. To its right, the space freed by the absent dropdown/compose is filled with the view switcher buttons and the pop-out button - all full height (~76px), arranged horizontally.
 
 ```
 ┌───────────────────────────────┬─────────────────────────┐
-│ [✉] [ D ][WW][ W ][ M ] [↗] │                          │
+│ [] [ D ][WW][ W ][ M ] [↗] │                          │
 │───────────────────────────────│  Week View              │
 │ ◀ March 2026 ▶                │                          │
 │ Mo Tu We Th Fr Sa Su          │                          │
 │ ...                           │                          │
 │───────────────────────────────│                          │
-│ ☑ 🔵 Work                    │                          │
-│ ☑ 🟢 Personal                │                          │
+│ [x] (blue) Work                    │                          │
+│ [x] (green) Personal                │                          │
 └───────────────────────────────┴─────────────────────────┘
 ```
 
@@ -116,10 +116,10 @@ See § Mode Switcher for the layout diagram. The pop-out button (↗) and Today 
 A list of all calendars the user has, with color indicators and visibility toggles. Each calendar is a row:
 
 ```
-☑ 🔵 Work (alice@corp.com)
-☑ 🟢 Personal (alice@gmail.com)
-☐ 🟡 Team Calendar
-☑ 🔴 Holidays
+[x] (blue) Work (alice@corp.com)
+[x] (green) Personal (alice@gmail.com)
+[ ] (yellow) Team Calendar
+[x] (red) Holidays
 ```
 
 Toggling a calendar's checkbox shows/hides its events in the main view. Calendar colors are synced from the provider where available, with deterministic fallback (same approach as label colors - see `docs/main-layout/implementation-spec.md` Slice 1).
@@ -136,7 +136,7 @@ The event block is the fundamental visual element across all calendar views. It 
 
 - **Background color**: the calendar's color (synced from provider or deterministic fallback)
 - **Top-left**: start time + title, e.g. "10:00 Standup". Full-day events show title only (no start time)
-- **Top-right**: repeating/recurrence icon (🔁) if the event is part of a recurring series
+- **Top-right**: repeating/recurrence icon () if the event is part of a recurring series
 - **Overflow**: text is not truncated with ellipsis. It simply clips at the block boundary - text flows under adjacent UI elements and disappears. No wrapping, no ellipsis
 - **Click**: opens the event detail popover (see § Event Interaction)
 
@@ -251,13 +251,13 @@ Clicking an event block opens a popover. Clicking outside or pressing Escape dis
 ```
 ┌─────────────────────────┐
 │ Sprint Planning       ↗ │  ← title + expand-to-modal button (top-right)
-│ 10:00-11:30  🔁         │  ← abbreviated time/span + recurrence icon (right-pinned)
+│ 10:00-11:30           │  ← abbreviated time/span + recurrence icon (right-pinned)
 │ Room 4B                 │  ← location (hidden if empty)
 │ Invited by Alice Smith  │  ← organizer (hidden if own event)
 │ Bob, Charlie, +3 others │  ← other attendees (hidden if none)
 │ Discuss Q2 roadmap...   │  ← description (truncated ~200 words, hidden if empty)
 │                         │
-│ ☐ Email organizer       │  ← checkbox (only shown when RSVP actions are present)
+│ [ ] Email organizer       │  ← checkbox (only shown when RSVP actions are present)
 │ [Accept] [Decline] [?]  │  ← action buttons (context-dependent, see below)
 └─────────────────────────┘
 ```
@@ -305,15 +305,15 @@ The modal dims and blocks interaction with the rest of the calendar window. It s
 │ Title                                              │       │Standup ││
 │ ─────────────────────────────────────────          │  9:30 └────────┘│
 │ Date: Wed, Mar 19, 2026                            │ 10:00 ┌────────┐│
-│ Time: 10:00 - 11:30           🔁 Weekly            │       │THIS    ││
+│ Time: 10:00 - 11:30            Weekly            │       │THIS    ││
 │ Location: Room 4B                                  │       │EVENT   ││
 │                                                    │ 11:30 └────────┘│
 │ Organizer: Alice Smith                             │ 12:00            │
 │ Attendees:                                         │ 13:00            │
-│   ✓ Alice Smith (organizer)                        │ 14:00 ┌────────┐│
-│   ✓ Bob Jones                                      │       │Client  ││
+│   [x] Alice Smith (organizer)                        │ 14:00 ┌────────┐│
+│   [x] Bob Jones                                      │       │Client  ││
 │   ? Charlie (no response)                          │       │call    ││
-│   ✗ Diana (declined)                               │ 15:00 └────────┘│
+│   [ ] Diana (declined)                               │ 15:00 └────────┘│
 │                                                    │ 16:00            │
 │ Description:                                       │                  │
 │ Discuss Q2 roadmap priorities and resource          │                  │
@@ -321,7 +321,7 @@ The modal dims and blocks interaction with the rest of the calendar window. It s
 │                                                    │                  │
 │ Reminders: 15 min before                           │                  │
 │                                                    │                  │
-│ ☐ Email organizer                                  │                  │
+│ [ ] Email organizer                                  │                  │
 │ [Accept] [Decline] [Tentative] [Dismiss]           │                  │
 └────────────────────────────────────────────────────┴──────────────────┘
 ```
@@ -338,7 +338,7 @@ The modal dims and blocks interaction with the rest of the calendar window. It s
 - Recurrence rule (if recurring)
 - Location (with clickable link if URL / meeting link)
 - Organizer
-- Attendees with per-person RSVP status (✓ accepted, ? no response, ~ tentative, ✗ declined)
+- Attendees with per-person RSVP status ([x] accepted, ? no response, ~ tentative, [ ] declined)
 - Description (full, not truncated)
 - Reminders
 - "Email organizer" checkbox (when RSVP actions are present)
@@ -352,7 +352,7 @@ Clicking "Edit" switches the left panel to edit mode - fields become editable in
 
 #### Close
 
-A close button (✕) in the top-right corner of the modal. Escape also closes. In edit mode, closing without saving prompts for confirmation if changes have been made.
+A close button ([ ]) in the top-right corner of the modal. Escape also closes. In edit mode, closing without saving prompts for confirmation if changes have been made.
 
 This two-tier approach keeps quick checks fast (popover) while giving complex events the space they need (modal).
 
@@ -370,9 +370,9 @@ The date/time field in the modal (both read and edit mode) is **not a standard t
 │ End time (default: +30min from start) │
 │ [10:30]                               │
 │                                       │
-│ [🌐 Timezone]                         │
+│ [ Timezone]                         │
 │                                       │
-│ ☐ All day                             │
+│ [ ] All day                             │
 │ ○ Recurring                           │
 └───────────────────────────────────────┘
 ```
@@ -395,9 +395,9 @@ Clicking the timezone button expands the 3 fields (start date, start time, end t
 │ [Mar 19, 2026] [10:00] [Europe/Oslo] │
 │ [Mar 19, 2026] [10:30] [US/Eastern]  │
 │                                       │
-│ [🌐 Timezone]  (collapse)             │
+│ [ Timezone]  (collapse)             │
 │                                       │
-│ ☐ All day                             │
+│ [ ] All day                             │
 │ ○ Recurring                           │
 └───────────────────────────────────────┘
 ```
@@ -413,14 +413,14 @@ Toggling "Recurring" on expands the popover with recurrence configuration:
 │ [Start date] [Start time]            │
 │ [End time]                            │
 │                                       │
-│ ☐ All day                             │
+│ [ ] All day                             │
 │ ● Recurring                           │
 │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄ │
 │ Repeat every [1] [Week       ▾]      │
 │                                       │
 │ [Mo][Tu][We][Th][Fr][Sa][Su]          │  ← day-of-week toggles (day/week only)
 │                                       │
-│ ☐ Never on weekends or holidays       │
+│ [ ] Never on weekends or holidays       │
 │   (shifts to closest work day)        │
 │                                       │
 │ Ends: [Never ▾]                       │
@@ -507,7 +507,7 @@ For events the user is invited to (not the organizer), RSVP actions appear in th
 - **Accept** - marks attendance as accepted, sends response to organizer
 - **Tentative** - marks as tentative
 - **Decline** - marks as declined, optionally hides event from view
-RSVP is especially important because meeting invites arrive as email. The 📅 button on a meeting invitation email should open the event in the calendar with RSVP actions ready.
+RSVP is especially important because meeting invites arrive as email. The  button on a meeting invitation email should open the event in the calendar with RSVP actions ready.
 
 ## Pop-Out Window
 
@@ -538,22 +538,22 @@ When the calendar is popped out:
 
 ## Email ↔ Calendar Integration
 
-### Create Event from Email (📅 button)
+### Create Event from Email ( button)
 
-Already spec'd in `docs/main-layout/problem-statement.md` § Calendar Event Creation. The 📅 button on expanded messages opens the event creation form pre-filled with:
+Already spec'd in `docs/main-layout/problem-statement.md` § Calendar Event Creation. The  button on expanded messages opens the event creation form pre-filled with:
 
 - **Title**: email subject
 - **Description**: link to the email thread (or pasted snippet)
 - **Attendees**: email participants (from/to/cc)
 - **Date/time**: extracted from email body if possible (NLP date extraction), otherwise defaults to "next available slot"
 
-If the user is in mail mode when they click 📅, the behavior should be: open the event creation panel inline (not switch to calendar mode). The event is created without leaving email context.
+If the user is in mail mode when they click , the behavior should be: open the event creation panel inline (not switch to calendar mode). The event is created without leaving email context.
 
 ### Meeting Invites in Email
 
 When a meeting invite (iCalendar attachment, or provider-native invite) arrives as an email:
 
-- The thread list card shows a calendar indicator (📅) alongside or instead of the normal snippet
+- The thread list card shows a calendar indicator () alongside or instead of the normal snippet
 - The reading pane shows the event details inline (time, location, attendees) with RSVP buttons directly in the email view
 - RSVP actions in the email view are equivalent to RSVP in the calendar - they update the event and send the response
 

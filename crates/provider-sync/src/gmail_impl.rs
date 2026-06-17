@@ -4,10 +4,10 @@
 //! so the gmail crate no longer needs to depend on `service-state`. The
 //! impl logic is unchanged; only the home of the impl block changed.
 
+use ::gmail::ops::GmailOps;
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use ::gmail::ops::GmailOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 

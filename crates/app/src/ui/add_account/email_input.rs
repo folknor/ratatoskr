@@ -9,9 +9,7 @@ use crate::ui::theme;
 
 use rtsk::db::queries_extra::account_exists_by_email_sync;
 
-use super::state::{
-    AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard,
-};
+use super::state::{AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard};
 use super::views::{ghost_button, primary_button};
 
 impl AddAccountWizard {

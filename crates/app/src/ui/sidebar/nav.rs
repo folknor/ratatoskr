@@ -1,5 +1,5 @@
-use iced::widget::{column, mouse_area};
 use iced::Element;
+use iced::widget::{column, mouse_area};
 
 use crate::ui::layout::*;
 use crate::ui::widgets;
@@ -66,6 +66,9 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     col.into()
 }
 
-pub(super) fn sidebar_nav_selection_is_active(sidebar: &Sidebar, selection: &SidebarSelection) -> bool {
+pub(super) fn sidebar_nav_selection_is_active(
+    sidebar: &Sidebar,
+    selection: &SidebarSelection,
+) -> bool {
     sidebar.active_pinned_search.is_none() && sidebar.selection == *selection
 }

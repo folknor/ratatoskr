@@ -57,9 +57,7 @@ fn is_all_accounts_inbox(scope: &AccountScope, label_id: Option<&str>) -> bool {
 
 /// SQL clause that excludes threads with any of the broad-inbox exclusion
 /// folders. Placeholders start at `base_idx`. Returns `(clause, params)`.
-fn broad_inbox_exclusion_clause(
-    base_idx: usize,
-) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+fn broad_inbox_exclusion_clause(base_idx: usize) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let placeholders: Vec<String> = BROAD_INBOX_EXCLUSIONS
         .iter()
         .enumerate()
@@ -354,9 +352,7 @@ fn execute_count_query(
 }
 
 /// System folder IDs whose unread count comes from `thread_folders`.
-const SYSTEM_FOLDER_IDS: &[&str] = &[
-    "INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "archive",
-];
+const SYSTEM_FOLDER_IDS: &[&str] = &["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "archive"];
 
 /// Return unread counts for each universal folder, aggregated across `scope`.
 ///
@@ -376,7 +372,8 @@ pub fn get_unread_counts_by_folder(
     // sent/archive/spam" view; the INBOX-label-based row that's currently
     // in `results` undercounts it.
     if matches!(scope, AccountScope::All) {
-        let broad = UniversalUnreadCount::from_synced_thread_count(broad_inbox_unread_count(conn, scope)?);
+        let broad =
+            UniversalUnreadCount::from_synced_thread_count(broad_inbox_unread_count(conn, scope)?);
         if let Some(row) = results.iter_mut().find(|r| r.folder_id == "INBOX") {
             row.unread_count = broad;
         } else {

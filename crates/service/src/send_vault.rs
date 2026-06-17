@@ -104,9 +104,7 @@ pub(crate) fn validate_relative_path(rel: &str) -> Result<(), VaultError> {
         use std::path::Component;
         match component {
             Component::ParentDir => {
-                return Err(VaultError::InvalidPath(format!(
-                    "contains ..: {rel}"
-                )));
+                return Err(VaultError::InvalidPath(format!("contains ..: {rel}")));
             }
             Component::RootDir | Component::Prefix(_) => {
                 return Err(VaultError::InvalidPath(format!(
@@ -166,8 +164,8 @@ pub(crate) fn verify_and_transfer(
         return Err(VaultError::StagingSymlink(staging_path));
     }
 
-    let actual_hash = blake3_file(&staging_path)
-        .map_err(|e| VaultError::StagingIo(staging_path.clone(), e))?;
+    let actual_hash =
+        blake3_file(&staging_path).map_err(|e| VaultError::StagingIo(staging_path.clone(), e))?;
     if &actual_hash != expected_hash {
         return Err(VaultError::HashMismatch(staging_path));
     }
@@ -191,10 +189,7 @@ pub(crate) fn cleanup_vault_dir(app_data_dir: &Path, send_id: &PlanId) {
     if let Err(error) = std::fs::remove_dir_all(&dir)
         && error.kind() != std::io::ErrorKind::NotFound
     {
-        log::warn!(
-            "send_vault: failed to remove {}: {error}",
-            dir.display()
-        );
+        log::warn!("send_vault: failed to remove {}: {error}", dir.display());
     }
 }
 
@@ -310,7 +305,10 @@ mod tests {
         let err = verify_and_transfer(tmp.path(), &send_id, "0.bin", &bogus, 0)
             .expect_err("should reject");
         assert!(matches!(err, VaultError::HashMismatch(_)));
-        assert!(staging.join("0.bin").exists(), "staging preserved on rejection");
+        assert!(
+            staging.join("0.bin").exists(),
+            "staging preserved on rejection"
+        );
     }
 
     #[test]
@@ -347,11 +345,13 @@ mod tests {
 
         let mut live = HashSet::new();
         live.insert(live_id);
-        let removed =
-            cleanup_orphan_vaults(tmp.path(), &live).expect("cleanup");
+        let removed = cleanup_orphan_vaults(tmp.path(), &live).expect("cleanup");
         assert_eq!(removed, 2);
         assert!(vault_dir(tmp.path(), &live_id).exists(), "live preserved");
-        assert!(!vault_dir(tmp.path(), &orphan_id).exists(), "orphan removed");
+        assert!(
+            !vault_dir(tmp.path(), &orphan_id).exists(),
+            "orphan removed"
+        );
     }
 
     #[test]

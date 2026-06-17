@@ -6,13 +6,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::db::ReadConn;
 use db_read::db::FromRow;
 use db_read::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use db_read::db::types::{AccountScope, DbThread};
-use crate::db::ReadConn;
 use search::{
-    AttachmentAttributionInput, AttributionInputs, MatchKind, SearchParams,
-    SearchReadState, SearchResult as TantivyResult,
+    AttachmentAttributionInput, AttributionInputs, MatchKind, SearchParams, SearchReadState,
+    SearchResult as TantivyResult,
 };
 use smart_folder::{ParsedQuery, parse_query, query_thread_keys_read, query_threads_read};
 
@@ -180,7 +180,13 @@ fn search_tantivy_only(
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let params = build_tantivy_params(parsed);
     let mut results = search_state.search_with_filters(&params)?;
-    enrich_with_attribution(&mut results, &parsed.free_text, search_state, conn, body_read);
+    enrich_with_attribution(
+        &mut results,
+        &parsed.free_text,
+        search_state,
+        conn,
+        body_read,
+    );
     let mut grouped = group_by_thread_unified(results);
     let thread_rows = fetch_thread_rows_for_results(conn, &grouped)?;
     let thread_map: HashMap<(String, String), &DbThread> = thread_rows
@@ -191,7 +197,9 @@ fn search_tantivy_only(
         .into_iter()
         .filter_map(|r| {
             let key = (r.account_id.clone(), r.thread_id.clone());
-            thread_map.get(&key).map(|thread| enrich_from_sql(r, thread))
+            thread_map
+                .get(&key)
+                .map(|thread| enrich_from_sql(r, thread))
         })
         .collect();
     grouped.sort_by(|a, b| {
@@ -280,7 +288,9 @@ fn search_combined(
         .into_iter()
         .filter_map(|r| {
             let key = (r.account_id.clone(), r.thread_id.clone());
-            thread_map.get(&key).map(|thread| enrich_from_sql(r, thread))
+            thread_map
+                .get(&key)
+                .map(|thread| enrich_from_sql(r, thread))
         })
         .collect();
 
@@ -323,13 +333,14 @@ fn enrich_with_attribution(
         .iter()
         .map(|r| (r.account_id.clone(), r.message_id.clone()))
         .collect();
-    let fragments = match db_read::db::queries_extra::select_attachment_fragments_batch(conn, &pairs) {
-        Ok(map) => map,
-        Err(e) => {
-            log::warn!("enrich_with_attribution: attachment fetch failed: {e}");
-            return;
-        }
-    };
+    let fragments =
+        match db_read::db::queries_extra::select_attachment_fragments_batch(conn, &pairs) {
+            Ok(map) => map,
+            Err(e) => {
+                log::warn!("enrich_with_attribution: attachment fetch failed: {e}");
+                return;
+            }
+        };
     // Body fetch is opt-in via `body_read`; failures fall back to empty
     // body strings (degraded but not broken).
     let mut body_by_mid: HashMap<String, String> = HashMap::new();
@@ -356,9 +367,9 @@ fn enrich_with_attribution(
             .map(|rows| {
                 rows.iter()
                     .map(|row| AttachmentAttributionInput {
-                        attachment_id:  row.attachment_id.clone(),
-                        filename:       row.filename.clone(),
-                        mime:           row.mime_type.clone(),
+                        attachment_id: row.attachment_id.clone(),
+                        filename: row.filename.clone(),
+                        mime: row.mime_type.clone(),
                         extracted_text: row.extracted_text.clone(),
                     })
                     .collect()
@@ -367,9 +378,9 @@ fn enrich_with_attribution(
         inputs.insert(
             r.message_id.clone(),
             AttributionInputs {
-                subject:     r.subject.clone().unwrap_or_default(),
-                from_name:   r.from_name.clone().unwrap_or_default(),
-                body_text:   body_by_mid.remove(&r.message_id).unwrap_or_default(),
+                subject: r.subject.clone().unwrap_or_default(),
+                from_name: r.from_name.clone().unwrap_or_default(),
+                body_text: body_by_mid.remove(&r.message_id).unwrap_or_default(),
                 attachments,
             },
         );
@@ -523,10 +534,7 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
 /// product spec; keep Tantivy's `rank` / `match_kind` / `also_matched` so the
 /// hit explains why this thread matched while the card looks the same as in
 /// the inbox.
-fn enrich_from_sql(
-    mut result: UnifiedSearchResult,
-    thread: &DbThread,
-) -> UnifiedSearchResult {
+fn enrich_from_sql(mut result: UnifiedSearchResult, thread: &DbThread) -> UnifiedSearchResult {
     result.subject = thread.subject.clone();
     result.snippet = thread.snippet.clone();
     result.from_name = thread.from_name.clone();

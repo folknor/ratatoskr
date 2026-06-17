@@ -1,11 +1,13 @@
+use common::types::{FolderKind, LabelKind, MailProviderKind};
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels,
 };
-use common::types::{FolderKind, LabelKind, MailProviderKind};
 use search::SearchDocument;
-use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState};
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
 use store::inline_image_store::InlineImage;
 
 use super::super::client::GmailClient;
@@ -43,7 +45,8 @@ pub(super) async fn process_single_thread(
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let parsed_clone = parsed.clone();
-    write_db.with_write(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
+    write_db
+        .with_write(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
         .await?;
 
     // Fire-and-forget post-DB writes - all independent, run concurrently.
@@ -67,9 +70,7 @@ fn store_thread_to_db(
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin tx: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
 
     upsert_thread_record(&tx, account_id, thread_id, messages)?;
     set_thread_labels(&tx, account_id, thread_id, messages)?;
@@ -200,9 +201,10 @@ fn upsert_messages(
         .iter()
         .map(|msg| {
             let b = &msg.base;
-            let invite_idx = msg.attachments.iter().position(|att| {
-                common::email_parsing::is_calendar_content_type(&att.mime_type)
-            });
+            let invite_idx = msg
+                .attachments
+                .iter()
+                .position(|att| common::email_parsing::is_calendar_content_type(&att.mime_type));
             let invite_method = invite_idx.and_then(|i| {
                 common::email_parsing::extract_imip_method(&msg.attachments[i].mime_type)
             });
@@ -364,7 +366,11 @@ async fn store_inline_images(
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(search: &SearchWriteHandle, account_id: &str, messages: &[ParsedGmailMessage]) {
+async fn index_messages(
+    search: &SearchWriteHandle,
+    account_id: &str,
+    messages: &[ParsedGmailMessage],
+) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {

@@ -36,7 +36,7 @@ Opened by double-clicking a message card in the conversation view.
 A single-panel window showing one message with full content.
 
 ```
-┌─ Re: Sprint Planning - alice@corp.com ───────── ─ □ ✕ ┐
+┌─ Re: Sprint Planning - alice@corp.com ───────── ─ □ [ ] ┐
 │                                                        │
 │ From: Alice Smith              [↩] [↩All] [→] [⋮]     │
 │       alice@corp.com                                   │
@@ -58,7 +58,7 @@ A single-panel window showing one message with full content.
 │                                                        │
 ├─ Attachments (1) ──────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────┐  │
-│  │ 📄 roadmap.pdf                                  │  │
+│  │  roadmap.pdf                                  │  │
 │  │ PDF · 2.1 MB · Mar 19 from Alice Smith          │  │
 │  └─────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
@@ -122,21 +122,21 @@ Opened by:
 - Popping out the inline composer (pop-out button on the inline reply/forward)
 - Clicking Reply/Reply All/Forward in a message view pop-out
 - Command palette Compose command (`c`)
-- The 📅→email flow from calendar (composing an email about an event)
+- The →email flow from calendar (composing an email about an event)
 
 ### Layout
 
 ```
-┌─ New Message ──────────────────────────────────── ─ □ ✕ ┐
+┌─ New Message ──────────────────────────────────── ─ □ [ ] ┐
 │                                                          │
-│ From: [Alice Smith <alice@corp.com> ▾] [Cc][Bcc]  [📎][🖨][💾] [Send] │
+│ From: [Alice Smith <alice@corp.com> ▾] [Cc][Bcc]  [][][] [Send] │
 │ To:   [Bob Jones] [charlie@corp.com] [         ]         │
 │ Cc:   [                                        ]         │
 │ Bcc:  [                                        ]         │
 │ Subject: [Re: Sprint Planning                  ]         │
 │                                                          │
 │ ─── Formatting Toolbar ──────────────────────────        │
-│ B  I  U  S  │ • ─ 1. │ "" │ 🔗 │ 😀                    │
+│ B  I  U  S  │ • ─ 1. │ "" │  │                     │
 │                                                          │
 │ ──────────────────────────────────────────────────        │
 │                                                    │
@@ -197,7 +197,7 @@ For forwards, the original message's attachments are included (the user can remo
 
 Files are attached via:
 
-- The 📎 button in the header (opens a file picker - adds as attachment)
+- The  button in the header (opens a file picker - adds as attachment)
 - Paste (for images from clipboard - inserts inline)
 - **Drag and drop** - when files are dragged over the compose window, a full-window overlay appears. The entire window darkens, and two semi-transparent colored drop zones appear side by side, covering ~94% of the window (the rest is margin). The zone under the cursor gets a hover highlight.
 
@@ -215,10 +215,10 @@ Dropping on the left zone inserts the file inline in the message body (images ar
 Attached files appear at the bottom of the window as part of the chrome (same position as the viewer window's attachment list):
 
 ```
-│ Attachments: [📎 roadmap.pdf ✕] [📎 screenshot.png ✕] │
+│ Attachments: [ roadmap.pdf [ ]] [ screenshot.png [ ]] │
 ```
 
-Each attachment shows the filename, size, and a remove button (✕). Double-clicking opens the file with the OS default handler.
+Each attachment shows the filename, size, and a remove button ([ ]). Double-clicking opens the file with the OS default handler.
 
 #### Attachment Compression
 
@@ -235,12 +235,12 @@ Compression is transparent - the user doesn't need to configure it. The attachme
 
 Action buttons in the top-right of the header area, on the same row as the From field:
 
-- **Attach** (📎) - opens a file picker to attach files
-- **Print** (🖨) - prints the composed message via the OS print dialog
-- **Save** (💾) - saves the draft immediately
+- **Attach** () - opens a file picker to attach files
+- **Print** () - prints the composed message via the OS print dialog
+- **Save** () - saves the draft immediately
 - **Send** - sends the email and closes the window. Visually distinct (primary button).
 
-**Discard:** Closing the window (✕ button, Ctrl+W, or other window-close shortcuts) with unsaved content (beyond signature and quoted text) prompts for confirmation. If discarded, the draft is deleted. Escape does not close the compose window.
+**Discard:** Closing the window ([ ] button, Ctrl+W, or other window-close shortcuts) with unsaved content (beyond signature and quoted text) prompts for confirmation. If discarded, the draft is deleted. Escape does not close the compose window.
 
 ### Drafts
 

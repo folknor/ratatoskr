@@ -17,14 +17,14 @@
 //! replaced with `ctx.write_db.with_write(...)` so writes go through the
 //! writer-half exclusively.
 
-use gmail::client::GmailClient;
-use graph::client::GraphClient;
-use jmap::client::JmapClient;
 use action_types::{ActionError, ActionOutcome, CalendarActionContext, MutationLog};
+use db::db::WriteConn;
 use db::db::queries_extra::{
     set_calendar_event_remote_id_and_etag, update_calendar_event_fields_and_etag,
 };
-use db::db::WriteConn;
+use gmail::client::GmailClient;
+use graph::client::GraphClient;
+use jmap::client::JmapClient;
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
 use super::google::{
@@ -278,14 +278,9 @@ async fn dispatch_delete(
     let read_db = ctx.read_db.clone();
     match provider {
         CalendarProvider::Google(client) => {
-            google_calendar_delete_event_impl(
-                client,
-                &read_db,
-                calendar_remote_id,
-                remote_event_id,
-            )
-            .await
-            .map_err(ActionError::remote)
+            google_calendar_delete_event_impl(client, &read_db, calendar_remote_id, remote_event_id)
+                .await
+                .map_err(ActionError::remote)
         }
         CalendarProvider::Graph(client) => {
             graph_calendar_delete_event_impl(client, &read_db, remote_event_id)
@@ -338,10 +333,7 @@ struct EventMeta {
     calendar_id: Option<String>,
 }
 
-fn lookup_event_meta(
-    conn: &WriteConn<'_>,
-    event_id: &str,
-) -> Result<EventMeta, ActionError> {
+fn lookup_event_meta(conn: &WriteConn<'_>, event_id: &str) -> Result<EventMeta, ActionError> {
     conn.query_row(
         "SELECT account_id, remote_event_id, etag, calendar_id FROM calendar_events WHERE id = ?1",
         rusqlite::params![event_id],
@@ -553,15 +545,14 @@ pub async fn update_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
-    let provider =
-        match create_calendar_provider(ctx, &meta.account_id).await {
-            Ok(p) => p,
-            Err(e) => {
-                let outcome = ActionOutcome::Failed { error: e };
-                mlog.emit(&outcome);
-                return outcome;
-            }
-        };
+    let provider = match create_calendar_provider(ctx, &meta.account_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
 
     let Some(cal_remote) = calendar_remote_id else {
         let outcome = ActionOutcome::Failed {
@@ -592,28 +583,22 @@ pub async fn update_calendar_event(
             match db
                 .with_write_mapped(
                     move |conn| {
-                        let params =
-                            db::db::queries_extra::calendars::LocalCalendarEventParams {
-                                account_id: event_account_id,
-                                summary: input.title,
-                                description: input.description,
-                                location: input.location,
-                                start_time: input.start_time,
-                                end_time: input.end_time,
-                                is_all_day: input.is_all_day,
-                                calendar_id: cal_id,
-                                timezone: input.timezone,
-                                recurrence_rule: input.recurrence_rule,
-                                availability: input.availability,
-                                visibility: input.visibility,
-                            };
-                        update_calendar_event_fields_and_etag(
-                            conn,
-                            &eid,
-                            &params,
-                            etag.as_deref(),
-                        )
-                        .map_err(ActionError::db)?;
+                        let params = db::db::queries_extra::calendars::LocalCalendarEventParams {
+                            account_id: event_account_id,
+                            summary: input.title,
+                            description: input.description,
+                            location: input.location,
+                            start_time: input.start_time,
+                            end_time: input.end_time,
+                            is_all_day: input.is_all_day,
+                            calendar_id: cal_id,
+                            timezone: input.timezone,
+                            recurrence_rule: input.recurrence_rule,
+                            availability: input.availability,
+                            visibility: input.visibility,
+                        };
+                        update_calendar_event_fields_and_etag(conn, &eid, &params, etag.as_deref())
+                            .map_err(ActionError::db)?;
                         Ok(())
                     },
                     ActionError::db,
@@ -691,15 +676,14 @@ pub async fn delete_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
-    let provider =
-        match create_calendar_provider(ctx, &meta.account_id).await {
-            Ok(p) => p,
-            Err(e) => {
-                let outcome = ActionOutcome::Failed { error: e };
-                mlog.emit(&outcome);
-                return outcome;
-            }
-        };
+    let provider = match create_calendar_provider(ctx, &meta.account_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
 
     let Some(cal_remote) = calendar_remote_id else {
         let outcome = ActionOutcome::Failed {

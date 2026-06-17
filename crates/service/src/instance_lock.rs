@@ -63,17 +63,15 @@ mod tests {
     use std::sync::Arc;
 
     fn temp_data_dir(suffix: &str) -> std::io::Result<std::path::PathBuf> {
-        let path = std::env::current_dir()?
-            .join("target")
-            .join(format!(
-                "instance-lock-test-{}-{}-{}",
-                std::process::id(),
-                suffix,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            ));
+        let path = std::env::current_dir()?.join("target").join(format!(
+            "instance-lock-test-{}-{}-{}",
+            std::process::id(),
+            suffix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path)?;
         Ok(path)

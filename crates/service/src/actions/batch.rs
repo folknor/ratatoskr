@@ -122,14 +122,12 @@ async fn execute_account_group(
 
     // Create provider once for this account
     let provider =
-        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key)
-            .await
-        {
-        Ok(p) => p,
-        Err(e) => {
-            let kind = classify_provider_error(&e);
-            return degraded_fallback(ctx, account_id, &e, kind, thread_ops).await;
-        }
+        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => {
+                let kind = classify_provider_error(&e);
+                return degraded_fallback(ctx, account_id, &e, kind, thread_ops).await;
+            }
         };
 
     // Dispatch sequentially with short-circuit on consecutive failures
@@ -242,9 +240,7 @@ async fn handle_thread_degraded(
         .await;
         // Permanent delete is provider-first: local rows carry the remote refs
         // needed for retry, so degraded mode must not delete them locally.
-        let outcome = ActionOutcome::Failed {
-            error,
-        };
+        let outcome = ActionOutcome::Failed { error };
         mlog.emit(&outcome);
         return outcome;
     }
@@ -350,9 +346,7 @@ async fn dispatch_with_provider(
         op @ (MailOperation::SetPinned { .. }
         | MailOperation::SetMuted { .. }
         | MailOperation::Snooze { .. }
-        | MailOperation::Unsnooze) => {
-            dispatch_local_only(ctx, op, account_id, thread_id).await
-        }
+        | MailOperation::Unsnooze) => dispatch_local_only(ctx, op, account_id, thread_id).await,
     }
 }
 
@@ -387,16 +381,16 @@ async fn op_local(
                 .await
                 .map(|()| true)
         }
-        MailOperation::AddLabel { label_id } => label::add_label_local(
-            ctx, account_id, thread_id, label_id,
-        )
-        .await
-        .map(|_| true),
-        MailOperation::RemoveLabel { label_id } => label::remove_label_local(
-            ctx, account_id, thread_id, label_id,
-        )
-        .await
-        .map(|_| true),
+        MailOperation::AddLabel { label_id } => {
+            label::add_label_local(ctx, account_id, thread_id, label_id)
+                .await
+                .map(|_| true)
+        }
+        MailOperation::RemoveLabel { label_id } => {
+            label::remove_label_local(ctx, account_id, thread_id, label_id)
+                .await
+                .map(|_| true)
+        }
         MailOperation::ApplyLabelGroup { group_id } => {
             label_group::apply_label_group_local_initial(ctx, account_id, thread_id, *group_id)
                 .await

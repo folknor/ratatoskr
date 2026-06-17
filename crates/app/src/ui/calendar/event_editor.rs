@@ -1,5 +1,7 @@
 use chrono::Datelike;
-use iced::widget::{Space, button, column, container, pick_list, row, scrollable, text, text_input};
+use iced::widget::{
+    Space, button, column, container, pick_list, row, scrollable, text, text_input,
+};
 use iced::{Alignment, Element, Length};
 
 use crate::ui::layout::*;
@@ -238,9 +240,7 @@ pub(super) fn event_editor_card<'a>(
 
     let mut action_row = row![save_btn, cancel_btn].spacing(SPACE_XS);
 
-    if !is_creating
-        && let Some(ref id) = event.id
-    {
+    if !is_creating && let Some(ref id) = event.id {
         action_row = action_row.push(Space::new().width(Length::Fill));
         action_row = action_row.push(
             button(text("Delete").size(TEXT_SM).style(text::danger))

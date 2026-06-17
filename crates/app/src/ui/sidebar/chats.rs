@@ -75,7 +75,9 @@ fn chat_entry_card<'a>(
         .wrapping(Wrapping::None);
 
     let header_row = row![
-        container(name_widget).width(Length::Fill).align_y(Alignment::Center),
+        container(name_widget)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
         text(time_label)
             .size(TEXT_XS)
             .style(theme::TextClass::Muted.style())

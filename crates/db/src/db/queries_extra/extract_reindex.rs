@@ -20,17 +20,17 @@ const MAX_PAIRS_PER_CHUNK: usize = 256;
 /// caller (in the `service` crate) maps this into `search::SearchDocument`.
 #[derive(Debug, Clone)]
 pub struct MessageIndexRow {
-    pub message_id:   String,
-    pub account_id:   String,
-    pub thread_id:    String,
-    pub subject:      Option<String>,
-    pub from_name:    Option<String>,
+    pub message_id: String,
+    pub account_id: String,
+    pub thread_id: String,
+    pub subject: Option<String>,
+    pub from_name: Option<String>,
     pub from_address: Option<String>,
     pub to_addresses: Option<String>,
-    pub snippet:      Option<String>,
-    pub date:         i64,
-    pub is_read:      bool,
-    pub is_starred:   bool,
+    pub snippet: Option<String>,
+    pub date: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
 }
 
 /// Per-attachment fields needed to build a `search::AttachmentDocFragment`.
@@ -38,11 +38,11 @@ pub struct MessageIndexRow {
 /// or its status is not `'indexed'` (skipped/failed rows have NULL text).
 #[derive(Debug, Clone)]
 pub struct AttachmentFragmentRow {
-    pub attachment_id:  String,
-    pub message_id:     String,
-    pub account_id:     String,
-    pub filename:       String,
-    pub mime_type:      String,
+    pub attachment_id: String,
+    pub message_id: String,
+    pub account_id: String,
+    pub filename: String,
+    pub mime_type: String,
     pub extracted_text: String,
 }
 
@@ -54,9 +54,9 @@ pub struct AttachmentFragmentRow {
 #[derive(Debug, Clone)]
 pub struct UnindexedCachedAttachmentRow {
     pub attachment_id: String,
-    pub message_id:    String,
-    pub account_id:    String,
-    pub content_hash:  Option<crate::blob_hash::BlobHash>,
+    pub message_id: String,
+    pub account_id: String,
+    pub content_hash: Option<crate::blob_hash::BlobHash>,
 }
 
 /// Phase 7-9: enumerate every message identity for the index-rebuild
@@ -221,9 +221,9 @@ pub fn find_unindexed_cached_attachments(
         .query_map(params![limit_i64], |row| {
             Ok(UnindexedCachedAttachmentRow {
                 attachment_id: row.get::<_, String>(0)?,
-                message_id:    row.get::<_, String>(1)?,
-                account_id:    row.get::<_, String>(2)?,
-                content_hash:  row.get::<_, Option<crate::blob_hash::BlobHash>>(3)?,
+                message_id: row.get::<_, String>(1)?,
+                account_id: row.get::<_, String>(2)?,
+                content_hash: row.get::<_, Option<crate::blob_hash::BlobHash>>(3)?,
             })
         })
         .map_err(|e| format!("query find_unindexed_cached_attachments: {e}"))?;
@@ -317,17 +317,17 @@ pub fn select_messages_for_index_batch(
         let rows = stmt
             .query_map(params_vec.as_slice(), |row| {
                 Ok(MessageIndexRow {
-                    message_id:   row.get::<_, String>(0)?,
-                    account_id:   row.get::<_, String>(1)?,
-                    thread_id:    row.get::<_, String>(2)?,
-                    subject:      row.get::<_, Option<String>>(3)?,
-                    from_name:    row.get::<_, Option<String>>(4)?,
+                    message_id: row.get::<_, String>(0)?,
+                    account_id: row.get::<_, String>(1)?,
+                    thread_id: row.get::<_, String>(2)?,
+                    subject: row.get::<_, Option<String>>(3)?,
+                    from_name: row.get::<_, Option<String>>(4)?,
                     from_address: row.get::<_, Option<String>>(5)?,
                     to_addresses: row.get::<_, Option<String>>(6)?,
-                    snippet:      row.get::<_, Option<String>>(7)?,
-                    date:         row.get::<_, i64>(8)?,
-                    is_read:      row.get::<_, i64>(9)? != 0,
-                    is_starred:   row.get::<_, i64>(10)? != 0,
+                    snippet: row.get::<_, Option<String>>(7)?,
+                    date: row.get::<_, i64>(8)?,
+                    is_read: row.get::<_, i64>(9)? != 0,
+                    is_starred: row.get::<_, i64>(10)? != 0,
                 })
             })
             .map_err(|e| format!("query select_messages_for_index_batch: {e}"))?;
@@ -388,13 +388,13 @@ pub fn select_attachment_fragments_batch(
             .map_err(|e| format!("prepare select_attachment_fragments_batch: {e}"))?;
         let rows = stmt
             .query_map(params_vec.as_slice(), |row| {
-                let attachment_id  = row.get::<_, String>(0)?;
-                let message_id     = row.get::<_, String>(1)?;
-                let account_id     = row.get::<_, String>(2)?;
-                let filename       = row.get::<_, Option<String>>(3)?.unwrap_or_default();
-                let mime_type      = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+                let attachment_id = row.get::<_, String>(0)?;
+                let message_id = row.get::<_, String>(1)?;
+                let account_id = row.get::<_, String>(2)?;
+                let filename = row.get::<_, Option<String>>(3)?.unwrap_or_default();
+                let mime_type = row.get::<_, Option<String>>(4)?.unwrap_or_default();
                 let extracted_text = row.get::<_, Option<String>>(5)?;
-                let status         = row.get::<_, Option<String>>(6)?;
+                let status = row.get::<_, Option<String>>(6)?;
                 // Only carry text into the index when the row was
                 // successfully indexed. Skipped/failed rows leave the
                 // attachment present in the doc (so filename/mime are
@@ -485,7 +485,8 @@ mod tests {
             rusqlite::params![hash_a, hash_b],
         )
         .expect("seed");
-        let mut pairs = find_message_ids_referencing_content_hash(&read(&conn), &hash_a).expect("query");
+        let mut pairs =
+            find_message_ids_referencing_content_hash(&read(&conn), &hash_a).expect("query");
         pairs.sort();
         assert_eq!(
             pairs,
@@ -550,8 +551,10 @@ mod tests {
         let map = select_attachment_fragments_batch(&read, &pairs).expect("query");
         let frags = map.get(&("acc1".into(), "msg1".into())).expect("frags");
         assert_eq!(frags.len(), 2);
-        let by_id: HashMap<&str, &AttachmentFragmentRow> =
-            frags.iter().map(|f| (f.attachment_id.as_str(), f)).collect();
+        let by_id: HashMap<&str, &AttachmentFragmentRow> = frags
+            .iter()
+            .map(|f| (f.attachment_id.as_str(), f))
+            .collect();
         assert_eq!(by_id["att1"].extracted_text, "pdf body");
         assert_eq!(by_id["att2"].extracted_text, "");
         assert_eq!(by_id["att2"].filename, "b.txt");
@@ -573,7 +576,13 @@ mod tests {
             "INSERT INTO attachments \
              (id, message_id, account_id, content_hash, text_indexed_at) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![att_id, message_id, account_id, content_hash, text_indexed_at],
+            rusqlite::params![
+                att_id,
+                message_id,
+                account_id,
+                content_hash,
+                text_indexed_at
+            ],
         )
         .expect("seed attachment");
         if let Some(hash) = content_hash {
@@ -620,15 +629,7 @@ mod tests {
             None,
             Some(150),
         );
-        seed_attachment_with_blob(
-            &conn,
-            "no_hash",
-            "msg4",
-            "acc1",
-            None,
-            None,
-            None,
-        );
+        seed_attachment_with_blob(&conn, "no_hash", "msg4", "acc1", None, None, None);
 
         let rows = find_unindexed_cached_attachments(&read(&conn), 1000).expect("query");
         assert_eq!(rows.len(), 1, "{rows:?}");

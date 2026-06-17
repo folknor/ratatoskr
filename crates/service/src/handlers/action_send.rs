@@ -90,15 +90,13 @@ pub(super) async fn handle(
     // Returns the journaled-payload-shaped data; we serialize + insert
     // in a follow-up spawn_blocking against the DB lock.
     let app_data_for_blocking = app_data_dir.clone();
-    let payload: JournaledSend = tokio::task::spawn_blocking(move || {
-        transfer_attachments(&app_data_for_blocking, request)
-    })
-    .await
-    .map_err(|error| ServiceError::Internal(format!("spawn_blocking: {error}")))??;
+    let payload: JournaledSend =
+        tokio::task::spawn_blocking(move || transfer_attachments(&app_data_for_blocking, request))
+            .await
+            .map_err(|error| ServiceError::Internal(format!("spawn_blocking: {error}")))??;
 
-    let payload_blob = serde_json::to_vec(&payload).map_err(|error| {
-        ServiceError::Internal(format!("serialize JournaledSend: {error}"))
-    })?;
+    let payload_blob = serde_json::to_vec(&payload)
+        .map_err(|error| ServiceError::Internal(format!("serialize JournaledSend: {error}")))?;
     let job_id_bytes = *payload.send_id.0.as_bytes();
     let account_id_for_journal = payload.account_id.clone();
 
@@ -220,22 +218,17 @@ fn map_vault_error(error: send_vault::VaultError) -> ServiceError {
         },
         VaultError::HashMismatch(path) => ServiceError::InvalidParams {
             method: "action.send".into(),
-            message: format!(
-                "staging file hash mismatch: {}",
-                path.display()
-            ),
+            message: format!("staging file hash mismatch: {}", path.display()),
         },
         VaultError::StagingSymlink(path) => ServiceError::InvalidParams {
             method: "action.send".into(),
             message: format!("staging file is a symlink: {}", path.display()),
         },
-        VaultError::StagingIo(path, error) => ServiceError::Internal(format!(
-            "staging IO error {}: {error}",
-            path.display()
-        )),
-        VaultError::VaultIo(path, error) => ServiceError::Internal(format!(
-            "vault IO error {}: {error}",
-            path.display()
-        )),
+        VaultError::StagingIo(path, error) => {
+            ServiceError::Internal(format!("staging IO error {}: {error}", path.display()))
+        }
+        VaultError::VaultIo(path, error) => {
+            ServiceError::Internal(format!("vault IO error {}: {error}", path.display()))
+        }
     }
 }

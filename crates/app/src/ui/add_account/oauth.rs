@@ -97,27 +97,32 @@ impl AddAccountWizard {
                 // registration attempt can use it. Registry-resolved
                 // providers don't get dyn-registration; their client IDs
                 // are baked in.
-                let (auth_url, token_url, scopes, use_pkce, registration_endpoint, supports_public_client) =
-                    if let Some(r) = resolved {
-                        (r.0, r.1, r.2, r.3, None, true)
-                    } else if let Some(issuer) = oidc_issuer {
-                        let endpoints =
-                            rtsk::discovery::oidc::probe_issuer(&issuer).await.ok_or_else(
-                                || format!("OIDC discovery failed for issuer '{issuer}'"),
-                            )?;
-                        (
-                            endpoints.auth_url,
-                            endpoints.token_url,
-                            endpoints.scopes,
-                            endpoints.supports_pkce_s256,
-                            endpoints.registration_endpoint,
-                            endpoints.supports_public_client,
-                        )
-                    } else {
-                        return Err::<Result<OAuthSuccess, String>, String>(
-                            "No OAuth configuration available".into(),
-                        );
-                    };
+                let (
+                    auth_url,
+                    token_url,
+                    scopes,
+                    use_pkce,
+                    registration_endpoint,
+                    supports_public_client,
+                ) = if let Some(r) = resolved {
+                    (r.0, r.1, r.2, r.3, None, true)
+                } else if let Some(issuer) = oidc_issuer {
+                    let endpoints = rtsk::discovery::oidc::probe_issuer(&issuer)
+                        .await
+                        .ok_or_else(|| format!("OIDC discovery failed for issuer '{issuer}'"))?;
+                    (
+                        endpoints.auth_url,
+                        endpoints.token_url,
+                        endpoints.scopes,
+                        endpoints.supports_pkce_s256,
+                        endpoints.registration_endpoint,
+                        endpoints.supports_public_client,
+                    )
+                } else {
+                    return Err::<Result<OAuthSuccess, String>, String>(
+                        "No OAuth configuration available".into(),
+                    );
+                };
 
                 // RFC 7591 dynamic registration: when the user didn't
                 // provide a client_id and the IdP advertised a
@@ -132,11 +137,10 @@ impl AddAccountWizard {
                             );
                         }
                         let scope = scopes.join(" ");
-                        let req =
-                            rtsk::discovery::dyn_registration::public_client_request(
-                                OAUTH_REDIRECT_URI,
-                                &scope,
-                            );
+                        let req = rtsk::discovery::dyn_registration::public_client_request(
+                            OAUTH_REDIRECT_URI,
+                            &scope,
+                        );
                         match rtsk::discovery::dyn_registration::register(endpoint, &req).await {
                             Some(registered) => {
                                 log::info!(
@@ -328,12 +332,8 @@ impl AddAccountWizard {
 /// scope names cannot contain whitespace, so splitting on whitespace is
 /// safe and matches the OAuth wire format.
 pub(super) fn parse_extra_scopes(raw: Option<&str>) -> Vec<String> {
-    raw.map(|s| {
-        s.split_whitespace()
-            .map(str::to_string)
-            .collect()
-    })
-    .unwrap_or_default()
+    raw.map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 /// Merge negotiated OAuth scopes with extras, preserving order and
@@ -526,10 +526,7 @@ mod tests {
 
     #[test]
     fn parse_extra_scopes_splits_whitespace() {
-        assert_eq!(
-            parse_extra_scopes(Some("a b c")),
-            v(&["a", "b", "c"])
-        );
+        assert_eq!(parse_extra_scopes(Some("a b c")), v(&["a", "b", "c"]));
         // Multiple spaces / tabs / mixed whitespace
         assert_eq!(
             parse_extra_scopes(Some("a\tb  c\n d")),

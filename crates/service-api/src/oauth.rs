@@ -101,8 +101,7 @@ mod tests {
     fn params_round_trip_create() {
         let original = sample_params(false);
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: OauthExchangeCodeParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: OauthExchangeCodeParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -110,8 +109,7 @@ mod tests {
     fn params_round_trip_reauth() {
         let original = sample_params(true);
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: OauthExchangeCodeParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: OauthExchangeCodeParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -135,8 +133,7 @@ mod tests {
             token_expires_at: Some(1234567890),
         };
         let json = serde_json::to_value(&ack).expect("serialize");
-        let recovered: OauthExchangeCodeAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: OauthExchangeCodeAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(ack, recovered);
     }
 

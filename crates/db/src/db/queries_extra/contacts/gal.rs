@@ -64,10 +64,7 @@ pub fn gal_cache_age_sync(
 }
 
 /// Record that a GAL refresh was performed for an account.
-pub fn record_gal_refresh_sync(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-) -> Result<(), String> {
+pub fn record_gal_refresh_sync(conn: &WriteConn<'_>, account_id: &str) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp().to_string();
     let key = format!("gal_refresh_{account_id}");
     conn.execute(

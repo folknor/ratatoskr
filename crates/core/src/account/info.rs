@@ -41,8 +41,7 @@ pub fn get_caldav_connection_info(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<CaldavConnectionInfo>, String> {
-    let Some(account) = get_account_sync(conn, account_id)?
-    else {
+    let Some(account) = get_account_sync(conn, account_id)? else {
         return Ok(None);
     };
 

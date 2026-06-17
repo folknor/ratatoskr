@@ -514,8 +514,8 @@ mod tests {
 
     #[test]
     fn unicode_content() {
-        let doc = Document::from_blocks(vec![Block::paragraph("Héllo wörld 🌍")]);
-        assert_eq!(to_html(&doc), "<p>Héllo wörld 🌍</p>");
+        let doc = Document::from_blocks(vec![Block::paragraph("Héllo wörld \u{1F30D}")]);
+        assert_eq!(to_html(&doc), "<p>Héllo wörld \u{1F30D}</p>");
     }
 
     #[test]

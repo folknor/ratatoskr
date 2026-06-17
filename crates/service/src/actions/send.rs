@@ -2,12 +2,12 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
-use db::progress::NoopProgressReporter;
 use crate::send::{
     SendIntent, SendRequest, build_mime_message_base64url, delete_local_draft, mark_draft_failed,
     mark_send_intent_local,
 };
 use common::types::ProviderCtx;
+use db::progress::NoopProgressReporter;
 
 /// Send an email: build MIME, persist draft, dispatch to provider.
 ///
@@ -42,38 +42,43 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     let account_id_outer = account_id.clone();
     let thread_id_outer = thread_id.clone();
     let source_message_id_outer = source_message_id.clone();
-    let local_result = db.with_write_mapped(move |conn| {
-        let mime_base64url = build_mime_message_base64url(&request)
-            .map_err(|e| ActionError::build(format!("{e}")))?;
+    let local_result = db
+        .with_write_mapped(
+            move |conn| {
+                let mime_base64url = build_mime_message_base64url(&request)
+                    .map_err(|e| ActionError::build(format!("{e}")))?;
 
-        db::db::queries_extra::draft_lifecycle::persist_draft_pending_sync(
-            conn,
-            &draft_id,
-            &account_id,
-            &request.to.join(", "),
-            &request.cc.join(", "),
-            &request.bcc.join(", "),
-            request.subject.as_deref(),
-            &request.body_html,
-            request.in_reply_to.as_deref(),
-            thread_id.as_deref(),
-            &request.from,
-            &mime_base64url,
-        )
-        .map_err(ActionError::db)?;
-
-        let transitioned =
-            db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)
+                db::db::queries_extra::draft_lifecycle::persist_draft_pending_sync(
+                    conn,
+                    &draft_id,
+                    &account_id,
+                    &request.to.join(", "),
+                    &request.cc.join(", "),
+                    &request.bcc.join(", "),
+                    request.subject.as_deref(),
+                    &request.body_html,
+                    request.in_reply_to.as_deref(),
+                    thread_id.as_deref(),
+                    &request.from,
+                    &mime_base64url,
+                )
                 .map_err(ActionError::db)?;
-        if !transitioned {
-            return Err(ActionError::invalid_state(format!(
-                "Draft {draft_id} not found or already sending/sent"
-            )));
-        }
 
-        Ok(mime_base64url)
-    }, ActionError::db)
-    .await;
+                let transitioned = db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(
+                    conn, &draft_id,
+                )
+                .map_err(ActionError::db)?;
+                if !transitioned {
+                    return Err(ActionError::invalid_state(format!(
+                        "Draft {draft_id} not found or already sending/sent"
+                    )));
+                }
+
+                Ok(mime_base64url)
+            },
+            ActionError::db,
+        )
+        .await;
 
     let mime_base64url = match local_result {
         Ok(mime) => mime,
@@ -85,7 +90,14 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     };
 
     // 2. Provider dispatch
-    let provider = match create_provider(&ctx.db, &ctx.write_db, &account_id_outer, ctx.encryption_key).await {
+    let provider = match create_provider(
+        &ctx.db,
+        &ctx.write_db,
+        &account_id_outer,
+        ctx.encryption_key,
+    )
+    .await
+    {
         Ok(p) => p,
         Err(e) => {
             let _ = mark_draft_failed(&ctx.write_db, draft_id_outer).await;
@@ -157,17 +169,21 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
     // 1. Look up remote_draft_id and delete locally in one spawn_blocking call
     let db = ctx.write_db.clone();
     let did = draft_id.to_string();
-    let local_result = db.with_write_mapped(move |conn| {
-        let remote_id =
-            db::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(conn, &did)
-                .map_err(ActionError::db)?;
+    let local_result = db
+        .with_write_mapped(
+            move |conn| {
+                let remote_id =
+                    db::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(conn, &did)
+                        .map_err(ActionError::db)?;
 
-        db::db::queries_extra::draft_lifecycle::delete_draft_sync(conn, &did)
-            .map_err(ActionError::db)?;
+                db::db::queries_extra::draft_lifecycle::delete_draft_sync(conn, &did)
+                    .map_err(ActionError::db)?;
 
-        Ok(remote_id)
-    }, ActionError::db)
-    .await;
+                Ok(remote_id)
+            },
+            ActionError::db,
+        )
+        .await;
 
     let remote_id = match local_result {
         Ok(id) => id,
@@ -180,7 +196,8 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
 
     // 2. Provider delete (best-effort, only if remote_draft_id exists)
     if let Some(remote_draft_id) = remote_id
-        && let Ok(provider) = create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await
+        && let Ok(provider) =
+            create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await
     {
         let provider_ctx = ProviderCtx {
             account_id,

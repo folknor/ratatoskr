@@ -233,7 +233,10 @@ mod tests {
         let options = ImportOptions::default().with_header(true);
         let prepared = prepare_csv_import(&source, &mappings, options).expect("should prepare");
         assert_eq!(prepared.contacts.len(), 1);
-        assert_eq!(prepared.contacts[0].email.as_deref(), Some("alice@test.com"));
+        assert_eq!(
+            prepared.contacts[0].email.as_deref(),
+            Some("alice@test.com")
+        );
         assert_eq!(prepared.stats.skipped_invalid_email, 1);
     }
 

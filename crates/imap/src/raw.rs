@@ -517,10 +517,7 @@ fn extract_flags_from_fetch(line: &str) -> Vec<String> {
     let Some(end) = after.find(')') else {
         return Vec::new();
     };
-    after[..end]
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect()
+    after[..end].split_whitespace().map(str::to_owned).collect()
 }
 
 /// Extract INTERNALDATE from FETCH response.

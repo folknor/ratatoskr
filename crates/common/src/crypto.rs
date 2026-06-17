@@ -203,8 +203,8 @@ mod tests {
 
     #[test]
     fn stored_secret_rejects_legacy_plaintext() {
-        let err = StoredSecret::parse("plain-value".to_string())
-            .expect_err("plaintext must not parse");
+        let err =
+            StoredSecret::parse("plain-value".to_string()).expect_err("plaintext must not parse");
 
         assert!(err.contains("malformed stored secret"));
     }

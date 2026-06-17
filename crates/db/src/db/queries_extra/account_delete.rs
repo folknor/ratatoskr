@@ -374,7 +374,8 @@ mod tests {
         let conn = test_db();
         insert_account(&conn, "acct-empty");
 
-        let plan = delete_account_orchestrate_sync(&write(&conn), "acct-empty").expect("orchestrate");
+        let plan =
+            delete_account_orchestrate_sync(&write(&conn), "acct-empty").expect("orchestrate");
 
         assert!(plan.data.message_ids.is_empty());
         assert!(plan.data.cached_hashes.is_empty());

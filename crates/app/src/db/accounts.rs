@@ -7,7 +7,9 @@ impl Db {
         &self,
         account_id: &str,
     ) -> Result<rtsk::db::queries_extra::AccountAuthInfo, String> {
-        self.with_read_sync(|conn| rtsk::db::queries_extra::get_account_auth_info_sync(conn, account_id))
+        self.with_read_sync(|conn| {
+            rtsk::db::queries_extra::get_account_auth_info_sync(conn, account_id)
+        })
     }
 
     pub fn get_shared_mailbox_email(
@@ -21,9 +23,7 @@ impl Db {
     }
 
     pub fn get_send_identity_emails_sync(&self) -> Result<Vec<String>, String> {
-        self.with_read_sync(|conn| {
-            rtsk::send_identity::get_all_send_identity_emails(conn)
-        })
+        self.with_read_sync(|conn| rtsk::send_identity::get_all_send_identity_emails(conn))
     }
 
     pub async fn get_accounts(&self) -> Result<Vec<Account>, String> {
@@ -68,17 +68,19 @@ impl Db {
     /// Load pinned public folders for sidebar display, across all accounts.
     pub async fn get_pinned_public_folders(&self) -> Result<Vec<PinnedPublicFolder>, String> {
         self.with_read(|conn| {
-            Ok(rtsk::db::queries_extra::get_pinned_public_folders_sync(conn)?
-                .into_iter()
-                .map(|row| PinnedPublicFolder {
-                    folder_id: row.folder_id,
-                    display_name: row.display_name,
-                    account_id: row.account_id,
-                    sync_enabled: row.sync_enabled,
-                    position: row.position,
-                    unread_count: row.unread_count,
-                })
-                .collect())
+            Ok(
+                rtsk::db::queries_extra::get_pinned_public_folders_sync(conn)?
+                    .into_iter()
+                    .map(|row| PinnedPublicFolder {
+                        folder_id: row.folder_id,
+                        display_name: row.display_name,
+                        account_id: row.account_id,
+                        sync_enabled: row.sync_enabled,
+                        position: row.position,
+                        unread_count: row.unread_count,
+                    })
+                    .collect(),
+            )
         })
         .await
     }
@@ -89,14 +91,16 @@ impl Db {
         partial: String,
     ) -> Result<Vec<TypeaheadItem>, String> {
         self.with_read(move |conn| {
-            Ok(rtsk::db::queries_extra::search_labels_for_typeahead_sync(conn, &partial)?
-                .into_iter()
-                .map(|row| TypeaheadItem {
-                    label: row.name.clone(),
-                    detail: Some(row.account_email),
-                    insert_value: row.name,
-                })
-                .collect())
+            Ok(
+                rtsk::db::queries_extra::search_labels_for_typeahead_sync(conn, &partial)?
+                    .into_iter()
+                    .map(|row| TypeaheadItem {
+                        label: row.name.clone(),
+                        detail: Some(row.account_email),
+                        insert_value: row.name,
+                    })
+                    .collect(),
+            )
         })
         .await
     }

@@ -383,7 +383,6 @@ impl_from_row!(DbPhishingAllowlistEntry {
     created_at,
 });
 
-
 // ── Signature ───────────────────────────────────────────────
 
 impl_from_row!(DbSignature {

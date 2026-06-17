@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use store::body_store::BodyStoreReadState;
 use db::db::ReadDbState;
 use search::SearchReadState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreReadState;
 
 /// Dependencies needed by the action service.

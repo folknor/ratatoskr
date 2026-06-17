@@ -357,9 +357,7 @@ async fn commit_and_notify(
         {
             Ok(Ok(())) => {}
             Ok(Err(_)) => {
-                log::warn!(
-                    "IndexCommitted send: notification queue closed (UI is probably gone)"
-                );
+                log::warn!("IndexCommitted send: notification queue closed (UI is probably gone)");
             }
             Err(_) => {
                 log::warn!(
@@ -480,9 +478,9 @@ async fn enrich_thin_docs(docs: &mut [search::SearchDocument], db_read: &ReadDbS
         doc.attachments = rows
             .into_iter()
             .map(|r| AttachmentDocFragment {
-                attachment_id:  r.attachment_id,
-                filename:       r.filename,
-                mime:           r.mime_type,
+                attachment_id: r.attachment_id,
+                filename: r.filename,
+                mime: r.mime_type,
                 extracted_text: r.extracted_text,
             })
             .collect();

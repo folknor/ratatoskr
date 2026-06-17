@@ -1,5 +1,5 @@
-use iced::widget::{Space, column, text};
 use iced::Length;
+use iced::widget::{Space, column, text};
 
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;

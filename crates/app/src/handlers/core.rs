@@ -183,10 +183,7 @@ impl ReadyApp {
         Task::batch(tasks)
     }
 
-    pub(crate) fn handle_reading_pane_event(
-        &mut self,
-        event: ReadingPaneEvent,
-    ) -> Task<Message> {
+    pub(crate) fn handle_reading_pane_event(&mut self, event: ReadingPaneEvent) -> Task<Message> {
         match event {
             ReadingPaneEvent::AttachmentCollapseChanged {
                 thread_key,
@@ -205,9 +202,7 @@ impl ReadyApp {
                 // failed collapse-toggle would be more annoying than
                 // helpful, and the next reload will catch up.
                 let Some(client) = self.service_client.as_ref().cloned() else {
-                    log::warn!(
-                        "thread_ui_state.set: no ServiceClient yet; collapse not persisted"
-                    );
+                    log::warn!("thread_ui_state.set: no ServiceClient yet; collapse not persisted");
                     return Task::none();
                 };
                 let account_id = account_id.to_string();
@@ -538,9 +533,7 @@ impl ReadyApp {
                 // shows the old values and the user can re-commit).
                 let prefs = self.settings.committed_preferences.clone();
                 let Some(client) = self.service_client.as_ref().cloned() else {
-                    log::warn!(
-                        "settings.set: no ServiceClient yet; preferences not persisted"
-                    );
+                    log::warn!("settings.set: no ServiceClient yet; preferences not persisted");
                     return Task::none();
                 };
                 let values = vec![
@@ -552,15 +545,12 @@ impl ReadyApp {
                     SettingValue::FontSize(prefs.font_size.clone()),
                     SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
                 ];
-                Task::perform(
-                    async move { client.set_settings(values).await },
-                    |result| {
-                        if let Err(e) = result {
-                            log::warn!("settings.set failed: {e}");
-                        }
-                        Message::Noop
-                    },
-                )
+                Task::perform(async move { client.set_settings(values).await }, |result| {
+                    if let Err(e) = result {
+                        log::warn!("settings.set failed: {e}");
+                    }
+                    Message::Noop
+                })
             }
             SettingsEvent::PreferencesDiscarded => {
                 // Live fields are already restored to committed state by Settings.
@@ -576,18 +566,12 @@ impl ReadyApp {
                 self.handle_save_account_changes(account_id, params)
             }
             SettingsEvent::SaveSignature(req) => {
-                handlers::signatures::handle_save_signature(
-                    self.service_client.clone(),
-                    req,
-                )
-                .map(Message::SignatureOp)
+                handlers::signatures::handle_save_signature(self.service_client.clone(), req)
+                    .map(Message::SignatureOp)
             }
             SettingsEvent::DeleteSignature(id) => {
-                handlers::signatures::handle_delete_signature(
-                    self.service_client.clone(),
-                    id,
-                )
-                .map(Message::SignatureOp)
+                handlers::signatures::handle_delete_signature(self.service_client.clone(), id)
+                    .map(Message::SignatureOp)
             }
             SettingsEvent::ReorderSignatures(ordered_ids) => {
                 handlers::signatures::handle_reorder_signatures(
@@ -685,8 +669,7 @@ impl ReadyApp {
                 // Refresh both the settings list and the sidebar so the
                 // new order shows up everywhere it's rendered.
                 return Task::batch([
-                    handlers::labels::load_label_groups_async(&self.db)
-                        .map(Message::LabelOp),
+                    handlers::labels::load_label_groups_async(&self.db).map(Message::LabelOp),
                     self.load_navigation_and_threads(),
                 ]);
             }
@@ -821,20 +804,12 @@ impl ReadyApp {
             cache_attachments_enabled: params.cache_attachments_enabled,
         };
         Task::perform(
-            async move {
-                client
-                    .update_account(wire)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
+            async move { client.update_account(wire).await.map_err(|e| e.to_string()) },
             Message::AccountUpdated,
         )
     }
 
-    pub(crate) fn handle_reorder_label_groups(
-        &mut self,
-        orders: Vec<(i64, i64)>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_reorder_label_groups(&mut self, orders: Vec<(i64, i64)>) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             log::warn!("label_group.reorder: no ServiceClient yet; ignoring reorder");
             return Task::none();
@@ -850,10 +825,7 @@ impl ReadyApp {
         )
     }
 
-    pub(crate) fn handle_reorder_accounts(
-        &mut self,
-        orders: Vec<(String, i64)>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_reorder_accounts(&mut self, orders: Vec<(String, i64)>) -> Task<Message> {
         // Phase 6a: account.reorder IPC. Same staleness tolerance as
         // signature.reorder - rapid drag-reorder clicks may land out
         // of order; next reload reconciles. Per-entity ordering token
@@ -891,7 +863,12 @@ impl ReadyApp {
             return Task::none();
         };
         Task::perform(
-            async move { client.delete_all_pinned_searches().await.map_err(|e| e.to_string()) },
+            async move {
+                client
+                    .delete_all_pinned_searches()
+                    .await
+                    .map_err(|e| e.to_string())
+            },
             Message::PinnedSearchDeleteAllAck,
         )
     }
@@ -1051,14 +1028,13 @@ impl ReadyApp {
         for warning in &ack.warnings {
             log::warn!("bootstrap snapshot decrypt warning: {warning}");
         }
-        let ui_snap: rtsk::db::queries::UiBootstrapSnapshot =
-            match serde_json::from_value(ack.ui) {
-                Ok(s) => s,
-                Err(e) => {
-                    log::warn!("could not parse ui bootstrap snapshot: {e}");
-                    return;
-                }
-            };
+        let ui_snap: rtsk::db::queries::UiBootstrapSnapshot = match serde_json::from_value(ack.ui) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("could not parse ui bootstrap snapshot: {e}");
+                return;
+            }
+        };
         let settings_snap: rtsk::db::queries::SettingsBootstrapSnapshot =
             match serde_json::from_value(ack.settings) {
                 Ok(s) => s,
@@ -1070,19 +1046,15 @@ impl ReadyApp {
         self.settings.apply_bootstrap(&ui_snap, &settings_snap);
     }
 
-    pub(crate) fn handle_accounts_loaded(
-        &mut self,
-        accounts: Vec<db::Account>,
-    ) -> Task<Message> {
+    pub(crate) fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {
         self.sidebar.accounts = accounts;
         if self.sidebar.accounts.is_empty() {
             self.no_accounts = true;
-            self.add_account_wizard = Some(
-                crate::ui::add_account::AddAccountWizard::new_first_launch(
+            self.add_account_wizard =
+                Some(crate::ui::add_account::AddAccountWizard::new_first_launch(
                     Arc::clone(&self.db),
                     self.service_client.clone(),
-                ),
-            );
+                ));
             self.status = "Welcome".to_string();
             return Task::none();
         }

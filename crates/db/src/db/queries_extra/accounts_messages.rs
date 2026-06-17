@@ -1,5 +1,5 @@
-use super::super::{ReadConn, ReadDbState};
 use super::super::types::DbAccount;
+use super::super::{ReadConn, ReadDbState};
 use rusqlite::{Row, params};
 
 fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
@@ -49,17 +49,11 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
 }
 
 pub async fn db_get_all_accounts(db: &ReadDbState) -> Result<Vec<DbAccount>, String> {
-    db.with_read(move |conn| {
-        get_all_accounts_sync(conn)
-    })
-    .await
+    db.with_read(move |conn| get_all_accounts_sync(conn)).await
 }
 
 pub async fn db_get_account(db: &ReadDbState, id: String) -> Result<Option<DbAccount>, String> {
-    db.with_read(move |conn| {
-        get_account_sync(conn, &id)
-    })
-    .await
+    db.with_read(move |conn| get_account_sync(conn, &id)).await
 }
 
 pub async fn db_get_account_by_email(
@@ -132,9 +126,7 @@ pub fn list_all_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, Str
 /// google_api/gmail_api -> Google calendar, graph -> Microsoft, caldav
 /// (any of `calendar_provider`, `provider == 'caldav'` with a configured
 /// url, or an explicit `calendar_provider = 'caldav'`), jmap -> JMAP.
-pub fn list_calendar_capable_account_ids_sync(
-    conn: &ReadConn<'_>,
-) -> Result<Vec<String>, String> {
+pub fn list_calendar_capable_account_ids_sync(conn: &ReadConn<'_>) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id FROM accounts \

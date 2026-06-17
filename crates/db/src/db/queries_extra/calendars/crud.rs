@@ -1,5 +1,7 @@
-use super::super::super::{ReadConn, WriterPool, WriteConn};
-use super::super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
+use super::super::super::types::{
+    DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder,
+};
+use super::super::super::{ReadConn, WriteConn, WriterPool};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
@@ -630,9 +632,7 @@ pub fn get_event_reminders_sync(
 }
 
 /// Load all calendars for the sidebar list (synchronous).
-pub fn load_calendars_for_sidebar_sync(
-    conn: &ReadConn<'_>,
-) -> Result<Vec<DbCalendar>, String> {
+pub fn load_calendars_for_sidebar_sync(conn: &ReadConn<'_>) -> Result<Vec<DbCalendar>, String> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {CALENDAR_COLS} FROM calendars
@@ -744,10 +744,7 @@ pub fn update_calendar_event_sync(
 }
 
 /// Delete a calendar event by id (synchronous), cascading to attendees and reminders.
-pub fn delete_calendar_event_sync(
-    conn: &WriteConn<'_>,
-    event_id: &str,
-) -> Result<(), String> {
+pub fn delete_calendar_event_sync(conn: &WriteConn<'_>, event_id: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM calendar_attendees WHERE event_id = ?1",
         params![event_id],

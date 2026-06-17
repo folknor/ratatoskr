@@ -94,20 +94,40 @@ pub enum WireMailOperation {
     Archive,
     Trash,
     PermanentDelete,
-    SetSpam { to: bool },
-    SetStarred { to: bool },
-    SetRead { to: bool },
-    SetPinned { to: bool },
-    SetMuted { to: bool },
+    SetSpam {
+        to: bool,
+    },
+    SetStarred {
+        to: bool,
+    },
+    SetRead {
+        to: bool,
+    },
+    SetPinned {
+        to: bool,
+    },
+    SetMuted {
+        to: bool,
+    },
     MoveToFolder {
         dest: WireFolderId,
         source: Option<WireFolderId>,
     },
-    AddLabel { label_id: WireLabelId },
-    RemoveLabel { label_id: WireLabelId },
-    ApplyLabelGroup { group_id: WireLabelGroupId },
-    RemoveLabelGroup { group_id: WireLabelGroupId },
-    Snooze { until: i64 },
+    AddLabel {
+        label_id: WireLabelId,
+    },
+    RemoveLabel {
+        label_id: WireLabelId,
+    },
+    ApplyLabelGroup {
+        group_id: WireLabelGroupId,
+    },
+    RemoveLabelGroup {
+        group_id: WireLabelGroupId,
+    },
+    Snooze {
+        until: i64,
+    },
     Unsnooze,
 }
 
@@ -537,12 +557,13 @@ mod tests {
             WireMailOperation::RemoveLabelGroup {
                 group_id: WireLabelGroupId(7),
             },
-            WireMailOperation::Snooze { until: 1_700_000_000 },
+            WireMailOperation::Snooze {
+                until: 1_700_000_000,
+            },
         ];
         for op in cases {
             let json = serde_json::to_value(&op).expect("serialize");
-            let recovered: WireMailOperation =
-                serde_json::from_value(json).expect("deserialize");
+            let recovered: WireMailOperation = serde_json::from_value(json).expect("deserialize");
             assert_eq!(op, recovered);
         }
     }
@@ -620,8 +641,7 @@ mod tests {
         ];
         for outcome in cases {
             let json = serde_json::to_value(&outcome).expect("serialize");
-            let recovered: OperationOutcome =
-                serde_json::from_value(json).expect("deserialize");
+            let recovered: OperationOutcome = serde_json::from_value(json).expect("deserialize");
             assert_eq!(outcome, recovered);
         }
     }

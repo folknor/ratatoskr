@@ -1,9 +1,9 @@
 //! Orphan impl of `ProviderSyncOps` for `jmap::ops::JmapOps`.
 
+use ::jmap::ops::JmapOps;
 use async_trait::async_trait;
 use common::error::ProviderError;
 use common::types::SyncResult;
-use ::jmap::ops::JmapOps;
 
 use crate::{ProviderSyncOps, SyncProviderCtx};
 

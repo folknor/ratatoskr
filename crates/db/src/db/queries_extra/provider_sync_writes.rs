@@ -60,11 +60,9 @@ pub fn get_thread_id_for_imap_uid(
         |row| row.get::<_, String>("thread_id"),
     )
     .map(Some)
-    .or_else(|e| {
-        match e {
-            ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            other => Err(format!("get_thread_id_for_imap_uid: {other}")),
-        }
+    .or_else(|e| match e {
+        ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        other => Err(format!("get_thread_id_for_imap_uid: {other}")),
     })
 }
 
@@ -526,10 +524,7 @@ pub fn get_public_folder_sync_depth(
 
 /// Return the IDs of all public folders that have `sync_enabled = 1` for an
 /// account.
-pub fn get_pinned_folder_ids(
-    conn: &ReadConn<'_>,
-    account_id: &str,
-) -> Result<Vec<String>, String> {
+pub fn get_pinned_folder_ids(conn: &ReadConn<'_>, account_id: &str) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT folder_id FROM public_folder_pins \

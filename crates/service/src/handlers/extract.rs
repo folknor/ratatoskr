@@ -25,7 +25,12 @@ pub(crate) async fn handle_status(
 ) -> Result<Value, ServiceError> {
     let ack = if let Some(runtime) = boot_state.extract_runtime() {
         let (queue_depth, indexed_total, skipped_total, failed_total) = runtime.status_snapshot();
-        ExtractStatusAck { queue_depth, indexed_total, skipped_total, failed_total }
+        ExtractStatusAck {
+            queue_depth,
+            indexed_total,
+            skipped_total,
+            failed_total,
+        }
     } else {
         // Pre-7-4d (no runtime installed) or post-shutdown.
         ExtractStatusAck {
@@ -45,7 +50,11 @@ pub(crate) async fn handle_rebuild(
 ) -> Result<Value, ServiceError> {
     let search_write = boot_state
         .search_write()
-        .or_else(|| boot_state.sync_runtime().map(|runtime| runtime.search_write()))
+        .or_else(|| {
+            boot_state
+                .sync_runtime()
+                .map(|runtime| runtime.search_write())
+        })
         .ok_or_else(|| {
             ServiceError::Internal("index.rebuild: search_write missing post-boot.ready".into())
         })?;
@@ -61,7 +70,10 @@ pub(crate) async fn handle_rebuild(
         // installing the new one. The rebuild task respects
         // CancellationToken between chunks.
         if let Some(prev) = boot_state.take_rebuild_task() {
-            log::info!("index.rebuild: pre-empting previous rebuild {}", prev.rebuild_id);
+            log::info!(
+                "index.rebuild: pre-empting previous rebuild {}",
+                prev.rebuild_id
+            );
             prev.cancel.cancel();
             // Don't .await on prev.handle here - the handler is
             // user-facing and shouldn't block on the previous
@@ -75,10 +87,12 @@ pub(crate) async fn handle_rebuild(
     // Resolve the runtime dependencies. Errors here are programming
     // bugs (boot completes before any handler is dispatched).
     let db_state = boot_state.write_db_state().map_err(|e| {
-        ServiceError::Internal(format!("index.rebuild: db_conn missing post-boot.ready: {e}"))
+        ServiceError::Internal(format!(
+            "index.rebuild: db_conn missing post-boot.ready: {e}"
+        ))
     })?;
-    let body_read =
-        store::body_store::BodyStoreReadState::init(boot_state.app_data_dir()).map_err(|e| {
+    let body_read = store::body_store::BodyStoreReadState::init(boot_state.app_data_dir())
+        .map_err(|e| {
             ServiceError::Internal(format!("index.rebuild: body_store init failed: {e}"))
         })?;
     let notification_tx = boot_state.notification_sender().ok_or_else(|| {
@@ -149,7 +163,6 @@ pub(crate) async fn handle_rebuild(
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
-
 /// Phase 7-6: post-boot backfill. Selects up to
 /// `BACKFILL_KICK_LIMIT` attachment rows that are cached but
 /// unindexed, and enqueues each into the installed `ExtractRuntime`.
@@ -167,9 +180,7 @@ pub(crate) async fn handle_rebuild(
 /// - the call entirely if no `ExtractRuntime` is installed - this is
 ///   the case during shutdown and during the brief window before the
 ///   post-ready spawn finishes installing the runtime.
-pub(crate) async fn handle_backfill_kick(
-    boot_state: &Arc<BootSharedState>,
-) -> Result<(), String> {
+pub(crate) async fn handle_backfill_kick(boot_state: &Arc<BootSharedState>) -> Result<(), String> {
     let Some(runtime) = boot_state.extract_runtime() else {
         log::debug!("extract.backfill_kick: ExtractRuntime not installed, skipping");
         return Ok(());
@@ -188,7 +199,10 @@ pub(crate) async fn handle_backfill_kick(
         log::debug!("extract.backfill_kick: no unindexed cached attachments");
         return Ok(());
     }
-    log::info!("extract.backfill_kick: enqueuing {} attachments", rows.len());
+    log::info!(
+        "extract.backfill_kick: enqueuing {} attachments",
+        rows.len()
+    );
     for row in rows {
         let Some(content_hash) = row.content_hash else {
             log::debug!(

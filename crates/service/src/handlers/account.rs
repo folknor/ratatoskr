@@ -46,7 +46,8 @@ pub(crate) async fn encrypt_optional_credentials(
 > {
     tokio::task::spawn_blocking(move || {
         let enc = |v: Option<String>| -> Result<Option<String>, String> {
-            v.map(|s| common::crypto::encrypt_value(&key, &s)).transpose()
+            v.map(|s| common::crypto::encrypt_value(&key, &s))
+                .transpose()
         };
         Ok::<_, String>((
             enc(access_token)?,
@@ -117,8 +118,7 @@ pub(crate) async fn handle_update(
         });
     }
 
-    serde_json::to_value(AccountUpdateAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(AccountUpdateAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 /// Post-commit kick fired when `cache_attachments_enabled` flips
@@ -132,7 +132,9 @@ async fn kick_cache_reenable(boot_state: Arc<BootSharedState>, account_id: Strin
         );
         return;
     };
-    let Ok(write_db) = boot_state.write_db_state() else { return };
+    let Ok(write_db) = boot_state.write_db_state() else {
+        return;
+    };
     let aid = account_id.clone();
     let provider: String = write_db
         .with_write(move |conn| {
@@ -183,8 +185,7 @@ pub(crate) async fn handle_reorder(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    serde_json::to_value(AccountReorderAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(AccountReorderAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_update_tokens(
@@ -202,15 +203,22 @@ pub(crate) async fn handle_update_tokens(
     let params = *params;
     let id = params.account_id.clone();
     let id_for_push = id.clone();
-    let (access_token, refresh_token, imap_password, smtp_password) =
-        encrypt_optional_credentials(
-            key,
-            params.access_token.map(service_api::RedactedString::into_inner),
-            params.refresh_token.map(service_api::RedactedString::into_inner),
-            params.imap_password.map(service_api::RedactedString::into_inner),
-            params.smtp_password.map(service_api::RedactedString::into_inner),
-        )
-        .await?;
+    let (access_token, refresh_token, imap_password, smtp_password) = encrypt_optional_credentials(
+        key,
+        params
+            .access_token
+            .map(service_api::RedactedString::into_inner),
+        params
+            .refresh_token
+            .map(service_api::RedactedString::into_inner),
+        params
+            .imap_password
+            .map(service_api::RedactedString::into_inner),
+        params
+            .smtp_password
+            .map(service_api::RedactedString::into_inner),
+    )
+    .await?;
     let reauth = db::db::queries_extra::ReauthAccountParams {
         access_token,
         refresh_token,
@@ -219,7 +227,9 @@ pub(crate) async fn handle_update_tokens(
         smtp_password,
     };
     write_db
-        .with_write(move |conn| db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth))
+        .with_write(move |conn| {
+            db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth)
+        })
         .await
         .map_err(ServiceError::Internal)?;
 
@@ -231,17 +241,13 @@ pub(crate) async fn handle_update_tokens(
     // may not honour the old session's cursor.
     if let Some(push_runtime) = boot_state.push_runtime() {
         tokio::spawn(async move {
-            if let Err(e) = push_runtime
-                .start_account(id_for_push.clone(), true)
-                .await
-            {
+            if let Err(e) = push_runtime.start_account(id_for_push.clone(), true).await {
                 log::warn!("[push] re-auth start_account({id_for_push}) failed: {e}");
             }
         });
     }
 
-    serde_json::to_value(AccountUpdateTokensAck)
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(AccountUpdateTokensAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_create(
@@ -316,8 +322,7 @@ pub(crate) async fn handle_create(
         accept_invalid_certs: p.accept_invalid_certs,
     };
     let id = crate::accounts::create_account_inner(&write_db, create).await?;
-    serde_json::to_value(AccountCreateAck { id })
-        .map_err(|e| ServiceError::Internal(e.to_string()))
+    serde_json::to_value(AccountCreateAck { id }).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 /// Phase 6a-part-2: orchestrated account deletion.
@@ -362,9 +367,7 @@ pub(crate) async fn handle_delete(
             })
             .await
     {
-        log::warn!(
-            "account.delete: failed to set is_deleting for {account_id}: {e}; proceeding"
-        );
+        log::warn!("account.delete: failed to set is_deleting for {account_id}: {e}; proceeding");
     }
 
     if let Some(sync) = boot_state.sync_runtime()
@@ -406,8 +409,7 @@ pub(crate) async fn handle_delete(
     let app_data = boot_state.app_data_dir().to_path_buf();
     let Some(sync) = boot_state.sync_runtime() else {
         return Err(ServiceError::Internal(
-            "account.delete: sync runtime not installed; cannot run external-store cleanup"
-                .into(),
+            "account.delete: sync runtime not installed; cannot run external-store cleanup".into(),
         ));
     };
     let body_write = sync.body_write();

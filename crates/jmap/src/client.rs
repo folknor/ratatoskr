@@ -187,9 +187,7 @@ async fn refresh_token_in_db_if_expired(
         // Another task refreshed - return the fresh access token.
         let access_token = StoredSecret::decrypt_optional(fresh_access, key)?
             .filter(|v| !v.is_empty())
-            .ok_or_else(|| {
-                format!("JMAP token re-check: missing access token for {account_id}")
-            })?;
+            .ok_or_else(|| format!("JMAP token re-check: missing access token for {account_id}"))?;
         return Ok(Some(access_token));
     }
 
@@ -477,8 +475,7 @@ mod tests {
 
     #[test]
     fn test_jmap_endpoint_origin_maps_to_base_url() {
-        let url = jmap_base_url_from_test_endpoint("http://127.0.0.1:8080")
-            .expect("endpoint maps");
+        let url = jmap_base_url_from_test_endpoint("http://127.0.0.1:8080").expect("endpoint maps");
         assert_eq!(url, "http://127.0.0.1:8080");
     }
 

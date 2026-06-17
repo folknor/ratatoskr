@@ -33,9 +33,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use service_api::{
-    OauthExchangeCodeAck, OauthExchangeCodeParams, RedactedString, ServiceError,
-};
+use service_api::{OauthExchangeCodeAck, OauthExchangeCodeParams, RedactedString, ServiceError};
 
 use crate::boot::BootSharedState;
 
@@ -163,4 +161,3 @@ pub(crate) async fn handle_exchange_code(
     })
     .map_err(|e| ServiceError::Internal(e.to_string()))
 }
-

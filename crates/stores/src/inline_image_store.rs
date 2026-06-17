@@ -18,8 +18,7 @@ pub fn open_inline_image_store_connection(app_data_dir: &Path) -> Result<Connect
 
     let db_path = app_data_dir.join("inline_images.db");
     log::info!("Initializing inline image store at {}", db_path.display());
-    let conn =
-        Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
+    let conn = Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;

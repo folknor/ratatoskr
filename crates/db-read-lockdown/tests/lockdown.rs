@@ -118,8 +118,8 @@ fn link_cargo_home_child(original: &std::path::Path, isolated: &std::path::Path,
 #[test]
 fn db_read_public_surface_does_not_reexport_rusqlite() {
     let root = workspace_root();
-    let lib = std::fs::read_to_string(root.join("crates/db-read/src/lib.rs"))
-        .expect("read db-read lib");
+    let lib =
+        std::fs::read_to_string(root.join("crates/db-read/src/lib.rs")).expect("read db-read lib");
     for banned in [
         "pub use rusqlite::Connection",
         "pub use rusqlite::Statement",

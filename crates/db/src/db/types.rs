@@ -725,9 +725,7 @@ impl UniversalUnreadCount {
 }
 
 impl rusqlite::types::FromSql for UniversalUnreadCount {
-    fn column_result(
-        value: rusqlite::types::ValueRef<'_>,
-    ) -> rusqlite::types::FromSqlResult<Self> {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         <i64 as rusqlite::types::FromSql>::column_result(value).map(Self)
     }
 }

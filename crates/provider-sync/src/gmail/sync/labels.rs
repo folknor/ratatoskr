@@ -3,8 +3,8 @@ use sha2::{Digest, Sha256};
 use super::super::client::GmailClient;
 use super::super::types::{GmailLabel, GmailSendAs};
 use super::SyncCtx;
-use db::db::{ReadConn, ReadDbState, WriteConn, WriteTarget};
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
+use db::db::{ReadConn, ReadDbState, WriteConn, WriteTarget};
 
 // ---------------------------------------------------------------------------
 // Folder + label sync
@@ -83,7 +83,8 @@ fn persist_folders_and_labels(
 
     insert_folders_batch(&tx, &folder_rows)?;
     upsert_labels(&tx, &label_rows)?;
-    tx.commit().map_err(|e| format!("commit folders + labels: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("commit folders + labels: {e}"))?;
     Ok(())
 }
 

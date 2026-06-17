@@ -12,10 +12,10 @@ UI-only spec for the initial crates/app main layout work defined by `docs/main-l
 
 | Phase | Status | Commits |
 |-------|--------|---------|
-| Phase 1: Thread List Polish + Layout | ✅ Complete | `286bc92` |
-| Phase 2: Conversation View (snippet-only) | ✅ Complete | `d1b70d0` |
+| Phase 1: Thread List Polish + Layout | [x] Complete | `286bc92` |
+| Phase 2: Conversation View (snippet-only) | [x] Complete | `d1b70d0` |
 | Phase 3: Interaction Flow | ⏳ Deferred | Blocked on command palette iced integration |
-| Phase 4: Polish | ✅ Complete | `75c0dd4`, `2c81b1a` |
+| Phase 4: Polish | [x] Complete | `75c0dd4`, `2c81b1a` |
 
 ### Deviations from spec
 

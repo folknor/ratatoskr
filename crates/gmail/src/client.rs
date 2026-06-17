@@ -112,7 +112,11 @@ impl GmailClient {
     }
 
     /// Make an authenticated GET request to the Gmail API.
-    pub async fn get<T: DeserializeOwned>(&self, path: &str, db: &ReadDbState) -> Result<T, String> {
+    pub async fn get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        db: &ReadDbState,
+    ) -> Result<T, String> {
         let url = self.api_url(path);
         self.request::<T, ()>(&url, "GET", None, db).await
     }
@@ -444,7 +448,8 @@ fn read_account_tokens(
         .ok_or_else(|| "Account missing OAuth credentials - reauthorize to fix".to_string())?;
     let client_id = crypto::StoredSecret::parse(enc_client_id)?.decrypt(key)?;
 
-    let client_secret = crypto::StoredSecret::decrypt_optional(row.4.filter(|s| !s.is_empty()), key)?;
+    let client_secret =
+        crypto::StoredSecret::decrypt_optional(row.4.filter(|s| !s.is_empty()), key)?;
 
     Ok((
         access_token,
@@ -479,16 +484,15 @@ mod tests {
 
     #[test]
     fn test_gmail_endpoint_origin_maps_to_api_base() {
-        let base = gmail_api_base_from_test_endpoint("http://127.0.0.1:8080")
-            .expect("endpoint maps");
+        let base =
+            gmail_api_base_from_test_endpoint("http://127.0.0.1:8080").expect("endpoint maps");
         assert_eq!(base, "http://127.0.0.1:8080/gmail/v1/users/me");
     }
 
     #[test]
     fn test_gmail_endpoint_keeps_explicit_path() {
-        let base =
-            gmail_api_base_from_test_endpoint("http://127.0.0.1:8080/custom")
-                .expect("endpoint maps");
+        let base = gmail_api_base_from_test_endpoint("http://127.0.0.1:8080/custom")
+            .expect("endpoint maps");
         assert_eq!(base, "http://127.0.0.1:8080/custom");
     }
 }

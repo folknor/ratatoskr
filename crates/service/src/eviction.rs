@@ -56,8 +56,8 @@ impl EvictionTrigger {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EvictionStats {
     pub blobs_tombstoned: u64,
-    pub pages_walked:     u64,
-    pub superseded:       bool,
+    pub pages_walked: u64,
+    pub superseded: bool,
 }
 
 /// Walk `attachment_blobs` in `content_hash` order, tombstoning any
@@ -175,7 +175,10 @@ pub async fn run_eviction_sweep(
         .send(Notification::EvictionCompleted(payload))
         .await
     {
-        log::warn!("eviction sweep ({}): notification send failed: {e}", trigger.as_str());
+        log::warn!(
+            "eviction sweep ({}): notification send failed: {e}",
+            trigger.as_str()
+        );
     }
 
     log::debug!(

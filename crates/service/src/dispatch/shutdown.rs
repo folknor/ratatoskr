@@ -227,7 +227,10 @@ async fn drain_notifications_bounded(handlers: &mut JoinSet<()>, bound: std::tim
 }
 
 async fn panic_safe_drain(lifecycle: &ServiceLifecycle, cause: ShutdownCause) -> bool {
-    match AssertUnwindSafe(lifecycle.drain(cause)).catch_unwind().await {
+    match AssertUnwindSafe(lifecycle.drain(cause))
+        .catch_unwind()
+        .await
+    {
         Ok(value) => value,
         Err(panic) => {
             log::error!("shutdown drain panicked: {}", panic_message(panic.as_ref()));

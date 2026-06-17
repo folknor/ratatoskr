@@ -126,11 +126,7 @@ where
     }
 
     /// Read one marker by key. Returns `Ok(None)` if no file exists.
-    pub(crate) async fn read(
-        &self,
-        app_data_dir: &Path,
-        key: &str,
-    ) -> Result<Option<T>, String> {
+    pub(crate) async fn read(&self, app_data_dir: &Path, key: &str) -> Result<Option<T>, String> {
         let path = self.path(app_data_dir, key);
         match fs::read(&path).await {
             Ok(bytes) => {
@@ -145,11 +141,7 @@ where
 
     /// Idempotent unlink. `NotFound` is treated as success because
     /// drain code paths re-run on boot and may double-unlink.
-    pub(crate) async fn unlink(
-        &self,
-        app_data_dir: &Path,
-        key: &str,
-    ) -> Result<(), String> {
+    pub(crate) async fn unlink(&self, app_data_dir: &Path, key: &str) -> Result<(), String> {
         let path = self.path(app_data_dir, key);
         match fs::remove_file(&path).await {
             Ok(()) => Ok(()),
@@ -174,10 +166,7 @@ where
     /// that path needs to surface `Unparseable` markers as a
     /// distinct dirty status.
     #[allow(dead_code)]
-    pub(crate) async fn list(
-        &self,
-        app_data_dir: &Path,
-    ) -> Result<Vec<(String, T)>, String> {
+    pub(crate) async fn list(&self, app_data_dir: &Path) -> Result<Vec<(String, T)>, String> {
         let dir = self.dir(app_data_dir);
         let mut entries = match fs::read_dir(&dir).await {
             Ok(e) => e,
@@ -205,20 +194,14 @@ where
             let bytes = match fs::read(&path).await {
                 Ok(b) => b,
                 Err(e) => {
-                    log::warn!(
-                        "{}: skip marker {stem}, read failed: {e}",
-                        self.dir_name
-                    );
+                    log::warn!("{}: skip marker {stem}, read failed: {e}", self.dir_name);
                     continue;
                 }
             };
             let payload: T = match serde_json::from_slice(&bytes) {
                 Ok(p) => p,
                 Err(e) => {
-                    log::warn!(
-                        "{}: skip marker {stem}, parse failed: {e}",
-                        self.dir_name
-                    );
+                    log::warn!("{}: skip marker {stem}, parse failed: {e}", self.dir_name);
                     continue;
                 }
             };
@@ -249,7 +232,9 @@ mod tests {
         let payload = StepList {
             completed: vec!["body".into(), "inline".into()],
         };
-        m.write(dir.path(), "acct-1", &payload).await.expect("write");
+        m.write(dir.path(), "acct-1", &payload)
+            .await
+            .expect("write");
         let recovered = m.read(dir.path(), "acct-1").await.expect("read");
         assert_eq!(recovered.as_ref(), Some(&payload));
     }

@@ -53,9 +53,7 @@ pub fn upsert_pending_thread_label_intents<'a>(
             params![account_id, thread_id],
             |row| row.get(0),
         )
-        .map_err(|e| {
-            format!("read thread generation for {account_id}/{thread_id}: {e}")
-        })?;
+        .map_err(|e| format!("read thread generation for {account_id}/{thread_id}: {e}"))?;
 
     let now = now_epoch()?;
     for intent in intents {
@@ -358,11 +356,8 @@ pub fn user_visible_label_group_rendered_fragment(
     thread_column: &str,
     group_predicate: &str,
 ) -> String {
-    let visible_member = user_visible_label_exists_fragment(
-        account_column,
-        thread_column,
-        "lgm.label_id",
-    );
+    let visible_member =
+        user_visible_label_exists_fragment(account_column, thread_column, "lgm.label_id");
     format!(
         "EXISTS (SELECT 1 FROM label_group_members lgm \
            JOIN label_groups lg ON lg.id = lgm.group_id \
@@ -439,8 +434,11 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute("INSERT INTO labels (account_id, id) VALUES ('acc', 'lab')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO labels (account_id, id) VALUES ('acc', 'lab')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO messages (account_id, id, thread_id) VALUES ('acc', 'm1', 'thr')",
             [],
@@ -484,9 +482,11 @@ mod tests {
         tx.commit().unwrap();
 
         let pending: i64 = conn
-            .query_row("SELECT COUNT(*) FROM pending_thread_label_intents", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM pending_thread_label_intents",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         let generation: i64 = conn
             .query_row(
@@ -589,7 +589,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(per_message, 2, "every current message should carry the label");
+        assert_eq!(
+            per_message, 2,
+            "every current message should carry the label"
+        );
     }
 
     #[test]
@@ -676,18 +679,19 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute(
-            "UPDATE pending_thread_label_intents SET updated_at = 0",
-            [],
-        )
-        .unwrap();
+        conn.execute("UPDATE pending_thread_label_intents SET updated_at = 0", [])
+            .unwrap();
 
-        let deleted = delete_stale_pending_thread_label_intents(&crate::db::WriteConn::from_raw(&conn), 1).unwrap();
+        let deleted =
+            delete_stale_pending_thread_label_intents(&crate::db::WriteConn::from_raw(&conn), 1)
+                .unwrap();
         assert_eq!(deleted, 0);
 
         conn.execute("DELETE FROM pending_operations WHERE id = 'live'", [])
             .unwrap();
-        let deleted = delete_stale_pending_thread_label_intents(&crate::db::WriteConn::from_raw(&conn), 1).unwrap();
+        let deleted =
+            delete_stale_pending_thread_label_intents(&crate::db::WriteConn::from_raw(&conn), 1)
+                .unwrap();
         assert_eq!(deleted, 1);
     }
 }

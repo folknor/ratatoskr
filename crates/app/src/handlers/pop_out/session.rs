@@ -191,10 +191,8 @@ impl ReadyApp {
             }
         };
 
-        let mut state = crate::pop_out::compose::ComposeState::from_local_draft(
-            &self.sidebar.accounts,
-            &draft,
-        );
+        let mut state =
+            crate::pop_out::compose::ComposeState::from_local_draft(&self.sidebar.accounts, &draft);
         state.width = width;
         state.height = height;
         state.x = x;

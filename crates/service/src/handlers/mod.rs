@@ -1,27 +1,27 @@
+mod account;
 mod action;
 mod action_mark_chat_read;
 mod action_send;
 mod action_status;
+mod attachment;
 mod boot;
 mod cal_action;
 mod calendar;
-mod gal;
-mod health;
-mod pending_ops_kick;
-mod account;
-mod attachment;
 mod contacts;
 pub(crate) mod extract;
+mod gal;
+mod health;
 mod internal;
 mod label;
 mod oauth;
+mod pending_ops_kick;
 mod pinned_search;
 mod settings;
 mod signature;
 mod smart_folder;
 mod sync;
-mod thread_ui_state;
 mod test_helpers;
+mod thread_ui_state;
 
 pub(crate) use action_mark_chat_read::JournaledChatRead;
 pub(crate) use action_send::JournaledSend;
@@ -49,9 +49,7 @@ pub(crate) async fn dispatch(
         )),
         RequestParams::BootReady => boot::handle(&boot_state).await,
         RequestParams::ActionExecutePlan { plan } => action::handle(&boot_state, plan).await,
-        RequestParams::CalActionExecutePlan { plan } => {
-            cal_action::handle(&boot_state, plan).await
-        }
+        RequestParams::CalActionExecutePlan { plan } => cal_action::handle(&boot_state, plan).await,
         RequestParams::ActionJobStatus { plan_id } => {
             action_status::handle(&boot_state, plan_id).await
         }
@@ -77,9 +75,7 @@ pub(crate) async fn dispatch(
         RequestParams::ThreadUiStateSet { params } => {
             thread_ui_state::handle_set(&boot_state, params).await
         }
-        RequestParams::SettingsSet { params } => {
-            settings::handle_set(&boot_state, params).await
-        }
+        RequestParams::SettingsSet { params } => settings::handle_set(&boot_state, params).await,
         RequestParams::SignatureCreate { params } => {
             signature::handle_create(&boot_state, params).await
         }
@@ -253,8 +249,6 @@ pub(crate) async fn dispatch_notification(
         ClientNotification::AttachmentTmpCleanupKick => {
             attachment::handle_tmp_cleanup_kick(&boot_state).await
         }
-        ClientNotification::ExtractBackfillKick => {
-            extract::handle_backfill_kick(&boot_state).await
-        }
+        ClientNotification::ExtractBackfillKick => extract::handle_backfill_kick(&boot_state).await,
     }
 }

@@ -69,34 +69,37 @@ async fn apply_label_group_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_write_mapped(move |conn| {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM label_groups WHERE id = ?1",
-                rusqlite::params![group_id.as_i64()],
-                |row| row.get(0),
-            )
-            .map_err(|e| ActionError::db(format!("label group lookup: {e}")))?;
-        if exists == 0 {
-            return Err(ActionError::not_found("label group not found"));
-        }
-
-        if kind == DispatchKind::Retry {
-            // User reversed intent: queued `applyLabelGroup` is no longer
-            // current. Skip member dispatch and resolve as success.
-            if !thread_renders_group_for_user(conn, &aid, &tid, group_id)? {
-                return Ok(LocalStep::Skip);
+    db.with_write_mapped(
+        move |conn| {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM label_groups WHERE id = ?1",
+                    rusqlite::params![group_id.as_i64()],
+                    |row| row.get(0),
+                )
+                .map_err(|e| ActionError::db(format!("label group lookup: {e}")))?;
+            if exists == 0 {
+                return Err(ActionError::not_found("label group not found"));
             }
-        }
 
-        let labels = read_group_member_labels(conn, &aid, group_id)?;
-        let generation_seen =
-            upsert_group_intents(conn, &aid, &tid, &labels, PendingLabelIntentOp::Add)?;
-        Ok(LocalStep::Proceed {
-            labels,
-            generation_seen,
-        })
-    }, ActionError::db)
+            if kind == DispatchKind::Retry {
+                // User reversed intent: queued `applyLabelGroup` is no longer
+                // current. Skip member dispatch and resolve as success.
+                if !thread_renders_group_for_user(conn, &aid, &tid, group_id)? {
+                    return Ok(LocalStep::Skip);
+                }
+            }
+
+            let labels = read_group_member_labels(conn, &aid, group_id)?;
+            let generation_seen =
+                upsert_group_intents(conn, &aid, &tid, &labels, PendingLabelIntentOp::Add)?;
+            Ok(LocalStep::Proceed {
+                labels,
+                generation_seen,
+            })
+        },
+        ActionError::db,
+    )
     .await
 }
 
@@ -110,23 +113,26 @@ async fn remove_label_group_local(
     let db = ctx.write_db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    db.with_write_mapped(move |conn| {
-        if kind == DispatchKind::Retry {
-            // User re-applied the group after the queued `removeLabelGroup`.
-            // Skip member RemoveLabel dispatches.
-            if thread_renders_group_for_user(conn, &aid, &tid, group_id)? {
-                return Ok(LocalStep::Skip);
+    db.with_write_mapped(
+        move |conn| {
+            if kind == DispatchKind::Retry {
+                // User re-applied the group after the queued `removeLabelGroup`.
+                // Skip member RemoveLabel dispatches.
+                if thread_renders_group_for_user(conn, &aid, &tid, group_id)? {
+                    return Ok(LocalStep::Skip);
+                }
             }
-        }
 
-        let labels = read_applied_group_member_labels(conn, &aid, &tid, group_id)?;
-        let generation_seen =
-            upsert_group_intents(conn, &aid, &tid, &labels, PendingLabelIntentOp::Remove)?;
-        Ok(LocalStep::Proceed {
-            labels,
-            generation_seen,
-        })
-    }, ActionError::db)
+            let labels = read_applied_group_member_labels(conn, &aid, &tid, group_id)?;
+            let generation_seen =
+                upsert_group_intents(conn, &aid, &tid, &labels, PendingLabelIntentOp::Remove)?;
+            Ok(LocalStep::Proceed {
+                labels,
+                generation_seen,
+            })
+        },
+        ActionError::db,
+    )
     .await
 }
 
@@ -295,53 +301,46 @@ async fn apply_label_group_with_kind(
     match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             let outcome = apply_label_group_with_provider_kind(
-                ctx,
-                &*provider,
-                account_id,
-                thread_id,
-                group_id,
-                kind,
+                ctx, &*provider, account_id, thread_id, group_id, kind,
             )
             .await;
             mlog.emit(&outcome);
             outcome
         }
-        Err(e) => {
-            match apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-                Ok(LocalStep::Skip) => {
-                    let outcome = ActionOutcome::Success;
-                    mlog.emit(&outcome);
-                    outcome
-                }
-                Ok(LocalStep::Proceed {
-                    labels,
-                    generation_seen,
-                }) => {
-                    let outcome = ActionOutcome::LocalOnly {
-                        reason: ActionError::remote(e.clone()),
-                        retryable: composite_retryability(&e),
-                    };
-                    finalize_composite_outcome(
-                        ctx,
-                        &outcome,
-                        account_id,
-                        thread_id,
-                        group_id,
-                        true,
-                        &labels,
-                        generation_seen,
-                    )
-                    .await;
-                    mlog.emit(&outcome);
-                    outcome
-                }
-                Err(le) => {
-                    let outcome = ActionOutcome::Failed { error: le };
-                    mlog.emit(&outcome);
-                    outcome
-                }
+        Err(e) => match apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
+            Ok(LocalStep::Skip) => {
+                let outcome = ActionOutcome::Success;
+                mlog.emit(&outcome);
+                outcome
             }
-        }
+            Ok(LocalStep::Proceed {
+                labels,
+                generation_seen,
+            }) => {
+                let outcome = ActionOutcome::LocalOnly {
+                    reason: ActionError::remote(e.clone()),
+                    retryable: composite_retryability(&e),
+                };
+                finalize_composite_outcome(
+                    ctx,
+                    &outcome,
+                    account_id,
+                    thread_id,
+                    group_id,
+                    true,
+                    &labels,
+                    generation_seen,
+                )
+                .await;
+                mlog.emit(&outcome);
+                outcome
+            }
+            Err(le) => {
+                let outcome = ActionOutcome::Failed { error: le };
+                mlog.emit(&outcome);
+                outcome
+            }
+        },
     }
 }
 
@@ -462,12 +461,7 @@ async fn remove_label_group_with_kind(
     match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
             let outcome = remove_label_group_with_provider_kind(
-                ctx,
-                &*provider,
-                account_id,
-                thread_id,
-                group_id,
-                kind,
+                ctx, &*provider, account_id, thread_id, group_id, kind,
             )
             .await;
             mlog.emit(&outcome);
@@ -513,10 +507,7 @@ async fn remove_label_group_with_kind(
 }
 
 fn composite_retryability(error: &str) -> bool {
-    !matches!(
-        classify_provider_error(error),
-        RemoteFailureKind::Permanent,
-    )
+    !matches!(classify_provider_error(error), RemoteFailureKind::Permanent,)
 }
 
 /// Per-member provider dispatch. Runs each member write through an explicit
@@ -566,8 +557,13 @@ async fn dispatch_member_ops(
         };
         match outcome {
             ActionOutcome::Success | ActionOutcome::NoOp => {}
-            ActionOutcome::LocalOnly { retryable: true, .. } => saw_local_only = true,
-            ActionOutcome::LocalOnly { retryable: false, reason } => {
+            ActionOutcome::LocalOnly {
+                retryable: true, ..
+            } => saw_local_only = true,
+            ActionOutcome::LocalOnly {
+                retryable: false,
+                reason,
+            } => {
                 // Member dispatcher already cleared its own intent for the
                 // permanent failure; the composite surfaces it as Failed.
                 last_failed = Some(reason);
@@ -599,8 +595,14 @@ async fn finalize_composite_outcome(
     generation_seen: i64,
 ) {
     match outcome {
-        ActionOutcome::LocalOnly { retryable: true, .. } => {
-            let op_name = if apply { "applyLabelGroup" } else { "removeLabelGroup" };
+        ActionOutcome::LocalOnly {
+            retryable: true, ..
+        } => {
+            let op_name = if apply {
+                "applyLabelGroup"
+            } else {
+                "removeLabelGroup"
+            };
             let intent_op = if apply {
                 PendingLabelIntentOp::Add
             } else {
@@ -621,13 +623,22 @@ async fn finalize_composite_outcome(
                 .await;
             }
         }
-        ActionOutcome::LocalOnly { retryable: false, .. } => {
+        ActionOutcome::LocalOnly {
+            retryable: false, ..
+        } => {
             // Composite-level permanent failure (e.g. permanent
             // create_provider error): tear down every member intent
             // the local step wrote rather than waiting for the stale
             // sweep.
-            clear_group_intents_immediate(ctx, account_id, thread_id, labels, generation_seen, apply)
-                .await;
+            clear_group_intents_immediate(
+                ctx,
+                account_id,
+                thread_id,
+                labels,
+                generation_seen,
+                apply,
+            )
+            .await;
         }
         ActionOutcome::Success | ActionOutcome::NoOp | ActionOutcome::Failed { .. } => {}
     }
@@ -653,19 +664,19 @@ async fn clear_group_intents_immediate(
     } else {
         PendingLabelIntentOp::Remove
     };
-    if let Err(e) = db.with_write(move |conn| {
-        db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
-            conn,
-            &aid,
-            &tid,
-            label_ids.iter().map(|label_id| PendingLabelIntent {
-                label_id,
-                op,
-            }),
-            generation_seen,
-        )
-    })
-    .await
+    if let Err(e) = db
+        .with_write(move |conn| {
+            db::db::queries_extra::delete_pending_thread_label_intents_for_labels(
+                conn,
+                &aid,
+                &tid,
+                label_ids
+                    .iter()
+                    .map(|label_id| PendingLabelIntent { label_id, op }),
+                generation_seen,
+            )
+        })
+        .await
     {
         log::warn!("[actions] clear composite intents on permanent fail: {e}");
     }
@@ -710,20 +721,20 @@ async fn attach_group_action_id(
         .iter()
         .map(|label_id| label_id.as_str().to_string())
         .collect();
-    if let Err(e) = db.with_write(move |conn| {
-        db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
-            conn,
-            &aid,
-            &tid,
-            label_ids.iter().map(|label_id| PendingLabelIntent {
-                label_id,
-                op,
-            }),
-            generation_seen,
-            &action_id,
-        )
-    })
-    .await
+    if let Err(e) = db
+        .with_write(move |conn| {
+            db::db::queries_extra::attach_action_id_to_pending_thread_label_intents(
+                conn,
+                &aid,
+                &tid,
+                label_ids
+                    .iter()
+                    .map(|label_id| PendingLabelIntent { label_id, op }),
+                generation_seen,
+                &action_id,
+            )
+        })
+        .await
     {
         log::warn!("[actions] attach composite label intent action id failed: {e}");
     }
@@ -755,11 +766,8 @@ fn read_applied_group_member_labels(
     thread_id: &str,
     group_id: LabelGroupId,
 ) -> Result<Vec<LabelId>, ActionError> {
-    let visible_label = db::db::queries_extra::user_visible_label_exists_fragment(
-        "?1",
-        "?2",
-        "lgm.label_id",
-    );
+    let visible_label =
+        db::db::queries_extra::user_visible_label_exists_fragment("?1", "?2", "lgm.label_id");
     let mut stmt = conn
         .prepare(&format!(
             "SELECT lgm.label_id

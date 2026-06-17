@@ -25,9 +25,7 @@ impl ReadyApp {
     /// `SyncCompleted` notification.
     pub(crate) fn dispatch_sync_delta(&mut self, account_id: String) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
-            log::debug!(
-                "dispatch_sync_delta({account_id}): no ServiceClient yet; skipping",
-            );
+            log::debug!("dispatch_sync_delta({account_id}): no ServiceClient yet; skipping",);
             return Task::none();
         };
         let aid_for_msg = account_id.clone();
@@ -233,9 +231,7 @@ impl ReadyApp {
                     log::debug!("attachment.eviction_kick send failed: {error}");
                 }
                 if let Err(error) = client
-                    .send_notification(
-                        service_api::ClientNotification::AttachmentTmpCleanupKick,
-                    )
+                    .send_notification(service_api::ClientNotification::AttachmentTmpCleanupKick)
                     .await
                 {
                     log::debug!("attachment.tmp_cleanup_kick send failed: {error}");
@@ -256,9 +252,7 @@ impl ReadyApp {
     /// surface stays quiet because the request is best-effort.
     pub(crate) fn dispatch_calendar_sync(&self, account_id: String) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
-            log::debug!(
-                "dispatch_calendar_sync({account_id}): no ServiceClient yet; skipping",
-            );
+            log::debug!("dispatch_calendar_sync({account_id}): no ServiceClient yet; skipping",);
             return Task::none();
         };
         Task::perform(
@@ -293,5 +287,4 @@ impl ReadyApp {
         }
         Task::batch(tasks)
     }
-
 }

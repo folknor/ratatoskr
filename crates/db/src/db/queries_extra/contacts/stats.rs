@@ -1,5 +1,5 @@
-use crate::db::WriterPool;
 use crate::db::FromRow;
+use crate::db::WriterPool;
 use crate::db::types::{ContactAttachmentRow, ContactStats, RecentThread, SameDomainContact};
 use rusqlite::params;
 

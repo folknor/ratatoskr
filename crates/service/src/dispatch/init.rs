@@ -78,8 +78,7 @@ where
         let boot_state = Arc::clone(&boot_state);
         async move {
             if let Err(failure) =
-                boot::run_boot_sequence(out_tx, app_data_dir, boot_state, had_clean_shutdown)
-                    .await
+                boot::run_boot_sequence(out_tx, app_data_dir, boot_state, had_clean_shutdown).await
             {
                 let _ = boot_failure_tx.send(failure.as_exit_code()).await;
             }

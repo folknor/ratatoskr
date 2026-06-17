@@ -46,7 +46,10 @@ pub async fn load_ai_settings_map(db: &ReadDbState) -> Result<HashMap<String, St
 }
 
 /// Load the resolved AI configuration (provider, model, key, URL).
-pub async fn load_ai_config(db: &ReadDbState, encryption_key: &[u8; 32]) -> Result<AiConfig, AiError> {
+pub async fn load_ai_config(
+    db: &ReadDbState,
+    encryption_key: &[u8; 32],
+) -> Result<AiConfig, AiError> {
     let settings = load_ai_settings_map(db).await?;
     build_ai_config(&settings, encryption_key)
 }

@@ -87,10 +87,7 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
     let references_header = get_header(headers, "References");
     let is_replied =
         sent_membership && (in_reply_to_header.is_some() || references_header.is_some());
-    let is_forwarded = sent_membership
-        && subject
-            .as_deref()
-            .is_some_and(is_forwarded_subject);
+    let is_forwarded = sent_membership && subject.as_deref().is_some_and(is_forwarded_subject);
 
     ParsedGmailMessage {
         base: ParsedMessageBase {
@@ -236,9 +233,7 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
             } else {
                 None
             };
-            let content_hash = inline_data
-                .as_deref()
-                .map(db::blob_hash::BlobHash::hash);
+            let content_hash = inline_data.as_deref().map(db::blob_hash::BlobHash::hash);
 
             let filename = if has_filename {
                 part.filename.clone()

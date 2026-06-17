@@ -22,7 +22,10 @@ fn main() -> std::io::Result<()> {
     })?;
 
     let mut command = std::process::Command::new(&service_binary);
-    command.arg("--service").arg("--app-data-dir").arg(&data_dir);
+    command
+        .arg("--service")
+        .arg("--app-data-dir")
+        .arg(&data_dir);
 
     unsafe {
         command.pre_exec(|| {

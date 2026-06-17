@@ -76,7 +76,13 @@ pub fn search_contacts_unified(
     // 2. Search GAL cache (second priority, after synced contacts).
     let gal_remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if gal_remaining > 0 {
-        search_gal_cache(conn, &like_pattern, gal_remaining, &mut seen_emails, &mut results)?;
+        search_gal_cache(
+            conn,
+            &like_pattern,
+            gal_remaining,
+            &mut seen_emails,
+            &mut results,
+        )?;
     }
 
     // 3. Search seen_addresses table (lower priority, fills remaining) - FTS5 with LIKE fallback.

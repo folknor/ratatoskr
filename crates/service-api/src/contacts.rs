@@ -195,8 +195,7 @@ mod tests {
             member_count: 2,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: ContactGroupSaveParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ContactGroupSaveParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -204,8 +203,7 @@ mod tests {
     fn group_save_ack_round_trips() {
         let original = ContactGroupSaveAck;
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: ContactGroupSaveAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ContactGroupSaveAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -232,8 +230,7 @@ mod tests {
             member_count: 0,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: ContactGroupSaveParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ContactGroupSaveParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
         assert!(recovered.member_emails.is_empty());
     }
@@ -255,8 +252,7 @@ mod tests {
             server_id: None,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: ContactSaveParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ContactSaveParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -264,8 +260,7 @@ mod tests {
     fn writeback_outcome_success_round_trips() {
         let original = WritebackOutcome::Success;
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: WritebackOutcome =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: WritebackOutcome = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -276,8 +271,7 @@ mod tests {
             retryable: false,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: WritebackOutcome =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: WritebackOutcome = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -317,8 +311,7 @@ mod tests {
     fn contact_delete_params_round_trip() {
         let original = ContactDeleteParams { id: "c-9".into() };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: ContactDeleteParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ContactDeleteParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 
@@ -328,8 +321,7 @@ mod tests {
             writeback: WritebackOutcome::Success,
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: ContactDeleteAck =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: ContactDeleteAck = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

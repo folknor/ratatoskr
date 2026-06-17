@@ -28,7 +28,12 @@ pub(crate) fn build_table_preview(
         .cloned()
         .collect();
     let mappings = auto_detect_mappings(&headers, &sample_cells, has_header);
-    let preview_rows = preview_rows(&data_rows, &mappings, first_data_row_number, options.preview_rows);
+    let preview_rows = preview_rows(
+        &data_rows,
+        &mappings,
+        first_data_row_number,
+        options.preview_rows,
+    );
     let stats = stats_for_rows(&data_rows, &mappings);
     let total_rows = data_rows.len();
 
@@ -72,7 +77,10 @@ pub(crate) fn prepare_table_import(
     prepared
 }
 
-fn split_headers(rows: Vec<Vec<String>>, has_header: bool) -> (Vec<String>, Vec<Vec<String>>, usize) {
+fn split_headers(
+    rows: Vec<Vec<String>>,
+    has_header: bool,
+) -> (Vec<String>, Vec<Vec<String>>, usize) {
     let col_count = rows.iter().map(Vec::len).max().unwrap_or(0);
     if has_header {
         let mut iter = rows.into_iter();
@@ -115,16 +123,19 @@ fn preview_rows(
     rows.iter()
         .take(limit)
         .enumerate()
-        .scan(std::collections::HashSet::new(), |seen_emails, (index, row)| {
-            let contact = row_to_contact(row, mappings);
-            let status = row_status_with_seen(&contact, seen_emails);
-            Some(ImportPreviewRow {
-                row_number: first_data_row_number + index,
-                cells: row.clone(),
-                contact,
-                status,
-            })
-        })
+        .scan(
+            std::collections::HashSet::new(),
+            |seen_emails, (index, row)| {
+                let contact = row_to_contact(row, mappings);
+                let status = row_status_with_seen(&contact, seen_emails);
+                Some(ImportPreviewRow {
+                    row_number: first_data_row_number + index,
+                    cells: row.clone(),
+                    contact,
+                    status,
+                })
+            },
+        )
         .collect()
 }
 
@@ -273,7 +284,10 @@ mod tests {
         assert_eq!(prepared.contacts.len(), 2);
         assert_eq!(prepared.stats.importable, 2);
         assert_eq!(prepared.stats.skipped_duplicate, 1);
-        assert_eq!(prepared.skipped_rows[0].status, ImportRowStatus::DuplicateEmail);
+        assert_eq!(
+            prepared.skipped_rows[0].status,
+            ImportRowStatus::DuplicateEmail
+        );
     }
 
     #[test]
@@ -293,7 +307,10 @@ mod tests {
 
     #[test]
     fn row_to_contact_splits_groups() {
-        let row = vec!["alice@example.com".to_string(), "Eng; Project X|VIP".to_string()];
+        let row = vec![
+            "alice@example.com".to_string(),
+            "Eng; Project X|VIP".to_string(),
+        ];
         let mappings = vec![
             ColumnMapping {
                 source_index: 0,

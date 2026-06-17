@@ -120,14 +120,14 @@ pub struct JobStatusSnapshot {
 }
 
 struct JobStatusRow {
-    status:  String,
+    status: String,
     summary: Option<Vec<u8>>,
 }
 
 impl FromRow for JobStatusRow {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
-            status:  row.get("status")?,
+            status: row.get("status")?,
             summary: row.get("summary")?,
         })
     }
@@ -689,15 +689,12 @@ pub fn unfinalized_per_op_plan_jobs(
     for row in rows {
         let (bytes, raw_kind) =
             row.map_err(|e| format!("unfinalized_per_op_plan_jobs row: {e}"))?;
-        let arr: [u8; 16] = bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| {
-                format!(
-                    "unfinalized_per_op_plan_jobs: job_id len {} != 16",
-                    bytes.len()
-                )
-            })?;
+        let arr: [u8; 16] = bytes.as_slice().try_into().map_err(|_| {
+            format!(
+                "unfinalized_per_op_plan_jobs: job_id len {} != 16",
+                bytes.len()
+            )
+        })?;
         let kind = PerOpJobKind::from_sql(&raw_kind).ok();
         out.push((arr, kind));
     }
@@ -885,11 +882,7 @@ mod tests {
         crate::db::WriteConn::from_raw(conn)
     }
 
-    fn insert_test_job(
-        conn: &Connection,
-        job_id: &[u8; 16],
-        status: &str,
-    ) {
+    fn insert_test_job(conn: &Connection, job_id: &[u8; 16], status: &str) {
         conn.execute(
             "INSERT INTO action_jobs (\
                  job_id, kind, account_id, status, quiet, payload, \
@@ -900,12 +893,7 @@ mod tests {
         .expect("insert action_jobs");
     }
 
-    fn insert_test_op(
-        conn: &Connection,
-        job_id: &[u8; 16],
-        operation_id: u32,
-        status: &str,
-    ) {
+    fn insert_test_op(conn: &Connection, job_id: &[u8; 16], operation_id: u32, status: &str) {
         conn.execute(
             "INSERT INTO action_job_ops (\
                  job_id, operation_id, ordinal, thread_id, operation, status\
@@ -931,7 +919,10 @@ mod tests {
              ) VALUES (?1, 'unknown', 'acc-1', 'queued', 0, X'', 0, 0)",
             params![job_id.as_slice()],
         );
-        assert!(result.is_err(), "kind CHECK constraint must reject unknowns");
+        assert!(
+            result.is_err(),
+            "kind CHECK constraint must reject unknowns"
+        );
     }
 
     fn insert_send_job(conn: &Connection, job_id: &[u8; 16], status: &str) {
@@ -1208,13 +1199,7 @@ mod tests {
         // (someone reverts the early-return) breaks loudly.
         let conn = fresh_db();
         let job_id = [0xD1; 16];
-        let result = insert_quiet_job(
-            &write(&conn),
-            &job_id,
-            "mark_chat_read",
-            "<chat>",
-            b"{}",
-        );
+        let result = insert_quiet_job(&write(&conn), &job_id, "mark_chat_read", "<chat>", b"{}");
         assert!(
             result.is_err(),
             "FK to accounts(id) must reject unknown account_id"
@@ -1315,8 +1300,7 @@ mod tests {
                 operation_blob: b"op-1-blob".to_vec(),
             },
         ];
-        let now = insert_mail_plan(
-            &write(&conn), &plan_id, "acc-1", false, &ops).expect("insert");
+        let now = insert_mail_plan(&write(&conn), &plan_id, "acc-1", false, &ops).expect("insert");
         assert!(now > 0);
 
         // jobs row exists with status='queued'
@@ -1524,10 +1508,9 @@ mod tests {
         )
         .expect("insert");
         // Mark op 0 done, op 1 failed, leave op 2 pending.
-        mark_op_terminal(
-            &write(&conn), &plan_id, 0, OpTerminalStatus::Done, b"o0").expect("done");
-        mark_op_terminal(
-            &write(&conn), &plan_id, 1, OpTerminalStatus::Failed, b"o1").expect("failed");
+        mark_op_terminal(&write(&conn), &plan_id, 0, OpTerminalStatus::Done, b"o0").expect("done");
+        mark_op_terminal(&write(&conn), &plan_id, 1, OpTerminalStatus::Failed, b"o1")
+            .expect("failed");
         let counts = count_ops_by_status(&write(&conn), &plan_id).expect("counts");
         assert_eq!(counts.done, 1);
         assert_eq!(counts.failed, 1);
@@ -1572,13 +1555,28 @@ mod tests {
 
         // Both ops have outcomes, but only plan_active is non-terminal.
         mark_op_terminal(
-            &write(&conn), &plan_active, 0, OpTerminalStatus::Done, b"o-active")
-            .expect("active done");
+            &write(&conn),
+            &plan_active,
+            0,
+            OpTerminalStatus::Done,
+            b"o-active",
+        )
+        .expect("active done");
         mark_op_terminal(
-            &write(&conn), &plan_done, 0, OpTerminalStatus::Done, b"o-done").expect("done");
+            &write(&conn),
+            &plan_done,
+            0,
+            OpTerminalStatus::Done,
+            b"o-done",
+        )
+        .expect("done");
         finalize_job(
-            &write(&conn), &plan_done, JobTerminalStatus::Completed, b"sum")
-            .expect("finalize done");
+            &write(&conn),
+            &plan_done,
+            JobTerminalStatus::Completed,
+            b"sum",
+        )
+        .expect("finalize done");
 
         let replayable = unemitted_terminal_ops(&write(&conn)).expect("query");
         assert_eq!(replayable.len(), 1);
@@ -1600,6 +1598,9 @@ mod tests {
              ) VALUES (?1, 1, 0, 'thr-1', X'', 'pending')",
             params![job_id.as_slice()],
         );
-        assert!(result.is_err(), "duplicate (job_id, ordinal) must be rejected");
+        assert!(
+            result.is_err(),
+            "duplicate (job_id, ordinal) must be rejected"
+        );
     }
 }

@@ -1,10 +1,10 @@
 use serde::Deserialize;
 
 use super::client::GraphClient;
-use db::db::{ReadDbState, WriterPool};
-use db::db::queries_extra::{LabelWriteRow, upsert_labels};
-use label_colors::preset_colors;
 use common::types::{ImportanceLevel, LabelKind};
+use db::db::queries_extra::{LabelWriteRow, upsert_labels};
+use db::db::{ReadDbState, WriterPool};
+use label_colors::preset_colors;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,65 +39,65 @@ pub async fn graph_label_sync(
     let count = categories.len();
     log::info!("[Graph] Label sync for account {account_id}: {count} categories fetched");
 
-    writer.with_write(move |conn| {
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("label sync tx: {e}"))?;
+    writer
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| format!("label sync tx: {e}"))?;
 
-        let mut rows: Vec<LabelWriteRow> = categories
-            .iter()
-            .enumerate()
-            .map(|(i, cat)| {
-                let color_preset = cat.color.as_deref().unwrap_or("None");
-                let (color_bg, color_fg) = if color_preset == "None" {
-                    (None, None)
-                } else {
-                    match preset_colors::preset_to_hex(color_preset) {
-                        Some((bg, fg)) => (Some(bg.to_string()), Some(fg.to_string())),
-                        None => (None, None),
-                    }
-                };
+            let mut rows: Vec<LabelWriteRow> = categories
+                .iter()
+                .enumerate()
+                .map(|(i, cat)| {
+                    let color_preset = cat.color.as_deref().unwrap_or("None");
+                    let (color_bg, color_fg) = if color_preset == "None" {
+                        (None, None)
+                    } else {
+                        match preset_colors::preset_to_hex(color_preset) {
+                            Some((bg, fg)) => (Some(bg.to_string()), Some(fg.to_string())),
+                            None => (None, None),
+                        }
+                    };
 
-                let label = LabelKind::graph_category(&cat.display_name)?;
-                Ok(LabelWriteRow {
-                    id: label.storage_id(),
-                    account_id: aid.clone(),
-                    name: cat.display_name.clone(),
-                    visible: None,
-                    sort_order: Some(i64::try_from(i).unwrap_or(0)),
-                    server_color_bg: color_bg,
-                    server_color_fg: color_fg,
-                    user_color_bg: None,
-                    user_color_fg: None,
-                    is_undeletable: false,
+                    let label = LabelKind::graph_category(&cat.display_name)?;
+                    Ok(LabelWriteRow {
+                        id: label.storage_id(),
+                        account_id: aid.clone(),
+                        name: cat.display_name.clone(),
+                        visible: None,
+                        sort_order: Some(i64::try_from(i).unwrap_or(0)),
+                        server_color_bg: color_bg,
+                        server_color_fg: color_fg,
+                        user_color_bg: None,
+                        user_color_fg: None,
+                        is_undeletable: false,
+                    })
                 })
-            })
-            .collect::<Result<_, String>>()?;
-        rows.extend(importance_label_rows(&aid));
+                .collect::<Result<_, String>>()?;
+            rows.extend(importance_label_rows(&aid));
 
-        upsert_labels(&tx, &rows)?;
+            upsert_labels(&tx, &rows)?;
 
-        tx.commit()
-            .map_err(|e| format!("label sync commit: {e}"))?;
-        Ok(count)
-    })
-    .await
+            tx.commit().map_err(|e| format!("label sync commit: {e}"))?;
+            Ok(count)
+        })
+        .await
 }
 
 fn importance_label_rows(account_id: &str) -> Vec<LabelWriteRow> {
     ImportanceLevel::ALL
-    .into_iter()
-    .map(|level| LabelWriteRow {
-        id: level.label_id().to_string(),
-        account_id: account_id.to_string(),
-        name: level.display_name().to_string(),
-        visible: None,
-        sort_order: Some(level.sort_order()),
-        server_color_bg: None,
-        server_color_fg: None,
-        user_color_bg: None,
-        user_color_fg: None,
-        is_undeletable: true,
-    })
-    .collect()
+        .into_iter()
+        .map(|level| LabelWriteRow {
+            id: level.label_id().to_string(),
+            account_id: account_id.to_string(),
+            name: level.display_name().to_string(),
+            visible: None,
+            sort_order: Some(level.sort_order()),
+            server_color_bg: None,
+            server_color_fg: None,
+            user_color_bg: None,
+            user_color_fg: None,
+            is_undeletable: true,
+        })
+        .collect()
 }

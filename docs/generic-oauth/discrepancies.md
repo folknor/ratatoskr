@@ -6,7 +6,7 @@ Audit date: 2026-05-19 (previous: 2026-03-30). Items #2 / #3 / #4 (Custom OIDC w
 
 ## Critical
 
-1. ~~**Re-auth broken for generic/OIDC providers.**~~ ✅ Fixed - re-auth detects the `oidc:` prefix on the stored provider id and re-discovers endpoints at runtime via `probe_issuer()` instead of failing on registry lookup. See `crates/app/src/ui/add_account/oauth.rs:44-89` (the `oidc:` strip + `probe_issuer` call inside `start_reauth_oauth`).
+1. ~~**Re-auth broken for generic/OIDC providers.**~~ [x] Fixed - re-auth detects the `oidc:` prefix on the stored provider id and re-discovers endpoints at runtime via `probe_issuer()` instead of failing on registry lookup. See `crates/app/src/ui/add_account/oauth.rs:44-89` (the `oidc:` strip + `probe_issuer` call inside `start_reauth_oauth`).
 
 ## Missing features
 

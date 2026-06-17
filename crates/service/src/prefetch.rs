@@ -215,7 +215,9 @@ pub enum SkipReason {
 }
 
 impl SkipReason {
-    fn is_timeout(self) -> bool { matches!(self, Self::ProviderTimeout) }
+    fn is_timeout(self) -> bool {
+        matches!(self, Self::ProviderTimeout)
+    }
     fn is_failure(self) -> bool {
         matches!(
             self,
@@ -233,15 +235,15 @@ impl SkipReason {
 #[derive(Debug, Default)]
 struct BreakerState {
     /// Wallclock instants of recent timeouts. Older than W are pruned.
-    timeouts:           VecDeque<Instant>,
+    timeouts: VecDeque<Instant>,
     /// When the circuit was last tripped open. While `Some`, fetches
     /// for this account skip until `tripped_at + current_backoff`.
-    tripped_at:         Option<Instant>,
+    tripped_at: Option<Instant>,
     /// Current backoff window. Doubles each trip up to MAX.
-    current_backoff:    Duration,
+    current_backoff: Duration,
     /// Total trips this incarnation. Bumped each time we transition
     /// Closed -> Open. Drives backoff doubling.
-    consecutive_trips:  u32,
+    consecutive_trips: u32,
 }
 
 impl BreakerState {
@@ -292,9 +294,7 @@ impl BreakerState {
 fn backoff_for(trips: u32) -> Duration {
     // Trip #1 -> MIN, #2 -> 2*MIN, capped at MAX.
     let mult = 1u64 << (trips.saturating_sub(1).min(8) as u64);
-    let secs = CIRCUIT_BREAKER_BACKOFF_MIN
-        .as_secs()
-        .saturating_mul(mult);
+    let secs = CIRCUIT_BREAKER_BACKOFF_MIN.as_secs().saturating_mul(mult);
     let bounded = secs.min(CIRCUIT_BREAKER_BACKOFF_MAX.as_secs());
     Duration::from_secs(bounded)
 }
@@ -308,20 +308,20 @@ type InFlightKey = (String, String);
 type InFlightGuard = (HashSet<InFlightKey>, VecDeque<InFlightKey>);
 
 pub(crate) struct PrefetchRuntimeInner {
-    closed:               AtomicBool,
-    in_flight:            Mutex<InFlightGuard>,
-    sync_tx:              mpsc::Sender<PrefetchWork>,
-    backfill_tx:          mpsc::Sender<PrefetchWork>,
-    db:                   WriteDbState,
-    boot_state:           Arc<crate::boot::BootSharedState>,
-    notification_tx:      NotificationSender,
-    service_generation:   u32,
-    cancellation:         CancellationToken,
-    worker_handle:        std::sync::Mutex<Option<JoinHandle<()>>>,
-    queue_depth:          AtomicU64,
-    fetched_count:        AtomicU64,
-    skipped_count:        AtomicU64,
-    failed_count:         AtomicU64,
+    closed: AtomicBool,
+    in_flight: Mutex<InFlightGuard>,
+    sync_tx: mpsc::Sender<PrefetchWork>,
+    backfill_tx: mpsc::Sender<PrefetchWork>,
+    db: WriteDbState,
+    boot_state: Arc<crate::boot::BootSharedState>,
+    notification_tx: NotificationSender,
+    service_generation: u32,
+    cancellation: CancellationToken,
+    worker_handle: std::sync::Mutex<Option<JoinHandle<()>>>,
+    queue_depth: AtomicU64,
+    fetched_count: AtomicU64,
+    skipped_count: AtomicU64,
+    failed_count: AtomicU64,
     /// Last wallclock at which `finalize_item` emitted a
     /// `PrefetchProgress` notification. Throttles the per-item firehose
     /// down to one event per `PROGRESS_THROTTLE` interval; the
@@ -330,7 +330,7 @@ pub(crate) struct PrefetchRuntimeInner {
     /// Counter snapshot mutex used when building `PrefetchCompleted`.
     /// Without this, fetched/skipped/failed read at different instants
     /// can disagree by O(in-flight) and the ack totals look impossible.
-    counters_snapshot:    Mutex<()>,
+    counters_snapshot: Mutex<()>,
     /// Per-(account, provider) semaphore cache. Populated lazily on
     /// first dispatch. Keyed on `(account_id, provider)` so the cap
     /// (IMAP serializes its folder-batches, JMAP/Gmail/Graph parallel)
@@ -338,18 +338,18 @@ pub(crate) struct PrefetchRuntimeInner {
     /// first caller's provider. Each account has exactly one provider
     /// today, but the key is explicit so a future "switch provider"
     /// migration doesn't pick up the wrong cap.
-    account_semaphores:   Mutex<HashMap<(String, String), Arc<Semaphore>>>,
+    account_semaphores: Mutex<HashMap<(String, String), Arc<Semaphore>>>,
     /// Circuit breakers keyed by `(provider, account_id)`. Today the
     /// two-tuple is practically equivalent to a per-account map since
     /// every account has exactly one provider, but threading provider
     /// through the breaker call sites lets a later promotion to
     /// per-provider-only land without churning every caller.
-    breakers:             Mutex<HashMap<(String, String), BreakerState>>,
+    breakers: Mutex<HashMap<(String, String), BreakerState>>,
     /// Account ids whose deletion is in flight. `cancel_account`
     /// inserts; `run_pipeline` checks before PackStore::put so a queued
     /// or in-flight prefetch can't land bytes after the
     /// `AttachmentCache` deletion-step snapshotted hashes.
-    cancelling_accounts:  Mutex<HashSet<String>>,
+    cancelling_accounts: Mutex<HashSet<String>>,
 }
 
 #[derive(Clone)]
@@ -366,11 +366,10 @@ impl PrefetchRuntime {
         cancellation: CancellationToken,
     ) -> Self {
         let (sync_tx, sync_rx) = mpsc::channel::<PrefetchWork>(SYNC_QUEUE_CAPACITY);
-        let (backfill_tx, backfill_rx) =
-            mpsc::channel::<PrefetchWork>(BACKFILL_QUEUE_CAPACITY);
+        let (backfill_tx, backfill_rx) = mpsc::channel::<PrefetchWork>(BACKFILL_QUEUE_CAPACITY);
         let inner = Arc::new(PrefetchRuntimeInner {
-            closed:             AtomicBool::new(false),
-            in_flight:          Mutex::new((HashSet::new(), VecDeque::new())),
+            closed: AtomicBool::new(false),
+            in_flight: Mutex::new((HashSet::new(), VecDeque::new())),
             sync_tx,
             backfill_tx,
             db,
@@ -378,15 +377,15 @@ impl PrefetchRuntime {
             notification_tx,
             service_generation,
             cancellation,
-            worker_handle:      std::sync::Mutex::new(None),
-            queue_depth:        AtomicU64::new(0),
-            fetched_count:      AtomicU64::new(0),
-            skipped_count:      AtomicU64::new(0),
-            failed_count:       AtomicU64::new(0),
+            worker_handle: std::sync::Mutex::new(None),
+            queue_depth: AtomicU64::new(0),
+            fetched_count: AtomicU64::new(0),
+            skipped_count: AtomicU64::new(0),
+            failed_count: AtomicU64::new(0),
             last_progress_emit_ms: AtomicU64::new(0),
-            counters_snapshot:  Mutex::new(()),
+            counters_snapshot: Mutex::new(()),
             account_semaphores: Mutex::new(HashMap::new()),
-            breakers:           Mutex::new(HashMap::new()),
+            breakers: Mutex::new(HashMap::new()),
             cancelling_accounts: Mutex::new(HashSet::new()),
         });
         let inner_for_worker = Arc::clone(&inner);
@@ -435,7 +434,11 @@ impl PrefetchRuntime {
                     accepted.push(key);
                     PrefetchWork::Item(it)
                 }
-                PrefetchWork::ImapBatch { account_id, folder_id, items } => {
+                PrefetchWork::ImapBatch {
+                    account_id,
+                    folder_id,
+                    items,
+                } => {
                     let mut kept = Vec::with_capacity(items.len());
                     for it in items {
                         let key = (it.account_id.clone(), it.attachment_id.clone());
@@ -447,7 +450,11 @@ impl PrefetchRuntime {
                     if kept.is_empty() {
                         return Ok(EnqueueOutcome::Dedupe);
                     }
-                    PrefetchWork::ImapBatch { account_id, folder_id, items: kept }
+                    PrefetchWork::ImapBatch {
+                        account_id,
+                        folder_id,
+                        items: kept,
+                    }
                 }
             };
             for key in &accepted {
@@ -469,7 +476,7 @@ impl PrefetchRuntime {
         let added = work.item_count() as u64;
         self.inner.queue_depth.fetch_add(added, Ordering::Relaxed);
         let tx = match priority {
-            PrefetchPriority::Sync     => &self.inner.sync_tx,
+            PrefetchPriority::Sync => &self.inner.sync_tx,
             PrefetchPriority::Backfill => &self.inner.backfill_tx,
         };
         if let Err(e) = tx.send(work.clone()).await {
@@ -563,17 +570,14 @@ impl PrefetchRuntime {
                     )
                     .map_err(|e| format!("prepare prefetch sweep: {e}"))?;
                 let it = stmt
-                    .query_map(
-                        rusqlite::params![aid, window_start_unix, lim],
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, String>(1)?,
-                                row.get::<_, Option<String>>(2)?,
-                                row.get::<_, Option<String>>(3)?,
-                            ))
-                        },
-                    )
+                    .query_map(rusqlite::params![aid, window_start_unix, lim], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })
                     .map_err(|e| format!("query prefetch sweep: {e}"))?;
                 let mut out = Vec::new();
                 for r in it {
@@ -622,9 +626,8 @@ impl PrefetchRuntime {
                 }
             }
             for it in orphans {
-                if let Ok(EnqueueOutcome::Newly) = self
-                    .enqueue(PrefetchWork::Item(it), priority)
-                    .await
+                if let Ok(EnqueueOutcome::Newly) =
+                    self.enqueue(PrefetchWork::Item(it), priority).await
                 {
                     newly += 1;
                 }
@@ -723,7 +726,7 @@ impl PrefetchRuntime {
             service_generation: self.inner.service_generation,
             fetched: self.inner.fetched_count.load(Ordering::Relaxed),
             skipped: self.inner.skipped_count.load(Ordering::Relaxed),
-            failed:  self.inner.failed_count.load(Ordering::Relaxed),
+            failed: self.inner.failed_count.load(Ordering::Relaxed),
         });
         if let Err(e) = self.inner.notification_tx.send(completed).await {
             log::debug!("PrefetchRuntime emit_completed_if_idle send failed: {e}");
@@ -769,8 +772,6 @@ impl PrefetchRuntime {
             .await
             .remove(account_id);
     }
-
-
 
     /// Begin shutdown. Idempotent. Mirrors `ExtractRuntime::shutdown`.
     pub async fn shutdown(&self) {
@@ -843,7 +844,11 @@ async fn spawn_one(
 async fn process_one(inner: Arc<PrefetchRuntimeInner>, work: PrefetchWork) {
     match work {
         PrefetchWork::Item(item) => process_item(inner, item).await,
-        PrefetchWork::ImapBatch { account_id, folder_id, items } => {
+        PrefetchWork::ImapBatch {
+            account_id,
+            folder_id,
+            items,
+        } => {
             process_imap_batch(inner, account_id, folder_id, items).await;
         }
     }
@@ -941,23 +946,19 @@ async fn process_imap_batch(
         }
     };
     let writer_pool = write_db.writer_pool();
-    let config = match imap::account_config::load_imap_config(
-        &read_db,
-        &writer_pool,
-        &account_id,
-        &key,
-    )
-    .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            log::debug!("prefetch imap load_config {account_id}: {e}");
-            for item in items {
-                record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+    let config =
+        match imap::account_config::load_imap_config(&read_db, &writer_pool, &account_id, &key)
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                log::debug!("prefetch imap load_config {account_id}: {e}");
+                for item in items {
+                    record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
+                }
+                return;
             }
-            return;
-        }
-    };
+        };
     let mut session = match imap::connection::connect(&config).await {
         Ok(s) => s,
         Err(e) => {
@@ -968,13 +969,10 @@ async fn process_imap_batch(
             return;
         }
     };
-    if let Err(e) = tokio::time::timeout(
-        Duration::from_secs(30),
-        session.select(&folder_id),
-    )
-    .await
-    .map_err(|_| format!("SELECT {folder_id} timed out"))
-    .and_then(|r| r.map_err(|e| format!("SELECT {folder_id}: {e}")))
+    if let Err(e) = tokio::time::timeout(Duration::from_secs(30), session.select(&folder_id))
+        .await
+        .map_err(|_| format!("SELECT {folder_id} timed out"))
+        .and_then(|r| r.map_err(|e| format!("SELECT {folder_id}: {e}")))
     {
         log::debug!("prefetch imap SELECT {account_id}/{folder_id}: {e}");
         let _ = session.logout().await;
@@ -1002,12 +1000,7 @@ async fn process_imap_batch(
             // touching the session - cancellation will tear it down
             // along with the worker.
             for stragglers in remaining.by_ref() {
-                record_item_outcome(
-                    &inner,
-                    &stragglers,
-                    Err(SkipReason::ProviderTransient),
-                )
-                .await;
+                record_item_outcome(&inner, &stragglers, Err(SkipReason::ProviderTransient)).await;
             }
             break;
         }
@@ -1018,7 +1011,9 @@ async fn process_imap_batch(
         let outcome = run_item_pipeline(
             &inner,
             &item,
-            ItemFetch::ImapSession { session: &mut session },
+            ItemFetch::ImapSession {
+                session: &mut session,
+            },
         )
         .await;
         let is_session_error = matches!(
@@ -1116,10 +1111,7 @@ async fn run_item_pipeline(
     // reclaim) reaches the sweep via the LEFT JOIN in
     // `enqueue_window_for_account`, and the fetch +
     // `PackStore::put` path below puts it back on its feet.
-    if info.content_hash.is_some()
-        && info.blob_present
-        && info.blob_tombstoned_at.is_none()
-    {
+    if info.content_hash.is_some() && info.blob_present && info.blob_tombstoned_at.is_none() {
         return Err(SkipReason::AlreadyCached);
     }
 
@@ -1133,61 +1125,75 @@ async fn run_item_pipeline(
                 .boot_state
                 .write_db_state()
                 .map_err(|_| SkipReason::InternalError)?;
-            let provider =
-                crate::actions::provider::create_provider(&read_db, &write_db, &item.account_id, key)
-                    .await
-                    .map_err(|e| {
-                        log::debug!("prefetch create_provider {}: {e}", item.account_id);
-                        SkipReason::InternalError
-                    })?;
-            let provider_ctx = common::types::ProviderCtx {
-                account_id: &item.account_id,
-                db:         &read_db,
-                progress:   &db::progress::NoopProgressReporter,
-            };
-            let fetch_fut =
-                provider.fetch_attachment(&provider_ctx, &item.message_id, &item.remote_attachment_id);
-            match tokio::time::timeout(
-                Duration::from_secs(PER_FETCH_TIMEOUT_SECS),
-                fetch_fut,
+            let provider = crate::actions::provider::create_provider(
+                &read_db,
+                &write_db,
+                &item.account_id,
+                key,
             )
             .await
+            .map_err(|e| {
+                log::debug!("prefetch create_provider {}: {e}", item.account_id);
+                SkipReason::InternalError
+            })?;
+            let provider_ctx = common::types::ProviderCtx {
+                account_id: &item.account_id,
+                db: &read_db,
+                progress: &db::progress::NoopProgressReporter,
+            };
+            let fetch_fut = provider.fetch_attachment(
+                &provider_ctx,
+                &item.message_id,
+                &item.remote_attachment_id,
+            );
+            match tokio::time::timeout(Duration::from_secs(PER_FETCH_TIMEOUT_SECS), fetch_fut).await
             {
                 Ok(Ok(a)) => a.bytes,
                 Ok(Err(e)) => {
                     let kind = e.kind();
                     log::debug!(
                         "prefetch fetch_attachment {}/{} ({:?}): {e}",
-                        item.account_id, item.attachment_id, kind,
+                        item.account_id,
+                        item.attachment_id,
+                        kind,
                     );
                     return Err(match kind {
-                        common::error::ProviderErrorKind::Transient => SkipReason::ProviderTransient,
-                        common::error::ProviderErrorKind::Permanent => SkipReason::ProviderPermanent,
+                        common::error::ProviderErrorKind::Transient => {
+                            SkipReason::ProviderTransient
+                        }
+                        common::error::ProviderErrorKind::Permanent => {
+                            SkipReason::ProviderPermanent
+                        }
                     });
                 }
                 Err(_) => return Err(SkipReason::ProviderTimeout),
             }
         }
         ItemFetch::ImapSession { session } => {
-            let (_msg_folder, uid) = imap::ops::parse_imap_message_id(&item.message_id, &item.account_id)
-                .map_err(|e| {
-                    log::debug!(
-                        "prefetch imap parse_message_id {}/{}: {e}",
-                        item.account_id, item.attachment_id,
-                    );
-                    SkipReason::ProviderPermanent
-                })?;
+            let (_msg_folder, uid) =
+                imap::ops::parse_imap_message_id(&item.message_id, &item.account_id).map_err(
+                    |e| {
+                        log::debug!(
+                            "prefetch imap parse_message_id {}/{}: {e}",
+                            item.account_id,
+                            item.attachment_id,
+                        );
+                        SkipReason::ProviderPermanent
+                    },
+                )?;
             let fetch_fut = imap::client::fetch_attachment_on_selected(
                 session,
                 uid,
                 &item.remote_attachment_id,
             );
-            match tokio::time::timeout(Duration::from_secs(PER_FETCH_TIMEOUT_SECS), fetch_fut).await {
+            match tokio::time::timeout(Duration::from_secs(PER_FETCH_TIMEOUT_SECS), fetch_fut).await
+            {
                 Ok(Ok(bytes)) => bytes,
                 Ok(Err(e)) => {
                     log::debug!(
                         "prefetch imap fetch {}/{}: {e}",
-                        item.account_id, item.attachment_id,
+                        item.account_id,
+                        item.attachment_id,
                     );
                     return Err(SkipReason::ProviderTransient);
                 }
@@ -1221,15 +1227,13 @@ async fn run_item_pipeline(
         bytes,
         inner.boot_state.compress_attachments_enabled(),
         inner.boot_state.allow_lossy_compression_enabled(),
-    ).await;
+    )
+    .await;
 
-    let content_hash = pack_store
-        .put(bytes)
-        .await
-        .map_err(|e| {
-            log::warn!("prefetch PackStore::put {}: {e}", item.attachment_id);
-            SkipReason::PackStoreError
-        })?;
+    let content_hash = pack_store.put(bytes).await.map_err(|e| {
+        log::warn!("prefetch PackStore::put {}: {e}", item.attachment_id);
+        SkipReason::PackStoreError
+    })?;
 
     // Re-check after the write. PackStore::put is content-hash
     // idempotent so the worst case here is a tombstone of a blob the
@@ -1237,7 +1241,8 @@ async fn run_item_pipeline(
     if account_is_cancelling_or_deleting(inner, &item.account_id).await {
         if let Err(e) = pack_store.tombstone(&content_hash).await {
             log::debug!(
-                "prefetch tombstone-after-cancel {}: {e}", item.attachment_id,
+                "prefetch tombstone-after-cancel {}: {e}",
+                item.attachment_id,
             );
         }
         return Err(SkipReason::RowGone);
@@ -1247,11 +1252,18 @@ async fn run_item_pipeline(
     inner
         .db
         .with_write(move |conn| {
-            db::db::queries_extra::update_attachment_cache_fields(conn, &id_for_update, &content_hash)
+            db::db::queries_extra::update_attachment_cache_fields(
+                conn,
+                &id_for_update,
+                &content_hash,
+            )
         })
         .await
         .map_err(|e| {
-            log::warn!("prefetch update_attachment_cache_fields {}: {e}", item.attachment_id);
+            log::warn!(
+                "prefetch update_attachment_cache_fields {}: {e}",
+                item.attachment_id
+            );
             SkipReason::DbUpdateError
         })?;
 
@@ -1302,8 +1314,8 @@ fn enqueue_extraction_after_prefetch(
     };
     let extract_work = crate::extract::ExtractWork {
         content_hash,
-        account_id:    work.account_id.clone(),
-        message_id:    work.message_id.clone(),
+        account_id: work.account_id.clone(),
+        message_id: work.message_id.clone(),
         attachment_id: work.attachment_id.clone(),
     };
     if let Err(e) = runtime.try_enqueue(extract_work) {
@@ -1320,7 +1332,8 @@ async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchItem) {
         fifo.retain(|k| k != &key);
         set.is_empty()
     };
-    let new_depth = inner.queue_depth
+    let new_depth = inner
+        .queue_depth
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
             if v > 0 { Some(v - 1) } else { None }
         })
@@ -1340,7 +1353,7 @@ async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchItem) {
         inner.last_progress_emit_ms.store(now_ms, Ordering::Relaxed);
         let progress = Notification::PrefetchProgress(PrefetchProgress {
             service_generation: inner.service_generation,
-            remaining:          new_depth,
+            remaining: new_depth,
             fetched_in_session: inner.fetched_count.load(Ordering::Relaxed),
         });
         if let Err(e) = inner.notification_tx.send(progress).await {
@@ -1357,7 +1370,7 @@ async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchItem) {
             service_generation: inner.service_generation,
             fetched: inner.fetched_count.load(Ordering::Relaxed),
             skipped: inner.skipped_count.load(Ordering::Relaxed),
-            failed:  inner.failed_count.load(Ordering::Relaxed),
+            failed: inner.failed_count.load(Ordering::Relaxed),
         });
         if let Err(e) = inner.notification_tx.send(completed).await {
             log::debug!("PrefetchRuntime completed send failed: {e}");
@@ -1391,7 +1404,9 @@ async fn account_semaphore(
     let cap = provider_semaphore_cap(provider);
     let key = (account_id.to_string(), provider.to_string());
     let mut map = inner.account_semaphores.lock().await;
-    let sem = map.entry(key).or_insert_with(|| Arc::new(Semaphore::new(cap)));
+    let sem = map
+        .entry(key)
+        .or_insert_with(|| Arc::new(Semaphore::new(cap)));
     Arc::clone(sem)
 }
 
@@ -1414,22 +1429,14 @@ async fn breaker_is_open(
         .is_open()
 }
 
-async fn note_breaker_timeout(
-    inner: &Arc<PrefetchRuntimeInner>,
-    provider: &str,
-    account_id: &str,
-) {
+async fn note_breaker_timeout(inner: &Arc<PrefetchRuntimeInner>, provider: &str, account_id: &str) {
     let mut map = inner.breakers.lock().await;
     map.entry(breaker_key(provider, account_id))
         .or_default()
         .note_timeout();
 }
 
-async fn note_breaker_success(
-    inner: &Arc<PrefetchRuntimeInner>,
-    provider: &str,
-    account_id: &str,
-) {
+async fn note_breaker_success(inner: &Arc<PrefetchRuntimeInner>, provider: &str, account_id: &str) {
     let mut map = inner.breakers.lock().await;
     map.entry(breaker_key(provider, account_id))
         .or_default()
@@ -1440,10 +1447,7 @@ async fn note_breaker_success(
 /// for the given account. Returns `false` if the row is missing - a
 /// missing row means the account was deleted (or never existed) and
 /// we must not attempt a fetch against it.
-async fn account_caching_enabled(
-    inner: &Arc<PrefetchRuntimeInner>,
-    account_id: &str,
-) -> bool {
+async fn account_caching_enabled(inner: &Arc<PrefetchRuntimeInner>, account_id: &str) -> bool {
     let aid = account_id.to_string();
     inner
         .db
@@ -1470,12 +1474,7 @@ async fn account_is_cancelling_or_deleting(
     inner: &Arc<PrefetchRuntimeInner>,
     account_id: &str,
 ) -> bool {
-    if inner
-        .cancelling_accounts
-        .lock()
-        .await
-        .contains(account_id)
-    {
+    if inner.cancelling_accounts.lock().await.contains(account_id) {
         return true;
     }
     let aid = account_id.to_string();
@@ -1533,7 +1532,11 @@ fn statvfs_free_bytes(path: &std::path::Path) -> Option<u64> {
     // step fails (matches the Unix fallback contract).
     let mut candidate = Some(path.to_path_buf());
     while let Some(p) = candidate {
-        let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = p
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let mut free_to_caller: u64 = 0;
         let rc = unsafe {
             GetDiskFreeSpaceExW(
@@ -1800,16 +1803,27 @@ mod tests {
             )
             .unwrap();
         let ids: Vec<String> = stmt
-            .query_map(rusqlite::params!["acct", window_start_secs], |r| r.get::<_, String>(0))
+            .query_map(rusqlite::params!["acct", window_start_secs], |r| {
+                r.get::<_, String>(0)
+            })
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
 
         // a1 (NULL hash, in window) and a3 (tombstoned, in window)
         // must appear; a2 (out of window) must not.
-        assert!(ids.contains(&"a1".to_string()), "a1 (uncached, in window) should sweep, got {ids:?}");
-        assert!(ids.contains(&"a3".to_string()), "a3 (tombstoned, in window) should sweep, got {ids:?}");
-        assert!(!ids.contains(&"a2".to_string()), "a2 (out of window) must NOT sweep, got {ids:?}");
+        assert!(
+            ids.contains(&"a1".to_string()),
+            "a1 (uncached, in window) should sweep, got {ids:?}"
+        );
+        assert!(
+            ids.contains(&"a3".to_string()),
+            "a3 (tombstoned, in window) should sweep, got {ids:?}"
+        );
+        assert!(
+            !ids.contains(&"a2".to_string()),
+            "a2 (out of window) must NOT sweep, got {ids:?}"
+        );
         assert_eq!(ids.len(), 2);
     }
 }

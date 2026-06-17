@@ -336,8 +336,7 @@ fn message_view_header<'a>(
             Some(Some(path)) if path.exists() => Some(path),
             _ => None,
         });
-    let avatar =
-        widgets::sender_avatar(sender_name, bimi_logo.as_deref(), AVATAR_MESSAGE_CARD);
+    let avatar = widgets::sender_avatar(sender_name, bimi_logo.as_deref(), AVATAR_MESSAGE_CARD);
 
     // From row: avatar + (name + email) + actions
     let from_row = row![
@@ -453,8 +452,7 @@ fn action_buttons_with_overflow<'a>(
             PopOutMessage::MessageView(MessageViewMessage::Forward),
         ),
     );
-    let overflow =
-        overflow_context_menu(state.context_menu_open, state.rendering_mode, window_id);
+    let overflow = overflow_context_menu(state.context_menu_open, state.rendering_mode, window_id);
 
     row![reply_btn, reply_all_btn, forward_btn, overflow]
         .spacing(SPACE_XXS)
@@ -574,8 +572,7 @@ fn context_menu_item<'a>(
                 .height(SLOT_DROPDOWN)
                 .align_x(Alignment::Center)
                 .align_y(Alignment::Center),
-            container(text(label).size(TEXT_MD).style(text::base))
-                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
@@ -603,8 +600,7 @@ fn context_menu_radio_item<'a>(
                 .height(SLOT_DROPDOWN)
                 .align_x(Alignment::Center)
                 .align_y(Alignment::Center),
-            container(text(label).size(TEXT_MD).style(text::base))
-                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
@@ -616,7 +612,6 @@ fn context_menu_radio_item<'a>(
     .width(Length::Fill)
     .into()
 }
-
 
 // ── Body ───────────────────────────────────────────────
 
@@ -845,10 +840,8 @@ fn compact_attachment_card<'a>(
 
     // ── At-rest pill content ──
     let pill_row = row![
-        container(file_ico.size(ICON_MD).style(text::secondary))
-            .align_y(Alignment::Center),
-        container(text(filename).size(TEXT_MD).style(text::base))
-            .align_y(Alignment::Center),
+        container(file_ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+        container(text(filename).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
         container(
             text(size_str)
                 .size(TEXT_SM)
@@ -912,13 +905,9 @@ fn compact_attachment_card<'a>(
         .width(Length::Fill)
         .height(Length::Fill);
 
-        let overlay = container(
-            row![save_btn, open_btn]
-                .spacing(0.0)
-                .height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill);
+        let overlay = container(row![save_btn, open_btn].spacing(0.0).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill);
 
         stack![pill, overlay].into()
     } else {

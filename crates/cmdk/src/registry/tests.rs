@@ -238,8 +238,7 @@ fn validate_param_request_rejects_non_parameterized() {
 #[test]
 fn validate_param_request_rejects_out_of_bounds() {
     let registry = CommandRegistry::new();
-    let result =
-        registry.validate_param_request(CommandId::EmailMoveToFolder, 1, &["x".into()]);
+    let result = registry.validate_param_request(CommandId::EmailMoveToFolder, 1, &["x".into()]);
     assert!(result.is_err());
     assert!(
         result.unwrap_err().contains("out of bounds"),
@@ -250,11 +249,8 @@ fn validate_param_request_rejects_out_of_bounds() {
 #[test]
 fn validate_param_request_rejects_wrong_prior_selections_count() {
     let registry = CommandRegistry::new();
-    let result = registry.validate_param_request(
-        CommandId::EmailMoveToFolder,
-        0,
-        &["unexpected".into()],
-    );
+    let result =
+        registry.validate_param_request(CommandId::EmailMoveToFolder, 0, &["unexpected".into()]);
     assert!(result.is_err());
     assert!(
         result.unwrap_err().contains("prior selections"),

@@ -23,8 +23,7 @@ mod tests {
             orders: vec![(1, 0), (2, 1), (3, 2)],
         };
         let json = serde_json::to_value(&original).expect("serialize");
-        let recovered: LabelGroupReorderParams =
-            serde_json::from_value(json).expect("deserialize");
+        let recovered: LabelGroupReorderParams = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

@@ -22,8 +22,8 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
 
     // Stores: tempdir-backed
     let body_store = store::body_store::BodyStoreReadState::init(tmp.path()).expect("body store");
-    let inline_images =
-        store::inline_image_store::InlineImageStoreReadState::init(tmp.path()).expect("inline images");
+    let inline_images = store::inline_image_store::InlineImageStoreReadState::init(tmp.path())
+        .expect("inline images");
     let search = search::SearchReadState::init(tmp.path()).expect("search");
 
     let ctx = ActionContext {
@@ -650,7 +650,9 @@ async fn apply_label_group_local_initial_writes_member_intent() {
     )
     .await;
     assert!(r.is_ok(), "{r:?}");
-    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
+    assert!(has_pending_label_intent(
+        &ctx, "acc1", "t1", "labelA", "Add"
+    ));
 }
 
 #[tokio::test]
@@ -669,7 +671,9 @@ async fn apply_label_group_local_initial_zero_members_still_succeeds() {
     )
     .await;
     assert!(r.is_ok());
-    assert!(!has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
+    assert!(!has_pending_label_intent(
+        &ctx, "acc1", "t1", "labelA", "Add"
+    ));
 }
 
 #[tokio::test]
@@ -703,7 +707,9 @@ async fn remove_label_group_local_initial_writes_remove_intent() {
     )
     .await
     .expect("apply");
-    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
+    assert!(has_pending_label_intent(
+        &ctx, "acc1", "t1", "labelA", "Add"
+    ));
 
     super::label_group::remove_label_group_local_initial(
         &ctx,
@@ -713,7 +719,9 @@ async fn remove_label_group_local_initial_writes_remove_intent() {
     )
     .await
     .expect("remove");
-    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Remove"));
+    assert!(has_pending_label_intent(
+        &ctx, "acc1", "t1", "labelA", "Remove"
+    ));
 }
 
 #[tokio::test]
@@ -731,7 +739,9 @@ async fn remove_label_group_with_no_attachment_succeeds() {
     )
     .await;
     assert!(outcome.is_local_only() || outcome.is_success());
-    assert!(!has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Remove"));
+    assert!(!has_pending_label_intent(
+        &ctx, "acc1", "t1", "labelA", "Remove"
+    ));
 }
 
 #[tokio::test]
@@ -757,7 +767,9 @@ async fn apply_label_group_handles_member_label() {
     // LocalOnly with the composite-typed retry enqueued (NOT per-member
     // rows - that bypasses the preflight contract).
     assert!(outcome.is_local_only() || outcome.is_success());
-    assert!(has_pending_label_intent(&ctx, "acc1", "t1", "labelA", "Add"));
+    assert!(has_pending_label_intent(
+        &ctx, "acc1", "t1", "labelA", "Add"
+    ));
     // Composite type enqueued, not raw addLabel.
     let composite_count = count_pending_ops(&ctx, "acc1", "t1", "applyLabelGroup");
     let raw_count = count_pending_ops(&ctx, "acc1", "t1", "addLabel");
@@ -766,5 +778,8 @@ async fn apply_label_group_handles_member_label() {
         "expect composite-typed retry rather than raw addLabel rows: \
          composite={composite_count}, raw={raw_count}"
     );
-    assert_eq!(raw_count, 0, "no per-member rows allowed in pending_operations");
+    assert_eq!(
+        raw_count, 0,
+        "no per-member rows allowed in pending_operations"
+    );
 }

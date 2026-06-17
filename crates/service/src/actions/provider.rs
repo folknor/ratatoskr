@@ -27,9 +27,7 @@ pub async fn create_provider(
 ) -> Result<Box<dyn ProviderSyncOps>, String> {
     let aid = account_id.to_string();
     let raw_provider = db
-        .with_read(move |conn| {
-            db::db::queries_extra::get_account_provider_raw_sync(conn, &aid)
-        })
+        .with_read(move |conn| db::db::queries_extra::get_account_provider_raw_sync(conn, &aid))
         .await?;
     match raw_provider.as_str() {
         "harness-offline" => return Ok(Box::new(HarnessOfflineProvider::immediate())),
@@ -141,8 +139,8 @@ impl HarnessOfflineProvider {
 
 type HarnessAttachmentKey = (String, String, String);
 
-fn harness_attachments(
-) -> &'static Mutex<HashMap<HarnessAttachmentKey, common::types::FetchedAttachment>> {
+fn harness_attachments()
+-> &'static Mutex<HashMap<HarnessAttachmentKey, common::types::FetchedAttachment>> {
     static MAP: OnceLock<Mutex<HashMap<HarnessAttachmentKey, common::types::FetchedAttachment>>> =
         OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))

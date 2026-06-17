@@ -8,8 +8,8 @@ pub type BodyMap = HashMap<String, (Option<String>, Option<String>)>;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
-use crate::db::ReadConn;
 use super::thread_ui_state::get_attachments_collapsed;
+use crate::db::ReadConn;
 
 // ── Return types ────────────────────────────────────────────
 

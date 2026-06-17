@@ -5,8 +5,8 @@
 
 use rusqlite::params_from_iter;
 
-use crate::db::ReadConn;
 use super::super::types::AccountScope;
+use crate::db::ReadConn;
 
 /// A thread row from the free-text SQL fallback search.
 #[derive(Debug, Clone)]
@@ -36,8 +36,7 @@ pub fn search_threads_freetext_sync(
         AccountScope::All => (String::new(), vec![]),
         AccountScope::Single(id) => ("AND t.account_id = ?2".to_string(), vec![id.clone()]),
         AccountScope::Multiple(ids) => {
-            let placeholders: Vec<String> =
-                (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
+            let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
             (
                 format!("AND t.account_id IN ({})", placeholders.join(",")),
                 ids.clone(),

@@ -3,9 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tantivy::collector::TopDocs;
-use tantivy::query::{
-    BooleanQuery, BoostQuery, Occur, Query, QueryParser, RangeQuery, TermQuery,
-};
+use tantivy::query::{BooleanQuery, BoostQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::{
     DateOptions, Field, NumericOptions, STORED, STRING, Schema, TextFieldIndexing, TextOptions,
 };
@@ -169,9 +167,9 @@ pub struct SearchDocument {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentDocFragment {
-    pub attachment_id:  String,
-    pub filename:       String,
-    pub mime:           String,
+    pub attachment_id: String,
+    pub filename: String,
+    pub mime: String,
     pub extracted_text: String,
 }
 
@@ -211,9 +209,9 @@ pub enum MatchKind {
     From,
     Attachment {
         attachment_id: String,
-        filename:      String,
-        mime:          String,
-        snippet:       String,
+        filename: String,
+        mime: String,
+        snippet: String,
     },
 }
 
@@ -223,9 +221,9 @@ pub enum MatchKind {
 /// search crate stays free of DB dependencies.
 #[derive(Debug, Clone, Default)]
 pub struct AttributionInputs {
-    pub subject:     String,
-    pub from_name:   String,
-    pub body_text:   String,
+    pub subject: String,
+    pub from_name: String,
+    pub body_text: String,
     pub attachments: Vec<AttachmentAttributionInput>,
 }
 
@@ -235,9 +233,9 @@ pub struct AttributionInputs {
 /// the doc but contribute no full-text segment).
 #[derive(Debug, Clone)]
 pub struct AttachmentAttributionInput {
-    pub attachment_id:  String,
-    pub filename:       String,
-    pub mime:           String,
+    pub attachment_id: String,
+    pub filename: String,
+    pub mime: String,
     pub extracted_text: String,
 }
 
@@ -386,14 +384,16 @@ pub fn staging_search_index_dir(app_data_dir: &Path, rebuild_id: &str) -> std::p
 }
 
 /// Atomically point future readers and boots at `index_dir`.
-pub fn write_active_search_index_dir(
-    app_data_dir: &Path,
-    index_dir: &Path,
-) -> Result<(), String> {
+pub fn write_active_search_index_dir(app_data_dir: &Path, index_dir: &Path) -> Result<(), String> {
     let name = index_dir
         .file_name()
         .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| format!("active index path has no file name: {}", index_dir.display()))?;
+        .ok_or_else(|| {
+            format!(
+                "active index path has no file name: {}",
+                index_dir.display()
+            )
+        })?;
     validate_active_index_dir_name(name)?;
     std::fs::create_dir_all(app_data_dir)
         .map_err(|e| format!("create app data dir {}: {e}", app_data_dir.display()))?;
@@ -416,7 +416,10 @@ fn read_active_index_dir_name(app_data_dir: &Path) -> Option<String> {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => {
-            log::warn!("read active search index pointer {}: {e}", pointer.display());
+            log::warn!(
+                "read active search index pointer {}: {e}",
+                pointer.display()
+            );
             return None;
         }
     };
@@ -517,10 +520,7 @@ pub fn build_search_doc(fields: &Fields, msg: &SearchDocument) -> tantivy::Tanti
         msg.body_text.as_deref().unwrap_or_default(),
     );
     doc.add_text(fields.snippet, msg.snippet.as_deref().unwrap_or_default());
-    doc.add_date(
-        fields.date,
-        TantivyDateTime::from_timestamp_secs(msg.date),
-    );
+    doc.add_date(fields.date, TantivyDateTime::from_timestamp_secs(msg.date));
     doc.add_u64(fields.is_read, u64::from(msg.is_read));
     doc.add_u64(fields.is_starred, u64::from(msg.is_starred));
     doc.add_u64(fields.has_attachment, u64::from(msg.has_attachment));
@@ -559,9 +559,8 @@ pub fn build_search_doc(fields: &Fields, msg: &SearchDocument) -> tantivy::Tanti
 /// (which is fine, but the cost of building a 256-byte string is
 /// negligible).
 fn build_boundary_string() -> String {
-    let mut s = String::with_capacity(
-        ATTACHMENT_BOUNDARY_REPEATS * (ATTACHMENT_BOUNDARY_TOKEN.len() + 1),
-    );
+    let mut s =
+        String::with_capacity(ATTACHMENT_BOUNDARY_REPEATS * (ATTACHMENT_BOUNDARY_TOKEN.len() + 1));
     for i in 0..ATTACHMENT_BOUNDARY_REPEATS {
         if i > 0 {
             s.push(' ');
@@ -834,19 +833,23 @@ impl SearchReadState {
             let lower = params
                 .after
                 .map(|bound| {
-                    bound.to_range_bound(|ts| Term::from_field_date(
-                        self.fields.date,
-                        TantivyDateTime::from_timestamp_secs(ts),
-                    ))
+                    bound.to_range_bound(|ts| {
+                        Term::from_field_date(
+                            self.fields.date,
+                            TantivyDateTime::from_timestamp_secs(ts),
+                        )
+                    })
                 })
                 .unwrap_or(std::ops::Bound::Unbounded);
             let upper = params
                 .before
                 .map(|bound| {
-                    bound.to_range_bound(|ts| Term::from_field_date(
-                        self.fields.date,
-                        TantivyDateTime::from_timestamp_secs(ts),
-                    ))
+                    bound.to_range_bound(|ts| {
+                        Term::from_field_date(
+                            self.fields.date,
+                            TantivyDateTime::from_timestamp_secs(ts),
+                        )
+                    })
                 })
                 .unwrap_or(std::ops::Bound::Unbounded);
             clauses.push((Occur::Must, Box::new(RangeQuery::new(lower, upper))));
@@ -1043,7 +1046,10 @@ impl SearchReadState {
         // term-frequency tiebreak.
         let mut query_tokens: Vec<String> = trimmed
             .split_whitespace()
-            .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+            .map(|t| {
+                t.trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_lowercase()
+            })
             .filter(|t| !t.is_empty())
             .collect();
         query_tokens.sort();
@@ -1101,9 +1107,9 @@ impl SearchReadState {
                 candidates.push((
                     MatchKind::Attachment {
                         attachment_id: att.attachment_id.clone(),
-                        filename:      att.filename.clone(),
-                        mime:          att.mime.clone(),
-                        snippet:       fragment,
+                        filename: att.filename.clone(),
+                        mime: att.mime.clone(),
+                        snippet: fragment,
                     },
                     highlights,
                 ));
@@ -1166,7 +1172,9 @@ fn score_field(snippet_gen: &Option<SnippetGenerator>, text: &str) -> usize {
     if text.is_empty() {
         return 0;
     }
-    let Some(snippet_gen) = snippet_gen else { return 0 };
+    let Some(snippet_gen) = snippet_gen else {
+        return 0;
+    };
     snippet_gen.snippet(text).highlighted().len()
 }
 
@@ -1317,7 +1325,9 @@ mod tests {
                 has_attachment: false,
                 attachments: Vec::new(),
             };
-            writer.add_document(build_search_doc(&fields, &doc)).expect("add");
+            writer
+                .add_document(build_search_doc(&fields, &doc))
+                .expect("add");
         }
         writer.commit().expect("commit");
         let reader = index
@@ -1393,9 +1403,7 @@ mod tests {
         let schema = build_schema();
         let fields = Fields::from_schema(&schema);
         let index = Index::create_in_ram(schema.clone());
-        let mut writer: tantivy::IndexWriter = index
-            .writer(15_000_000)
-            .expect("writer");
+        let mut writer: tantivy::IndexWriter = index.writer(15_000_000).expect("writer");
         let doc = SearchDocument {
             message_id: "msg1".into(),
             account_id: "acct1".into(),
@@ -1468,15 +1476,15 @@ mod tests {
                 body_text: body.into(),
                 attachments: vec![
                     AttachmentAttributionInput {
-                        attachment_id:  "att1".into(),
-                        filename:       "first.pdf".into(),
-                        mime:           "application/pdf".into(),
+                        attachment_id: "att1".into(),
+                        filename: "first.pdf".into(),
+                        mime: "application/pdf".into(),
                         extracted_text: att1_text.into(),
                     },
                     AttachmentAttributionInput {
-                        attachment_id:  "att2".into(),
-                        filename:       "second.pdf".into(),
-                        mime:           "application/pdf".into(),
+                        attachment_id: "att2".into(),
+                        filename: "second.pdf".into(),
+                        mime: "application/pdf".into(),
                         extracted_text: att2_text.into(),
                     },
                 ],
@@ -1490,7 +1498,8 @@ mod tests {
         let read = build_attribution_test_index("hello world", "subj", "alice", "", "");
         let mut results = vec![make_result_for_attribution()];
         let inputs = make_inputs("hello world", "subj", "alice", "", "");
-        read.enrich_match_kinds("   ", &mut results, &inputs).expect("ok");
+        read.enrich_match_kinds("   ", &mut results, &inputs)
+            .expect("ok");
         assert!(matches!(results[0].match_kind, MatchKind::Body));
         assert!(results[0].also_matched.is_empty());
     }
@@ -1512,9 +1521,12 @@ mod tests {
             "the quarterly contract specifies penalties for delay",
             "shipping manifest only - no contract here",
         );
-        read.enrich_match_kinds("contract", &mut results, &inputs).expect("ok");
+        read.enrich_match_kinds("contract", &mut results, &inputs)
+            .expect("ok");
         match &results[0].match_kind {
-            MatchKind::Attachment { filename, snippet, .. } => {
+            MatchKind::Attachment {
+                filename, snippet, ..
+            } => {
                 // Both attachments contain "contract"; picker is by score
                 // first, term-frequency next, then alphabetical filename.
                 assert!(
@@ -1553,7 +1565,8 @@ mod tests {
             "no relevant words here",
             "another irrelevant attachment",
         );
-        read.enrich_match_kinds("contract", &mut results, &inputs).expect("ok");
+        read.enrich_match_kinds("contract", &mut results, &inputs)
+            .expect("ok");
         assert!(matches!(results[0].match_kind, MatchKind::Body));
         assert!(
             results[0].also_matched.is_empty(),
@@ -1579,7 +1592,8 @@ mod tests {
             "contract once",
             "contract once",
         );
-        read.enrich_match_kinds("contract", &mut results, &inputs).expect("ok");
+        read.enrich_match_kinds("contract", &mut results, &inputs)
+            .expect("ok");
         // Tiebreak: alphabetical by filename. "first.pdf" < "second.pdf".
         match &results[0].match_kind {
             MatchKind::Attachment { filename, .. } => assert_eq!(filename, "first.pdf"),
@@ -1604,15 +1618,13 @@ mod tests {
     #[test]
     fn phase_7_3_attachment_boundary_blocks_cross_attachment_phrase() {
         use tantivy::Index;
-        use tantivy::query::QueryParser;
         use tantivy::collector::Count;
+        use tantivy::query::QueryParser;
 
         let schema = build_schema();
         let fields = Fields::from_schema(&schema);
         let index = Index::create_in_ram(schema.clone());
-        let mut writer: tantivy::IndexWriter = index
-            .writer(15_000_000)
-            .expect("writer");
+        let mut writer: tantivy::IndexWriter = index.writer(15_000_000).expect("writer");
 
         let doc = SearchDocument {
             message_id: "msg1".into(),
@@ -1648,9 +1660,7 @@ mod tests {
         // in place, the position distance is ATTACHMENT_BOUNDARY_REPEATS
         // tokens + tantivy's own POSITION_GAP, well beyond slop=0.
         let cross_query = qp.parse_query("\"brown fox\"").expect("parse cross");
-        let cross_count = searcher
-            .search(&cross_query, &Count)
-            .expect("search cross");
+        let cross_count = searcher.search(&cross_query, &Count).expect("search cross");
         assert_eq!(
             cross_count, 0,
             "cross-attachment phrase query must NOT match (boundary padding broken?)",

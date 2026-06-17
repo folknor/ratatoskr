@@ -39,7 +39,9 @@ pub struct LastFolderCache {
 }
 
 impl LastFolderCache {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn get(&self, key: &(String, String)) -> Option<&PathBuf> {
         self.map.get(key)
@@ -64,11 +66,11 @@ impl LastFolderCache {
 /// the DB for filenames the UI already had in scope.
 #[derive(Debug, Clone)]
 pub struct AttachmentRef {
-    pub account_id:    String,
-    pub message_id:    String,
+    pub account_id: String,
+    pub message_id: String,
     pub attachment_id: String,
-    pub filename:      Option<String>,
-    pub mime_type:     Option<String>,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,23 +81,20 @@ pub struct OpenAttachmentParams {
 #[derive(Debug, Clone)]
 pub struct SaveAttachmentParams {
     pub thread_id: String,
-    pub item:      AttachmentRef,
+    pub item: AttachmentRef,
 }
 
 #[derive(Debug, Clone)]
 pub struct SaveAllAttachmentsParams {
     pub thread_id: String,
-    pub items:     Vec<AttachmentRef>,
+    pub items: Vec<AttachmentRef>,
 }
 
 impl ReadyApp {
     /// Fetch the attachment, write a copy to
     /// `<app_data>/opened_attachments/<safe_name>`, and shell out to
     /// the OS default handler.
-    pub(crate) fn handle_open_attachment(
-        &mut self,
-        params: OpenAttachmentParams,
-    ) -> Task<Message> {
+    pub(crate) fn handle_open_attachment(&mut self, params: OpenAttachmentParams) -> Task<Message> {
         let Some(client) = self.service_client.clone() else {
             log::warn!("open_attachment: service_client unavailable");
             return Task::none();
@@ -115,10 +114,7 @@ impl ReadyApp {
 
     /// Show a Save dialog, fetch the attachment, write to the chosen
     /// path. Remembers the directory per-thread for the session.
-    pub(crate) fn handle_save_attachment(
-        &mut self,
-        params: SaveAttachmentParams,
-    ) -> Task<Message> {
+    pub(crate) fn handle_save_attachment(&mut self, params: SaveAttachmentParams) -> Task<Message> {
         let Some(client) = self.service_client.clone() else {
             log::warn!("save_attachment: service_client unavailable");
             return Task::none();
@@ -178,9 +174,9 @@ impl ReadyApp {
 }
 
 async fn open_attachment_worker(
-    client:       Arc<ServiceClient>,
+    client: Arc<ServiceClient>,
     app_data_dir: PathBuf,
-    item:         AttachmentRef,
+    item: AttachmentRef,
 ) {
     let ack = match client
         .fetch_attachment(item.account_id, item.message_id, item.attachment_id.clone())
@@ -200,9 +196,7 @@ async fn open_attachment_worker(
             return;
         }
     };
-    let safe = sanitize_attachment_filename(
-        item.filename.as_deref().unwrap_or("attachment"),
-    );
+    let safe = sanitize_attachment_filename(item.filename.as_deref().unwrap_or("attachment"));
     let dest_dir = app_data_dir.join("opened_attachments");
     if let Err(e) = tokio::fs::create_dir_all(&dest_dir).await {
         log::warn!("open_attachment mkdir ({}): {e}", dest_dir.display());
@@ -222,17 +216,14 @@ async fn open_attachment_worker(
 /// is the folder to remember for next time. `None` on cancel or
 /// failure.
 async fn save_attachment_worker(
-    client:       Arc<ServiceClient>,
+    client: Arc<ServiceClient>,
     app_data_dir: PathBuf,
-    item:         AttachmentRef,
-    initial_dir:  Option<PathBuf>,
+    item: AttachmentRef,
+    initial_dir: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    let suggested =
-        sanitize_attachment_filename(item.filename.as_deref().unwrap_or("attachment"));
-    let (filter_label, filter_ext) = save_dialog_filter(
-        item.filename.as_deref(),
-        item.mime_type.as_deref(),
-    );
+    let suggested = sanitize_attachment_filename(item.filename.as_deref().unwrap_or("attachment"));
+    let (filter_label, filter_ext) =
+        save_dialog_filter(item.filename.as_deref(), item.mime_type.as_deref());
 
     let mut dialog = rfd::AsyncFileDialog::new()
         .set_title("Save Attachment")
@@ -274,10 +265,10 @@ async fn save_attachment_worker(
 /// Returns `Some(folder)` if the user picked a folder. `None` on
 /// cancel.
 async fn save_all_attachments_worker(
-    client:       Arc<ServiceClient>,
+    client: Arc<ServiceClient>,
     app_data_dir: PathBuf,
-    items:        Vec<AttachmentRef>,
-    initial_dir:  Option<PathBuf>,
+    items: Vec<AttachmentRef>,
+    initial_dir: Option<PathBuf>,
 ) -> Option<PathBuf> {
     let mut dialog = rfd::AsyncFileDialog::new().set_title("Save All Attachments");
     if let Some(dir) = initial_dir.as_ref().filter(|p| p.exists()) {
@@ -379,11 +370,28 @@ fn is_windows_reserved_device(name: &str) -> bool {
     let upper = stem.to_ascii_uppercase();
     matches!(
         upper.as_str(),
-        "CON" | "PRN" | "NUL" | "AUX"
-        | "COM1" | "COM2" | "COM3" | "COM4" | "COM5"
-        | "COM6" | "COM7" | "COM8" | "COM9"
-        | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5"
-        | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "CON"
+            | "PRN"
+            | "NUL"
+            | "AUX"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     )
 }
 
@@ -393,10 +401,16 @@ fn is_windows_reserved_device(name: &str) -> bool {
 /// the same filesystem.
 async fn atomic_write(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = dest.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no parent")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "destination has no parent",
+        )
     })?;
     let file_name = dest.file_name().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no file name")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "destination has no file name",
+        )
     })?;
     let mut tmp_name = std::ffi::OsString::from(".");
     tmp_name.push(file_name);
@@ -424,7 +438,7 @@ fn pick_collision_free_path(folder: &Path, filename: &str) -> PathBuf {
     for n in 1..1000 {
         let next = match ext {
             Some(e) => folder.join(format!("{stem} ({n}).{e}")),
-            None    => folder.join(format!("{filename} ({n})")),
+            None => folder.join(format!("{filename} ({n})")),
         };
         if !next.exists() {
             return next;
@@ -434,7 +448,7 @@ fn pick_collision_free_path(folder: &Path, filename: &str) -> PathBuf {
     // 1000th candidate and let write fail loudly.
     match ext {
         Some(e) => folder.join(format!("{stem} (1000).{e}")),
-        None    => folder.join(format!("{filename} (1000)")),
+        None => folder.join(format!("{filename} (1000)")),
     }
 }
 
@@ -449,10 +463,7 @@ fn split_stem_ext(filename: &str) -> (&str, Option<&str>) {
 /// Suggest a (filter_label, primary_ext) pair for the rfd save dialog.
 /// Prefers the filename's own extension; falls back to mime mapping.
 /// `("All files", "*")` is the catch-all.
-fn save_dialog_filter(
-    filename:  Option<&str>,
-    mime_type: Option<&str>,
-) -> (String, String) {
+fn save_dialog_filter(filename: Option<&str>, mime_type: Option<&str>) -> (String, String) {
     if let Some(name) = filename
         && let (_, Some(ext)) = split_stem_ext(name)
     {
@@ -467,24 +478,28 @@ fn save_dialog_filter(
 }
 
 fn mime_to_ext(mime: &str) -> Option<&'static str> {
-    match mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase().as_str() {
-        "application/pdf"            => Some("pdf"),
-        "image/jpeg"                 => Some("jpg"),
-        "image/png"                  => Some("png"),
-        "image/gif"                  => Some("gif"),
-        "image/webp"                 => Some("webp"),
-        "image/svg+xml"              => Some("svg"),
-        "text/plain"                 => Some("txt"),
-        "text/html"                  => Some("html"),
-        "text/csv"                   => Some("csv"),
-        "application/zip"            => Some("zip"),
-        "application/json"           => Some("json"),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                     => Some("docx"),
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                     => Some("xlsx"),
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                                     => Some("pptx"),
+    match mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "application/pdf" => Some("pdf"),
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
+        "text/plain" => Some("txt"),
+        "text/html" => Some("html"),
+        "text/csv" => Some("csv"),
+        "application/zip" => Some("zip"),
+        "application/json" => Some("json"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some("docx"),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Some("xlsx"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some("pptx"),
         _ => None,
     }
 }
@@ -527,8 +542,14 @@ mod tests {
         assert_eq!(sanitize_attachment_filename("report.pdf"), "report.pdf");
         assert_eq!(sanitize_attachment_filename("a/b/c.pdf"), "a_b_c.pdf");
         assert_eq!(sanitize_attachment_filename("a\\b\\c.pdf"), "a_b_c.pdf");
-        assert_eq!(sanitize_attachment_filename("with space.pdf"), "with space.pdf");
-        assert_eq!(sanitize_attachment_filename("hidden\u{0001}.pdf"), "hidden_.pdf");
+        assert_eq!(
+            sanitize_attachment_filename("with space.pdf"),
+            "with space.pdf"
+        );
+        assert_eq!(
+            sanitize_attachment_filename("hidden\u{0001}.pdf"),
+            "hidden_.pdf"
+        );
     }
 
     #[test]

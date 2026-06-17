@@ -207,7 +207,12 @@ async fn ensure_oauth_access_token(
     let new_expires = refreshed.expires_at;
     writer
         .with_write(move |conn| {
-            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access_token, new_expires)
+            db::db::queries::persist_refreshed_token(
+                conn,
+                &aid,
+                &encrypted_access_token,
+                new_expires,
+            )
         })
         .await?;
 
@@ -224,8 +229,10 @@ async fn resolve_account_password(
     if record.auth_method == "oauth2" {
         ensure_oauth_access_token(db, writer, account_id, encryption_key, record).await
     } else {
-        Ok(StoredSecret::decrypt_optional(record.imap_password.clone(), encryption_key)?
-            .unwrap_or_default())
+        Ok(
+            StoredSecret::decrypt_optional(record.imap_password.clone(), encryption_key)?
+                .unwrap_or_default(),
+        )
     }
 }
 
@@ -244,9 +251,7 @@ fn imap_config_from_record(
     username: String,
     password: String,
 ) -> Result<ImapConfig, String> {
-    if let Some((host, port)) =
-        test_endpoint_host_port("RATATOSKR_TEST_IMAP_ENDPOINT", 143)?
-    {
+    if let Some((host, port)) = test_endpoint_host_port("RATATOSKR_TEST_IMAP_ENDPOINT", 143)? {
         return Ok(ImapConfig {
             host,
             port,
@@ -281,9 +286,7 @@ fn smtp_config_from_record(
     username: String,
     password: String,
 ) -> Result<SmtpConfig, String> {
-    if let Some((host, port)) =
-        test_endpoint_host_port("RATATOSKR_TEST_SMTP_ENDPOINT", 25)?
-    {
+    if let Some((host, port)) = test_endpoint_host_port("RATATOSKR_TEST_SMTP_ENDPOINT", 25)? {
         return Ok(SmtpConfig {
             host,
             port,
@@ -321,7 +324,8 @@ pub async fn load_imap_config(
 ) -> Result<ImapConfig, String> {
     let record = load_account_record(db, account_id).await?;
     let username = username_for_record(&record);
-    let password = resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
+    let password =
+        resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
     imap_config_from_record(account_id, &record, username, password)
 }
 
@@ -333,7 +337,8 @@ pub async fn load_smtp_config(
 ) -> Result<SmtpConfig, String> {
     let record = load_account_record(db, account_id).await?;
     let username = username_for_record(&record);
-    let password = resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
+    let password =
+        resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
     smtp_config_from_record(account_id, &record, username, password)
 }
 
@@ -345,7 +350,8 @@ pub async fn load_both_configs(
 ) -> Result<ImapAndSmtpConfig, String> {
     let record = load_account_record(db, account_id).await?;
     let username = username_for_record(&record);
-    let password = resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
+    let password =
+        resolve_account_password(db, writer, account_id, encryption_key, &record).await?;
     let imap = imap_config_from_record(account_id, &record, username.clone(), password.clone())?;
     let smtp = smtp_config_from_record(account_id, &record, username, password)?;
     Ok(ImapAndSmtpConfig { imap, smtp })
@@ -366,15 +372,15 @@ mod tests {
 
     #[test]
     fn test_endpoint_host_port_parses_mock_endpoint() {
-        let parsed = parse_test_endpoint_host_port("127.0.0.1:2525", 25, "TEST")
-            .expect("parse endpoint");
+        let parsed =
+            parse_test_endpoint_host_port("127.0.0.1:2525", 25, "TEST").expect("parse endpoint");
         assert_eq!(parsed, ("127.0.0.1".to_string(), 2525));
     }
 
     #[test]
     fn test_endpoint_host_port_defaults_port() {
-        let parsed = parse_test_endpoint_host_port("imap://localhost", 143, "TEST")
-            .expect("parse endpoint");
+        let parsed =
+            parse_test_endpoint_host_port("imap://localhost", 143, "TEST").expect("parse endpoint");
         assert_eq!(parsed, ("localhost".to_string(), 143));
     }
 }

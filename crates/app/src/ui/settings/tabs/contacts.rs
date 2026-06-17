@@ -107,7 +107,9 @@ fn contact_account_selector<'a>(
 
     setting_row_with_description(
         "Account",
-        Some("Choose the account that owns this contact. Local contacts are stored only in Ratatoskr and are not synced to any provider."),
+        Some(
+            "Choose the account that owns this contact. Local contacts are stored only in Ratatoskr and are not synced to any provider.",
+        ),
         dropdown,
         SettingsMessage::ToggleSelect(SelectField::ContactAccount),
     )

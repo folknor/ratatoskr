@@ -164,10 +164,7 @@ pub enum RequestParseError {
     #[error("malformed json: {0}")]
     MalformedJson(#[from] serde_json::Error),
     #[error("invalid request: {message}")]
-    InvalidRequest {
-        id: Option<u64>,
-        message: String,
-    },
+    InvalidRequest { id: Option<u64>, message: String },
 }
 
 impl RequestParseError {
@@ -237,12 +234,8 @@ pub fn parse_client_message(line: &str) -> Result<ParsedClientMessage, RequestPa
     // dispatches into the Drop-class notification task pool.
     let id_present = raw.id.as_ref().is_some_and(|v| !matches!(v, Value::Null));
     if !id_present {
-        let notification = ClientNotification::from_method_params(method, &raw.params).map_err(
-            |message| RequestParseError::InvalidRequest {
-                id: None,
-                message,
-            },
-        )?;
+        let notification = ClientNotification::from_method_params(method, &raw.params)
+            .map_err(|message| RequestParseError::InvalidRequest { id: None, message })?;
         return Ok(ParsedClientMessage::Notification(notification));
     }
     let id = id_opt.ok_or_else(|| RequestParseError::InvalidRequest {
@@ -289,9 +282,7 @@ pub fn parse_service_message(line: &str) -> Result<ParsedServiceMessage, Request
         (None, None) if raw.error.is_some() => {
             // Parse-error response from the Service: id is null/absent,
             // error is present. Surface it with id=None.
-            let error = raw
-                .error
-                .expect("guarded by the arm condition");
+            let error = raw.error.expect("guarded by the arm condition");
             Ok(ParsedServiceMessage::Response {
                 id: None,
                 response: ServiceResponse::Error(error),
@@ -456,11 +447,9 @@ mod tests {
             // capacity backpressures the producer, so we never have more
             // than a few chunks in flight, but the cumulative payload is
             // 1 MiB - far past the 64 KiB cap.
-            let next = tokio::time::timeout(
-                std::time::Duration::from_millis(200),
-                lines.next_line(),
-            )
-            .await;
+            let next =
+                tokio::time::timeout(std::time::Duration::from_millis(200), lines.next_line())
+                    .await;
             peak = peak.max(lines.buffer_len());
             match next {
                 Ok(Err(FrameError::TooLarge)) => {

@@ -58,8 +58,8 @@ pub struct AttachmentCacheSizeParams {}
 /// fresh-enough rather than authoritative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentCacheSizeAck {
-    pub live_bytes:        u64,
-    pub tombstoned_bytes:  u64,
+    pub live_bytes: u64,
+    pub tombstoned_bytes: u64,
 }
 
 /// Attachments roadmap Phase 8a: emitted at the end of every
@@ -75,14 +75,16 @@ pub struct AttachmentCacheSizeAck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvictionCompleted {
     pub service_generation: u32,
-    pub trigger:            String,
-    pub blobs_tombstoned:   u64,
-    pub pages_walked:       u64,
-    pub superseded:         bool,
+    pub trigger: String,
+    pub blobs_tombstoned: u64,
+    pub pages_walked: u64,
+    pub superseded: bool,
 }
 
 impl crate::notification::WithGeneration for EvictionCompleted {
-    fn generation(&self) -> u32 { self.service_generation }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
     fn set_generation(&mut self, generation: u32) {
         self.service_generation = generation;
     }
@@ -104,7 +106,7 @@ pub struct AttachmentClearCacheParams {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentClearCacheAck {
     pub blobs_tombstoned: u64,
-    pub bytes_reclaimed:  u64,
+    pub bytes_reclaimed: u64,
 }
 
 /// Attachments roadmap Phase 8b: physical GC pack-repack completion.
@@ -113,14 +115,16 @@ pub struct AttachmentClearCacheAck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GcCompleted {
     pub service_generation: u32,
-    pub trigger:            String,
-    pub packs_compacted:    u32,
-    pub blobs_dropped:      u64,
-    pub bytes_reclaimed:    u64,
+    pub trigger: String,
+    pub packs_compacted: u32,
+    pub blobs_dropped: u64,
+    pub bytes_reclaimed: u64,
 }
 
 impl crate::notification::WithGeneration for GcCompleted {
-    fn generation(&self) -> u32 { self.service_generation }
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
     fn set_generation(&mut self, generation: u32) {
         self.service_generation = generation;
     }

@@ -50,17 +50,17 @@ pub(crate) fn extract_docx(bytes: &[u8]) -> ExtractionOutcome {
         Err(o) => return o,
     };
     match collect_text_from_entry(&mut archive, "word/document.xml", &[b"t"]) {
-        Ok(out) if out.text.trim().is_empty() => {
-            ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent }
-        }
+        Ok(out) if out.text.trim().is_empty() => ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        },
         Ok(out) => ExtractionOutcome::Indexed { text: out.text },
-        Err(EntryError::NotFound) => {
-            ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent }
-        }
+        Err(EntryError::NotFound) => ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        },
         Err(EntryError::Read(e)) => ExtractionOutcome::Failed { error: e },
-        Err(EntryError::ZipBomb) => {
-            ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb }
-        }
+        Err(EntryError::ZipBomb) => ExtractionOutcome::Skipped {
+            reason: SkipReason::ZipBomb,
+        },
     }
 }
 
@@ -86,7 +86,9 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
         Err(EntryError::NotFound) => {}
         Err(EntryError::Read(e)) => return ExtractionOutcome::Failed { error: e },
         Err(EntryError::ZipBomb) => {
-            return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
+            return ExtractionOutcome::Skipped {
+                reason: SkipReason::ZipBomb,
+            };
         }
     }
 
@@ -100,7 +102,9 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
 
     for name in sheet_names {
         if budget == 0 {
-            return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
+            return ExtractionOutcome::Skipped {
+                reason: SkipReason::ZipBomb,
+            };
         }
         match collect_text_from_entry_bounded(&mut archive, &name, &[b"t"], budget) {
             Ok(out) => {
@@ -110,13 +114,17 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
             Err(EntryError::NotFound) => {}
             Err(EntryError::Read(e)) => return ExtractionOutcome::Failed { error: e },
             Err(EntryError::ZipBomb) => {
-                return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
+                return ExtractionOutcome::Skipped {
+                    reason: SkipReason::ZipBomb,
+                };
             }
         }
     }
 
     if combined.trim().is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
     ExtractionOutcome::Indexed { text: combined }
 }
@@ -135,14 +143,18 @@ pub(crate) fn extract_pptx(bytes: &[u8]) -> ExtractionOutcome {
         .collect();
 
     if slide_names.is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
 
     let mut combined = String::new();
     let mut budget = MAX_TOTAL_DECOMPRESSED;
     for name in slide_names {
         if budget == 0 {
-            return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
+            return ExtractionOutcome::Skipped {
+                reason: SkipReason::ZipBomb,
+            };
         }
         match collect_text_from_entry_bounded(&mut archive, &name, &[b"t"], budget) {
             Ok(out) => {
@@ -152,13 +164,17 @@ pub(crate) fn extract_pptx(bytes: &[u8]) -> ExtractionOutcome {
             Err(EntryError::NotFound) => {}
             Err(EntryError::Read(e)) => return ExtractionOutcome::Failed { error: e },
             Err(EntryError::ZipBomb) => {
-                return ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb };
+                return ExtractionOutcome::Skipped {
+                    reason: SkipReason::ZipBomb,
+                };
             }
         }
     }
 
     if combined.trim().is_empty() {
-        return ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent };
+        return ExtractionOutcome::Skipped {
+            reason: SkipReason::EmptyContent,
+        };
     }
     ExtractionOutcome::Indexed { text: combined }
 }
@@ -172,9 +188,7 @@ enum EntryError {
 /// Open an OOXML archive after a sanity-check on the central
 /// directory's declared total uncompressed size. Catches archives
 /// that openly admit to being huge before we read any payload bytes.
-fn open_with_size_check(
-    bytes: &[u8],
-) -> Result<zip::ZipArchive<Cursor<&[u8]>>, ExtractionOutcome> {
+fn open_with_size_check(bytes: &[u8]) -> Result<zip::ZipArchive<Cursor<&[u8]>>, ExtractionOutcome> {
     let cursor = Cursor::new(bytes);
     let mut archive = match zip::ZipArchive::new(cursor) {
         Ok(a) => a,
@@ -209,11 +223,15 @@ fn open_with_size_check(
         match claimed_total.checked_add(entry_size) {
             Some(t) => claimed_total = t,
             None => {
-                return Err(ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb });
+                return Err(ExtractionOutcome::Skipped {
+                    reason: SkipReason::ZipBomb,
+                });
             }
         }
         if claimed_total > MAX_TOTAL_DECOMPRESSED {
-            return Err(ExtractionOutcome::Skipped { reason: SkipReason::ZipBomb });
+            return Err(ExtractionOutcome::Skipped {
+                reason: SkipReason::ZipBomb,
+            });
         }
     }
 
@@ -365,8 +383,8 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut writer = ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             writer
                 .start_file("word/document.xml", opts)
                 .expect("start_file");
@@ -381,8 +399,8 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut writer = ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             for (name, body) in slides {
                 writer.start_file(*name, opts).expect("start_file");
                 writer.write_all(body.as_bytes()).expect("write");
@@ -397,8 +415,8 @@ mod tests {
         {
             let cursor = Cursor::new(&mut buf);
             let mut writer = ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             writer
                 .start_file("xl/sharedStrings.xml", opts)
                 .expect("start_file");
@@ -449,7 +467,12 @@ mod tests {
             writer.finish().expect("finish");
         }
         let outcome = extract_docx(&buf);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]
@@ -491,7 +514,12 @@ mod tests {
     fn pptx_no_slides_skips_empty() {
         let bytes = build_pptx(&[]);
         let outcome = extract_pptx(&bytes);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 
     #[test]
@@ -507,9 +535,7 @@ mod tests {
     <row><c t="inlineStr"><is><t>Inline value</t></is></c></row>
   </sheetData>
 </worksheet>"#;
-        let bytes = build_xlsx_with_shared_strings(shared, &[
-            ("xl/worksheets/sheet1.xml", sheet1),
-        ]);
+        let bytes = build_xlsx_with_shared_strings(shared, &[("xl/worksheets/sheet1.xml", sheet1)]);
         match extract_xlsx(&bytes) {
             ExtractionOutcome::Indexed { text } => {
                 assert!(text.contains("Apple"), "got {text:?}");
@@ -528,6 +554,11 @@ mod tests {
 </w:document>"#;
         let bytes = build_docx(body);
         let outcome = extract_docx(&bytes);
-        assert_eq!(outcome, ExtractionOutcome::Skipped { reason: SkipReason::EmptyContent });
+        assert_eq!(
+            outcome,
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::EmptyContent
+            }
+        );
     }
 }

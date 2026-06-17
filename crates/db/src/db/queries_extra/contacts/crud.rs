@@ -1,6 +1,6 @@
 use crate::db::FromRow;
-use crate::db::WriterPool;
 use crate::db::WriteTarget;
+use crate::db::WriterPool;
 use crate::db::types::DbContact;
 use rusqlite::{OptionalExtension, params};
 

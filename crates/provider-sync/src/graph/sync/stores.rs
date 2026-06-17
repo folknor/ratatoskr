@@ -11,7 +11,10 @@ use sync::progress as sync_progress;
 // Body store helper
 // ---------------------------------------------------------------------------
 
-pub(super) async fn store_bodies(body_store: &BodyStoreWriteState, messages: &[ParsedGraphMessage]) {
+pub(super) async fn store_bodies(
+    body_store: &BodyStoreWriteState,
+    messages: &[ParsedGraphMessage],
+) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,

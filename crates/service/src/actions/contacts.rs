@@ -96,24 +96,27 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     let db = ctx.write_db.clone();
     let inp = input.clone();
     let local_result = db
-        .with_write_mapped(move |conn| {
-            let source = inp.source.as_deref().unwrap_or("user");
-            db_upsert_contact_full(
-                conn,
-                UpsertContactParams {
-                    id: &inp.id,
-                    email: &inp.email,
-                    display_name: inp.display_name.as_deref(),
-                    email2: inp.email2.as_deref(),
-                    phone: inp.phone.as_deref(),
-                    company: inp.company.as_deref(),
-                    notes: inp.notes.as_deref(),
-                    account_id: inp.account_id.as_deref(),
-                    source,
-                },
-            )
-            .map_err(ActionError::db)
-        }, ActionError::db)
+        .with_write_mapped(
+            move |conn| {
+                let source = inp.source.as_deref().unwrap_or("user");
+                db_upsert_contact_full(
+                    conn,
+                    UpsertContactParams {
+                        id: &inp.id,
+                        email: &inp.email,
+                        display_name: inp.display_name.as_deref(),
+                        email2: inp.email2.as_deref(),
+                        phone: inp.phone.as_deref(),
+                        company: inp.company.as_deref(),
+                        notes: inp.notes.as_deref(),
+                        account_id: inp.account_id.as_deref(),
+                        source,
+                    },
+                )
+                .map_err(ActionError::db)
+            },
+            ActionError::db,
+        )
         .await;
 
     if let Err(e) = local_result {
@@ -179,11 +182,17 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     let db = ctx.write_db.clone();
     let cid = contact_id.to_string();
     let meta_result = db
-        .with_write_mapped(move |conn| {
-            db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(&conn.as_read(), &cid)
+        .with_write_mapped(
+            move |conn| {
+                db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(
+                    &conn.as_read(),
+                    &cid,
+                )
                 .map_err(ActionError::db)?
                 .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))
-        }, ActionError::db)
+            },
+            ActionError::db,
+        )
         .await;
 
     let meta = match meta_result {
@@ -261,15 +270,14 @@ async fn dispatch_write_back(
 ) -> Result<(), ActionError> {
     match source {
         "jmap" => {
-            let client =
-                jmap::client::JmapClient::from_account(
-                    &ctx.db,
-                    ctx.write_db.writer_pool(),
-                    account_id,
-                    &ctx.encryption_key,
-                )
-                    .await
-                    .map_err(ActionError::remote)?;
+            let client = jmap::client::JmapClient::from_account(
+                &ctx.db,
+                ctx.write_db.writer_pool(),
+                account_id,
+                &ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
             jmap::contacts_sync::jmap_contacts_push_update(
                 &client, server_id, phone, company, notes,
             )
@@ -292,23 +300,21 @@ async fn dispatch_write_back(
                 return Ok(()); // nothing to push
             }
 
-            let client =
-                gmail::client::GmailClient::from_account(
-                    &ctx.db,
-                    ctx.write_db.writer_pool(),
-                    account_id,
-                    ctx.encryption_key,
-                )
-                    .await
-                    .map_err(ActionError::remote)?;
+            let client = gmail::client::GmailClient::from_account(
+                &ctx.db,
+                ctx.write_db.writer_pool(),
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
             let body = build_google_contact_update_body(
                 phone, company, notes, "*", // etag "*" = skip optimistic locking
             );
             let field_mask = update_fields.join(",");
             let api_base = gmail::contacts::people_api_base();
-            let url = format!(
-                "{api_base}/{server_id}:updateContact?updatePersonFields={field_mask}",
-            );
+            let url =
+                format!("{api_base}/{server_id}:updateContact?updatePersonFields={field_mask}",);
             let _resp: serde_json::Value = client
                 .patch_absolute(&url, &body, &ctx.db)
                 .await
@@ -317,15 +323,14 @@ async fn dispatch_write_back(
             Ok(())
         }
         "graph" => {
-            let client =
-                graph::client::GraphClient::from_account(
-                    &ctx.db,
-                    ctx.write_db.writer_pool(),
-                    account_id,
-                    ctx.encryption_key,
-                )
-                    .await
-                    .map_err(ActionError::remote)?;
+            let client = graph::client::GraphClient::from_account(
+                &ctx.db,
+                ctx.write_db.writer_pool(),
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
             let body = build_graph_contact_update_body(phone, company, notes);
             client
                 .patch(&format!("/me/contacts/{server_id}"), &body, &ctx.db)
@@ -354,29 +359,27 @@ async fn dispatch_delete(
 ) -> Result<(), ActionError> {
     match source {
         "jmap" => {
-            let client =
-                jmap::client::JmapClient::from_account(
-                    &ctx.db,
-                    ctx.write_db.writer_pool(),
-                    account_id,
-                    &ctx.encryption_key,
-                )
-                    .await
-                    .map_err(ActionError::remote)?;
+            let client = jmap::client::JmapClient::from_account(
+                &ctx.db,
+                ctx.write_db.writer_pool(),
+                account_id,
+                &ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
             jmap_contact_delete(&client, server_id)
                 .await
                 .map_err(ActionError::remote)
         }
         "google" => {
-            let client =
-                gmail::client::GmailClient::from_account(
-                    &ctx.db,
-                    ctx.write_db.writer_pool(),
-                    account_id,
-                    ctx.encryption_key,
-                )
-                    .await
-                    .map_err(ActionError::remote)?;
+            let client = gmail::client::GmailClient::from_account(
+                &ctx.db,
+                ctx.write_db.writer_pool(),
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
             let api_base = gmail::contacts::people_api_base();
             let url = format!("{api_base}/{server_id}:deleteContact");
             client
@@ -387,15 +390,14 @@ async fn dispatch_delete(
             Ok(())
         }
         "graph" => {
-            let client =
-                graph::client::GraphClient::from_account(
-                    &ctx.db,
-                    ctx.write_db.writer_pool(),
-                    account_id,
-                    ctx.encryption_key,
-                )
-                    .await
-                    .map_err(ActionError::remote)?;
+            let client = graph::client::GraphClient::from_account(
+                &ctx.db,
+                ctx.write_db.writer_pool(),
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
             client
                 .delete(&format!("/me/contacts/{server_id}"), &ctx.db)
                 .await

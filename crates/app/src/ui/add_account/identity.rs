@@ -5,9 +5,7 @@ use service_api::{AccountCreateParams, AccountCredentials};
 use crate::ui::layout::*;
 use crate::ui::widgets;
 
-use super::state::{
-    AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard,
-};
+use super::state::{AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard};
 use super::views::{labeled_input, primary_button, titlecase};
 
 impl AddAccountWizard {
