@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use db::db::queries_extra::{LabelWriteRow, recompute_thread_labels_from_messages, upsert_labels};
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum KeywordProvider {
+pub enum KeywordProvider {
     Imap,
     Jmap,
 }
@@ -25,7 +25,7 @@ impl KeywordProvider {
     }
 }
 
-pub(crate) fn replace_message_keywords(
+pub fn replace_message_keywords(
     tx: &db::db::WriteTxn<'_>,
     provider: KeywordProvider,
     account_id: &str,
@@ -58,7 +58,7 @@ pub(crate) fn replace_message_keywords(
 /// provider mailboxes are folder-shaped and local label groups live in
 /// `thread_label_groups`. The destructive replace is therefore scoped to
 /// the whole thread_labels set for the thread.
-pub(crate) fn recompute_thread_keyword_labels(
+pub fn recompute_thread_keyword_labels(
     tx: &db::db::WriteTxn<'_>,
     provider: KeywordProvider,
     account_id: &str,

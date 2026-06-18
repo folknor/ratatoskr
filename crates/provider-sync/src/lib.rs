@@ -19,6 +19,7 @@
 //! is satisfied because the trait is local to this crate; the impl
 //! targets are foreign types from the provider crates.
 
+pub mod consumer_support;
 pub mod gmail;
 mod gmail_impl;
 pub mod graph;

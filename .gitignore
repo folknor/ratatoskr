@@ -3,6 +3,14 @@ research
 .plans
 .codex
 
+# Spec-loop transient artifacts (specs, design docs, review reports - never committed,
+# deleted at landing per orchestrate.md). The governing plan docs/bifrost-migration.md
+# is a sibling FILE and stays tracked.
+docs/bifrost-migration/
+
+# Python bytecode (codex wrapper scripts)
+scripts/__pycache__/
+
 # Environment variables & secrets
 .env
 .env.*

@@ -19,12 +19,14 @@ use service_api::{
     ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
     PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
-    SettingValue, SettingsSetParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
-    TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
-    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
-    WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
+    SettingValue, SettingsSetParams, TestBifrostArmHookParams, TestBifrostAttachParams,
+    TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestCrashAfterNWritesParams,
+    TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams,
+    TestSearchIndexParams, TestSeedAccountParams, TestSeedCachedAttachmentParams,
+    TestSeedRemoteAttachmentParams, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation, WireFolderId,
+    WireLabelGroupId, WireLabelId, WireMailOperation,
 };
 use std::collections::HashMap;
 use std::io::{BufWriter, Write as _};
@@ -2747,6 +2749,131 @@ fn request_params_from_lua(
                 params: TestStartSyncParams { account_id },
             })
         }
+        "TestBifrostAttach" | "test.bifrost_attach" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestBifrostAttach requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestBifrostAttach requires params.account_id"))?;
+            let provider_kind = match get_string_field(state, params_idx, "provider_kind")?
+                .ok_or_else(|| {
+                    lua_error_message("TestBifrostAttach requires params.provider_kind")
+                })?
+                .as_str()
+            {
+                "gmail" | "Gmail" => TestBifrostProviderKind::Gmail,
+                "graph" | "Graph" => TestBifrostProviderKind::Graph,
+                "imap" | "Imap" | "IMAP" => TestBifrostProviderKind::Imap,
+                "jmap" | "Jmap" | "JMAP" => TestBifrostProviderKind::Jmap,
+                other => {
+                    return Err(lua_error_message(format!(
+                        "unknown TestBifrostAttach provider_kind {other:?}"
+                    )));
+                }
+            };
+            Ok(RequestParams::TestBifrostAttach {
+                params: TestBifrostAttachParams {
+                    account_id,
+                    provider_kind,
+                    detach_on_complete: get_bool_field(state, params_idx, "detach_on_complete")?
+                        .unwrap_or(true),
+                },
+            })
+        }
+        "TestBifrostInjectBatch" | "test.bifrost_inject_batch" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestBifrostInjectBatch requires params table",
+                ));
+            }
+            let account_id =
+                get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
+                    lua_error_message("TestBifrostInjectBatch requires params.account_id")
+                })?;
+            let session_id =
+                get_number_field(state, params_idx, "session_id")?.ok_or_else(|| {
+                    lua_error_message("TestBifrostInjectBatch requires params.session_id")
+                })?;
+            let scope = get_string_field(state, params_idx, "scope")?
+                .unwrap_or_else(|| "account".to_string());
+            Ok(RequestParams::TestBifrostInjectBatch {
+                params: service_api::TestBifrostInjectBatchParams {
+                    account_id,
+                    session_id: session_id as u64,
+                    scope,
+                    checkpoint: get_byte_array_field(state, params_idx, "checkpoint")?,
+                    messages: get_bifrost_messages_field(state, params_idx, "messages")?,
+                    item_outcomes: get_bifrost_outcomes_field(state, params_idx, "item_outcomes")?,
+                },
+            })
+        }
+        "TestBifrostArmHook" | "test.bifrost_arm_hook" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestBifrostArmHook requires params table",
+                ));
+            }
+            let account_id =
+                get_string_field(state, params_idx, "account_id")?.ok_or_else(|| {
+                    lua_error_message("TestBifrostArmHook requires params.account_id")
+                })?;
+            let top = state.get_top();
+            state.push_string("hook");
+            state.get_table(params_idx)?;
+            let hook_idx = state.get_top() as isize;
+            if state.typ(hook_idx) != LuaType::Table {
+                return Err(lua_error_message(
+                    "TestBifrostArmHook requires params.hook table",
+                ));
+            }
+            let hook = match get_string_field(state, hook_idx, "kind")?
+                .ok_or_else(|| lua_error_message("TestBifrostArmHook requires hook.kind"))?
+                .as_str()
+            {
+                "stall_consumer" | "StallConsumer" => {
+                    let after_ms =
+                        get_number_field(state, hook_idx, "after_ms")?.ok_or_else(|| {
+                            lua_error_message("TestBifrostArmHook StallConsumer requires after_ms")
+                        })?;
+                    TestBifrostHook::StallConsumer {
+                        after_ms: after_ms as u64,
+                    }
+                }
+                "crash_before_ack" | "CrashBeforeAck" => TestBifrostHook::CrashBeforeAck,
+                "crash_after_ack_no_sentinel" | "CrashAfterAckNoSentinel" => {
+                    TestBifrostHook::CrashAfterAckNoSentinel
+                }
+                other => {
+                    return Err(lua_error_message(format!(
+                        "unknown TestBifrostArmHook kind {other:?}"
+                    )));
+                }
+            };
+            state.set_top(top as isize);
+            Ok(RequestParams::TestBifrostArmHook {
+                params: TestBifrostArmHookParams { account_id, hook },
+            })
+        }
+        "TestBifrostProbe" | "test.bifrost_probe" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestBifrostProbe requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestBifrostProbe requires params.account_id"))?;
+            Ok(RequestParams::TestBifrostProbe {
+                params: TestBifrostProbeParams {
+                    account_id,
+                    scope: get_string_field(state, params_idx, "scope")?
+                        .unwrap_or_else(|| "account".to_string()),
+                    seen_address: get_string_field(state, params_idx, "seen_address")?,
+                    searchable_message_id: get_string_field(
+                        state,
+                        params_idx,
+                        "searchable_message_id",
+                    )?,
+                },
+            })
+        }
         "TestQueryDbState" | "test.query_db_state" => {
             let params = if state.get_top() >= params_idx as usize
                 && state.typ(params_idx) != LuaType::Nil
@@ -3872,6 +3999,100 @@ fn get_string_array_field(
     }
     state.set_top(top as isize);
     Ok(values)
+}
+
+fn get_byte_array_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Option<Vec<u8>>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    if state.typ(-1) == LuaType::Nil {
+        state.set_top(top as isize);
+        return Ok(None);
+    }
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message(format!("{key} must be a table")));
+    }
+    let values_idx = state.get_top() as isize;
+    let len = state.table_len(values_idx);
+    let mut values = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(values_idx)?;
+        values.push(state.to_number(-1)? as u8);
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(Some(values))
+}
+
+fn get_bifrost_messages_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Vec<service_api::TestBifrostSyntheticMessage>> {
+    let top = state.get_top();
+    state.push_string(key);
+    state.get_table(table_idx)?;
+    if state.typ(-1) == LuaType::Nil {
+        state.set_top(top as isize);
+        return Ok(Vec::new());
+    }
+    if state.typ(-1) != LuaType::Table {
+        state.set_top(top as isize);
+        return Err(lua_error_message(format!("{key} must be a table")));
+    }
+    let values_idx = state.get_top() as isize;
+    let len = state.table_len(values_idx);
+    let mut messages = Vec::with_capacity(len);
+    for i in 1..=len {
+        state.push_number(i as f64);
+        state.get_table(values_idx)?;
+        let message_idx = state.get_top() as isize;
+        messages.push(service_api::TestBifrostSyntheticMessage {
+            id: get_string_field(state, message_idx, "id")?
+                .ok_or_else(|| lua_error_message("bifrost message requires id"))?,
+            thread_id: get_string_field(state, message_idx, "thread_id")?,
+            subject: get_string_field(state, message_idx, "subject")?.unwrap_or_default(),
+            from_addr: get_string_field(state, message_idx, "from_addr")?.unwrap_or_default(),
+            to_addrs: get_string_array_field(state, message_idx, "to_addrs")?,
+            folder_ids: get_string_array_field(state, message_idx, "folder_ids")?,
+            label_ids: get_string_array_field(state, message_idx, "label_ids")?,
+            keywords: get_string_array_field(state, message_idx, "keywords")?,
+            raw_body: get_string_field(state, message_idx, "raw_body")?
+                .unwrap_or_default()
+                .into_bytes(),
+        });
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(messages)
+}
+
+fn get_bifrost_outcomes_field(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Vec<service_api::TestBifrostItemOutcome>> {
+    let values = get_string_array_field(state, table_idx, key)?;
+    values
+        .into_iter()
+        .map(|value| match value.as_str() {
+            "succeeded" | "Succeeded" => Ok(service_api::TestBifrostItemOutcome::Succeeded),
+            "degraded_body" | "DegradedBody" => {
+                Ok(service_api::TestBifrostItemOutcome::DegradedBody)
+            }
+            "failed" | "Failed" => Ok(service_api::TestBifrostItemOutcome::Failed),
+            "uncertain" | "Uncertain" => Ok(service_api::TestBifrostItemOutcome::Uncertain),
+            other => Err(lua_error_message(format!(
+                "unknown bifrost item outcome {other:?}"
+            ))),
+        })
+        .collect()
 }
 
 fn resource_id(state: &mut State, idx: isize) -> dellingr::Result<u64> {

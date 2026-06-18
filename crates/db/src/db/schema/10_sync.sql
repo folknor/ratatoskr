@@ -67,6 +67,14 @@ CREATE TABLE IF NOT EXISTS sync_cursors (
     PRIMARY KEY (account_id, kind, scope_key, partition_key)
 );
 
+CREATE TABLE IF NOT EXISTS seen_ingest_markers (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    scope_key TEXT NOT NULL,
+    checkpoint_blob BLOB NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (account_id, scope_key, checkpoint_blob)
+);
+
 CREATE TABLE IF NOT EXISTS shared_mailbox_sync_state (
     account_id TEXT NOT NULL,
     mailbox_id TEXT NOT NULL,

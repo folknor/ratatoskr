@@ -289,6 +289,15 @@ impl SyncRuntime {
         }
     }
 
+    pub(crate) fn bifrost_consumer_stores(&self) -> crate::bifrost::BifrostConsumerStores {
+        crate::bifrost::BifrostConsumerStores {
+            db: self.inner.db.clone(),
+            body_store: self.inner.body_write.clone(),
+            inline_images: self.inner.inline_write.clone(),
+            search: self.inner.search_write.clone(),
+        }
+    }
+
     /// Cancel an in-flight runner for `account_id`. Returns the active
     /// `run_id` so the caller can subscribe to `SyncCompleted` and
     /// await the cancellation outcome.

@@ -234,15 +234,64 @@ checkpoint cursors, so they move to bifrost's `SubscriptionRegistry` at B3b. For
 the full disposition table, the brick-by-brick gates, and the design rationale,
 read the B2 landing commit.
 
-- B3. The bifrost-sync consumer (center of gravity). Stand up the `SyncEngine`;
-  build the change-stream-to-DB writer (Change / Inventory / hydration to
-  `ProviderParsedMessage`-equivalent to body store, search index, messages
-  table); wire ack, control/pause handling, and the invalidation sink for
-  out-of-process push (Gmail Pub/Sub, Graph webhooks). Feed the unchanged
-  application sync layer. Cut sync over for all providers at once; delete the
-  `provider-sync` sync impls. Likely splits into B3a (engine plus change
-  translation), B3b (push plus invalidation), B3c (control / pause / recovery).
-  Needs A1-A3, B1-B2.
+B3a-infra (the engine harness plus the provider-agnostic durability framework)
+is done and its TODO entry is removed per repo convention; the B3a-cut-* / B3b /
+B3c sub-items below that name it as a prerequisite ("Needs B3a-infra", "Needs
+B3a") have that dependency satisfied. For what B3a-infra delivered - the
+`service`-owned `BifrostSyncEngine` (the first live wiring of B2's
+`SqliteCheckpointStore` into `SyncEngineBuilder::checkpoints`), the
+change-stream-to-DB consumer module (`crates/service/src/bifrost/consumer/`) with
+REAL writes to all four stores (main DB, body, inline-image, search), the
+`RecvError::Lagged` detach/re-attach recovery, search `flush_now`-before-ack,
+ack-last ordering, the single-txn replay-safety marker keyed `(account_id, scope,
+checkpoint)`, the per-item Succeeded / Failed / Uncertain hydration taxonomy, the
+baseline provider-agnostic membership write, the per-provider post-persist HOOK
+SEAM with only the shared `seen_ingest` arm filled, the one-shot
+attach/drive/detach driver with completion synthesis from
+`backfill_registry().snapshot()` plus a fixed-2s idle cadence, the
+`provider_sync::consumer_support` facade that makes the existing `provider-sync`
+helpers reachable without relocating them, the test-only attach path
+(`TestBifrost*` requests driven by synthetic injected batches), and the new
+`bifrost-consumer-*` durability + hot-path harness instruments - read the
+B3a-infra landing commit. It landed ADDITIVELY: it cuts no provider over, rewires
+no production sync, deletes nothing - legacy `provider-sync` stays live and
+authoritative for all four providers, and the consumer is reached only through
+the test-only attach path until a B3a-cut-* spec routes a real provider onto it.
+The HARD ordering constraint the cut specs inherit: no B3a-cut-* may splice the
+consumer's lag-recovery driver into production `run_sync` before B3c lands its
+backoff / pause-and-surface recovery (the recovery is correct-but-unbounded and
+can livelock a structurally-slow consumer), unless that cut carries its own
+gated bounded-retry stopgap.
+
+- B3. The bifrost-sync consumer (center of gravity), carved into per-provider
+  cutovers so no single landing carries the whole rip. The `SyncEngine` and the
+  change-stream-to-DB consumer that persists each batch (messages, body store,
+  inline images, search), flushes search, then acks the bifrost checkpoint LAST
+  are stood up by B3a-infra (done; see the done-note above). What remains is
+  routing each provider's production sync through that consumer and replicating
+  each provider's ACTUAL post-persist processing, which is asymmetric, not a
+  uniform pipeline: IMAP runs JWZ `threading::build_threads`;
+  JMAP / Graph / Gmail write the thread aggregate inline (`upsert_thread_aggregate`)
+  with per-provider membership strategies; `seen_ingest` is the one shared pass;
+  bundling, filters, smart labels, and `evaluate_notifications` have NO sync-time
+  callers today and stay unwired (whether they should auto-fire on new mail is a
+  separate product item, explicitly not B3's scope - feature-preserving means the
+  consumer reproduces today's behavior, not that it inherits an unwired gap as a
+  feature). The sub-items:
+  - B3a-cut-jmap / -graph / -gmail / -imap. One cutover per provider: route that
+    provider's sync through the consumer, delete that provider's `provider-sync`
+    impl, gated by that provider's sync-bench (`{jmap,graph,gmail,imap}-steady-state-delta`
+    held against baseline) plus the mandatory membership-row and threading-output
+    equality assertions. The per-provider coexistence dispatch is removed by the
+    final cutover. Each needs B3a-infra.
+  - B3b. Push plus invalidation. Wire the out-of-process push ingress (Gmail
+    Pub/Sub, Graph webhooks) and the invalidation sink; move `jmap_push_state` /
+    `graph_subscriptions` to bifrost's `SubscriptionRegistry`. Needs B3a.
+  - B3c. Control, pause, recovery. The keep-attached lifecycle for steady-state /
+    push, pause/resume, and `RecoveryClass` dispatch. Needs B3a, B3b.
+  The worked-out design - the per-provider seam survey, durability ordering, and
+  the lag / hydration / completion policies each sub-spec is carved from - was
+  produced during B3 spec review and is consumed by each sub-spec's author.
 - B4. Action pipeline rewire. Dispatch onto `Account` conveniences plus bulk
   mutations over `MutationTarget`; thread-to-message expansion; map
   `AccountError` to `OperationResult`; rebuild the pending-ops / retry journal
@@ -368,9 +417,12 @@ A spec that touches bifrost cites `./research/bifrost` as required reading for
 its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
-Track A is complete: the reading-reference `./research/bifrost` is at commit
-`ff56478` (the A8-closing commit), in sync with the `../bifrost` dependency
-checkout at the same commit. Each Track B spec records, in its ground
+Track A is complete at commit `ff56478` (the A8-closing commit). The current
+frozen reference is `aa9172d`: during B3's spec review a bifrost side-quest -
+making backfill checkpoints consumer-ack-deferred, required for at-least-once
+cold-start hydration (see § 2's side-quest protocol) - was landed in `../bifrost`,
+and both `./research/bifrost` and `../bifrost` were re-synced together to
+`aa9172d`. Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the

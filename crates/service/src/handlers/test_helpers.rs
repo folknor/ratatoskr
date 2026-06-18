@@ -9,24 +9,65 @@ use crate::boot::BootSharedState;
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 use service_api::{
-    HealthPingResponse, ServiceError, TestBifrostFactoryOpenAck, TestBifrostFactoryOpenParams,
-    TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow,
-    TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow,
-    TestDbContactRow, TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow,
-    TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
-    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
-    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
-    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
-    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
-    TestThreadReadParams,
+    HealthPingResponse, ServiceError, TestBifrostArmHookAck, TestBifrostArmHookParams,
+    TestBifrostAttachAck, TestBifrostAttachParams, TestBifrostDurableCursor,
+    TestBifrostFactoryOpenAck, TestBifrostFactoryOpenParams, TestBifrostHook,
+    TestBifrostInjectBatchAck, TestBifrostInjectBatchParams, TestBifrostItemOutcome,
+    TestBifrostProbeAck, TestBifrostProbeParams, TestBifrostProviderKind, TestCounterReadAck,
+    TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
+    TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
+    TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
+    TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
+    TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams,
+    TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
+    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
+    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadAck, TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tokio::sync::broadcast;
+
+static BIFROST_HOOKS: OnceLock<Arc<crate::bifrost::ConsumerHookRegistry>> = OnceLock::new();
+static BIFROST_SESSIONS: OnceLock<std::sync::Mutex<HashMap<u64, Arc<BifrostTestSession>>>> =
+    OnceLock::new();
+static NEXT_BIFROST_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+struct BifrostTestSession {
+    account_id: String,
+    db: service_state::WriteDbState,
+    inject_tx: broadcast::Sender<bifrost_sync::multiplexer::MultiplexerEvent>,
+    _engine: crate::bifrost::BifrostSyncEngine,
+}
+
+/// Per-account latch of the most-recent attach session's one-shot
+/// completion edge (spec 4.1.2), readable by `TestBifrostProbe`. The
+/// empty-stream "completes immediately" edge has no durable side effect to
+/// probe for (no batch, no cursor, no marker), so the driver's
+/// `ConsumerDriveReport.completed` is surfaced through this latch instead.
+/// Keyed by account id and installed by the attach handler so the probe can
+/// read it without holding the session (the drive task may have detached).
+static BIFROST_COMPLETION: OnceLock<
+    std::sync::Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
+> = OnceLock::new();
+
+fn bifrost_completion()
+-> &'static std::sync::Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>> {
+    BIFROST_COMPLETION.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn bifrost_hooks() -> Arc<crate::bifrost::ConsumerHookRegistry> {
+    Arc::clone(BIFROST_HOOKS.get_or_init(|| Arc::new(Default::default())))
+}
+
+fn bifrost_sessions() -> &'static std::sync::Mutex<HashMap<u64, Arc<BifrostTestSession>>> {
+    BIFROST_SESSIONS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
 
 pub(super) async fn panic_handle() -> Result<Value, ServiceError> {
     panic!("test-helpers: TestPanic handler intentional panic");
@@ -253,6 +294,453 @@ pub(super) async fn bifrost_factory_open_handle(
             })
         }
     }
+    .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn bifrost_arm_hook_handle(
+    params: TestBifrostArmHookParams,
+) -> Result<Value, ServiceError> {
+    let hook = match params.hook {
+        TestBifrostHook::StallConsumer { after_ms } => {
+            crate::bifrost::ConsumerHook::StallConsumer { after_ms }
+        }
+        TestBifrostHook::CrashBeforeAck => crate::bifrost::ConsumerHook::CrashBeforeAck,
+        TestBifrostHook::CrashAfterAckNoSentinel => {
+            crate::bifrost::ConsumerHook::CrashAfterAckNoSentinel
+        }
+    };
+    bifrost_hooks().arm(params.account_id, hook).await;
+    serde_json::to_value(TestBifrostArmHookAck { armed: true })
+        .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn bifrost_attach_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestBifrostAttachParams,
+) -> Result<Value, ServiceError> {
+    let read_db = boot_state.read_db_state().ok_or_else(|| {
+        ServiceError::Internal("test.bifrost_attach received before read DB was available".into())
+    })?;
+    let write_db = boot_state.write_db_state()?;
+    let sync_runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.bifrost_attach received before SyncRuntime was installed".into(),
+        )
+    })?;
+    let stores = sync_runtime.bifrost_consumer_stores();
+    let checkpoint_store =
+        crate::bifrost::SqliteCheckpointStore::new(write_db.writer_pool(), read_db.clone());
+    let harness = crate::bifrost::BifrostSyncEngine::build(checkpoint_store, None)
+        .map_err(|error| ServiceError::Internal(format!("build bifrost engine: {error}")))?;
+    let account_id = bifrost_types::AccountId(params.account_id.clone());
+    let provider = match params.provider_kind {
+        TestBifrostProviderKind::Gmail => crate::bifrost::BifrostProviderKind::Gmail,
+        TestBifrostProviderKind::Graph => crate::bifrost::BifrostProviderKind::Graph,
+        TestBifrostProviderKind::Imap => crate::bifrost::BifrostProviderKind::Imap,
+        TestBifrostProviderKind::Jmap => crate::bifrost::BifrostProviderKind::Jmap,
+    };
+    // Deliberate deviation from spec 4.4 "changes_capacity parity" (256):
+    // a smaller standee capacity lets the lag-recovery gate overflow the
+    // bounded broadcast with a manageable number of synthetic injects rather
+    // than 256+. The gate asserts Lagged recovery, which any bounded
+    // capacity smaller than the flood exercises identically; production
+    // fidelity of the exact overflow threshold is not what the gate pins.
+    const INJECT_CHANNEL_CAPACITY: usize = 16;
+    let (inject_tx, inject_rx) = broadcast::channel(INJECT_CHANNEL_CAPACITY);
+    let mut consumer = crate::bifrost::ChangeStreamConsumer::new(
+        harness.engine(),
+        account_id.clone(),
+        provider,
+        stores,
+    )
+    .with_checkpoint_store(harness.checkpoints())
+    .with_hooks(bifrost_hooks());
+    let completion_edge = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let task_edge = Arc::clone(&completion_edge);
+        tokio::spawn(async move {
+            match consumer.drive_injected_stream(inject_rx).await {
+                Ok(report) => {
+                    if report.completed {
+                        // Surface the one-shot completion edge (spec 4.1.2)
+                        // - this is the only observation of the empty-stream
+                        // "completes immediately" case, which has no durable
+                        // side effect for a probe to read otherwise.
+                        task_edge.store(true, Ordering::Relaxed);
+                    }
+                }
+                Err(error) => log::warn!("test bifrost injected consumer exited: {error}"),
+            }
+        });
+    }
+    bifrost_completion()
+        .lock()
+        .map_err(|error| ServiceError::Internal(format!("bifrost completion lock: {error}")))?
+        .insert(params.account_id.clone(), Arc::clone(&completion_edge));
+    let session_id = NEXT_BIFROST_SESSION_ID.fetch_add(1, Ordering::Relaxed);
+    let session = Arc::new(BifrostTestSession {
+        account_id: params.account_id,
+        db: write_db.clone(),
+        inject_tx,
+        _engine: harness,
+    });
+    bifrost_sessions()
+        .lock()
+        .map_err(|error| ServiceError::Internal(format!("bifrost session lock: {error}")))?
+        .insert(session_id, session);
+    serde_json::to_value(TestBifrostAttachAck {
+        session_id,
+        subscribed: true,
+        completed: false,
+        scopes_completed: 0,
+        batches_acked: 0,
+    })
+    .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn bifrost_inject_batch_handle(
+    params: TestBifrostInjectBatchParams,
+) -> Result<Value, ServiceError> {
+    let session = {
+        let sessions = bifrost_sessions()
+            .lock()
+            .map_err(|error| ServiceError::Internal(format!("bifrost session lock: {error}")))?;
+        sessions.get(&params.session_id).cloned()
+    }
+    .ok_or_else(|| ServiceError::InvalidParams {
+        method: "test.bifrost_inject_batch".into(),
+        message: format!("unknown bifrost session {}", params.session_id),
+    })?;
+    if session.account_id != params.account_id {
+        return Err(ServiceError::InvalidParams {
+            method: "test.bifrost_inject_batch".into(),
+            message: "session account_id mismatch".into(),
+        });
+    }
+    let scope = parse_bifrost_scope(&params.scope)?;
+    let checkpoint = params
+        .checkpoint
+        .clone()
+        .map(|bytes| synthetic_change_checkpoint(scope.clone(), bytes));
+    let checkpoint_blob = checkpoint.as_ref().map(bifrost_sync::encode_envelope);
+    let changes = params
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let forced_outcome = params
+                .item_outcomes
+                .get(index)
+                .copied()
+                .map(synthetic_outcome);
+            let synthetic = crate::bifrost::consumer::hydrate::SyntheticMessage {
+                id: message.id.clone(),
+                thread_id: message.thread_id.clone(),
+                subject: message.subject.clone(),
+                from_addr: message.from_addr.clone(),
+                to_addrs: message.to_addrs.clone(),
+                folder_ids: message.folder_ids.clone(),
+                label_ids: message.label_ids.clone(),
+                keywords: message.keywords.clone(),
+                raw_body: message.raw_body.clone(),
+                degraded_body: matches!(
+                    forced_outcome,
+                    Some(crate::bifrost::consumer::hydrate::SyntheticOutcome::DegradedBody)
+                ),
+                forced_outcome,
+            };
+            crate::bifrost::consumer::hydrate::encode_synthetic_message(&synthetic).map(|id| {
+                bifrost_types::Change::ObjectChange(bifrost_types::ObjectChange {
+                    id: bifrost_types::ObjectId(id),
+                    kind: bifrost_types::ObjectChangeKind::Created,
+                })
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ServiceError::Internal)?;
+    let hydrated = params
+        .item_outcomes
+        .iter()
+        .filter(|outcome| !matches!(outcome, TestBifrostItemOutcome::Failed))
+        .count()
+        .max(
+            params
+                .messages
+                .len()
+                .saturating_sub(params.item_outcomes.len()),
+        );
+    let blocked = params
+        .item_outcomes
+        .iter()
+        .any(|outcome| matches!(outcome, TestBifrostItemOutcome::Uncertain));
+    let batch = bifrost_types::Batch {
+        bytes_in: params
+            .messages
+            .iter()
+            .map(|message| u64::try_from(message.raw_body.len()).unwrap_or(u64::MAX))
+            .sum(),
+        checkpoint: checkpoint.clone(),
+        items: changes,
+        page_boundary: bifrost_types::PageBoundary::Page,
+        server_latency: Duration::from_millis(0),
+    };
+    let event = bifrost_sync::multiplexer::MultiplexerEvent {
+        scope: scope.clone(),
+        event: Arc::new(bifrost_types::SyncEvent::Batch(batch)),
+        checkpoint,
+    };
+    // A CrashBeforeAck hook exits the drive task between the search flush
+    // and the ack, so the cursor advance never lands. Read the armed hook
+    // BEFORE injecting (the consumer `take`s it while processing, so a
+    // post-send peek would race) and skip the cursor wait rather than block
+    // on a checkpoint the consumer deliberately withholds. `acked` still
+    // reports the INTENDED ack (checkpoint present, not Uncertain-blocked);
+    // the withheld case is distinguished by probing the (absent) cursor.
+    let ack_withheld_by_crash = bifrost_hooks().peek_withholds_ack(&params.account_id).await;
+    session.inject_tx.send(event).map_err(|error| {
+        ServiceError::Internal(format!("send bifrost synthetic batch: {error}"))
+    })?;
+    wait_for_bifrost_messages(&session.db, &params.account_id, &params.messages).await?;
+    if let Some(blob) = &checkpoint_blob
+        && !blocked
+        && !ack_withheld_by_crash
+    {
+        wait_for_bifrost_checkpoint(&session.db, &params.account_id, &scope, blob).await?;
+    }
+    serde_json::to_value(TestBifrostInjectBatchAck {
+        hydrated: hydrated.try_into().unwrap_or(u32::MAX),
+        persisted: hydrated.try_into().unwrap_or(u32::MAX),
+        acked: checkpoint_blob.is_some() && !blocked,
+        blocked,
+        checkpoint_blob,
+    })
+    .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+fn parse_bifrost_scope(scope: &str) -> Result<bifrost_types::CursorScope, ServiceError> {
+    match scope {
+        "account" | "Account" => Ok(bifrost_types::CursorScope::Account),
+        other => Err(ServiceError::InvalidParams {
+            method: "test.bifrost_inject_batch".into(),
+            message: format!("unsupported bifrost test scope {other:?}"),
+        }),
+    }
+}
+
+fn bifrost_probe_scope_key(scope: &bifrost_types::CursorScope) -> String {
+    match scope {
+        bifrost_types::CursorScope::Account => "account".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+fn synthetic_change_checkpoint(
+    scope: bifrost_types::CursorScope,
+    bytes: Vec<u8>,
+) -> bifrost_types::Checkpoint {
+    bifrost_types::Checkpoint::Change(bifrost_types::ChangeCursor {
+        scope,
+        server_state: bifrost_types::OpaqueChangeState {
+            protocol: bifrost_types::ProtocolKind::Jmap,
+            envelope_version: 1,
+            bytes,
+        },
+        advanced_through: None,
+        envelope_version: 1,
+    })
+}
+
+fn synthetic_outcome(
+    outcome: TestBifrostItemOutcome,
+) -> crate::bifrost::consumer::hydrate::SyntheticOutcome {
+    match outcome {
+        TestBifrostItemOutcome::Succeeded => {
+            crate::bifrost::consumer::hydrate::SyntheticOutcome::Succeeded
+        }
+        TestBifrostItemOutcome::DegradedBody => {
+            crate::bifrost::consumer::hydrate::SyntheticOutcome::DegradedBody
+        }
+        TestBifrostItemOutcome::Failed => {
+            crate::bifrost::consumer::hydrate::SyntheticOutcome::Failed
+        }
+        TestBifrostItemOutcome::Uncertain => {
+            crate::bifrost::consumer::hydrate::SyntheticOutcome::Uncertain
+        }
+    }
+}
+
+async fn wait_for_bifrost_messages(
+    db: &service_state::WriteDbState,
+    account_id: &str,
+    messages: &[service_api::TestBifrostSyntheticMessage],
+) -> Result<(), ServiceError> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let account_id = account_id.to_string();
+    let ids = messages
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<Vec<_>>();
+    for _ in 0..30 {
+        let account_id = account_id.clone();
+        let ids = ids.clone();
+        let present = db
+            .with_read(move |conn| {
+                let mut count = 0usize;
+                for id in &ids {
+                    let exists = conn
+                        .query_row(
+                            "SELECT 1 FROM messages WHERE account_id = ?1 AND id = ?2 LIMIT 1",
+                            rusqlite::params![account_id, id],
+                            |_| Ok(()),
+                        )
+                        .map(|()| true)
+                        .or_else(|error| match error {
+                            db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => {
+                                Ok(false)
+                            }
+                            other => Err(other.to_string()),
+                        })?;
+                    if exists {
+                        count = count.saturating_add(1);
+                    }
+                }
+                Ok(count)
+            })
+            .await
+            .map_err(ServiceError::Internal)?;
+        if present == messages.len() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(ServiceError::Internal(
+        "timed out waiting for bifrost synthetic messages".into(),
+    ))
+}
+
+async fn wait_for_bifrost_checkpoint(
+    db: &service_state::WriteDbState,
+    account_id: &str,
+    scope: &bifrost_types::CursorScope,
+    checkpoint_blob: &[u8],
+) -> Result<(), ServiceError> {
+    let account_id = account_id.to_string();
+    let scope_key = bifrost_probe_scope_key(scope);
+    let checkpoint_blob = checkpoint_blob.to_vec();
+    for _ in 0..30 {
+        let account_id = account_id.clone();
+        let scope_key = scope_key.clone();
+        let checkpoint_blob = checkpoint_blob.clone();
+        let present = db
+            .with_read(move |conn| {
+                conn.query_row(
+                    "SELECT 1 FROM sync_cursors \
+                     WHERE account_id = ?1 AND scope_key = ?2 AND checkpoint_blob = ?3 LIMIT 1",
+                    rusqlite::params![account_id, scope_key, checkpoint_blob],
+                    |_| Ok(()),
+                )
+                .map(|()| true)
+                .or_else(|error| match error {
+                    db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                    other => Err(other.to_string()),
+                })
+            })
+            .await
+            .map_err(ServiceError::Internal)?;
+        if present {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(ServiceError::Internal(
+        "timed out waiting for bifrost checkpoint".into(),
+    ))
+}
+
+pub(super) async fn bifrost_probe_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestBifrostProbeParams,
+) -> Result<Value, ServiceError> {
+    let db = boot_state.write_db_state()?;
+    let account_id = params.account_id.clone();
+    let scope_key = bifrost_probe_scope_key(&parse_bifrost_scope(&params.scope)?);
+    let seen_address = params.seen_address.clone();
+    let searchable_message_id = params.searchable_message_id.clone();
+    let (durable_cursor, times_sent_to, marker_rows, message_present) = db
+        .with_read(move |conn| {
+            let durable_cursor = conn
+                .query_row(
+                    "SELECT kind, scope_key, checkpoint_blob FROM sync_cursors \
+                     WHERE account_id = ?1 AND scope_key = ?2 \
+                     ORDER BY updated_at DESC LIMIT 1",
+                    rusqlite::params![account_id, scope_key],
+                    |row| {
+                        Ok(TestBifrostDurableCursor {
+                            kind: row.get(0)?,
+                            scope_key: row.get(1)?,
+                            checkpoint_blob: row.get(2)?,
+                        })
+                    },
+                )
+                .map(Some)
+                .or_else(|error| match error {
+                    db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    other => Err(other.to_string()),
+                })?;
+            let times_sent_to = if let Some(address) = seen_address {
+                match conn.query_row(
+                    "SELECT times_sent_to FROM seen_addresses \
+                     WHERE account_id = ?1 AND email = ?2 LIMIT 1",
+                    rusqlite::params![account_id, address],
+                    |row| row.get::<_, i64>(0),
+                ) {
+                    Ok(value) => Some(value),
+                    Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => None,
+                    Err(error) => return Err(error.to_string()),
+                }
+            } else {
+                None
+            };
+            let marker_rows: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM seen_ingest_markers WHERE account_id = ?1",
+                    rusqlite::params![account_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let message_present = if let Some(message_id) = searchable_message_id {
+                conn.query_row(
+                    "SELECT 1 FROM messages WHERE id = ?1 LIMIT 1",
+                    rusqlite::params![message_id],
+                    |_| Ok(()),
+                )
+                .map(|()| true)
+                .or_else(|error| match error {
+                    db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                    other => Err(other.to_string()),
+                })
+                .map(Some)?
+            } else {
+                None
+            };
+            Ok((durable_cursor, times_sent_to, marker_rows, message_present))
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    let completion_edge = bifrost_completion()
+        .lock()
+        .map_err(|error| ServiceError::Internal(format!("bifrost completion lock: {error}")))?
+        .get(&params.account_id)
+        .map(|edge| edge.load(Ordering::Relaxed));
+    serde_json::to_value(TestBifrostProbeAck {
+        durable_cursor,
+        times_sent_to,
+        is_searchable: message_present,
+        marker_rows: marker_rows.try_into().unwrap_or(u32::MAX),
+        completion_edge,
+    })
     .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 

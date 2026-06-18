@@ -30,6 +30,7 @@ types = { path = "../types" }
 # pref so this dep is unconditional.
 squeeze = { path = "../squeeze" }
 search = { path = "../search" }
+seen = { path = "../seen" }
 sync = { path = "../sync" }
 rusqlite.workspace = true
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }

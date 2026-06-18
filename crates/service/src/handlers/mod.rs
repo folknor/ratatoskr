@@ -200,6 +200,18 @@ pub(crate) async fn dispatch(
         RequestParams::TestStartSync { params } => {
             test_helpers::start_sync_handle(&boot_state, params).await
         }
+        RequestParams::TestBifrostAttach { params } => {
+            test_helpers::bifrost_attach_handle(&boot_state, params).await
+        }
+        RequestParams::TestBifrostInjectBatch { params } => {
+            test_helpers::bifrost_inject_batch_handle(params).await
+        }
+        RequestParams::TestBifrostArmHook { params } => {
+            test_helpers::bifrost_arm_hook_handle(params).await
+        }
+        RequestParams::TestBifrostProbe { params } => {
+            test_helpers::bifrost_probe_handle(&boot_state, params).await
+        }
         RequestParams::TestQueryDbState { params } => {
             test_helpers::query_db_state_handle(&boot_state, params).await
         }

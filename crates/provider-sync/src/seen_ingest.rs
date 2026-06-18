@@ -2,7 +2,7 @@ use db::db::WriteConn;
 use rusqlite::params;
 use service_state::WriteDbState;
 
-pub(crate) async fn ingest_from_messages<T: seen::MessageAddresses + Send + Sync + 'static>(
+pub async fn ingest_from_messages<T: seen::MessageAddresses + Send + Sync + 'static>(
     write_db: &WriteDbState,
     account_id: &str,
     messages: &[T],

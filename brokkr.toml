@@ -155,3 +155,42 @@ equal_to_baseline = true
 
 [ratatoskr.gate.jmap_steady_state_delta.metrics."meta.correct"]
 equal = 1
+
+[ratatoskr.gate.bifrost-consumer-hot-path]
+script = "crates/app/tests/sync-harness/bifrost-consumer-hot-path.lua"
+baseline_label = "2026-06-18 B3a bifrost consumer hot-path baseline"
+
+[ratatoskr.gate.bifrost-consumer-hot-path.baseline]
+plantasjen = "a70721e2b67b4516acd93deff79eaa51"
+
+[ratatoskr.gate.bifrost-consumer-hot-path.metrics.elapsed_ms]
+# MARKED measurement: the script emits SYNC_START/SYNC_END around exactly the
+# consumer draining the injected synthetic batch (inject -> durable ack ->
+# probe-confirmed drain), so `elapsed_ms` here is the hot-path duration ONLY,
+# NOT whole-run wall-clock (Service spawn + mock setup are outside the markers).
+# Relative catches gross throughput regressions; the absolute cap is the real
+# hang-catcher. The marked consumer-drain window (200 synthetic messages through
+# hydrate -> write -> post-persist -> flush_now -> ack) is sub-second but has
+# ~35% best-of-3 sampling noise (observed 228-331ms; flush_now/SQLite fsync
+# timing), so the relative bound is deliberately loose - it flags a real
+# regression (>60% slower), not sampling jitter. Absolute max=2000 backstops hangs.
+max_relative = 1.6
+max = 2000
+
+[ratatoskr.gate.bifrost-consumer-hot-path.metrics.success]
+equal = 1
+
+[ratatoskr.gate.bifrost-consumer-hot-path.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.bifrost-consumer-hot-path.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.bifrost-consumer-hot-path.metrics."meta.messages_per_second"]
+min = 0
+
+[ratatoskr.gate.bifrost-consumer-hot-path.metrics."meta.marker_rows"]
+# One acked advancing checkpoint leaves exactly one replay-safety marker
+# (the recent-window prune keeps it; 1 < 256). A regression that fails to
+# write the marker (0) or writes one per message (200) is caught here.
+equal = 1

@@ -275,6 +275,139 @@ pub struct TestStartSyncParams {
     pub account_id: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestBifrostProviderKind {
+    Gmail,
+    Graph,
+    Imap,
+    Jmap,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostAttachParams {
+    pub account_id: String,
+    pub provider_kind: TestBifrostProviderKind,
+    #[serde(default)]
+    pub detach_on_complete: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostAttachAck {
+    pub session_id: u64,
+    pub subscribed: bool,
+    pub completed: bool,
+    pub scopes_completed: u32,
+    pub batches_acked: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostSyntheticMessage {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    pub subject: String,
+    pub from_addr: String,
+    #[serde(default)]
+    pub to_addrs: Vec<String>,
+    #[serde(default)]
+    pub folder_ids: Vec<String>,
+    #[serde(default)]
+    pub label_ids: Vec<String>,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub raw_body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestBifrostItemOutcome {
+    Succeeded,
+    DegradedBody,
+    Failed,
+    Uncertain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostInjectBatchParams {
+    pub account_id: String,
+    pub session_id: u64,
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<Vec<u8>>,
+    #[serde(default)]
+    pub messages: Vec<TestBifrostSyntheticMessage>,
+    #[serde(default)]
+    pub item_outcomes: Vec<TestBifrostItemOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostInjectBatchAck {
+    pub hydrated: u32,
+    pub persisted: u32,
+    pub acked: bool,
+    pub blocked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_blob: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum TestBifrostHook {
+    StallConsumer { after_ms: u64 },
+    CrashBeforeAck,
+    CrashAfterAckNoSentinel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostArmHookParams {
+    pub account_id: String,
+    pub hook: TestBifrostHook,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostArmHookAck {
+    pub armed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostProbeParams {
+    pub account_id: String,
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seen_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub searchable_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostProbeAck {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_cursor: Option<TestBifrostDurableCursor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub times_sent_to: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_searchable: Option<bool>,
+    pub marker_rows: u32,
+    /// The one-shot completion edge (spec 4.1.2) the consumer's drive loop
+    /// synthesized for the most recent attach session of this account, or
+    /// `None` when no session has been observed. `Some(true)` is the edge a
+    /// caught-up kick reaches - including the empty-stream "completes
+    /// immediately" case where no batch was ever injected. Surfaced here so
+    /// the completion-cadence gate can assert the edge fires (and the
+    /// empty-stream edge specifically) without a real provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_edge: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostDurableCursor {
+    pub kind: String,
+    pub scope_key: String,
+    pub checkpoint_blob: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1091,6 +1224,22 @@ pub enum RequestParams {
     TestStartSync {
         params: TestStartSyncParams,
     },
+    /// Harness-only Bifrost engine attach plus consumer drive.
+    TestBifrostAttach {
+        params: TestBifrostAttachParams,
+    },
+    /// Harness-only synthetic Bifrost batch injection.
+    TestBifrostInjectBatch {
+        params: TestBifrostInjectBatchParams,
+    },
+    /// Harness-only one-shot Bifrost consumer hook.
+    TestBifrostArmHook {
+        params: TestBifrostArmHookParams,
+    },
+    /// Harness-only Bifrost consumer durability probe.
+    TestBifrostProbe {
+        params: TestBifrostProbeParams,
+    },
     /// Reads a small DB snapshot for sync-harness assertions.
     TestQueryDbState {
         params: TestQueryDbStateParams,
@@ -1195,6 +1344,10 @@ impl RequestParams {
             Self::TestThreadRead { .. } => "test.thread_read",
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             Self::TestStartSync { .. } => "test.start_sync",
+            Self::TestBifrostAttach { .. } => "test.bifrost_attach",
+            Self::TestBifrostInjectBatch { .. } => "test.bifrost_inject_batch",
+            Self::TestBifrostArmHook { .. } => "test.bifrost_arm_hook",
+            Self::TestBifrostProbe { .. } => "test.bifrost_probe",
             Self::TestQueryDbState { .. } => "test.query_db_state",
             Self::TestSearchIndex { .. } => "test.search_index",
             Self::TestDelayNextWrite { .. } => "test.delay_next_write",
@@ -1326,6 +1479,10 @@ impl RequestParams {
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
+            | Self::TestBifrostAttach { .. }
+            | Self::TestBifrostInjectBatch { .. }
+            | Self::TestBifrostArmHook { .. }
+            | Self::TestBifrostProbe { .. }
             | Self::TestQueryDbState { .. }
             | Self::TestSearchIndex { .. }
             | Self::TestDelayNextWrite { .. }
@@ -1423,6 +1580,7 @@ impl RequestParams {
             | Self::TestCounterRead { .. }
             | Self::TestThreadRead { .. }
             | Self::TestPendingOpsRead { .. }
+            | Self::TestBifrostProbe { .. }
             | Self::TestQueryDbState { .. }
             | Self::TestSearchIndex { .. }
             | Self::TestQueryBlobTombstoneState { .. }
@@ -1434,11 +1592,13 @@ impl RequestParams {
             | Self::TestSeedCachedAttachment { .. }
             | Self::TestSeedRemoteAttachment { .. }
             | Self::TestRemoveCachedAttachmentBytes { .. }
+            | Self::TestBifrostArmHook { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
-            Self::TestStartSync { .. } | Self::TestBifrostFactoryOpen { .. } => {
-                Idempotency::Conditional
-            }
+            Self::TestStartSync { .. }
+            | Self::TestBifrostFactoryOpen { .. }
+            | Self::TestBifrostAttach { .. }
+            | Self::TestBifrostInjectBatch { .. } => Idempotency::Conditional,
         }
     }
 
@@ -1552,6 +1712,12 @@ impl RequestParams {
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
+            Self::TestBifrostAttach { params } => serde_json::json!({ "params": params }),
+            Self::TestBifrostInjectBatch { params } => {
+                serde_json::json!({ "params": params })
+            }
+            Self::TestBifrostArmHook { params } => serde_json::json!({ "params": params }),
+            Self::TestBifrostProbe { params } => serde_json::json!({ "params": params }),
             Self::TestQueryDbState { params } => serde_json::json!({ "params": params }),
             Self::TestSearchIndex { params } => serde_json::json!({ "params": params }),
             Self::TestDelayNextWrite { params } => {
@@ -2090,6 +2256,42 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.start_sync params: {e}"))?;
                 Ok(Self::TestStartSync { params: p.params })
+            }
+            "test.bifrost_attach" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestBifrostAttachParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.bifrost_attach params: {e}"))?;
+                Ok(Self::TestBifrostAttach { params: p.params })
+            }
+            "test.bifrost_inject_batch" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestBifrostInjectBatchParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.bifrost_inject_batch params: {e}"))?;
+                Ok(Self::TestBifrostInjectBatch { params: p.params })
+            }
+            "test.bifrost_arm_hook" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestBifrostArmHookParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.bifrost_arm_hook params: {e}"))?;
+                Ok(Self::TestBifrostArmHook { params: p.params })
+            }
+            "test.bifrost_probe" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestBifrostProbeParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.bifrost_probe params: {e}"))?;
+                Ok(Self::TestBifrostProbe { params: p.params })
             }
             "test.query_db_state" => {
                 #[derive(Deserialize)]
