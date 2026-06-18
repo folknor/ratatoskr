@@ -49,8 +49,9 @@ const SCHEMA_V100: &str = concat!(
     include_str!("schema/09_security.sql"),
     "\n",
     // folder_sync_state, jmap_sync_state, graph_folder_delta_tokens,
-    // graph_shared_mailbox_delta_tokens, shared_mailbox_sync_state,
-    // jmap_push_state, graph_subscriptions, pending_operations
+    // graph_shared_mailbox_delta_tokens, sync_cursors,
+    // shared_mailbox_sync_state, jmap_push_state, graph_subscriptions,
+    // pending_operations
     include_str!("schema/10_sync.sql"),
     "\n",
     // public_folders, public_folder_items, public_folder_pins,
@@ -258,6 +259,23 @@ mod tests {
             .expect("query");
         let expected = MIGRATIONS.last().expect("at least one migration").version;
         assert_eq!(max_ver, expected);
+    }
+
+    #[test]
+    fn sync_cursors_table_exists() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("migrations should succeed");
+
+        let count: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table' AND name='sync_cursors'",
+                [],
+                |row| row.get("cnt"),
+            )
+            .expect("query");
+        assert_eq!(count, 1);
     }
 
     /// Locks in the per-migration progress contract: each migration produces

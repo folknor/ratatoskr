@@ -210,22 +210,30 @@ contradicting § 3's "the app stays bifrost-free; it depends on `rtsk` plus
 writer-side crates; only ratatoskr-owned DTOs and the `service`-to-`app` wire
 types cross the core/UI boundary.
 
-- B2. CheckpointStore plus cursor schema. Implement bifrost's `CheckpointStore`
-  over a new opaque cursor table; migrate off `jmap_sync_state` /
-  `folder_sync_state` / `graph_*_delta_tokens`. Needs B1.
+B2 (CheckpointStore plus cursor schema) is done and its TODO entry is removed per
+repo convention; the items below that name it as a prerequisite ("Needs B1-B2",
+"B1 to B2 to B3") have that dependency satisfied. It landed additively: a new
+opaque `sync_cursors` table in `crates/db/src/db/schema/10_sync.sql`, the
+service-side `SqliteCheckpointStore` over bifrost's own `encode_envelope` /
+`decode_envelope` codec (`crates/service/src/bifrost/checkpoint_store.rs`), and a
+table-by-table disposition decision for every protocol/sync-state table. The
+store and table sit dormant - written by no one, read by no one - until B3 wires
+the engine to them; no legacy cursor table or writer was removed. The disposition
+enumeration is the reconciliation source for the later deletion cuts: it pins,
+for each of `folder_sync_state`, `jmap_sync_state`, `graph_folder_delta_tokens`,
+`graph_contact_delta_tokens`, `graph_shared_mailbox_delta_tokens`,
+`public_folder_sync_state`, `jmap_push_state`, `graph_subscriptions`,
+`shared_mailbox_sync_state`, `public_folder_content_routing`, `pending_operations`,
+and `clean_shutdown_cursors`, whether it retires into the opaque envelope (B3/B8/
+B12), moves to bifrost ownership (B3b), or is retained app-side - so none is left
+orphaned when its writer is dropped. Two pinned open questions ride into the
+cutover: the JMAP `shared_account_id` dimension does not fold cleanly into any
+`CursorScope` variant (a B3/B12 concern gated on bifrost growing a shared-mailbox
+scope), and `jmap_push_state` / `graph_subscriptions` are subscription state, not
+checkpoint cursors, so they move to bifrost's `SubscriptionRegistry` at B3b. For
+the full disposition table, the brick-by-brick gates, and the design rationale,
+read the B2 landing commit.
 
-  Those three are not the full set. Because bifrost owns the sync engine, push,
-  and cursor state, B2 must account for the lifecycle of every protocol/sync
-  state table, not just the three named above. Per `reference/architecture.md`
-  and `migrations.rs`, the broader set includes at least `jmap_push_state`,
-  `graph_subscriptions`, `graph_shared_mailbox_delta_tokens`,
-  `graph_contact_delta_tokens`, `shared_mailbox_sync_state`, and
-  `public_folder_sync_state`. B2 owns a table-by-table decision for each one:
-  retired into the opaque checkpoint envelope, moved into bifrost's ownership, or
-  explicitly retained app-side with a stated reason. (Some - e.g. the
-  shared-mailbox/public-folder cursors and the push-subscription state - land
-  with their feature specs B12 / B3b rather than B2 itself; B2's job is to
-  enumerate the full set and pin where each retires, so none is left orphaned.)
 - B3. The bifrost-sync consumer (center of gravity). Stand up the `SyncEngine`;
   build the change-stream-to-DB writer (Change / Inventory / hydration to
   `ProviderParsedMessage`-equivalent to body store, search index, messages
@@ -378,8 +386,10 @@ both reports live under `docs/bifrost-migration/`. Every valid finding from both
 is now folded into the sections above: the stale commit pin (advanced from
 `416cbd4` to `ff56478` in § 11), the core-boundary leak (the core-boundary rule
 in § 7), the maximal-integration deletion audit and the out-of-tree
-`bifrost-jmap` dep (§ 7 B15), the incomplete B2 cursor-table set (§ 7 B2), and the
-compile-only-replacement gate gap (§ 9 B3 and § 10).
+`bifrost-jmap` dep (§ 7 B15), the incomplete B2 cursor-table set (which expanded
+B2's scope to a full table-by-table disposition and has since been satisfied by
+the B2 landing - see the B2-done note in § 7), and the compile-only-replacement
+gate gap (§ 9 B3 and § 10).
 
 Findings considered but not folded, with reasons:
 

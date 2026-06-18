@@ -43,6 +43,30 @@ CREATE TABLE IF NOT EXISTS graph_shared_mailbox_delta_tokens (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
+-- Bifrost opaque cursor store (B2). Replaces the per-protocol cursor
+-- tables (jmap_sync_state, folder_sync_state, graph_*_delta_tokens, ...).
+-- bifrost owns the protocol-minted envelope bytes serialized by its
+-- encode_envelope codec; ratatoskr owns the SQLite storage and lookup keys.
+-- `checkpoint_blob` is the self-describing envelope (scope, protocol, BOTH
+-- envelope versions, server_state bytes, advanced_through, partition,
+-- progress_marker, BackfillProgress) and is the single source of truth for
+-- the round-trip. The other columns are query keys minted from the typed
+-- Checkpoint at write time, never authoritative: `scope_key` (serialized
+-- CursorScope) for scope lookup, `kind` ('change' | 'backfill') to
+-- discriminate, `partition_key` (Partition.0; empty blob for change cursors)
+-- as the backfill PK dimension, `items_done` so get_backfill picks the
+-- latest partition via ORDER BY without decoding every blob.
+CREATE TABLE IF NOT EXISTS sync_cursors (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,                       -- 'change' | 'backfill'
+    scope_key TEXT NOT NULL,                  -- serialized CursorScope
+    partition_key BLOB NOT NULL DEFAULT X'',  -- Partition.0; empty for change
+    items_done INTEGER NOT NULL DEFAULT 0,    -- BackfillProgress.items_done
+    checkpoint_blob BLOB NOT NULL,            -- encode_envelope(&Checkpoint)
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (account_id, kind, scope_key, partition_key)
+);
+
 CREATE TABLE IF NOT EXISTS shared_mailbox_sync_state (
     account_id TEXT NOT NULL,
     mailbox_id TEXT NOT NULL,
