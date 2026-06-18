@@ -22,7 +22,7 @@ futures = "0.3"
 sha2 = "0.11"
 tokio-util = "0.7"
 urlencoding = "2"
-bifrost-jmap = { path = "/home/folk/Programs/jmap-client/crates/jmap", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
+bifrost-jmap = { git = "file:///home/folk/Programs/jmap-client", rev = "b3d207c", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
 
 # Extracted workspace crates
 db = { path = "../db" }

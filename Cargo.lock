@@ -548,8 +548,132 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "bifrost-caldav"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bifrost-net",
+ "bifrost-types",
+ "bytes",
+ "caldata",
+ "chrono",
+ "chrono-tz",
+ "futures",
+ "quick-xml 0.40.1",
+ "reqwest",
+ "uuid",
+]
+
+[[package]]
+name = "bifrost-carddav"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bifrost-net",
+ "bifrost-types",
+ "bytes",
+ "caldata",
+ "futures",
+ "quick-xml 0.40.1",
+ "reqwest",
+ "uuid",
+]
+
+[[package]]
+name = "bifrost-google"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64",
+ "bifrost-net",
+ "bifrost-types",
+ "bytes",
+ "chrono",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "bifrost-graph"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64",
+ "bifrost-net",
+ "bifrost-types",
+ "bytes",
+ "chrono",
+ "futures",
+ "getrandom 0.4.2",
+ "quick-xml 0.40.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "bifrost-imap"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bifrost-caldav",
+ "bifrost-carddav",
+ "bifrost-net",
+ "bifrost-sasl",
+ "bifrost-smtp",
+ "bifrost-types",
+ "bytes",
+ "chrono",
+ "encoding_rs",
+ "flate2",
+ "futures",
+ "getrandom 0.4.2",
+ "native-tls",
+ "nom 8.0.0",
+ "socket2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "bifrost-jmap"
 version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64",
+ "bifrost-net",
+ "bifrost-types",
+ "bytes",
+ "chrono",
+ "futures",
+ "http",
+ "native-tls",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
+ "tokio-websockets",
+]
+
+[[package]]
+name = "bifrost-jmap"
+version = "0.1.0"
+source = "git+file:///home/folk/Programs/jmap-client?rev=b3d207c#b3d207c1c40dd7cc14b65566e83316541a8c5254"
 dependencies = [
  "async-stream",
  "base64",
@@ -562,6 +686,98 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "bifrost-net"
+version = "0.1.0"
+dependencies = [
+ "bifrost-types",
+ "bytes",
+ "futures",
+ "httpdate",
+ "native-tls",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "bifrost-sasl"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "hmac",
+ "md-5 0.11.0",
+ "pbkdf2",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
+ "zeroize",
+]
+
+[[package]]
+name = "bifrost-smtp"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bifrost-net",
+ "bifrost-sasl",
+ "bifrost-types",
+ "email-encoding",
+ "email_address",
+ "fastrand",
+ "getrandom 0.4.2",
+ "hostname",
+ "httpdate",
+ "idna",
+ "mime",
+ "native-tls",
+ "nom 8.0.0",
+ "percent-encoding",
+ "quoted_printable",
+ "socket2",
+ "tokio",
+ "tokio-native-tls",
+ "url",
+ "zeroize",
+]
+
+[[package]]
+name = "bifrost-sync"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bifrost-net",
+ "bifrost-types",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "futures",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bifrost-types"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -813,6 +1029,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "caldata"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e18d0b0cbc271e44b6f0dc262c9469f10f10f8af3fa00c3ebcc10e49ac91d478"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "derive_more",
+ "itertools",
+ "lazy_static",
+ "log",
+ "phf 0.13.1",
+ "regex",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "calloop"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1050,6 +1283,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmov"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
+
+[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1149,6 +1388,15 @@ name = "constant_time_eq"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
+
+[[package]]
+name = "convert_case"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
+dependencies = [
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "core-foundation"
@@ -1402,6 +1650,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctutils"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+dependencies = [
+ "cmov",
+]
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1564,10 +1821,12 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
 dependencies = [
+ "convert_case",
  "proc-macro2",
  "quote",
  "rustc_version",
  "syn",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -1608,6 +1867,7 @@ dependencies = [
  "block-buffer 0.12.1",
  "const-oid",
  "crypto-common 0.2.2",
+ "ctutils",
 ]
 
 [[package]]
@@ -2530,6 +2790,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "indexmap",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2723,6 +3002,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hmac"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
+dependencies = [
+ "digest 0.11.3",
+]
+
+[[package]]
+name = "hostname"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-link",
+]
+
+[[package]]
 name = "hotpath"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2878,6 +3177,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -2886,6 +3186,21 @@ dependencies = [
  "smallvec",
  "tokio",
  "want",
+]
+
+[[package]]
+name = "hyper-rustls"
+version = "0.27.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
+dependencies = [
+ "http",
+ "hyper",
+ "hyper-util",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
 ]
 
 [[package]]
@@ -3494,7 +3809,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64",
- "bifrost-jmap",
+ "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
  "chrono",
  "common",
  "db",
@@ -3947,7 +4262,7 @@ dependencies = [
  "indexmap",
  "itoa",
  "log",
- "md-5",
+ "md-5 0.10.6",
  "nom 8.0.0",
  "nom_locate",
  "rand 0.9.4",
@@ -3977,7 +4292,7 @@ dependencies = [
  "itoa",
  "jiff",
  "log",
- "md-5",
+ "md-5 0.10.6",
  "nom 8.0.0",
  "nom_locate",
  "rand 0.10.1",
@@ -4146,6 +4461,16 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "md-5"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
+dependencies = [
+ "cfg-if",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -5091,6 +5416,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
 
 [[package]]
+name = "pbkdf2"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "112d82ceb8c5bf524d9af484d4e4970c9fd5a0cc15ba14ad93dccd28873b0629"
+dependencies = [
+ "digest 0.11.3",
+ "hmac",
+]
+
+[[package]]
 name = "pdf-extract"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5515,7 +5850,7 @@ name = "provider-sync"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bifrost-jmap",
+ "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
  "chrono",
  "common",
  "db",
@@ -5924,10 +6259,12 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
+ "hyper-rustls",
  "hyper-tls",
  "hyper-util",
  "js-sys",
@@ -6085,7 +6422,7 @@ dependencies = [
  "async-imap",
  "async-trait",
  "base64",
- "bifrost-jmap",
+ "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
  "calcard",
  "chrono",
  "cmdk",
@@ -6215,12 +6552,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls"
+version = "0.23.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+dependencies = [
+ "once_cell",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "rustls-pki-types"
 version = "1.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30a7197ae7eb376e574fe940d068c30fe0462554a3ddbe4eca7838e049c937a9"
 dependencies = [
  "zeroize",
+]
+
+[[package]]
+name = "rustls-webpki"
+version = "0.103.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+dependencies = [
+ "ring",
+ "rustls-pki-types",
+ "untrusted",
 ]
 
 [[package]]
@@ -6491,8 +6852,16 @@ dependencies = [
  "action-types",
  "async-trait",
  "base64",
- "bifrost-jmap",
+ "bifrost-google",
+ "bifrost-graph",
+ "bifrost-imap",
+ "bifrost-jmap 0.1.0",
+ "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
+ "bifrost-net",
+ "bifrost-sync",
+ "bifrost-types",
  "blake3",
+ "bytes",
  "cal",
  "chrono",
  "common",
@@ -6514,6 +6883,7 @@ dependencies = [
  "process-lifetime",
  "provider-sync",
  "quick-xml 0.40.1",
+ "reqwest",
  "rtsk",
  "rusqlite",
  "search",
@@ -6580,6 +6950,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha1"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -7612,6 +7993,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-rustls"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
+dependencies = [
+ "rustls",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-tungstenite"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7634,8 +8025,29 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tokio-websockets"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dad543404f98bfc969aeb71994105c592acfc6c43323fddcd016bb208d1c65cb"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "getrandom 0.4.2",
+ "http",
+ "httparse",
+ "sha1_smol",
+ "simdutf8",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
 ]
 
 [[package]]
@@ -7809,7 +8221,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.9.4",
- "sha1",
+ "sha1 0.10.6",
  "thiserror 2.0.18",
 ]
 
@@ -9294,6 +9706,9 @@ name = "zeroize"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "zerotrie"

@@ -170,6 +170,9 @@ pub(crate) async fn dispatch(
         RequestParams::TestSeedAccount { params } => {
             test_helpers::seed_account_handle(&boot_state, params).await
         }
+        RequestParams::TestBifrostFactoryOpen { params } => {
+            test_helpers::bifrost_factory_open_handle(&boot_state, params).await
+        }
         RequestParams::TestCounterRead { counter } => {
             test_helpers::counter_read_handle(counter).await
         }

@@ -230,7 +230,7 @@ pub async fn run_invariant_pass(
         {
             Ok(()) => stats.history_ids_cleared += 1,
             Err(e) => {
-                log::warn!("invariant pass: clear_account_history_id({account_id}) failed: {e}")
+                log::warn!("invariant pass: clear_account_history_id({account_id}) failed: {e}");
             }
         }
 
@@ -242,7 +242,7 @@ pub async fn run_invariant_pass(
             match drop_search_orphans(db, search_read, search_write, &account_id).await {
                 Ok(n) => stats.search_orphans_dropped += n,
                 Err(e) => {
-                    log::warn!("invariant pass: search orphan drop for {account_id} failed: {e}")
+                    log::warn!("invariant pass: search orphan drop for {account_id} failed: {e}");
                 }
             }
         }

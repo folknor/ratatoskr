@@ -48,13 +48,22 @@ async-trait = "0.1"
 # jmap-client for the JMAP-specific contact action handlers.
 futures = "0.3"
 uuid = { version = "1.23.1", features = ["v4"] }
-bifrost-jmap = { path = "/home/folk/Programs/jmap-client/crates/jmap", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
+bifrost-jmap = { git = "file:///home/folk/Programs/jmap-client", rev = "b3d207c", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
+bifrost-types.workspace = true
+bifrost-net.workspace = true
+bifrost-sync.workspace = true
+bifrost-jmap-new = { workspace = true, features = ["sync"] }
+bifrost-imap.workspace = true
+bifrost-graph.workspace = true
+bifrost-google.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"
 futures-util.workspace = true
 base64.workspace = true
+bytes.workspace = true
 chrono.workspace = true
 fs2 = "0.4"
 log = "0.4"

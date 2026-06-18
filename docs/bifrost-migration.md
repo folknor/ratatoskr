@@ -4,7 +4,13 @@ The strategic map for replacing ratatoskr's hand-rolled provider stack with
 dependencies on the bifrost workspace. This document is the source-of-record
 the spec-loop consumes: every work item below becomes one
 technical-implementation-spec, run through the orchestrate.md seven steps. The
-loop is not yet running; this plan precedes it.
+loop is running: Track B has begun (B1 has landed; see § 7).
+
+`../bifrost` and `./research/bifrost` are at the same git commit. We keep both
+because they serve two distinct purposes: `../bifrost` is the Cargo dependency
+path the build resolves, and `./research/bifrost` is a reading-reference that
+exists so agents can read bifrost source freely without tripping up the harness.
+See § 11 for the full distinction.
 
 ## 1. Goal
 
@@ -19,6 +25,14 @@ This is a feature-preserving plumbing replacement. Every capability ratatoskr
 ships today survives the migration. The goal is to delete ~33k LOC of
 duplicated provider logic and inherit bifrost's unified, tested surface, not to
 change what the client does.
+
+**Maximal integration.** This is a total integration, not a provider-only swap.
+The four provider crates and `jmap-client` are the largest target, but the rule
+is general: wherever bifrost offers an equivalent for something ratatoskr
+currently hand-rolls, or for an external dependency ratatoskr currently pulls
+separately, that thing is replaced by bifrost. The end state is ratatoskr
+depending on bifrost for everything bifrost covers, with no parallel
+hand-rolled or duplicated dependency surviving alongside it.
 
 ## 2. First principle (this project's governing rule)
 
@@ -37,6 +51,26 @@ is fixed FIRST, in the bifrost repo, before the corresponding ratatoskr work.
 
 Track A below is the concrete definition of that ideal bifrost. It is a
 specification of the target, not a list of bugs.
+
+Bifrost's origin makes this concrete. Bifrost was started by ripping
+ratatoskr's existing provider code - what now lives in the provider crates -
+out of ratatoskr and unifying it. So if a capability looks mysteriously absent
+from bifrost, that is not a design gap to engineer around; it means that part
+was simply not carried over yet. The original code still in ratatoskr (the
+current provider crates plus git history) is the reference for what bifrost
+should already do.
+
+**The side-quest protocol.** When any brick along the way surfaces that
+ratatoskr would benefit from a rewrite or refactor of something in bifrost - a
+missing capability, an awkward surface, a wart that would otherwise force a
+ratatoskr workaround - that becomes a side-quest, never a ratatoskr
+contortion. The orchestrator brings the tree to a clean boundary (landing what
+is landable, reverting the blocked in-flight work so nothing parks dirty),
+pauses the orchestration loop, and surfaces the brick to the user. The user
+implements it in the bifrost repo and re-syncs the two folders (`../bifrost`
+and `./research/bifrost` advanced together to a single new shared commit). Only
+then does the loop resume, against the updated surface, with the new commit as
+the frozen reference for the item.
 
 ## 3. Target architecture (the seam, post-migration)
 
@@ -159,16 +193,39 @@ may be partially built already. A1 is the universal first domino.
 Written purely against the ideal bifrost from Track A. No adapters around
 warts, no per-provider branches.
 
-- B1. Dependency wiring plus construction plumbing. Add path deps on the
-  bifrost crates (pointing at `../bifrost/`, relative to this repo's top-level
-  folder - see § 11); introduce bifrost types into `service` / `core`; build the
-  `AccountFactory` impl that reads encrypted token rows and constructs bifrost
-  accounts, wiring a `TokenSource` that refreshes and writes rotated tokens
-  back to the DB; build the `AccountError`-to-`OperationResult` mapping.
-  Additive, green. Needs A1.
+B1 (dependency wiring plus construction plumbing) is done and its TODO entry is
+removed per repo convention; the items below that name it as a prerequisite
+("Needs B1") have that dependency satisfied. For what B1 delivered - the bifrost
+path deps wired into `service`, the `service`-side `build_account_factory` and
+generic `DbWriteBackTokenSource` (the construction module at
+`crates/service/src/bifrost/`), and the `AccountError`-to-`OperationResult`
+mapping - read the B1 landing commit. It is additive: nothing live routes through
+it yet (that is B3/B4) and no legacy provider surface was removed.
+
+One load-bearing rule B1 fixed binds every later item: bifrost must not become a
+dependency of `core` (`rtsk`). The app depends on `rtsk` (`crates/app/Cargo.toml`),
+so any bifrost type that lands in `core` is pulled into the UI build - directly
+contradicting § 3's "the app stays bifrost-free; it depends on `rtsk` plus
+`service-api` wire types only." Bifrost is confined to `service` and other
+writer-side crates; only ratatoskr-owned DTOs and the `service`-to-`app` wire
+types cross the core/UI boundary.
+
 - B2. CheckpointStore plus cursor schema. Implement bifrost's `CheckpointStore`
   over a new opaque cursor table; migrate off `jmap_sync_state` /
   `folder_sync_state` / `graph_*_delta_tokens`. Needs B1.
+
+  Those three are not the full set. Because bifrost owns the sync engine, push,
+  and cursor state, B2 must account for the lifecycle of every protocol/sync
+  state table, not just the three named above. Per `reference/architecture.md`
+  and `migrations.rs`, the broader set includes at least `jmap_push_state`,
+  `graph_subscriptions`, `graph_shared_mailbox_delta_tokens`,
+  `graph_contact_delta_tokens`, `shared_mailbox_sync_state`, and
+  `public_folder_sync_state`. B2 owns a table-by-table decision for each one:
+  retired into the opaque checkpoint envelope, moved into bifrost's ownership, or
+  explicitly retained app-side with a stated reason. (Some - e.g. the
+  shared-mailbox/public-folder cursors and the push-subscription state - land
+  with their feature specs B12 / B3b rather than B2 itself; B2's job is to
+  enumerate the full set and pin where each retires, so none is left orphaned.)
 - B3. The bifrost-sync consumer (center of gravity). Stand up the `SyncEngine`;
   build the change-stream-to-DB writer (Change / Inventory / hydration to
   `ProviderParsedMessage`-equivalent to body store, search index, messages
@@ -209,6 +266,19 @@ warts, no per-provider branches.
   `common`'s provider surface, the external `jmap-client` dep, and the
   workspace members; remove any transitional scaffolding. The final green cut.
   Needs all above.
+
+  This explicit list is a floor, not the full scope. The § 1 maximal-integration
+  rule (no parallel hand-rolled or duplicated dependency surviving alongside a
+  bifrost equivalent) is stronger than this enumeration, so B15 must run a
+  mechanical dependency-and-module audit of the whole workspace - every crate's
+  `Cargo.toml` plus its module tree - and delete every bifrost-covered equivalent
+  it finds, not only the named targets. Known instance to confirm in that audit:
+  `crates/service/Cargo.toml` still carries
+  `bifrost-jmap = { path = "/home/folk/Programs/jmap-client/crates/jmap" }` (the
+  out-of-tree `jmap-client` checkout, used by the JMAP-specific contact action
+  handlers). That dependency, and any others the audit surfaces, retire here -
+  subject to the § 9 caveat that retiring the external `jmap-client` must not
+  strand bifrost-jmap (confirm bifrost-jmap's own internal JMAP dependency first).
 - B16. Reference-doc reconciliation. Update `reference/architecture.md`,
   `AGENTS.md`, and the crate map. Bundled with B15 per repo convention (never a
   standalone markdown commit).
@@ -235,7 +305,12 @@ Estimated scope: ~8 bifrost specs plus ~16-20 ratatoskr specs.
   moves, the cursor schema changes, and the application sync layer's input
   contract must be preserved exactly. Mitigate by freezing the
   `ProviderParsedMessage` / `SyncResult` contract as the seam and validating
-  that threading and bundling outputs are unchanged across the cut.
+  that threading and bundling outputs are unchanged across the cut. "Validate"
+  here means named behavioral gates, not a compile check: B3 (and every other
+  sync-touching spec) must pin explicit `brokkr service-test` / sync-harness runs
+  plus the relevant `brokkr sync-bench` so a compile-only replacement cannot pass
+  the gate. See § 10 for the workspace-wide gate requirement this is an instance
+  of.
 - Calendar (B7) is the largest single rewire and depends on bifrost calendar
   maturity (high on native providers; A7 for DAV).
 - Shared mailboxes and public folders (A5 / B12) is the largest bifrost-side
@@ -252,6 +327,17 @@ A-item in the bifrost repo, becomes one technical-implementation-spec, run
 through the orchestrate.md seven steps. Items are processed serially, the tree
 green at every boundary, nothing deferred.
 
+Behavioral gates are mandatory, not optional. Because this migration swaps the
+entire provider stack underneath unchanged application behavior, a green
+`brokkr check` is necessary but not sufficient - it proves the new code
+compiles and passes unit tests, not that real provider sync still behaves. Every
+spec that touches sync, actions, calendar, or contacts must pin, in its gate
+section, the explicit behavioral gates it has to pass: the relevant
+`brokkr service-test` scripts, the sync-harness runs (real provider sync against
+the `saehrimnir` mock servers - see the harness doc), and `brokkr sync-bench`
+where performance is in scope. A spec the loop can satisfy with a compile-only
+replacement is under-gated and must be rejected at review.
+
 ## 11. Bifrost source and dependency paths
 
 Bifrost lives in two places relative to this repo's top-level folder, and they
@@ -262,8 +348,12 @@ serve two distinct purposes - do not conflate them:
   `Account` / `AccountError` / `SyncEngine` surface a Track B spec is written
   against, or to confirm a type signature before speccing. Spec authors and
   reviewers read here; it is the ground a bifrost-facing spec is judged against.
+  `./research/bifrost/reference/` holds per-crate and per-protocol
+  quick-reference sheets (`net.md`, `sync.md`, `error-model.md`, `jmap.md`,
+  `imap.md`, `graph.md`, `google.md`, `smtp.md`, `caldav.md`, `carddav.md`,
+  `sasl.md`) - start there for a crate's surface, then drop into the source.
 - Dependency path: `../bifrost/`. This is what Cargo `path = "..."` deps resolve
-  to. When B1 (and any later item) adds path deps on the bifrost crates, they
+  to. The path deps on the bifrost crates (added by B1, extended by later items)
   point at `../bifrost/`, not at the reading-reference copy.
 
 A spec that touches bifrost cites `./research/bifrost` as required reading for
@@ -271,7 +361,8 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete: the reading-reference `./research/bifrost` is at commit
-`416cbd4` (the A8-closing commit). Each Track B spec records, in its ground
+`ff56478` (the A8-closing commit), in sync with the `../bifrost` dependency
+checkout at the same commit. Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the
@@ -279,3 +370,26 @@ dependency compiles from source, so a `../bifrost` that is red OR merely
 mutating underneath an in-flight ratatoskr step makes every ratatoskr gate
 meaningless, and a later bifrost change would silently shift the surface the
 spec was built against.
+
+## 12. Review reconciliation
+
+This plan was reviewed twice before the loop launched (R1 / opus, R2 / codex);
+both reports live under `docs/bifrost-migration/`. Every valid finding from both
+is now folded into the sections above: the stale commit pin (advanced from
+`416cbd4` to `ff56478` in § 11), the core-boundary leak (the core-boundary rule
+in § 7), the maximal-integration deletion audit and the out-of-tree
+`bifrost-jmap` dep (§ 7 B15), the incomplete B2 cursor-table set (§ 7 B2), and the
+compile-only-replacement gate gap (§ 9 B3 and § 10).
+
+Findings considered but not folded, with reasons:
+
+- R1's pre-loop status observations about the tree (and its note on the then-open
+  B1 spec) were point-in-time facts, not changes to this governing plan, and have
+  since been overtaken by the B1 landing (which added the bifrost deps and
+  `crates/service/src/bifrost/`). No edit to the plan was needed for them.
+- R1's "could not verify the `../bifrost` sibling from the sandbox" and the
+  accompanying open question, plus R2's open question on whether `core` may take a
+  bifrost dependency, are both resolved rather than folded as caveats: the
+  user confirmed both `../bifrost` and `./research/bifrost` are at `ff56478`
+  (§ 11), and the core-boundary rule (§ 7) settles that `core` stays
+  bifrost-free. No residual uncertainty to record.

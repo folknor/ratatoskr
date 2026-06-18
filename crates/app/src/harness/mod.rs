@@ -2553,12 +2553,29 @@ fn request_params_from_lua(
                     oauth_provider: get_string_field(state, params_idx, "oauth_provider")?,
                     oauth_client_id: get_string_field(state, params_idx, "oauth_client_id")?,
                     oauth_token_url: get_string_field(state, params_idx, "oauth_token_url")?,
+                    jmap_url: get_string_field(state, params_idx, "jmap_url")?,
                     oauth_extra_scopes: get_string_field(state, params_idx, "oauth_extra_scopes")?,
                 }
             } else {
                 TestSeedAccountParams::default()
             };
             Ok(RequestParams::TestSeedAccount { params })
+        }
+        "TestBifrostFactoryOpen" | "test.bifrost_factory_open" => {
+            let params = if state.get_top() >= params_idx as usize
+                && state.typ(params_idx) == LuaType::Table
+            {
+                service_api::TestBifrostFactoryOpenParams {
+                    account_id: get_string_field(state, params_idx, "account_id")?.ok_or_else(
+                        || lua_error_message("TestBifrostFactoryOpen requires params.account_id"),
+                    )?,
+                }
+            } else {
+                return Err(lua_error_message(
+                    "TestBifrostFactoryOpen params must be table",
+                ));
+            };
+            Ok(RequestParams::TestBifrostFactoryOpen { params })
         }
         "TestCounterRead" | "test.counter_read" => {
             let counter = if state.get_top() >= params_idx as usize

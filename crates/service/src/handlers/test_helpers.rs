@@ -9,18 +9,19 @@ use crate::boot::BootSharedState;
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 use service_api::{
-    HealthPingResponse, ServiceError, TestCounterReadAck, TestCrashAfterNWritesAck,
-    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow,
-    TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow, TestDbFolderRow, TestDbLabelRow,
-    TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck,
-    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
-    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
-    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
-    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
-    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
-    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadAck, TestThreadReadParams,
+    HealthPingResponse, ServiceError, TestBifrostFactoryOpenAck, TestBifrostFactoryOpenParams,
+    TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow,
+    TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow,
+    TestDbContactRow, TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow,
+    TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
+    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
+    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
+    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
+    TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -143,7 +144,11 @@ pub(super) async fn seed_account_handle(
         smtp_security: Some("starttls".into()),
         smtp_username: Some(email.clone()),
         smtp_password: encrypt_secret(Some("test-password".into()))?,
-        jmap_url: Some("https://jmap.example.test".into()),
+        jmap_url: Some(
+            params
+                .jmap_url
+                .unwrap_or_else(|| "https://jmap.example.test".into()),
+        ),
         accept_invalid_certs: true,
     };
     let ack_email = email.clone();
@@ -171,6 +176,83 @@ pub(super) async fn seed_account_handle(
         email: ack_email,
         label_count,
     })
+    .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn bifrost_factory_open_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestBifrostFactoryOpenParams,
+) -> Result<Value, ServiceError> {
+    let read_db = boot_state.read_db_state().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.bifrost_factory_open received before read DB was available".into(),
+        )
+    })?;
+    let write_db = boot_state.write_db_state()?;
+    let encryption_key = boot_state.encryption_key().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.bifrost_factory_open received before encryption key was available".into(),
+        )
+    })?;
+    let factory = match crate::bifrost::build_account_factory(
+        &read_db,
+        write_db.writer_pool(),
+        &params.account_id,
+        encryption_key,
+    )
+    .await
+    {
+        Ok(factory) => factory,
+        // A construction-time failure (unknown provider, missing
+        // credential/endpoint, decrypt failure) is reported through the
+        // ack rather than as a request error so the harness can assert on
+        // the typed `BifrostBuildError::classify` mapping at the IO
+        // boundary, alongside the open-path `AccountError` mapping below.
+        Err(error) => {
+            return serde_json::to_value(TestBifrostFactoryOpenAck {
+                account_id: params.account_id,
+                opened: false,
+                capability_debug: None,
+                failure_kind: Some(format!("{:?}", error.classify())),
+                provider_message: Some(error.to_string()),
+                diagnostic_debug: None,
+            })
+            .map_err(|error| ServiceError::Internal(error.to_string()));
+        }
+    };
+    match factory
+        .open(bifrost_types::AccountId(params.account_id.clone()))
+        .await
+    {
+        Ok(account) => serde_json::to_value(TestBifrostFactoryOpenAck {
+            account_id: params.account_id,
+            opened: true,
+            capability_debug: Some(format!("{:?}", account.capabilities())),
+            failure_kind: None,
+            provider_message: None,
+            diagnostic_debug: None,
+        }),
+        Err(error) => {
+            let service_api::actions::ActionError::Remote { kind, message } =
+                crate::bifrost::account_error_to_action_error(&error)
+            else {
+                unreachable!("bifrost account errors map to remote action errors");
+            };
+            // `provider_message` carries the wire-safe `message_key()` (the
+            // `account_error_to_action_error` message), matching the live
+            // mapping convention. The raw cause-chain diagnostic goes on the
+            // separate, clearly-internal `diagnostic_debug` field so the safe
+            // key is not conflated with `support_internal()` dumps.
+            serde_json::to_value(TestBifrostFactoryOpenAck {
+                account_id: params.account_id,
+                opened: false,
+                capability_debug: None,
+                failure_kind: Some(format!("{kind:?}")),
+                provider_message: Some(message),
+                diagnostic_debug: Some(format!("{:?}", error.support_internal())),
+            })
+        }
+    }
     .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 

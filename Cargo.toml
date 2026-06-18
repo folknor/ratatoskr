@@ -109,6 +109,16 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client
 reqwest = { version = "0.13", default-features = false, features = ["native-tls", "json", "form"] }
+bytes = "1"
+
+# Bifrost migration
+bifrost-types = { path = "../bifrost/crates/types" }
+bifrost-net = { path = "../bifrost/crates/net" }
+bifrost-sync = { path = "../bifrost/crates/sync" }
+bifrost-jmap-new = { package = "bifrost-jmap", path = "../bifrost/crates/jmap" }
+bifrost-imap = { path = "../bifrost/crates/imap" }
+bifrost-graph = { path = "../bifrost/crates/graph" }
+bifrost-google = { path = "../bifrost/crates/google" }
 
 # Encoding
 base64 = "0.22"

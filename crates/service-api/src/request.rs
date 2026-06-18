@@ -71,6 +71,8 @@ pub struct TestSeedAccountParams {
     pub oauth_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_token_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jmap_url: Option<String>,
     /// Space-separated extra OAuth scopes appended to the negotiated set.
     /// Used by IT-distributable config and the (future) custom-OIDC wizard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -571,6 +573,32 @@ pub struct TestDelayNextWriteParams {
 pub struct TestDelayNextWriteAck;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostFactoryOpenParams {
+    pub account_id: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestBifrostFactoryOpenAck {
+    pub account_id: String,
+    pub opened: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_debug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<String>,
+    /// The wire-safe `message_key()` (open-path) or `BifrostBuildError`
+    /// display (construction-path). Mirrors the live `provider_message`
+    /// convention: a stable, non-sensitive key, NOT raw provider text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_message: Option<String>,
+    /// Test-only raw internal diagnostic dump (`AccountError::support_internal`).
+    /// Kept off `provider_message` so the safe-key convention is not conflated
+    /// with internal cause-chain diagnostics. Harness-only; never a wire field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_debug: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestParams {
     HealthPing,
     Shutdown,
@@ -1023,6 +1051,10 @@ pub enum RequestParams {
     TestSeedAccount {
         params: TestSeedAccountParams,
     },
+    /// Builds and opens a bifrost account factory for a seeded account.
+    TestBifrostFactoryOpen {
+        params: TestBifrostFactoryOpenParams,
+    },
     /// Reads a service-side test counter by name.
     TestCounterRead {
         counter: String,
@@ -1153,6 +1185,7 @@ impl RequestParams {
             Self::TestSlow { .. } => "test.slow",
             Self::TestPrintln { .. } => "test.println",
             Self::TestSeedAccount { .. } => "test.seed_account",
+            Self::TestBifrostFactoryOpen { .. } => "test.bifrost_factory_open",
             Self::TestCounterRead { .. } => "test.counter_read",
             Self::TestCrashAfterNWrites { .. } => "test.crash_after_n_writes",
             Self::TestSeedThread { .. } => "test.seed_thread",
@@ -1283,6 +1316,7 @@ impl RequestParams {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             Self::TestSeedAccount { .. }
+            | Self::TestBifrostFactoryOpen { .. }
             | Self::TestCounterRead { .. }
             | Self::TestCrashAfterNWrites { .. }
             | Self::TestSeedThread { .. }
@@ -1402,7 +1436,9 @@ impl RequestParams {
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
-            Self::TestStartSync { .. } => Idempotency::Conditional,
+            Self::TestStartSync { .. } | Self::TestBifrostFactoryOpen { .. } => {
+                Idempotency::Conditional
+            }
         }
     }
 
@@ -1498,6 +1534,7 @@ impl RequestParams {
             Self::TestSlow { millis } => serde_json::json!({ "millis": millis }),
             Self::TestPrintln { message } => serde_json::json!({ "message": message }),
             Self::TestSeedAccount { params } => serde_json::json!({ "params": params }),
+            Self::TestBifrostFactoryOpen { params } => serde_json::json!({ "params": params }),
             Self::TestCounterRead { counter } => serde_json::json!({ "counter": counter }),
             Self::TestCrashAfterNWrites { params } => {
                 serde_json::json!({ "params": params })
@@ -1963,6 +2000,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.seed_account params: {e}"))?;
                 Ok(Self::TestSeedAccount { params: p.params })
+            }
+            "test.bifrost_factory_open" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestBifrostFactoryOpenParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.bifrost_factory_open params: {e}"))?;
+                Ok(Self::TestBifrostFactoryOpen { params: p.params })
             }
             "test.counter_read" => {
                 #[derive(Deserialize)]
@@ -3600,6 +3646,7 @@ mod tests {
                 oauth_provider: Some("oidc:saehrimnir".into()),
                 oauth_client_id: Some("ratatoskr-harness".into()),
                 oauth_token_url: Some("http://127.0.0.1:12345/oauth/token".into()),
+                jmap_url: Some("http://127.0.0.1:12345/jmap".into()),
                 oauth_extra_scopes: Some("custom:scope".into()),
             },
         };

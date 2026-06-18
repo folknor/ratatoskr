@@ -2,6 +2,7 @@ mod accounts;
 pub mod actions;
 mod attachment_compress;
 mod attachment_materialize;
+pub mod bifrost;
 mod boot;
 mod boot_progress;
 pub(crate) mod cal_actions;
