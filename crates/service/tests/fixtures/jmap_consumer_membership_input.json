@@ -1,0 +1,70 @@
+{
+  "account_id": "acc",
+  "messages": [
+    {
+      "id": "m2",
+      "thread_id": "t1",
+      "subject": "Project kickoff",
+      "date_ms": 1700000000000,
+      "from": { "name": "Bob Root", "address": "bob@example.test" },
+      "to": [{ "name": null, "address": "me@example.test" }],
+      "cc": [],
+      "bcc": [],
+      "containers": ["INBOX"],
+      "flags": ["$seen", "project"],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <root-m2@example.test>",
+        "Subject: Project kickoff",
+        "From: Bob Root <bob@example.test>",
+        "To: me@example.test",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Kickoff body for the project thread."
+      ]
+    },
+    {
+      "id": "m1",
+      "thread_id": "t1",
+      "subject": "Re: Project kickoff",
+      "date_ms": 1700000100000,
+      "from": { "name": "Alice Reply", "address": "alice@example.test" },
+      "to": [{ "name": null, "address": "me@example.test" }],
+      "cc": [{ "name": null, "address": "team@example.test" }],
+      "bcc": [],
+      "containers": ["archive"],
+      "flags": ["project", "$important"],
+      "importance": "high",
+      "blobs": [
+        { "id": "blob-invite", "content_type": "text/calendar; method=REQUEST" }
+      ],
+      "raw_lines": [
+        "Message-ID: <reply-m1@example.test>",
+        "In-Reply-To: <root-m2@example.test> <older@example.test>",
+        "References: <root-m2@example.test> <older@example.test>",
+        "List-Unsubscribe: <https://example.test/unsub>, <mailto:unsub@example.test>",
+        "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
+        "Authentication-Results: example.test; spf=pass smtp.mailfrom=alice@example.test",
+        "Disposition-Notification-To: alice@example.test",
+        "Subject: Re: Project kickoff",
+        "From: Alice Reply <alice@example.test>",
+        "To: me@example.test",
+        "Cc: team@example.test",
+        "Content-Type: multipart/mixed; boundary=BNDRY",
+        "",
+        "--BNDRY",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Replying on the project thread.",
+        "--BNDRY",
+        "Content-Type: text/calendar; method=REQUEST; name=invite.ics",
+        "Content-Disposition: attachment; filename=invite.ics",
+        "",
+        "BEGIN:VCALENDAR",
+        "END:VCALENDAR",
+        "--BNDRY--"
+      ]
+    }
+  ]
+}

@@ -31,7 +31,9 @@ mailbox({
 
 email({
   id = "email-001",
+  thread_id = "thread-hello",
   mailbox_ids = {"mbx-inbox"},
+  keywords = {"project"},
   from = "alice@example.com",
   to = {"bob@example.com"},
   subject = "Hello",
@@ -42,6 +44,7 @@ email({
 
 email({
   id = "email-002",
+  thread_id = "thread-hello",
   mailbox_ids = {"mbx-inbox"},
   from = "carol@example.com",
   to = {"bob@example.com"},

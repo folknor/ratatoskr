@@ -131,7 +131,10 @@ fn build_jmap_factory(
     provider: MailProviderKind,
     writer: WriterPool,
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
-    let url = account.required_plain("jmap_url", account.row.jmap_url.as_deref())?;
+    let url = match std::env::var("RATATOSKR_TEST_JMAP_ENDPOINT") {
+        Ok(url) => url,
+        Err(_) => account.required_plain("jmap_url", account.row.jmap_url.as_deref())?,
+    };
     let credentials = if account.is_oauth() {
         JmapCredentials::Bearer {
             token_source: account.oauth_token_source(provider, writer)?,

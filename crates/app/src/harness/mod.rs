@@ -2843,6 +2843,7 @@ fn request_params_from_lua(
                 "crash_after_ack_no_sentinel" | "CrashAfterAckNoSentinel" => {
                     TestBifrostHook::CrashAfterAckNoSentinel
                 }
+                "force_lag" | "ForceLag" => TestBifrostHook::ForceLag,
                 other => {
                     return Err(lua_error_message(format!(
                         "unknown TestBifrostArmHook kind {other:?}"

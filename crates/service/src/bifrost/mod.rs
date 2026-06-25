@@ -1,6 +1,7 @@
 pub mod checkpoint_store;
 pub mod consumer;
 pub mod engine;
+pub mod engine_sync;
 pub mod error_map;
 pub mod factory;
 pub mod token_source;

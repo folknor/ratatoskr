@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
 
 use db::db::queries_extra::{
-    LabelWriteRow, compute_thread_aggregate, insert_messages, upsert_labels,
-    upsert_thread_aggregate,
+    LabelWriteRow, compute_thread_aggregate, delete_messages_and_cleanup_threads,
+    insert_attachments, insert_messages, maybe_update_chat_state, query_user_emails, upsert_labels,
+    upsert_thread_aggregate, upsert_thread_participants,
 };
 use provider_sync::consumer_support::{
     FolderWriteRow, KeywordProvider, index_search_documents, insert_folders_batch,
-    recompute_thread_keyword_labels, replace_message_keywords,
-    replace_message_membership_and_recompute, store_inline_images, store_message_bodies,
+    recompute_thread_keyword_labels, replace_message_folders_and_recompute,
+    replace_message_keywords, replace_message_membership_and_recompute, store_inline_images,
+    store_message_bodies,
 };
 
 use super::BifrostConsumerStores;
@@ -22,18 +24,24 @@ pub struct PersistAffected {
 
 pub async fn persist(
     stores: &BifrostConsumerStores,
+    account_id: &str,
     provider: BifrostProviderKind,
     rows: &[ConsumerMessageRow],
+    deleted_ids: &[String],
 ) -> Result<PersistAffected, String> {
-    if rows.is_empty() {
+    if rows.is_empty() && deleted_ids.is_empty() {
         return Ok(PersistAffected::default());
     }
 
     let rows = rows.to_vec();
+    let deleted_ids = deleted_ids.to_vec();
+    let account_id = account_id.to_string();
     let affected = stores
         .db
         .with_write({
             let rows = rows.clone();
+            let deleted_ids = deleted_ids.clone();
+            let account_id = account_id.clone();
             move |conn| {
                 let tx = conn.transaction().map_err(|error| error.to_string())?;
                 for row in &rows {
@@ -44,10 +52,16 @@ pub async fn persist(
             .map_err(|error| format!("insert thread placeholder: {error}"))?;
                 }
                 let messages: Vec<_> = rows.iter().map(|row| row.message.clone()).collect();
-                insert_messages(&tx, &messages)?;
+                insert_messages(&tx, &messages)
+                    .map_err(|error| format!("insert messages: {error}"))?;
 
                 let mut thread_ids = BTreeSet::new();
                 let mut message_ids = Vec::new();
+                let user_emails = if provider == BifrostProviderKind::Jmap {
+                    Some(query_user_emails(&tx)?)
+                } else {
+                    None
+                };
                 for row in &rows {
                     thread_ids.insert(row.message.thread_id.clone());
                     message_ids.push(row.message.id.clone());
@@ -70,7 +84,8 @@ pub async fn persist(
                             }
                         })
                         .collect::<Vec<_>>();
-                    upsert_labels(&tx, &label_rows)?;
+                    upsert_labels(&tx, &label_rows)
+                        .map_err(|error| format!("upsert labels: {error}"))?;
                     // The message_folders FK targets folders(account_id, id), so the
                     // baseline membership write must ensure each folder row exists
                     // before it writes membership (spec 1 / 4.1.4 "folder-row
@@ -105,40 +120,130 @@ pub async fn persist(
                             }
                         })
                         .collect::<Vec<_>>();
-                    insert_folders_batch(&tx, &folder_rows)?;
-                    replace_message_membership_and_recompute(
-                        &tx,
-                        &row.message.account_id,
-                        &row.message.thread_id,
-                        &row.message.id,
-                        &row.folders,
-                        &row.labels,
-                    )?;
+                    insert_folders_batch(&tx, &folder_rows)
+                        .map_err(|error| format!("insert folders: {error}"))?;
+                    match provider {
+                        BifrostProviderKind::Jmap => {
+                            replace_message_folders_and_recompute(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                &row.message.id,
+                                &row.folders,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "replace JMAP message folders for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                            insert_attachments(&tx, &row.attachments)
+                                .map_err(|error| format!("insert JMAP attachments: {error}"))?;
+                            upsert_thread_participants(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                row.message.from_address.as_deref(),
+                                row.message.to_addresses.as_deref(),
+                                row.message.cc_addresses.as_deref(),
+                                row.message.bcc_addresses.as_deref(),
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "upsert JMAP thread participants for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                        }
+                        _ => {
+                            replace_message_membership_and_recompute(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                &row.message.id,
+                                &row.folders,
+                                &row.labels,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "replace baseline message membership for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                        }
+                    }
                     replace_message_keywords(
                         &tx,
                         keyword_provider(provider),
                         &row.message.account_id,
                         &row.message.id,
                         &row.keywords,
-                    )?;
+                    )
+                    .map_err(|error| {
+                        format!("replace message keywords for {}: {error}", row.message.id)
+                    })?;
                     recompute_thread_keyword_labels(
                         &tx,
                         keyword_provider(provider),
                         &row.message.account_id,
                         &row.message.thread_id,
-                    )?;
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "recompute thread keyword labels for {}: {error}",
+                            row.message.thread_id
+                        )
+                    })?;
                 }
 
                 for thread_id in &thread_ids {
-                    let account_id = rows
+                    let thread_rows = rows
                         .iter()
-                        .find(|row| row.message.thread_id == *thread_id)
+                        .filter(|row| row.message.thread_id == *thread_id)
+                        .collect::<Vec<_>>();
+                    let account_id = thread_rows
+                        .first()
                         .map(|row| row.message.account_id.as_str())
                         .ok_or_else(|| format!("missing account for thread {thread_id}"))?;
-                    let aggregate = compute_thread_aggregate(&tx, account_id, thread_id)?;
-                    upsert_thread_aggregate(&tx, account_id, thread_id, &aggregate, None, None)?;
+                    let aggregate =
+                        compute_thread_aggregate(&tx, account_id, thread_id).map_err(|error| {
+                            format!("compute thread aggregate {thread_id}: {error}")
+                        })?;
+                    let is_important = if provider == BifrostProviderKind::Jmap {
+                        // Importance is carried on the hydrated row (from
+                        // `Message::importance` for real JMAP, from the
+                        // `$important` keyword for synthetic fixtures). It is
+                        // NOT read from `row.keywords`: `$important` is
+                        // `$`-prefixed and stripped by `is_user_visible_keyword`
+                        // during hydration, so a keyword-string probe would
+                        // always be false on the real path.
+                        Some(thread_rows.iter().any(|row| row.is_important))
+                    } else {
+                        None
+                    };
+                    upsert_thread_aggregate(
+                        &tx,
+                        account_id,
+                        thread_id,
+                        &aggregate,
+                        is_important,
+                        None,
+                    )
+                    .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
+                    if provider == BifrostProviderKind::Jmap
+                        && let Some(user_emails) = &user_emails
+                    {
+                        maybe_update_chat_state(&tx, account_id, thread_id, user_emails)
+                            .map_err(|error| format!("update chat state {thread_id}: {error}"))?;
+                    }
                 }
 
+                if provider == BifrostProviderKind::Jmap && !deleted_ids.is_empty() {
+                    delete_messages_and_cleanup_threads(&tx, &account_id, &deleted_ids)
+                        .map_err(|error| format!("delete JMAP destroyed messages: {error}"))?;
+                }
+
+                assert_no_foreign_key_violations(&tx)?;
                 tx.commit().map_err(|error| error.to_string())?;
                 Ok(PersistAffected {
                     thread_ids: thread_ids.into_iter().collect(),
@@ -167,6 +272,14 @@ pub async fn persist(
         .map(|row| row.search_document.clone())
         .collect::<Vec<_>>();
     index_search_documents(&stores.search, search_docs, provider.as_str()).await;
+    if !deleted_ids.is_empty() {
+        if let Err(error) = stores.body_store.delete(deleted_ids.clone()).await {
+            log::warn!("Failed to delete bifrost bodies: {error}");
+        }
+        if let Err(error) = stores.search.delete_messages_batch(deleted_ids).await {
+            log::warn!("Failed to delete bifrost search documents: {error}");
+        }
+    }
 
     Ok(affected)
 }
@@ -180,10 +293,32 @@ fn keyword_provider(provider: BifrostProviderKind) -> KeywordProvider {
     }
 }
 
+fn assert_no_foreign_key_violations(tx: &db::db::WriteTxn<'_>) -> Result<(), String> {
+    let mut stmt = tx
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(|error| format!("prepare foreign_key_check: {error}"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|error| format!("run foreign_key_check: {error}"))?;
+    if let Some(row) = rows
+        .next()
+        .map_err(|error| format!("read foreign_key_check: {error}"))?
+    {
+        let table: String = row.get(0).unwrap_or_else(|_| "<unknown>".to_string());
+        let rowid: i64 = row.get(1).unwrap_or(-1);
+        let parent: String = row.get(2).unwrap_or_else(|_| "<unknown>".to_string());
+        let fkid: i64 = row.get(3).unwrap_or(-1);
+        return Err(format!(
+            "foreign key violation table={table} rowid={rowid} parent={parent} fkid={fkid}"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::super::hydrate::hydrate_change_to_message_insert_row;
+    use super::super::hydrate::hydrate_change_to_message_insert_row_offline;
     use super::super::{BifrostConsumerStores, BifrostProviderKind};
     use super::persist;
     use bifrost_types::{Change, ObjectChange, ObjectChangeKind, ObjectId};
@@ -269,8 +404,11 @@ mod tests {
         let rows: Vec<_> = changes
             .iter()
             .map(|change| {
-                match hydrate_change_to_message_insert_row("acc", BifrostProviderKind::Jmap, change)
-                {
+                match hydrate_change_to_message_insert_row_offline(
+                    "acc",
+                    BifrostProviderKind::Jmap,
+                    change,
+                ) {
                     super::super::hydrate::HydratedChange::Message(row, _) => *row,
                     other => panic!("unexpected result {other:?}"),
                 }
@@ -285,7 +423,7 @@ mod tests {
         );
 
         let stores = stores(state.clone(), &_tmp);
-        let affected = persist(&stores, BifrostProviderKind::Jmap, &rows)
+        let affected = persist(&stores, "acc", BifrostProviderKind::Jmap, &rows, &[])
             .await
             .unwrap();
         assert_eq!(affected.message_ids, vec!["m1", "m2"]);
@@ -349,4 +487,11 @@ mod tests {
             "thread_labels rollup recomputed"
         );
     }
+
+    // The JMAP byte-identical membership-AND-threading equality gate
+    // (`jmap_consumer_membership_equals_legacy`) lives in `golden_test.rs`:
+    // it drives the full hydrate -> persist -> post_persist path against a
+    // frozen golden captured from the legacy JMAP persist semantics, rather
+    // than the consumer-only row counts this module used to assert
+    // (B3a-cut-jmap 4.0 / 6.1).
 }

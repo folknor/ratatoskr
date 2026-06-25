@@ -20,7 +20,7 @@ mod settings;
 mod signature;
 mod smart_folder;
 mod sync;
-mod test_helpers;
+pub(crate) mod test_helpers;
 mod thread_ui_state;
 
 pub(crate) use action_mark_chat_read::JournaledChatRead;

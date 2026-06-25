@@ -2,14 +2,18 @@ pub mod hydrate;
 pub mod post_persist;
 pub mod write;
 
-use std::collections::HashSet;
+#[cfg(test)]
+mod golden_test;
+
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bifrost_sync::CheckpointStore;
 use bifrost_sync::backfill::BackfillState;
 use bifrost_sync::{Error, SyncEngine};
-use bifrost_types::{AccountId, Checkpoint, CursorScope, SyncEvent};
+use bifrost_types::{AccountId, Checkpoint, CursorScope, ObjectType, SyncEvent};
+use common::types::FolderKind;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
@@ -50,9 +54,19 @@ pub struct BifrostConsumerStores {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConsumerHook {
-    StallConsumer { after_ms: u64 },
+    StallConsumer {
+        after_ms: u64,
+    },
     CrashBeforeAck,
     CrashAfterAckNoSentinel,
+    /// Force the drive loop to report `lagged` (and detach) on the next
+    /// event, simulating sustained structural broadcast lag WITHOUT needing
+    /// a real overflow. The production bounded lag-backoff loop in
+    /// `engine_sync::sync_jmap_account` then exercises its re-attach budget,
+    /// backoff delays, and failed-with-lag terminal exactly as it would
+    /// under a real `RecvError::Lagged`. Gate target for the
+    /// production-lag-backoff harness (B3a-cut-jmap 6.4).
+    ForceLag,
 }
 
 #[derive(Default)]
@@ -98,6 +112,7 @@ pub struct ChangeStreamConsumer {
     stores: BifrostConsumerStores,
     checkpoint_store: Option<Arc<SqliteCheckpointStore>>,
     hook_registry: Option<Arc<ConsumerHookRegistry>>,
+    jmap_folder_map: HashMap<String, FolderKind>,
     /// The set of scopes the consumer has OBSERVED a `MultiplexerEvent` for
     /// on the broadcast. This is the completion-synthesis scope enumeration
     /// (spec 4.1.2), used in place of `engine.cursors.all_scopes()`.
@@ -130,6 +145,7 @@ impl ChangeStreamConsumer {
             stores,
             checkpoint_store: None,
             hook_registry: None,
+            jmap_folder_map: HashMap::new(),
             observed_scopes: HashSet::new(),
         }
     }
@@ -143,6 +159,12 @@ impl ChangeStreamConsumer {
     #[must_use]
     pub fn with_hooks(mut self, hook_registry: Arc<ConsumerHookRegistry>) -> Self {
         self.hook_registry = Some(hook_registry);
+        self
+    }
+
+    #[must_use]
+    pub fn with_jmap_folder_map(mut self, folder_map: HashMap<String, FolderKind>) -> Self {
+        self.jmap_folder_map = folder_map;
         self
     }
 
@@ -176,6 +198,20 @@ impl ChangeStreamConsumer {
                     } else {
                         None
                     };
+                    // ForceLag short-circuits to the lag arm WITHOUT persisting
+                    // this event, so the cursor never advances past the gap -
+                    // exactly the no-message-loss invariant a real
+                    // `RecvError::Lagged` preserves (the dropped events are
+                    // refetched from the last durable cursor on re-attach).
+                    if matches!(hook, Some(ConsumerHook::ForceLag)) {
+                        log::warn!(
+                            "bifrost consumer FORCED lag for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.lagged = true;
+                        self.engine.detach(&self.account_id).await?;
+                        return Ok(());
+                    }
                     let hook = if let Some(hook @ ConsumerHook::StallConsumer { .. }) = hook {
                         apply_hook_before_batch(hook).await?;
                         None
@@ -227,13 +263,30 @@ impl ChangeStreamConsumer {
     ) -> Result<bool, Error> {
         match &*event.event {
             SyncEvent::Batch(batch) => {
-                let hydrated =
-                    HydrateBatch::from_changes(&self.account_id.0, self.provider, &batch.items);
-                let affected = write::persist(&self.stores, self.provider, &hydrated.rows)
-                    .await
-                    .map_err(Error::Other)?;
+                let hydrated = if is_email_scope(&event.scope) {
+                    HydrateBatch::from_changes(
+                        &self.engine,
+                        &self.account_id,
+                        self.provider,
+                        &self.jmap_folder_map,
+                        &batch.items,
+                    )
+                    .await?
+                } else {
+                    HydrateBatch::default()
+                };
+                let affected = write::persist(
+                    &self.stores,
+                    &self.account_id.0,
+                    self.provider,
+                    &hydrated.rows,
+                    &hydrated.deleted_ids,
+                )
+                .await
+                .map_err(|error| Error::Other(format!("bifrost persist: {error}")))?;
                 post_persist::run(
                     &self.stores.db,
+                    &self.account_id.0,
                     self.provider,
                     &event.scope,
                     event.checkpoint.as_ref(),
@@ -241,7 +294,7 @@ impl ChangeStreamConsumer {
                     &affected,
                 )
                 .await
-                .map_err(Error::Other)?;
+                .map_err(|error| Error::Other(format!("bifrost post-persist: {error}")))?;
                 self.stores.search.flush_now().await.map_err(Error::Other)?;
                 if matches!(hook, Some(ConsumerHook::CrashBeforeAck)) {
                     return Err(Error::Other(
@@ -329,6 +382,13 @@ impl ChangeStreamConsumer {
     }
 }
 
+fn is_email_scope(scope: &CursorScope) -> bool {
+    matches!(
+        scope,
+        CursorScope::Account | CursorScope::Type(ObjectType::Email)
+    )
+}
+
 async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
     match hook {
         ConsumerHook::StallConsumer { after_ms } => {
@@ -338,6 +398,9 @@ async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
         ConsumerHook::CrashBeforeAck | ConsumerHook::CrashAfterAckNoSentinel => Err(Error::Other(
             "bifrost consumer crash hook fired in in-process handler".to_string(),
         )),
+        // ForceLag is handled inline in `drive_receiver` (it short-circuits to
+        // the lag arm before any batch work), so it never reaches here.
+        ConsumerHook::ForceLag => Ok(()),
     }
 }
 

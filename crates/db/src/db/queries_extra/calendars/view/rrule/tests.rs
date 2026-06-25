@@ -1,4 +1,3 @@
-
 use super::super::CalendarViewEvent;
 use super::*;
 use chrono::{TimeZone, Timelike};

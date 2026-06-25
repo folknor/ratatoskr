@@ -61,7 +61,7 @@ fn bifrost_completion()
     BIFROST_COMPLETION.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
-fn bifrost_hooks() -> Arc<crate::bifrost::ConsumerHookRegistry> {
+pub(crate) fn bifrost_hooks() -> Arc<crate::bifrost::ConsumerHookRegistry> {
     Arc::clone(BIFROST_HOOKS.get_or_init(|| Arc::new(Default::default())))
 }
 
@@ -308,6 +308,7 @@ pub(super) async fn bifrost_arm_hook_handle(
         TestBifrostHook::CrashAfterAckNoSentinel => {
             crate::bifrost::ConsumerHook::CrashAfterAckNoSentinel
         }
+        TestBifrostHook::ForceLag => crate::bifrost::ConsumerHook::ForceLag,
     };
     bifrost_hooks().arm(params.account_id, hook).await;
     serde_json::to_value(TestBifrostArmHookAck { armed: true })

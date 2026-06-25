@@ -19,7 +19,9 @@ sort_order = 1
 
 [[email]]
 id = "email-001"
+thread_id = "thread-hello"
 mailbox_ids = ["mbx-inbox"]
+keywords = ["project"]
 from = "alice@example.com"
 to = ["bob@example.com"]
 subject = "Hello"
@@ -29,6 +31,7 @@ body_text = "First message body."
 
 [[email]]
 id = "email-002"
+thread_id = "thread-hello"
 mailbox_ids = ["mbx-inbox"]
 from = "carol@example.com"
 to = ["bob@example.com"]

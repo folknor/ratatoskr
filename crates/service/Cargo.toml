@@ -49,6 +49,10 @@ async-trait = "0.1"
 # jmap-client for the JMAP-specific contact action handlers.
 futures = "0.3"
 uuid = { version = "1.23.1", features = ["v4"] }
+# B3a-cut-jmap 4.2: the consumer re-parses the raw RFC822 the JMAP engine
+# streams (`open_raw_rfc822`) to recover the headers / attachment detail the
+# structured `Message` drops.
+mail-parser = "0.11.3"
 bifrost-jmap = { git = "file:///home/folk/Programs/jmap-client", rev = "b3d207c", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
 bifrost-types.workspace = true
 bifrost-net.workspace = true

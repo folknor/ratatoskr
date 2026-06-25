@@ -43,6 +43,31 @@ local function count_account_requests(requests, command, account_id)
     return count
 end
 
+-- Email/get requests that actually hydrate a message, i.e. carry a
+-- non-empty `ids[]`. bifrost's per-kick Account::open probe issues an
+-- `Email/get` with `ids = []` (alongside the empty `Thread/get`) to
+-- learn account state; saehrimnir's request log records that probe
+-- with `account_id` set but no `detail.ids` key (the mock omits an
+-- empty ids array, per notes/request-log.md). The "primary delta must
+-- fetch zero emails" gate cares about real hydration, not the empty
+-- open-time probe, so it counts only entries whose `detail.ids` is
+-- present. A genuine state-isolation regression (primary's
+-- Email/changes wrongly reporting email-primary-001 as updated) still
+-- trips this: the resulting Email/get carries `ids = [...]`.
+local function count_email_hydrations(requests, account_id)
+    local count = 0
+    for _, request in ipairs(requests) do
+        if request.protocol == "jmap"
+            and request.command == "Email/get"
+            and request.detail ~= nil
+            and request.detail.account_id == account_id
+            and request.detail.ids ~= nil then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 local function mutate_other_account(endpoint)
     local response = harness.http_json({
         method = "POST",
@@ -133,7 +158,7 @@ harness.assert_eq(
     "delta sync unexpectedly checked secondary email changes"
 )
 harness.assert_eq(
-    count_account_requests(delta_requests, "Email/get", "account-primary"),
+    count_email_hydrations(delta_requests, "account-primary"),
     0,
     "primary delta fetched email after secondary-only mutation"
 )
@@ -149,7 +174,7 @@ harness.write_summary({
     message_count = after_delta.message_count,
     provider_requests = #delta_requests,
     email_changes_primary = count_account_requests(delta_requests, "Email/changes", "account-primary"),
-    email_get_primary = count_account_requests(delta_requests, "Email/get", "account-primary"),
+    email_get_primary = count_email_hydrations(delta_requests, "account-primary"),
 })
 
 local ok, shutdown_err = client:shutdown()

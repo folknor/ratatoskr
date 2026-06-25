@@ -1,3 +1,4 @@
+use common::ops::ProviderOps;
 use db::db::ReadDbState;
 use provider_sync::ProviderSyncOps;
 use service_state::WriteDbState;
@@ -24,7 +25,7 @@ pub async fn create_provider(
     write_db: &WriteDbState,
     account_id: &str,
     encryption_key: [u8; 32],
-) -> Result<Box<dyn ProviderSyncOps>, String> {
+) -> Result<Box<dyn ProviderOps>, String> {
     let aid = account_id.to_string();
     let raw_provider = db
         .with_read(move |conn| db::db::queries_extra::get_account_provider_raw_sync(conn, &aid))
@@ -66,6 +67,51 @@ pub async fn create_provider(
             .await?;
             Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
+        MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(
+            encryption_key,
+            write_db.writer_pool(),
+        ))),
+    }
+}
+
+pub async fn create_sync_provider(
+    db: &ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+) -> Result<Box<dyn ProviderSyncOps>, String> {
+    let aid = account_id.to_string();
+    let raw_provider = db
+        .with_read(move |conn| db::db::queries_extra::get_account_provider_raw_sync(conn, &aid))
+        .await?;
+    match raw_provider.as_str() {
+        "harness-offline" => return Ok(Box::new(HarnessOfflineProvider::immediate())),
+        "harness-slow-sync" => return Ok(Box::new(HarnessOfflineProvider::slow_sync())),
+        _ => {}
+    }
+
+    match MailProviderKind::parse(&raw_provider)? {
+        MailProviderKind::Gmail => {
+            let client = gmail::client::GmailClient::from_account(
+                db,
+                write_db.writer_pool(),
+                account_id,
+                encryption_key,
+            )
+            .await?;
+            Ok(Box::new(gmail::ops::GmailOps::new(client)))
+        }
+        MailProviderKind::Graph => {
+            let client = graph::client::GraphClient::from_account(
+                db,
+                write_db.writer_pool(),
+                account_id,
+                encryption_key,
+            )
+            .await?;
+            Ok(Box::new(graph::ops::GraphOps::new(client)))
+        }
+        MailProviderKind::Jmap => Err("JMAP sync is handled by the bifrost runner".to_string()),
         MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(
             encryption_key,
             write_db.writer_pool(),

@@ -1,6 +1,16 @@
-use bifrost_types::{Change, ObjectChangeKind};
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use bifrost_sync::SyncEngine;
+use bifrost_types::{
+    AccountId, BlobHandle, Change, HydrationProjection, Importance, Message, ObjectChangeKind,
+    ObjectId, SyncEvent,
+};
 use common::types::{FolderKind, LabelKind, MailProviderKind};
-use db::db::queries_extra::MessageInsertRow;
+use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow};
+use futures::StreamExt;
+use mail_parser::MessageParser;
+use provider_sync::consumer_support::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use search::SearchDocument;
 use serde::{Deserialize, Serialize};
 use store::inline_image_store::InlineImage;
@@ -28,7 +38,7 @@ pub enum HydrationOutcome {
 pub struct HydrateBatch {
     pub rows: Vec<ConsumerMessageRow>,
     pub failed: usize,
-    pub deleted: usize,
+    pub deleted_ids: Vec<String>,
     pub uncertain: usize,
     pub blocked: bool,
 }
@@ -39,22 +49,41 @@ pub struct ConsumerMessageRow {
     pub folders: Vec<FolderKind>,
     pub labels: Vec<LabelKind>,
     pub keywords: Vec<String>,
+    pub attachments: Vec<AttachmentInsertRow>,
     pub body_html: Option<String>,
     pub body_text: Option<String>,
     pub inline_images: Vec<InlineImage>,
     pub search_document: SearchDocument,
+    /// Whether this message carries the provider's "important" signal.
+    /// JMAP folds the `$important` keyword into `Message::importance`
+    /// (`High`), so the consumer reads importance from there rather than
+    /// from the user-visible keyword set - `$important` is `$`-prefixed and
+    /// is stripped by `is_user_visible_keyword`, so it never survives into
+    /// `keywords`. The thread aggregate (`write.rs`) ORs this across the
+    /// thread's messages to set `threads.is_important`, matching the legacy
+    /// JMAP path that derived it from the IMPORTANT label.
+    pub is_important: bool,
 }
 
 impl HydrateBatch {
-    #[must_use]
-    pub fn from_changes(
-        account_id: &str,
+    pub async fn from_changes(
+        engine: &SyncEngine,
+        account_id: &AccountId,
         provider: BifrostProviderKind,
+        jmap_folder_map: &HashMap<String, FolderKind>,
         changes: &[Change],
-    ) -> Self {
+    ) -> Result<Self, bifrost_sync::Error> {
         let mut batch = Self::default();
         for change in changes {
-            match hydrate_change_to_message_insert_row(account_id, provider, change) {
+            match hydrate_change_to_message_insert_row(
+                engine,
+                account_id,
+                provider,
+                jmap_folder_map,
+                change,
+            )
+            .await?
+            {
                 HydratedChange::Message(row, outcome) => match outcome {
                     HydrationOutcome::Succeeded | HydrationOutcome::SucceededWithDegradedBody => {
                         batch.rows.push(*row);
@@ -63,7 +92,41 @@ impl HydrateBatch {
                         batch.failed = batch.failed.saturating_add(1);
                     }
                     HydrationOutcome::Deleted => {
-                        batch.deleted = batch.deleted.saturating_add(1);
+                        if let Change::ObjectChange(object) = change {
+                            batch.deleted_ids.push(object.id.0.clone());
+                        }
+                    }
+                    HydrationOutcome::Uncertain => {
+                        batch.uncertain = batch.uncertain.saturating_add(1);
+                        batch.blocked = true;
+                    }
+                },
+                HydratedChange::ScopeOnly => {}
+            }
+        }
+        Ok(batch)
+    }
+
+    #[cfg(test)]
+    pub fn from_changes_offline(
+        account_id: &str,
+        provider: BifrostProviderKind,
+        changes: &[Change],
+    ) -> Self {
+        let mut batch = Self::default();
+        for change in changes {
+            match hydrate_change_to_message_insert_row_offline(account_id, provider, change) {
+                HydratedChange::Message(row, outcome) => match outcome {
+                    HydrationOutcome::Succeeded | HydrationOutcome::SucceededWithDegradedBody => {
+                        batch.rows.push(*row);
+                    }
+                    HydrationOutcome::Failed => {
+                        batch.failed = batch.failed.saturating_add(1);
+                    }
+                    HydrationOutcome::Deleted => {
+                        if let Change::ObjectChange(object) = change {
+                            batch.deleted_ids.push(object.id.0.clone());
+                        }
                     }
                     HydrationOutcome::Uncertain => {
                         batch.uncertain = batch.uncertain.saturating_add(1);
@@ -83,12 +146,13 @@ pub enum HydratedChange {
     ScopeOnly,
 }
 
-#[must_use]
-pub fn hydrate_change_to_message_insert_row(
-    account_id: &str,
+pub async fn hydrate_change_to_message_insert_row(
+    engine: &SyncEngine,
+    account_id: &AccountId,
     provider: BifrostProviderKind,
+    jmap_folder_map: &HashMap<String, FolderKind>,
     change: &Change,
-) -> HydratedChange {
+) -> Result<HydratedChange, bifrost_sync::Error> {
     match change {
         Change::ObjectChange(object) => {
             let outcome = match object.kind {
@@ -102,6 +166,76 @@ pub fn hydrate_change_to_message_insert_row(
                 _ => HydrationOutcome::Uncertain,
             };
             if let Some(synthetic) = decode_synthetic_message(&object.id.0) {
+                return Ok(synthetic_to_row(
+                    &account_id.0,
+                    provider,
+                    synthetic,
+                    outcome,
+                ));
+            }
+            if matches!(
+                outcome,
+                HydrationOutcome::Deleted | HydrationOutcome::Uncertain
+            ) {
+                return Ok(HydratedChange::Message(
+                    Box::new(ConsumerMessageRow {
+                        message: minimal_message_row(&account_id.0, &object.id.0),
+                        folders: Vec::new(),
+                        labels: Vec::new(),
+                        keywords: Vec::new(),
+                        attachments: Vec::new(),
+                        body_html: None,
+                        body_text: None,
+                        inline_images: Vec::new(),
+                        search_document: minimal_search_document(&account_id.0, &object.id.0),
+                        is_important: false,
+                    }),
+                    outcome,
+                ));
+            }
+            let message = engine
+                .message_hydrate(
+                    account_id,
+                    ObjectId(object.id.0.clone()),
+                    HydrationProjection::Full,
+                )
+                .await?;
+            Ok(HydratedChange::Message(
+                Box::new(
+                    message_to_consumer_row(
+                        engine,
+                        account_id,
+                        provider,
+                        jmap_folder_map,
+                        message,
+                        outcome,
+                    )
+                    .await?,
+                ),
+                outcome,
+            ))
+        }
+        Change::ScopeChange(_) => Ok(HydratedChange::ScopeOnly),
+        _ => Ok(HydratedChange::ScopeOnly),
+    }
+}
+
+#[cfg(test)]
+pub fn hydrate_change_to_message_insert_row_offline(
+    account_id: &str,
+    provider: BifrostProviderKind,
+    change: &Change,
+) -> HydratedChange {
+    match change {
+        Change::ObjectChange(object) => {
+            let outcome = match object.kind {
+                ObjectChangeKind::Created | ObjectChangeKind::Updated => {
+                    HydrationOutcome::Succeeded
+                }
+                ObjectChangeKind::Destroyed => HydrationOutcome::Deleted,
+                _ => HydrationOutcome::Uncertain,
+            };
+            if let Some(synthetic) = decode_synthetic_message(&object.id.0) {
                 return synthetic_to_row(account_id, provider, synthetic, outcome);
             }
             HydratedChange::Message(
@@ -110,22 +244,399 @@ pub fn hydrate_change_to_message_insert_row(
                     folders: Vec::new(),
                     labels: Vec::new(),
                     keywords: Vec::new(),
+                    attachments: Vec::new(),
                     body_html: None,
                     body_text: None,
                     inline_images: Vec::new(),
                     search_document: minimal_search_document(account_id, &object.id.0),
+                    is_important: false,
                 }),
                 outcome,
             )
         }
-        // ScopeChange (membership add/remove) drives the membership tables,
-        // not a message-row write (B3-spec 2.3.1). The full membership
-        // hydration is still a gap; for now it carries no message row.
         Change::ScopeChange(_) => HydratedChange::ScopeOnly,
-        // `Change` is #[non_exhaustive]; tolerate future variants as
-        // membership-only no-ops rather than panicking the drive loop.
         _ => HydratedChange::ScopeOnly,
     }
+}
+
+async fn message_to_consumer_row(
+    engine: &SyncEngine,
+    account_id: &AccountId,
+    provider: BifrostProviderKind,
+    jmap_folder_map: &HashMap<String, FolderKind>,
+    message: Message,
+    outcome: HydrationOutcome,
+) -> Result<ConsumerMessageRow, bifrost_sync::Error> {
+    let degraded = matches!(outcome, HydrationOutcome::SucceededWithDegradedBody);
+    // B3a-cut-jmap 4.2: stream the verbatim RFC822 (engine I/O) and download
+    // inline-image blobs (engine I/O), then hand the bytes to the pure
+    // builder. Splitting the I/O from the merge lets the byte-identical
+    // golden test drive the exact same merge with fixture bytes and no live
+    // engine, so the production path and the gate cannot drift.
+    let raw = if degraded {
+        None
+    } else {
+        fetch_raw_rfc822(engine, account_id, &message.id).await?
+    };
+    let inline_hashes = hydrate_inline_images(engine, account_id, &message.attachments).await?;
+    Ok(build_consumer_row(
+        account_id,
+        provider,
+        jmap_folder_map,
+        &message,
+        raw.as_deref(),
+        inline_hashes,
+        outcome,
+    ))
+}
+
+/// Pure merge of a structured bifrost `Message`, the verbatim RFC822 octets,
+/// and the downloaded inline-image blobs into a `ConsumerMessageRow`. No
+/// engine, no network - the production async path and the byte-identical
+/// golden test both call this so their output cannot diverge (B3a-cut-jmap
+/// 4.0 / 4.2).
+pub(crate) fn build_consumer_row(
+    account_id: &AccountId,
+    provider: BifrostProviderKind,
+    jmap_folder_map: &HashMap<String, FolderKind>,
+    message: &Message,
+    raw: Option<&[u8]>,
+    inline_hashes: HashMap<String, (db::blob_hash::BlobHash, InlineImage)>,
+    outcome: HydrationOutcome,
+) -> ConsumerMessageRow {
+    let message_id = message.id.0.clone();
+    let thread_id = message
+        .thread_id
+        .as_ref()
+        .map(|id| id.0.clone())
+        .unwrap_or_else(|| message_id.clone());
+    // `date` matches legacy: JMAP `sentAt || receivedAt` (bifrost computes
+    // `Message::date` the same way). `internal_date` legacy = `receivedAt`,
+    // a server-assigned timestamp the frozen bifrost surface does not expose
+    // on `Message`/`HydratedObject`/`InventoryEntry` and that does not live
+    // in the RFC822 octets either; `Message::date` is the closest available
+    // value, equal to `receivedAt` whenever `sentAt` is unset.
+    let date = message.date.map(system_time_ms).unwrap_or(0);
+
+    let degraded = matches!(outcome, HydrationOutcome::SucceededWithDegradedBody);
+
+    // B3a-cut-jmap 4.2: re-parse the verbatim RFC822 to recover the headers /
+    // body / attachment detail the structured `Message` dropped. A re-parse
+    // failure degrades the body lane (metadata persists, never dropped -
+    // B3-spec 4.1.3) rather than failing the row.
+    let raw = if degraded { None } else { raw };
+    let reparsed = raw.and_then(|bytes| parse_rfc822(&MessageParser::default(), bytes).ok());
+    // If the raw fetch was requested but yielded nothing parseable, the body
+    // could not be recovered: treat as a degraded body (metadata-only).
+    let body_degraded = degraded || (raw.is_some() && reparsed.is_none());
+
+    let parsed = reparsed.unwrap_or_default();
+    let Rfc822Parsed {
+        message_id_header,
+        in_reply_to_header,
+        references_header,
+        list_unsubscribe,
+        list_unsubscribe_post,
+        auth_results,
+        mdn_requested,
+        body_text: parsed_body_text,
+        body_html: parsed_body_html,
+        attachments: parsed_attachments,
+    } = parsed;
+
+    let (body_html, body_text) = if body_degraded {
+        (None, None)
+    } else {
+        // Prefer the re-parsed body (first non-AMP part, legacy semantics);
+        // fall back to the structured body if the re-parse produced nothing.
+        (
+            parsed_body_html.or_else(|| message.body_html.clone()),
+            parsed_body_text.or_else(|| message.body_text.clone()),
+        )
+    };
+    // Snippet: legacy used the JMAP server `email.preview()`, which bifrost
+    // does not surface; derive it from the re-parsed text body as the IMAP
+    // raw-MIME path does.
+    let snippet = snippet_from_body(body_text.as_deref());
+
+    let keywords = message
+        .flags
+        .iter()
+        .filter(|keyword| common::folder_roles::is_user_visible_keyword(keyword))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut folders = message
+        .containers
+        .iter()
+        .filter_map(|container| {
+            if provider == BifrostProviderKind::Jmap
+                && let Some(folder) = jmap_folder_map.get(&container.0)
+            {
+                return Some(folder.clone());
+            }
+            FolderKind::parse(&container.0, provider.mail_provider_kind()).ok()
+        })
+        .collect::<Vec<_>>();
+    // Legacy JMAP `get_labels_for_email` synthesized a DRAFT folder for any
+    // `$draft`-keyword message that did not already resolve a Drafts
+    // mailbox, so a draft without an explicit Drafts container still lands
+    // in the DRAFT system folder. Preserve that to keep folder membership
+    // byte-identical with the legacy path.
+    if provider == BifrostProviderKind::Jmap && message.flags.contains("$draft") {
+        let draft = FolderKind::System(common::types::SystemFolderId::Draft);
+        if !folders.contains(&draft) {
+            folders.push(draft);
+        }
+    }
+    // Inline-image blobs were downloaded by the caller; their per-blob BLAKE3
+    // hash (keyed by blob id) back-fills each attachment row's `content_hash`
+    // exactly as the legacy JMAP post-store UPDATE did, so the attachment-
+    // store dedup linkage stays intact.
+    // Attachment rows: id / remote_attachment_id come from the bifrost blob
+    // handle (the JMAP blobId); filename / content_id / is_inline come from
+    // the RFC822 re-parse (the structured `BlobHandle` cannot carry the part
+    // name, the Content-ID, or the inline disposition). The server returns
+    // the structured attachment list and the MIME parts in the same order,
+    // so the two are matched by ordinal position.
+    let attachments = message
+        .attachments
+        .iter()
+        .enumerate()
+        .map(|(index, blob)| {
+            let detail = parsed_attachments.get(index);
+            AttachmentInsertRow {
+                id: format!("{}_{}", message_id, blob.id.0),
+                message_id: message_id.clone(),
+                account_id: account_id.0.clone(),
+                filename: detail
+                    .map(|d| d.filename.clone())
+                    .or_else(|| Some(blob.id.0.clone())),
+                mime_type: detail
+                    .map(|d| d.mime_type.clone())
+                    .or_else(|| blob.content_type.clone()),
+                size: detail
+                    .map(|d| d.size)
+                    .or_else(|| blob.size.and_then(|size| i64::try_from(size).ok())),
+                remote_attachment_id: Some(blob.id.0.clone()),
+                content_hash: inline_hashes.get(&blob.id.0).map(|entry| entry.0),
+                content_id: detail.and_then(|d| d.content_id.clone()),
+                is_inline: detail.map_or_else(
+                    || {
+                        blob.content_type
+                            .as_deref()
+                            .is_some_and(|mime| mime.starts_with("image/"))
+                    },
+                    |d| d.is_inline,
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+    let inline_images = inline_hashes
+        .into_values()
+        .map(|(_, image)| image)
+        .collect::<Vec<_>>();
+    let raw_size = raw
+        .map(|bytes| i64::try_from(bytes.len()).unwrap_or(i64::MAX))
+        .or_else(|| message.size_bytes.and_then(|size| i64::try_from(size).ok()));
+    let row = MessageInsertRow {
+        id: message_id.clone(),
+        account_id: account_id.0.clone(),
+        thread_id: thread_id.clone(),
+        from_address: message.from.first().map(|address| address.address.clone()),
+        from_name: message
+            .from
+            .first()
+            .and_then(|address| address.name.clone()),
+        to_addresses: format_addresses(&message.to),
+        cc_addresses: format_addresses(&message.cc),
+        bcc_addresses: format_addresses(&message.bcc),
+        reply_to: format_addresses(&message.reply_to),
+        subject: message.subject.clone(),
+        snippet: snippet.clone(),
+        date,
+        is_read: message.flags.contains("$seen"),
+        is_starred: message.flags.contains("$flagged"),
+        is_replied: message.flags.contains("$answered"),
+        is_forwarded: message.flags.contains("$forwarded"),
+        raw_size,
+        internal_date: Some(date),
+        list_unsubscribe,
+        list_unsubscribe_post,
+        auth_results,
+        message_id_header,
+        // Prefer the re-parsed References (all ids); fall back to the
+        // structured list if the re-parse produced nothing.
+        references_header: references_header.or_else(|| {
+            if message.references.is_empty() {
+                None
+            } else {
+                Some(message.references.join(" "))
+            }
+        }),
+        // In-Reply-To: the re-parse joins ALL ids; the structured
+        // `Message::in_reply_to` keeps only the first.
+        in_reply_to_header: in_reply_to_header.or_else(|| message.in_reply_to.clone()),
+        body_cached: body_html.is_some() || body_text.is_some(),
+        mdn_requested,
+        is_reaction: false,
+        imap_uid: None,
+        imap_folder: None,
+        has_meeting_invite: parsed_attachments
+            .iter()
+            .map(|att| att.mime_type.as_str())
+            .any(common::email_parsing::is_calendar_content_type),
+        meeting_invite_method: parsed_attachments
+            .iter()
+            .find_map(|att| common::email_parsing::extract_imip_method(&att.mime_type)),
+        meeting_invite_uid: None,
+    };
+    let search_document = SearchDocument {
+        message_id,
+        account_id: account_id.0.clone(),
+        thread_id,
+        subject: message.subject.clone(),
+        from_name: row.from_name.clone(),
+        from_address: row.from_address.clone(),
+        to_addresses: row.to_addresses.clone(),
+        body_text: body_text.clone(),
+        snippet: Some(snippet),
+        date: date / 1000,
+        is_read: row.is_read,
+        is_starred: row.is_starred,
+        has_attachment: !attachments.is_empty(),
+        attachments: Vec::new(),
+    };
+    ConsumerMessageRow {
+        message: row,
+        folders,
+        labels: Vec::new(),
+        keywords,
+        attachments,
+        body_html,
+        body_text,
+        inline_images,
+        search_document,
+        is_important: matches!(message.importance, Importance::High),
+    }
+}
+
+/// Stream the message's verbatim RFC822 octets via the engine's read-only
+/// `open_raw_rfc822` passthrough. Returns `Ok(None)` when the stream
+/// terminates with an error (e.g. the provider does not support raw fetch),
+/// so the caller degrades the body lane rather than failing the row.
+async fn fetch_raw_rfc822(
+    engine: &SyncEngine,
+    account_id: &AccountId,
+    message_id: &ObjectId,
+) -> Result<Option<Vec<u8>>, bifrost_sync::Error> {
+    let mut stream = engine.open_raw_rfc822(account_id, message_id.clone())?;
+    let mut bytes = Vec::new();
+    let mut terminated = false;
+    while let Some(event) = stream.next().await {
+        match event {
+            SyncEvent::Batch(batch) => {
+                for chunk in batch.items {
+                    bytes.extend_from_slice(&chunk);
+                }
+            }
+            SyncEvent::Terminated(error) => {
+                log::warn!(
+                    "JMAP raw RFC822 fetch terminated for {}: {}",
+                    message_id.0,
+                    error
+                );
+                terminated = true;
+                break;
+            }
+            SyncEvent::Done(_) | SyncEvent::Progress(_) | SyncEvent::Warning(_) => {}
+            _ => {}
+        }
+    }
+    if terminated || bytes.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(bytes))
+    }
+}
+
+/// Download each image blob once and return, keyed by blob id, the BLAKE3
+/// hash plus the `InlineImage` ready for the store. The hash is surfaced so
+/// the caller can back-fill `attachments.content_hash` (legacy parity); a
+/// blob is downloaded at most once per message so duplicate attachment rows
+/// pointing at the same blob share a single download and the same hash.
+async fn hydrate_inline_images(
+    engine: &SyncEngine,
+    account_id: &AccountId,
+    blobs: &[BlobHandle],
+) -> Result<HashMap<String, (db::blob_hash::BlobHash, InlineImage)>, bifrost_sync::Error> {
+    let mut images: HashMap<String, (db::blob_hash::BlobHash, InlineImage)> = HashMap::new();
+    for blob in blobs {
+        let Some(mime_type) = blob.content_type.as_ref() else {
+            continue;
+        };
+        if !mime_type.starts_with("image/") {
+            continue;
+        }
+        if images.contains_key(&blob.id.0) {
+            continue;
+        }
+        let mut stream = engine.open_blob(account_id, blob.clone())?;
+        let mut bytes = Vec::new();
+        while let Some(event) = stream.next().await {
+            match event {
+                SyncEvent::Batch(batch) => {
+                    for chunk in batch.items {
+                        bytes.extend_from_slice(&chunk);
+                    }
+                }
+                SyncEvent::Terminated(error) => {
+                    log::warn!(
+                        "JMAP inline blob {} hydration terminated: {}",
+                        blob.id.0,
+                        error
+                    );
+                    bytes.clear();
+                    break;
+                }
+                SyncEvent::Done(_) | SyncEvent::Progress(_) | SyncEvent::Warning(_) => {}
+                _ => {}
+            }
+        }
+        if !bytes.is_empty() && bytes.len() <= store::inline_image_store::MAX_INLINE_SIZE {
+            let hash = db::blob_hash::BlobHash::hash(&bytes);
+            images.insert(
+                blob.id.0.clone(),
+                (
+                    hash,
+                    InlineImage {
+                        content_hash: hash.to_hex(),
+                        data: bytes,
+                        mime_type: mime_type.clone(),
+                    },
+                ),
+            );
+        }
+    }
+    Ok(images)
+}
+
+fn system_time_ms(time: SystemTime) -> i64 {
+    let millis = time
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    i64::try_from(millis).unwrap_or(i64::MAX)
+}
+
+fn format_addresses(addresses: &[bifrost_types::Address]) -> Option<String> {
+    if addresses.is_empty() {
+        return None;
+    }
+    common::email_parsing::format_address_list(
+        addresses
+            .iter()
+            .map(|address| (address.name.clone(), address.address.clone())),
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,16 +800,22 @@ fn synthetic_to_row(
         has_attachment: false,
         attachments: Vec::new(),
     };
+    let is_important = synthetic
+        .keywords
+        .iter()
+        .any(|keyword| keyword == "$important");
     HydratedChange::Message(
         Box::new(ConsumerMessageRow {
             message,
             folders,
             labels,
             keywords: synthetic.keywords,
+            attachments: Vec::new(),
             body_html: None,
             body_text,
             inline_images,
             search_document,
+            is_important,
         }),
         outcome,
     )
@@ -374,17 +891,21 @@ fn minimal_search_document(account_id: &str, id: &str) -> SearchDocument {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{HydratedChange, HydrationOutcome, hydrate_change_to_message_insert_row};
+    use super::{HydratedChange, HydrationOutcome, hydrate_change_to_message_insert_row_offline};
     use crate::bifrost::consumer::BifrostProviderKind;
     use bifrost_types::{Change, ObjectChange, ObjectChangeKind, ObjectId, ScopeChange};
 
     #[test]
-    fn hydrate_change_to_message_insert_row_maps_object_create() {
+    fn hydrate_change_to_message_insert_row_offline_maps_object_create() {
         let change = Change::ObjectChange(ObjectChange {
             id: ObjectId("m1".to_string()),
             kind: ObjectChangeKind::Created,
         });
-        match hydrate_change_to_message_insert_row("acc", BifrostProviderKind::Jmap, &change) {
+        match hydrate_change_to_message_insert_row_offline(
+            "acc",
+            BifrostProviderKind::Jmap,
+            &change,
+        ) {
             HydratedChange::Message(row, HydrationOutcome::Succeeded) => {
                 assert_eq!(row.message.id, "m1");
                 assert_eq!(row.message.account_id, "acc");
@@ -395,12 +916,16 @@ mod tests {
     }
 
     #[test]
-    fn hydrate_change_to_message_insert_row_classifies_destroyed_as_deleted() {
+    fn hydrate_change_to_message_insert_row_offline_classifies_destroyed_as_deleted() {
         let change = Change::ObjectChange(ObjectChange {
             id: ObjectId("m1".to_string()),
             kind: ObjectChangeKind::Destroyed,
         });
-        match hydrate_change_to_message_insert_row("acc", BifrostProviderKind::Jmap, &change) {
+        match hydrate_change_to_message_insert_row_offline(
+            "acc",
+            BifrostProviderKind::Jmap,
+            &change,
+        ) {
             HydratedChange::Message(_, HydrationOutcome::Deleted) => {}
             other => panic!("expected Deleted outcome, got {other:?}"),
         }
@@ -418,10 +943,11 @@ mod tests {
                 kind: ObjectChangeKind::Destroyed,
             }),
         ];
-        let batch = super::HydrateBatch::from_changes("acc", BifrostProviderKind::Jmap, &changes);
+        let batch =
+            super::HydrateBatch::from_changes_offline("acc", BifrostProviderKind::Jmap, &changes);
         assert_eq!(batch.rows.len(), 1, "deleted item must not persist a row");
         assert_eq!(batch.rows[0].message.id, "keep");
-        assert_eq!(batch.deleted, 1);
+        assert_eq!(batch.deleted_ids.len(), 1);
         assert!(!batch.blocked, "a deletion must not block the ack");
     }
 
@@ -451,11 +977,11 @@ mod tests {
     /// a Failed item is skipped and does NOT block the ack; an Uncertain
     /// item leaves siblings persisted but sets `blocked` so the ack is held.
     #[test]
-    fn hydrate_change_to_message_insert_row_taxonomy_lanes() {
+    fn hydrate_change_to_message_insert_row_offline_taxonomy_lanes() {
         use super::SyntheticOutcome;
 
         // Degraded body: metadata row persists, body hydration off.
-        match hydrate_change_to_message_insert_row(
+        match hydrate_change_to_message_insert_row_offline(
             "acc",
             BifrostProviderKind::Jmap,
             &synthetic_change("deg", SyntheticOutcome::DegradedBody),
@@ -473,7 +999,8 @@ mod tests {
             synthetic_change("ok", SyntheticOutcome::Succeeded),
             synthetic_change("bad", SyntheticOutcome::Failed),
         ];
-        let batch = super::HydrateBatch::from_changes("acc", BifrostProviderKind::Jmap, &changes);
+        let batch =
+            super::HydrateBatch::from_changes_offline("acc", BifrostProviderKind::Jmap, &changes);
         assert_eq!(batch.rows.len(), 1, "Failed item is skipped");
         assert_eq!(batch.rows[0].message.id, "ok");
         assert_eq!(batch.failed, 1);
@@ -484,7 +1011,8 @@ mod tests {
             synthetic_change("sib", SyntheticOutcome::Succeeded),
             synthetic_change("maybe", SyntheticOutcome::Uncertain),
         ];
-        let batch = super::HydrateBatch::from_changes("acc", BifrostProviderKind::Jmap, &changes);
+        let batch =
+            super::HydrateBatch::from_changes_offline("acc", BifrostProviderKind::Jmap, &changes);
         assert_eq!(batch.rows.len(), 1, "siblings persist, Uncertain does not");
         assert_eq!(batch.uncertain, 1);
         assert!(batch.blocked, "an Uncertain item must block the ack");
@@ -500,7 +1028,7 @@ mod tests {
             kind: bifrost_types::ScopeChangeKind::Added,
         });
         assert!(matches!(
-            hydrate_change_to_message_insert_row("acc", BifrostProviderKind::Jmap, &change),
+            hydrate_change_to_message_insert_row_offline("acc", BifrostProviderKind::Jmap, &change),
             HydratedChange::ScopeOnly
         ));
     }

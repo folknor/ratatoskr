@@ -255,38 +255,93 @@ helpers reachable without relocating them, the test-only attach path
 `bifrost-consumer-*` durability + hot-path harness instruments - read the
 B3a-infra landing commit. It landed ADDITIVELY: it cuts no provider over, rewires
 no production sync, deletes nothing - legacy `provider-sync` stays live and
-authoritative for all four providers, and the consumer is reached only through
-the test-only attach path until a B3a-cut-* spec routes a real provider onto it.
-The HARD ordering constraint the cut specs inherit: no B3a-cut-* may splice the
-consumer's lag-recovery driver into production `run_sync` before B3c lands its
-backoff / pause-and-surface recovery (the recovery is correct-but-unbounded and
-can livelock a structurally-slow consumer), unless that cut carries its own
-gated bounded-retry stopgap.
+authoritative for all four providers, and the consumer was reached only through
+the test-only attach path until B3a-cut-jmap (below) routed JMAP onto it.
+The HARD ordering constraint the remaining cut specs inherit: no B3a-cut-* may
+splice the consumer's lag-recovery driver into production `run_sync` before B3c
+lands its backoff / pause-and-surface recovery (the recovery is
+correct-but-unbounded and can livelock a structurally-slow consumer), unless that
+cut carries its own gated bounded-retry stopgap (B3a-cut-jmap carried one - the
+minimal bounded lag-backoff in `engine_sync.rs` - so the remaining cuts can reuse
+the same stopgap shape).
+
+B3a-cut-jmap (the first per-provider cutover) is done and its TODO entry is
+removed per repo convention; the B3a-cut-graph / -gmail / -imap sub-items below
+that name it as establishing the per-provider mechanics have those mechanics
+available to reuse. It landed as ONE coexistence cutover: JMAP accounts now sync
+through `BifrostSyncEngine` + `ChangeStreamConsumer`, while Gmail, Graph, and IMAP
+stay on legacy `provider-sync`. For what it delivered - the coexistence dispatch
+in `run_sync` (`crates/service/src/sync.rs`) that routes JMAP accounts to the new
+engine path and every other provider to the unchanged legacy
+`sync_dispatch::sync_for_account`; the service-owned one-shot JMAP runner
+(`crates/service/src/bifrost/engine_sync.rs`, with the minimal bounded lag-backoff
+the B3a-infra HARD constraint requires); the filled JMAP arms of the consumer's
+hydrate / write / post-persist hooks (real engine-driven JMAP hydration over the
+`dc670ef` `SyncEngine` passthrough, the folders-only-recompute membership strategy
+with keyword labels, the JMAP deletion path, thread participants + chat-state, and
+the `is_important` aggregate); the relocation of the four entangled JMAP auxiliary
+passes (shared-account discovery, identity resolution, contacts sync,
+ShareNotification polling) into `crates/provider-sync/src/jmap/aux_sync.rs` and the
+runner branch, not dropped; and the DELETION of the legacy JMAP `provider-sync`
+sync impl (`crates/provider-sync/src/jmap/sync/`, `shared_mailbox_sync.rs`, and
+`jmap_impl.rs`) - read the B3a-cut-jmap landing commit. The `jmap_sync_state`
+`"Email"`/`"Mailbox"` change-cursor writer retires (the engine owns that cursor
+via the opaque `sync_cursors` envelope); the `"ShareNotification"` writer survives
+because its call site was re-homed; the table schema stays (additive-green) until
+B15. The JMAP `ProviderSyncOps::{sync_initial, sync_delta}` arm is gone, but the
+JMAP `ProviderOps` action methods survive (B4/B15). The coexistence dispatch is
+in-tree provider-kind routing, removed by the final per-provider cut
+(B3a-cut-imap). Gated against the bifrost freeze `ae73e92` (§ 11): `brokkr check`
+green, `brokkr service-suite` 63/63, and every spec § 6 gate passes -
+`jmap-initial`, `jmap-bulk-initial` (10001 msgs), `jmap-steady-state-delta`,
+`jmap-incremental-steps`, `jmap-email-set-delta`, `jmap-contacts-initial`,
+`jmap-production-lag-backoff`, `jmap-multi-account-{primary,secondary}-isolation`,
+the `golden` membership-equality + `hydrate` service tests,
+`bifrost-consumer-lag-recovery`, and `parent_sigkill`. The two
+multi-account-isolation gates initially read as a redundant wire `Email/get`
+regression, but the root cause was the harness matcher: it counted bifrost's empty
+open-time `Email/get(ids=[])` `Account::open` probe (which hydrates nothing) as a
+fetch. saehrimnir's per-`accountId` state was correct; the fix was a
+`count_email_hydrations` helper that counts only `Email/get` calls carrying a
+non-empty `ids[]`, preserving the strict "delta fetches zero emails after a
+foreign-account mutation" intent while ignoring the no-op probe.
 
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
   inline images, search), flushes search, then acks the bifrost checkpoint LAST
-  are stood up by B3a-infra (done; see the done-note above). What remains is
-  routing each provider's production sync through that consumer and replicating
+  are stood up by B3a-infra (done; see the done-note above), and JMAP is routed
+  onto it by B3a-cut-jmap (done). What remains is routing each remaining
+  provider's production sync through that consumer and replicating
   each provider's ACTUAL post-persist processing, which is asymmetric, not a
   uniform pipeline: IMAP runs JWZ `threading::build_threads`;
   JMAP / Graph / Gmail write the thread aggregate inline (`upsert_thread_aggregate`)
-  with per-provider membership strategies; `seen_ingest` is the one shared pass;
+  with per-provider membership strategies (JMAP's now done, in the consumer);
+  `seen_ingest` is the one shared pass;
   bundling, filters, smart labels, and `evaluate_notifications` have NO sync-time
   callers today and stay unwired (whether they should auto-fire on new mail is a
   separate product item, explicitly not B3's scope - feature-preserving means the
   consumer reproduces today's behavior, not that it inherits an unwired gap as a
   feature). The sub-items:
-  - B3a-cut-jmap / -graph / -gmail / -imap. One cutover per provider: route that
+  - B3a-cut-graph / -gmail / -imap. One cutover per provider: route that
     provider's sync through the consumer, delete that provider's `provider-sync`
-    impl, gated by that provider's sync-bench (`{jmap,graph,gmail,imap}-steady-state-delta`
+    impl, gated by that provider's sync-bench (`{graph,gmail,imap}-steady-state-delta`
     held against baseline) plus the mandatory membership-row and threading-output
-    equality assertions. The per-provider coexistence dispatch is removed by the
-    final cutover. Each needs B3a-infra.
+    equality assertions. B3a-cut-jmap (done; see the done-note above) established
+    the per-provider mechanics: the coexistence dispatch in `run_sync`, the
+    service-owned one-shot runner with bounded lag-backoff, and the per-provider
+    membership / post-persist arms in the consumer. The coexistence dispatch is
+    removed by the final cutover (B3a-cut-imap). Each needs B3a-infra.
   - B3b. Push plus invalidation. Wire the out-of-process push ingress (Gmail
     Pub/Sub, Graph webhooks) and the invalidation sink; move `jmap_push_state` /
     `graph_subscriptions` to bifrost's `SubscriptionRegistry`. Needs B3a.
+    Follow-up surfaced by B3a-cut-jmap: the one-shot JMAP runner opens TWO JMAP
+    connections per kick (the shared legacy `aux_client` for the auxiliary passes
+    plus the bifrost engine attach), and the consumer's `COMPLETION_IDLE_INTERVAL`
+    idle cadence costs ~2s/kick - both are artefacts of the attach/drive/detach
+    one-shot shape. B3b's keep-attached lifecycle amortizes them back toward the
+    legacy steady-state (~4 provider requests, ~22ms) by holding the engine open
+    across kicks instead of re-attaching per sync.
   - B3c. Control, pause, recovery. The keep-attached lifecycle for steady-state /
     push, pause/resume, and `RecoveryClass` dispatch. Needs B3a, B3b.
   The worked-out design - the per-provider seam survey, durability ordering, and
@@ -418,11 +473,30 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `aa9172d`: during B3's spec review a bifrost side-quest -
-making backfill checkpoints consumer-ack-deferred, required for at-least-once
-cold-start hydration (see § 2's side-quest protocol) - was landed in `../bifrost`,
-and both `./research/bifrost` and `../bifrost` were re-synced together to
-`aa9172d`. Each Track B spec records, in its ground
+frozen reference is `ae73e92`: four bifrost side-quests have landed since the
+A8-closing commit (see § 2's side-quest protocol), and both `./research/bifrost`
+and `../bifrost` were re-synced together to each in turn. First `aa9172d` ("sync:
+make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
+review, made backfill checkpoints consumer-ack-deferred for at-least-once
+cold-start hydration. Then `dc670ef` ("sync: expose read-only hydration
+passthrough on SyncEngine"), surfaced during B3a-cut-jmap's spec review, added a
+read-only hydration passthrough cluster (`get_stream` / `message_hydrate` /
+`thread_hydrate` / `open_raw_rfc822` / `open_blob` / `open_blob_range`) so the
+change-stream consumer can reach the engine-private `Arc<dyn Account>` to hydrate
+a broadcast `Change` into real rows - the blocker B3a-cut-jmap § 4.2 named.
+Then two further side-quests surfaced during B3a-cut-jmap's step-7 gate
+validation, both in `run_backfill_orchestrator` (`crates/sync/src/engine.rs`):
+the OpenPages loop treated a short inventory page (`seen < chunk`, the common case
+when a JMAP server caps `Email/query` below the requested chunk) as
+end-of-inventory and dropped the rest of a bulk backfill - fixed to terminate on
+an empty page; and the orchestrator never read `get_backfill` from the
+`CheckpointStore`, so a one-shot re-attach re-walked backfill from page 0 every
+kick (inflating delta `Email/query` and failing the steady-state gates) - fixed to
+resume/skip from the persisted backfill checkpoint. Both landed and advanced the
+freeze to `ae73e92`. (Note: separate from these bifrost commits, B3a-cut-jmap also
+required several `saehrimnir` mock extensions - JMAP `Thread/get`, `ContactCard/get`,
+and per-`accountId` `Email`/`Mailbox` state - which are an installed external
+binary, not commit-pinned here.) Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the

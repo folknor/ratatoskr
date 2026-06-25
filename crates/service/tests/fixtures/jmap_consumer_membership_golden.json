@@ -1,0 +1,162 @@
+{
+  "attachments": [
+    {
+      "account_id": "acc",
+      "content_id": null,
+      "filename": "invite.ics",
+      "id": "m1_blob-invite",
+      "is_inline": 0,
+      "message_id": "m1",
+      "mime_type": "text/calendar; method=REQUEST",
+      "remote_attachment_id": "blob-invite",
+      "size": 30
+    }
+  ],
+  "message_folders": [
+    {
+      "account_id": "acc",
+      "folder_id": "archive",
+      "message_id": "m1"
+    },
+    {
+      "account_id": "acc",
+      "folder_id": "INBOX",
+      "message_id": "m2"
+    }
+  ],
+  "message_keywords": [
+    {
+      "account_id": "acc",
+      "keyword": "project",
+      "label_id": "kw:project",
+      "message_id": "m1"
+    },
+    {
+      "account_id": "acc",
+      "keyword": "project",
+      "label_id": "kw:project",
+      "message_id": "m2"
+    }
+  ],
+  "message_labels": [],
+  "messages": [
+    {
+      "account_id": "acc",
+      "auth_results": "example.test; spf=pass smtp.mailfrom=alice@example.test",
+      "bcc_addresses": null,
+      "body_cached": 1,
+      "cc_addresses": "team@example.test",
+      "date": 1700000100000,
+      "from_address": "alice@example.test",
+      "from_name": "Alice Reply",
+      "has_meeting_invite": 1,
+      "id": "m1",
+      "in_reply_to_header": "root-m2@example.test older@example.test",
+      "internal_date": 1700000100000,
+      "is_forwarded": 0,
+      "is_reaction": 0,
+      "is_read": 0,
+      "is_replied": 0,
+      "is_starred": 0,
+      "list_unsubscribe": "<https://example.test/unsub>, <mailto:unsub@example.test>",
+      "list_unsubscribe_post": "List-Unsubscribe=One-Click",
+      "mdn_requested": 1,
+      "meeting_invite_method": "REQUEST",
+      "meeting_invite_uid": null,
+      "message_id_header": "reply-m1@example.test",
+      "raw_size": 826,
+      "references_header": "root-m2@example.test older@example.test",
+      "reply_to": null,
+      "snippet": "Replying on the project thread.",
+      "subject": "Re: Project kickoff",
+      "thread_id": "t1",
+      "to_addresses": "me@example.test"
+    },
+    {
+      "account_id": "acc",
+      "auth_results": null,
+      "bcc_addresses": null,
+      "body_cached": 1,
+      "cc_addresses": null,
+      "date": 1700000000000,
+      "from_address": "bob@example.test",
+      "from_name": "Bob Root",
+      "has_meeting_invite": 0,
+      "id": "m2",
+      "in_reply_to_header": null,
+      "internal_date": 1700000000000,
+      "is_forwarded": 0,
+      "is_reaction": 0,
+      "is_read": 1,
+      "is_replied": 0,
+      "is_starred": 0,
+      "list_unsubscribe": null,
+      "list_unsubscribe_post": null,
+      "mdn_requested": 0,
+      "meeting_invite_method": null,
+      "meeting_invite_uid": null,
+      "message_id_header": "root-m2@example.test",
+      "raw_size": 197,
+      "references_header": null,
+      "reply_to": null,
+      "snippet": "Kickoff body for the project thread.",
+      "subject": "Project kickoff",
+      "thread_id": "t1",
+      "to_addresses": "me@example.test"
+    }
+  ],
+  "thread_folders": [
+    {
+      "account_id": "acc",
+      "folder_id": "INBOX",
+      "thread_id": "t1"
+    },
+    {
+      "account_id": "acc",
+      "folder_id": "archive",
+      "thread_id": "t1"
+    }
+  ],
+  "thread_labels": [
+    {
+      "account_id": "acc",
+      "label_id": "kw:project",
+      "thread_id": "t1"
+    }
+  ],
+  "thread_participants": [
+    {
+      "account_id": "acc",
+      "email": "alice@example.test",
+      "thread_id": "t1"
+    },
+    {
+      "account_id": "acc",
+      "email": "bob@example.test",
+      "thread_id": "t1"
+    },
+    {
+      "account_id": "acc",
+      "email": "me@example.test",
+      "thread_id": "t1"
+    },
+    {
+      "account_id": "acc",
+      "email": "team@example.test",
+      "thread_id": "t1"
+    }
+  ],
+  "threads": [
+    {
+      "account_id": "acc",
+      "has_attachments": 1,
+      "id": "t1",
+      "is_chat_thread": 0,
+      "is_important": 1,
+      "is_read": 0,
+      "is_starred": 0,
+      "message_count": 2,
+      "shared_mailbox_id": null
+    }
+  ]
+}

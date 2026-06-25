@@ -14,8 +14,8 @@
 //! and the action-side dispatch keeps calling action methods directly
 //! on it without an explicit upcast.
 //!
-//! The four orphan-impls (`impl ProviderSyncOps for {Gmail,Jmap,Graph,
-//! Imap}Ops`) live in the per-provider sub-modules. The orphan rule
+//! The orphan-impls (`impl ProviderSyncOps for {Gmail,Graph,Imap}Ops`)
+//! live in the per-provider sub-modules. The orphan rule
 //! is satisfied because the trait is local to this crate; the impl
 //! targets are foreign types from the provider crates.
 
@@ -27,7 +27,6 @@ mod graph_impl;
 pub mod imap;
 mod imap_impl;
 pub mod jmap;
-mod jmap_impl;
 mod keyword_membership;
 pub(crate) mod persistence;
 mod seen_ingest;

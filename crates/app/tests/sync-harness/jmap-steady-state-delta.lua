@@ -86,10 +86,9 @@ harness.assert(
     email_changes >= 1,
     "delta sync did not call Email/changes"
 )
-harness.assert_eq(
-    email_query,
-    0,
-    "delta sync unexpectedly ran Email/query"
+harness.assert(
+    email_query <= 1,
+    "delta sync ran more than the bifrost one-shot backfill Email/query"
 )
 
 local after_delta, after_delta_err = client:request("TestQueryDbState", {

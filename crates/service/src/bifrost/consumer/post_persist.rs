@@ -44,6 +44,7 @@ impl seen::MessageAddresses for SeenMessage {
 
 pub async fn run(
     db: &WriteDbState,
+    account_id: &str,
     provider: BifrostProviderKind,
     scope: &CursorScope,
     checkpoint: Option<&Checkpoint>,
@@ -71,10 +72,6 @@ pub async fn run(
     // (scope, checkpoint). The marker MUST be written in the SAME txn as
     // the increment (B3-spec 4.1.3): if they split, a crash between them
     // double-counts on replay, defeating the marker entirely.
-    let account_id = rows
-        .first()
-        .map(|row| row.message.account_id.as_str())
-        .unwrap_or_default();
     let marker = checkpoint.map(|cp| MarkerKey::new(account_id, scope, cp));
     ingest_seen_with_marker(db, rows, marker).await
 }
@@ -329,16 +326,18 @@ mod tests {
             folders: Vec::new(),
             labels: Vec::new(),
             keywords: Vec::new(),
+            attachments: Vec::new(),
             body_html: None,
             body_text: None,
             inline_images: Vec::new(),
+            is_important: false,
         }
     }
 
     fn minimal() -> MessageInsertRow {
         // Reuse the hydrate stub shape so the test does not duplicate every
         // MessageInsertRow field.
-        match crate::bifrost::consumer::hydrate::hydrate_change_to_message_insert_row(
+        match crate::bifrost::consumer::hydrate::hydrate_change_to_message_insert_row_offline(
             "acc",
             crate::bifrost::consumer::BifrostProviderKind::Jmap,
             &bifrost_types::Change::ObjectChange(bifrost_types::ObjectChange {

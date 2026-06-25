@@ -1501,6 +1501,13 @@ async fn run_boot_sequence_inner(
     let progress_reporter: Arc<dyn ProgressReporter> = Arc::new(
         crate::progress::IpcProgressReporter::new(out_tx.clone(), String::new()),
     );
+    let bifrost_checkpoint_store =
+        crate::bifrost::SqliteCheckpointStore::new(db_write.writer_pool(), db_read.clone());
+    let bifrost_engine = crate::bifrost::BifrostSyncEngine::build(bifrost_checkpoint_store, None)
+        .map_err(|error| {
+        log::error!("build bifrost sync engine: {error}");
+        BootFailure::MigrationFailure
+    })?;
     let runtime = Arc::new(crate::sync::SyncRuntime::new(
         db_write.clone(),
         body_write,
@@ -1511,6 +1518,7 @@ async fn run_boot_sequence_inner(
         notification_tx,
         app_data_dir.clone(),
         0,
+        bifrost_engine,
         Arc::clone(&state),
     ));
     state.install_sync_runtime(runtime);

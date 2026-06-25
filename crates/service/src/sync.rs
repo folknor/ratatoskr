@@ -140,6 +140,7 @@ pub(crate) struct SyncRuntimeInner {
     pub(crate) notification_tx: NotificationSender,
     pub(crate) app_data_dir: PathBuf,
     pub(crate) service_generation: u32,
+    pub(crate) bifrost_engine: crate::bifrost::BifrostSyncEngine,
     /// Attachments roadmap Phase 4: handle back to the boot state so
     /// `run_sync` can fire a post-sync prefetch sweep without going
     /// through provider-sync (which stays prefetch-ignorant). Held as
@@ -161,6 +162,7 @@ impl SyncRuntime {
         notification_tx: NotificationSender,
         app_data_dir: PathBuf,
         service_generation: u32,
+        bifrost_engine: crate::bifrost::BifrostSyncEngine,
         boot_state: Arc<crate::boot::BootSharedState>,
     ) -> Self {
         Self {
@@ -175,6 +177,7 @@ impl SyncRuntime {
                 notification_tx,
                 app_data_dir,
                 service_generation,
+                bifrost_engine,
                 boot_state,
             }),
         }
@@ -483,21 +486,57 @@ async fn run_sync(
     let mut encryption_key_bytes = [0u8; 32];
     encryption_key_bytes.copy_from_slice(inner.encryption_key.expose().as_slice());
 
-    let result = crate::sync_dispatch::sync_for_account(
-        &inner.db,
-        &inner
-            .boot_state
-            .read_db_state()
-            .expect("read db installed after boot.ready"),
-        &account_id,
-        encryption_key_bytes,
-        &inner.body_write,
-        &inner.inline_write,
-        &inner.search_write,
-        inner.progress.as_ref(),
-        &cancellation_token,
-    )
-    .await;
+    let read_db = inner
+        .boot_state
+        .read_db_state()
+        .expect("read db installed after boot.ready");
+    let provider_kind = {
+        let aid = account_id.clone();
+        read_db
+            .with_read(move |conn| {
+                conn.query_row(
+                    "SELECT provider FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| format!("read account provider: {error}"))
+            })
+            .await
+    };
+    let result = match provider_kind {
+        Ok(provider) if provider == "jmap" => {
+            crate::bifrost::engine_sync::sync_jmap_account(
+                &inner.bifrost_engine,
+                crate::bifrost::BifrostConsumerStores {
+                    db: inner.db.clone(),
+                    body_store: inner.body_write.clone(),
+                    inline_images: inner.inline_write.clone(),
+                    search: inner.search_write.clone(),
+                },
+                &read_db,
+                &inner.db,
+                &account_id,
+                encryption_key_bytes,
+                &cancellation_token,
+            )
+            .await
+        }
+        Ok(_) => {
+            crate::sync_dispatch::sync_for_account(
+                &inner.db,
+                &read_db,
+                &account_id,
+                encryption_key_bytes,
+                &inner.body_write,
+                &inner.inline_write,
+                &inner.search_write,
+                inner.progress.as_ref(),
+                &cancellation_token,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
 
     // Force a tantivy commit so any docs queued during this run are
     // observable by the time the UI handles `SyncCompleted`. The

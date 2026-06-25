@@ -355,9 +355,14 @@ pub struct TestBifrostInjectBatchAck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum TestBifrostHook {
-    StallConsumer { after_ms: u64 },
+    StallConsumer {
+        after_ms: u64,
+    },
     CrashBeforeAck,
     CrashAfterAckNoSentinel,
+    /// Force the consumer drive to report sustained lag, exercising the
+    /// production bounded lag-backoff loop (B3a-cut-jmap 6.4).
+    ForceLag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
