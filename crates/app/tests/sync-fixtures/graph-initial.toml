@@ -1,0 +1,50 @@
+name = "graph-initial"
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+account_id = "account-1"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mbx-archive"
+account_id = "account-1"
+name = "Archive"
+role = "archive"
+sort_order = 1
+
+[[category]]
+id = "cat-work"
+display_name = "Work"
+color = "preset0"
+account_id = "account-1"
+
+[[category]]
+id = "cat-urgent"
+display_name = "Urgent"
+color = "preset15"
+account_id = "account-1"
+
+[[email]]
+id = "email-001"
+thread_id = "thread-graph-initial"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Graph initial"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<graph-initial-001@example.com>"]
+body_text = "Graph initial message body."
+
+[[email.attachment]]
+blob_id = "blob-att-001"
+name = "sample.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"

@@ -108,7 +108,6 @@ pub async fn build_account_factory(
             ),
         )),
         MailProviderKind::Graph => {
-            let source = decrypted.oauth_token_source(provider, writer)?;
             let graph_base = std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT")
                 .ok()
                 .map(|base| format!("{}/v1.0", base.trim_end_matches('/')))
@@ -117,9 +116,15 @@ pub async fn build_account_factory(
                 .ok()
                 .map(|base| format!("{}/beta", base.trim_end_matches('/')))
                 .unwrap_or_else(|| "https://graph.microsoft.com/beta".to_string());
-            Ok(Arc::new(GraphAccountFactory::new(
-                GraphClient::with_source(graph_base, graph_beta, source),
-            )))
+            let client = if std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT").is_ok() {
+                let access_token =
+                    decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
+                GraphClient::with_api_bases(graph_base, graph_beta, access_token)
+            } else {
+                let source = decrypted.oauth_token_source(provider, writer)?;
+                GraphClient::with_source(graph_base, graph_beta, source)
+            };
+            Ok(Arc::new(GraphAccountFactory::new(client)))
         }
         MailProviderKind::Jmap => build_jmap_factory(&decrypted, provider, writer),
         MailProviderKind::Imap => build_imap_factory(decrypted, provider, writer),

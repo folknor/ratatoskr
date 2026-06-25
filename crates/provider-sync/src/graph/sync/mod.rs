@@ -1,3 +1,27 @@
+//! Legacy Graph per-folder sync, RETAINED as the shared-mailbox-only leg.
+//!
+//! DELIBERATE DEVIATION from the original B3a-cut-graph cutover plan (recorded
+//! in the B3a-cut-graph landing commit; the cut spec itself is deleted at
+//! landing), kept explicitly rather than silently. The plan's headline was to
+//! delete this tree and re-home a "minimal `graph_{initial,delta}_sync` shim" for
+//! `shared_mailbox_sync.rs`. In practice that shim is NOT minimal: the only
+//! remaining consumer of this module is `graph/shared_mailbox_sync.rs` (B12,
+//! out of scope for this cut), and it calls the FULL `graph_initial_sync` /
+//! `graph_delta_sync` - which pull in `SyncCtx`, the per-folder delta-token
+//! persistence (`delta_tokens`), the message persistence (`persistence`), the
+//! folder fetch (`folders`), and the store writes (`stores`). Re-homing those
+//! into a shared-mailbox leg would relocate ~the whole tree for ~0 net LOC
+//! reduction and high compile risk, with no behavioral value until B12 rewires
+//! shared mailboxes onto the consumer.
+//!
+//! What the cut DID achieve: the PERSONAL-mail Graph path no longer routes
+//! through here at all - `graph_impl.rs` (the `ProviderSyncOps` orphan) is
+//! deleted and personal Graph mail persists through the service-owned bifrost
+//! consumer. `aux_sync.rs` resolves the folder map via the `graph` crate's own
+//! `::graph::sync::sync_folders_public` (its natural owner), not this tree.
+//! This module is therefore now exclusively the B12 shared-mailbox legacy leg;
+//! it is deleted/rewired by B12, not by B3a-cut-graph.
+
 mod delta_tokens;
 mod folders;
 mod persistence;

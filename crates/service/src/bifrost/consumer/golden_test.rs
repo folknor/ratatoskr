@@ -40,6 +40,8 @@ use super::hydrate::{HydrationOutcome, build_consumer_row};
 
 const INPUT_FIXTURE: &str = "tests/fixtures/jmap_consumer_membership_input.json";
 const GOLDEN_FIXTURE: &str = "tests/fixtures/jmap_consumer_membership_golden.json";
+const GRAPH_INPUT_FIXTURE: &str = "tests/fixtures/graph_consumer_membership_input.json";
+const GRAPH_GOLDEN_FIXTURE: &str = "tests/fixtures/graph_consumer_membership_golden.json";
 
 /// The ten tables / columns the gate pins (spec 4.0). `message_labels` is
 /// asserted EMPTY (JMAP keyword-label semantics).
@@ -186,14 +188,15 @@ fn build_message(input: &InputMessage) -> (Message, Vec<u8>) {
     (message, raw)
 }
 
-fn state(account_id: &str) -> (WriteDbState, tempfile::TempDir) {
+fn state(account_id: &str, provider: &str) -> (WriteDbState, tempfile::TempDir) {
     let tmp = tempfile::TempDir::new().unwrap();
     let pool = db::db::open_writer_pool(tmp.path()).unwrap();
     let account_id = account_id.to_string();
+    let provider = provider.to_string();
     pool.with_write_sync(move |conn| {
         conn.execute(
-            "INSERT INTO accounts (id, email, provider) VALUES (?1, 'me@example.test', 'jmap')",
-            rusqlite::params![account_id],
+            "INSERT INTO accounts (id, email, provider) VALUES (?1, 'me@example.test', ?2)",
+            rusqlite::params![account_id, provider],
         )
         .unwrap();
         Ok(())
@@ -286,7 +289,7 @@ async fn jmap_consumer_membership_equals_legacy() {
         serde_json::from_slice(&std::fs::read(manifest_path(INPUT_FIXTURE)).unwrap()).unwrap();
     let account = AccountId(input.account_id.clone());
 
-    let (db_state, tmp) = state(&input.account_id);
+    let (db_state, tmp) = state(&input.account_id, "jmap");
     let consumer_stores = stores(db_state.clone(), &tmp);
 
     // The consumer path: build each row through the SAME pure merge the
@@ -374,5 +377,214 @@ async fn jmap_consumer_membership_equals_legacy() {
     assert_eq!(
         message_labels, 0,
         "JMAP must never write message_labels rows"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn graph_consumer_membership_equals_legacy() {
+    let input: InputFixture =
+        serde_json::from_slice(&std::fs::read(manifest_path(GRAPH_INPUT_FIXTURE)).unwrap())
+            .unwrap();
+    let account = AccountId(input.account_id.clone());
+
+    let (db_state, tmp) = state(&input.account_id, "graph");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+
+    let mut graph_folder_map: HashMap<String, common::types::FolderKind> = HashMap::new();
+    graph_folder_map.insert(
+        "mbx-inbox".to_string(),
+        common::types::FolderKind::System(common::types::SystemFolderId::Inbox),
+    );
+    graph_folder_map.insert(
+        "mbx-archive".to_string(),
+        common::types::FolderKind::System(common::types::SystemFolderId::Archive),
+    );
+
+    let rows: Vec<_> = input
+        .messages
+        .iter()
+        .map(|message| {
+            let (msg, raw) = build_message(message);
+            build_consumer_row(
+                &account,
+                BifrostProviderKind::Graph,
+                &graph_folder_map,
+                &msg,
+                Some(&raw),
+                HashMap::new(),
+                HydrationOutcome::Succeeded,
+            )
+        })
+        .collect();
+
+    let affected = super::write::persist(
+        &consumer_stores,
+        &input.account_id,
+        BifrostProviderKind::Graph,
+        &rows,
+        &[],
+    )
+    .await
+    .unwrap();
+    super::post_persist::run(
+        &consumer_stores.db,
+        &input.account_id,
+        BifrostProviderKind::Graph,
+        &bifrost_types::CursorScope::FolderType {
+            folder: bifrost_types::FolderId("mbx-inbox".to_string()),
+            ty: bifrost_types::ObjectType::Email,
+        },
+        None,
+        &rows,
+        &affected,
+    )
+    .await
+    .unwrap();
+
+    let snapshot = dump_snapshot(&db_state).await;
+    let snapshot_str = canonical_string(&snapshot);
+
+    // ACCEPTED DEVIATION (finding D): unlike the spec 6.1 finding-3 ideal of
+    // capturing the Graph golden from the legacy `persist_messages` path, this
+    // golden is (re)generated from the NEW consumer via `UPDATE_GOLDEN`. It
+    // therefore locks the consumer against ITSELF, not against legacy, and so
+    // cannot catch a systematic consumer-vs-legacy divergence - only an
+    // unintended future drift in consumer output. This matches the LANDED JMAP
+    // golden precedent (`jmap_consumer_membership_equals_legacy` above, same
+    // self-referential `UPDATE_GOLDEN` regeneration) and is kept for parity:
+    // capturing from legacy would require a throwaway `#[ignore]` harness that
+    // drives the still-present `graph/sync/persistence.rs` `persist_messages`
+    // over this fixture, and the legacy/consumer label-row metadata is instead
+    // pinned directly by the explicit `labels`-table assertions at the end of
+    // this test (cat: deletable + raw name, importance: undeletable + sort
+    // order), which DO encode the legacy contract independently of the golden.
+    if std::env::var("UPDATE_GOLDEN").is_ok() {
+        std::fs::write(
+            manifest_path(GRAPH_GOLDEN_FIXTURE),
+            format!("{snapshot_str}\n"),
+        )
+        .unwrap();
+        eprintln!(
+            "===BEGIN GRAPH GOLDEN SNAPSHOT===\n{snapshot_str}\n===END GRAPH GOLDEN SNAPSHOT==="
+        );
+        eprintln!("[golden] regenerated {GRAPH_GOLDEN_FIXTURE}");
+        return;
+    }
+
+    let golden_raw =
+        std::fs::read_to_string(manifest_path(GRAPH_GOLDEN_FIXTURE)).unwrap_or_else(|_| {
+            panic!(
+                "missing golden fixture {GRAPH_GOLDEN_FIXTURE}; regenerate with \
+                 UPDATE_GOLDEN=1 after validating the consumer output against the \
+                 legacy Graph persist semantics"
+            )
+        });
+    let golden: Value = serde_json::from_str(&golden_raw).unwrap();
+    let golden_str = canonical_string(&golden);
+
+    if snapshot_str != golden_str {
+        eprintln!(
+            "===BEGIN GRAPH CONSUMER SNAPSHOT===\n{snapshot_str}\n===END GRAPH CONSUMER SNAPSHOT==="
+        );
+    }
+    assert_eq!(
+        snapshot_str, golden_str,
+        "consumer Graph persist diverged from the frozen legacy golden; if this is an \
+         intentional change, regenerate with UPDATE_GOLDEN=1 and justify it in the commit"
+    );
+
+    let message_keywords = snapshot
+        .get("message_keywords")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(usize::MAX);
+    assert_eq!(
+        message_keywords, 0,
+        "Graph categories must not be written as message_keywords rows"
+    );
+
+    let message_labels = snapshot
+        .get("message_labels")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    assert!(
+        message_labels >= 2,
+        "Graph category and importance labels must be written to message_labels"
+    );
+
+    // The `labels` table is the one place the generic baseline write is NOT
+    // byte-faithful for Graph (spec 4.4): category tags carry the raw display
+    // name and are deletable; importance labels carry the level display name,
+    // a sort order, and the undeletable flag. SNAPSHOT_QUERIES omits `labels`,
+    // so pin that metadata directly here.
+    let labels = db_state
+        .with_read(move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, name, sort_order, is_undeletable FROM labels ORDER BY id")
+                .map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            let mut query = stmt.query([]).map_err(|e| e.to_string())?;
+            while let Some(row) = query.next().map_err(|e| e.to_string())? {
+                out.push((
+                    row.get::<_, String>(0).map_err(|e| e.to_string())?,
+                    row.get::<_, String>(1).map_err(|e| e.to_string())?,
+                    row.get::<_, Option<i64>>(2).map_err(|e| e.to_string())?,
+                    row.get::<_, i64>(3).map_err(|e| e.to_string())?,
+                ));
+            }
+            Ok(out)
+        })
+        .await
+        .unwrap();
+
+    let category = labels
+        .iter()
+        .find(|(id, _, _, _)| id == "cat:Blue")
+        .expect("cat:Blue label row must exist");
+    assert_eq!(
+        category.1, "Blue",
+        "category label keeps its raw display name"
+    );
+    assert_eq!(category.3, 0, "category labels are deletable");
+
+    let importance = labels
+        .iter()
+        .find(|(id, _, _, _)| id == "importance:high")
+        .expect("importance:high label row must exist");
+    assert_eq!(
+        importance.1,
+        common::types::ImportanceLevel::High.display_name(),
+        "importance label carries the level display name"
+    );
+    assert_eq!(
+        importance.2,
+        Some(common::types::ImportanceLevel::High.sort_order()),
+        "importance label carries its sort order"
+    );
+    assert_eq!(importance.3, 1, "importance labels are undeletable");
+
+    // Finding F: the golden fixture covers normal (gm2) + high (gm1) + low
+    // (gm3) so the `Importance::Low -> importance:low` arm is exercised, not
+    // just High. A blanket `importance:normal` for ordinary mail (spec 4.3 /
+    // finding 4) would show up as a spurious label row here.
+    let importance_low = labels
+        .iter()
+        .find(|(id, _, _, _)| id == "importance:low")
+        .expect("importance:low label row must exist (gm3 is low importance)");
+    assert_eq!(
+        importance_low.1,
+        common::types::ImportanceLevel::Low.display_name(),
+        "low importance label carries the level display name"
+    );
+    assert_eq!(
+        importance_low.2,
+        Some(common::types::ImportanceLevel::Low.sort_order()),
+        "low importance label carries its sort order"
+    );
+    assert_eq!(importance_low.3, 1, "importance labels are undeletable");
+    assert!(
+        !labels.iter().any(|(id, _, _, _)| id == "importance:normal"),
+        "ordinary (normal-importance) mail must NOT mint an importance:normal row"
     );
 }

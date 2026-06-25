@@ -156,6 +156,41 @@ equal_to_baseline = true
 [ratatoskr.gate.jmap_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
+[ratatoskr.gate.graph_steady_state_delta]
+script = "crates/app/tests/sync-harness/graph-steady-state-delta.lua"
+baseline_label = "2026-06-25 bifrost B3a-cut-graph engine one-shot steady-state (provider_requests=18: 3 folder + 10 mail per-folder polling + aux passes)"
+
+[ratatoskr.gate.graph_steady_state_delta.baseline]
+# Other hosts and CI must record their own baseline with --as-baseline
+# before running this gate.
+plantasjen = "40d12374daec4d32963ab8bd65099a38"
+
+[ratatoskr.gate.graph_steady_state_delta.metrics.elapsed_ms]
+# Relative catches normal drift from the host baseline; absolute catches
+# gross hangs even when a local baseline is already slow.
+max_relative = 1.25
+max = 5000
+
+[ratatoskr.gate.graph_steady_state_delta.metrics.success]
+equal = 1
+
+[ratatoskr.gate.graph_steady_state_delta.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.graph_steady_state_delta.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.graph_steady_state_delta.metrics."meta.provider_requests"]
+# Exact-match by design: any new provider request should be reviewed
+# and either justified with a new baseline or fixed.
+max_delta = 0
+
+[ratatoskr.gate.graph_steady_state_delta.metrics."meta.message_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.graph_steady_state_delta.metrics."meta.correct"]
+equal = 1
+
 [ratatoskr.gate.bifrost-consumer-hot-path]
 script = "crates/app/tests/sync-harness/bifrost-consumer-hot-path.lua"
 baseline_label = "2026-06-18 B3a bifrost consumer hot-path baseline"

@@ -4,9 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
     AccountId, BlobHandle, Change, HydrationProjection, Importance, Message, ObjectChangeKind,
-    ObjectId, SyncEvent,
+    ObjectId, ScopeChangeKind, SyncEvent,
 };
-use common::types::{FolderKind, LabelKind, MailProviderKind};
+use common::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind};
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow};
 use futures::StreamExt;
 use mail_parser::MessageParser;
@@ -38,7 +38,29 @@ pub enum HydrationOutcome {
 pub struct HydrateBatch {
     pub rows: Vec<ConsumerMessageRow>,
     pub failed: usize,
+    /// Ids the provider reports as DEFINITIVELY destroyed within this batch
+    /// (a JMAP `ObjectChange{Destroyed}` -> `HydrationOutcome::Deleted`).
+    /// These are applied immediately in the per-batch persist - there is no
+    /// move ambiguity because a `Destroyed` is an explicit object deletion,
+    /// not a per-folder membership removal.
     pub deleted_ids: Vec<String>,
+    /// Graph `ScopeChange{Removed}` ids observed in this batch - CANDIDATE
+    /// deletions only. Graph delta has no destroyed split: a hard-purge and a
+    /// folder MOVE both surface as `Removed` in the source folder's per-folder
+    /// scope batch, and a move's surviving membership arrives as an
+    /// `Updated`/`Added` in the DESTINATION folder's SEPARATE scope batch
+    /// (`graph.md:255-258`). A candidate must therefore be reconciled against
+    /// the live ids seen across the WHOLE drive (not just this batch) before it
+    /// can be deleted - see `ChangeStreamConsumer::flush_pending_deletions`
+    /// (finding A). The drive accumulates these and applies the reconcile at
+    /// drive end.
+    pub removed_ids: Vec<String>,
+    /// Ids seen LIVE in this batch (an `ObjectChange{Created|Updated}` or a
+    /// `ScopeChange{Added}`). The drive accumulates these across all per-folder
+    /// scope batches so a move's destination `Added`/`Updated` cancels the
+    /// source `Removed`, regardless of which folder's batch the consumer
+    /// processed first.
+    pub live_ids: Vec<String>,
     pub uncertain: usize,
     pub blocked: bool,
 }
@@ -70,17 +92,20 @@ impl HydrateBatch {
         engine: &SyncEngine,
         account_id: &AccountId,
         provider: BifrostProviderKind,
-        jmap_folder_map: &HashMap<String, FolderKind>,
+        folder_map: &HashMap<String, FolderKind>,
         changes: &[Change],
     ) -> Result<Self, bifrost_sync::Error> {
         let mut batch = Self::default();
         for change in changes {
+            // Record live/removed membership BEFORE hydration. The Graph
+            // move-vs-purge reconcile is per-DRIVE, not per-batch: a move's
+            // source `Removed` and destination `Added`/`Updated` land in
+            // different per-folder scope batches, so the consumer accumulates
+            // `removed_ids`/`live_ids` across the whole drive and only deletes
+            // the unreconciled remainder at drive end (finding A).
+            record_change_membership(&mut batch, provider, change);
             match hydrate_change_to_message_insert_row(
-                engine,
-                account_id,
-                provider,
-                jmap_folder_map,
-                change,
+                engine, account_id, provider, folder_map, change,
             )
             .await?
             {
@@ -115,6 +140,7 @@ impl HydrateBatch {
     ) -> Self {
         let mut batch = Self::default();
         for change in changes {
+            record_change_membership(&mut batch, provider, change);
             match hydrate_change_to_message_insert_row_offline(account_id, provider, change) {
                 HydratedChange::Message(row, outcome) => match outcome {
                     HydrationOutcome::Succeeded | HydrationOutcome::SucceededWithDegradedBody => {
@@ -140,6 +166,40 @@ impl HydrateBatch {
     }
 }
 
+/// Classify a single change into the drive's live / removed-candidate id sets
+/// (finding A). `live` = an `ObjectChange{Created|Updated}` or a
+/// `ScopeChange{Added}` (the message exists / has membership somewhere);
+/// `removed` = a Graph `ScopeChange{Removed}` (a candidate deletion that only
+/// fires if no live signal cancels it across the whole drive). JMAP deletions
+/// flow through `HydrationOutcome::Deleted`/`deleted_ids` and are NOT recorded
+/// here.
+fn record_change_membership(
+    batch: &mut HydrateBatch,
+    provider: BifrostProviderKind,
+    change: &Change,
+) {
+    match change {
+        Change::ObjectChange(object)
+            if matches!(
+                object.kind,
+                ObjectChangeKind::Created | ObjectChangeKind::Updated
+            ) =>
+        {
+            batch.live_ids.push(object.id.0.clone());
+        }
+        Change::ScopeChange(scope) if matches!(scope.kind, ScopeChangeKind::Added) => {
+            batch.live_ids.push(scope.id.0.clone());
+        }
+        Change::ScopeChange(scope)
+            if provider == BifrostProviderKind::Graph
+                && matches!(scope.kind, ScopeChangeKind::Removed) =>
+        {
+            batch.removed_ids.push(scope.id.0.clone());
+        }
+        _ => {}
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum HydratedChange {
     Message(Box<ConsumerMessageRow>, HydrationOutcome),
@@ -150,7 +210,7 @@ pub async fn hydrate_change_to_message_insert_row(
     engine: &SyncEngine,
     account_id: &AccountId,
     provider: BifrostProviderKind,
-    jmap_folder_map: &HashMap<String, FolderKind>,
+    folder_map: &HashMap<String, FolderKind>,
     change: &Change,
 ) -> Result<HydratedChange, bifrost_sync::Error> {
     match change {
@@ -193,22 +253,18 @@ pub async fn hydrate_change_to_message_insert_row(
                     outcome,
                 ));
             }
+            let projection = if provider == BifrostProviderKind::Graph {
+                HydrationProjection::FullWithBlobs
+            } else {
+                HydrationProjection::Full
+            };
             let message = engine
-                .message_hydrate(
-                    account_id,
-                    ObjectId(object.id.0.clone()),
-                    HydrationProjection::Full,
-                )
+                .message_hydrate(account_id, ObjectId(object.id.0.clone()), projection)
                 .await?;
             Ok(HydratedChange::Message(
                 Box::new(
                     message_to_consumer_row(
-                        engine,
-                        account_id,
-                        provider,
-                        jmap_folder_map,
-                        message,
-                        outcome,
+                        engine, account_id, provider, folder_map, message, outcome,
                     )
                     .await?,
                 ),
@@ -263,7 +319,7 @@ async fn message_to_consumer_row(
     engine: &SyncEngine,
     account_id: &AccountId,
     provider: BifrostProviderKind,
-    jmap_folder_map: &HashMap<String, FolderKind>,
+    folder_map: &HashMap<String, FolderKind>,
     message: Message,
     outcome: HydrationOutcome,
 ) -> Result<ConsumerMessageRow, bifrost_sync::Error> {
@@ -282,7 +338,7 @@ async fn message_to_consumer_row(
     Ok(build_consumer_row(
         account_id,
         provider,
-        jmap_folder_map,
+        folder_map,
         &message,
         raw.as_deref(),
         inline_hashes,
@@ -298,7 +354,7 @@ async fn message_to_consumer_row(
 pub(crate) fn build_consumer_row(
     account_id: &AccountId,
     provider: BifrostProviderKind,
-    jmap_folder_map: &HashMap<String, FolderKind>,
+    folder_map: &HashMap<String, FolderKind>,
     message: &Message,
     raw: Option<&[u8]>,
     inline_hashes: HashMap<String, (db::blob_hash::BlobHash, InlineImage)>,
@@ -359,18 +415,42 @@ pub(crate) fn build_consumer_row(
     // raw-MIME path does.
     let snippet = snippet_from_body(body_text.as_deref());
 
-    let keywords = message
-        .flags
+    let mut labels = Vec::new();
+    if provider == BifrostProviderKind::Graph {
+        for flag in &message.flags {
+            if let Some(category) = flag.strip_prefix("category:")
+                && let Ok(label) = LabelKind::graph_category(category)
+            {
+                labels.push(label);
+            }
+        }
+        // Legacy seeded an importance label only for messages carrying an
+        // ImportanceLevel id - never a blanket `importance:normal` for ordinary
+        // mail (spec 4.3). Mirror that: surface High/Low, leave Normal bare.
+        match message.importance {
+            Importance::High => labels.push(LabelKind::graph_importance(ImportanceLevel::High)),
+            Importance::Low => labels.push(LabelKind::graph_importance(ImportanceLevel::Low)),
+            _ => {}
+        }
+    }
+    let flags = normalized_flags(provider, &message.flags);
+    let keywords = flags
         .iter()
-        .filter(|keyword| common::folder_roles::is_user_visible_keyword(keyword))
+        .filter(|keyword| {
+            !keyword.starts_with("category:")
+                && !keyword.starts_with('\\')
+                && common::folder_roles::is_user_visible_keyword(keyword)
+        })
         .cloned()
         .collect::<Vec<_>>();
     let mut folders = message
         .containers
         .iter()
         .filter_map(|container| {
-            if provider == BifrostProviderKind::Jmap
-                && let Some(folder) = jmap_folder_map.get(&container.0)
+            if matches!(
+                provider,
+                BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+            ) && let Some(folder) = folder_map.get(&container.0)
             {
                 return Some(folder.clone());
             }
@@ -382,7 +462,7 @@ pub(crate) fn build_consumer_row(
     // mailbox, so a draft without an explicit Drafts container still lands
     // in the DRAFT system folder. Preserve that to keep folder membership
     // byte-identical with the legacy path.
-    if provider == BifrostProviderKind::Jmap && message.flags.contains("$draft") {
+    if provider == BifrostProviderKind::Jmap && flags.contains("$draft") {
         let draft = FolderKind::System(common::types::SystemFolderId::Draft);
         if !folders.contains(&draft) {
             folders.push(draft);
@@ -404,6 +484,7 @@ pub(crate) fn build_consumer_row(
         .enumerate()
         .map(|(index, blob)| {
             let detail = parsed_attachments.get(index);
+            let remote_attachment_id = remote_attachment_id(provider, &blob.id.0);
             AttachmentInsertRow {
                 id: format!("{}_{}", message_id, blob.id.0),
                 message_id: message_id.clone(),
@@ -417,7 +498,7 @@ pub(crate) fn build_consumer_row(
                 size: detail
                     .map(|d| d.size)
                     .or_else(|| blob.size.and_then(|size| i64::try_from(size).ok())),
-                remote_attachment_id: Some(blob.id.0.clone()),
+                remote_attachment_id: Some(remote_attachment_id),
                 content_hash: inline_hashes.get(&blob.id.0).map(|entry| entry.0),
                 content_id: detail.and_then(|d| d.content_id.clone()),
                 is_inline: detail.map_or_else(
@@ -454,10 +535,10 @@ pub(crate) fn build_consumer_row(
         subject: message.subject.clone(),
         snippet: snippet.clone(),
         date,
-        is_read: message.flags.contains("$seen"),
-        is_starred: message.flags.contains("$flagged"),
-        is_replied: message.flags.contains("$answered"),
-        is_forwarded: message.flags.contains("$forwarded"),
+        is_read: flags.contains("$seen"),
+        is_starred: flags.contains("$flagged"),
+        is_replied: flags.contains("$answered"),
+        is_forwarded: flags.contains("$forwarded"),
         raw_size,
         internal_date: Some(date),
         list_unsubscribe,
@@ -509,7 +590,7 @@ pub(crate) fn build_consumer_row(
     ConsumerMessageRow {
         message: row,
         folders,
-        labels: Vec::new(),
+        labels,
         keywords,
         attachments,
         body_html,
@@ -518,6 +599,40 @@ pub(crate) fn build_consumer_row(
         search_document,
         is_important: matches!(message.importance, Importance::High),
     }
+}
+
+fn remote_attachment_id(provider: BifrostProviderKind, blob_id: &str) -> String {
+    if provider == BifrostProviderKind::Graph
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(blob_id)
+        && let Some(attachment_id) = value
+            .get("attachment_id")
+            .and_then(serde_json::Value::as_str)
+    {
+        return attachment_id.to_string();
+    }
+    blob_id.to_string()
+}
+
+fn normalized_flags(
+    provider: BifrostProviderKind,
+    flags: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
+    let mut normalized = flags.clone();
+    if provider == BifrostProviderKind::Graph {
+        if flags.contains("\\seen") || flags.contains("\\Seen") {
+            normalized.insert("$seen".to_string());
+        }
+        if flags.contains("\\flagged") || flags.contains("\\Flagged") {
+            normalized.insert("$flagged".to_string());
+        }
+        if flags.contains("\\answered") || flags.contains("\\Answered") {
+            normalized.insert("$answered".to_string());
+        }
+        if flags.contains("\\forwarded") || flags.contains("\\Forwarded") {
+            normalized.insert("$forwarded".to_string());
+        }
+    }
+    normalized
 }
 
 /// Stream the message's verbatim RFC822 octets via the engine's read-only
@@ -891,9 +1006,17 @@ fn minimal_search_document(account_id: &str, id: &str) -> SearchDocument {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{HydratedChange, HydrationOutcome, hydrate_change_to_message_insert_row_offline};
+    use super::{
+        HydratedChange, HydrationOutcome, build_consumer_row,
+        hydrate_change_to_message_insert_row_offline,
+    };
     use crate::bifrost::consumer::BifrostProviderKind;
-    use bifrost_types::{Change, ObjectChange, ObjectChangeKind, ObjectId, ScopeChange};
+    use bifrost_types::{
+        Address, Change, ContainerId, Importance, Message, ObjectChange, ObjectChangeKind,
+        ObjectId, ScopeChange, ThreadId,
+    };
+    use common::types::{FolderKind, ImportanceLevel, LabelKind, SystemFolderId};
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn hydrate_change_to_message_insert_row_offline_maps_object_create() {
@@ -1031,5 +1154,69 @@ mod tests {
             hydrate_change_to_message_insert_row_offline("acc", BifrostProviderKind::Jmap, &change),
             HydratedChange::ScopeOnly
         ));
+    }
+
+    #[test]
+    fn hydrate_change_graph_category_and_importance_mapping() {
+        let flags = HashSet::from([
+            "category:Red Category".to_string(),
+            "\\seen".to_string(),
+            "\\flagged".to_string(),
+            "client-keyword".to_string(),
+        ]);
+        let message = Message {
+            id: ObjectId("m1".to_string()),
+            thread_id: Some(ThreadId("t1".to_string())),
+            from: vec![Address::bare("sender@example.com")],
+            to: vec![Address::bare("me@example.com")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: Some("Graph mapping".to_string()),
+            date: None,
+            containers: vec![ContainerId("graph-inbox-native".to_string())],
+            flags,
+            importance: Importance::High,
+            body_text: Some("body".to_string()),
+            body_html: None,
+            attachments: Vec::new(),
+            size_bytes: None,
+            in_reply_to: None,
+            references: Vec::new(),
+        };
+        let folder_map = HashMap::from([(
+            "graph-inbox-native".to_string(),
+            FolderKind::System(SystemFolderId::Inbox),
+        )]);
+
+        let row = build_consumer_row(
+            &bifrost_types::AccountId("acc".to_string()),
+            BifrostProviderKind::Graph,
+            &folder_map,
+            &message,
+            None,
+            HashMap::new(),
+            HydrationOutcome::Succeeded,
+        );
+
+        assert_eq!(row.folders, vec![FolderKind::System(SystemFolderId::Inbox)]);
+        assert!(row.message.is_read);
+        assert!(row.message.is_starred);
+        assert!(row.is_important);
+        assert!(
+            row.labels
+                .contains(&LabelKind::graph_category("Red Category").unwrap())
+        );
+        assert!(
+            row.labels
+                .contains(&LabelKind::graph_importance(ImportanceLevel::High))
+        );
+        assert!(
+            !row.keywords
+                .iter()
+                .any(|keyword| keyword.starts_with("category:"))
+        );
+        assert!(!row.keywords.iter().any(|keyword| keyword.starts_with('\\')));
+        assert!(row.keywords.contains(&"client-keyword".to_string()));
     }
 }

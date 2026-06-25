@@ -101,16 +101,7 @@ pub async fn create_sync_provider(
             .await?;
             Ok(Box::new(gmail::ops::GmailOps::new(client)))
         }
-        MailProviderKind::Graph => {
-            let client = graph::client::GraphClient::from_account(
-                db,
-                write_db.writer_pool(),
-                account_id,
-                encryption_key,
-            )
-            .await?;
-            Ok(Box::new(graph::ops::GraphOps::new(client)))
-        }
+        MailProviderKind::Graph => Err("Graph sync is handled by the bifrost runner".to_string()),
         MailProviderKind::Jmap => Err("JMAP sync is handled by the bifrost runner".to_string()),
         MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(
             encryption_key,

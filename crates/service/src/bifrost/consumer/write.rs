@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use common::types::LabelKind;
 use db::db::queries_extra::{
     LabelWriteRow, compute_thread_aggregate, delete_messages_and_cleanup_threads,
     insert_attachments, insert_messages, maybe_update_chat_state, query_user_emails, upsert_labels,
@@ -22,6 +23,18 @@ pub struct PersistAffected {
     pub message_ids: Vec<String>,
 }
 
+// Finding G (pending-ops guard): the legacy Graph delta path ran
+// `filter_pending_ops` to skip persisting server state for threads that still
+// carried un-acked optimistic local mutations, so an in-flight user action was
+// not clobbered by a stale server snapshot. This consumer write path has NO
+// such guard, DELIBERATELY, matching the LANDED JMAP/B-series precedent: under
+// the bifrost migration the action pipeline (B4) owns optimistic local state
+// and its server reconciliation, not the read-side sync consumer. Re-homing a
+// pending-ops filter here would duplicate (and risk diverging from) that B4
+// ownership before B4 exists. Until B4 lands, the exposure is the same one the
+// JMAP cut already accepted and is bounded by the action pipeline's own
+// re-issue/ack semantics; it is recorded here rather than left silent (spec
+// section 9 finding 6).
 pub async fn persist(
     stores: &BifrostConsumerStores,
     account_id: &str,
@@ -57,7 +70,10 @@ pub async fn persist(
 
                 let mut thread_ids = BTreeSet::new();
                 let mut message_ids = Vec::new();
-                let user_emails = if provider == BifrostProviderKind::Jmap {
+                let user_emails = if matches!(
+                    provider,
+                    BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                ) {
                     Some(query_user_emails(&tx)?)
                 } else {
                     None
@@ -68,21 +84,7 @@ pub async fn persist(
                     let label_rows = row
                         .labels
                         .iter()
-                        .map(|label| {
-                            let id = label.storage_id();
-                            LabelWriteRow {
-                                id,
-                                account_id: row.message.account_id.clone(),
-                                name: label.storage_id(),
-                                visible: None,
-                                sort_order: None,
-                                server_color_bg: None,
-                                server_color_fg: None,
-                                user_color_bg: None,
-                                user_color_fg: None,
-                                is_undeletable: false,
-                            }
-                        })
+                        .map(|label| label_write_row(label, &row.message.account_id))
                         .collect::<Vec<_>>();
                     upsert_labels(&tx, &label_rows)
                         .map_err(|error| format!("upsert labels: {error}"))?;
@@ -155,6 +157,39 @@ pub async fn persist(
                                 )
                             })?;
                         }
+                        BifrostProviderKind::Graph => {
+                            replace_message_membership_and_recompute(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                &row.message.id,
+                                &row.folders,
+                                &row.labels,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "replace Graph message membership for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                            insert_attachments(&tx, &row.attachments)
+                                .map_err(|error| format!("insert Graph attachments: {error}"))?;
+                            upsert_thread_participants(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                row.message.from_address.as_deref(),
+                                row.message.to_addresses.as_deref(),
+                                row.message.cc_addresses.as_deref(),
+                                row.message.bcc_addresses.as_deref(),
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "upsert Graph thread participants for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                        }
                         _ => {
                             replace_message_membership_and_recompute(
                                 &tx,
@@ -209,7 +244,10 @@ pub async fn persist(
                         compute_thread_aggregate(&tx, account_id, thread_id).map_err(|error| {
                             format!("compute thread aggregate {thread_id}: {error}")
                         })?;
-                    let is_important = if provider == BifrostProviderKind::Jmap {
+                    let is_important = if matches!(
+                        provider,
+                        BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                    ) {
                         // Importance is carried on the hydrated row (from
                         // `Message::importance` for real JMAP, from the
                         // `$important` keyword for synthetic fixtures). It is
@@ -230,17 +268,23 @@ pub async fn persist(
                         None,
                     )
                     .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
-                    if provider == BifrostProviderKind::Jmap
-                        && let Some(user_emails) = &user_emails
+                    if matches!(
+                        provider,
+                        BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                    ) && let Some(user_emails) = &user_emails
                     {
                         maybe_update_chat_state(&tx, account_id, thread_id, user_emails)
                             .map_err(|error| format!("update chat state {thread_id}: {error}"))?;
                     }
                 }
 
-                if provider == BifrostProviderKind::Jmap && !deleted_ids.is_empty() {
+                if matches!(
+                    provider,
+                    BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                ) && !deleted_ids.is_empty()
+                {
                     delete_messages_and_cleanup_threads(&tx, &account_id, &deleted_ids)
-                        .map_err(|error| format!("delete JMAP destroyed messages: {error}"))?;
+                        .map_err(|error| format!("delete destroyed messages: {error}"))?;
                 }
 
                 assert_no_foreign_key_violations(&tx)?;
@@ -290,6 +334,35 @@ fn keyword_provider(provider: BifrostProviderKind) -> KeywordProvider {
         BifrostProviderKind::Gmail | BifrostProviderKind::Graph | BifrostProviderKind::Jmap => {
             KeywordProvider::Jmap
         }
+    }
+}
+
+fn label_write_row(label: &LabelKind, account_id: &str) -> LabelWriteRow {
+    let id = label.storage_id();
+    let (name, sort_order, is_undeletable) = match label {
+        LabelKind::GraphCategory(_) => (
+            id.strip_prefix("cat:").unwrap_or(id.as_str()).to_string(),
+            None,
+            false,
+        ),
+        LabelKind::GraphImportance(level) => (
+            level.display_name().to_string(),
+            Some(level.sort_order()),
+            true,
+        ),
+        _ => (id.clone(), None, false),
+    };
+    LabelWriteRow {
+        id,
+        account_id: account_id.to_string(),
+        name,
+        visible: None,
+        sort_order,
+        server_color_bg: None,
+        server_color_fg: None,
+        user_color_bg: None,
+        user_color_fg: None,
+        is_undeletable,
     }
 }
 

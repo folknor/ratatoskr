@@ -266,9 +266,10 @@ minimal bounded lag-backoff in `engine_sync.rs` - so the remaining cuts can reus
 the same stopgap shape).
 
 B3a-cut-jmap (the first per-provider cutover) is done and its TODO entry is
-removed per repo convention; the B3a-cut-graph / -gmail / -imap sub-items below
-that name it as establishing the per-provider mechanics have those mechanics
-available to reuse. It landed as ONE coexistence cutover: JMAP accounts now sync
+removed per repo convention; the per-provider cutovers that name it as
+establishing the per-provider mechanics (B3a-cut-graph, now also done below, and
+the remaining B3a-cut-gmail / -imap sub-items) have those mechanics available to
+reuse. It landed as ONE coexistence cutover: JMAP accounts now sync
 through `BifrostSyncEngine` + `ChangeStreamConsumer`, while Gmail, Graph, and IMAP
 stay on legacy `provider-sync`. For what it delivered - the coexistence dispatch
 in `run_sync` (`crates/service/src/sync.rs`) that routes JMAP accounts to the new
@@ -306,28 +307,94 @@ fetch. saehrimnir's per-`accountId` state was correct; the fix was a
 non-empty `ids[]`, preserving the strict "delta fetches zero emails after a
 foreign-account mutation" intent while ignoring the no-op probe.
 
+B3a-cut-graph (the second per-provider cutover) is done and its TODO entry is
+removed per repo convention; the remaining B3a-cut-gmail / -imap sub-items reuse
+the mechanics it shares with B3a-cut-jmap. It landed as ONE coexistence cutover:
+Graph (Microsoft) accounts now sync through `BifrostSyncEngine` +
+`ChangeStreamConsumer`, while Gmail and IMAP stay on legacy `provider-sync`. For
+what it delivered - the `"graph"` arm of the `run_sync` coexistence dispatch
+(`crates/service/src/sync.rs`); the service-owned one-shot Graph runner
+`sync_graph_account` (`crates/service/src/bifrost/engine_sync.rs`), a near-clone
+of the JMAP runner with the same bounded lag-backoff and a single connected
+`GraphClient` (`aux_client`) built per kick and shared by the folder-map prepare
+and the post-drive aux passes; the filled Graph arms of the consumer's
+hydrate / write / post-persist hooks. The consumer machinery was generalized,
+not forked: the `jmap_folder_map` field/setter became the provider-agnostic
+`folder_map` / `with_folder_map`, and `is_email_scope` now also matches Graph's
+per-folder `CursorScope::FolderType { ty: Email, .. }` (JMAP emits
+account/type-level email scopes; Graph emits one cursor per folder). The Graph
+hydration arm resolves opaque `parentFolderId` containers through the folder map,
+translates bifrost's `category:<name>` flags into `cat:` `graph_category` labels
+(kept OUT of the keyword set), normalizes bifrost's backslash `\seen` / `\flagged`
+canonical flags into the `$`-forms the consumer reads, hydrates with
+`HydrationProjection::FullWithBlobs` (Graph omits blob handles under plain `Full`,
+which would drop every attachment), and surfaces importance as both the
+`importance:*` undeletable labels and the `threads.is_important` aggregate - the
+last enabled by a bifrost side-quest (`importance` added to Graph's typed
+`hydrate_select`) that advanced the freeze to `7c576bdd` (§ 11). Graph hard-deletes
+arrive as a per-folder `ScopeChange{Removed}` (Graph delta has no
+created/updated/destroyed split), so a drive-level reconcile accumulates
+`removed - live` ids across every per-folder scope batch and deletes only the
+remainder at drive end - a move (source-folder `Removed` + destination-folder
+`Updated`) survives because the destination's full-replace membership already
+corrects it. The five entangled auxiliary passes were relocated into
+`crates/provider-sync/src/graph/aux_sync.rs` (folder-map prepare + `importance:*`
+seed, master-category labels, contacts, Exchange groups, and a reaction
+seeder+refresh poll - the legacy refresher only re-polled messages that already
+had reaction rows, so the poll's selection was broadened to also seed
+recently-received messages), driven on the existing per-account `graph_sync_cycle`
+counter (`increment_graph_sync_cycle`, repurposed from the personal path's
+priority-tier scheduling to the aux cadence: master categories + Exchange groups
+every 20th cycle, reactions + contacts-delta every 5th - contacts dropped from the
+legacy 20th to the 5th so the `graph-contacts-incremental` gate reaches a delta
+within its 120s ceiling under the one-shot per-kick connect cost, to be restored
+once B3b amortizes it), not collapsed to every-kick (which would inflate the
+steady-state Graph request count). The legacy
+Graph `provider-sync` sync impl `graph_impl.rs` (the `ProviderSyncOps` orphan) is
+DELETED and Graph removed from the `sync_dispatch` / `create_provider` provider-kind
+dispatch; the personal Graph path stops writing `graph_folder_delta_tokens` (the
+engine owns each `FolderType` cursor via the opaque `sync_cursors` envelope) while
+the retained shared-mailbox leg still writes it until B12, and `graph_sync_cycle`
+is repurposed rather than dropped. The retired-table schema stays additive-green
+until B15. The `graph/sync/` tree is
+RETAINED (not deleted) as a deliberate documented deviation: its only remaining
+consumer is `graph/shared_mailbox_sync.rs` (B12), which calls the FULL
+`graph_{initial,delta}_sync`, so re-homing a "minimal shim" would relocate ~the
+whole tree for ~0 net LOC and high risk - B12 deletes/rewires it. The Graph
+`ProviderOps` action methods survive (B4/B15). Gated by `brokkr check` green,
+`brokkr service-suite`, the `graph-initial` / `graph-steady-state-delta` sync-bench
+(the new `graph_steady_state_delta` gate, `meta.provider_requests` pinned
+`max_delta = 0`), the `graph_consumer_membership_equals_legacy` membership golden,
+the `hydrate_change_graph_category_and_importance_mapping` unit test, the
+`graph_drive_reconciles_move/purge` in-process move-vs-purge tests, and the
+existing `graph-attachment-*` / `graph-master-category-label-sync` /
+`graph-contacts-*` scripts held green across the cut - read the B3a-cut-graph
+landing commit.
+
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
   inline images, search), flushes search, then acks the bifrost checkpoint LAST
-  are stood up by B3a-infra (done; see the done-note above), and JMAP is routed
-  onto it by B3a-cut-jmap (done). What remains is routing each remaining
-  provider's production sync through that consumer and replicating
+  are stood up by B3a-infra (done; see the done-note above), and JMAP and Graph
+  are routed onto it by B3a-cut-jmap and B3a-cut-graph (both done). What remains
+  is routing each remaining provider's (Gmail, IMAP) production sync through that
+  consumer and replicating
   each provider's ACTUAL post-persist processing, which is asymmetric, not a
   uniform pipeline: IMAP runs JWZ `threading::build_threads`;
   JMAP / Graph / Gmail write the thread aggregate inline (`upsert_thread_aggregate`)
-  with per-provider membership strategies (JMAP's now done, in the consumer);
+  with per-provider membership strategies (JMAP's and Graph's now done, in the consumer);
   `seen_ingest` is the one shared pass;
   bundling, filters, smart labels, and `evaluate_notifications` have NO sync-time
   callers today and stay unwired (whether they should auto-fire on new mail is a
   separate product item, explicitly not B3's scope - feature-preserving means the
   consumer reproduces today's behavior, not that it inherits an unwired gap as a
   feature). The sub-items:
-  - B3a-cut-graph / -gmail / -imap. One cutover per provider: route that
+  - B3a-cut-gmail / -imap. One cutover per provider: route that
     provider's sync through the consumer, delete that provider's `provider-sync`
-    impl, gated by that provider's sync-bench (`{graph,gmail,imap}-steady-state-delta`
+    impl, gated by that provider's sync-bench (`{gmail,imap}-steady-state-delta`
     held against baseline) plus the mandatory membership-row and threading-output
-    equality assertions. B3a-cut-jmap (done; see the done-note above) established
+    equality assertions. B3a-cut-jmap and B3a-cut-graph (both done; see the
+    done-notes above) established
     the per-provider mechanics: the coexistence dispatch in `run_sync`, the
     service-owned one-shot runner with bounded lag-backoff, and the per-provider
     membership / post-persist arms in the consumer. The coexistence dispatch is

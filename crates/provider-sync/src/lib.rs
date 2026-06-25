@@ -23,7 +23,6 @@ pub mod consumer_support;
 pub mod gmail;
 mod gmail_impl;
 pub mod graph;
-mod graph_impl;
 pub mod imap;
 mod imap_impl;
 pub mod jmap;

@@ -521,6 +521,23 @@ async fn run_sync(
             )
             .await
         }
+        Ok(provider) if provider == "graph" => {
+            crate::bifrost::engine_sync::sync_graph_account(
+                &inner.bifrost_engine,
+                crate::bifrost::BifrostConsumerStores {
+                    db: inner.db.clone(),
+                    body_store: inner.body_write.clone(),
+                    inline_images: inner.inline_write.clone(),
+                    search: inner.search_write.clone(),
+                },
+                &read_db,
+                &inner.db,
+                &account_id,
+                encryption_key_bytes,
+                &cancellation_token,
+            )
+            .await
+        }
         Ok(_) => {
             crate::sync_dispatch::sync_for_account(
                 &inner.db,

@@ -1,0 +1,95 @@
+{
+  "account_id": "acc",
+  "messages": [
+    {
+      "id": "gm2",
+      "thread_id": "gt1",
+      "subject": "Graph project kickoff",
+      "date_ms": 1700000000000,
+      "from": { "name": "Bob Root", "address": "bob@example.test" },
+      "to": [{ "name": null, "address": "me@example.test" }],
+      "cc": [],
+      "bcc": [],
+      "containers": ["mbx-inbox"],
+      "flags": ["\\seen", "category:Blue"],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <graph-root-gm2@example.test>",
+        "Subject: Graph project kickoff",
+        "From: Bob Root <bob@example.test>",
+        "To: me@example.test",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Kickoff body for the Graph project thread."
+      ]
+    },
+    {
+      "id": "gm1",
+      "thread_id": "gt1",
+      "subject": "Re: Graph project kickoff",
+      "date_ms": 1700000100000,
+      "from": { "name": "Alice Reply", "address": "alice@example.test" },
+      "to": [{ "name": null, "address": "me@example.test" }],
+      "cc": [{ "name": null, "address": "team@example.test" }],
+      "bcc": [],
+      "containers": ["mbx-archive"],
+      "flags": ["category:Blue"],
+      "importance": "high",
+      "blobs": [
+        { "id": "blob-invite", "content_type": "text/calendar; method=REQUEST" }
+      ],
+      "raw_lines": [
+        "Message-ID: <graph-reply-gm1@example.test>",
+        "In-Reply-To: <graph-root-gm2@example.test> <graph-older@example.test>",
+        "References: <graph-root-gm2@example.test> <graph-older@example.test>",
+        "List-Unsubscribe: <https://example.test/unsub>, <mailto:unsub@example.test>",
+        "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
+        "Authentication-Results: example.test; spf=pass smtp.mailfrom=alice@example.test",
+        "Disposition-Notification-To: alice@example.test",
+        "Subject: Re: Graph project kickoff",
+        "From: Alice Reply <alice@example.test>",
+        "To: me@example.test",
+        "Cc: team@example.test",
+        "Content-Type: multipart/mixed; boundary=BNDRY",
+        "",
+        "--BNDRY",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Replying on the Graph project thread.",
+        "--BNDRY",
+        "Content-Type: text/calendar; method=REQUEST; name=invite.ics",
+        "Content-Disposition: attachment; filename=invite.ics",
+        "",
+        "BEGIN:VCALENDAR",
+        "END:VCALENDAR",
+        "--BNDRY--"
+      ]
+    },
+    {
+      "id": "gm3",
+      "thread_id": "gt1",
+      "subject": "Re: Graph project kickoff (low priority)",
+      "date_ms": 1700000200000,
+      "from": { "name": "Carol Low", "address": "carol@example.test" },
+      "to": [{ "name": null, "address": "me@example.test" }],
+      "cc": [],
+      "bcc": [],
+      "containers": ["mbx-inbox"],
+      "flags": ["\\seen"],
+      "importance": "low",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <graph-low-gm3@example.test>",
+        "In-Reply-To: <graph-root-gm2@example.test>",
+        "References: <graph-root-gm2@example.test>",
+        "Subject: Re: Graph project kickoff (low priority)",
+        "From: Carol Low <carol@example.test>",
+        "To: me@example.test",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "A low-importance follow-up on the Graph project thread."
+      ]
+    }
+  ]
+}

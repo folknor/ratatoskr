@@ -58,13 +58,7 @@ pub async fn run(
                 affected.thread_ids.len()
             );
         }
-        BifrostProviderKind::Graph => {
-            log::debug!(
-                "bifrost Graph reaction refresh placeholder touched {} messages",
-                affected.message_ids.len()
-            );
-        }
-        BifrostProviderKind::Gmail | BifrostProviderKind::Jmap => {}
+        BifrostProviderKind::Gmail | BifrostProviderKind::Graph | BifrostProviderKind::Jmap => {}
     }
 
     // The seen-ingest counter upsert is the only non-idempotent

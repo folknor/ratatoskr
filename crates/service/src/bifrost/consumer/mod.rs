@@ -5,6 +5,9 @@ pub mod write;
 #[cfg(test)]
 mod golden_test;
 
+#[cfg(test)]
+mod move_purge_test;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -112,7 +115,7 @@ pub struct ChangeStreamConsumer {
     stores: BifrostConsumerStores,
     checkpoint_store: Option<Arc<SqliteCheckpointStore>>,
     hook_registry: Option<Arc<ConsumerHookRegistry>>,
-    jmap_folder_map: HashMap<String, FolderKind>,
+    folder_map: HashMap<String, FolderKind>,
     /// The set of scopes the consumer has OBSERVED a `MultiplexerEvent` for
     /// on the broadcast. This is the completion-synthesis scope enumeration
     /// (spec 4.1.2), used in place of `engine.cursors.all_scopes()`.
@@ -145,7 +148,7 @@ impl ChangeStreamConsumer {
             stores,
             checkpoint_store: None,
             hook_registry: None,
-            jmap_folder_map: HashMap::new(),
+            folder_map: HashMap::new(),
             observed_scopes: HashSet::new(),
         }
     }
@@ -163,8 +166,8 @@ impl ChangeStreamConsumer {
     }
 
     #[must_use]
-    pub fn with_jmap_folder_map(mut self, folder_map: HashMap<String, FolderKind>) -> Self {
-        self.jmap_folder_map = folder_map;
+    pub fn with_folder_map(mut self, folder_map: HashMap<String, FolderKind>) -> Self {
+        self.folder_map = folder_map;
         self
     }
 
@@ -188,6 +191,40 @@ impl ChangeStreamConsumer {
         &mut self,
         rx: &mut broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
         report: &mut ConsumerDriveReport,
+    ) -> Result<(), Error> {
+        let mut pending = PendingDeletions::default();
+        let outcome = self.recv_loop(rx, report, &mut pending).await;
+        // Drive-end Graph deletion reconcile (finding A / spec 4.4). A Graph
+        // `ScopeChange{Removed}` is only a CANDIDATE: a folder move surfaces as
+        // `Removed` in the source folder's per-folder scope batch and as
+        // `Updated`/`Added` in the DESTINATION folder's SEPARATE batch, so the
+        // move is only distinguishable from a true purge once every batch in
+        // the drive has been observed. We therefore accumulate the candidate
+        // (`removed`) and live (`live`) id sets across the whole drive and
+        // delete only the unreconciled remainder here, at drive end.
+        //
+        // Flush on EVERY clean exit (caught-up, stream-closed, AND lagged), not
+        // just the caught-up edge: a purge's `Removed` batch is acked
+        // per-batch, so its cursor has already advanced past the deletion. If a
+        // lagged drive skipped the flush, that purge would never be re-emitted
+        // and the local row would leak forever. The narrow cost is that a move
+        // whose destination `Updated` had not yet arrived when the drive lagged
+        // is transiently deleted, then re-created on the re-kick (the
+        // destination folder's cursor never advanced, so its `Updated`
+        // re-emits) - eventual consistency, never permanent loss. On an error
+        // exit (crash hooks / real engine error) we skip the flush: a partial,
+        // un-acked drive must not apply deletions.
+        if outcome.is_ok() {
+            self.flush_pending_deletions(&pending).await?;
+        }
+        outcome
+    }
+
+    async fn recv_loop(
+        &mut self,
+        rx: &mut broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        report: &mut ConsumerDriveReport,
+        pending: &mut PendingDeletions,
     ) -> Result<(), Error> {
         loop {
             match tokio::time::timeout(COMPLETION_IDLE_INTERVAL, rx.recv()).await {
@@ -218,7 +255,7 @@ impl ChangeStreamConsumer {
                     } else {
                         hook
                     };
-                    if self.handle_event(event, hook, report).await? {
+                    if self.handle_event(event, hook, report, pending).await? {
                         return Ok(());
                     }
                 }
@@ -260,6 +297,7 @@ impl ChangeStreamConsumer {
         event: bifrost_sync::multiplexer::MultiplexerEvent,
         hook: Option<ConsumerHook>,
         report: &mut ConsumerDriveReport,
+        pending: &mut PendingDeletions,
     ) -> Result<bool, Error> {
         match &*event.event {
             SyncEvent::Batch(batch) => {
@@ -268,13 +306,18 @@ impl ChangeStreamConsumer {
                         &self.engine,
                         &self.account_id,
                         self.provider,
-                        &self.jmap_folder_map,
+                        &self.folder_map,
                         &batch.items,
                     )
                     .await?
                 } else {
                     HydrateBatch::default()
                 };
+                // Accumulate this batch's live ids and Graph removed-candidates
+                // into the drive-level reconcile state (finding A). The actual
+                // deletion of unreconciled candidates is deferred to drive end.
+                pending.live.extend(hydrated.live_ids.iter().cloned());
+                pending.removed.extend(hydrated.removed_ids.iter().cloned());
                 let affected = write::persist(
                     &self.stores,
                     &self.account_id.0,
@@ -380,12 +423,55 @@ impl ChangeStreamConsumer {
             .try_into()
             .unwrap_or(u32::MAX)
     }
+
+    /// Apply the drive-level Graph deletion reconcile (finding A): delete every
+    /// `ScopeChange{Removed}` candidate that NO live signal (`Updated`/`Added`)
+    /// revived anywhere in this drive. A surviving move keeps its row (its
+    /// destination folder re-asserted membership); only a true purge - removed
+    /// and never seen live - is deleted. No-op for non-Graph providers (they
+    /// never populate `removed`) and when nothing needs deleting.
+    async fn flush_pending_deletions(&self, pending: &PendingDeletions) -> Result<(), Error> {
+        let to_delete: Vec<String> = pending
+            .removed
+            .iter()
+            .filter(|id| !pending.live.contains(*id))
+            .cloned()
+            .collect();
+        if to_delete.is_empty() {
+            return Ok(());
+        }
+        write::persist(
+            &self.stores,
+            &self.account_id.0,
+            self.provider,
+            &[],
+            &to_delete,
+        )
+        .await
+        .map_err(|error| Error::Other(format!("bifrost drive-end delete: {error}")))?;
+        Ok(())
+    }
+}
+
+/// Drive-level accumulator for the Graph move-vs-purge reconcile (finding A).
+/// `removed` collects `ScopeChange{Removed}` candidates and `live` collects the
+/// `Updated`/`Added` ids seen across every per-folder scope batch in the drive;
+/// at drive end `removed - live` is the set actually deleted.
+#[derive(Default)]
+struct PendingDeletions {
+    removed: HashSet<String>,
+    live: HashSet<String>,
 }
 
 fn is_email_scope(scope: &CursorScope) -> bool {
     matches!(
         scope,
-        CursorScope::Account | CursorScope::Type(ObjectType::Email)
+        CursorScope::Account
+            | CursorScope::Type(ObjectType::Email)
+            | CursorScope::FolderType {
+                ty: ObjectType::Email,
+                ..
+            }
     )
 }
 

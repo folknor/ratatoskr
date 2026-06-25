@@ -128,3 +128,31 @@ pub async fn sync_jmap_mailbox_folder_map(
     };
     crate::jmap::aux_sync::sync_mailbox_folder_map(&ctx).await
 }
+
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_graph_folder_map(
+    client: &crate::graph::client::GraphClient,
+    account_id: &str,
+    read_db: &db::db::ReadDbState,
+    _write_db: &service_state::WriteDbState,
+) -> Result<HashMap<String, FolderKind>, String> {
+    crate::graph::aux_sync::sync_graph_folder_map(client, account_id, read_db).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_graph_auxiliary_sync(
+    client: &crate::graph::client::GraphClient,
+    account_id: &str,
+    read_db: &db::db::ReadDbState,
+    write_db: &service_state::WriteDbState,
+    initial_sync_completed_before_run: bool,
+) {
+    crate::graph::aux_sync::run_graph_auxiliary_sync(
+        client,
+        account_id,
+        read_db,
+        write_db,
+        initial_sync_completed_before_run,
+    )
+    .await;
+}

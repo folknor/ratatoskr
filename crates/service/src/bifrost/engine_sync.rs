@@ -82,6 +82,7 @@ pub async fn sync_jmap_account(
             account_id,
             encryption_key,
             cancellation_token,
+            BifrostProviderKind::Jmap,
             jmap_folder_map.clone(),
         )
         .await?;
@@ -104,6 +105,86 @@ pub async fn sync_jmap_account(
         }
         if attempt >= LAG_BACKOFF_DELAYS.len() {
             return Err("bifrost JMAP consumer lagged after bounded reattach attempts".to_string());
+        }
+        tokio::select! {
+            () = tokio::time::sleep(LAG_BACKOFF_DELAYS[attempt]) => {}
+            () = cancellation_token.cancelled() => return Err("sync cancelled".to_string()),
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_graph_account(
+    engine: &BifrostSyncEngine,
+    stores: BifrostConsumerStores,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+    cancellation_token: &CancellationToken,
+) -> Result<(), String> {
+    let initial_sync_completed = {
+        let aid = account_id.to_string();
+        write_db
+            .with_write(move |conn| {
+                conn.query_row(
+                    "SELECT initial_sync_completed FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|value| value != 0)
+                .map_err(|error| format!("read initial_sync_completed: {error}"))
+            })
+            .await?
+    };
+
+    let aux_client = graph::client::GraphClient::from_account(
+        read_db,
+        write_db.writer_pool(),
+        account_id,
+        encryption_key,
+    )
+    .await?;
+
+    let graph_folder_map =
+        prepare_graph_folders(&aux_client, account_id, read_db, write_db).await?;
+
+    let mut attempt = 0usize;
+    loop {
+        let report = drive_once(
+            engine,
+            stores.clone(),
+            read_db,
+            write_db,
+            account_id,
+            encryption_key,
+            cancellation_token,
+            BifrostProviderKind::Graph,
+            graph_folder_map.clone(),
+        )
+        .await?;
+        if !report.lagged {
+            if !initial_sync_completed {
+                let aid = account_id.to_string();
+                write_db
+                    .with_write(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
+                    .await?;
+            }
+            provider_sync::consumer_support::run_graph_auxiliary_sync(
+                &aux_client,
+                account_id,
+                read_db,
+                write_db,
+                initial_sync_completed,
+            )
+            .await;
+            return Ok(());
+        }
+        if attempt >= LAG_BACKOFF_DELAYS.len() {
+            return Err(
+                "bifrost Graph consumer lagged after bounded reattach attempts".to_string(),
+            );
         }
         tokio::select! {
             () = tokio::time::sleep(LAG_BACKOFF_DELAYS[attempt]) => {}
@@ -143,6 +224,16 @@ async fn prepare_jmap_mailboxes(
     .await
 }
 
+async fn prepare_graph_folders(
+    client: &graph::client::GraphClient,
+    account_id: &str,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+) -> Result<std::collections::HashMap<String, common::types::FolderKind>, String> {
+    provider_sync::consumer_support::sync_graph_folder_map(client, account_id, read_db, write_db)
+        .await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn drive_once(
     engine: &BifrostSyncEngine,
@@ -152,7 +243,8 @@ async fn drive_once(
     account_id: &str,
     encryption_key: [u8; 32],
     cancellation_token: &CancellationToken,
-    jmap_folder_map: std::collections::HashMap<String, common::types::FolderKind>,
+    provider: BifrostProviderKind,
+    folder_map: std::collections::HashMap<String, common::types::FolderKind>,
 ) -> Result<super::ConsumerDriveReport, String> {
     let factory =
         build_account_factory(read_db, write_db.writer_pool(), account_id, encryption_key)
@@ -165,19 +257,15 @@ async fn drive_once(
         .await
         .map_err(|error| format!("{error:?}"))?;
     let drive_result = async {
-        let mut consumer = ChangeStreamConsumer::new(
-            engine.engine(),
-            account.clone(),
-            BifrostProviderKind::Jmap,
-            stores,
-        )
-        .with_jmap_folder_map(jmap_folder_map)
-        .with_checkpoint_store(engine.checkpoints())
-        // Honor the test hook registry on the PRODUCTION kick so the
-        // production-lag-backoff gate (B3a-cut-jmap 6.4) can arm a ForceLag
-        // hook against the real drive loop. The registry is empty in
-        // production, so this is a no-op outside the harness.
-        .with_hooks(crate::handlers::test_helpers::bifrost_hooks());
+        let mut consumer =
+            ChangeStreamConsumer::new(engine.engine(), account.clone(), provider, stores)
+                .with_folder_map(folder_map)
+                .with_checkpoint_store(engine.checkpoints())
+                // Honor the test hook registry on the PRODUCTION kick so the
+                // production-lag-backoff gate (B3a-cut-jmap 6.4) can arm a ForceLag
+                // hook against the real drive loop. The registry is empty in
+                // production, so this is a no-op outside the harness.
+                .with_hooks(crate::handlers::test_helpers::bifrost_hooks());
         tokio::select! {
             result = consumer.drive_to_caught_up() => result.map_err(|error| format!("{error:?}")),
             () = cancellation_token.cancelled() => Err("sync cancelled".to_string()),
