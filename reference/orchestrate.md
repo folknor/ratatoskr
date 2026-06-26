@@ -297,9 +297,21 @@ These are rules, not guidance:
 - Never set a timeout on anything. Never kill a run for being slow.
 - Never block waiting on a launched task. Launch, then schedule the wakeup.
 - While anything is in flight, keep the heartbeat firing: call ScheduleWakeup
-  for 270 seconds out, every turn, until the task returns. Do not skip a beat -
-  one missed wakeup goes past the 5-minute cache TTL and the next turn pays a
-  full-context cold re-read of a very long conversation.
+  for 270 seconds out, every turn, until the task returns. The heartbeat is NOT
+  polling for completion - do not reason about it as "checking on the task." A
+  harness-tracked Agent auto-notifies you the instant it finishes, and a codex
+  run re-invokes you when its process exits, so completion always arrives on its
+  own; you never need to wake to look for it. The heartbeat exists for ONE
+  reason: to keep the prompt cache warm. The Anthropic prompt cache has a
+  5-minute TTL, so a wake every 270 seconds is a touch inside that window that
+  keeps this (very long) conversation cached. Skip a beat and the cache lapses;
+  the next turn then pays a full-context cold re-read - real money. So do NOT
+  "optimize" the heartbeat into a single long fallback (1800s, "the harness will
+  notify me anyway") - that reasoning is the trap: the notification is not the
+  point, cache warmth is, and a long gap is exactly what drops it. The 270s
+  cadence is identical whether you wait on codex or a harness-tracked Agent; the
+  auto-notification changes nothing about the cache and so changes nothing about
+  the cadence.
 - ScheduleWakeup's prompt is plain continuation text and must NEVER begin with
   a slash. The harness reads a leading slash as a slash-command or skill
   invocation; if that command is absent or disabled the wakeup silently fails

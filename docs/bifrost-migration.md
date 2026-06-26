@@ -8,9 +8,11 @@ loop is running: Track B has begun (B1 has landed; see § 7).
 
 `../bifrost` and `./research/bifrost` are at the same git commit. We keep both
 because they serve two distinct purposes: `../bifrost` is the Cargo dependency
-path the build resolves, and `./research/bifrost` is a reading-reference that
-exists so agents can read bifrost source freely without tripping up the harness.
-See § 11 for the full distinction.
+path the build resolves, and `./research/bifrost` is the in-tree working copy -
+both the reading-reference agents read bifrost source from AND the staging area
+where side-quest edits to bifrost are made before the bridge promotes them to
+`../bifrost` (see § 2). Keeping it in-tree is what lets agents read and edit
+bifrost without tripping up the harness. See § 11 for the full distinction.
 
 ## 1. Goal
 
@@ -61,16 +63,100 @@ current provider crates plus git history) is the reference for what bifrost
 should already do.
 
 **The side-quest protocol.** When any brick along the way surfaces that
-ratatoskr would benefit from a rewrite or refactor of something in bifrost - a
-missing capability, an awkward surface, a wart that would otherwise force a
-ratatoskr workaround - that becomes a side-quest, never a ratatoskr
-contortion. The orchestrator brings the tree to a clean boundary (landing what
-is landable, reverting the blocked in-flight work so nothing parks dirty),
-pauses the orchestration loop, and surfaces the brick to the user. The user
-implements it in the bifrost repo and re-syncs the two folders (`../bifrost`
-and `./research/bifrost` advanced together to a single new shared commit). Only
-then does the loop resume, against the updated surface, with the new commit as
-the frozen reference for the item.
+ratatoskr would benefit from a rewrite or refactor of something in bifrost or
+saehrimnir - a missing capability, an awkward surface, a wart that would
+otherwise force a ratatoskr workaround - that becomes a side-quest, never a
+ratatoskr contortion. The orchestrator brings the tree to a clean boundary
+(landing what is landable, reverting the blocked in-flight work so nothing
+parks dirty), then handles the side-quest itself, in-loop, without pausing for
+the user:
+
+1. The orchestrator launches ONE Opus agent (the Agent tool, never codex) to do
+   the bifrost or saehrimnir work. The agent's prompt must state, in
+   unambiguous terms:
+   - It works EXCLUSIVELY inside `./research/bifrost` or
+     `./research/saehrimnir`. It must not read, edit, or otherwise touch any
+     part of ratatoskr proper, under any circumstance. If it finds itself
+     blocked on something that would require a change in ratatoskr, it STOPS
+     WORK immediately and reports back - it never improvises a ratatoskr edit.
+   - It must `cd` into the relevant `./research/<repo>` folder before doing
+     anything, and stay there. (This is a guardrail, not a wall - the fence is
+     the instruction above, so state it plainly.)
+   - It must NOT commit. Committing in `./research/<repo>` is the
+     orchestrator's job.
+   - It is told NOTHING about the bridge scripts below and must never run them.
+     Promotion to the live dependency is the orchestrator's job.
+   - Per the standing rule, it must not launch any sub-agents.
+   - It is doing a DIRECT implementation task, not an orchestration. The
+     `./research/<repo>` CLAUDE.md leads with the spec-loop ("when asked to
+     orchestrate, read reference/orchestrate.md FIRST"); that cue is not for
+     this agent. It must not orchestrate, must not read that repo's
+     orchestrate.md, and must ignore the spec-loop machinery - it does the
+     work itself, in-place.
+2. When the agent returns, the orchestrator - not pausing for the user -
+   reviews, validates, commits, and promotes, in that order:
+   - Review the work in `./research/<repo>` (`git -C ... diff`; see the
+     mechanics note below).
+   - Validate it IN PLACE: `cd` into `./research/<repo>` and run `brokkr check`
+     (plus any focused `brokkr test`). This is the gate on the side-quest and
+     runs BEFORE the commit, per the loop's check-before-commit discipline.
+   - Commit it there (the commit is the orchestrator's job, never the agent's).
+   - Promote it to the live dependency by running the bridge script from the
+     main session - `scripts/bifrost.sh` or `scripts/saehrimnir.sh`. Each pushes
+     the staged `./research/<repo>` commit to its shared remote and pulls it
+     into the Cargo/install path (`../bifrost` / `../sæhrimnir`);
+     `saehrimnir.sh` also reinstalls the mock binary. The scripts round-trip
+     through GitHub, so they are orchestrator-only and can never run inside a
+     codex step (the codex sandbox is network-isolated). The push and the
+     reinstall are routine in-loop steps; like every other step of the loop they
+     need no separate user approval.
+
+The `../bifrost` / `../sæhrimnir` HEAD the bridge reports becomes the frozen
+reference for the item (`./research/<repo>` and the dependency path now sit at a
+single shared commit). Only then does the loop resume, against the updated
+surface, with that commit pinned for the item's full duration.
+
+**Orchestrator mechanics in the research working copies.** The bash rules (no
+`git -C`, one command per invocation, no chaining) are written for ratatoskr
+proper. `./research/bifrost` and `./research/saehrimnir` are separate repos the
+orchestrator legitimately manages, so the orchestrator is exempt there for the
+review / validate / commit / discard it owns:
+
+- Git: run `git -C <abs-path>/research/<repo> ...` directly (diff, status,
+  commit, branch-check, `checkout` to discard). The Bash working directory also
+  persists between calls, so a bare `cd ./research/<repo>` followed by a
+  separate `git` / `brokkr` command is an equivalent path - just `cd` back to the
+  ratatoskr root afterward, since the cwd persists and later steps assume root.
+- Validate in place: `cd ./research/<repo>` then `brokkr check` (and focused
+  `brokkr test -p <pkg> <name>`). This is the side-quest's gate and runs before
+  the commit. It works because each research repo is its own standalone Cargo
+  workspace root that brokkr resolves instead of walking up into ratatoskr's:
+  bifrost already is a workspace; saehrimnir needed a bare `[workspace]` table
+  added to its `Cargo.toml` so cargo would not adopt a parent manifest (a
+  committable fix in its own right).
+- The CARGO_MANIFEST_DIR gotcha: brokkr builds a nested research workspace with
+  `CARGO_MANIFEST_DIR` anchored under brokkr's OWN install path, not the real
+  source location. Any test that resolves a committed fixture via
+  `env!("CARGO_MANIFEST_DIR")` therefore reads a path that does not exist and
+  fails (in saehrimnir this surfaced as the lifecycle tests' "sentinel did not
+  appear"). Such tests must resolve fixtures against the runtime working
+  directory (`std::env::current_dir()`), which is the crate root under both
+  `cargo test` and brokkr. A side-quest that adds or touches such a test uses the
+  runtime-cwd form.
+
+Two validation layers exist, and a sync-touching side-quest wants both:
+
+- In place (above): gates the change inside the research copy before promotion.
+- Post-promotion, ratatoskr-side from the repo root (no nested-workspace issue):
+  for bifrost - a path dep ratatoskr compiles from source - the authoritative
+  gate is ratatoskr's own `brokkr check` after `bifrost.sh`. For saehrimnir - an
+  installed mock binary - `saehrimnir.sh`'s `cargo install` compile-gates the
+  binary, and the behavioral gate is a ratatoskr sync-harness run against the
+  reinstalled mock.
+
+Bridge-script assumptions the orchestrator must hold: the work is already
+committed in `./research/<repo>`, and that clone is on a branch tracking origin
+(not a detached HEAD), so the scripts' bare `git push` succeeds.
 
 ## 3. Target architecture (the seam, post-migration)
 
@@ -661,11 +747,16 @@ replacement is under-gated and must be rejected at review.
 Bifrost lives in two places relative to this repo's top-level folder, and they
 serve two distinct purposes - do not conflate them:
 
-- Reading-reference: `./research/bifrost`. This is where agents inspect bifrost
-  source - to verify a Track A item against bifrost's current shape, to read the
-  `Account` / `AccountError` / `SyncEngine` surface a Track B spec is written
-  against, or to confirm a type signature before speccing. Spec authors and
-  reviewers read here; it is the ground a bifrost-facing spec is judged against.
+- In-tree working copy: `./research/bifrost`. It serves two roles. First, the
+  reading-reference: where agents inspect bifrost source - to verify a Track A
+  item against bifrost's current shape, to read the `Account` / `AccountError` /
+  `SyncEngine` surface a Track B spec is written against, or to confirm a type
+  signature before speccing. Spec authors and reviewers read here; it is the
+  ground a bifrost-facing spec is judged against. Second, the staging area:
+  side-quest edits to bifrost (§ 2) are made HERE, by an Opus agent confined to
+  this folder, then committed by the orchestrator and promoted to the dependency
+  path by `scripts/bifrost.sh`. `./research/saehrimnir` works the same way for
+  the mock server, paired with `scripts/saehrimnir.sh`.
   `./research/bifrost/reference/` holds per-crate and per-protocol
   quick-reference sheets (`net.md`, `sync.md`, `error-model.md`, `jmap.md`,
   `imap.md`, `graph.md`, `google.md`, `smtp.md`, `caldav.md`, `carddav.md`,
