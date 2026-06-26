@@ -1,41 +1,40 @@
+use std::collections::HashMap;
+
 use sha2::{Digest, Sha256};
 
-use super::super::client::GmailClient;
-use super::super::types::{GmailLabel, GmailSendAs};
-use super::SyncCtx;
+use super::client::GmailClient;
+use super::types::{GmailLabel, GmailSendAs};
+use common::types::{FolderKind, MailProviderKind};
 use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
 use db::db::{ReadConn, ReadDbState, WriteConn, WriteTarget};
+use service_state::WriteDbState;
 
-// ---------------------------------------------------------------------------
-// Folder + label sync
-// ---------------------------------------------------------------------------
-//
-// Gmail returns all sidebar primitives from one `list_labels` call, but
-// `type: "system"` rows (INBOX, SENT, CATEGORY_*, CHAT, etc.) are folders
-// in Ratatoskr and `type: "user"` rows are labels. This module partitions
-// them at ingest and routes each side to the appropriate writer.
-// See `reference/glossary/folders-labels.md` "Per-provider mapping".
-
-pub(super) async fn sync_labels(ctx: &SyncCtx<'_>) -> Result<(), String> {
-    let labels = ctx.client.list_labels(ctx.db).await?;
-
-    let aid = ctx.account_id.to_string();
-    ctx.write_db
+pub async fn sync_gmail_label_folder_map(
+    client: &GmailClient,
+    account_id: &str,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+) -> Result<HashMap<String, FolderKind>, String> {
+    let labels = client.list_labels(read_db).await?;
+    let aid = account_id.to_string();
+    let folder_map = write_db
         .with_write(move |conn| persist_folders_and_labels(conn, &aid, &labels))
-        .await
+        .await?;
+    Ok(folder_map)
 }
 
 fn persist_folders_and_labels(
     conn: &WriteConn<'_>,
     account_id: &str,
     labels: &[GmailLabel],
-) -> Result<(), String> {
+) -> Result<HashMap<String, FolderKind>, String> {
     let tx = conn
         .transaction()
         .map_err(|e| format!("begin label tx: {e}"))?;
 
     let mut folder_rows = Vec::new();
     let mut label_rows = Vec::new();
+    let mut folder_map = HashMap::new();
 
     for label in labels
         .iter()
@@ -43,6 +42,8 @@ fn persist_folders_and_labels(
     {
         let label_type = label.label_type.as_deref().unwrap_or("user");
         if label_type == "system" {
+            let folder = FolderKind::parse(&label.id, MailProviderKind::Gmail)?;
+            folder_map.insert(label.id.clone(), folder);
             folder_rows.push(FolderWriteRow {
                 id: label.id.clone(),
                 account_id: account_id.to_string(),
@@ -85,84 +86,102 @@ fn persist_folders_and_labels(
     upsert_labels(&tx, &label_rows)?;
     tx.commit()
         .map_err(|e| format!("commit folders + labels: {e}"))?;
-    Ok(())
+    Ok(folder_map)
 }
 
-// ---------------------------------------------------------------------------
-// Signature sync (bidirectional)
-// ---------------------------------------------------------------------------
+#[allow(clippy::too_many_arguments)]
+pub async fn run_gmail_auxiliary_sync(
+    client: &GmailClient,
+    account_id: &str,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+    initial_sync_completed_before_run: bool,
+) {
+    if let Err(error) = sync_gmail_signatures(client, account_id, read_db, write_db).await {
+        log::warn!("Gmail signature sync failed for account {account_id}: {error}");
+    }
 
-/// Local signature row read from the `signatures` table for diff comparison.
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used for future sync enhancements (rename, default toggle)
-struct LocalSignature {
-    id: String,
-    server_id: String,
-    body_html: String,
-    server_html_hash: Option<String>,
-    name: String,
-    is_default: bool,
-    sort_order: i64,
+    let should_sync_contacts = if initial_sync_completed_before_run {
+        match sync::state::increment_gmail_sync_cycle(&write_db.writer_pool(), account_id).await {
+            Ok(cycle) => cycle.is_multiple_of(20),
+            Err(error) => {
+                log::warn!("Gmail sync-cycle increment failed for account {account_id}: {error}");
+                false
+            }
+        }
+    } else {
+        true
+    };
+
+    if should_sync_contacts {
+        if let Err(error) = super::contacts::sync_google_contacts(
+            client,
+            account_id,
+            read_db,
+            &write_db.writer_pool(),
+        )
+        .await
+        {
+            log::warn!("Google contacts sync failed for account {account_id}: {error}");
+        }
+        let writer = write_db.clone();
+        if let Err(error) = super::contacts::sync_google_other_contacts(
+            client,
+            account_id,
+            read_db,
+            &write_db.writer_pool(),
+            move |write| {
+                let writer = writer.clone();
+                async move {
+                    writer
+                        .with_write(move |conn| {
+                            let tx = conn
+                                .transaction()
+                                .map_err(|e| format!("begin google other contacts tx: {e}"))?;
+                            super::contacts::persist_google_other_contacts_write(&tx, write)?;
+                            tx.commit()
+                                .map_err(|e| format!("commit google other contacts tx: {e}"))?;
+                            Ok(())
+                        })
+                        .await
+                }
+            },
+        )
+        .await
+        {
+            log::warn!("Google otherContacts sync failed for account {account_id}: {error}");
+        }
+    }
 }
 
-/// Action determined by comparing local and server state.
-enum SigSyncAction {
-    /// Server changed, local did not (or new) → pull server HTML to local.
-    PullFromServer,
-    /// Local changed, server did not → push local HTML to server.
-    PushToServer,
-    /// Both changed → prefer server, log conflict warning.
-    ConflictServerWins,
-    /// No change on either side → skip.
-    NoOp,
-}
+async fn sync_gmail_signatures(
+    client: &GmailClient,
+    account_id: &str,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+) -> Result<(), String> {
+    let aliases = client.list_send_as(read_db).await?;
 
-/// Bidirectional signature sync.
-///
-/// For each Gmail sendAs alias:
-/// 1. Fetch current server signatures via `list_send_as()`.
-/// 2. Compare `server_html_hash` (stored locally from last sync) against the
-///    current server HTML hash to detect server-side changes.
-/// 3. Compare local `body_html` hash against `server_html_hash` to detect
-///    local edits.
-/// 4. Resolve:
-///    - Server changed, local didn't → update local (`body_html`, hash, timestamp).
-///    - Local changed, server didn't → push to Gmail API.
-///    - Both changed → prefer server (log a conflict warning).
-///    - Neither changed → no-op.
-pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
-    let aliases = ctx.client.list_send_as(ctx.db).await?;
-
-    // Read existing local signatures for this account
-    let aid = ctx.account_id.to_string();
-    let locals: Vec<LocalSignature> = ctx
-        .db
+    let aid = account_id.to_string();
+    let locals: Vec<LocalSignature> = read_db
         .with_read(move |conn| read_local_signatures(conn, &aid))
         .await?;
 
-    // Build a lookup: server_id → LocalSignature
-    let local_map: std::collections::HashMap<&str, &LocalSignature> =
+    let local_map: HashMap<&str, &LocalSignature> =
         locals.iter().map(|l| (l.server_id.as_str(), l)).collect();
 
     let now = chrono::Utc::now().timestamp();
-
-    // Collect push-to-server actions to execute after the DB pass
     let mut push_queue: Vec<(String, String)> = Vec::new();
 
     for (i, alias) in aliases.iter().enumerate() {
         let server_id = &alias.send_as_email;
         let server_html = alias.signature.as_deref().unwrap_or("");
-
-        // Compute hash of current server HTML
         let server_hash_now = html_hash(server_html);
-
         let local = local_map.get(server_id.as_str()).copied();
 
         let action = determine_sync_action(local, server_html, &server_hash_now);
-
         match action {
             SigSyncAction::NoOp => {}
-
             SigSyncAction::PullFromServer | SigSyncAction::ConflictServerWins => {
                 if matches!(action, SigSyncAction::ConflictServerWins) {
                     log::warn!(
@@ -170,21 +189,17 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
                          Preferring server version."
                     );
                 }
-
                 let name = build_sig_name(alias, server_id);
                 let is_default = i64::from(alias.is_default.unwrap_or(false));
-                let id = format!(
-                    "gmail_sig_{account_id}_{server_id}",
-                    account_id = ctx.account_id
-                );
-                let aid = ctx.account_id.to_string();
+                let id = format!("gmail_sig_{account_id}_{server_id}");
+                let aid = account_id.to_string();
                 let sid = server_id.clone();
                 let html = server_html.to_string();
                 let hash = server_hash_now.clone();
                 #[allow(clippy::cast_possible_wrap)]
                 let sort = i as i64;
 
-                ctx.write_db
+                write_db
                     .with_write(move |conn| {
                         upsert_signature_from_server(
                             conn, &id, &aid, &name, &html, is_default, sort, &sid, &hash, now,
@@ -192,15 +207,12 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
                     })
                     .await?;
             }
-
             SigSyncAction::PushToServer => {
                 if let Some(loc) = local {
                     push_queue.push((server_id.clone(), loc.body_html.clone()));
-
-                    // After push, update the stored hash to match what we just pushed
                     let local_hash = html_hash(&loc.body_html);
                     let lid = loc.id.clone();
-                    ctx.write_db
+                    write_db
                         .with_write(move |conn| {
                             conn.execute(
                                 "UPDATE signatures SET server_html_hash = ?1, last_synced_at = ?2 \
@@ -216,24 +228,43 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
         }
     }
 
-    // Execute pushes to Gmail API
     for (send_as_email, html) in &push_queue {
-        if let Err(e) = push_signature_to_gmail(ctx.client, send_as_email, html, ctx.db).await {
-            log::error!("Failed to push signature for {send_as_email}: {e}");
+        if let Err(error) = client
+            .update_send_as_signature(send_as_email, html, read_db)
+            .await
+        {
+            log::error!("Failed to push signature for {send_as_email}: {error}");
         }
     }
 
     Ok(())
 }
 
-/// Determine what sync action to take for a single signature.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct LocalSignature {
+    id: String,
+    server_id: String,
+    body_html: String,
+    server_html_hash: Option<String>,
+    name: String,
+    is_default: bool,
+    sort_order: i64,
+}
+
+enum SigSyncAction {
+    PullFromServer,
+    PushToServer,
+    ConflictServerWins,
+    NoOp,
+}
+
 fn determine_sync_action(
     local: Option<&LocalSignature>,
     server_html: &str,
     server_hash_now: &str,
 ) -> SigSyncAction {
     let Some(loc) = local else {
-        // No local row yet - if server has content, pull it
         if server_html.is_empty() {
             return SigSyncAction::NoOp;
         }
@@ -243,10 +274,10 @@ fn determine_sync_action(
     let stored_server_hash = loc.server_html_hash.as_deref().unwrap_or("");
     let local_hash = html_hash(&loc.body_html);
 
-    let server_changed = server_hash_now != stored_server_hash;
-    let local_changed = local_hash != stored_server_hash;
-
-    match (server_changed, local_changed) {
+    match (
+        server_hash_now != stored_server_hash,
+        local_hash != stored_server_hash,
+    ) {
         (false, false) => SigSyncAction::NoOp,
         (true, false) => SigSyncAction::PullFromServer,
         (false, true) => SigSyncAction::PushToServer,
@@ -254,21 +285,6 @@ fn determine_sync_action(
     }
 }
 
-/// Push a local signature to Gmail via the sendAs API.
-async fn push_signature_to_gmail(
-    client: &GmailClient,
-    send_as_email: &str,
-    html: &str,
-    db: &ReadDbState,
-) -> Result<(), String> {
-    client
-        .update_send_as_signature(send_as_email, html, db)
-        .await?;
-    log::info!("Pushed signature update to Gmail for {send_as_email}");
-    Ok(())
-}
-
-/// Upsert a signature row from server data (pull path).
 #[allow(clippy::too_many_arguments)]
 fn upsert_signature_from_server(
     conn: &impl WriteTarget,
@@ -310,8 +326,6 @@ fn upsert_signature_from_server(
     Ok(())
 }
 
-/// Read all local signatures for an account that have a `server_id` (i.e. came
-/// from Gmail sync or were linked to a sendAs alias).
 fn read_local_signatures(
     conn: &ReadConn<'_>,
     account_id: &str,
@@ -344,23 +358,23 @@ fn read_local_signatures(
     Ok(result)
 }
 
-/// Build a human-readable display name for a signature.
 fn build_sig_name(alias: &GmailSendAs, server_id: &str) -> String {
     alias
         .display_name
         .as_deref()
-        .filter(|n| !n.is_empty())
-        .map_or_else(|| server_id.to_string(), |n| format!("{n} ({server_id})"))
+        .filter(|name| !name.is_empty())
+        .map_or_else(
+            || server_id.to_string(),
+            |name| format!("{name} ({server_id})"),
+        )
 }
 
-/// SHA-256 hash of HTML content, hex-encoded.
 fn html_hash(html: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(html.as_bytes());
     hex_encode(hasher.finalize())
 }
 
-/// Minimal hex encoding (same pattern as bimi.rs).
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     use std::fmt::Write;
     bytes.as_ref().iter().fold(String::new(), |mut s, b| {

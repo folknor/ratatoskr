@@ -42,6 +42,8 @@ const INPUT_FIXTURE: &str = "tests/fixtures/jmap_consumer_membership_input.json"
 const GOLDEN_FIXTURE: &str = "tests/fixtures/jmap_consumer_membership_golden.json";
 const GRAPH_INPUT_FIXTURE: &str = "tests/fixtures/graph_consumer_membership_input.json";
 const GRAPH_GOLDEN_FIXTURE: &str = "tests/fixtures/graph_consumer_membership_golden.json";
+const GMAIL_INPUT_FIXTURE: &str = "tests/fixtures/gmail_consumer_membership_input.json";
+const GMAIL_GOLDEN_FIXTURE: &str = "tests/fixtures/gmail_consumer_membership_golden.json";
 
 /// The ten tables / columns the gate pins (spec 4.0). `message_labels` is
 /// asserted EMPTY (JMAP keyword-label semantics).
@@ -246,6 +248,42 @@ async fn dump_snapshot(state: &WriteDbState) -> Value {
         tables.insert((*name).to_string(), Value::Array(rows));
     }
     Value::Object(tables)
+}
+
+async fn dump_snapshot_with_reactions(state: &WriteDbState) -> Value {
+    let mut snapshot = dump_snapshot(state).await;
+    let reactions = state
+        .with_read(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT message_id, account_id, reactor_email, reactor_name, reaction_type, \
+                     reacted_at, source FROM message_reactions ORDER BY message_id, reactor_email",
+                )
+                .map_err(|e| e.to_string())?;
+            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                let statement = row.as_ref();
+                let column_names: Vec<String> = statement
+                    .column_names()
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect();
+                let mut obj = Map::new();
+                for (idx, col) in column_names.iter().enumerate() {
+                    let value: rusqlite::types::Value = row.get(idx).map_err(|e| e.to_string())?;
+                    obj.insert(col.clone(), sqlite_to_json(&value));
+                }
+                out.push(Value::Object(obj));
+            }
+            Ok(out)
+        })
+        .await
+        .unwrap();
+    if let Value::Object(ref mut map) = snapshot {
+        map.insert("message_reactions".to_string(), Value::Array(reactions));
+    }
+    snapshot
 }
 
 fn sqlite_to_json(value: &rusqlite::types::Value) -> Value {
@@ -586,5 +624,265 @@ async fn graph_consumer_membership_equals_legacy() {
     assert!(
         !labels.iter().any(|(id, _, _, _)| id == "importance:normal"),
         "ordinary (normal-importance) mail must NOT mint an importance:normal row"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gmail_consumer_membership_equals_legacy() {
+    let input: InputFixture =
+        serde_json::from_slice(&std::fs::read(manifest_path(GMAIL_INPUT_FIXTURE)).unwrap())
+            .unwrap();
+    let account = AccountId(input.account_id.clone());
+
+    let (db_state, tmp) = state(&input.account_id, "gmail_api");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+
+    let gmail_folder_map: HashMap<String, common::types::FolderKind> = HashMap::from([
+        (
+            "INBOX".to_string(),
+            common::types::FolderKind::System(common::types::SystemFolderId::Inbox),
+        ),
+        (
+            "SENT".to_string(),
+            common::types::FolderKind::System(common::types::SystemFolderId::Sent),
+        ),
+        (
+            "IMPORTANT".to_string(),
+            common::types::FolderKind::System(common::types::SystemFolderId::Important),
+        ),
+    ]);
+
+    let rows: Vec<_> = input
+        .messages
+        .iter()
+        .map(|message| {
+            let (msg, raw) = build_message(message);
+            build_consumer_row(
+                &account,
+                BifrostProviderKind::Gmail,
+                &gmail_folder_map,
+                &msg,
+                Some(&raw),
+                HashMap::new(),
+                HydrationOutcome::Succeeded,
+            )
+        })
+        .collect();
+
+    let affected = super::write::persist(
+        &consumer_stores,
+        &input.account_id,
+        BifrostProviderKind::Gmail,
+        &rows,
+        &[],
+    )
+    .await
+    .unwrap();
+    super::post_persist::run(
+        &consumer_stores.db,
+        &input.account_id,
+        BifrostProviderKind::Gmail,
+        &bifrost_types::CursorScope::Account,
+        None,
+        &rows,
+        &affected,
+    )
+    .await
+    .unwrap();
+
+    let snapshot = dump_snapshot_with_reactions(&db_state).await;
+    let snapshot_str = canonical_string(&snapshot);
+
+    // PROVENANCE (finding 5 / spec 6.2): unlike the spec-6.2 ideal of capturing
+    // this golden by byte-replaying the legacy `gmail/sync/storage.rs`
+    // `store_thread_to_db` persist, that path is DELETED in this same landing
+    // (spec 4.7), so a legacy byte-capture is impossible - there is nothing left
+    // to run. This golden is therefore INVARIANT-based, not legacy-captured: it
+    // is (re)generated from the NEW consumer via `UPDATE_GOLDEN` and locks the
+    // consumer against future drift, while the legacy-equivalent SEMANTICS are
+    // pinned independently by the explicit assertions below the equality check:
+    //   - the multi-message thread's folder rollup is the UNION across its
+    //     messages (INBOX from msg1/msg3 AND SENT from msg2 both survive), the
+    //     legacy `set_thread_labels` whole-thread-coverage union;
+    //   - the user label `Label_1` survives in the thread rollup;
+    //   - STARRED / UNREAD are excluded as message STATE, never thread labels
+    //     (legacy `is_message_state_label_id` skip);
+    //   - the Gmail emoji reaction is resolved into a `message_reactions` row.
+    // Those assertions encode the legacy contract directly, so the golden's
+    // self-referential regeneration cannot silently mask a consumer-vs-legacy
+    // divergence on the load-bearing invariants.
+    if std::env::var("UPDATE_GOLDEN").is_ok() {
+        std::fs::write(
+            manifest_path(GMAIL_GOLDEN_FIXTURE),
+            format!("{snapshot_str}\n"),
+        )
+        .unwrap();
+        eprintln!(
+            "===BEGIN GMAIL GOLDEN SNAPSHOT===\n{snapshot_str}\n===END GMAIL GOLDEN SNAPSHOT==="
+        );
+        eprintln!("[golden] regenerated {GMAIL_GOLDEN_FIXTURE}");
+        return;
+    }
+
+    let golden_raw = std::fs::read_to_string(manifest_path(GMAIL_GOLDEN_FIXTURE)).unwrap();
+    let golden: Value = serde_json::from_str(&golden_raw).unwrap();
+    let golden_str = canonical_string(&golden);
+
+    if snapshot_str != golden_str {
+        eprintln!(
+            "===BEGIN GMAIL CONSUMER SNAPSHOT===\n{snapshot_str}\n===END GMAIL CONSUMER SNAPSHOT==="
+        );
+    }
+    assert_eq!(snapshot_str, golden_str);
+
+    let thread_folders = snapshot
+        .get("thread_folders")
+        .and_then(Value::as_array)
+        .expect("thread_folders snapshot");
+    assert!(
+        thread_folders
+            .iter()
+            .any(|row| row.get("folder_id") == Some(&json!("INBOX"))),
+        "multi-message Gmail thread lost INBOX membership"
+    );
+    assert!(
+        thread_folders
+            .iter()
+            .any(|row| row.get("folder_id") == Some(&json!("SENT"))),
+        "multi-message Gmail thread lost SENT membership"
+    );
+    let thread_labels = snapshot
+        .get("thread_labels")
+        .and_then(Value::as_array)
+        .expect("thread_labels snapshot");
+    assert!(
+        thread_labels
+            .iter()
+            .any(|row| row.get("label_id") == Some(&json!("Label_1"))),
+        "multi-message Gmail thread lost user-label membership"
+    );
+    assert!(
+        !thread_labels.iter().any(|row| {
+            row.get("label_id") == Some(&json!("STARRED"))
+                || row.get("label_id") == Some(&json!("UNREAD"))
+        }),
+        "Gmail state labels must not be persisted as thread labels"
+    );
+    let reactions = snapshot
+        .get("message_reactions")
+        .and_then(Value::as_array)
+        .expect("message_reactions snapshot");
+    assert_eq!(reactions.len(), 1, "Gmail reaction row missing");
+}
+
+/// Build a bare single-part Gmail `Message` whose RFC822 octets are exactly
+/// `raw`. The structured `Message` carries no body/labels of its own here: the
+/// reaction is recovered entirely from the verbatim MIME, which is the path
+/// the production hydrate takes (`build_consumer_row` re-parses the raw).
+fn gmail_message_with_raw(id: &str) -> Message {
+    Message {
+        id: ObjectId(id.to_string()),
+        thread_id: Some(ThreadId(format!("{id}-thread"))),
+        from: vec![Address {
+            name: Some("Sender".to_string()),
+            address: "sender@example.com".to_string(),
+        }],
+        to: vec![Address {
+            name: None,
+            address: "me@example.test".to_string(),
+        }],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
+        subject: Some("Re: Gmail thread".to_string()),
+        date: Some(UNIX_EPOCH + Duration::from_millis(1_700_000_000_000)),
+        containers: vec![ContainerId("INBOX".to_string())],
+        flags: std::collections::HashSet::new(),
+        importance: Importance::Normal,
+        body_text: None,
+        body_html: None,
+        attachments: Vec::new(),
+        size_bytes: None,
+        in_reply_to: None,
+        references: Vec::new(),
+    }
+}
+
+/// Finding-1 gate: the membership golden's reaction (`gmail-msg-3`) carries a
+/// 7bit-ASCII reaction body, so it never exercised the Content-Transfer-Encoding
+/// decode. A reaction whose MIME body is base64-encoded (as Gmail emits when the
+/// payload is non-ASCII) must STILL be extracted - the legacy structured parser
+/// (`gmail/src/parse.rs`) decoded the part body per its CTE, whereas a raw
+/// substring scan for `{"emoji"` never matches the encoded octets and silently
+/// drops the reaction. Conversely, a normal message that merely MENTIONS the
+/// reaction MIME-type string plus an emoji JSON blob in its body must NOT be
+/// mis-flagged as a reaction.
+#[test]
+fn gmail_base64_encoded_reaction_is_extracted_and_no_false_positive() {
+    use base64::Engine;
+    let account = AccountId("gmail-acc".to_string());
+    let folder_map: HashMap<String, common::types::FolderKind> = HashMap::new();
+
+    // (a) A reaction part whose body is base64-encoded per Content-Transfer-
+    //     Encoding. The substring-scan path missed this entirely.
+    let json = "{\"emoji\":\"\u{1f44d}\",\"version\":1}";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(json);
+    let reaction_raw = format!(
+        "Message-ID: <react@example.com>\r\n\
+         From: Sender <sender@example.com>\r\n\
+         To: me@example.test\r\n\
+         Subject: Re: Gmail thread\r\n\
+         Content-Type: text/vnd.google.email-reaction+json\r\n\
+         Content-Transfer-Encoding: base64\r\n\
+         \r\n\
+         {encoded}\r\n"
+    )
+    .into_bytes();
+    let reaction_row = build_consumer_row(
+        &account,
+        BifrostProviderKind::Gmail,
+        &folder_map,
+        &gmail_message_with_raw("gmail-react"),
+        Some(&reaction_raw),
+        HashMap::new(),
+        HydrationOutcome::Succeeded,
+    );
+    assert_eq!(
+        reaction_row.reaction_emoji.as_deref(),
+        Some("\u{1f44d}"),
+        "base64-encoded reaction body must be decoded and the emoji extracted"
+    );
+    assert!(
+        reaction_row.message.is_reaction,
+        "a decoded reaction must set is_reaction"
+    );
+
+    // (b) A normal message whose plain-text body merely references the reaction
+    //     MIME type string and an emoji JSON blob. It has no part of that type,
+    //     so it must NOT be flagged as a reaction.
+    let normal_raw = b"Message-ID: <normal@example.com>\r\n\
+From: Sender <sender@example.com>\r\n\
+To: me@example.test\r\n\
+Subject: about reactions\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+We use text/vnd.google.email-reaction+json with {\"emoji\":\"x\"} blobs.\r\n"
+        .to_vec();
+    let normal_row = build_consumer_row(
+        &account,
+        BifrostProviderKind::Gmail,
+        &folder_map,
+        &gmail_message_with_raw("gmail-normal"),
+        Some(&normal_raw),
+        HashMap::new(),
+        HydrationOutcome::Succeeded,
+    );
+    assert_eq!(
+        normal_row.reaction_emoji, None,
+        "a body that merely mentions the reaction MIME type is not a reaction"
+    );
+    assert!(
+        !normal_row.message.is_reaction,
+        "a non-reaction message must not be flagged is_reaction"
     );
 }

@@ -72,7 +72,9 @@ pub async fn persist(
                 let mut message_ids = Vec::new();
                 let user_emails = if matches!(
                     provider,
-                    BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                    BifrostProviderKind::Jmap
+                        | BifrostProviderKind::Graph
+                        | BifrostProviderKind::Gmail
                 ) {
                     Some(query_user_emails(&tx)?)
                 } else {
@@ -157,7 +159,7 @@ pub async fn persist(
                                 )
                             })?;
                         }
-                        BifrostProviderKind::Graph => {
+                        BifrostProviderKind::Graph | BifrostProviderKind::Gmail => {
                             replace_message_membership_and_recompute(
                                 &tx,
                                 &row.message.account_id,
@@ -168,12 +170,17 @@ pub async fn persist(
                             )
                             .map_err(|error| {
                                 format!(
-                                    "replace Graph message membership for {}: {error}",
+                                    "replace {} message membership for {}: {error}",
+                                    provider.as_str(),
                                     row.message.id
                                 )
                             })?;
-                            insert_attachments(&tx, &row.attachments)
-                                .map_err(|error| format!("insert Graph attachments: {error}"))?;
+                            insert_attachments(&tx, &row.attachments).map_err(|error| {
+                                format!("insert {} attachments: {error}", provider.as_str())
+                            })?;
+                            if provider == BifrostProviderKind::Gmail {
+                                insert_gmail_reaction(&tx, &account_id, row)?;
+                            }
                             upsert_thread_participants(
                                 &tx,
                                 &row.message.account_id,
@@ -185,7 +192,8 @@ pub async fn persist(
                             )
                             .map_err(|error| {
                                 format!(
-                                    "upsert Graph thread participants for {}: {error}",
+                                    "upsert {} thread participants for {}: {error}",
+                                    provider.as_str(),
                                     row.message.id
                                 )
                             })?;
@@ -246,7 +254,9 @@ pub async fn persist(
                         })?;
                     let is_important = if matches!(
                         provider,
-                        BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                        BifrostProviderKind::Jmap
+                            | BifrostProviderKind::Graph
+                            | BifrostProviderKind::Gmail
                     ) {
                         // Importance is carried on the hydrated row (from
                         // `Message::importance` for real JMAP, from the
@@ -270,7 +280,9 @@ pub async fn persist(
                     .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
                     if matches!(
                         provider,
-                        BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                        BifrostProviderKind::Jmap
+                            | BifrostProviderKind::Graph
+                            | BifrostProviderKind::Gmail
                     ) && let Some(user_emails) = &user_emails
                     {
                         maybe_update_chat_state(&tx, account_id, thread_id, user_emails)
@@ -280,7 +292,9 @@ pub async fn persist(
 
                 if matches!(
                     provider,
-                    BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                    BifrostProviderKind::Jmap
+                        | BifrostProviderKind::Graph
+                        | BifrostProviderKind::Gmail
                 ) && !deleted_ids.is_empty()
                 {
                     delete_messages_and_cleanup_threads(&tx, &account_id, &deleted_ids)
@@ -366,6 +380,53 @@ fn label_write_row(label: &LabelKind, account_id: &str) -> LabelWriteRow {
     }
 }
 
+fn insert_gmail_reaction(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    row: &ConsumerMessageRow,
+) -> Result<(), String> {
+    let Some(emoji) = row.reaction_emoji.as_deref() else {
+        return Ok(());
+    };
+    let Some(in_reply_to) = row.message.in_reply_to_header.as_deref() else {
+        log::warn!(
+            "Gmail reaction message {} has no In-Reply-To header, skipping",
+            row.message.id
+        );
+        return Ok(());
+    };
+    let Some(reactor_email) = row.message.from_address.as_deref() else {
+        return Ok(());
+    };
+
+    let target_message_id: Option<String> = tx
+        .query_row(
+            "SELECT id FROM messages WHERE message_id_header = ?1 AND account_id = ?2 LIMIT 1",
+            rusqlite::params![in_reply_to, account_id],
+            |lookup| lookup.get("id"),
+        )
+        .ok();
+    let target_id = target_message_id.as_deref().unwrap_or(in_reply_to);
+
+    tx.execute(
+        "INSERT INTO message_reactions \
+         (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'gmail_mime') \
+         ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
+           reactor_name = ?4, reacted_at = ?6",
+        rusqlite::params![
+            target_id,
+            account_id,
+            reactor_email,
+            row.message.from_name,
+            emoji,
+            row.message.date,
+        ],
+    )
+    .map_err(|error| format!("insert Gmail reaction: {error}"))?;
+    Ok(())
+}
+
 fn assert_no_foreign_key_violations(tx: &db::db::WriteTxn<'_>) -> Result<(), String> {
     let mut stmt = tx
         .prepare("PRAGMA foreign_key_check")
@@ -444,6 +505,7 @@ mod tests {
             raw_body: b"hello world".to_vec(),
             degraded_body: false,
             forced_outcome: None,
+            reaction_emoji: None,
         };
         let encoded = super::super::hydrate::encode_synthetic_message(&synthetic).unwrap();
         Change::ObjectChange(ObjectChange {

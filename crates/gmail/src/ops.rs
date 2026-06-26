@@ -25,10 +25,8 @@ impl GmailOps {
     }
 }
 
-// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
-// `ProviderOps`. The relocated `ProviderSyncOps` trait
-// (`provider-sync` crate) carries them; `provider-sync/src/gmail_impl.rs`
-// holds the orphan-impl and sync entry-point code.
+// Gmail mail sync now runs through the service-owned bifrost runner; this
+// type remains the Gmail action surface.
 #[async_trait]
 impl ProviderOps for GmailOps {
     async fn archive(

@@ -1,0 +1,119 @@
+{
+  "account_id": "gmail-acc",
+  "messages": [
+    {
+      "id": "gmail-msg-1",
+      "thread_id": "gmail-thread-1",
+      "subject": "Gmail thread",
+      "date_ms": 1700000000000,
+      "from": {
+        "name": "Sender",
+        "address": "sender@example.com"
+      },
+      "to": [
+        {
+          "name": null,
+          "address": "me@example.test"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "containers": [
+        "INBOX",
+        "UNREAD"
+      ],
+      "flags": [
+        "\\Flagged"
+      ],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <gmail-msg-1@example.com>",
+        "From: Sender <sender@example.com>",
+        "To: me@example.test",
+        "Subject: Gmail thread",
+        "",
+        "Inbox body"
+      ]
+    },
+    {
+      "id": "gmail-msg-2",
+      "thread_id": "gmail-thread-1",
+      "subject": "Re: Gmail thread",
+      "date_ms": 1700000060000,
+      "from": {
+        "name": null,
+        "address": "me@example.test"
+      },
+      "to": [
+        {
+          "name": null,
+          "address": "sender@example.com"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "containers": [
+        "SENT",
+        "IMPORTANT",
+        "STARRED",
+        "Label_1"
+      ],
+      "flags": [
+        "\\Seen",
+        "\\Flagged",
+        "$Important",
+        "$gmail-label:Label_1:Project"
+      ],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <gmail-msg-2@example.com>",
+        "In-Reply-To: <gmail-msg-1@example.com>",
+        "References: <gmail-msg-1@example.com>",
+        "From: me@example.test",
+        "To: sender@example.com",
+        "Subject: Re: Gmail thread",
+        "",
+        "Sent body"
+      ]
+    },
+    {
+      "id": "gmail-msg-3",
+      "thread_id": "gmail-thread-1",
+      "subject": "Re: Gmail thread",
+      "date_ms": 1700000120000,
+      "from": {
+        "name": "Sender",
+        "address": "sender@example.com"
+      },
+      "to": [
+        {
+          "name": null,
+          "address": "me@example.test"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "containers": [
+        "INBOX"
+      ],
+      "flags": [
+        "\\Seen"
+      ],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <gmail-msg-3@example.com>",
+        "In-Reply-To: <gmail-msg-1@example.com>",
+        "References: <gmail-msg-1@example.com>",
+        "From: Sender <sender@example.com>",
+        "To: me@example.test",
+        "Subject: Re: Gmail thread",
+        "Content-Type: text/vnd.google.email-reaction+json",
+        "",
+        "{\"emoji\":\"+1\",\"version\":1}"
+      ]
+    }
+  ]
+}

@@ -194,6 +194,86 @@ pub async fn sync_graph_account(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_gmail_account(
+    engine: &BifrostSyncEngine,
+    stores: BifrostConsumerStores,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+    cancellation_token: &CancellationToken,
+) -> Result<(), String> {
+    let initial_sync_completed = {
+        let aid = account_id.to_string();
+        write_db
+            .with_write(move |conn| {
+                conn.query_row(
+                    "SELECT initial_sync_completed FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|value| value != 0)
+                .map_err(|error| format!("read initial_sync_completed: {error}"))
+            })
+            .await?
+    };
+
+    let aux_client = gmail::client::GmailClient::from_account(
+        read_db,
+        write_db.writer_pool(),
+        account_id,
+        encryption_key,
+    )
+    .await?;
+    aux_client.get_access_token(read_db).await?;
+
+    let gmail_folder_map = prepare_gmail_labels(&aux_client, account_id, read_db, write_db).await?;
+
+    let mut attempt = 0usize;
+    loop {
+        let report = drive_once(
+            engine,
+            stores.clone(),
+            read_db,
+            write_db,
+            account_id,
+            encryption_key,
+            cancellation_token,
+            BifrostProviderKind::Gmail,
+            gmail_folder_map.clone(),
+        )
+        .await?;
+        if !report.lagged {
+            if !initial_sync_completed {
+                let aid = account_id.to_string();
+                write_db
+                    .with_write(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
+                    .await?;
+            }
+            provider_sync::consumer_support::run_gmail_auxiliary_sync(
+                &aux_client,
+                account_id,
+                read_db,
+                write_db,
+                initial_sync_completed,
+            )
+            .await;
+            return Ok(());
+        }
+        if attempt >= LAG_BACKOFF_DELAYS.len() {
+            return Err(
+                "bifrost Gmail consumer lagged after bounded reattach attempts".to_string(),
+            );
+        }
+        tokio::select! {
+            () = tokio::time::sleep(LAG_BACKOFF_DELAYS[attempt]) => {}
+            () = cancellation_token.cancelled() => return Err("sync cancelled".to_string()),
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
 async fn run_auxiliary_sync(
     client: &jmap::client::JmapClient,
     read_db: &ReadDbState,
@@ -232,6 +312,18 @@ async fn prepare_graph_folders(
 ) -> Result<std::collections::HashMap<String, common::types::FolderKind>, String> {
     provider_sync::consumer_support::sync_graph_folder_map(client, account_id, read_db, write_db)
         .await
+}
+
+async fn prepare_gmail_labels(
+    client: &gmail::client::GmailClient,
+    account_id: &str,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+) -> Result<std::collections::HashMap<String, common::types::FolderKind>, String> {
+    provider_sync::consumer_support::sync_gmail_label_folder_map(
+        client, account_id, read_db, write_db,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]

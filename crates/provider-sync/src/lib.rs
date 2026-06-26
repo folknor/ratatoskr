@@ -14,14 +14,15 @@
 //! and the action-side dispatch keeps calling action methods directly
 //! on it without an explicit upcast.
 //!
-//! The orphan-impls (`impl ProviderSyncOps for {Gmail,Graph,Imap}Ops`)
-//! live in the per-provider sub-modules. The orphan rule
+//! The orphan-impl (`impl ProviderSyncOps for ImapOps`) lives in the
+//! per-provider sub-module. (JMAP, Graph, and Gmail were cut over to the
+//! bifrost engine + consumer; only IMAP remains on this legacy path.) The
+//! orphan rule
 //! is satisfied because the trait is local to this crate; the impl
 //! targets are foreign types from the provider crates.
 
 pub mod consumer_support;
 pub mod gmail;
-mod gmail_impl;
 pub mod graph;
 pub mod imap;
 mod imap_impl;

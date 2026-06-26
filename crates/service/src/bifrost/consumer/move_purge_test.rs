@@ -95,6 +95,7 @@ fn synthetic(id: &str, thread: &str, folders: &[&str]) -> SyntheticMessage {
         raw_body: b"body".to_vec(),
         degraded_body: false,
         forced_outcome: None,
+        reaction_emoji: None,
     }
 }
 

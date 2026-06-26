@@ -449,6 +449,7 @@ pub(super) async fn bifrost_inject_batch_handle(
                     Some(crate::bifrost::consumer::hydrate::SyntheticOutcome::DegradedBody)
                 ),
                 forced_outcome,
+                reaction_emoji: None,
             };
             crate::bifrost::consumer::hydrate::encode_synthetic_message(&synthetic).map(|id| {
                 bifrost_types::Change::ObjectChange(bifrost_types::ObjectChange {

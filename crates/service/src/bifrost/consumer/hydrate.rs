@@ -9,7 +9,7 @@ use bifrost_types::{
 use common::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind};
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow};
 use futures::StreamExt;
-use mail_parser::MessageParser;
+use mail_parser::{MessageParser, MimeHeaders};
 use provider_sync::consumer_support::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use search::SearchDocument;
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,7 @@ pub struct ConsumerMessageRow {
     /// thread's messages to set `threads.is_important`, matching the legacy
     /// JMAP path that derived it from the IMPORTANT label.
     pub is_important: bool,
+    pub reaction_emoji: Option<String>,
 }
 
 impl HydrateBatch {
@@ -249,11 +250,15 @@ pub async fn hydrate_change_to_message_insert_row(
                         inline_images: Vec::new(),
                         search_document: minimal_search_document(&account_id.0, &object.id.0),
                         is_important: false,
+                        reaction_emoji: None,
                     }),
                     outcome,
                 ));
             }
-            let projection = if provider == BifrostProviderKind::Graph {
+            let projection = if matches!(
+                provider,
+                BifrostProviderKind::Graph | BifrostProviderKind::Gmail
+            ) {
                 HydrationProjection::FullWithBlobs
             } else {
                 HydrationProjection::Full
@@ -269,6 +274,29 @@ pub async fn hydrate_change_to_message_insert_row(
                     .await?,
                 ),
                 outcome,
+            ))
+        }
+        Change::ScopeChange(scope) if provider == BifrostProviderKind::Gmail => {
+            let message = engine
+                .message_hydrate(
+                    account_id,
+                    ObjectId(scope.id.0.clone()),
+                    HydrationProjection::FullWithBlobs,
+                )
+                .await?;
+            Ok(HydratedChange::Message(
+                Box::new(
+                    message_to_consumer_row(
+                        engine,
+                        account_id,
+                        provider,
+                        folder_map,
+                        message,
+                        HydrationOutcome::Succeeded,
+                    )
+                    .await?,
+                ),
+                HydrationOutcome::Succeeded,
             ))
         }
         Change::ScopeChange(_) => Ok(HydratedChange::ScopeOnly),
@@ -306,10 +334,19 @@ pub fn hydrate_change_to_message_insert_row_offline(
                     inline_images: Vec::new(),
                     search_document: minimal_search_document(account_id, &object.id.0),
                     is_important: false,
+                    reaction_emoji: None,
                 }),
                 outcome,
             )
         }
+        // The online Gmail `ScopeChange` arm re-hydrates the affected message
+        // to recover its full membership (a label-only delta carries no
+        // `ObjectChange`). The offline path has no engine to re-hydrate from,
+        // so emitting an empty-folders/empty-labels row here would REPLACE the
+        // thread's coverage with nothing and wipe membership. This arm is
+        // unreachable today (the batch-injection harness only emits
+        // `ObjectChange`), but mirror the online path's safe disposition:
+        // a `ScopeOnly` change writes nothing rather than erasing membership.
         Change::ScopeChange(_) => HydratedChange::ScopeOnly,
         _ => HydratedChange::ScopeOnly,
     }
@@ -416,7 +453,19 @@ pub(crate) fn build_consumer_row(
     let snippet = snippet_from_body(body_text.as_deref());
 
     let mut labels = Vec::new();
-    if provider == BifrostProviderKind::Graph {
+    if provider == BifrostProviderKind::Gmail {
+        for container in &message.containers {
+            if common::folder_roles::is_message_state_label_id(&container.0) {
+                continue;
+            }
+            if common::folder_roles::is_gmail_system_folder_label_id(&container.0) {
+                continue;
+            }
+            if let Ok(label) = LabelKind::parse(&container.0, MailProviderKind::Gmail) {
+                labels.push(label);
+            }
+        }
+    } else if provider == BifrostProviderKind::Graph {
         for flag in &message.flags {
             if let Some(category) = flag.strip_prefix("category:")
                 && let Ok(label) = LabelKind::graph_category(category)
@@ -447,6 +496,17 @@ pub(crate) fn build_consumer_row(
         .containers
         .iter()
         .filter_map(|container| {
+            if provider == BifrostProviderKind::Gmail {
+                if common::folder_roles::is_message_state_label_id(&container.0) {
+                    return None;
+                }
+                if !common::folder_roles::is_gmail_system_folder_label_id(&container.0) {
+                    return None;
+                }
+                if let Some(folder) = folder_map.get(&container.0) {
+                    return Some(folder.clone());
+                }
+            }
             if matches!(
                 provider,
                 BifrostProviderKind::Jmap | BifrostProviderKind::Graph
@@ -467,6 +527,9 @@ pub(crate) fn build_consumer_row(
         if !folders.contains(&draft) {
             folders.push(draft);
         }
+    }
+    if provider == BifrostProviderKind::Gmail && gmail_should_synthesize_archive(&folders) {
+        folders.push(FolderKind::System(common::types::SystemFolderId::Archive));
     }
     // Inline-image blobs were downloaded by the caller; their per-blob BLAKE3
     // hash (keyed by blob id) back-fills each attachment row's `content_hash`
@@ -519,6 +582,23 @@ pub(crate) fn build_consumer_row(
     let raw_size = raw
         .map(|bytes| i64::try_from(bytes.len()).unwrap_or(i64::MAX))
         .or_else(|| message.size_bytes.and_then(|size| i64::try_from(size).ok()));
+    let reaction_emoji = if provider == BifrostProviderKind::Gmail {
+        raw.and_then(extract_gmail_reaction_emoji)
+    } else {
+        None
+    };
+    let sent_membership = provider == BifrostProviderKind::Gmail
+        && folders.iter().any(|folder| folder.storage_id() == "SENT");
+    let is_replied = if provider == BifrostProviderKind::Gmail {
+        sent_membership && (in_reply_to_header.is_some() || references_header.is_some())
+    } else {
+        flags.contains("$answered")
+    };
+    let is_forwarded = if provider == BifrostProviderKind::Gmail {
+        sent_membership && message.subject.as_deref().is_some_and(is_forwarded_subject)
+    } else {
+        flags.contains("$forwarded")
+    };
     let row = MessageInsertRow {
         id: message_id.clone(),
         account_id: account_id.0.clone(),
@@ -537,8 +617,8 @@ pub(crate) fn build_consumer_row(
         date,
         is_read: flags.contains("$seen"),
         is_starred: flags.contains("$flagged"),
-        is_replied: flags.contains("$answered"),
-        is_forwarded: flags.contains("$forwarded"),
+        is_replied,
+        is_forwarded,
         raw_size,
         internal_date: Some(date),
         list_unsubscribe,
@@ -559,7 +639,7 @@ pub(crate) fn build_consumer_row(
         in_reply_to_header: in_reply_to_header.or_else(|| message.in_reply_to.clone()),
         body_cached: body_html.is_some() || body_text.is_some(),
         mdn_requested,
-        is_reaction: false,
+        is_reaction: reaction_emoji.is_some(),
         imap_uid: None,
         imap_folder: None,
         has_meeting_invite: parsed_attachments
@@ -597,13 +677,17 @@ pub(crate) fn build_consumer_row(
         body_text,
         inline_images,
         search_document,
-        is_important: matches!(message.importance, Importance::High),
+        is_important: matches!(message.importance, Importance::High)
+            || flags.contains("$important"),
+        reaction_emoji,
     }
 }
 
 fn remote_attachment_id(provider: BifrostProviderKind, blob_id: &str) -> String {
-    if provider == BifrostProviderKind::Graph
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(blob_id)
+    if matches!(
+        provider,
+        BifrostProviderKind::Graph | BifrostProviderKind::Gmail
+    ) && let Ok(value) = serde_json::from_str::<serde_json::Value>(blob_id)
         && let Some(attachment_id) = value
             .get("attachment_id")
             .and_then(serde_json::Value::as_str)
@@ -613,12 +697,24 @@ fn remote_attachment_id(provider: BifrostProviderKind, blob_id: &str) -> String 
     blob_id.to_string()
 }
 
+fn gmail_should_synthesize_archive(folders: &[FolderKind]) -> bool {
+    !folders.iter().any(|folder| {
+        matches!(
+            folder.storage_id().as_str(),
+            "INBOX" | "SENT" | "DRAFT" | "TRASH" | "SPAM" | "archive"
+        )
+    })
+}
+
 fn normalized_flags(
     provider: BifrostProviderKind,
     flags: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
     let mut normalized = flags.clone();
-    if provider == BifrostProviderKind::Graph {
+    if matches!(
+        provider,
+        BifrostProviderKind::Graph | BifrostProviderKind::Gmail
+    ) {
         if flags.contains("\\seen") || flags.contains("\\Seen") {
             normalized.insert("$seen".to_string());
         }
@@ -631,8 +727,62 @@ fn normalized_flags(
         if flags.contains("\\forwarded") || flags.contains("\\Forwarded") {
             normalized.insert("$forwarded".to_string());
         }
+        if flags.contains("\\draft") || flags.contains("\\Draft") {
+            normalized.insert("$draft".to_string());
+        }
+        if flags.contains("$Important") {
+            normalized.insert("$important".to_string());
+        }
     }
     normalized
+}
+
+fn is_forwarded_subject(subject: &str) -> bool {
+    let trimmed = subject.trim_start();
+    trimmed
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("fwd:"))
+        || trimmed
+            .get(..3)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("fw:"))
+}
+
+/// The Gmail MIME type marking an emoji-reaction part (not a real message).
+const GMAIL_REACTION_MIME_TYPE: &str = "text/vnd.google.email-reaction+json";
+
+/// Locate the Gmail reaction MIME part in the verbatim RFC822, decode its body
+/// per its `Content-Transfer-Encoding`, and parse the `{"emoji": ...}` JSON.
+///
+/// This mirrors the legacy structured parser (`gmail/src/parse.rs`
+/// `extract_reaction_emoji`), which walked the Gmail payload MIME tree and
+/// base64url-decoded the part body, rather than raw-substring-scanning the
+/// assembled bytes. The substring scan had two regressions a structured decode
+/// avoids: (a) a reaction part whose body is base64 / quoted-printable encoded
+/// never matched the literal `{"emoji"` and was silently dropped, and (b) a
+/// normal message that merely MENTIONED the MIME-type string plus an emoji
+/// JSON blob in its body was mis-flagged as a reaction. `mail_parser` returns
+/// each part's `contents()` already decoded per its CTE, so a base64 / QP body
+/// is recovered, and the match keys on the part's actual `Content-Type`, so a
+/// body that only references the string is not a false positive.
+fn extract_gmail_reaction_emoji(raw: &[u8]) -> Option<String> {
+    let message = MessageParser::default().parse(raw)?;
+    message.parts.iter().find_map(|part| {
+        let ct = part.content_type()?;
+        let is_reaction_part = format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or_default())
+            .eq_ignore_ascii_case(GMAIL_REACTION_MIME_TYPE);
+        if !is_reaction_part {
+            return None;
+        }
+        // `contents()` is the part body decoded per its Content-Transfer-Encoding.
+        serde_json::from_slice::<serde_json::Value>(part.contents())
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("emoji")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+    })
 }
 
 /// Stream the message's verbatim RFC822 octets via the engine's read-only
@@ -774,6 +924,8 @@ pub struct SyntheticMessage {
     pub degraded_body: bool,
     #[serde(default)]
     pub forced_outcome: Option<SyntheticOutcome>,
+    #[serde(default)]
+    pub reaction_emoji: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -866,7 +1018,7 @@ fn synthetic_to_row(
         in_reply_to_header: None,
         body_cached: body_text.is_some(),
         mdn_requested: false,
-        is_reaction: false,
+        is_reaction: synthetic.reaction_emoji.is_some(),
         imap_uid: None,
         imap_folder: None,
         has_meeting_invite: false,
@@ -931,6 +1083,7 @@ fn synthetic_to_row(
             inline_images,
             search_document,
             is_important,
+            reaction_emoji: synthetic.reaction_emoji,
         }),
         outcome,
     )
@@ -1087,6 +1240,7 @@ mod tests {
             raw_body: b"body".to_vec(),
             degraded_body: false,
             forced_outcome: Some(forced),
+            reaction_emoji: None,
         };
         let encoded = super::encode_synthetic_message(&synthetic).unwrap();
         Change::ObjectChange(ObjectChange {
@@ -1218,5 +1372,78 @@ mod tests {
         );
         assert!(!row.keywords.iter().any(|keyword| keyword.starts_with('\\')));
         assert!(row.keywords.contains(&"client-keyword".to_string()));
+    }
+
+    #[test]
+    fn hydrate_change_gmail_labels_and_importance_mapping() {
+        let flags = HashSet::from([
+            "\\Flagged".to_string(),
+            "$Important".to_string(),
+            "$gmail-label:Label_1:Project".to_string(),
+        ]);
+        let message = Message {
+            id: ObjectId("gmail-msg-1".to_string()),
+            thread_id: Some(ThreadId("gmail-thread-1".to_string())),
+            from: vec![Address::bare("sender@example.com")],
+            to: vec![Address::bare("me@example.com")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: Some("Gmail mapping".to_string()),
+            date: None,
+            containers: vec![
+                ContainerId("INBOX".to_string()),
+                ContainerId("IMPORTANT".to_string()),
+                ContainerId("STARRED".to_string()),
+                ContainerId("UNREAD".to_string()),
+                ContainerId("Label_1".to_string()),
+            ],
+            flags,
+            importance: Importance::Normal,
+            body_text: Some("body".to_string()),
+            body_html: None,
+            attachments: Vec::new(),
+            size_bytes: None,
+            in_reply_to: None,
+            references: Vec::new(),
+        };
+        let folder_map = HashMap::from([
+            (
+                "INBOX".to_string(),
+                FolderKind::System(SystemFolderId::Inbox),
+            ),
+            (
+                "IMPORTANT".to_string(),
+                FolderKind::System(SystemFolderId::Important),
+            ),
+        ]);
+
+        let row = build_consumer_row(
+            &bifrost_types::AccountId("acc".to_string()),
+            BifrostProviderKind::Gmail,
+            &folder_map,
+            &message,
+            None,
+            HashMap::new(),
+            HydrationOutcome::Succeeded,
+        );
+
+        assert!(
+            row.folders
+                .contains(&FolderKind::System(SystemFolderId::Inbox))
+        );
+        assert!(
+            row.folders
+                .contains(&FolderKind::System(SystemFolderId::Important))
+        );
+        assert_eq!(row.labels, vec![LabelKind::gmail_user("Label_1").unwrap()]);
+        assert!(!row.message.is_read);
+        assert!(row.message.is_starred);
+        assert!(row.is_important);
+        assert!(
+            !row.labels
+                .iter()
+                .any(|label| label.storage_id() == "STARRED" || label.storage_id() == "UNREAD")
+        );
     }
 }

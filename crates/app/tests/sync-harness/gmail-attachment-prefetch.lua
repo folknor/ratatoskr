@@ -48,9 +48,27 @@ local function wait_for_content_hash(client, account_id, timeout_s)
     return nil
 end
 
+local function mint_token(token_url)
+    local response = harness.http_json({
+        method = "POST",
+        url = token_url,
+        body = {
+            grant_type = "authorization_code",
+            account_id = "account-1",
+            code = "harness-gmail-prefetch-account-1",
+            client_id = "ratatoskr-gmail-harness",
+            redirect_uri = "http://127.0.0.1/oauth-callback",
+        },
+    })
+    harness.assert(response.access_token ~= nil, "/oauth/token did not return access_token")
+    return response.access_token
+end
+
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
+local token_url = harness.join_url(admin_endpoint, "oauth/token")
 harness.clear_mock_requests(admin_endpoint)
+local access_token = mint_token(token_url)
 
 local dir = harness.data_dir("sync_gmail_attachment_prefetch")
 local client, err = harness.spawn(dir)
@@ -67,6 +85,12 @@ local account, account_err = client:request("TestSeedAccount", {
     display_name = "Sync Gmail Prefetch",
     account_name = "Sync Gmail Prefetch",
     provider = "gmail_api",
+    access_token = access_token,
+    refresh_token = "gmail-prefetch-refresh-unused",
+    token_expires_at = 2000000000,
+    oauth_provider = "google",
+    oauth_client_id = "ratatoskr-gmail-harness",
+    oauth_token_url = token_url,
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 

@@ -91,16 +91,7 @@ pub async fn create_sync_provider(
     }
 
     match MailProviderKind::parse(&raw_provider)? {
-        MailProviderKind::Gmail => {
-            let client = gmail::client::GmailClient::from_account(
-                db,
-                write_db.writer_pool(),
-                account_id,
-                encryption_key,
-            )
-            .await?;
-            Ok(Box::new(gmail::ops::GmailOps::new(client)))
-        }
+        MailProviderKind::Gmail => Err("Gmail sync is handled by the bifrost runner".to_string()),
         MailProviderKind::Graph => Err("Graph sync is handled by the bifrost runner".to_string()),
         MailProviderKind::Jmap => Err("JMAP sync is handled by the bifrost runner".to_string()),
         MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(

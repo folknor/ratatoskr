@@ -16,6 +16,10 @@ use types::MailProviderKind;
 
 use super::token_source::DbWriteBackTokenSource;
 
+fn gmail_api_base_from_test_endpoint(endpoint: &str) -> Option<String> {
+    common::test_endpoint::api_base_from_test_endpoint(endpoint, "gmail/v1/users/me")
+}
+
 #[derive(Debug, Clone)]
 pub enum BifrostBuildError {
     UnknownProvider(String),
@@ -102,11 +106,21 @@ pub async fn build_account_factory(
         .map_err(|_| BifrostBuildError::UnknownProvider(row.provider.clone()))?;
     let decrypted = row.decrypt(encryption_key)?;
     match provider {
-        MailProviderKind::Gmail => Ok(Arc::new(
-            bifrost_google::account::GoogleAccountFactory::from_token_source(
-                decrypted.oauth_token_source(provider, writer)?,
-            ),
-        )),
+        MailProviderKind::Gmail => {
+            let source = decrypted.oauth_token_source(provider, writer)?;
+            let factory = match std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
+                .ok()
+                .and_then(|endpoint| gmail_api_base_from_test_endpoint(&endpoint))
+            {
+                Some(api_base) => {
+                    bifrost_google::account::GoogleAccountFactory::from_token_source_with_api_base(
+                        source, api_base,
+                    )
+                }
+                None => bifrost_google::account::GoogleAccountFactory::from_token_source(source),
+            };
+            Ok(Arc::new(factory))
+        }
         MailProviderKind::Graph => {
             let graph_base = std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT")
                 .ok()

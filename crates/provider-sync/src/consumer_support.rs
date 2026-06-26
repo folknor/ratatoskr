@@ -156,3 +156,31 @@ pub async fn run_graph_auxiliary_sync(
     )
     .await;
 }
+
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_gmail_label_folder_map(
+    client: &crate::gmail::client::GmailClient,
+    account_id: &str,
+    read_db: &db::db::ReadDbState,
+    write_db: &service_state::WriteDbState,
+) -> Result<HashMap<String, FolderKind>, String> {
+    crate::gmail::aux_sync::sync_gmail_label_folder_map(client, account_id, read_db, write_db).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_gmail_auxiliary_sync(
+    client: &crate::gmail::client::GmailClient,
+    account_id: &str,
+    read_db: &db::db::ReadDbState,
+    write_db: &service_state::WriteDbState,
+    initial_sync_completed_before_run: bool,
+) {
+    crate::gmail::aux_sync::run_gmail_auxiliary_sync(
+        client,
+        account_id,
+        read_db,
+        write_db,
+        initial_sync_completed_before_run,
+    )
+    .await;
+}

@@ -22,7 +22,11 @@ local function mint_token(token_url, account_id, label)
         response.access_token ~= nil,
         label .. " /oauth/token did not return access_token"
     )
-    return response.access_token
+    harness.assert(
+        response.refresh_token ~= nil,
+        label .. " /oauth/token did not return refresh_token"
+    )
+    return response
 end
 
 local function message_by_subject(messages, subject)
@@ -50,7 +54,14 @@ harness.clear_mock_requests(admin_endpoint)
 
 local primary_token = mint_token(token_url, "account-primary", "primary")
 local secondary_token = mint_token(token_url, "account-secondary", "secondary")
-harness.assert(primary_token ~= secondary_token, "token store returned duplicate strings")
+harness.assert(
+    primary_token.access_token ~= secondary_token.access_token,
+    "token store returned duplicate access token strings"
+)
+harness.assert(
+    primary_token.refresh_token ~= secondary_token.refresh_token,
+    "token store returned duplicate refresh token strings"
+)
 
 local dir = harness.data_dir("sync_gmail_oauth_multi_account")
 local client, err = harness.spawn(dir)
@@ -67,8 +78,8 @@ local primary, primary_err = client:request("TestSeedAccount", {
     display_name = "Gmail OAuth Primary",
     account_name = "Gmail OAuth Primary",
     provider = "gmail_api",
-    access_token = primary_token,
-    refresh_token = "primary-refresh-unused",
+    access_token = primary_token.access_token,
+    refresh_token = primary_token.refresh_token,
     token_expires_at = future_expiry,
     oauth_provider = "google",
     oauth_client_id = "ratatoskr-gmail-oauth-harness",
@@ -81,8 +92,8 @@ local secondary, secondary_err = client:request("TestSeedAccount", {
     display_name = "Gmail OAuth Secondary",
     account_name = "Gmail OAuth Secondary",
     provider = "gmail_api",
-    access_token = secondary_token,
-    refresh_token = "secondary-refresh-unused",
+    access_token = secondary_token.access_token,
+    refresh_token = secondary_token.refresh_token,
     token_expires_at = future_expiry,
     oauth_provider = "google",
     oauth_client_id = "ratatoskr-gmail-oauth-harness",
@@ -167,18 +178,18 @@ end
 assert_labels_scoped(primary_state, primary.account_id, "primary")
 assert_labels_scoped(secondary_state, secondary.account_id, "secondary")
 
--- Mock-request log shows the same /gmail/v1/users/me/threads endpoint
+-- Mock-request log shows the same /gmail/v1/users/me/messages endpoint
 -- was hit at least once per account - the bearer header is the only
 -- thing distinguishing them.
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
-local thread_list_requests = harness.request_count_prefix(
+local message_list_requests = harness.request_count(
     requests,
     "gmail",
-    "GET /gmail/v1/users/me/threads"
+    "GET /gmail/v1/users/me/messages"
 )
 harness.assert(
-    thread_list_requests >= 2,
-    "expected at least one Gmail thread-list call per account"
+    message_list_requests >= 2,
+    "expected at least one Gmail message-list call per account"
 )
 local label_list_requests = harness.request_count(
     requests,
@@ -196,7 +207,7 @@ harness.write_summary({
     secondary_message_count = secondary_state.message_count,
     primary_label_count = #primary_state.labels,
     secondary_label_count = #secondary_state.labels,
-    gmail_thread_list_requests = thread_list_requests,
+    gmail_message_list_requests = message_list_requests,
     gmail_label_list_requests = label_list_requests,
 })
 
