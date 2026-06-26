@@ -97,19 +97,19 @@ pub use request::{
     TestBifrostChangeKind, TestBifrostDurableCursor, TestBifrostFactoryOpenAck,
     TestBifrostFactoryOpenParams, TestBifrostHook, TestBifrostInjectBatchAck,
     TestBifrostInjectBatchParams, TestBifrostItemOutcome, TestBifrostProbeAck,
-    TestBifrostProbeParams, TestBifrostProviderKind, TestBifrostSyntheticMessage,
-    TestCounterReadAck, TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow,
-    TestDbAttachmentRow, TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow,
-    TestDbContactRow, TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow,
-    TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
-    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
-    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
-    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
-    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
-    TestThreadReadParams,
+    TestBifrostProbeParams, TestBifrostProviderKind, TestBifrostRecovery,
+    TestBifrostSyntheticMessage, TestCounterReadAck, TestCrashAfterNWritesAck,
+    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow,
+    TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow, TestDbFolderRow, TestDbLabelRow,
+    TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck,
+    TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
+    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
+    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
+    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadAck, TestThreadReadParams,
 };
 pub use response::{HealthPingResponse, ShutdownResponse};
 pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
@@ -119,7 +119,8 @@ pub use signature::{
 };
 pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
 pub use sync::{
-    IndexCommitted, SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
+    AccountPausedNotification, IndexCommitted, SyncCancelAccountParams, SyncCancelAck,
+    SyncCompleted, SyncPauseReason, SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncRunId,
     SyncStartAccountParams, SyncStartAck,
 };
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};

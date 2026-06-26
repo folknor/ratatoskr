@@ -433,6 +433,23 @@ impl SyncRuntime {
         Ok(())
     }
 
+    /// Clear a resident paused-account latch and ask bifrost to resume the
+    /// account boundary. Returns `Ok(false)` when no resident slot is
+    /// attached; the next kick will attach into a fresh run boundary.
+    pub async fn resume_account(&self, account_id: &str) -> Result<bool, String> {
+        self.inner.resident_engine.resume_account(account_id).await
+    }
+
+    /// Read the resident slot's bounded re-drive telemetry as
+    /// `(cumulative_total, current_attempt)`, or `None` when no slot is
+    /// attached. Test-probe pass-through for the § 4.3 bounded-re-drive gate.
+    pub async fn resident_redrive_telemetry(&self, account_id: &str) -> Option<(u64, u32)> {
+        self.inner
+            .resident_engine
+            .redrive_telemetry(account_id)
+            .await
+    }
+
     /// Drain step: cancel every runner + await all supervisor
     /// `JoinHandle`s. Phase 3 task 13 calls this from
     /// `lifecycle::run_drain` before the search-writer flush and the

@@ -752,6 +752,7 @@ impl BootingApp {
                     | service_api::Notification::ActionCompleted(_)
                     | service_api::Notification::SyncProgress(_)
                     | service_api::Notification::SyncCompleted(_)
+                    | service_api::Notification::AccountPaused(_)
                     | service_api::Notification::IndexCommitted(_)
                     | service_api::Notification::PushEvent(_)
                     | service_api::Notification::CalendarRunCompleted(_)

@@ -15,7 +15,10 @@
 
 use crate::boot::BootSharedState;
 use serde_json::Value;
-use service_api::{ServiceError, SyncCancelAccountParams, SyncStartAccountParams};
+use service_api::{
+    ServiceError, SyncCancelAccountParams, SyncResumeAccountParams, SyncResumeAck,
+    SyncStartAccountParams,
+};
 use std::sync::Arc;
 
 pub(crate) async fn handle_start_account(
@@ -65,6 +68,29 @@ pub(crate) async fn handle_cancel_account(
         let cal_ack = calendar_runtime.cancel_account(&params.account_id).await;
         ack.calendar_run_id = cal_ack.run_id;
     }
+
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_resume_account(
+    boot_state: &Arc<BootSharedState>,
+    params: SyncResumeAccountParams,
+) -> Result<Value, ServiceError> {
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "sync.resume_account received before SyncRuntime was installed; \
+             UI must wait for boot.ready"
+                .into(),
+        )
+    })?;
+    let resumed = runtime
+        .resume_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    let ack = SyncResumeAck {
+        account_id: params.account_id,
+        resumed,
+    };
 
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }

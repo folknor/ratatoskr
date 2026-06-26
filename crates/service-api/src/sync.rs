@@ -93,6 +93,21 @@ pub struct SyncCancelAccountParams {
     pub account_id: String,
 }
 
+/// `sync.resume_account` request body. Clears an intervention-required
+/// pause latch for the account and asks the resident bifrost engine to
+/// resume the account boundary if it is currently attached.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncResumeAccountParams {
+    pub account_id: String,
+}
+
+/// Synchronous response to `sync.resume_account`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncResumeAck {
+    pub account_id: String,
+    pub resumed: bool,
+}
+
 /// Synchronous response to `sync.cancel_account`. Always returns
 /// promptly; the actual cancellation propagates through the runner's
 /// `CancellationToken` and may take up to 5 seconds on a healthy
@@ -140,6 +155,31 @@ pub enum SyncResult {
     Completed,
     Cancelled,
     Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPauseReason {
+    NeedsReauth,
+    NeedsAttention,
+}
+
+/// Emitted when the resident bifrost engine observes an account pause that
+/// requires user or operator intervention before progress can resume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountPausedNotification {
+    pub account_id: String,
+    pub reason: SyncPauseReason,
+    pub service_generation: u32,
+}
+
+impl WithGeneration for AccountPausedNotification {
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
 }
 
 /// Emitted once per run after the runner has finished (or panicked,

@@ -1,6 +1,14 @@
 -- description: Bifrost consumer lag-recovery API smoke
 -- expected: pass
 -- ceiling: 60s
+--
+-- This gate exercises the INJECT path (test.bifrost_attach + inject + manual
+-- re-attach): it proves no-message-loss / last-safe-cursor across a bounded-
+-- broadcast lag. It does NOT drive the production resident_consumer_loop, so
+-- it cannot observe that loop's exponential re-drive backoff. The § 4.3
+-- bounded re-drive ("does not hot-loop", clean caught-up edge resets the
+-- backoff) is gated against the real resident loop, on the re-drive telemetry,
+-- by jmap-production-lag-backoff.lua.
 
 local dir = harness.data_dir("bifrost_consumer_lag_recovery")
 local client, err = harness.spawn(dir)

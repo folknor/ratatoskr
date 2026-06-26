@@ -1,3 +1,30 @@
+//! The bifrost change-stream consumer: drives a per-account
+//! `MultiplexerEvent` broadcast into the local stores, synthesizing the
+//! caught-up edge and bounding its steady-state accumulators.
+//!
+//! ## Accumulator bound vs. pause (B3c § 4.4)
+//!
+//! Under sustained push with no quiescence window the drive never reaches a
+//! clean idle edge, so the move-vs-purge (`PendingDeletions`), IMAP-threading,
+//! and deferred-ack accumulators would grow unboundedly. `resident_flush_due`
+//! plus the `RESIDENT_FLUSH_INTERVAL` / `RESIDENT_DEFERRED_ACK_CAP` /
+//! `RESIDENT_PENDING_DELETION_CAP` caps force a mid-drive flush so memory stays
+//! bounded regardless of cadence (gated by
+//! `bifrost-consumer-sustained-push-bound.lua`). This is a genuine
+//! steady-state memory invariant, NOT a B3b stopgap, and the caps are
+//! unchanged by B3c.
+//!
+//! Its interaction with an intervention-required `Pause` (§ 4.1,
+//! `RetryBudgetExhausted` / `OperatorOverrideRequired`) is the reconciliation
+//! B3c folds in: when the engine parks the account it flips the per-account
+//! boundary so every worker stops, so NO new `Batch` events reach this
+//! consumer. The accumulators therefore stop growing for the duration of the
+//! pause; the in-flight contents are drained by the next forced flush (the cap
+//! timer keeps ticking) or by the drive's clean exit, and nothing new
+//! accrues until a `Resume` flips the boundary back to `Run`. The caps remain
+//! the backstop purely for the NO-pause sustained-push case the gate
+//! exercises - a pause is self-limiting, an unbounded healthy push is not.
+
 pub mod hydrate;
 pub mod imap_threading;
 pub mod post_persist;
@@ -19,10 +46,13 @@ use bifrost_sync::CheckpointStore;
 use bifrost_sync::backfill::BackfillState;
 use bifrost_sync::{Error, SyncEngine};
 use bifrost_types::{
-    AccountId, BackfillCheckpoint, BackfillProgress, Checkpoint, CursorScope, ObjectType,
-    Partition, SyncEvent,
+    AccountErrorBuilder, AccountErrorKind, AccountId, AttemptCause, AuthCause, AuthErrorKind,
+    BackfillCheckpoint, BackfillProgress, Cause, Checkpoint, CursorScope, DiagnosticText,
+    ObjectType, Partition, Protocol, ProtocolErrorKind, ServerCause, ServerErrorKind, SyncEvent,
+    TransmissionState, WireCause,
 };
 use common::types::FolderKind;
+use service_api::OperationResult;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
@@ -32,6 +62,7 @@ use self::hydrate::HydrateBatch;
 use self::imap_threading::ImapThreadAccumulator;
 use super::SqliteCheckpointStore;
 use super::checkpoint_store::BACKFILL_COMPLETION_PARTITION;
+use super::error_map;
 
 const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 const RESIDENT_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
@@ -79,6 +110,19 @@ pub enum ConsumerHook {
     /// a real overflow. The resident loop then re-subscribes and re-pushes a
     /// full reconcile, matching the B3b stopgap for real `RecvError::Lagged`.
     ForceLag,
+    /// Force the drive loop to report a terminal failure on the next event,
+    /// simulating a `SyncEvent::Terminated` broadcast without relying on
+    /// provider or mock-server timing.
+    ForceTerminated {
+        recovery: ForcedRecoveryClass,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForcedRecoveryClass {
+    AuthLost,
+    Retry,
+    UnknownPermanent,
 }
 
 #[derive(Default)]
@@ -115,6 +159,13 @@ pub struct ConsumerDriveReport {
     pub scopes_completed: u32,
     pub batches_acked: u32,
     pub lagged: bool,
+    pub terminal: Option<TerminalFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalFailure {
+    pub result: OperationResult,
+    pub message: String,
 }
 
 pub struct ChangeStreamConsumer {
@@ -313,6 +364,15 @@ impl ChangeStreamConsumer {
                         self.flush_drive_end(&pending, &mut report, false).await?;
                         return Ok(report);
                     }
+                    if let Some(ConsumerHook::ForceTerminated { recovery }) = hook {
+                        log::warn!(
+                            "bifrost resident consumer FORCED terminal failure for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.terminal = Some(forced_terminal_failure(recovery));
+                        self.flush_drive_end(&pending, &mut report, false).await?;
+                        return Ok(report);
+                    }
                     let hook = if let Some(hook @ ConsumerHook::StallConsumer { .. }) = hook {
                         apply_hook_before_batch(hook).await?;
                         None
@@ -445,6 +505,15 @@ impl ChangeStreamConsumer {
                             self.account_id.0
                         );
                         report.lagged = true;
+                        self.engine.detach(&self.account_id).await?;
+                        return Ok(());
+                    }
+                    if let Some(ConsumerHook::ForceTerminated { recovery }) = hook {
+                        log::warn!(
+                            "bifrost consumer FORCED terminal failure for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.terminal = Some(forced_terminal_failure(recovery));
                         self.engine.detach(&self.account_id).await?;
                         return Ok(());
                     }
@@ -589,13 +658,15 @@ impl ChangeStreamConsumer {
                 }
             }
             SyncEvent::Terminated(error) => {
-                // B3a-infra: log and break. Mapping a terminal AccountError
-                // to an OperationResult and surfacing it is B3c.
                 log::warn!(
                     "bifrost consumer stream terminated for account {}: {}",
                     self.account_id.0,
                     error
                 );
+                report.terminal = Some(TerminalFailure {
+                    result: error_map::account_error_to_operation_result(error),
+                    message: error.message_key().to_string(),
+                });
                 return Ok(true);
             }
             SyncEvent::Done(checkpoint) => {
@@ -859,6 +930,42 @@ async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
         // ForceLag is handled inline in `drive_receiver` (it short-circuits to
         // the lag arm before any batch work), so it never reaches here.
         ConsumerHook::ForceLag => Ok(()),
+        ConsumerHook::ForceTerminated { .. } => Ok(()),
+    }
+}
+
+fn forced_terminal_failure(recovery: ForcedRecoveryClass) -> TerminalFailure {
+    let error = forced_account_error(recovery);
+    TerminalFailure {
+        result: error_map::account_error_to_operation_result(&error),
+        message: error.message_key().to_string(),
+    }
+}
+
+fn forced_account_error(recovery: ForcedRecoveryClass) -> bifrost_types::AccountError {
+    match recovery {
+        ForcedRecoveryClass::AuthLost => AccountErrorBuilder::new(
+            AccountErrorKind::Authentication(AuthErrorKind::Revoked),
+            Cause::Auth(AuthCause::Revoked),
+        )
+        .try_build()
+        .expect("valid forced auth-lost account error"),
+        ForcedRecoveryClass::Retry => AccountErrorBuilder::new(
+            AccountErrorKind::Server(ServerErrorKind::Unavailable),
+            Cause::Server(ServerCause::Unavailable { retry_hint: None }),
+        )
+        .push_cause(Cause::Attempt(AttemptCause::new(TransmissionState::Unsent)))
+        .try_build()
+        .expect("valid forced retryable account error"),
+        ForcedRecoveryClass::UnknownPermanent => AccountErrorBuilder::new(
+            AccountErrorKind::Protocol(ProtocolErrorKind::Unknown),
+            Cause::Wire(WireCause::MalformedResponse {
+                protocol: Protocol::Jmap,
+                detail: Some(DiagnosticText::support_only("forced terminal hook")),
+            }),
+        )
+        .try_build()
+        .expect("valid forced permanent account error"),
     }
 }
 

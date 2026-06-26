@@ -668,6 +668,85 @@ B3a regression + durability scripts held green under the longer lifetime, the ne
 steady-state sync-bench amortization baselines, and the resident-teardown /
 no-table-writer service tests - read the B3b landing commit.
 
+B3c (control / pause / recovery - the final B3 sub-item) is done and its TODO
+entry is removed per repo convention; with it B3 (the bifrost-sync consumer) is
+COMPLETE - the next open Track B item is B4 (action pipeline rewire). It closed
+the control loop B3a/B3b left open: a resident slot used to react to any
+structurally-terminal condition by logging and blind-re-driving every 250 ms
+forever, so a token revoked mid-sync livelocked the slot AND hung the
+`kick_account` future (no caught-up edge ever fired), and an engine `Pause` was
+invisible because nothing subscribed to the control broadcast. For what B3c
+delivered - a THIRD per-slot task (`resident_control_loop`,
+`crates/service/src/bifrost/resident.rs`) that subscribes once to
+`engine.account_control_stream(account)` and dispatches
+`AccountControl::Pause(reason)` / `Resume`: an intervention-required reason
+(`RetryBudgetExhausted` / `OperatorOverrideRequired`) latches a per-slot
+`terminal` watch cell and emits the new `Notification::AccountPaused` standing
+banner, the engine-resolved `TenantThrottle` is observed-and-logged (it
+auto-resumes engine-side), and a bounded control-stream `Lagged` fails CLOSED
+(latch a dismissible `NeedsAttention`) rather than silently dropping lifecycle
+state; the consumer's `SyncEvent::Terminated` arm
+(`crates/service/src/bifrost/consumer/mod.rs`) changed from log-and-swallow to
+mapping the `AccountError` through the B1 `account_error_to_operation_result`
+into a `TerminalFailure` carried out on `ConsumerDriveReport.terminal`, which
+the resident loop latches on `slot.terminal` to UNBLOCK `kick_account` with a
+structured `Err` - so a mid-sync terminal now reaches `run_sync`'s existing
+`SyncResult::Failed` + `MarkerStatus::Failed` + `SyncCompleted { Failed }` path
+exactly as a synchronous attach failure does, fixing the kick-hang livelock;
+a MERGE discipline on the two writers of `slot.terminal` (the consumer sets
+`result`/`message`, the control loop sets only `pause`) so a result-bearing
+outcome is never clobbered to pause-only across the unordered `changes_tx` /
+`account_control_tx` channels, with the wire `SyncPauseReason` (`NeedsReauth`
+upgraded from the latched error's `AuthLost` recovery class, else
+`NeedsAttention`) derived in `bifrost/error_map.rs`'s new `pause_reason_to_wire`
+rather than from the bare `PauseReason`; the B3b fixed-250 ms re-subscribe/repush
+stopgap REPLACED by a `RecoveryClass`-driven bounded exponential backoff (jitter,
+capped, reset on a clean caught-up edge) for the `Lagged` / closed-stream /
+drive-error arms - the retry-vs-terminal bool reads the mapped
+`OperationResult`'s `RemoteFailure.retryable` rather than minting a third
+classification, and all `Terminated` outcomes park (record + idle, no
+re-drive); the size/time-cap accumulator flush RETAINED unchanged (it is a
+genuine steady-state memory invariant gated by
+`bifrost-consumer-sustained-push-bound.lua`, not a stopgap) and reconciled into
+the finalized model in the consumer module doc (a pause self-limits because the
+parked boundary stops new batches; the caps remain the backstop for the
+no-pause sustained-push case); a new `service-api` wire surface
+(`SyncPauseReason`, `Notification::AccountPaused(AccountPausedNotification)`
+carrying `service_generation` with arms in `class()` / `method_name()` /
+`service_generation()` / `set_service_generation()`, and the new
+`sync.resume_account` request `SyncResumeAccount` -> `SyncRuntime::resume_account`
+-> `ResidentEngine::resume_account` -> `engine().resume_account` that clears the
+latch and resumes an attached boundary) plus an app-side `AccountPaused` banner
+on the existing sidebar account-row sync-status surface; and the verified
+end-to-end cursor-clear on `SchemaIncompatible` / `RestartScope` (the engine
+owns the clear and calls `SqliteCheckpointStore::delete_change_cursor`; B3c pins
+the durable side). The firewall holds: no bifrost type (`AccountControl`,
+`PauseReason`, `AccountError`, `RecoveryClass`) crosses into `service-api` /
+`core` / `app`; the one UI-bound type is the service-api-local `SyncPauseReason`,
+mapped down inside `service`. The re-auth path needed no new call: a successful
+token writeback already detaches + reattaches, and `SyncEngine::attach` mints a
+fresh `Run` boundary + slot per attach, so the engine `Pause` does not survive
+the cycle; the new `resume_account` is the dedicated banner-clear action for a
+user dismissing a pause WITHOUT a token change. B3c required NO bifrost change -
+every control/recovery surface it consumes (`account_control_stream`,
+`resume_account`, the `AccountControl` + `SyncEvent::Terminated` broadcasts) was
+already public at the frozen `db34ab4` (§ 11) - so the freeze holds and the
+side-quest count stays at seven; its only test additions were in-tree (a
+`ForceTerminated { recovery }` consumer hook + `resident_redrive_*` probe
+telemetry) plus a saehrimnir budget-exhaustion affordance (an installed external
+binary, not commit-pinned here). Gated by `brokkr check` green,
+`brokkr service-suite`, the new `jmap-terminated-mid-sync-fails.lua` and
+`jmap-pause-resume.lua` (the latter driving a real engine `RetryBudgetExhausted`
+pause through `account_control_tx`, not a hook), the extended
+`bifrost-consumer-lag-recovery.lua` / `jmap-production-lag-backoff.lua` bounded
+re-drive gates, the `checkpoint_store_change_roundtrip` cursor-delete unit test (the § 4.5
+fallback covering `delete_change_cursor`; the live engine cursor-clear wire rides
+`jmap-oauth-recovery.lua`), the
+`bifrost_error_map_*` + `account_paused` notification-contract + resident-teardown
+unit tests, and the `bifrost-consumer-sustained-push-bound` / account-delete /
+`sigint-mid-prefetch` drain regression guards held green - read the B3c landing
+commit.
+
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
@@ -686,13 +765,12 @@ no-table-writer service tests - read the B3b landing commit.
   callers today and stay unwired (whether they should auto-fire on new mail is a
   separate product item, explicitly not B3's scope - feature-preserving means the
   consumer reproduces today's behavior, not that it inherits an unwired gap as a
-  feature). What remains in B3 is B3c (B3b is done; see the B3b done-note
-  above). The sub-item:
-  - B3c. Control, pause, recovery. The keep-attached lifecycle for steady-state /
-    push, pause/resume, and `RecoveryClass` dispatch. Needs B3a, B3b.
-  The worked-out design - the per-provider seam survey, durability ordering, and
-  the lag / hydration / completion policies each sub-spec is carved from - was
-  produced during B3 spec review and is consumed by each sub-spec's author.
+  feature). B3 is COMPLETE: B3a-infra, the four per-provider cutovers, B3b
+  (push), and B3c (control / pause / recovery) have all landed - see the
+  done-notes above. The worked-out design - the per-provider seam survey,
+  durability ordering, and the lag / hydration / completion policies each
+  sub-spec was carved from - was produced during B3 spec review and consumed by
+  each sub-spec's author.
 - B4. Action pipeline rewire. Dispatch onto `Account` conveniences plus bulk
   mutations over `MutationTarget`; thread-to-message expansion; map
   `AccountError` to `OperationResult`; rebuild the pending-ops / retry journal
@@ -864,7 +942,14 @@ surfaced a JMAP-WebSocket `StateChange` parser bug in `client_ws.rs` (a double
 mock work was a separate `saehrimnir` push side-quest (JMAP WebSocket push frames,
 a Gmail Pub/Sub source plus `users.watch` / `users.stop`, and Graph
 `POST /subscriptions` + a loopback notification POST), again an installed external
-binary, not commit-pinned here. Each Track B spec records, in its ground
+binary, not commit-pinned here. B3c required NO bifrost change - every
+control/recovery surface it consumes (`account_control_stream`, `resume_account`,
+the `AccountControl` + `SyncEvent::Terminated` broadcasts) was already public at
+`db34ab4` - so the freeze stays at `db34ab4` and the side-quest count holds at
+seven; B3c's only test additions were in-tree (a `ForceTerminated` consumer hook
++ `resident_redrive_*` probe telemetry) plus a `saehrimnir` budget-exhaustion
+affordance for the real-engine pause gate, again an installed external binary,
+not commit-pinned here. Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the

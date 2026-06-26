@@ -32,7 +32,7 @@ use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
 use crate::smart_folder::SmartFolderCreateParams;
-use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
+use crate::sync::{SyncCancelAccountParams, SyncResumeAccountParams, SyncStartAccountParams};
 use crate::thread_ui_state::ThreadUiStateSetParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -385,6 +385,20 @@ pub enum TestBifrostHook {
     /// Force the consumer drive to report sustained lag, exercising the
     /// resident re-subscribe plus full-reconcile re-push stopgap.
     ForceLag,
+    /// Force the consumer drive to report a structured terminal failure,
+    /// exercising the resident terminal-outcome latch without relying on
+    /// mock-provider timing.
+    ForceTerminated {
+        recovery: TestBifrostRecovery,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestBifrostRecovery {
+    AuthLost,
+    Retry,
+    UnknownPermanent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -434,6 +448,19 @@ pub struct TestBifrostProbeAck {
     pub resident_max_pending_deletions: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resident_batches_acked: Option<u32>,
+    /// Cumulative count of bounded-backoff re-drives the PRODUCTION resident
+    /// loop (`resident_consumer_loop`) performed for this account, or `None`
+    /// when no resident slot is attached. The § 4.3 bounded-re-drive gate
+    /// asserts this is `>= 1` after a forced lag yet stays small (no
+    /// hot-loop). Distinct from `resident_forced_flushes`, which counts the
+    /// consumer's accumulator flushes on the test-inject path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_redrive_total: Option<u64>,
+    /// The resident loop's current consecutive re-drive attempt index (drives
+    /// the exponential backoff). Resets to 0 on a clean caught-up edge, so the
+    /// gate can assert the recovery reset the backoff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_redrive_attempt: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -865,6 +892,12 @@ pub enum RequestParams {
     /// token; cancellation propagation is asynchronous.
     SyncCancelAccount {
         params: SyncCancelAccountParams,
+    },
+    /// Clear a paused-account latch and ask the resident sync engine to
+    /// resume the attached account boundary. No-op if the account is not
+    /// currently attached.
+    SyncResumeAccount {
+        params: SyncResumeAccountParams,
     },
     /// Phase 5: explicit-request calendar sync (manual "Sync now",
     /// post-account-add, RSVP-then-resync). The handler returns within
@@ -1330,6 +1363,7 @@ impl RequestParams {
             Self::ActionSend { .. } => "action.send",
             Self::SyncStartAccount { .. } => "sync.start_account",
             Self::SyncCancelAccount { .. } => "sync.cancel_account",
+            Self::SyncResumeAccount { .. } => "sync.resume_account",
             Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
             Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
@@ -1435,6 +1469,7 @@ impl RequestParams {
             // Handler-only budget: flip the token + return the active
             // `run_id`. Cancellation propagation is async.
             Self::SyncCancelAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::SyncResumeAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Handler-only budgets for the calendar request pair.
             // Same shape as the sync pair above.
             Self::CalendarStartAccountSync { .. } => {
@@ -1578,6 +1613,7 @@ impl RequestParams {
             | Self::ActionSend { .. }
             | Self::OauthExchangeCode { .. }
             | Self::SyncCancelAccount { .. }
+            | Self::SyncResumeAccount { .. }
             | Self::CalendarCancelAccountSync { .. }
             | Self::SignatureCreate { .. }
             | Self::SmartFolderCreate { .. }
@@ -1686,6 +1722,7 @@ impl RequestParams {
             Self::ActionSend { request } => serde_json::json!({ "request": request }),
             Self::SyncStartAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncCancelAccount { params } => serde_json::json!({ "params": params }),
+            Self::SyncResumeAccount { params } => serde_json::json!({ "params": params }),
             Self::CalendarStartAccountSync { params } => serde_json::json!({ "params": params }),
             Self::CalendarCancelAccountSync { params } => {
                 serde_json::json!({ "params": params })
@@ -1847,6 +1884,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("sync.cancel_account params: {e}"))?;
                 Ok(Self::SyncCancelAccount { params: p.params })
+            }
+            "sync.resume_account" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SyncResumeAccountParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("sync.resume_account params: {e}"))?;
+                Ok(Self::SyncResumeAccount { params: p.params })
             }
             "calendar.start_account_sync" => {
                 #[derive(Deserialize)]
@@ -2714,6 +2760,44 @@ mod tests {
     fn sync_cancel_account_round_trips_from_method_params() {
         let original = RequestParams::SyncCancelAccount {
             params: SyncCancelAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn sync_resume_account_method_name_is_dotted() {
+        let p = RequestParams::SyncResumeAccount {
+            params: SyncResumeAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(p.method_name(), "sync.resume_account");
+    }
+
+    #[test]
+    fn sync_resume_account_timeout_is_five_seconds() {
+        let p = RequestParams::SyncResumeAccount {
+            params: SyncResumeAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn sync_resume_account_round_trips_from_method_params() {
+        let original = RequestParams::SyncResumeAccount {
+            params: SyncResumeAccountParams {
                 account_id: "acc-1".into(),
             },
         };

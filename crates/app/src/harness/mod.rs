@@ -2185,6 +2185,17 @@ fn push_notification(state: &mut State, notification: &Notification) -> dellingr
                 completed.service_generation as f64,
             )?;
         }
+        Notification::AccountPaused(paused) => {
+            set_field_string(state, idx, "type", "AccountPaused")?;
+            set_field_string(state, idx, "account_id", &paused.account_id)?;
+            set_field_string(state, idx, "reason", sync_pause_reason_name(&paused.reason))?;
+            set_field_number(
+                state,
+                idx,
+                "service_generation",
+                paused.service_generation as f64,
+            )?;
+        }
         Notification::IndexRebuildProgress(progress) => {
             set_field_string(state, idx, "type", "IndexRebuildProgress")?;
             set_field_string(state, idx, "rebuild_id", &progress.rebuild_id)?;
@@ -2293,6 +2304,13 @@ fn sync_result_name(result: &service_api::SyncResult) -> &'static str {
         service_api::SyncResult::Completed => "completed",
         service_api::SyncResult::Cancelled => "cancelled",
         service_api::SyncResult::Failed(_) => "failed",
+    }
+}
+
+fn sync_pause_reason_name(reason: &service_api::SyncPauseReason) -> &'static str {
+    match reason {
+        service_api::SyncPauseReason::NeedsReauth => "needs_reauth",
+        service_api::SyncPauseReason::NeedsAttention => "needs_attention",
     }
 }
 
@@ -2770,6 +2788,16 @@ fn request_params_from_lua(
                 params: TestStartSyncParams { account_id },
             })
         }
+        "SyncResumeAccount" | "sync.resume_account" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("SyncResumeAccount requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("SyncResumeAccount requires params.account_id"))?;
+            Ok(RequestParams::SyncResumeAccount {
+                params: service_api::SyncResumeAccountParams { account_id },
+            })
+        }
         "TestBifrostAttach" | "test.bifrost_attach" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("TestBifrostAttach requires params table"));
@@ -2870,6 +2898,28 @@ fn request_params_from_lua(
                     TestBifrostHook::CrashBeforeDriveEndThreading
                 }
                 "force_lag" | "ForceLag" => TestBifrostHook::ForceLag,
+                "force_terminated" | "ForceTerminated" => {
+                    let recovery = match get_string_field(state, hook_idx, "recovery")?
+                        .ok_or_else(|| {
+                            lua_error_message(
+                                "TestBifrostArmHook ForceTerminated requires recovery",
+                            )
+                        })?
+                        .as_str()
+                    {
+                        "auth_lost" | "AuthLost" => service_api::TestBifrostRecovery::AuthLost,
+                        "retry" | "Retry" => service_api::TestBifrostRecovery::Retry,
+                        "unknown_permanent" | "UnknownPermanent" => {
+                            service_api::TestBifrostRecovery::UnknownPermanent
+                        }
+                        other => {
+                            return Err(lua_error_message(format!(
+                                "unknown TestBifrostArmHook ForceTerminated recovery {other:?}"
+                            )));
+                        }
+                    };
+                    TestBifrostHook::ForceTerminated { recovery }
+                }
                 other => {
                     return Err(lua_error_message(format!(
                         "unknown TestBifrostArmHook kind {other:?}"

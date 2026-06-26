@@ -1,6 +1,6 @@
 use bifrost_types::{AccountError, RecoveryClass};
 use service_api::actions::{ActionError, RemoteFailureKind};
-use service_api::{OperationResult, RemoteFailure};
+use service_api::{OperationResult, RemoteFailure, SyncPauseReason};
 
 pub fn account_error_to_action_error(err: &AccountError) -> ActionError {
     let kind = recovery_to_failure_kind(err.recovery());
@@ -22,6 +22,31 @@ pub fn account_error_to_operation_result(err: &AccountError) -> OperationResult 
             ),
         },
     }
+}
+
+/// Map a latched terminal `OperationResult` to the wire pause reason
+/// surfaced to the UI (B3c § 4.1, review finding F3: derive the banner from
+/// the terminal error, not from the bare `PauseReason`, which carries no
+/// recovery class). Lives here, beside the `AccountError -> OperationResult`
+/// map, so the auth-loss heuristic sits next to the namespace it depends on.
+///
+/// The firewall forbids `RecoveryClass` from crossing into `service-api`, so
+/// the auth-loss signal is recovered from the stable `message_key` namespace
+/// instead: the only non-retryable `auth.*` keys bifrost derives are the
+/// three `RecoveryClass::AuthLost` kinds (`auth.expired`, `auth.revoked`,
+/// `auth.reauthorization-required`). `auth.refresh-transient` is also
+/// `auth.`-prefixed but is retryable, so the `!retryable` guard excludes it.
+/// Everything else maps to the generic attention-required banner. A bifrost
+/// bump that renames those keys is caught by the unit test below.
+#[must_use]
+pub fn pause_reason_to_wire(result: &OperationResult) -> SyncPauseReason {
+    if let OperationResult::RemoteFailure { failure } = result
+        && !failure.retryable
+        && failure.provider_message.starts_with("auth.")
+    {
+        return SyncPauseReason::NeedsReauth;
+    }
+    SyncPauseReason::NeedsAttention
 }
 
 fn recovery_to_failure_kind(recovery: &RecoveryClass) -> RemoteFailureKind {
@@ -135,6 +160,55 @@ mod tests {
 
         assert_eq!(failure.provider_message, err.message_key());
         assert!(!failure.provider_message.contains("secret"));
+    }
+
+    #[test]
+    fn pause_reason_to_wire_maps_auth_loss_to_reauth() {
+        // The three RecoveryClass::AuthLost kinds carry non-retryable
+        // `auth.*` message keys and must surface NeedsReauth.
+        for err in [
+            auth_lost_error(),
+            AccountErrorBuilder::new(
+                AccountErrorKind::Authentication(AuthErrorKind::Expired),
+                Cause::Auth(AuthCause::Expired),
+            )
+            .try_build()
+            .expect("valid auth-expired error"),
+            AccountErrorBuilder::new(
+                AccountErrorKind::Authentication(AuthErrorKind::ReauthorizationRequired),
+                Cause::Auth(AuthCause::ReauthorizationRequired),
+            )
+            .try_build()
+            .expect("valid reauth-required error"),
+        ] {
+            let result = account_error_to_operation_result(&err);
+            assert_eq!(
+                pause_reason_to_wire(&result),
+                SyncPauseReason::NeedsReauth,
+                "message key was {:?}",
+                err.message_key(),
+            );
+        }
+    }
+
+    #[test]
+    fn pause_reason_to_wire_maps_non_auth_and_retryable_to_attention() {
+        // A retryable auth refresh and every non-auth terminal map to the
+        // generic attention banner, never NeedsReauth.
+        for err in [
+            retry_error(),
+            unknown_permanent_error(),
+            no_permission_error(),
+            policy_error(),
+        ] {
+            let result = account_error_to_operation_result(&err);
+            assert_eq!(
+                pause_reason_to_wire(&result),
+                SyncPauseReason::NeedsAttention,
+                "message key was {:?}",
+                err.message_key(),
+            );
+        }
     }
 
     fn retry_error() -> bifrost_types::AccountError {

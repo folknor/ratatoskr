@@ -320,6 +320,21 @@ pub(super) async fn bifrost_arm_hook_handle(
             crate::bifrost::ConsumerHook::CrashBeforeDriveEndThreading
         }
         TestBifrostHook::ForceLag => crate::bifrost::ConsumerHook::ForceLag,
+        TestBifrostHook::ForceTerminated { recovery } => {
+            crate::bifrost::ConsumerHook::ForceTerminated {
+                recovery: match recovery {
+                    service_api::TestBifrostRecovery::AuthLost => {
+                        crate::bifrost::consumer::ForcedRecoveryClass::AuthLost
+                    }
+                    service_api::TestBifrostRecovery::Retry => {
+                        crate::bifrost::consumer::ForcedRecoveryClass::Retry
+                    }
+                    service_api::TestBifrostRecovery::UnknownPermanent => {
+                        crate::bifrost::consumer::ForcedRecoveryClass::UnknownPermanent
+                    }
+                },
+            }
+        }
     };
     bifrost_hooks().arm(params.account_id, hook).await;
     serde_json::to_value(TestBifrostArmHookAck { armed: true })
@@ -841,6 +856,15 @@ pub(super) async fn bifrost_probe_handle(
         })?
         .get(&params.account_id)
         .map(|telemetry| telemetry.snapshot());
+    // Production resident-loop re-drive telemetry (§ 4.3 bounded re-drive).
+    // Read off the live `ResidentEngine` slot through the SyncRuntime so the
+    // production lag gate can assert the backoff re-drove without hot-looping
+    // and that a clean caught-up edge reset the attempt counter. `None` when
+    // no resident slot is attached (e.g. the inject-only attach path).
+    let resident_redrive = match boot_state.sync_runtime() {
+        Some(runtime) => runtime.resident_redrive_telemetry(&params.account_id).await,
+        None => None,
+    };
     serde_json::to_value(TestBifrostProbeAck {
         durable_cursor,
         times_sent_to,
@@ -851,6 +875,8 @@ pub(super) async fn bifrost_probe_handle(
         resident_max_deferred_acks: resident.map(|snapshot| snapshot.max_deferred_acks),
         resident_max_pending_deletions: resident.map(|snapshot| snapshot.max_pending_deletions),
         resident_batches_acked: resident.map(|snapshot| snapshot.batches_acked),
+        resident_redrive_total: resident_redrive.map(|(total, _)| total),
+        resident_redrive_attempt: resident_redrive.map(|(_, attempt)| attempt),
     })
     .map_err(|error| ServiceError::Internal(error.to_string()))
 }

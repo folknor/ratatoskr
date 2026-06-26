@@ -63,6 +63,9 @@ pub(crate) async fn dispatch(
         RequestParams::SyncCancelAccount { params } => {
             sync::handle_cancel_account(&boot_state, params).await
         }
+        RequestParams::SyncResumeAccount { params } => {
+            sync::handle_resume_account(&boot_state, params).await
+        }
         RequestParams::CalendarStartAccountSync { params } => {
             calendar::handle_start_account_sync(&boot_state, params).await
         }

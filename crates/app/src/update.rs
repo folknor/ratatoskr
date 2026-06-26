@@ -304,6 +304,25 @@ impl ReadyApp {
                         );
                         Task::none()
                     }
+                    service_api::Notification::AccountPaused(paused) => {
+                        let email = self.email_for_account(&paused.account_id);
+                        let kind = match paused.reason {
+                            service_api::SyncPauseReason::NeedsReauth => {
+                                ui::status_bar::WarningKind::TokenExpiry
+                            }
+                            service_api::SyncPauseReason::NeedsAttention => {
+                                ui::status_bar::WarningKind::ConnectionFailure {
+                                    message: "Account paused; attention required".to_string(),
+                                }
+                            }
+                        };
+                        self.status_bar.set_warning(ui::status_bar::AccountWarning {
+                            account_id: paused.account_id,
+                            email,
+                            kind,
+                        });
+                        Task::none()
+                    }
                     service_api::Notification::IndexCommitted(_) => {
                         // Phase 3 task 17: stamp the pending reload
                         // deadline; the 200 ms `ReaderReloadTick`

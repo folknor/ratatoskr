@@ -1,21 +1,25 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use bifrost_types::{
-    AccountId, CursorScope, FolderId, HintPayload, InvalidationHint, ObjectType, PushSource,
-    WatchEvent,
+    AccountControl, AccountId, CursorScope, FolderId, HintPayload, InvalidationHint, ObjectType,
+    PauseReason, PushSource, WatchEvent,
 };
 use common::types::{FolderKind, SystemFolderId};
 use db::db::ReadDbState;
-use service_api::{Notification, PushEvent};
+use service_api::{
+    AccountPausedNotification, Notification, OperationResult, PushEvent, SyncPauseReason,
+};
 use service_state::WriteDbState;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::engine_sync::{prepare_gmail_labels, prepare_graph_folders, prepare_jmap_mailboxes};
+use super::error_map;
 use super::{
     BifrostConsumerStores, BifrostProviderKind, BifrostSyncEngine, ChangeStreamConsumer,
     PushIngress, RoutingKey, build_account_factory,
@@ -23,6 +27,14 @@ use super::{
 use crate::boot_progress::NotificationSender;
 
 const RESIDENT_REDRIVE_BACKOFF: Duration = Duration::from_millis(250);
+/// Ceiling for the consumer re-drive backoff. Chosen on the worst-case
+/// re-establish latency a transiently-lagged HEALTHY account should tolerate
+/// (B3c review finding F11): the re-drive backoff bounds RETRY RATE under a
+/// stalled/failing stream, a different regime from the accumulator
+/// `RESIDENT_FLUSH_INTERVAL` memory bound, so it is NOT aligned to 30s. Five
+/// seconds keeps a healthy account's re-establish well under the original
+/// fixed-250ms regression budget while still defanging the hot-loop.
+const RESIDENT_REDRIVE_BACKOFF_CAP: Duration = Duration::from_secs(5);
 /// First auxiliary pass runs shortly after attach so the engine's own
 /// attach + initial drive gets a head start; thereafter the passes run on a
 /// wall-clock cadence chosen to match the legacy per-kick cadence, which was
@@ -52,9 +64,24 @@ struct ResidentEngineInner {
 struct ResidentSlot {
     cancel: CancellationToken,
     consumer_task: Mutex<Option<JoinHandle<()>>>,
+    control_task: Mutex<Option<JoinHandle<()>>>,
     aux_task: Mutex<Option<JoinHandle<()>>>,
     run_seq: AtomicU64,
     caught_up: watch::Sender<u64>,
+    terminal: watch::Sender<Option<TerminalOutcome>>,
+    /// Cumulative count of bounded-backoff re-drives this slot has performed
+    /// (lag / closed-stream / drive-error re-subscribes). Monotonic for the
+    /// life of the slot; never reset. A genuine recovery climbs this by a
+    /// small bounded amount, so a gate can assert the re-drive does NOT
+    /// hot-loop (§ 4.3 / § 6 "bounded re-drive") by reading it off the probe.
+    redrive_total: AtomicU64,
+    /// The current consecutive re-drive attempt index that drives the
+    /// exponential backoff (`redrive_backoff_for_attempt`). Bumped on every
+    /// backoff re-drive and reset to 0 on a clean caught-up edge (the
+    /// `on_caught_up` callback) or a cleared terminal latch, so a healthy
+    /// account always re-establishes at the base delay. Readable off the
+    /// probe to prove the clean edge reset the backoff.
+    redrive_attempt: AtomicU32,
     /// Latches true once the resident consumer has observed (or set) the
     /// account's `initial_sync_completed` marker, so the per-caught-up
     /// callback stops re-reading the marker from the DB on every idle
@@ -62,6 +89,13 @@ struct ResidentSlot {
     /// `COMPLETION_IDLE_INTERVAL` while idle).
     initial_marked: AtomicBool,
     provider: BifrostProviderKind,
+}
+
+#[derive(Debug, Clone)]
+struct TerminalOutcome {
+    result: Option<OperationResult>,
+    message: String,
+    pause: Option<SyncPauseReason>,
 }
 
 impl ResidentEngine {
@@ -117,7 +151,11 @@ impl ResidentEngine {
             .saturating_add(1);
         self.invalidate_account(account_id, PushSource::Coalesced);
         let mut caught_up = slot.caught_up.subscribe();
+        let mut terminal = slot.terminal.subscribe();
         loop {
+            if let Some(outcome) = terminal.borrow().clone() {
+                return Err(outcome.message);
+            }
             if *caught_up.borrow() >= target {
                 return Ok(());
             }
@@ -125,6 +163,11 @@ impl ResidentEngine {
                 changed = caught_up.changed() => {
                     if changed.is_err() {
                         return Err("resident caught-up channel closed".to_string());
+                    }
+                }
+                changed = terminal.changed() => {
+                    if changed.is_err() {
+                        return Err("resident terminal channel closed".to_string());
                     }
                 }
                 () = cancellation_token.cancelled() => return Err("sync cancelled".to_string()),
@@ -172,12 +215,17 @@ impl ResidentEngine {
             .await;
 
         let (caught_tx, _) = watch::channel(0);
+        let (terminal_tx, _) = watch::channel(None);
         let slot = Arc::new(ResidentSlot {
             cancel: CancellationToken::new(),
             consumer_task: Mutex::new(None),
+            control_task: Mutex::new(None),
             aux_task: Mutex::new(None),
             run_seq: AtomicU64::new(0),
             caught_up: caught_tx,
+            terminal: terminal_tx,
+            redrive_total: AtomicU64::new(0),
+            redrive_attempt: AtomicU32::new(0),
             initial_marked: AtomicBool::new(false),
             provider,
         });
@@ -188,6 +236,13 @@ impl ResidentEngine {
             resident_consumer_loop(inner, task_slot, account_for_task, folder_map).await;
         });
         *slot.consumer_task.lock().await = Some(task);
+        let control_inner = Arc::clone(&self.inner);
+        let control_slot = Arc::clone(&slot);
+        let control_account = account_id.to_string();
+        let control = tokio::spawn(async move {
+            resident_control_loop(control_inner, control_slot, control_account).await;
+        });
+        *slot.control_task.lock().await = Some(control);
         // Auxiliary passes (contacts, signatures, master categories, Exchange
         // groups, reactions, IMAP PERMANENTFLAGS probe, JMAP shared-account /
         // identity / ShareNotification) ran per one-shot kick under B3a. The
@@ -215,6 +270,38 @@ impl ResidentEngine {
             .await
             .insert(account_id.to_string(), slot);
         Ok(())
+    }
+
+    pub async fn resume_account(&self, account_id: &str) -> Result<bool, String> {
+        let slot = {
+            let slots = self.inner.slots.lock().await;
+            slots.get(account_id).cloned()
+        };
+        let Some(slot) = slot else {
+            return Ok(false);
+        };
+        let account = AccountId(account_id.to_string());
+        self.inner
+            .engine
+            .engine()
+            .resume_account(&account)
+            .map_err(|error| format!("{error:?}"))?;
+        let _ = slot.terminal.send(None);
+        Ok(true)
+    }
+
+    /// Read the slot's re-drive telemetry as `(cumulative_total, current_attempt)`,
+    /// or `None` when no slot is attached for the account. Used by the test probe
+    /// to gate § 4.3's bounded re-drive: `total` proves the backoff path fired
+    /// without hot-looping, `attempt` proves a clean caught-up edge reset it.
+    pub async fn redrive_telemetry(&self, account_id: &str) -> Option<(u64, u32)> {
+        let slots = self.inner.slots.lock().await;
+        slots.get(account_id).map(|slot| {
+            (
+                slot.redrive_total.load(Ordering::SeqCst),
+                slot.redrive_attempt.load(Ordering::SeqCst),
+            )
+        })
     }
 
     pub async fn detach_account(&self, account_id: &str) -> Result<(), String> {
@@ -248,6 +335,9 @@ impl ResidentEngine {
         // transactional, so dropping it mid-flight is safe.
         if let Some(aux) = slot.aux_task.lock().await.take() {
             aux.abort();
+        }
+        if let Some(control) = slot.control_task.lock().await.take() {
+            control.abort();
         }
         self.inner.ingress.unregister_account(account_id).await;
         let account = AccountId(account_id.to_string());
@@ -506,6 +596,125 @@ fn push_subscribe_scopes(
     }
 }
 
+async fn resident_control_loop(
+    inner: Arc<ResidentEngineInner>,
+    slot: Arc<ResidentSlot>,
+    account_id: String,
+) {
+    let account = AccountId(account_id.clone());
+    let mut rx = match inner.engine.engine().account_control_stream(&account) {
+        Ok(rx) => rx,
+        Err(error) => {
+            log::warn!("account control stream unavailable for {account_id}: {error:?}");
+            return;
+        }
+    };
+    loop {
+        tokio::select! {
+            () = slot.cancel.cancelled() => return,
+            ev = rx.recv() => match ev {
+                Ok(AccountControl::Pause(reason)) => {
+                    handle_account_pause(&inner, &slot, &account_id, reason).await;
+                }
+                Ok(AccountControl::Resume) => {
+                    let _ = slot.terminal.send(None);
+                }
+                Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    log::warn!(
+                        "account control stream lagged for {account_id} after missing {missed} events"
+                    );
+                    latch_pause_outcome(&slot, SyncPauseReason::NeedsAttention);
+                    emit_account_paused(
+                        &inner,
+                        &account_id,
+                        SyncPauseReason::NeedsAttention,
+                    ).await;
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+                Ok(other) => {
+                    log::debug!("unhandled AccountControl for {account_id}: {other:?}");
+                }
+            }
+        }
+    }
+}
+
+async fn handle_account_pause(
+    inner: &ResidentEngineInner,
+    slot: &ResidentSlot,
+    account_id: &str,
+    reason: PauseReason,
+) {
+    match reason {
+        PauseReason::RetryBudgetExhausted | PauseReason::OperatorOverrideRequired => {
+            let pause = pause_reason_for_latched_outcome(slot);
+            latch_pause_outcome(slot, pause.clone());
+            emit_account_paused(inner, account_id, pause).await;
+        }
+        PauseReason::TenantThrottle => {
+            log::debug!("account {account_id} paused for tenant throttle; engine will resume");
+        }
+        PauseReason::ConsumerRequested => {
+            log::debug!("account {account_id} observed consumer-requested pause");
+        }
+        _ => {
+            log::debug!("account {account_id} observed unknown pause reason: {reason:?}");
+        }
+    }
+}
+
+fn pause_reason_for_latched_outcome(slot: &ResidentSlot) -> SyncPauseReason {
+    if let Some(outcome) = slot.terminal.borrow().clone()
+        && let Some(result) = outcome.result
+    {
+        return error_map::pause_reason_to_wire(&result);
+    }
+    SyncPauseReason::NeedsAttention
+}
+
+/// Merge a pause latch into the slot's terminal cell. Preserves any
+/// result-bearing terminal outcome the consumer already latched (F3 merge
+/// discipline: a result-bearing outcome is never downgraded to pause-only);
+/// only the `pause` field is (re)set here.
+fn latch_pause_outcome(slot: &ResidentSlot, pause: SyncPauseReason) {
+    let mut merged = slot.terminal.borrow().clone().unwrap_or(TerminalOutcome {
+        result: None,
+        message: "sync.account-paused".to_string(),
+        pause: None,
+    });
+    merged.pause = Some(pause);
+    let _ = slot.terminal.send(Some(merged));
+}
+
+/// Merge a terminal failure into the slot's terminal cell. Preserves any
+/// `pause` already latched by the control loop (F3 merge discipline); only
+/// the `result`/`message` fields are set here.
+fn latch_terminal_failure(slot: &ResidentSlot, result: OperationResult, message: String) {
+    let mut merged = slot.terminal.borrow().clone().unwrap_or(TerminalOutcome {
+        result: None,
+        message: String::new(),
+        pause: None,
+    });
+    merged.result = Some(result);
+    merged.message = message;
+    let _ = slot.terminal.send(Some(merged));
+}
+
+async fn emit_account_paused(
+    inner: &ResidentEngineInner,
+    account_id: &str,
+    reason: SyncPauseReason,
+) {
+    let notif = Notification::AccountPaused(AccountPausedNotification {
+        account_id: account_id.to_string(),
+        reason,
+        service_generation: inner.service_generation,
+    });
+    if let Err(error) = inner.notification_tx.send(notif).await {
+        log::debug!("emit account paused for {account_id}: {error}");
+    }
+}
+
 async fn resident_consumer_loop(
     inner: Arc<ResidentEngineInner>,
     slot: Arc<ResidentSlot>,
@@ -554,6 +763,11 @@ async fn resident_consumer_loop(
                                 }
                             }
                         };
+                        // A genuine caught-up edge is the clean signal that the
+                        // re-drive recovered: reset the exponential backoff so the
+                        // next lag/closed re-drive starts at the base delay again
+                        // (§ 4.3 "reset on a clean caught-up edge").
+                        slot.redrive_attempt.store(0, Ordering::SeqCst);
                         let previous_seq = *slot.caught_up.borrow();
                         let seq = slot.run_seq.load(Ordering::SeqCst);
                         let _ = slot.caught_up.send(seq);
@@ -567,30 +781,114 @@ async fn resident_consumer_loop(
         };
         match result {
             Ok(report) => {
+                if let Some(terminal) = report.terminal {
+                    let pause = error_map::pause_reason_to_wire(&terminal.result);
+                    latch_terminal_failure(&slot, terminal.result, terminal.message);
+                    // The standing banner is normally emitted by the control
+                    // loop when it observes the accompanying `Pause`. Emit here
+                    // only to UPGRADE a banner that the control loop already
+                    // raised as the generic `NeedsAttention` (the Pause-arrives-
+                    // before-Terminated race, F3) to the auth-specific
+                    // `NeedsReauth` now that the originating error is latched.
+                    // When no pause is latched yet (the common Terminated-first
+                    // ordering), the control loop will derive `NeedsReauth` from
+                    // the latched result itself, so we stay silent to avoid a
+                    // duplicate.
+                    if matches!(pause, SyncPauseReason::NeedsReauth)
+                        && slot
+                            .terminal
+                            .borrow()
+                            .as_ref()
+                            .and_then(|outcome| outcome.pause.as_ref())
+                            .is_some()
+                    {
+                        emit_account_paused(&inner, &account_id, pause).await;
+                    }
+                    wait_for_terminal_clear(&slot).await;
+                    slot.redrive_attempt.store(0, Ordering::SeqCst);
+                    continue;
+                }
                 // `drive_resident` only returns on a terminal stream condition
                 // (lag, stream-closed, or the ForceLag test hook); a genuine
                 // caught-up edge stays in the loop. So a return here always
                 // means the subscription must be re-established. Re-push a full
-                // reconcile on lag/close so the scopes whose batches were
-                // dropped are re-driven (spec 3.4); skip it during teardown.
+                // reconcile only on lag, where the bounded broadcast dropped
+                // events; stream closure re-subscribes from the durable cursor.
                 if slot.cancel.is_cancelled() {
                     return;
                 }
-                if report.lagged || !report.completed {
+                if report.completed {
+                    slot.redrive_attempt.store(0, Ordering::SeqCst);
+                }
+                if report.lagged {
                     repush_full_reconcile(&inner, &account_id);
                 }
-                tokio::time::sleep(RESIDENT_REDRIVE_BACKOFF).await;
+                perform_redrive_backoff(&slot, &account_id).await;
             }
             Err(error) => {
                 if slot.cancel.is_cancelled() {
                     return;
                 }
                 log::warn!("resident consumer for {account_id} failed: {error:?}");
-                repush_full_reconcile(&inner, &account_id);
-                tokio::time::sleep(RESIDENT_REDRIVE_BACKOFF).await;
+                perform_redrive_backoff(&slot, &account_id).await;
             }
         }
     }
+}
+
+async fn wait_for_terminal_clear(slot: &ResidentSlot) {
+    let mut terminal = slot.terminal.subscribe();
+    loop {
+        if slot.cancel.is_cancelled() || terminal.borrow().is_none() {
+            return;
+        }
+        tokio::select! {
+            () = slot.cancel.cancelled() => return,
+            changed = terminal.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Exponential backoff for the Nth consecutive re-drive: `BASE * 2^attempt`,
+/// capped at `RESIDENT_REDRIVE_BACKOFF_CAP`. `attempt == 0` (the first
+/// re-drive, or the first after a clean caught-up edge reset it) is the base
+/// delay, so a transiently-lagged healthy account re-establishes promptly.
+fn redrive_backoff_for_attempt(attempt: u32) -> Duration {
+    let factor = 1u32.checked_shl(attempt).unwrap_or(u32::MAX);
+    RESIDENT_REDRIVE_BACKOFF
+        .saturating_mul(factor)
+        .min(RESIDENT_REDRIVE_BACKOFF_CAP)
+}
+
+/// Sleep the bounded, jittered backoff for the slot's current re-drive attempt,
+/// then bump the per-slot telemetry: `redrive_attempt` (drives the next
+/// backoff) and the monotonic `redrive_total` (the "did not hot-loop" gate
+/// signal). A clean caught-up edge resets `redrive_attempt` to 0 (§ 4.3).
+async fn perform_redrive_backoff(slot: &ResidentSlot, account_id: &str) {
+    let attempt = slot.redrive_attempt.load(Ordering::SeqCst);
+    let backoff = redrive_backoff_for_attempt(attempt);
+    sleep_redrive_backoff(account_id, backoff, attempt).await;
+    slot.redrive_attempt
+        .store(attempt.saturating_add(1), Ordering::SeqCst);
+    slot.redrive_total.fetch_add(1, Ordering::SeqCst);
+}
+
+async fn sleep_redrive_backoff(account_id: &str, base: Duration, attempt: u32) {
+    tokio::time::sleep(jittered_backoff(account_id, base, attempt)).await;
+}
+
+fn jittered_backoff(account_id: &str, base: Duration, attempt: u32) -> Duration {
+    let millis = u64::try_from(base.as_millis()).unwrap_or(u64::MAX);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    account_id.hash(&mut hasher);
+    attempt.hash(&mut hasher);
+    let bucket = hasher.finish() % 41;
+    let percent = 80 + bucket;
+    Duration::from_millis(millis.saturating_mul(percent) / 100)
 }
 
 async fn mark_initial_sync_completed_once(
@@ -801,17 +1099,21 @@ mod tests {
             .find("pub async fn detach_account")
             .expect("detach_account exists");
         let cancel = index_after(source, "slot.cancel.cancel()", detach);
-        let unregister = index_after(source, "ingress.unregister_account", cancel);
+        let abort_aux = index_after(source, "slot.aux_task.lock().await.take()", cancel);
+        let abort_control = index_after(source, "slot.control_task.lock().await.take()", abort_aux);
+        let unregister = index_after(source, "ingress.unregister_account", abort_control);
         let unsubscribe = index_after(source, "unsubscribe_push", unregister);
         let engine_detach = index_after(source, ".detach(&account)", unsubscribe);
         let await_consumer = index_after(source, "task.await", engine_detach);
 
         assert!(
-            cancel < unregister
+            cancel < abort_aux
+                && abort_aux < abort_control
+                && abort_control < unregister
                 && unregister < unsubscribe
                 && unsubscribe < engine_detach
                 && engine_detach < await_consumer,
-            "resident detach must cancel, unregister ingress, unsubscribe push, detach engine, then await the consumer task",
+            "resident detach must cancel, abort aux/control, unregister ingress, unsubscribe push, detach engine, then await the consumer task",
         );
         assert_eq!(
             source[detach..await_consumer]

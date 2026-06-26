@@ -8,7 +8,7 @@ use crate::extract::{
     PrefetchCompleted, PrefetchProgress,
 };
 use crate::push::PushEvent;
-use crate::sync::{IndexCommitted, SyncCompleted};
+use crate::sync::{AccountPausedNotification, IndexCommitted, SyncCompleted};
 use serde::{Deserialize, Serialize};
 
 /// Marker + accessor trait for notification payloads that carry a
@@ -139,6 +139,11 @@ pub enum Notification {
     /// multiple waiters per run all resolve cleanly.
     #[serde(rename = "sync.completed")]
     SyncCompleted(SyncCompleted),
+    /// Per-account paused notification from the resident bifrost engine.
+    /// `MustDeliver`: this is a standing state banner and the account may
+    /// remain parked until the UI or a re-auth flow clears it.
+    #[serde(rename = "sync.account_paused")]
+    AccountPaused(AccountPausedNotification),
     /// Tantivy writer-task post-commit notification. `MustDeliver` on
     /// the wire taxonomy, with a 30 s send-deadline degrade in the
     /// writer task (the signal is advisory; the next commit will
@@ -241,6 +246,7 @@ impl Notification {
                 key: CoalesceKey::SyncProgress(progress.account_id.clone()),
             },
             Self::SyncCompleted(_) => NotificationClass::MustDeliver,
+            Self::AccountPaused(_) => NotificationClass::MustDeliver,
             Self::IndexCommitted(_) => NotificationClass::MustDeliver,
             Self::PushEvent(event) => NotificationClass::Coalesce {
                 key: CoalesceKey::PushEvent(event.account_id.clone()),
@@ -283,6 +289,7 @@ impl Notification {
             Self::ActionCompleted(_) => "action.completed",
             Self::SyncProgress(_) => "sync.progress",
             Self::SyncCompleted(_) => "sync.completed",
+            Self::AccountPaused(_) => "sync.account_paused",
             Self::IndexCommitted(_) => "index.committed",
             Self::PushEvent(_) => "push.event",
             Self::CalendarRunCompleted(_) => "calendar.run_completed",
@@ -336,6 +343,7 @@ impl Notification {
             Self::ActionCompleted(completed) => Some(completed.generation()),
             Self::SyncProgress(progress) => Some(progress.generation()),
             Self::SyncCompleted(completed) => Some(completed.generation()),
+            Self::AccountPaused(paused) => Some(paused.generation()),
             Self::IndexCommitted(committed) => Some(committed.generation()),
             Self::PushEvent(event) => Some(event.generation()),
             Self::CalendarRunCompleted(completed) => Some(completed.generation()),
@@ -371,6 +379,7 @@ impl Notification {
             Self::ActionCompleted(completed) => completed.set_generation(generation),
             Self::SyncProgress(progress) => progress.set_generation(generation),
             Self::SyncCompleted(completed) => completed.set_generation(generation),
+            Self::AccountPaused(paused) => paused.set_generation(generation),
             Self::IndexCommitted(committed) => committed.set_generation(generation),
             Self::PushEvent(event) => event.set_generation(generation),
             Self::CalendarRunCompleted(completed) => completed.set_generation(generation),
@@ -441,6 +450,43 @@ mod tests {
             value: "x".to_string(),
         };
         assert_eq!(notification.method_name(), "test.echo");
+    }
+
+    #[test]
+    fn account_paused_round_trips_through_parse_service_message() {
+        let line = r#"{"jsonrpc":"2.0","method":"sync.account_paused","params":{"account_id":"acc-1","reason":"needs_reauth","service_generation":7}}"#;
+        let parsed = parse_service_message(line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::AccountPaused(paused)) => {
+                assert_eq!(paused.account_id, "acc-1");
+                assert_eq!(paused.reason, crate::sync::SyncPauseReason::NeedsReauth);
+                assert_eq!(paused.service_generation, 7);
+            }
+            other => panic!("expected AccountPaused notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn account_paused_classifies_as_must_deliver() {
+        let notification = Notification::AccountPaused(crate::sync::AccountPausedNotification {
+            account_id: "acc-1".to_string(),
+            reason: crate::sync::SyncPauseReason::NeedsAttention,
+            service_generation: 0,
+        });
+        assert_eq!(notification.class(), NotificationClass::MustDeliver);
+    }
+
+    #[test]
+    fn account_paused_generation_is_tagged() {
+        let mut notification =
+            Notification::AccountPaused(crate::sync::AccountPausedNotification {
+                account_id: "acc-1".to_string(),
+                reason: crate::sync::SyncPauseReason::NeedsAttention,
+                service_generation: 0,
+            });
+        assert_eq!(notification.service_generation(), Some(0));
+        notification.set_service_generation(42);
+        assert_eq!(notification.service_generation(), Some(42));
     }
 
     #[test]

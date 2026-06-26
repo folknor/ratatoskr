@@ -22,9 +22,9 @@ use service_api::{
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
     SignatureUpdateAck, SignatureUpdateParams, SmartFolderCreateAck, SmartFolderCreateParams,
-    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
-    SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck, ThreadUiStateSetParams,
-    WritebackOutcome, encode_message, parse_service_message,
+    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncResumeAccountParams,
+    SyncResumeAck, SyncRunId, SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck,
+    ThreadUiStateSetParams, WritebackOutcome, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, hash_map::Entry};
 use std::io::Write as StdWrite;
@@ -1291,6 +1291,16 @@ impl ServiceClient {
             })
             .await?;
         self.subscribe_or_consume(ack.run_id).await
+    }
+
+    pub async fn resume_sync_account(
+        &self,
+        account_id: String,
+    ) -> Result<SyncResumeAck, ClientError> {
+        self.request(RequestParams::SyncResumeAccount {
+            params: SyncResumeAccountParams { account_id },
+        })
+        .await
     }
 
     /// Phase 5 task 9b: kick a calendar sync run for `account_id` and
@@ -3837,7 +3847,9 @@ mod tests {
     /// testable counterpart to the `WithGeneration` trait + the
     /// adjacent get/set methods on `Notification`.
     fn production_notification_catalog() -> Vec<Notification> {
-        use service_api::{BootPhase, BootProgress, PushEvent};
+        use service_api::{
+            AccountPausedNotification, BootPhase, BootProgress, PushEvent, SyncPauseReason,
+        };
         let phases = [
             BootPhase::LoadingKey,
             BootPhase::OpeningDatabase,
@@ -3866,6 +3878,11 @@ mod tests {
         // variant.
         catalog.push(Notification::PushEvent(PushEvent {
             account_id: "acc-1".into(),
+            service_generation: 0,
+        }));
+        catalog.push(Notification::AccountPaused(AccountPausedNotification {
+            account_id: "acc-1".into(),
+            reason: SyncPauseReason::NeedsAttention,
             service_generation: 0,
         }));
         // Phase 5: CalendarRunCompleted (MustDeliver) and CalendarChanged

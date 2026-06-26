@@ -120,6 +120,20 @@ impl CheckpointStore for SqliteCheckpointStore {
         })
     }
 
+    /// Durable side of the engine's cursor-clear (B3c § 4.5). The engine
+    /// owns the `EngineDirective::RestartScope` / `SchemaIncompatible`
+    /// dispatch and calls this to drop the poisoned change cursor so the next
+    /// establish re-runs via inventory. This store method is unit-covered
+    /// directly by `checkpoint_store_change_roundtrip` (puts then deletes then
+    /// asserts the row is absent); the live end-to-end engine wire that drives
+    /// this on a real reopen/recovery is exercised by the
+    /// `jmap-oauth-recovery.lua` sync-harness gate. Per the § 4.5 feasibility
+    /// hedge (review finding F6), seeding a sub-`MIN_MIGRATABLE` poison
+    /// envelope to drive the engine-internal dispatch from a ratatoskr service
+    /// test is not done here: `MIN_MIGRATABLE` is a bifrost-internal const not
+    /// exposed at the frozen surface, so the documented store + recovery-gate
+    /// coverage stands in for the bespoke `restart_scope_clears_durable_cursor`
+    /// test.
     fn delete_change_cursor<'a>(
         &'a self,
         account: &'a AccountId,
