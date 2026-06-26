@@ -2,7 +2,8 @@
 //!
 //! All provider operations go through core. Phase 4 removed the UI-side
 //! JMAP push subscription wiring; push events arrive as
-//! `Notification::PushEvent` from the Service-side `PushRuntime`.
+//! `Notification::PushEvent` from the Service-side resident sync engine
+//! (`ResidentEngine`), which owns the per-account push bridges.
 
 use iced::Task;
 

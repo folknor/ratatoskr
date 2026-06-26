@@ -95,6 +95,51 @@ harness.assert_eq(probe.durable_cursor.kind, "change", "cursor kind")
 harness.assert_eq(probe.is_searchable, true, "pre-gap message should persist")
 harness.assert(probe.times_sent_to >= 1, "seen counter should include pre-gap message")
 
+local recovery_attach, recovery_attach_err = client:request("test.bifrost_attach", {
+    account_id = seeded.account_id,
+    provider_kind = "jmap",
+    detach_on_complete = false,
+})
+harness.assert(recovery_attach_err == nil, "recovery test.bifrost_attach failed")
+
+local replayed = {}
+for i = 2, 24 do
+    replayed[#replayed + 1] = {
+        id = "bifrost-lag-m" .. tostring(i),
+        thread_id = "bifrost-lag-t" .. tostring(i),
+        subject = "Bifrost lag gap " .. tostring(i),
+        from_addr = "bifrost-lag@example.test",
+        to_addrs = { "lag-peer@example.test" },
+        folder_ids = { "INBOX" },
+        label_ids = { "kw:lag" },
+        keywords = { "lag" },
+        raw_body = "lag gap " .. tostring(i),
+    }
+end
+
+local recovery, recovery_err = client:request("test.bifrost_inject_batch", {
+    account_id = seeded.account_id,
+    session_id = recovery_attach.session_id,
+    scope = "account",
+    checkpoint = { 90 },
+    messages = replayed,
+})
+harness.assert(recovery_err == nil, "recovery inject failed")
+harness.assert(recovery.acked, "recovery batch should ack")
+
+local recovered_probe, recovered_probe_err = client:request("test.bifrost_probe", {
+    account_id = seeded.account_id,
+    scope = "account",
+    seen_address = "lag-peer@example.test",
+    searchable_message_id = "bifrost-lag-m24",
+})
+harness.assert(recovered_probe_err == nil, "recovered test.bifrost_probe failed")
+harness.assert_eq(recovered_probe.is_searchable, true, "lagged message should land after re-drive")
+harness.assert(
+    recovered_probe.times_sent_to >= 24,
+    "seen counter should include replayed lagged messages"
+)
+
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")
 harness.assert(shutdown_err == nil, "shutdown returned error")

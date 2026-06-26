@@ -6,15 +6,17 @@
 //! through a panic supervisor and emits the dual notifications
 //! (`CalendarRunCompleted` + `CalendarChanged`).
 //!
-//! ## Symmetry with `SyncRuntime` and `PushRuntime`
+//! ## Symmetry with `SyncRuntime` and the resident engine
 //!
 //! Structurally symmetric with `crates/service/src/sync.rs::SyncRuntime` for
 //! the lifecycle surface (per-account map, panic supervisor, start/cancel/
-//! shutdown). The `closed: AtomicBool` shutdown guard mirrors
-//! `crates/service/src/push.rs::PushRuntimeInner` (line 109) - `SyncRuntime`
-//! itself does not have the flag. We have it here because Calendar has a
-//! kick-driven entry path (the hourly tick) analogous to push's post-ready
-//! iteration: any kick arriving during shutdown must be rejected.
+//! shutdown). The `closed: AtomicBool` shutdown guard mirrors the
+//! `shutting_down` flag on `ResidentEngineInner`
+//! (`crates/service/src/bifrost/resident.rs`); `SyncRuntime` itself
+//! does not have the flag. We have it here because Calendar has a
+//! kick-driven entry path (the hourly tick) analogous to the resident
+//! engine's post-ready account attach: any kick arriving during
+//! shutdown must be rejected.
 //!
 //! Diverges intentionally on:
 //!
@@ -127,8 +129,9 @@ pub(crate) struct CalendarRuntimeInner {
     /// `DEFAULT_CONCURRENCY_CAP` rationale).
     pub(crate) semaphore: Arc<Semaphore>,
     /// Hard barrier against `start_account` accepting new entries after
-    /// `shutdown()` has begun. Same role as `PushRuntimeInner::closed`
-    /// (`crates/service/src/push.rs:109`): rejects any kick or
+    /// `shutdown()` has begun. Same role as
+    /// `ResidentEngineInner::shutting_down`
+    /// (`crates/service/src/bifrost/resident.rs`): rejects any kick or
     /// explicit-request start that arrives during shutdown.
     closed: AtomicBool,
 }
@@ -172,10 +175,11 @@ impl CalendarRuntime {
     /// Spawn a runner for `account_id` if one is not already in flight.
     /// Returns the existing or freshly-generated `CalendarStartAck`.
     ///
-    /// Same shutdown-guard pattern as PushRuntime - check `closed`
-    /// before the slow path, re-acquire the lock for the insert, and
-    /// re-check the guard. Mirrors
-    /// `crates/service/src/push.rs::PushRuntime::start_account`.
+    /// Same shutdown-guard concept as the resident engine's
+    /// `shutting_down` flag - check `closed` before the slow path,
+    /// re-acquire the lock for the insert, and re-check the guard. The
+    /// resident engine's analogous entry point is
+    /// `crates/service/src/bifrost/resident.rs::ResidentEngine::attach_account`.
     /// Diverging is a refactor smell. Returns
     /// `Result<CalendarStartAck, String>` so post-shutdown calls produce
     /// a testable `Err`, not a silently-dropped start.
@@ -298,9 +302,9 @@ impl CalendarRuntime {
     /// `JoinHandle`. Used by Phase 6a-part-2's `account.delete`
     /// handler so the runner-quiescence invariant closes
     /// Service-side. Same shape as
-    /// `SyncRuntime::cancel_account_and_await` and
-    /// `PushRuntime::cancel_account` (push folds the await into the
-    /// cancel for free).
+    /// `SyncRuntime::cancel_account_and_await` and the resident engine's
+    /// `ResidentEngine::detach_account` (detach folds the
+    /// cancel-and-await into one call).
     ///
     /// `Ok(())` on success or "no runner registered." `Err` only if
     /// joining the supervisor surfaces an error.

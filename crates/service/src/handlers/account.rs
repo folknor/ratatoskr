@@ -233,16 +233,15 @@ pub(crate) async fn handle_update_tokens(
         .await
         .map_err(ServiceError::Internal)?;
 
-    // Phase 8-3: re-arm push for the re-authed account. Without this,
-    // a JMAP token-revocation kills the websocket bridge and password
-    // re-entry leaves push dead until the Service restarts.
-    // `start_account` silently skips non-JMAP accounts; `fresh_start:
-    // true` clears the persisted `push_state` because the new session
-    // may not honour the old session's cursor.
-    if let Some(push_runtime) = boot_state.push_runtime() {
+    if let Some(sync_runtime) = boot_state.sync_runtime() {
         tokio::spawn(async move {
-            if let Err(e) = push_runtime.start_account(id_for_push.clone(), true).await {
-                log::warn!("[push] re-auth start_account({id_for_push}) failed: {e}");
+            if let Err(e) = sync_runtime.detach_resident_account(&id_for_push).await {
+                log::debug!(
+                    "account.update_tokens: resident detach before reattach {id_for_push}: {e}"
+                );
+            }
+            if let Err(e) = sync_runtime.attach_resident_account(&id_for_push).await {
+                log::warn!("account.update_tokens: resident reattach {id_for_push} failed: {e}");
             }
         });
     }
@@ -387,9 +386,6 @@ pub(crate) async fn handle_delete(
     // step's snapshot of cached hashes.
     if let Some(prefetch) = boot_state.prefetch_runtime() {
         prefetch.cancel_account(&account_id).await;
-    }
-    if let Some(push) = boot_state.push_runtime() {
-        let _ = push.cancel_account(&account_id).await;
     }
     if let Some(cal) = boot_state.calendar_runtime()
         && let Err(e) = cal.cancel_account_and_await(&account_id).await

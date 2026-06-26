@@ -1,4 +1,4 @@
--- description: Production Gmail kick survives forced sustained lag with bounded backoff
+-- description: Production Gmail kick survives forced lag via resident full-reconcile re-push
 -- expected: pass
 -- fixture: jmap-small.toml
 -- protocol: gmail
@@ -50,6 +50,12 @@ local account, account_err = client:request("TestSeedAccount", {
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
+local initial, initial_err = client:start_sync({
+    account_id = account.account_id,
+}, 30)
+harness.assert(initial_err == nil, "initial start_sync failed")
+harness.assert_eq(initial.result, "completed", initial.error or "initial sync result")
+
 local armed, arm_err = client:request("test.bifrost_arm_hook", {
     account_id = account.account_id,
     hook = { kind = "force_lag" },
@@ -57,6 +63,7 @@ local armed, arm_err = client:request("test.bifrost_arm_hook", {
 harness.assert(arm_err == nil, "test.bifrost_arm_hook failed")
 harness.assert(armed.armed, "force_lag hook was not armed")
 
+harness.clear_mock_requests(admin_endpoint)
 local started = harness.now_ms()
 local completed, sync_err = client:start_sync({
     account_id = account.account_id,

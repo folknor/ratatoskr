@@ -82,24 +82,26 @@ impl ServiceLifecycle {
     /// orchestrating helper in `dispatch::run_shutdown_drain` calls
     /// subsystem shutdowns *before* this method:
     ///
-    /// 1. `PushRuntime::shutdown()` (Phase 4) - cancel push bridges
-    ///    so a late `StateChange` can't call
-    ///    `SyncRuntime::start_account` after step 2.
-    /// 2. `CalendarRuntime::shutdown()` (Phase 5) - cancel + await
+    /// 1. `CalendarRuntime::shutdown()` (Phase 5) - cancel + await
     ///    calendar runners.
-    /// 3. `SyncRuntime::shutdown()` (Phase 3) - cancel + await sync
-    ///    runners.
-    /// 4. Mark BootSharedState shutting_down (Phase 7 H1) +
+    /// 2. `SyncRuntime::shutdown()` (Phase 3) - cancel + await sync
+    ///    runners, then drain the resident engine
+    ///    (`ResidentEngine::shutdown()`): detach every account and stop
+    ///    push ingress. Push is no longer a standalone runtime; the
+    ///    resident engine owns the push bridges and is torn down here,
+    ///    so a late `StateChange` cannot re-attach an account after the
+    ///    sync drain has begun.
+    /// 3. Mark BootSharedState shutting_down (Phase 7 H1) +
     ///    `take_extract_runtime` -> `ExtractRuntime::shutdown()`
     ///    (Phase 7) - cancel + await worker + drain per-item JoinSet.
-    /// 5. `take_rebuild_task` -> cancel + abort + await (Phase 7).
-    /// 6. Drop `Arc<SyncRuntime>` and clear single-use `search_write`
+    /// 4. `take_rebuild_task` -> cancel + abort + await (Phase 7).
+    /// 5. Drop `Arc<SyncRuntime>` and clear single-use `search_write`
     ///    slot so `SearchWriteHandle` clones release.
-    /// 7. Await search-writer `JoinHandle` (via `out_tx` drop +
+    /// 6. Await search-writer `JoinHandle` (via `out_tx` drop +
     ///    `writer_handle.await` in dispatch).
-    /// 8. **Then** this method: write the `clean_shutdown` sentinel.
+    /// 7. **Then** this method: write the `clean_shutdown` sentinel.
     ///
-    /// Calling this *before* steps 1-7 (the pre-Phase-4 layout) was
+    /// Calling this *before* steps 1-6 (the pre-Phase-4 layout) was
     /// racy: a sync runner mid-write could land bytes after the
     /// sentinel claimed clean state, leaving the next boot's invariant
     /// pass unable to detect the gap. The drain consolidation in
@@ -110,7 +112,7 @@ impl ServiceLifecycle {
     /// `PackStore::flush()` call here, but `PackStore::put` already
     /// fsyncs every frame + commits the matching index row inside a
     /// single SQLite transaction, so any blob whose `put` returned has
-    /// already landed durably. By the time this sentinel runs steps 1-7
+    /// already landed durably. By the time this sentinel runs steps 1-6
     /// have stopped every subsystem that could call `put`, so there is
     /// nothing to flush. The on-disk state is consistent without any
     /// extra ordering.

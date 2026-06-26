@@ -108,7 +108,7 @@ pub async fn build_account_factory(
     match provider {
         MailProviderKind::Gmail => {
             let source = decrypted.oauth_token_source(provider, writer)?;
-            let factory = match std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
+            let mut factory = match std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
                 .ok()
                 .and_then(|endpoint| gmail_api_base_from_test_endpoint(&endpoint))
             {
@@ -119,6 +119,10 @@ pub async fn build_account_factory(
                 }
                 None => bifrost_google::account::GoogleAccountFactory::from_token_source(source),
             };
+            if let Ok(topic) = std::env::var("RATATOSKR_GMAIL_PUBSUB_TOPIC") {
+                factory =
+                    factory.with_pubsub_config(bifrost_google::account::PubSubConfig::new(topic));
+            }
             Ok(Arc::new(factory))
         }
         MailProviderKind::Graph => {
@@ -138,7 +142,11 @@ pub async fn build_account_factory(
                 let source = decrypted.oauth_token_source(provider, writer)?;
                 GraphClient::with_source(graph_base, graph_beta, source)
             };
-            Ok(Arc::new(GraphAccountFactory::new(client)))
+            let mut factory = GraphAccountFactory::new(client);
+            if let Ok(webhook_url) = std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL") {
+                factory = factory.with_push_endpoint(webhook_url);
+            }
+            Ok(Arc::new(factory))
         }
         MailProviderKind::Jmap => build_jmap_factory(&decrypted, provider, writer),
         MailProviderKind::Imap => build_imap_factory(decrypted, provider, writer),

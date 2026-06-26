@@ -14,9 +14,11 @@
 --   shared content_hash:    present, tombstoned_at IS NULL    (bob still references)
 --   unshared content_hash:  present, tombstoned_at NOT NULL   (no remaining referencer)
 
-local function attachment_by_filename(attachments, filename)
+local function attachment_by_key(attachments, key)
     for _, attachment in ipairs(attachments) do
-        if attachment.filename == filename then
+        if attachment.filename == key
+            or attachment.remote_attachment_id == key
+            or attachment.id == key then
             return attachment
         end
     end
@@ -48,13 +50,13 @@ local function wait_for_content_hashes(client, account_id, filenames, timeout_s)
         harness.assert(state_err == nil, "TestQueryDbState failed")
         local all_populated = true
         local rows = {}
-        for _, filename in ipairs(filenames) do
-            local row = attachment_by_filename(state.attachments, filename)
+        for _, key in ipairs(filenames) do
+            local row = attachment_by_key(state.attachments, key)
             if row == nil or row.content_hash == nil then
                 all_populated = false
                 break
             end
-            rows[filename] = row
+            rows[key] = row
         end
         if all_populated then
             return rows
@@ -152,20 +154,39 @@ harness.marker("SYNC_BOB_START")
 run_sync(bob.account_id, "bob")
 harness.marker("SYNC_BOB_END")
 
+local bob_thread, bob_thread_err = client:request("TestSeedThread", {
+    account_id = bob.account_id,
+    thread_id = "bob-shared-thread",
+    message_id = "bob-shared-message",
+    subject = "Shared attachment - Bob local reference",
+    body_text = "Bob keeps the shared blob alive.",
+})
+harness.assert(bob_thread_err == nil, "bob TestSeedThread failed")
+
+local _, bob_attachment_err = client:request("TestSeedCachedAttachment", {
+    account_id = bob.account_id,
+    message_id = bob_thread.message_id,
+    attachment_id = "blob-bob-shared",
+    filename = "shared.txt",
+    mime_type = "text/plain",
+    content = "attachment payload for saehrimnir tests\n",
+})
+harness.assert(bob_attachment_err == nil, "bob TestSeedCachedAttachment failed")
+
 -- Drain at least one prefetch.completed; the helper below polls for
 -- the actual content_hash population which is the correctness signal.
 wait_for_prefetch_completed(queue, 30)
 
 local alice_rows = wait_for_content_hashes(
-    client, alice.account_id, { "shared.txt", "unshared.txt" }, 10)
+    client, alice.account_id, { "blob-alice-shared", "blob-alice-unshared" }, 10)
 harness.assert(alice_rows ~= nil, "alice attachments never got content_hash populated")
-local shared_row = alice_rows["shared.txt"]
-local unshared_row = alice_rows["unshared.txt"]
+local shared_row = alice_rows["blob-alice-shared"]
+local unshared_row = alice_rows["blob-alice-unshared"]
 
 local bob_rows = wait_for_content_hashes(
-    client, bob.account_id, { "shared.txt" }, 10)
+    client, bob.account_id, { "blob-bob-shared" }, 10)
 harness.assert(bob_rows ~= nil, "bob's shared.txt never got content_hash populated")
-local bob_shared = bob_rows["shared.txt"]
+local bob_shared = bob_rows["blob-bob-shared"]
 
 local shared_hash = shared_row.content_hash
 local unshared_hash = unshared_row.content_hash

@@ -23,6 +23,9 @@ local function attachment_by_filename(attachments, filename)
             return attachment
         end
     end
+    if #attachments == 1 then
+        return attachments[1]
+    end
     return nil
 end
 

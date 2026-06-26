@@ -29,28 +29,7 @@ pub(crate) async fn handle_start_account(
                 .into(),
         )
     })?;
-    let account_id = params.account_id.clone();
     let ack = runtime.start_account(params.account_id).await;
-
-    // Phase 4 task 6: opportunistic push start. Detached:
-    // PushRuntime::start_account does TLS+HTTPS+OAuth-refresh, which
-    // would violate the 5s sync.start_account IPC contract if awaited.
-    // Failure is logged inside the runtime, not surfaced through the
-    // SyncStartAck. PushRuntime::start_account is idempotent and
-    // self-policing (no-ops for non-JMAP accounts), so the handler
-    // doesn't need to know which provider an account uses.
-    if let Some(push_runtime) = boot_state.push_runtime() {
-        tokio::spawn(async move {
-            // Phase 8-3: piggyback start always uses the resume path
-            // (`fresh_start: false`) - the existing push_state cursor
-            // is the right one to pick up. Fresh-start is reserved
-            // for boot-time dirty-account recovery and post-re-auth
-            // restarts.
-            if let Err(e) = push_runtime.start_account(account_id.clone(), false).await {
-                log::debug!("[push] piggyback start_account({account_id}) failed: {e}");
-            }
-        });
-    }
 
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }
@@ -68,19 +47,11 @@ pub(crate) async fn handle_cancel_account(
     })?;
     let mut ack = runtime.cancel_account(&params.account_id).await;
 
-    // Phase 4 review-pass fix: push cancel is *awaited* on the cancel
-    // side (start side stays detached because TLS + OAuth-refresh
-    // would blow the 5s IPC budget; cancel does no network beyond the
-    // WebSocket close, and the connection-loop's TLS connect await is
-    // now in a select! against the shutdown watch so stop_push has
-    // bounded latency). The UI's `cancel_and_await` flow in the
-    // delete-account path then guarantees that by the time
-    // `client.cancel_and_await` returns, BOTH sync runners and push
-    // bridges for this account have been torn down - so the
-    // subsequent DB delete cannot race a late `start_sync` from a
-    // surviving push bridge.
-    if let Some(push_runtime) = boot_state.push_runtime() {
-        push_runtime.cancel_account(&params.account_id).await;
+    if let Err(error) = runtime.detach_resident_account(&params.account_id).await {
+        log::debug!(
+            "sync.cancel_account: resident detach for {} returned {error}",
+            params.account_id
+        );
     }
 
     // Phase 5 task 9: piggyback calendar cancel server-side, mirroring

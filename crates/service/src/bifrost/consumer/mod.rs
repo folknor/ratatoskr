@@ -10,8 +10,10 @@ mod golden_test;
 mod move_purge_test;
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use bifrost_sync::CheckpointStore;
 use bifrost_sync::backfill::BackfillState;
@@ -32,6 +34,9 @@ use super::SqliteCheckpointStore;
 use super::checkpoint_store::BACKFILL_COMPLETION_PARTITION;
 
 const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
+const RESIDENT_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+const RESIDENT_DEFERRED_ACK_CAP: usize = 128;
+const RESIDENT_PENDING_DELETION_CAP: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BifrostProviderKind {
@@ -70,12 +75,9 @@ pub enum ConsumerHook {
     CrashAfterAckNoSentinel,
     CrashBeforeDriveEndThreading,
     /// Force the drive loop to report `lagged` (and detach) on the next
-    /// event, simulating sustained structural broadcast lag WITHOUT needing
-    /// a real overflow. The production bounded lag-backoff loop in
-    /// `engine_sync::sync_jmap_account` then exercises its re-attach budget,
-    /// backoff delays, and failed-with-lag terminal exactly as it would
-    /// under a real `RecvError::Lagged`. Gate target for the
-    /// production-lag-backoff harness (B3a-cut-jmap 6.4).
+    /// event, simulating sustained structural broadcast lag without needing
+    /// a real overflow. The resident loop then re-subscribes and re-pushes a
+    /// full reconcile, matching the B3b stopgap for real `RecvError::Lagged`.
     ForceLag,
 }
 
@@ -145,6 +147,59 @@ pub struct ChangeStreamConsumer {
     crash_before_drive_end_threading: bool,
 }
 
+#[derive(Default)]
+pub struct ResidentFlushTelemetry {
+    forced_flushes: AtomicU32,
+    max_deferred_acks: AtomicU32,
+    max_pending_deletions: AtomicU32,
+    batches_acked: AtomicU32,
+}
+
+impl ResidentFlushTelemetry {
+    pub fn snapshot(&self) -> ResidentFlushTelemetrySnapshot {
+        ResidentFlushTelemetrySnapshot {
+            forced_flushes: self.forced_flushes.load(Ordering::Relaxed),
+            max_deferred_acks: self.max_deferred_acks.load(Ordering::Relaxed),
+            max_pending_deletions: self.max_pending_deletions.load(Ordering::Relaxed),
+            batches_acked: self.batches_acked.load(Ordering::Relaxed),
+        }
+    }
+
+    fn observe(&self, deferred_acks: usize, pending_deletions: usize) {
+        update_max(&self.max_deferred_acks, deferred_acks);
+        update_max(&self.max_pending_deletions, pending_deletions);
+    }
+
+    fn observe_report(&self, report: &ConsumerDriveReport) {
+        self.batches_acked
+            .store(report.batches_acked, Ordering::Relaxed);
+    }
+
+    fn record_forced_flush(&self) {
+        self.forced_flushes.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResidentFlushTelemetrySnapshot {
+    pub forced_flushes: u32,
+    pub max_deferred_acks: u32,
+    pub max_pending_deletions: u32,
+    pub batches_acked: u32,
+}
+
+fn update_max(value: &AtomicU32, candidate: usize) {
+    let candidate = u32::try_from(candidate).unwrap_or(u32::MAX);
+    let mut current = value.load(Ordering::Relaxed);
+    while candidate > current {
+        match value.compare_exchange_weak(current, candidate, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+}
+
 impl ChangeStreamConsumer {
     pub fn new(
         engine: Arc<SyncEngine>,
@@ -193,6 +248,134 @@ impl ChangeStreamConsumer {
         Ok(report)
     }
 
+    pub async fn drive_resident<F, Fut>(
+        &mut self,
+        mut on_caught_up: F,
+    ) -> Result<ConsumerDriveReport, Error>
+    where
+        F: FnMut(ConsumerDriveReport) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.drive_resident_loop(
+            self.engine.account_changes_stream(&self.account_id)?,
+            &mut on_caught_up,
+            None,
+        )
+        .await
+    }
+
+    pub async fn drive_resident_injected_stream<F, Fut>(
+        &mut self,
+        rx: broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        mut on_caught_up: F,
+        telemetry: Option<Arc<ResidentFlushTelemetry>>,
+    ) -> Result<ConsumerDriveReport, Error>
+    where
+        F: FnMut(ConsumerDriveReport) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.drive_resident_loop(rx, &mut on_caught_up, telemetry)
+            .await
+    }
+
+    async fn drive_resident_loop<F, Fut>(
+        &mut self,
+        mut rx: broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        on_caught_up: &mut F,
+        telemetry: Option<Arc<ResidentFlushTelemetry>>,
+    ) -> Result<ConsumerDriveReport, Error>
+    where
+        F: FnMut(ConsumerDriveReport) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let mut report = ConsumerDriveReport::default();
+        let mut pending = PendingDeletions::default();
+        let mut last_forced_flush = Instant::now();
+        loop {
+            match tokio::time::timeout(COMPLETION_IDLE_INTERVAL, rx.recv()).await {
+                Ok(Ok(event)) => {
+                    self.observed_scopes.insert(event.scope.clone());
+                    let hook = if let Some(registry) = &self.hook_registry {
+                        registry.take(&self.account_id.0).await
+                    } else {
+                        None
+                    };
+                    if matches!(hook, Some(ConsumerHook::ForceLag)) {
+                        log::warn!(
+                            "bifrost resident consumer FORCED lag for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.lagged = true;
+                        // Mirror the real `RecvError::Lagged` arm: flush pending
+                        // deletions (a per-batch-acked purge must still apply) but
+                        // skip the IMAP drive-end flush on a lagged drive, exactly
+                        // as the one-shot `drive_receiver` path does.
+                        self.flush_drive_end(&pending, &mut report, false).await?;
+                        return Ok(report);
+                    }
+                    let hook = if let Some(hook @ ConsumerHook::StallConsumer { .. }) = hook {
+                        apply_hook_before_batch(hook).await?;
+                        None
+                    } else {
+                        hook
+                    };
+                    if self
+                        .handle_event(event, hook, &mut report, &mut pending)
+                        .await?
+                    {
+                        self.flush_drive_end(&pending, &mut report, false).await?;
+                        return Ok(report);
+                    }
+                    if let Some(telemetry) = &telemetry {
+                        telemetry.observe(self.deferred_imap_acks.len(), pending.len());
+                        telemetry.observe_report(&report);
+                    }
+                    if self.resident_flush_due(&pending, last_forced_flush) {
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.record_forced_flush();
+                        }
+                        self.flush_drive_end(&pending, &mut report, true).await?;
+                        pending.clear();
+                        last_forced_flush = Instant::now();
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.observe(self.deferred_imap_acks.len(), pending.len());
+                            telemetry.observe_report(&report);
+                        }
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(missed))) => {
+                    log::warn!(
+                        "bifrost resident consumer lagged for account {} after missing {} events",
+                        self.account_id.0,
+                        missed
+                    );
+                    report.lagged = true;
+                    self.flush_drive_end(&pending, &mut report, false).await?;
+                    return Ok(report);
+                }
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    self.flush_drive_end(&pending, &mut report, false).await?;
+                    return Ok(report);
+                }
+                Err(_) => {
+                    if self.scopes_backfill_completed() {
+                        report.completed = true;
+                        report.scopes_completed = self.completed_scope_count();
+                        self.flush_drive_end(&pending, &mut report, true).await?;
+                        on_caught_up(report.clone()).await;
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.observe_report(&report);
+                        }
+                        report = ConsumerDriveReport::default();
+                        pending.clear();
+                        self.observed_scopes.clear();
+                        last_forced_flush = Instant::now();
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn drive_injected_stream(
         &mut self,
         mut rx: broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
@@ -230,15 +413,8 @@ impl ChangeStreamConsumer {
         // exit (crash hooks / real engine error) we skip the flush: a partial,
         // un-acked drive must not apply deletions.
         if outcome.is_ok() {
-            self.flush_pending_deletions(&pending).await?;
-            if self.crash_before_drive_end_threading {
-                return Err(Error::Other(
-                    "bifrost consumer crash_before_drive_end_threading hook fired".to_string(),
-                ));
-            }
-            if !report.lagged {
-                self.flush_imap_drive_end(report).await?;
-            }
+            self.flush_drive_end(&pending, report, !report.lagged)
+                .await?;
         }
         outcome
     }
@@ -583,6 +759,32 @@ impl ChangeStreamConsumer {
         self.imap_seen_by_scope.clear();
         Ok(())
     }
+
+    async fn flush_drive_end(
+        &mut self,
+        pending: &PendingDeletions,
+        report: &mut ConsumerDriveReport,
+        flush_imap: bool,
+    ) -> Result<(), Error> {
+        self.flush_pending_deletions(pending).await?;
+        if self.crash_before_drive_end_threading {
+            return Err(Error::Other(
+                "bifrost consumer crash_before_drive_end_threading hook fired".to_string(),
+            ));
+        }
+        if flush_imap {
+            self.flush_imap_drive_end(report).await?;
+        }
+        Ok(())
+    }
+
+    fn resident_flush_due(&self, pending: &PendingDeletions, last_flush: Instant) -> bool {
+        self.deferred_imap_acks.len() >= RESIDENT_DEFERRED_ACK_CAP
+            || pending.len() >= RESIDENT_PENDING_DELETION_CAP
+            || (!self.deferred_imap_acks.is_empty()
+                && last_flush.elapsed() >= RESIDENT_FLUSH_INTERVAL)
+            || (!pending.is_empty() && last_flush.elapsed() >= RESIDENT_FLUSH_INTERVAL)
+    }
 }
 
 fn completion_backfill_checkpoint(scope: CursorScope, seen: u64) -> BackfillCheckpoint {
@@ -606,6 +808,21 @@ fn completion_backfill_checkpoint(scope: CursorScope, seen: u64) -> BackfillChec
 struct PendingDeletions {
     removed: HashSet<String>,
     live: HashSet<String>,
+}
+
+impl PendingDeletions {
+    fn clear(&mut self) {
+        self.removed.clear();
+        self.live.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.removed.is_empty() && self.live.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.removed.len().saturating_add(self.live.len())
+    }
 }
 
 fn is_email_scope(scope: &CursorScope) -> bool {

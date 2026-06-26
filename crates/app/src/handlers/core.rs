@@ -1097,8 +1097,10 @@ impl ReadyApp {
         // action-pipeline concern.
         //
         // JMAP push setup also used to run here; as of Phase 4 it runs
-        // Service-side from a post-`boot.ready` runtime task in
-        // `dispatch.rs::spawn_post_ready_push_startup`. The
+        // Service-side from a post-`boot.ready` task in
+        // `dispatch/post_ready.rs::spawn_post_ready_push_startup`, which
+        // starts the resident sync engine's ingress and attaches
+        // accounts (the engine owns the per-account push bridges). The
         // `sync.start_account` IPC piggybacks push setup for newly
         // added accounts (Phase 4 task 6).
         Task::batch([

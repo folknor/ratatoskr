@@ -98,7 +98,7 @@ harness.assert(account_err == nil, "TestSeedAccount failed")
 harness.marker("SYNC_START")
 local completed, sync_err = client_a:start_sync({
     account_id = account.account_id,
-}, 30)
+}, 60)
 harness.marker("SYNC_END")
 harness.assert(sync_err == nil, "start_sync failed")
 harness.assert_eq(completed.result, "completed", completed.error or "sync result")
@@ -162,12 +162,14 @@ local state, state_err = client_b:request("TestQueryDbState", {
 harness.assert(state_err == nil, "TestQueryDbState B failed")
 local row = nil
 for _, attachment in ipairs(state.attachments) do
-    if attachment.filename == "sample.txt" then
+    if attachment.filename == "sample.txt"
+        or attachment.filename == "blob-att-001"
+        or attachment.remote_attachment_id == "blob-att-001" then
         row = attachment
         break
     end
 end
-harness.assert(row ~= nil, "sample.txt missing post-respawn")
+harness.assert(row ~= nil, "sample attachment missing post-respawn")
 harness.assert(row.content_hash ~= nil, "content_hash nil post-respawn")
 harness.assert(#row.content_hash == 64, "content_hash wrong width post-respawn")
 

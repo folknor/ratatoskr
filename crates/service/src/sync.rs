@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crypto_key::SecretKey;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use service_api::{
     Notification, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId, SyncStartAck,
@@ -135,11 +136,10 @@ pub(crate) struct SyncRuntimeInner {
     pub(crate) body_write: BodyStoreWriteState,
     pub(crate) inline_write: InlineImageStoreWriteState,
     pub(crate) search_write: SearchWriteHandle,
-    pub(crate) encryption_key: SecretKey,
     pub(crate) notification_tx: NotificationSender,
     pub(crate) app_data_dir: PathBuf,
     pub(crate) service_generation: u32,
-    pub(crate) bifrost_engine: crate::bifrost::BifrostSyncEngine,
+    pub(crate) resident_engine: crate::bifrost::ResidentEngine,
     /// Attachments roadmap Phase 4: handle back to the boot state so
     /// `run_sync` can fire a post-sync prefetch sweep without going
     /// through provider-sync (which stays prefetch-ignorant). Held as
@@ -156,14 +156,37 @@ impl SyncRuntime {
         body_write: BodyStoreWriteState,
         inline_write: InlineImageStoreWriteState,
         search_write: SearchWriteHandle,
-        encryption_key: SecretKey,
+        encryption_key: &SecretKey,
         _progress: Arc<dyn ProgressReporter>,
         notification_tx: NotificationSender,
         app_data_dir: PathBuf,
         service_generation: u32,
-        bifrost_engine: crate::bifrost::BifrostSyncEngine,
+        bifrost_engine: &crate::bifrost::BifrostSyncEngine,
+        read_db: ReadDbState,
         boot_state: Arc<crate::boot::BootSharedState>,
     ) -> Self {
+        let mut encryption_key_bytes = [0u8; 32];
+        encryption_key_bytes.copy_from_slice(encryption_key.expose().as_slice());
+        let ingress = crate::bifrost::PushIngress::new(
+            bifrost_engine.engine().invalidation_sink(),
+            crate::bifrost::PushIngressConfig::from_env(),
+        );
+        let stores = crate::bifrost::BifrostConsumerStores {
+            db: db.clone(),
+            body_store: body_write.clone(),
+            inline_images: inline_write.clone(),
+            search: search_write.clone(),
+        };
+        let resident_engine = crate::bifrost::ResidentEngine::new(
+            bifrost_engine.clone(),
+            stores,
+            read_db,
+            db.clone(),
+            encryption_key_bytes,
+            ingress,
+            notification_tx.clone(),
+            service_generation,
+        );
         Self {
             inner: Arc::new(SyncRuntimeInner {
                 accounts: Mutex::new(HashMap::new()),
@@ -171,14 +194,25 @@ impl SyncRuntime {
                 body_write,
                 inline_write,
                 search_write,
-                encryption_key,
                 notification_tx,
                 app_data_dir,
                 service_generation,
-                bifrost_engine,
+                resident_engine,
                 boot_state,
             }),
         }
+    }
+
+    pub async fn start_resident_ingress(&self) {
+        self.inner.resident_engine.start_ingress().await;
+    }
+
+    pub async fn attach_resident_account(&self, account_id: &str) -> Result<(), String> {
+        self.inner.resident_engine.attach_account(account_id).await
+    }
+
+    pub async fn detach_resident_account(&self, account_id: &str) -> Result<(), String> {
+        self.inner.resident_engine.detach_account(account_id).await
     }
 
     /// Spawn a runner for `account_id` if one is not already in flight.
@@ -390,6 +424,10 @@ impl SyncRuntime {
             sup.await
                 .map_err(|e| format!("sync supervisor join: {e}"))?;
         }
+        self.inner
+            .resident_engine
+            .detach_account(account_id)
+            .await?;
         // Drop the entry so a re-insert after delete starts fresh.
         self.inner.accounts.lock().await.remove(account_id);
         Ok(())
@@ -415,6 +453,7 @@ impl SyncRuntime {
                 log::warn!("supervisor join error during shutdown: {e}");
             }
         }
+        self.inner.resident_engine.shutdown().await;
     }
 
     /// Internal accessor used by `service::handlers::sync` to surface
@@ -481,9 +520,6 @@ async fn run_sync(
     run_id: SyncRunId,
     cancellation_token: CancellationToken,
 ) {
-    let mut encryption_key_bytes = [0u8; 32];
-    encryption_key_bytes.copy_from_slice(inner.encryption_key.expose().as_slice());
-
     let read_db = inner
         .boot_state
         .read_db_state()
@@ -502,73 +538,11 @@ async fn run_sync(
             .await
     };
     let result = match provider_kind {
-        Ok(provider) if provider == "jmap" => {
-            crate::bifrost::engine_sync::sync_jmap_account(
-                &inner.bifrost_engine,
-                crate::bifrost::BifrostConsumerStores {
-                    db: inner.db.clone(),
-                    body_store: inner.body_write.clone(),
-                    inline_images: inner.inline_write.clone(),
-                    search: inner.search_write.clone(),
-                },
-                &read_db,
-                &inner.db,
-                &account_id,
-                encryption_key_bytes,
-                &cancellation_token,
-            )
-            .await
-        }
-        Ok(provider) if provider == "graph" => {
-            crate::bifrost::engine_sync::sync_graph_account(
-                &inner.bifrost_engine,
-                crate::bifrost::BifrostConsumerStores {
-                    db: inner.db.clone(),
-                    body_store: inner.body_write.clone(),
-                    inline_images: inner.inline_write.clone(),
-                    search: inner.search_write.clone(),
-                },
-                &read_db,
-                &inner.db,
-                &account_id,
-                encryption_key_bytes,
-                &cancellation_token,
-            )
-            .await
-        }
-        Ok(provider) if provider == "gmail_api" => {
-            crate::bifrost::engine_sync::sync_gmail_account(
-                &inner.bifrost_engine,
-                crate::bifrost::BifrostConsumerStores {
-                    db: inner.db.clone(),
-                    body_store: inner.body_write.clone(),
-                    inline_images: inner.inline_write.clone(),
-                    search: inner.search_write.clone(),
-                },
-                &read_db,
-                &inner.db,
-                &account_id,
-                encryption_key_bytes,
-                &cancellation_token,
-            )
-            .await
-        }
-        Ok(provider) if provider == "imap" => {
-            crate::bifrost::engine_sync::sync_imap_account(
-                &inner.bifrost_engine,
-                crate::bifrost::BifrostConsumerStores {
-                    db: inner.db.clone(),
-                    body_store: inner.body_write.clone(),
-                    inline_images: inner.inline_write.clone(),
-                    search: inner.search_write.clone(),
-                },
-                &read_db,
-                &inner.db,
-                &account_id,
-                encryption_key_bytes,
-                &cancellation_token,
-            )
-            .await
+        Ok(provider) if matches!(provider.as_str(), "jmap" | "graph" | "gmail_api" | "imap") => {
+            inner
+                .resident_engine
+                .kick_account(&account_id, &cancellation_token)
+                .await
         }
         Ok(provider) => Err(format!("unsupported sync provider: {provider}")),
         Err(error) => Err(error),

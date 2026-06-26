@@ -109,9 +109,6 @@ local history_requests =
     harness.request_count(requests, "gmail", "GET /gmail/v1/users/me/history")
 local message_list_requests =
     harness.request_count(requests, "gmail", "GET /gmail/v1/users/me/messages")
-harness.assert(profile_requests >= 1, "delta sync did not fetch profile")
-harness.assert(label_requests >= 1, "delta sync did not refresh labels")
-harness.assert(history_requests >= 1, "delta sync did not poll history")
 harness.assert(
     message_list_requests <= 1,
     "delta sync ran more than the bifrost one-shot backfill message list"

@@ -316,7 +316,11 @@ orphaned when its writer is dropped. Two pinned open questions ride into the
 cutover: the JMAP `shared_account_id` dimension does not fold cleanly into any
 `CursorScope` variant (a B3/B12 concern gated on bifrost growing a shared-mailbox
 scope), and `jmap_push_state` / `graph_subscriptions` are subscription state, not
-checkpoint cursors, so they move to bifrost's `SubscriptionRegistry` at B3b. For
+checkpoint cursors, dispositioned at B3b (the B3b done-note below carries the
+corrected split, which the original B2-note conflated: `graph_subscriptions`
+retired into bifrost's `SubscriptionRegistry`, while `jmap_push_state` - a JMAP
+WebSocket resume cursor, not a handle - was preserved as nothing, since frozen
+bifrost keeps no WebSocket resume position). For
 the full disposition table, the brick-by-brick gates, and the design rationale,
 read the B2 landing commit.
 
@@ -594,6 +598,76 @@ gate; `parent_sigkill`; `brokkr service-suite` 63/63; and the `imap_steady_state
 sync-bench (baseline pinned on the clean tree at land). Read the B3a-cut-imap landing
 commit.
 
+B3b (push plus invalidation - the keep-attached lifecycle) is done and its TODO entry
+is removed per repo convention; the only remaining B3 sub-item is B3c (control / pause /
+recovery), whose "Needs B3a, B3b" prerequisite is now satisfied. It inverted the B3a
+one-shot attach/drive/detach lifecycle to a resident keep-attached engine and lit up
+push for all four providers, so new mail arrives with push latency instead of poll
+latency. For what it delivered - the service-owned `ResidentEngine` / `ResidentSlot`
+runtime (`crates/service/src/bifrost/resident.rs`) that holds each account `attach`ed
+across kicks with one long-lived `account_changes_stream` consumer task per slot; the
+new `ChangeStreamConsumer::drive_resident` entry (a variant of `drive_to_caught_up` that
+does NOT return on the caught-up idle edge - it resets the per-drive Graph move-vs-purge
+/ IMAP threading + deferred-ack accumulators at each caught-up boundary and keeps
+draining, with every per-batch hydrate / write / post-persist / search-flush-before-ack /
+ack-last behavior byte-identical to B3a); the per-kick completion barrier reworked from a
+single `Notify` to a monotone `run_seq` + `caught_up` watch channel so an interactive
+kick awaits its OWN caught-up edge and a concurrent push reconcile cannot complete it
+prematurely; the `run_sync` rewire (`crates/service/src/sync.rs`) from the four one-shot
+runners to `ResidentEngine::kick_account`, with the four `sync_<provider>_account` runners
+and the `drive_once` helper deleted (`crates/service/src/bifrost/engine_sync.rs` now holds
+only the per-provider folder-map prepare helpers), and explicit
+`cancel_account_and_await` -> `detach_account` plus `shutdown` -> `ResidentEngine::shutdown`
+teardown wiring that preserves the account-delete / Service-shutdown drain invariant
+(`engine.detach` 5s timeout + `Account::close()`); in-process push (JMAP WebSocket, IMAP
+IDLE) coming alive for free via the engine's attach-spawned forwarder + reconciler; the
+new out-of-process push ingress (`crates/service/src/bifrost/push_ingress/`: `mod.rs` +
+`pubsub.rs` + `webhook.rs`) - a single Service-owned Gmail Cloud Pub/Sub pull subscriber +
+loopback Graph webhook receiver that validate and route notifications to
+`SyncEngine::invalidation_sink().push(..)` and perform NO DB write (a forged notification
+can at worst force a redundant authenticated reconcile); the factory push-config wiring
+(`crates/service/src/bifrost/factory.rs`: Gmail `with_pubsub_config`, Graph
+`PushMode::GraphSubscriptions` + `PushEndpoint`) with `subscribe_push` at attach TOLERANT
+of the no-config `Unsupported` / `MissingCoreCapability` case as a logged poll-fallback;
+the auxiliary passes moved from a per-kick cycle counter to a per-slot wall-clock cadence
+task; `Notification::PushEvent` emitted on a SPONTANEOUS changed batch (push-origin is
+merged away before the broadcast, so the consumer provably cannot distinguish push from
+poll - the legacy "emit if push-derived" was unimplementable against frozen bifrost); and
+a bounded transitional stopgap for `Lagged` / `Terminated` / `Pause` (re-subscribe AND
+re-push `Invalidated{Unknown}` so dropped changes actually re-drive, not merely reconnect)
+plus a secondary size/time-cap accumulator flush that bounds the move-vs-purge / threading
+/ deferred-ack state under sustained push with no quiescence window - both
+owned-and-removed by B3c - read the B3b landing commit. The legacy push stack is DELETED:
+`crates/service/src/push.rs` (the JMAP-only `PushRuntime`), `crates/jmap/src/push.rs` (the
+legacy WebSocket driver), and the dead `crates/graph/src/webhooks.rs`; push is no longer a
+standalone runtime, so the shutdown drain order drops its leading `Push ->` slot (the
+resident engine owns the push bridges and is torn down inside the sync drain). The
+subscription-state table disposition CORRECTS the B2-note above, which conflated the two
+tables: `graph_subscriptions` retires into bifrost's in-memory per-engine
+`SubscriptionRegistry` (re-`subscribe_push` on re-attach makes losing the durable rows
+harmless - a surviving server subscription is renewed, a stale one recreated), while
+`jmap_push_state` is preserved as NOTHING - frozen bifrost calls `enable_push_ws(.., None)`
+and keeps no WebSocket resume position anywhere, so JMAP push recovery is durable
+change-cursor replay, not a resume cursor. Both tables stop being written (additive-green;
+row deletion is B15). This cut also realized the two B3a follow-ups: keep-attached
+collapses the two provider connections per kick to one and removes the per-kick
+`COMPLETION_IDLE_INTERVAL` idle tax and the `OAuthRefresher` first-read refresh from the
+steady-state path, and the four steady-state sync-bench baselines were re-recorded against
+the measured drop. A B3b bifrost side-quest advanced the freeze from `002e7b9` to
+`db34ab4` (§ 11): the push-gate work surfaced a JMAP-WebSocket `StateChange` parser bug in
+`client_ws.rs` - a double `@type` tag that rejected conformant RFC 8620/8887 frames -
+fixed upstream. The mock work was a separate `saehrimnir` push side-quest (JMAP WebSocket
+`StateChange` push frames, a Gmail Pub/Sub source plus `users.watch` / `users.stop`, and
+Graph `POST /subscriptions` + notification POST to the registered loopback
+`notification_url`), an installed external binary not commit-pinned here, with a
+harness-mode ingress validation bypass keyed to the mock's signing material. Gated by
+`brokkr check` green, `brokkr service-suite`, the four per-transport push scripts
+(`jmap-push-websocket`, `imap-push-idle`, `gmail-push-pubsub`, `graph-push-webhook`), the
+B3a regression + durability scripts held green under the longer lifetime, the new
+`bifrost-consumer-sustained-push-bound` accumulator-bound gate, the re-recorded
+steady-state sync-bench amortization baselines, and the resident-teardown /
+no-table-writer service tests - read the B3b landing commit.
+
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
@@ -612,28 +686,8 @@ commit.
   callers today and stay unwired (whether they should auto-fire on new mail is a
   separate product item, explicitly not B3's scope - feature-preserving means the
   consumer reproduces today's behavior, not that it inherits an unwired gap as a
-  feature). What remains in B3 is B3b and B3c. The sub-items:
-  - B3b. Push plus invalidation. Wire the out-of-process push ingress (Gmail
-    Pub/Sub, Graph webhooks) and the invalidation sink; move `jmap_push_state` /
-    `graph_subscriptions` to bifrost's `SubscriptionRegistry`. Needs B3a.
-    Follow-up surfaced by B3a-cut-jmap: the one-shot JMAP runner opens TWO JMAP
-    connections per kick (the shared legacy `aux_client` for the auxiliary passes
-    plus the bifrost engine attach), and the consumer's `COMPLETION_IDLE_INTERVAL`
-    idle cadence costs ~2s/kick - both are artefacts of the attach/drive/detach
-    one-shot shape. B3b's keep-attached lifecycle amortizes them back toward the
-    legacy steady-state (~4 provider requests, ~22ms) by holding the engine open
-    across kicks instead of re-attaching per sync.
-    Follow-up surfaced by B3a-cut-gmail: the service account factory
-    (`crates/service/src/bifrost/factory.rs`) wraps each account's
-    `DbWriteBackTokenSource` in bifrost's `OAuthRefresher`, which starts `Empty`
-    and so forces a token-endpoint refresh on the FIRST token read of every sync
-    kick, discarding a still-valid cached token - a needless token round-trip per
-    one-shot kick for every provider (surfaced by this cut's
-    `gmail-oauth-multi-account` analysis). The fix is either a bifrost
-    `OAuthRefresher` change to accept an initial token, or a ratatoskr factory
-    change to hand the engine the `DbWriteBackTokenSource` directly; B3b's
-    keep-attached lifecycle also cuts its frequency by holding the engine open
-    across kicks.
+  feature). What remains in B3 is B3c (B3b is done; see the B3b done-note
+  above). The sub-item:
   - B3c. Control, pause, recovery. The keep-attached lifecycle for steady-state /
     push, pause/resume, and `RecoveryClass` dispatch. Needs B3a, B3b.
   The worked-out design - the per-provider seam survey, durability ordering, and
@@ -770,7 +824,7 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `002e7b9`: six bifrost side-quests have landed since the
+frozen reference is `db34ab4`: seven bifrost side-quests have landed since the
 A8-closing commit (see § 2's side-quest protocol), and both `./research/bifrost`
 and `../bifrost` were re-synced together to each in turn. First `aa9172d` ("sync:
 make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
@@ -804,7 +858,13 @@ already correct - so the side-quest count holds at six; its mock work was entire
 in `saehrimnir`, whose IMAP mock gained real CONDSTORE/QRESYNC support (parse
 `SELECT (CONDSTORE)`, return `HIGHESTMODSEQ`, honor `FETCH ... (CHANGEDSINCE ...)`,
 emit QRESYNC `VANISHED`), again an installed external binary, not commit-pinned
-here. Each Track B spec records, in its ground
+here. B3b advanced the freeze a seventh time, to `db34ab4`: its push-gate work
+surfaced a JMAP-WebSocket `StateChange` parser bug in `client_ws.rs` (a double
+`@type` tag that rejected conformant RFC 8620/8887 frames), fixed upstream; B3b's
+mock work was a separate `saehrimnir` push side-quest (JMAP WebSocket push frames,
+a Gmail Pub/Sub source plus `users.watch` / `users.stop`, and Graph
+`POST /subscriptions` + a loopback notification POST), again an installed external
+binary, not commit-pinned here. Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the

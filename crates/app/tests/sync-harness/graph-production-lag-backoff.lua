@@ -1,14 +1,14 @@
--- description: Production IMAP kick survives forced lag via resident full-reconcile re-push
+-- description: Production Graph kick survives forced lag via resident full-reconcile re-push
 -- expected: pass
--- fixture: imap-small.toml
--- protocol: imap
+-- fixture: jmap-small.toml
+-- protocol: graph
 -- ceiling: 120s
 
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 harness.clear_mock_requests(admin_endpoint)
 
-local dir = harness.data_dir("sync_imap_production_lag_backoff")
+local dir = harness.data_dir("sync_graph_production_lag_repush")
 local client, err = harness.spawn(dir)
 harness.assert(err == nil, "spawn failed")
 
@@ -17,10 +17,10 @@ harness.assert(ready_err == nil, "boot.ready failed")
 harness.assert(ready.ready, "boot.ready returned ready=false")
 
 local account, account_err = client:request("TestSeedAccount", {
-    email = "sync-imap-lag-backoff@example.test",
-    display_name = "Sync IMAP Lag Backoff",
-    account_name = "Sync IMAP Lag Backoff",
-    provider = "imap",
+    email = "sync-graph-lag-repush@example.test",
+    display_name = "Sync Graph Lag Repush",
+    account_name = "Sync Graph Lag Repush",
+    provider = "graph",
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 

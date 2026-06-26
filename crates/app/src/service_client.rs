@@ -338,6 +338,7 @@ struct RespawnConfig {
     binary_path: PathBuf,
     app_data_dir: PathBuf,
     extra_args: Mutex<Vec<String>>,
+    env_overrides: Vec<(String, String)>,
     trace: Option<Arc<ServiceTraceSink>>,
     spawn_event_tx: mpsc::Sender<SpawnEvent>,
     /// Captured first `BootReadyResponse` for the schema-version sanity
@@ -760,11 +761,20 @@ impl ServiceClient {
         binary: PathBuf,
         app_data_dir: PathBuf,
         extra_args: Vec<String>,
+        env_overrides: Vec<(String, String)>,
         trace: Option<Arc<ServiceTraceSink>>,
     ) -> mpsc::Receiver<SpawnEvent> {
         let (tx, rx) = mpsc::channel(8);
         tokio::spawn(async move {
-            run_spawn_flow_with_trace(binary, app_data_dir, extra_args, tx, trace).await;
+            run_spawn_flow_with_env_and_trace(
+                binary,
+                app_data_dir,
+                extra_args,
+                env_overrides,
+                tx,
+                trace,
+            )
+            .await;
         });
         rx
     }
@@ -789,9 +799,18 @@ impl ServiceClient {
         binary: &Path,
         app_data_dir: &Path,
         extra_args: &[&str],
+        env_overrides: &[(String, String)],
         trace: Option<Arc<ServiceTraceSink>>,
     ) -> Result<Arc<Self>, ClientError> {
-        Self::spawn_inner_with_trace(binary, app_data_dir, extra_args, None, trace).await
+        Self::spawn_inner_with_env_and_trace(
+            binary,
+            app_data_dir,
+            extra_args,
+            env_overrides,
+            None,
+            trace,
+        )
+        .await
     }
 
     async fn spawn_inner(
@@ -807,6 +826,25 @@ impl ServiceClient {
         binary: &Path,
         app_data_dir: &Path,
         extra_args: &[&str],
+        respawn_config: Option<RespawnConfig>,
+        trace: Option<Arc<ServiceTraceSink>>,
+    ) -> Result<Arc<Self>, ClientError> {
+        Self::spawn_inner_with_env_and_trace(
+            binary,
+            app_data_dir,
+            extra_args,
+            &[],
+            respawn_config,
+            trace,
+        )
+        .await
+    }
+
+    async fn spawn_inner_with_env_and_trace(
+        binary: &Path,
+        app_data_dir: &Path,
+        extra_args: &[&str],
+        env_overrides: &[(String, String)],
         respawn_config: Option<RespawnConfig>,
         trace: Option<Arc<ServiceTraceSink>>,
     ) -> Result<Arc<Self>, ClientError> {
@@ -851,6 +889,7 @@ impl ServiceClient {
             binary,
             app_data_dir,
             extra_args,
+            env_overrides,
             &client._process_guard,
             Arc::clone(&pending),
             Arc::clone(&next_id),
@@ -2469,6 +2508,7 @@ impl ServiceClient {
             &respawn.binary_path,
             &respawn.app_data_dir,
             &extra_arg_refs,
+            &respawn.env_overrides,
             &self._process_guard,
             Arc::clone(&self.pending),
             Arc::clone(&self.next_id),
@@ -2855,6 +2895,7 @@ async fn launch_subprocess(
     binary: &Path,
     app_data_dir: &Path,
     extra_args: &[&str],
+    env_overrides: &[(String, String)],
     process_guard: &process_lifetime::ProcessGuard,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
     next_id: Arc<AtomicU64>,
@@ -2870,6 +2911,9 @@ async fn launch_subprocess(
         .arg(app_data_dir);
     for arg in extra_args {
         command.arg(arg);
+    }
+    for (key, value) in env_overrides {
+        command.env(key, value);
     }
     command
         .stdin(std::process::Stdio::piped())
@@ -2946,20 +2990,34 @@ async fn run_spawn_flow_with_trace(
     tx: mpsc::Sender<SpawnEvent>,
     trace: Option<Arc<ServiceTraceSink>>,
 ) {
+    run_spawn_flow_with_env_and_trace(binary, app_data_dir, extra_args, Vec::new(), tx, trace)
+        .await;
+}
+
+async fn run_spawn_flow_with_env_and_trace(
+    binary: PathBuf,
+    app_data_dir: PathBuf,
+    extra_args: Vec<String>,
+    env_overrides: Vec<(String, String)>,
+    tx: mpsc::Sender<SpawnEvent>,
+    trace: Option<Arc<ServiceTraceSink>>,
+) {
     let respawn_config = RespawnConfig {
         binary_path: binary.clone(),
         app_data_dir: app_data_dir.clone(),
         extra_args: Mutex::new(extra_args.clone()),
+        env_overrides: env_overrides.clone(),
         trace: trace.clone(),
         spawn_event_tx: tx.clone(),
         first_boot_ready: Mutex::new(None),
     };
 
     let extra_arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
-    let client = match ServiceClient::spawn_inner_with_trace(
+    let client = match ServiceClient::spawn_inner_with_env_and_trace(
         &binary,
         &app_data_dir,
         &extra_arg_refs,
+        &env_overrides,
         Some(respawn_config),
         trace,
     )

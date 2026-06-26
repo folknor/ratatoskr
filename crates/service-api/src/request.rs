@@ -290,6 +290,8 @@ pub struct TestBifrostAttachParams {
     pub provider_kind: TestBifrostProviderKind,
     #[serde(default)]
     pub detach_on_complete: bool,
+    #[serde(default)]
+    pub resident: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -304,6 +306,8 @@ pub struct TestBifrostAttachAck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestBifrostSyntheticMessage {
     pub id: String,
+    #[serde(default)]
+    pub change_kind: TestBifrostChangeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
     pub subject: String,
@@ -318,6 +322,17 @@ pub struct TestBifrostSyntheticMessage {
     pub keywords: Vec<String>,
     #[serde(default)]
     pub raw_body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestBifrostChangeKind {
+    #[default]
+    Created,
+    Updated,
+    Destroyed,
+    ScopeAdded,
+    ScopeRemoved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -340,6 +355,12 @@ pub struct TestBifrostInjectBatchParams {
     pub messages: Vec<TestBifrostSyntheticMessage>,
     #[serde(default)]
     pub item_outcomes: Vec<TestBifrostItemOutcome>,
+    #[serde(default = "default_true")]
+    pub await_ack: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -362,7 +383,7 @@ pub enum TestBifrostHook {
     CrashAfterAckNoSentinel,
     CrashBeforeDriveEndThreading,
     /// Force the consumer drive to report sustained lag, exercising the
-    /// production bounded lag-backoff loop (B3a-cut-jmap 6.4).
+    /// resident re-subscribe plus full-reconcile re-push stopgap.
     ForceLag,
 }
 
@@ -405,6 +426,14 @@ pub struct TestBifrostProbeAck {
     /// empty-stream edge specifically) without a real provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_edge: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_forced_flushes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_max_deferred_acks: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_max_pending_deletions: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_batches_acked: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

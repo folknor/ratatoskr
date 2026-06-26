@@ -35,8 +35,8 @@ pub(crate) struct Subsystems {
     /// Holds an `out_tx` clone directly, so it MUST be aborted before
     /// `drop(out_tx)` or the writer task's EOF wait pins forever.
     pub action_worker: JoinHandle<()>,
-    /// Post-ready: builds + installs `PushRuntime` once boot.ready
-    /// resolves, then spawns per-account starts. Idempotent on shutdown.
+    /// Post-ready: starts resident push ingress and attaches accounts.
+    /// Idempotent on shutdown.
     pub push_startup: Option<JoinHandle<()>>,
     /// Post-ready: builds + installs `CalendarRuntime`. Kick-driven, so
     /// it does not iterate accounts.
@@ -87,7 +87,6 @@ impl Subsystems {
         boot_state.shutdown_token().cancel();
 
         boot_state.mark_shutting_down();
-        drain_push(boot_state).await;
         drain_calendar(boot_state).await;
         drain_sync(boot_state).await;
         drain_prefetch(boot_state).await;
@@ -165,13 +164,6 @@ impl Subsystems {
         self.abort_boot().await;
         self.abort_startup_tasks().await;
         abort_and_await(self.action_worker, "action_worker").await;
-    }
-}
-
-async fn drain_push(boot_state: &Arc<BootSharedState>) {
-    if let Some(runtime) = boot_state.take_push_runtime() {
-        runtime.shutdown().await;
-        drop(runtime);
     }
 }
 

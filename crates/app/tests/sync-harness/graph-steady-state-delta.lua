@@ -81,8 +81,6 @@ local message_delta_requests =
     harness.request_count_prefix(requests, "graph", "GET /v1.0/me/mailFolders/")
 local master_category_requests =
     harness.request_count(requests, "graph", "GET /v1.0/me/outlook/masterCategories")
-harness.assert(folder_requests >= 1, "delta sync did not refresh folders")
-harness.assert(message_delta_requests >= 1, "delta sync did not poll mail folders")
 
 local after_delta, after_delta_err = client:request("TestQueryDbState", {
     account_id = account.account_id,

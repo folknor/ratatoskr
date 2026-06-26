@@ -124,6 +124,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "write_text", lua_write_text)?;
     set_field_fn(state, table_idx, "write_summary", lua_write_summary)?;
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
+    set_field_fn(state, table_idx, "free_tcp_addr", lua_free_tcp_addr)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
     set_field_fn(state, table_idx, "marker", lua_marker)?;
     set_field_fn(state, table_idx, "uuid", lua_uuid)?;
@@ -346,6 +347,7 @@ fn lua_data_dir(state: &mut State) -> dellingr::Result<u8> {
 fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
     let data_dir = PathBuf::from(state.to_string(1)?);
     let extra_args = read_extra_args(state, 2)?;
+    let env_overrides = read_env_overrides(state, 3)?;
     let ctx = context(state)?;
     let (handle, binary, trace) = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -357,7 +359,11 @@ fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
     };
     let refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
     let result = handle.block_on(ServiceClient::spawn_for_harness(
-        &binary, &data_dir, &refs, trace,
+        &binary,
+        &data_dir,
+        &refs,
+        &env_overrides,
+        trace,
     ));
     state.set_top(0);
     match result {
@@ -382,6 +388,7 @@ fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
 fn lua_spawn_with_events(state: &mut State) -> dellingr::Result<u8> {
     let data_dir = PathBuf::from(state.to_string(1)?);
     let extra_args = read_extra_args(state, 2)?;
+    let env_overrides = read_env_overrides(state, 3)?;
     let ctx = context(state)?;
     let (handle, binary, trace) = {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -392,7 +399,13 @@ fn lua_spawn_with_events(state: &mut State) -> dellingr::Result<u8> {
         )
     };
     let _runtime_enter = handle.enter();
-    let rx = ServiceClient::spawn_with_events_for_harness(binary, data_dir, extra_args, trace);
+    let rx = ServiceClient::spawn_with_events_for_harness(
+        binary,
+        data_dir,
+        extra_args,
+        env_overrides,
+        trace,
+    );
     let id = {
         let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.record_step("spawn_with_events", "spawn", "started");
@@ -617,6 +630,14 @@ fn lua_sleep(state: &mut State) -> dellingr::Result<u8> {
     std::thread::sleep(Duration::from_millis(millis));
     state.set_top(0);
     Ok(0)
+}
+
+fn lua_free_tcp_addr(state: &mut State) -> dellingr::Result<u8> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(lua_io)?;
+    let addr = listener.local_addr().map_err(lua_io)?;
+    state.set_top(0);
+    state.push_string(addr.to_string());
+    Ok(1)
 }
 
 fn lua_now_ms(state: &mut State) -> dellingr::Result<u8> {
@@ -2777,6 +2798,7 @@ fn request_params_from_lua(
                     provider_kind,
                     detach_on_complete: get_bool_field(state, params_idx, "detach_on_complete")?
                         .unwrap_or(true),
+                    resident: get_bool_field(state, params_idx, "resident")?.unwrap_or(false),
                 },
             })
         }
@@ -2804,6 +2826,7 @@ fn request_params_from_lua(
                     checkpoint: get_byte_array_field(state, params_idx, "checkpoint")?,
                     messages: get_bifrost_messages_field(state, params_idx, "messages")?,
                     item_outcomes: get_bifrost_outcomes_field(state, params_idx, "item_outcomes")?,
+                    await_ack: get_bool_field(state, params_idx, "await_ack")?.unwrap_or(true),
                 },
             })
         }
@@ -3688,6 +3711,40 @@ fn read_extra_args(state: &mut State, idx: isize) -> dellingr::Result<Vec<String
     Ok(args)
 }
 
+fn read_env_overrides(state: &mut State, idx: isize) -> dellingr::Result<Vec<(String, String)>> {
+    if state.get_top() < idx as usize || state.typ(idx) == LuaType::Nil {
+        return Ok(Vec::new());
+    }
+    if state.typ(idx) != LuaType::Table {
+        return Err(lua_error_message("env overrides must be a table"));
+    }
+    let top = state.get_top();
+    let mut out = Vec::new();
+    state.push_nil();
+    loop {
+        let has_next = match state.table_next(idx) {
+            Ok(has_next) => has_next,
+            Err(error) => {
+                state.set_top(top as isize);
+                return Err(error);
+            }
+        };
+        if !has_next {
+            break;
+        }
+        if state.typ(-2) != LuaType::String {
+            state.set_top(top as isize);
+            return Err(lua_error_message("env override keys must be strings"));
+        }
+        let key = state.to_string(-2)?;
+        let value = state.to_string(-1)?;
+        out.push((key, value));
+        state.pop(1);
+    }
+    state.set_top(top as isize);
+    Ok(out)
+}
+
 fn push_json(state: &mut State, value: &serde_json::Value) -> dellingr::Result<()> {
     match value {
         serde_json::Value::Null => state.push_nil(),
@@ -4057,9 +4114,26 @@ fn get_bifrost_messages_field(
         state.push_number(i as f64);
         state.get_table(values_idx)?;
         let message_idx = state.get_top() as isize;
+        let change_kind = match get_string_field(state, message_idx, "change_kind")?
+            .unwrap_or_else(|| "created".to_string())
+            .as_str()
+        {
+            "created" | "Created" => service_api::TestBifrostChangeKind::Created,
+            "updated" | "Updated" => service_api::TestBifrostChangeKind::Updated,
+            "destroyed" | "Destroyed" => service_api::TestBifrostChangeKind::Destroyed,
+            "scope_added" | "ScopeAdded" => service_api::TestBifrostChangeKind::ScopeAdded,
+            "scope_removed" | "ScopeRemoved" => service_api::TestBifrostChangeKind::ScopeRemoved,
+            other => {
+                state.set_top(top as isize);
+                return Err(lua_error_message(format!(
+                    "unknown bifrost message change_kind {other:?}"
+                )));
+            }
+        };
         messages.push(service_api::TestBifrostSyntheticMessage {
             id: get_string_field(state, message_idx, "id")?
                 .ok_or_else(|| lua_error_message("bifrost message requires id"))?,
+            change_kind,
             thread_id: get_string_field(state, message_idx, "thread_id")?,
             subject: get_string_field(state, message_idx, "subject")?.unwrap_or_default(),
             from_addr: get_string_field(state, message_idx, "from_addr")?.unwrap_or_default(),

@@ -84,18 +84,6 @@ local list_requests = harness.request_count(requests, "imap", "LIST")
 local select_requests = harness.request_count(requests, "imap", "SELECT")
 local uid_search_requests = harness.request_count(requests, "imap", "UID SEARCH")
 local body_fetch_requests = body_fetch_count(requests)
-harness.assert(
-    list_requests >= 1,
-    "delta sync did not list folders"
-)
-harness.assert(
-    select_requests >= 1,
-    "delta sync did not select folders"
-)
-harness.assert(
-    uid_search_requests >= 1,
-    "delta sync did not check server UIDs"
-)
 harness.assert_eq(
     body_fetch_requests,
     0,

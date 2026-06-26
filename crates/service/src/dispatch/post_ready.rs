@@ -1,8 +1,10 @@
-//! Tasks spawned at init time that park on `boot.ready` and then
-//! construct + install per-subsystem runtimes (push, calendar, extract,
-//! schema-rebuild). Each task holds an `out_tx` clone via the
-//! `NotificationSender` it eventually hands to the runtime; the
-//! shutdown drain is responsible for releasing those clones in order.
+//! Tasks spawned at init time that park on `boot.ready` and then bring
+//! up the per-subsystem post-ready work: the push task starts the
+//! resident sync engine's ingress and attaches accounts, while the
+//! calendar / extract / prefetch / schema-rebuild tasks construct +
+//! install their runtimes. Each task holds an `out_tx` clone via the
+//! `NotificationSender` it eventually hands on; the shutdown drain is
+//! responsible for releasing those clones in order.
 //!
 //! Moved verbatim from the old monolithic `dispatch.rs` - no behaviour
 //! change in Phase 1 of the bulletproofing refactor.
@@ -11,31 +13,23 @@ use crate::boot;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// Phase 4 task 5: post-ready push startup task.
+/// Post-ready resident startup.
 ///
-/// Spawn a task that waits for `boot.ready`, then constructs a
-/// `PushRuntime` and starts a bridge per JMAP account. Per-account
-/// starts are themselves `tokio::spawn`'d inside `PushRuntime::start_account`,
-/// so a slow initial connect (TLS+HTTPS+OAuth refresh) for one account
-/// does not delay the others.
-///
-/// Push startup explicitly runs *after* `boot.ready` rather than as a
-/// boot phase: readiness must not depend on push setup work, and a
-/// missing JMAP server (network down at boot) must not block the
-/// splash transition. Per-account failure is log-and-continue.
+/// Starts ingress and attaches sync-capable accounts after `boot.ready` so
+/// readiness does not depend on provider network setup.
 pub(crate) fn spawn_post_ready_push_startup(
     boot_state: Arc<boot::BootSharedState>,
-    out_tx: mpsc::Sender<Vec<u8>>,
+    _out_tx: mpsc::Sender<Vec<u8>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         if boot_state.wait_for_ready().await.is_err() {
-            log::debug!("post-ready push startup: boot failed, skipping push setup");
+            log::debug!("post-ready resident startup: boot failed, skipping setup");
             return;
         }
 
         let Some(sync_runtime) = boot_state.sync_runtime() else {
             log::error!(
-                "post-ready push startup: SyncRuntime missing after boot.ready - programming error",
+                "post-ready resident startup: SyncRuntime missing after boot.ready - programming error",
             );
             return;
         };
@@ -43,81 +37,53 @@ pub(crate) fn spawn_post_ready_push_startup(
             Ok(db_state) => db_state,
             Err(error) => {
                 log::error!(
-                    "post-ready push startup: db_conn missing after boot.ready - programming error: {error}"
+                    "post-ready resident startup: db_conn missing after boot.ready - programming error: {error}"
                 );
                 return;
             }
         };
-        let Some(key_bytes) = boot_state.encryption_key() else {
-            log::error!(
-                "post-ready push startup: encryption key missing after boot.ready - programming error",
-            );
-            return;
-        };
-        let encryption_key = crypto_key::SecretKey::from_bytes(key_bytes);
-        let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
+        sync_runtime.start_resident_ingress().await;
 
-        let push_runtime = Arc::new(crate::push::PushRuntime::new(
-            boot_state
-                .read_db_state()
-                .expect("read db installed after boot.ready"),
-            db_state.clone(),
-            encryption_key,
-            sync_runtime,
-            notification_tx,
-            0,
-        ));
-        boot_state.install_push_runtime(Arc::clone(&push_runtime));
-
-        let jmap_account_ids: Result<Vec<String>, String> = db_state
+        let resident_account_ids: Result<Vec<String>, String> = db_state
             .with_write(|conn| {
                 let mut stmt = conn
-                    .prepare("SELECT id FROM accounts WHERE provider = 'jmap'")
-                    .map_err(|e| format!("prepare jmap accounts query: {e}"))?;
+                    .prepare(
+                        "SELECT id FROM accounts \
+                         WHERE provider IN ('jmap', 'graph', 'gmail_api', 'imap') \
+                           AND COALESCE(is_deleting, 0) = 0",
+                    )
+                    .map_err(|e| format!("prepare resident accounts query: {e}"))?;
                 let ids = stmt
                     .query_map([], |row| row.get::<_, String>(0))
-                    .map_err(|e| format!("query jmap accounts: {e}"))?
+                    .map_err(|e| format!("query resident accounts: {e}"))?
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| format!("collect jmap account ids: {e}"))?;
+                    .map_err(|e| format!("collect resident account ids: {e}"))?;
                 Ok(ids)
             })
             .await;
 
-        let account_ids = match jmap_account_ids {
+        let account_ids = match resident_account_ids {
             Ok(ids) => ids,
             Err(e) => {
-                log::warn!("post-ready push startup: failed to enumerate JMAP accounts: {e}");
+                log::warn!("post-ready resident startup: failed to enumerate accounts: {e}");
                 return;
             }
         };
 
-        // Phase 8-3: discover dirty accounts via the Phase 3 sync-marker
-        // signal. JMAP accounts in this set get a fresh-start push
-        // (push_state cleared) so the server delivers `Initial` rather
-        // than attempting to resume a cursor that may be ahead of the
-        // local DB. Bounded one-time file-listing; no-op on clean boot.
-        let app_data_dir = boot_state.app_data_dir().to_path_buf();
-        let dirty: std::collections::HashSet<String> =
-            crate::startup_invariants::discover_dirty_accounts(&app_data_dir)
-                .await
-                .into_iter()
-                .map(|d| d.account_id)
-                .collect();
-
         log::info!(
-            "post-ready push startup: starting bridges for {} JMAP account(s) ({} dirty)",
-            account_ids.len(),
-            account_ids.iter().filter(|id| dirty.contains(*id)).count()
+            "post-ready resident startup: attaching {} account(s)",
+            account_ids.len()
         );
         for account_id in account_ids {
-            let push_runtime = Arc::clone(&push_runtime);
-            let fresh_start = dirty.contains(&account_id);
+            let sync_runtime = Arc::clone(&sync_runtime);
             tokio::spawn(async move {
-                if let Err(e) = push_runtime
-                    .start_account(account_id.clone(), fresh_start)
+                if let Err(e) = sync_runtime
+                    .inner()
+                    .resident_engine
+                    .attach_account(&account_id)
                     .await
                 {
-                    log::warn!("[push] start_account({account_id}) failed: {e}");
+                    log::warn!("post-ready resident startup: attach {account_id} failed: {e}");
                 }
             });
         }

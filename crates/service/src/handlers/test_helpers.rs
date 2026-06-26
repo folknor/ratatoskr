@@ -10,7 +10,7 @@ use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 use service_api::{
     HealthPingResponse, ServiceError, TestBifrostArmHookAck, TestBifrostArmHookParams,
-    TestBifrostAttachAck, TestBifrostAttachParams, TestBifrostDurableCursor,
+    TestBifrostAttachAck, TestBifrostAttachParams, TestBifrostChangeKind, TestBifrostDurableCursor,
     TestBifrostFactoryOpenAck, TestBifrostFactoryOpenParams, TestBifrostHook,
     TestBifrostInjectBatchAck, TestBifrostInjectBatchParams, TestBifrostItemOutcome,
     TestBifrostProbeAck, TestBifrostProbeParams, TestBifrostProviderKind, TestCounterReadAck,
@@ -37,6 +37,9 @@ static BIFROST_HOOKS: OnceLock<Arc<crate::bifrost::ConsumerHookRegistry>> = Once
 static BIFROST_SESSIONS: OnceLock<std::sync::Mutex<HashMap<u64, Arc<BifrostTestSession>>>> =
     OnceLock::new();
 static NEXT_BIFROST_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+static BIFROST_RESIDENT_TELEMETRY: OnceLock<
+    std::sync::Mutex<HashMap<String, Arc<crate::bifrost::ResidentFlushTelemetry>>>,
+> = OnceLock::new();
 
 struct BifrostTestSession {
     account_id: String,
@@ -67,6 +70,11 @@ pub(crate) fn bifrost_hooks() -> Arc<crate::bifrost::ConsumerHookRegistry> {
 
 fn bifrost_sessions() -> &'static std::sync::Mutex<HashMap<u64, Arc<BifrostTestSession>>> {
     BIFROST_SESSIONS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn bifrost_resident_telemetry()
+-> &'static std::sync::Mutex<HashMap<String, Arc<crate::bifrost::ResidentFlushTelemetry>>> {
+    BIFROST_RESIDENT_TELEMETRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
 pub(super) async fn panic_handle() -> Result<Value, ServiceError> {
@@ -350,7 +358,13 @@ pub(super) async fn bifrost_attach_handle(
     // capacity smaller than the flood exercises identically; production
     // fidelity of the exact overflow threshold is not what the gate pins.
     const INJECT_CHANNEL_CAPACITY: usize = 16;
-    let (inject_tx, inject_rx) = broadcast::channel(INJECT_CHANNEL_CAPACITY);
+    const RESIDENT_INJECT_CHANNEL_CAPACITY: usize = 8192;
+    let inject_capacity = if params.resident {
+        RESIDENT_INJECT_CHANNEL_CAPACITY
+    } else {
+        INJECT_CHANNEL_CAPACITY
+    };
+    let (inject_tx, inject_rx) = broadcast::channel(inject_capacity);
     let mut consumer = crate::bifrost::ChangeStreamConsumer::new(
         harness.engine(),
         account_id.clone(),
@@ -362,20 +376,49 @@ pub(super) async fn bifrost_attach_handle(
     let completion_edge = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
         let task_edge = Arc::clone(&completion_edge);
-        tokio::spawn(async move {
-            match consumer.drive_injected_stream(inject_rx).await {
-                Ok(report) => {
-                    if report.completed {
-                        // Surface the one-shot completion edge (spec 4.1.2)
-                        // - this is the only observation of the empty-stream
-                        // "completes immediately" case, which has no durable
-                        // side effect for a probe to read otherwise.
-                        task_edge.store(true, Ordering::Relaxed);
-                    }
+        if params.resident {
+            let telemetry = Arc::new(crate::bifrost::ResidentFlushTelemetry::default());
+            bifrost_resident_telemetry()
+                .lock()
+                .map_err(|error| {
+                    ServiceError::Internal(format!("bifrost resident telemetry lock: {error}"))
+                })?
+                .insert(params.account_id.clone(), Arc::clone(&telemetry));
+            tokio::spawn(async move {
+                let result = consumer
+                    .drive_resident_injected_stream(
+                        inject_rx,
+                        move |report| {
+                            let task_edge = Arc::clone(&task_edge);
+                            async move {
+                                if report.completed {
+                                    task_edge.store(true, Ordering::Relaxed);
+                                }
+                            }
+                        },
+                        Some(telemetry),
+                    )
+                    .await;
+                if let Err(error) = result {
+                    log::warn!("test bifrost resident injected consumer exited: {error}");
                 }
-                Err(error) => log::warn!("test bifrost injected consumer exited: {error}"),
-            }
-        });
+            });
+        } else {
+            tokio::spawn(async move {
+                match consumer.drive_injected_stream(inject_rx).await {
+                    Ok(report) => {
+                        if report.completed {
+                            // Surface the one-shot completion edge (spec 4.1.2)
+                            // - this is the only observation of the empty-stream
+                            // "completes immediately" case, which has no durable
+                            // side effect for a probe to read otherwise.
+                            task_edge.store(true, Ordering::Relaxed);
+                        }
+                    }
+                    Err(error) => log::warn!("test bifrost injected consumer exited: {error}"),
+                }
+            });
+        }
     }
     bifrost_completion()
         .lock()
@@ -432,6 +475,14 @@ pub(super) async fn bifrost_inject_batch_handle(
         .iter()
         .enumerate()
         .map(|(index, message)| {
+            let object_kind = match message.change_kind {
+                TestBifrostChangeKind::Created => bifrost_types::ObjectChangeKind::Created,
+                TestBifrostChangeKind::Updated => bifrost_types::ObjectChangeKind::Updated,
+                TestBifrostChangeKind::Destroyed => bifrost_types::ObjectChangeKind::Destroyed,
+                TestBifrostChangeKind::ScopeAdded | TestBifrostChangeKind::ScopeRemoved => {
+                    bifrost_types::ObjectChangeKind::Created
+                }
+            };
             let forced_outcome = params
                 .item_outcomes
                 .get(index)
@@ -455,25 +506,49 @@ pub(super) async fn bifrost_inject_batch_handle(
                 reaction_emoji: None,
             };
             crate::bifrost::consumer::hydrate::encode_synthetic_message(&synthetic).map(|id| {
-                bifrost_types::Change::ObjectChange(bifrost_types::ObjectChange {
-                    id: bifrost_types::ObjectId(id),
-                    kind: bifrost_types::ObjectChangeKind::Created,
-                })
+                match message.change_kind {
+                    TestBifrostChangeKind::ScopeAdded => {
+                        bifrost_types::Change::ScopeChange(bifrost_types::ScopeChange {
+                            id: bifrost_types::ObjectId(id),
+                            membership: bifrost_types::MembershipScope::Folder(
+                                bifrost_types::FolderId("INBOX".to_string()),
+                            ),
+                            kind: bifrost_types::ScopeChangeKind::Added,
+                        })
+                    }
+                    TestBifrostChangeKind::ScopeRemoved => {
+                        bifrost_types::Change::ScopeChange(bifrost_types::ScopeChange {
+                            id: bifrost_types::ObjectId(id),
+                            membership: bifrost_types::MembershipScope::Folder(
+                                bifrost_types::FolderId("INBOX".to_string()),
+                            ),
+                            kind: bifrost_types::ScopeChangeKind::Removed,
+                        })
+                    }
+                    _ => bifrost_types::Change::ObjectChange(bifrost_types::ObjectChange {
+                        id: bifrost_types::ObjectId(id),
+                        kind: object_kind,
+                    }),
+                }
             })
         })
         .collect::<Result<Vec<_>, _>>()
         .map_err(ServiceError::Internal)?;
     let hydrated = params
-        .item_outcomes
+        .messages
         .iter()
-        .filter(|outcome| !matches!(outcome, TestBifrostItemOutcome::Failed))
-        .count()
-        .max(
+        .zip(
             params
-                .messages
-                .len()
-                .saturating_sub(params.item_outcomes.len()),
-        );
+                .item_outcomes
+                .iter()
+                .copied()
+                .chain(std::iter::repeat(TestBifrostItemOutcome::Succeeded)),
+        )
+        .filter(|(message, outcome)| {
+            !matches!(message.change_kind, TestBifrostChangeKind::ScopeRemoved)
+                && !matches!(outcome, TestBifrostItemOutcome::Failed)
+        })
+        .count();
     let blocked = params
         .item_outcomes
         .iter()
@@ -505,8 +580,22 @@ pub(super) async fn bifrost_inject_batch_handle(
     session.inject_tx.send(event).map_err(|error| {
         ServiceError::Internal(format!("send bifrost synthetic batch: {error}"))
     })?;
-    wait_for_bifrost_messages(&session.db, &params.account_id, &params.messages).await?;
-    if let Some(blob) = &checkpoint_blob
+    let messages_to_wait_for = params
+        .messages
+        .iter()
+        .filter(|message| {
+            matches!(
+                message.change_kind,
+                TestBifrostChangeKind::Created
+                    | TestBifrostChangeKind::Updated
+                    | TestBifrostChangeKind::ScopeAdded
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    wait_for_bifrost_messages(&session.db, &params.account_id, &messages_to_wait_for).await?;
+    if params.await_ack
+        && let Some(blob) = &checkpoint_blob
         && !blocked
         && !ack_withheld_by_crash
     {
@@ -745,12 +834,23 @@ pub(super) async fn bifrost_probe_handle(
         .map_err(|error| ServiceError::Internal(format!("bifrost completion lock: {error}")))?
         .get(&params.account_id)
         .map(|edge| edge.load(Ordering::Relaxed));
+    let resident = bifrost_resident_telemetry()
+        .lock()
+        .map_err(|error| {
+            ServiceError::Internal(format!("bifrost resident telemetry lock: {error}"))
+        })?
+        .get(&params.account_id)
+        .map(|telemetry| telemetry.snapshot());
     serde_json::to_value(TestBifrostProbeAck {
         durable_cursor,
         times_sent_to,
         is_searchable: message_present,
         marker_rows: marker_rows.try_into().unwrap_or(u32::MAX),
         completion_edge,
+        resident_forced_flushes: resident.map(|snapshot| snapshot.forced_flushes),
+        resident_max_deferred_acks: resident.map(|snapshot| snapshot.max_deferred_acks),
+        resident_max_pending_deletions: resident.map(|snapshot| snapshot.max_pending_deletions),
+        resident_batches_acked: resident.map(|snapshot| snapshot.batches_acked),
     })
     .map_err(|error| ServiceError::Internal(error.to_string()))
 }

@@ -116,7 +116,9 @@ pub fn insert_attachments(tx: &WriteTxn<'_>, rows: &[AttachmentInsertRow]) -> Re
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO UPDATE SET \
                filename = ?4, mime_type = ?5, size = ?6, \
-               remote_attachment_id = ?7, content_hash = ?8, content_id = ?9, is_inline = ?10",
+               remote_attachment_id = ?7, \
+               content_hash = COALESCE(?8, content_hash), \
+               content_id = ?9, is_inline = ?10",
             params![
                 row.id,
                 row.message_id,
@@ -134,4 +136,80 @@ pub fn insert_attachments(tx: &WriteTxn<'_>, rows: &[AttachmentInsertRow]) -> Re
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AttachmentInsertRow, insert_attachments};
+    use crate::blob_hash::BlobHash;
+    use crate::db::WriteConn;
+
+    #[test]
+    fn attachment_upsert_does_not_clear_existing_content_hash_with_null() {
+        let raw = rusqlite::Connection::open_in_memory().expect("open db");
+        raw.execute_batch(
+            "CREATE TABLE attachments (
+                id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                filename TEXT,
+                mime_type TEXT,
+                size INTEGER,
+                remote_attachment_id TEXT,
+                content_hash BLOB,
+                content_id TEXT,
+                is_inline INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .expect("create schema");
+        let conn = WriteConn::from_raw(&raw);
+        let hash = BlobHash::from_bytes([7u8; 32]);
+
+        let tx = conn.transaction().expect("tx");
+        insert_attachments(
+            &tx,
+            &[AttachmentInsertRow {
+                id: "att-1".to_string(),
+                message_id: "msg-1".to_string(),
+                account_id: "acct-1".to_string(),
+                filename: Some("sample.txt".to_string()),
+                mime_type: Some("text/plain".to_string()),
+                size: Some(12),
+                remote_attachment_id: Some("remote-1".to_string()),
+                content_hash: Some(hash),
+                content_id: None,
+                is_inline: false,
+            }],
+        )
+        .expect("insert hashed attachment");
+        tx.commit().expect("commit");
+
+        let tx = conn.transaction().expect("tx");
+        insert_attachments(
+            &tx,
+            &[AttachmentInsertRow {
+                id: "att-1".to_string(),
+                message_id: "msg-1".to_string(),
+                account_id: "acct-1".to_string(),
+                filename: Some("sample.txt".to_string()),
+                mime_type: Some("text/plain".to_string()),
+                size: Some(12),
+                remote_attachment_id: Some("remote-1".to_string()),
+                content_hash: None,
+                content_id: None,
+                is_inline: false,
+            }],
+        )
+        .expect("upsert null hash");
+        tx.commit().expect("commit");
+
+        let stored: BlobHash = raw
+            .query_row(
+                "SELECT content_hash FROM attachments WHERE id = 'att-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read hash");
+        assert_eq!(stored, hash);
+    }
 }

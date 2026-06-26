@@ -14,7 +14,6 @@ mod gc;
 mod markers;
 mod prefetch;
 pub(crate) mod progress;
-pub(crate) mod push;
 pub(crate) mod rebuild;
 pub(crate) mod search_writer;
 pub(crate) mod send;

@@ -14,11 +14,15 @@
 > cursor lives in the opaque `sync_cursors` envelope, and the four auxiliary
 > passes this doc relies on - shared-account discovery, identity resolution,
 > contacts sync, and ShareNotification polling - were relocated to
-> `crates/provider-sync/src/jmap/aux_sync.rs` and are invoked from the JMAP
-> runner branch (`crates/service/src/bifrost/engine_sync.rs`), not from the
-> deleted sync bodies. The phase descriptions remain accurate as a record of
-> WHAT ships; their hook locations must be read against the consumer
-> architecture. See the B3a-cut-jmap landing commit and `docs/bifrost-migration.md` § 7.
+> `crates/provider-sync/src/jmap/aux_sync.rs`. Originally invoked from the per-kick
+> JMAP runner branch in `crates/service/src/bifrost/engine_sync.rs`, that branch was
+> itself replaced by the B3b keep-attached landing: the aux passes now run from a
+> per-slot wall-clock cadence task in the resident engine
+> (`crates/service/src/bifrost/resident.rs`), and `engine_sync.rs` retains only the
+> per-provider folder-map prepare helpers. The phase descriptions remain accurate as
+> a record of WHAT ships; their hook locations must be read against the consumer
+> architecture. See the B3a-cut-jmap and B3b landing commits and
+> `docs/bifrost-migration.md` § 7.
 
 - **What**: JMAP's native mechanism for shared mailboxes, delegated access, and permission management. RFC 9670 (published November 2024) defines Principal objects, ShareNotification tracking, and per-mailbox ACLs - all integrated into the protocol rather than bolted on as a separate system.
 - **Scope**: JMAP providers only (primarily Stalwart). The elegant counterpart to Exchange's Autodiscover-based shared mailbox discovery and IMAP's NAMESPACE/ACL extensions.

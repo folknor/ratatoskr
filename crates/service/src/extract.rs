@@ -895,7 +895,7 @@ async fn fan_out_reindex_chunk(
             to_addresses: m.to_addresses,
             body_text,
             snippet: m.snippet,
-            date: m.date,
+            date: m.date / 1000,
             is_read: m.is_read,
             is_starred: m.is_starred,
             has_attachment,

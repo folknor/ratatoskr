@@ -122,19 +122,14 @@ pub(crate) async fn handle_exchange_code(
             .map_err(ServiceError::Internal)?;
         log::info!("oauth.exchange_code: re-auth tokens persisted for account {id_for_log}");
 
-        // Phase 8-3: re-arm push for the re-authed account. Without
-        // this, the dead websocket bridge produced by the
-        // pre-re-auth token revocation stays dead until the Service
-        // restarts. `start_account` silently skips non-JMAP accounts;
-        // `fresh_start: true` clears the persisted `push_state`
-        // because the new session may not honour the old session's
-        // cursor. Spawned per-account so a slow handshake doesn't
-        // block the OAuth exchange ack.
-        if let Some(push_runtime) = boot_state.push_runtime() {
+        if let Some(sync_runtime) = boot_state.sync_runtime() {
             let aid = id_for_log.clone();
             tokio::spawn(async move {
-                if let Err(e) = push_runtime.start_account(aid.clone(), true).await {
-                    log::warn!("[push] re-auth start_account({aid}) failed: {e}");
+                if let Err(e) = sync_runtime.detach_resident_account(&aid).await {
+                    log::debug!("oauth.exchange_code: resident detach before reattach {aid}: {e}");
+                }
+                if let Err(e) = sync_runtime.attach_resident_account(&aid).await {
+                    log::warn!("oauth.exchange_code: resident reattach {aid} failed: {e}");
                 }
             });
         }
