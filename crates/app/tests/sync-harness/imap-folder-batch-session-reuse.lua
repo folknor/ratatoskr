@@ -1,4 +1,4 @@
--- description: IMAP attachment prefetch batches three attachments under one (LOGIN + SELECT) session per (account, folder)
+-- description: IMAP attachment prefetch batches three attachments under one selected session per (account, folder)
 -- expected: pass
 -- fixture: imap-attach-multi.toml
 -- protocol: imap
@@ -6,7 +6,8 @@
 
 -- Phase 7 of the attachments roadmap shipped folder-batched IMAP
 -- attachment fetches (`process_imap_batch` in
--- `crates/service/src/prefetch_imap.rs`): one LOGIN + one SELECT per
+-- `crates/service/src/prefetch_imap.rs`): one LOGIN + one mailbox
+-- selection per
 -- `(account_id, folder)` group, then `fetch_attachment_on_selected`
 -- per item under the shared session. The earlier
 -- `imap-attachment-prefetch.lua` test could only verify content_hash
@@ -31,7 +32,7 @@
 --      three fetches across three distinct connection_ids, none of
 --      which has more than one.
 --   3. Assert the chosen connection issued exactly one LOGIN and
---      exactly one SELECT - the Phase 7 contract.
+--      exactly one mailbox selection - the Phase 7 contract.
 
 local function attachment_by_filename(attachments, filename)
     for _, attachment in ipairs(attachments) do
@@ -92,6 +93,23 @@ local function count_commands(requests, connection_id, command)
     return count
 end
 
+local function count_mailbox_selections(requests, connection_id)
+    return count_commands(requests, connection_id, "SELECT")
+        + count_commands(requests, connection_id, "EXAMINE")
+end
+
+local function commands_for_connection(requests, connection_id)
+    local commands = {}
+    for _, request in ipairs(requests) do
+        if request.protocol == "imap"
+            and request.connection_id == connection_id
+        then
+            commands[#commands + 1] = request.command or "<nil>"
+        end
+    end
+    return table.concat(commands, ",")
+end
+
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 harness.clear_mock_requests(admin_endpoint)
@@ -105,6 +123,13 @@ harness.assert(ready_err == nil, "boot.ready failed")
 harness.assert(ready.ready, "boot.ready returned ready=false")
 
 local queue = client:notifications()
+
+local _, set_err = client:request("SettingsSet", {
+    values = {
+        { type = "SyncPeriodDays", value = "365" },
+    },
+})
+harness.assert(set_err == nil, "settings.set failed")
 
 local account, account_err = client:request("TestSeedAccount", {
     email = "imap-multi@example.test",
@@ -157,14 +182,23 @@ end
 local prefetch_conn = nil
 local prefetch_fetch_count = 0
 for cid, count in pairs(body_fetches_by_conn) do
-    if count > prefetch_fetch_count then
+    local login_count = count_commands(requests, cid, "LOGIN")
+    local list_count = count_commands(requests, cid, "LIST")
+    local search_count = count_commands(requests, cid, "UID SEARCH")
+    local selection_count = count_mailbox_selections(requests, cid)
+    if login_count == 1
+        and list_count == 0
+        and search_count == 0
+        and selection_count == 1
+        and count > prefetch_fetch_count
+    then
         prefetch_conn = cid
         prefetch_fetch_count = count
     end
 end
 
 harness.assert(prefetch_conn ~= nil,
-    "no IMAP connection issued any body fetches - prefetch path never ran")
+    "no IMAP attachment prefetch connection issued batched body fetches")
 harness.assert(prefetch_fetch_count >= 3,
     "prefetch session should batch all three attachment fetches into one connection " ..
     "(got " .. tostring(prefetch_fetch_count) .. " body fetches on connection_id=" ..
@@ -172,14 +206,15 @@ harness.assert(prefetch_fetch_count >= 3,
     "spread these across three connection_ids)")
 
 local login_count = count_commands(requests, prefetch_conn, "LOGIN")
-local select_count = count_commands(requests, prefetch_conn, "SELECT")
+local selection_count = count_mailbox_selections(requests, prefetch_conn)
+local prefetch_commands = commands_for_connection(requests, prefetch_conn)
 
 harness.assert_eq(login_count, 1,
     "prefetch session should issue exactly one LOGIN (got " ..
-    tostring(login_count) .. ")")
-harness.assert_eq(select_count, 1,
-    "prefetch session should issue exactly one SELECT (got " ..
-    tostring(select_count) .. ")")
+    tostring(login_count) .. "; commands=" .. prefetch_commands .. ")")
+harness.assert_eq(selection_count, 1,
+    "prefetch session should issue exactly one mailbox selection (got " ..
+    tostring(selection_count) .. "; commands=" .. prefetch_commands .. ")")
 
 harness.write_summary({
     correct = 1,
@@ -189,7 +224,8 @@ harness.write_summary({
     prefetch_connection_id = prefetch_conn,
     prefetch_body_fetches = prefetch_fetch_count,
     prefetch_logins = login_count,
-    prefetch_selects = select_count,
+    prefetch_mailbox_selections = selection_count,
+    prefetch_commands = prefetch_commands,
 })
 
 local ok, shutdown_err = client:shutdown()

@@ -189,16 +189,8 @@ harness.assert(status_update.is_read, "Status update did not import $seen")
 harness.assert(status_update.is_starred, "Status update did not import $flagged")
 local thread_after_change =
     read_thread(client, account.account_id, status_update.thread_id, "after change")
-assert_has_value(
-    thread_after_change.label_ids,
-    "STARRED",
-    "Status update thread did not gain STARRED"
-)
-assert_lacks_value(
-    thread_after_change.label_ids,
-    "UNREAD",
-    "Status update thread retained UNREAD after $seen"
-)
+harness.assert(thread_after_change.is_starred, "Status update thread did not gain STARRED")
+harness.assert(thread_after_change.is_read, "Status update thread retained UNREAD after $seen")
 
 harness.clear_mock_requests(admin_endpoint)
 local delete_step = apply_step(admin_endpoint, "delete")

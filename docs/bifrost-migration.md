@@ -448,44 +448,85 @@ incremental `history.list` projection, and an oauth refresh grant that resolves
 the account from the presented refresh token) - an installed external binary, not
 commit-pinned here. Read the B3a-cut-gmail landing commit.
 
+B3a-cut-imap (the fourth and FINAL per-provider cutover) is done and its TODO entry
+is removed per repo convention. With it the per-provider cutover series
+(B3a-cut-jmap, B3a-cut-graph, B3a-cut-gmail, B3a-cut-imap) is COMPLETE: every
+personal-account provider's mail sync now runs through `BifrostSyncEngine` +
+`ChangeStreamConsumer`, and only B3b (push) and B3c (control / pause / recovery)
+remain open in B3. It landed as the final, fully intrusive cutover and removed the
+coexistence scaffolding WHOLESALE. IMAP personal-account mail sync now routes
+through the engine + consumer; the legacy IMAP `provider-sync` sync impl is DELETED
+- `imap_impl.rs` (the `ProviderSyncOps` orphan) and the entire `imap/` sync subtree
+(`imap_initial.rs`, `imap_delta.rs`, `imap_delta_janitor.rs`, `sync_pipeline.rs`,
+`thread_store.rs`) - AND so are `sync_dispatch.rs`, the `ProviderSyncOps` trait +
+`SyncProviderCtx`, and `create_sync_provider` (the sync-only factory). Because IMAP
+was the last legacy provider the `run_sync` coexistence dispatch is removed ENTIRELY
+- no provider routes to a legacy path now, so the former `Ok(_)` legacy
+fall-through becomes an explicit unsupported-provider error. `create_provider` (the
+SEPARATE action-ops factory, `actions/provider.rs`) SURVIVES: it backs ~20 action /
+prefetch / attachment call sites, and the IMAP `ProviderOps` action methods
+(`imap::ops::ImapOps`) live in the `imap` crate, untouched until B4/B15. The
+IMAP-specific engineering this cut required, none of it shared with the HTTP cuts:
+drive-end JWZ threading (`threading::build_threads` run ONCE per drive over a
+post-adoption-id `ThreadableMessage` accumulator, at the legacy per-cycle boundary,
+so cross-batch subject-merge stays byte-identical to legacy output) with the IMAP
+change-cursor ack DEFERRED to drive end for crash-safety - a crash after per-batch
+persist but before drive-end threading re-drives the un-threaded messages on the
+next drive rather than stranding them on provisional thread ids past an advanced
+cursor, gated by a new `crash_before_drive_end_threading` consumer hook + the
+`bifrost-consumer-imap-crash-before-drive-end-threading.lua` script; identity
+adoption by `(account_id, imap_folder, imap_uid)` before insert so existing
+legacy-synced rows are reused, not duplicated; the bifrost IMAP CONDSTORE/QRESYNC
+delta surfaced as `ScopeChange{Added|Removed}` + `ObjectChange{Updated}` with
+`CursorScope::Folder` routing (`is_email_scope` extended to accept it);
+`HydrationProjection::Full` for IMAP (`FullWithBlobs` is redundant - bifrost IMAP
+returns empty blob handles, so the re-parsed RFC822 MIME tree is the SOLE source of
+attachment + inline-image rows); and the relocated IMAP aux passes in
+`crates/provider-sync/src/imap/aux_sync.rs` (folder-map prepare + a per-mailbox
+`PERMANENTFLAGS` keyword-capability probe, run every kick because `PERMANENTFLAGS`
+is per-mailbox and a new mailbox can appear at any time). The cross-provider
+`is_important` follow-up that B3a-cut-gmail filed under this item is RESOLVED here,
+not carried forward: `is_important` is recomputed as a sticky-OR of the batch
+against the persisted `threads.is_important`, so a delta carrying a non-important
+sibling can no longer clear a previously-important thread (applied to the JMAP /
+Graph / Gmail write arms; IMAP has no importance). A deliberate, validated
+DEVIATION rode along: `SyncEvent::Done(checkpoint)` persistence was GENERALIZED to
+all providers (the consumer previously ignored `Done`), closing the empty-delta
+cursor-durability gap for every provider - the JMAP, Gmail, and Graph steady-state
+sync-bench gates were re-run and all held at delta = 0 (no request-count
+regression). This cut needed NO bifrost change: the frozen `../bifrost` stays at
+`002e7b9` (§ 11; bifrost's IMAP CONDSTORE/QRESYNC behavior was already correct). The
+mock work was entirely in `saehrimnir`, whose IMAP mock gained real CONDSTORE/QRESYNC
+support (parse `SELECT (CONDSTORE)`, return `HIGHESTMODSEQ`, honor
+`FETCH ... CHANGEDSINCE`, emit QRESYNC `VANISHED`) - an installed external binary,
+not commit-pinned here, recorded like the sibling cuts' mock extensions. Gated by
+`brokkr check` green; the `imap_consumer_membership_equals_legacy` and
+`imap_drive_threading_equals_legacy` goldens; the hydrate, identity-adoption, and
+threading-reassign unit tests; all ten `imap-*` sync-harness scripts; the three
+`bifrost-consumer-*` durability scripts including the new IMAP deferred-ack crash
+gate; `parent_sigkill`; `brokkr service-suite` 63/63; and the `imap_steady_state_delta`
+sync-bench (baseline pinned on the clean tree at land). Read the B3a-cut-imap landing
+commit.
+
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
   inline images, search), flushes search, then acks the bifrost checkpoint LAST
-  are stood up by B3a-infra (done; see the done-note above), and JMAP, Graph, and
-  Gmail are routed onto it by B3a-cut-jmap, B3a-cut-graph, and B3a-cut-gmail (all
-  done). What remains is routing the last legacy provider's (IMAP) production sync
-  through that consumer and replicating
-  each provider's ACTUAL post-persist processing, which is asymmetric, not a
-  uniform pipeline: IMAP runs JWZ `threading::build_threads`;
+  are stood up by B3a-infra (done; see the done-note above), and JMAP, Graph,
+  Gmail, and IMAP are ALL routed onto it by B3a-cut-jmap, B3a-cut-graph,
+  B3a-cut-gmail, and B3a-cut-imap (all done; see the done-notes above). The
+  per-provider cutover series is therefore COMPLETE: every personal-account
+  provider syncs through the consumer, and each provider's ACTUAL post-persist
+  processing - asymmetric, not a uniform pipeline - is now replicated in it: IMAP
+  runs JWZ `threading::build_threads` at drive end;
   JMAP / Graph / Gmail write the thread aggregate inline (`upsert_thread_aggregate`)
-  with per-provider membership strategies (JMAP's, Graph's, and Gmail's now done, in the consumer);
+  with per-provider membership strategies;
   `seen_ingest` is the one shared pass;
   bundling, filters, smart labels, and `evaluate_notifications` have NO sync-time
   callers today and stay unwired (whether they should auto-fire on new mail is a
   separate product item, explicitly not B3's scope - feature-preserving means the
   consumer reproduces today's behavior, not that it inherits an unwired gap as a
-  feature). The sub-items:
-  - B3a-cut-imap. The final per-provider cutover: route IMAP's sync through the
-    consumer, delete IMAP's `provider-sync` impl, gated by IMAP's sync-bench
-    (`imap-steady-state-delta` held against baseline) plus the mandatory
-    membership-row and threading-output equality assertions. B3a-cut-jmap,
-    B3a-cut-graph, and B3a-cut-gmail (all done; see the done-notes above) established
-    the per-provider mechanics: the coexistence dispatch in `run_sync`, the
-    service-owned one-shot runner with bounded lag-backoff, and the per-provider
-    membership / post-persist arms in the consumer. The coexistence dispatch is
-    removed by this final cutover. Needs B3a-infra.
-    Follow-up surfaced by B3a-cut-gmail (cross-provider): the `threads.is_important`
-    aggregate in the consumer write arm (`crates/service/src/bifrost/consumer/write.rs`)
-    is OR'd over only the CURRENT sync batch's rows
-    (`thread_rows.iter().any(|row| row.is_important)`), not the thread's whole
-    persisted row set, so a delta carrying a non-important sibling clears a
-    previously-important thread. This is a PRE-EXISTING pattern shared by the JMAP
-    and Graph write arms that Gmail now joins - not introduced by any single cut,
-    but more impactful for relabel-heavy Gmail. The fix recomputes `is_important`
-    from all of a thread's persisted message rows (as
-    `recompute_thread_folders_from_messages` already does for membership), not just
-    the batch; it spans all three landed cuts' write arms.
+  feature). What remains in B3 is B3b and B3c. The sub-items:
   - B3b. Push plus invalidation. Wire the out-of-process push ingress (Gmail
     Pub/Sub, Graph webhooks) and the invalidation sink; move `jmap_push_state` /
     `graph_subscriptions` to bifrost's `SubscriptionRegistry`. Needs B3a.
@@ -666,7 +707,13 @@ to `7c576bdd`), and B3a-cut-gmail added the Gmail mock-redirect seam to
 these bifrost commits, B3a-cut-jmap also
 required several `saehrimnir` mock extensions - JMAP `Thread/get`, `ContactCard/get`,
 and per-`accountId` `Email`/`Mailbox` state - which are an installed external
-binary, not commit-pinned here.) Each Track B spec records, in its ground
+binary, not commit-pinned here.) B3a-cut-imap required NO bifrost change - the
+freeze stays at `002e7b9` because bifrost's IMAP CONDSTORE/QRESYNC behavior was
+already correct - so the side-quest count holds at six; its mock work was entirely
+in `saehrimnir`, whose IMAP mock gained real CONDSTORE/QRESYNC support (parse
+`SELECT (CONDSTORE)`, return `HIGHESTMODSEQ`, honor `FETCH ... (CHANGEDSINCE ...)`,
+emit QRESYNC `VANISHED`), again an installed external binary, not commit-pinned
+here. Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the

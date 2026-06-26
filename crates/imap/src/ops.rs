@@ -48,10 +48,6 @@ fn random_hex8() -> String {
 
 /// IMAP implementation of the provider operations trait.
 pub struct ImapOps {
-    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
-    /// can reach the key when delegating to `imap_initial` /
-    /// `imap_delta`. Phase 6d-B carved the sync trait out of
-    /// `common::ProviderOps`.
     pub encryption_key: [u8; 32],
     writer: WriterPool,
 }
@@ -65,8 +61,6 @@ impl ImapOps {
     }
 
     /// Shorthand for loading the IMAP config from the database.
-    /// `pub` so `provider-sync`'s orphan `ProviderSyncOps` impl can
-    /// reuse it.
     pub async fn load_config(
         &self,
         db: &db::db::ReadDbState,
@@ -525,11 +519,6 @@ async fn execute_folder_action(
 // ProviderOps implementation
 // ---------------------------------------------------------------------------
 
-// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
-// `ProviderOps`. The relocated `ProviderSyncOps` trait
-// (`provider-sync` crate) carries them; `provider-sync/src/imap_impl.rs`
-// holds the orphan-impl that delegates into `super::imap_initial` /
-// `super::imap_delta`.
 #[async_trait]
 impl ProviderOps for ImapOps {
     // ── Actions ─────────────────────────────────────────────────────────

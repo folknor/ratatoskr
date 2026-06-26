@@ -33,10 +33,8 @@ search = { path = "../search" }
 seen = { path = "../seen" }
 sync = { path = "../sync" }
 
-# Provider crates: provider-sync owns the orphan-impls of
-# `ProviderSyncOps` for each provider's `Ops` type. The trait is
-# defined in this crate, so the orphan rule is satisfied even though
-# the impl-target type lives in the provider crate.
+# Provider crates: retained auxiliary sync helpers and Bifrost consumer
+# support call into provider-specific client surfaces.
 gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }

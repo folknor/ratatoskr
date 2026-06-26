@@ -1,0 +1,78 @@
+{
+  "account_id": "imap-acc",
+  "messages": [
+    {
+      "id": "imap1:5:INBOX:1:1",
+      "thread_id": "ignored-imap-thread-1",
+      "subject": "IMAP thread",
+      "date_ms": 1700000000000,
+      "from": {
+        "name": "Sender",
+        "address": "sender@example.com"
+      },
+      "to": [
+        {
+          "name": null,
+          "address": "me@example.test"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "containers": [
+        "INBOX"
+      ],
+      "flags": [
+        "\\Seen",
+        "\\Flagged",
+        "Project"
+      ],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <imap-msg-1@example.com>",
+        "From: Sender <sender@example.com>",
+        "To: me@example.test",
+        "Subject: IMAP thread",
+        "",
+        "Inbox body"
+      ]
+    },
+    {
+      "id": "imap1:7:Archive:1:9",
+      "thread_id": "ignored-imap-thread-2",
+      "subject": "Re: IMAP thread",
+      "date_ms": 1700000060000,
+      "from": {
+        "name": null,
+        "address": "me@example.test"
+      },
+      "to": [
+        {
+          "name": null,
+          "address": "sender@example.com"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "containers": [
+        "Archive"
+      ],
+      "flags": [
+        "\\Seen",
+        "\\Answered"
+      ],
+      "importance": "normal",
+      "blobs": [],
+      "raw_lines": [
+        "Message-ID: <imap-msg-2@example.com>",
+        "In-Reply-To: <imap-msg-1@example.com>",
+        "References: <imap-msg-1@example.com>",
+        "From: me@example.test",
+        "To: sender@example.com",
+        "Subject: Re: IMAP thread",
+        "",
+        "Archive reply body"
+      ]
+    }
+  ]
+}

@@ -176,9 +176,28 @@ fn build_imap_factory(
     provider: MailProviderKind,
     writer: WriterPool,
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
-    let imap_host = account.required_plain("imap_host", account.row.imap_host.as_deref())?;
-    let imap_port = account.optional_port(account.row.imap_port, "imap_port")?;
-    let imap = match account.row.imap_security.as_deref().unwrap_or("tls") {
+    let (imap_host, imap_port, imap_security, allow_cleartext_auth) =
+        if let Ok(endpoint) = std::env::var("RATATOSKR_TEST_IMAP_ENDPOINT") {
+            let (host, port) =
+                parse_host_port(&endpoint).ok_or_else(|| BifrostBuildError::InvalidConfig {
+                    account_id: account.row.id.clone(),
+                    detail: format!("invalid RATATOSKR_TEST_IMAP_ENDPOINT {endpoint}"),
+                })?;
+            (host, Some(port), "none".to_string(), true)
+        } else {
+            (
+                account.required_plain("imap_host", account.row.imap_host.as_deref())?,
+                account.optional_port(account.row.imap_port, "imap_port")?,
+                account
+                    .row
+                    .imap_security
+                    .as_deref()
+                    .unwrap_or("tls")
+                    .to_string(),
+                false,
+            )
+        };
+    let imap = match imap_security.as_str() {
         "tls" | "ssl" => ImapConfig::tls(imap_host),
         "starttls" => ImapConfig::starttls(imap_host),
         "none" => ImapConfig::plaintext(imap_host),
@@ -213,11 +232,26 @@ fn build_imap_factory(
             account.required_secret("imap_password", account.imap_password.as_deref())?,
         )
     };
-    let mut config = ImapAccountConfig::new(imap, credentials, AuthPolicy::default().with_login());
+    let auth_policy = if allow_cleartext_auth {
+        AuthPolicy::default()
+            .with_login()
+            .allow_cleartext_without_tls()
+    } else {
+        AuthPolicy::default().with_login()
+    };
+    let mut config = ImapAccountConfig::new(imap, credentials, auth_policy);
     if let Some(submission) = account.smtp_submission(shared_source)? {
         config = config.with_submission(submission);
     }
     Ok(Arc::new(ImapAccountFactory::new(config)))
+}
+
+fn parse_host_port(endpoint: &str) -> Option<(String, u16)> {
+    let (host, port) = endpoint.rsplit_once(':')?;
+    if host.is_empty() {
+        return None;
+    }
+    Some((host.to_string(), port.parse().ok()?))
 }
 
 #[derive(Clone)]

@@ -22,7 +22,6 @@ mod send_vault;
 mod snooze_runner;
 pub(crate) mod startup_invariants;
 pub(crate) mod sync;
-pub(crate) mod sync_dispatch;
 pub(crate) mod test_counters;
 pub(crate) mod text_extract;
 

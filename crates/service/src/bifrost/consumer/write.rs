@@ -12,10 +12,11 @@ use provider_sync::consumer_support::{
     replace_message_keywords, replace_message_membership_and_recompute, store_inline_images,
     store_message_bodies,
 };
+use rusqlite::OptionalExtension;
 
 use super::BifrostConsumerStores;
 use super::BifrostProviderKind;
-use super::hydrate::ConsumerMessageRow;
+use super::hydrate::{ConsumerMessageRow, decode_imap_object_id};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PersistAffected {
@@ -49,7 +50,7 @@ pub async fn persist(
     let rows = rows.to_vec();
     let deleted_ids = deleted_ids.to_vec();
     let account_id = account_id.to_string();
-    let affected = stores
+    let (affected, persisted_rows, resolved_deleted_ids) = stores
         .db
         .with_write({
             let rows = rows.clone();
@@ -57,6 +58,17 @@ pub async fn persist(
             let account_id = account_id.clone();
             move |conn| {
                 let tx = conn.transaction().map_err(|error| error.to_string())?;
+                let mut rows = rows;
+                if provider == BifrostProviderKind::Imap {
+                    for row in &mut rows {
+                        adopt_existing_imap_identity(&tx, row)?;
+                    }
+                }
+                let deleted_ids = if provider == BifrostProviderKind::Imap {
+                    resolve_imap_deleted_ids(&tx, &account_id, &deleted_ids)?
+                } else {
+                    deleted_ids
+                };
                 for row in &rows {
                     tx.execute(
                 "INSERT OR IGNORE INTO threads (account_id, id, message_count) VALUES (?1, ?2, 0)",
@@ -198,21 +210,9 @@ pub async fn persist(
                                 )
                             })?;
                         }
-                        _ => {
-                            replace_message_membership_and_recompute(
-                                &tx,
-                                &row.message.account_id,
-                                &row.message.thread_id,
-                                &row.message.id,
-                                &row.folders,
-                                &row.labels,
-                            )
-                            .map_err(|error| {
-                                format!(
-                                    "replace baseline message membership for {}: {error}",
-                                    row.message.id
-                                )
-                            })?;
+                        BifrostProviderKind::Imap => {
+                            insert_attachments(&tx, &row.attachments)
+                                .map_err(|error| format!("insert IMAP attachments: {error}"))?;
                         }
                     }
                     replace_message_keywords(
@@ -225,68 +225,77 @@ pub async fn persist(
                     .map_err(|error| {
                         format!("replace message keywords for {}: {error}", row.message.id)
                     })?;
-                    recompute_thread_keyword_labels(
-                        &tx,
-                        keyword_provider(provider),
-                        &row.message.account_id,
-                        &row.message.thread_id,
-                    )
-                    .map_err(|error| {
-                        format!(
-                            "recompute thread keyword labels for {}: {error}",
-                            row.message.thread_id
+                    if provider != BifrostProviderKind::Imap {
+                        recompute_thread_keyword_labels(
+                            &tx,
+                            keyword_provider(provider),
+                            &row.message.account_id,
+                            &row.message.thread_id,
                         )
-                    })?;
+                        .map_err(|error| {
+                            format!(
+                                "recompute thread keyword labels for {}: {error}",
+                                row.message.thread_id
+                            )
+                        })?;
+                    }
                 }
 
-                for thread_id in &thread_ids {
-                    let thread_rows = rows
-                        .iter()
-                        .filter(|row| row.message.thread_id == *thread_id)
-                        .collect::<Vec<_>>();
-                    let account_id = thread_rows
-                        .first()
-                        .map(|row| row.message.account_id.as_str())
-                        .ok_or_else(|| format!("missing account for thread {thread_id}"))?;
-                    let aggregate =
-                        compute_thread_aggregate(&tx, account_id, thread_id).map_err(|error| {
-                            format!("compute thread aggregate {thread_id}: {error}")
-                        })?;
-                    let is_important = if matches!(
-                        provider,
-                        BifrostProviderKind::Jmap
-                            | BifrostProviderKind::Graph
-                            | BifrostProviderKind::Gmail
-                    ) {
-                        // Importance is carried on the hydrated row (from
-                        // `Message::importance` for real JMAP, from the
-                        // `$important` keyword for synthetic fixtures). It is
-                        // NOT read from `row.keywords`: `$important` is
-                        // `$`-prefixed and stripped by `is_user_visible_keyword`
-                        // during hydration, so a keyword-string probe would
-                        // always be false on the real path.
-                        Some(thread_rows.iter().any(|row| row.is_important))
-                    } else {
-                        None
-                    };
-                    upsert_thread_aggregate(
-                        &tx,
-                        account_id,
-                        thread_id,
-                        &aggregate,
-                        is_important,
-                        None,
-                    )
-                    .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
-                    if matches!(
-                        provider,
-                        BifrostProviderKind::Jmap
-                            | BifrostProviderKind::Graph
-                            | BifrostProviderKind::Gmail
-                    ) && let Some(user_emails) = &user_emails
-                    {
-                        maybe_update_chat_state(&tx, account_id, thread_id, user_emails)
-                            .map_err(|error| format!("update chat state {thread_id}: {error}"))?;
+                if provider != BifrostProviderKind::Imap {
+                    for thread_id in &thread_ids {
+                        let thread_rows = rows
+                            .iter()
+                            .filter(|row| row.message.thread_id == *thread_id)
+                            .collect::<Vec<_>>();
+                        let account_id = thread_rows
+                            .first()
+                            .map(|row| row.message.account_id.as_str())
+                            .ok_or_else(|| format!("missing account for thread {thread_id}"))?;
+                        let aggregate = compute_thread_aggregate(&tx, account_id, thread_id)
+                            .map_err(|error| {
+                                format!("compute thread aggregate {thread_id}: {error}")
+                            })?;
+                        let is_important = if matches!(
+                            provider,
+                            BifrostProviderKind::Jmap
+                                | BifrostProviderKind::Graph
+                                | BifrostProviderKind::Gmail
+                        ) {
+                            // Importance is carried on the hydrated row (from
+                            // `Message::importance` for real JMAP, from the
+                            // `$important` keyword for synthetic fixtures). It is
+                            // NOT read from `row.keywords`: `$important` is
+                            // `$`-prefixed and stripped by `is_user_visible_keyword`
+                            // during hydration, so a keyword-string probe would
+                            // always be false on the real path.
+                            Some(
+                                existing_thread_is_important(&tx, account_id, thread_id)?
+                                    || thread_rows.iter().any(|row| row.is_important),
+                            )
+                        } else {
+                            None
+                        };
+                        upsert_thread_aggregate(
+                            &tx,
+                            account_id,
+                            thread_id,
+                            &aggregate,
+                            is_important,
+                            None,
+                        )
+                        .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
+                        if matches!(
+                            provider,
+                            BifrostProviderKind::Jmap
+                                | BifrostProviderKind::Graph
+                                | BifrostProviderKind::Gmail
+                        ) && let Some(user_emails) = &user_emails
+                        {
+                            maybe_update_chat_state(&tx, account_id, thread_id, user_emails)
+                                .map_err(|error| {
+                                    format!("update chat state {thread_id}: {error}")
+                                })?;
+                        }
                     }
                 }
 
@@ -295,6 +304,7 @@ pub async fn persist(
                     BifrostProviderKind::Jmap
                         | BifrostProviderKind::Graph
                         | BifrostProviderKind::Gmail
+                        | BifrostProviderKind::Imap
                 ) && !deleted_ids.is_empty()
                 {
                     delete_messages_and_cleanup_threads(&tx, &account_id, &deleted_ids)
@@ -303,38 +313,46 @@ pub async fn persist(
 
                 assert_no_foreign_key_violations(&tx)?;
                 tx.commit().map_err(|error| error.to_string())?;
-                Ok(PersistAffected {
-                    thread_ids: thread_ids.into_iter().collect(),
-                    message_ids,
-                })
+                Ok((
+                    PersistAffected {
+                        thread_ids: thread_ids.into_iter().collect(),
+                        message_ids,
+                    },
+                    rows,
+                    deleted_ids,
+                ))
             }
         })
         .await?;
 
     store_message_bodies(
         &stores.body_store,
-        &rows,
+        &persisted_rows,
         provider.as_str(),
         |row| row.message.id.as_str(),
         |row| row.body_html.as_ref(),
         |row| row.body_text.as_ref(),
     )
     .await;
-    let inline_images = rows
+    let inline_images = persisted_rows
         .iter()
         .flat_map(|row| row.inline_images.clone())
         .collect::<Vec<_>>();
     store_inline_images(&stores.inline_images, inline_images, provider.as_str()).await;
-    let search_docs = rows
+    let search_docs = persisted_rows
         .iter()
         .map(|row| row.search_document.clone())
         .collect::<Vec<_>>();
     index_search_documents(&stores.search, search_docs, provider.as_str()).await;
-    if !deleted_ids.is_empty() {
-        if let Err(error) = stores.body_store.delete(deleted_ids.clone()).await {
+    if !resolved_deleted_ids.is_empty() {
+        if let Err(error) = stores.body_store.delete(resolved_deleted_ids.clone()).await {
             log::warn!("Failed to delete bifrost bodies: {error}");
         }
-        if let Err(error) = stores.search.delete_messages_batch(deleted_ids).await {
+        if let Err(error) = stores
+            .search
+            .delete_messages_batch(resolved_deleted_ids.clone())
+            .await
+        {
             log::warn!("Failed to delete bifrost search documents: {error}");
         }
     }
@@ -378,6 +396,78 @@ fn label_write_row(label: &LabelKind, account_id: &str) -> LabelWriteRow {
         user_color_fg: None,
         is_undeletable,
     }
+}
+
+fn adopt_existing_imap_identity(
+    tx: &db::db::WriteTxn<'_>,
+    row: &mut ConsumerMessageRow,
+) -> Result<(), String> {
+    let (Some(folder), Some(uid)) = (row.message.imap_folder.as_deref(), row.message.imap_uid)
+    else {
+        return Ok(());
+    };
+    let existing: Option<(String, String)> = tx
+        .query_row(
+            "SELECT id, thread_id FROM messages \
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
+             LIMIT 1",
+            rusqlite::params![row.message.account_id, folder, uid],
+            |lookup| Ok((lookup.get(0)?, lookup.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("lookup existing IMAP message: {error}"))?;
+    if let Some((id, thread_id)) = existing {
+        row.message.id = id.clone();
+        row.message.thread_id = thread_id.clone();
+        row.search_document.message_id = id.clone();
+        row.search_document.thread_id = thread_id;
+        for attachment in &mut row.attachments {
+            attachment.message_id = id.clone();
+        }
+    }
+    Ok(())
+}
+
+fn resolve_imap_deleted_ids(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    ids: &[String],
+) -> Result<Vec<String>, String> {
+    ids.iter()
+        .map(|id| {
+            if let Some(decoded) = decode_imap_object_id(id) {
+                let local_id = tx
+                    .query_row(
+                        "SELECT id FROM messages \
+                         WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
+                         LIMIT 1",
+                        rusqlite::params![account_id, decoded.folder, i64::from(decoded.uid)],
+                        |lookup| lookup.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(|error| format!("resolve IMAP expunge id: {error}"))?;
+                Ok(local_id)
+            } else {
+                Ok(Some(id.clone()))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|ids| ids.into_iter().flatten().collect())
+}
+
+fn existing_thread_is_important(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<bool, String> {
+    tx.query_row(
+        "SELECT COALESCE(is_important, 0) FROM threads WHERE account_id = ?1 AND id = ?2",
+        rusqlite::params![account_id, thread_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map_err(|error| format!("read existing thread importance: {error}"))
+    .map(|value| value.unwrap_or(0) != 0)
 }
 
 fn insert_gmail_reaction(

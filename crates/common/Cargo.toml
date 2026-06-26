@@ -26,10 +26,8 @@ search = { path = "../search" }
 seen = { path = "../seen" }
 types = { path = "../types" }
 crypto-key = { path = "../crypto-key" }
-# Phase 6d-B: `service-state` dep removed. The sync-trait surface and
-# `SyncProviderCtx` (the only types in `common` that referenced
-# writer-half handles) relocated to the new `provider-sync` crate so
-# `common` is now UI-safe at the dep-graph level.
+# `common` stays UI-safe at the dep-graph level: provider sync is driven
+# Service-side through the Bifrost engine and consumer.
 
 # Crate-specific deps
 tokio = { workspace = true, features = ["sync"] }

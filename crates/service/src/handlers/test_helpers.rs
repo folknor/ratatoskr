@@ -308,6 +308,9 @@ pub(super) async fn bifrost_arm_hook_handle(
         TestBifrostHook::CrashAfterAckNoSentinel => {
             crate::bifrost::ConsumerHook::CrashAfterAckNoSentinel
         }
+        TestBifrostHook::CrashBeforeDriveEndThreading => {
+            crate::bifrost::ConsumerHook::CrashBeforeDriveEndThreading
+        }
         TestBifrostHook::ForceLag => crate::bifrost::ConsumerHook::ForceLag,
     };
     bifrost_hooks().arm(params.account_id, hook).await;
@@ -522,6 +525,9 @@ pub(super) async fn bifrost_inject_batch_handle(
 fn parse_bifrost_scope(scope: &str) -> Result<bifrost_types::CursorScope, ServiceError> {
     match scope {
         "account" | "Account" => Ok(bifrost_types::CursorScope::Account),
+        folder if folder.starts_with("folder:") => Ok(bifrost_types::CursorScope::Folder(
+            bifrost_types::FolderId(folder["folder:".len()..].to_string()),
+        )),
         other => Err(ServiceError::InvalidParams {
             method: "test.bifrost_inject_batch".into(),
             message: format!("unsupported bifrost test scope {other:?}"),
@@ -532,6 +538,9 @@ fn parse_bifrost_scope(scope: &str) -> Result<bifrost_types::CursorScope, Servic
 fn bifrost_probe_scope_key(scope: &bifrost_types::CursorScope) -> String {
     match scope {
         bifrost_types::CursorScope::Account => "account".to_string(),
+        bifrost_types::CursorScope::Folder(folder) => {
+            format!("folder:{}:{}", folder.0.len(), folder.0)
+        }
         other => format!("{other:?}"),
     }
 }

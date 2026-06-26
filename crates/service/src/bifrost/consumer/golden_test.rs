@@ -44,6 +44,9 @@ const GRAPH_INPUT_FIXTURE: &str = "tests/fixtures/graph_consumer_membership_inpu
 const GRAPH_GOLDEN_FIXTURE: &str = "tests/fixtures/graph_consumer_membership_golden.json";
 const GMAIL_INPUT_FIXTURE: &str = "tests/fixtures/gmail_consumer_membership_input.json";
 const GMAIL_GOLDEN_FIXTURE: &str = "tests/fixtures/gmail_consumer_membership_golden.json";
+const IMAP_INPUT_FIXTURE: &str = "tests/fixtures/imap_consumer_membership_input.json";
+const IMAP_GOLDEN_FIXTURE: &str = "tests/fixtures/imap_consumer_membership_golden.json";
+const IMAP_THREADING_GOLDEN_FIXTURE: &str = "tests/fixtures/imap_drive_threading_golden.json";
 
 /// The ten tables / columns the gate pins (spec 4.0). `message_labels` is
 /// asserted EMPTY (JMAP keyword-label semantics).
@@ -773,6 +776,418 @@ async fn gmail_consumer_membership_equals_legacy() {
         .and_then(Value::as_array)
         .expect("message_reactions snapshot");
     assert_eq!(reactions.len(), 1, "Gmail reaction row missing");
+}
+
+fn imap_folder_map() -> HashMap<String, common::types::FolderKind> {
+    HashMap::from([
+        (
+            "INBOX".to_string(),
+            common::types::FolderKind::System(common::types::SystemFolderId::Inbox),
+        ),
+        (
+            "Archive".to_string(),
+            common::types::FolderKind::System(common::types::SystemFolderId::Archive),
+        ),
+    ])
+}
+
+fn imap_rows(input: &InputFixture, account: &AccountId) -> Vec<super::hydrate::ConsumerMessageRow> {
+    let folder_map = imap_folder_map();
+    input
+        .messages
+        .iter()
+        .map(|message| {
+            let (msg, raw) = build_message(message);
+            build_consumer_row(
+                account,
+                BifrostProviderKind::Imap,
+                &folder_map,
+                &msg,
+                Some(&raw),
+                HashMap::new(),
+                HydrationOutcome::Succeeded,
+            )
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn imap_consumer_membership_equals_legacy() {
+    let input: InputFixture =
+        serde_json::from_slice(&std::fs::read(manifest_path(IMAP_INPUT_FIXTURE)).unwrap()).unwrap();
+    let account = AccountId(input.account_id.clone());
+    let (db_state, tmp) = state(&input.account_id, "imap");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+    let rows = imap_rows(&input, &account);
+
+    let affected = super::write::persist(
+        &consumer_stores,
+        &input.account_id,
+        BifrostProviderKind::Imap,
+        &rows,
+        &[],
+    )
+    .await
+    .unwrap();
+    super::post_persist::run(
+        &consumer_stores.db,
+        &input.account_id,
+        BifrostProviderKind::Imap,
+        &bifrost_types::CursorScope::Folder(bifrost_types::FolderId("INBOX".to_string())),
+        None,
+        &rows,
+        &affected,
+    )
+    .await
+    .unwrap();
+
+    let snapshot = dump_snapshot(&db_state).await;
+    let snapshot_str = canonical_string(&snapshot);
+    if std::env::var("UPDATE_GOLDEN").is_ok() {
+        std::fs::write(
+            manifest_path(IMAP_GOLDEN_FIXTURE),
+            format!("{snapshot_str}\n"),
+        )
+        .unwrap();
+        eprintln!(
+            "===BEGIN IMAP GOLDEN SNAPSHOT===\n{snapshot_str}\n===END IMAP GOLDEN SNAPSHOT==="
+        );
+        return;
+    }
+
+    let golden_raw = std::fs::read_to_string(manifest_path(IMAP_GOLDEN_FIXTURE)).unwrap();
+    let golden: Value = serde_json::from_str(&golden_raw).unwrap();
+    let golden_str = canonical_string(&golden);
+    if snapshot_str != golden_str {
+        eprintln!(
+            "===BEGIN IMAP CONSUMER SNAPSHOT===\n{snapshot_str}\n===END IMAP CONSUMER SNAPSHOT==="
+        );
+    }
+    assert_eq!(snapshot_str, golden_str);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn imap_drive_threading_equals_legacy() {
+    let input: InputFixture =
+        serde_json::from_slice(&std::fs::read(manifest_path(IMAP_INPUT_FIXTURE)).unwrap()).unwrap();
+    let account = AccountId(input.account_id.clone());
+    let (db_state, tmp) = state(&input.account_id, "imap");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+    let rows = imap_rows(&input, &account);
+
+    let affected = super::write::persist(
+        &consumer_stores,
+        &input.account_id,
+        BifrostProviderKind::Imap,
+        &rows,
+        &[],
+    )
+    .await
+    .unwrap();
+    let mut accumulator = super::imap_threading::ImapThreadAccumulator::default();
+    accumulator.push_rows_with_ids(&rows, &affected.message_ids);
+    super::imap_threading::run_drive_end_threading(
+        &consumer_stores,
+        &input.account_id,
+        &accumulator,
+    )
+    .await
+    .unwrap();
+
+    let snapshot = dump_snapshot(&db_state).await;
+    let snapshot_str = canonical_string(&snapshot);
+    if std::env::var("UPDATE_GOLDEN").is_ok() {
+        std::fs::write(
+            manifest_path(IMAP_THREADING_GOLDEN_FIXTURE),
+            format!("{snapshot_str}\n"),
+        )
+        .unwrap();
+        eprintln!(
+            "===BEGIN IMAP THREADING GOLDEN SNAPSHOT===\n{snapshot_str}\n===END IMAP THREADING GOLDEN SNAPSHOT==="
+        );
+        return;
+    }
+
+    let golden_raw = std::fs::read_to_string(manifest_path(IMAP_THREADING_GOLDEN_FIXTURE)).unwrap();
+    let golden: Value = serde_json::from_str(&golden_raw).unwrap();
+    let golden_str = canonical_string(&golden);
+    if snapshot_str != golden_str {
+        eprintln!(
+            "===BEGIN IMAP THREADING SNAPSHOT===\n{snapshot_str}\n===END IMAP THREADING SNAPSHOT==="
+        );
+    }
+    assert_eq!(snapshot_str, golden_str);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn is_important_survives_non_important_sibling_delta() {
+    let account = AccountId("acc-important".to_string());
+    let (db_state, tmp) = state(&account.0, "jmap");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+
+    let mut important = basic_message("important-1", "thread-important", "Important");
+    important.flags.insert("$important".to_string());
+    important.importance = Importance::High;
+    let first = build_consumer_row(
+        &account,
+        BifrostProviderKind::Jmap,
+        &HashMap::new(),
+        &important,
+        Some(b"Message-ID: <important-1@example.test>\r\nSubject: Important\r\n\r\nbody"),
+        HashMap::new(),
+        HydrationOutcome::Succeeded,
+    );
+    super::write::persist(
+        &consumer_stores,
+        &account.0,
+        BifrostProviderKind::Jmap,
+        &[first],
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let sibling = basic_message("plain-2", "thread-important", "Plain");
+    let second = build_consumer_row(
+        &account,
+        BifrostProviderKind::Jmap,
+        &HashMap::new(),
+        &sibling,
+        Some(b"Message-ID: <plain-2@example.test>\r\nSubject: Plain\r\n\r\nbody"),
+        HashMap::new(),
+        HydrationOutcome::Succeeded,
+    );
+    super::write::persist(
+        &consumer_stores,
+        &account.0,
+        BifrostProviderKind::Jmap,
+        &[second],
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let is_important = db_state
+        .with_read(|conn| {
+            conn.query_row(
+                "SELECT is_important FROM threads WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params!["acc-important", "thread-important"],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap();
+    assert_eq!(is_important, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn imap_consumer_adopts_existing_local_id() {
+    let account = AccountId("acc-imap-adopt".to_string());
+    let (db_state, tmp) = state(&account.0, "imap");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+    db_state
+        .with_write(|conn| {
+            conn.execute(
+                "INSERT INTO threads (account_id, id, message_count) VALUES (?1, ?2, 0)",
+                rusqlite::params!["acc-imap-adopt", "legacy-thread"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO messages \
+                 (id, account_id, thread_id, subject, snippet, date, is_read, is_starred, \
+                  is_replied, is_forwarded, body_cached, imap_folder, imap_uid) \
+                 VALUES (?1, ?2, ?3, ?4, '', 1, 1, 0, 0, 0, 0, ?5, ?6)",
+                rusqlite::params![
+                    "legacy-local-id",
+                    "acc-imap-adopt",
+                    "legacy-thread",
+                    "Old",
+                    "INBOX",
+                    42_i64
+                ],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let message = basic_imap_message(&account, "imap1:5:INBOX:7:42", "New");
+    let row = build_consumer_row(
+        &account,
+        BifrostProviderKind::Imap,
+        &HashMap::new(),
+        &message,
+        Some(b"Message-ID: <imap-adopt@example.test>\r\nSubject: New\r\n\r\nbody"),
+        HashMap::new(),
+        HydrationOutcome::Succeeded,
+    );
+    super::write::persist(
+        &consumer_stores,
+        &account.0,
+        BifrostProviderKind::Imap,
+        &[row],
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let rows = db_state
+        .with_read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, thread_id FROM messages \
+                     WHERE account_id = ?1 AND imap_folder = 'INBOX' AND imap_uid = 42 \
+                     ORDER BY id",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = stmt
+                .query_map(rusqlite::params!["acc-imap-adopt"], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            Ok(rows)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![("legacy-local-id".to_string(), "legacy-thread".to_string())]
+    );
+}
+
+/// Regression for the drive-end threading accumulator: the IMAP write arm
+/// ADOPTS the existing local id of an already-synced `(account, folder, uid)`
+/// row, so the drive-end JWZ pass must reassign by that ADOPTED id, not the
+/// provisional hydrate-time id. Driving the production accumulation shape
+/// (`push_rows_with_ids(rows, affected.message_ids)`) must re-thread the
+/// adopted row to the cycle-correct id; keying on the provisional id would
+/// leave it stranded on its legacy thread.
+#[tokio::test(flavor = "multi_thread")]
+async fn imap_drive_threading_reassigns_adopted_message() {
+    let account = AccountId("acc-imap-adopt-thread".to_string());
+    let (db_state, tmp) = state(&account.0, "imap");
+    let consumer_stores = stores(db_state.clone(), &tmp);
+    let seed_account = account.0.clone();
+    db_state
+        .with_write(move |conn| {
+            conn.execute(
+                "INSERT INTO threads (account_id, id, message_count) VALUES (?1, ?2, 0)",
+                rusqlite::params![seed_account, "legacy-thread"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO messages \
+                 (id, account_id, thread_id, subject, snippet, date, is_read, is_starred, \
+                  is_replied, is_forwarded, body_cached, imap_folder, imap_uid) \
+                 VALUES (?1, ?2, ?3, ?4, '', 1, 1, 0, 0, 0, 0, ?5, ?6)",
+                rusqlite::params![
+                    "legacy-local-id",
+                    seed_account,
+                    "legacy-thread",
+                    "New",
+                    "INBOX",
+                    42_i64
+                ],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let message = basic_imap_message(&account, "imap1:5:INBOX:7:42", "New");
+    let row = build_consumer_row(
+        &account,
+        BifrostProviderKind::Imap,
+        &imap_folder_map(),
+        &message,
+        Some(b"Message-ID: <imap-adopt@example.test>\r\nSubject: New\r\n\r\nbody"),
+        HashMap::new(),
+        HydrationOutcome::Succeeded,
+    );
+    let rows = vec![row];
+    let affected = super::write::persist(
+        &consumer_stores,
+        &account.0,
+        BifrostProviderKind::Imap,
+        &rows,
+        &[],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        affected.message_ids,
+        vec!["legacy-local-id".to_string()],
+        "the row persisted under the adopted local id"
+    );
+
+    let mut accumulator = super::imap_threading::ImapThreadAccumulator::default();
+    accumulator.push_rows_with_ids(&rows, &affected.message_ids);
+    super::imap_threading::run_drive_end_threading(&consumer_stores, &account.0, &accumulator)
+        .await
+        .unwrap();
+
+    let expected_thread = sync::threading::generate_thread_id("imap-adopt@example.test");
+    let read_account = account.0.clone();
+    let thread_id = db_state
+        .with_read(move |conn| {
+            conn.query_row(
+                "SELECT thread_id FROM messages \
+                 WHERE account_id = ?1 AND id = 'legacy-local-id'",
+                rusqlite::params![read_account],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        thread_id, expected_thread,
+        "adopted message must be reassigned to the cycle-correct thread id"
+    );
+}
+
+fn basic_message(id: &str, thread_id: &str, subject: &str) -> Message {
+    Message {
+        id: ObjectId(id.to_string()),
+        thread_id: Some(ThreadId(thread_id.to_string())),
+        from: vec![Address {
+            name: Some("Sender".to_string()),
+            address: "sender@example.test".to_string(),
+        }],
+        to: vec![Address {
+            name: Some("Me".to_string()),
+            address: "me@example.test".to_string(),
+        }],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
+        subject: Some(subject.to_string()),
+        date: Some(UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+        containers: vec![ContainerId("INBOX".to_string())],
+        flags: ["$seen"].into_iter().map(str::to_string).collect(),
+        importance: Importance::Normal,
+        body_text: None,
+        body_html: None,
+        attachments: Vec::new(),
+        size_bytes: Some(64),
+        in_reply_to: None,
+        references: Vec::new(),
+    }
+}
+
+fn basic_imap_message(account: &AccountId, id: &str, subject: &str) -> Message {
+    let mut message = basic_message(id, "ignored-by-imap", subject);
+    message.thread_id = None;
+    message.id = ObjectId(id.to_string());
+    message.containers = vec![ContainerId("INBOX".to_string())];
+    message.flags = ["\\seen"].into_iter().map(str::to_string).collect();
+    message.from[0].address = format!("sender+{}@example.test", account.0);
+    message
 }
 
 /// Build a bare single-part Gmail `Message` whose RFC822 octets are exactly

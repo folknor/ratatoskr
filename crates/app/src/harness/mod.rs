@@ -2843,6 +2843,9 @@ fn request_params_from_lua(
                 "crash_after_ack_no_sentinel" | "CrashAfterAckNoSentinel" => {
                     TestBifrostHook::CrashAfterAckNoSentinel
                 }
+                "crash_before_drive_end_threading" | "CrashBeforeDriveEndThreading" => {
+                    TestBifrostHook::CrashBeforeDriveEndThreading
+                }
                 "force_lag" | "ForceLag" => TestBifrostHook::ForceLag,
                 other => {
                     return Err(lua_error_message(format!(

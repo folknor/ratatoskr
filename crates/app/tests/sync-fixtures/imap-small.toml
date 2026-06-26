@@ -7,6 +7,8 @@ name = "imap-small"
 #
 #   - $seen on email-001, $flagged on email-002 - exercises the
 #     keyword -> IMAP flag mapping and the UNSEEN counter.
+#   - a custom "project" keyword on email-001 - exercises IMAP keyword
+#     label persistence without affecting the read/starred assertions.
 #   - explicit sent_at distinct from received_at - lets tests
 #     assert INTERNALDATE is built from received_at, not sent_at.
 #   - mbx-archive remains empty - LIST coverage of a folder with
@@ -36,7 +38,7 @@ sort_order = 1
 [[email]]
 id = "email-001"
 mailbox_ids = ["mbx-inbox"]
-keywords = ["$seen"]
+keywords = ["$seen", "project"]
 from = "alice@example.com"
 to = ["bob@example.com"]
 subject = "Hello"

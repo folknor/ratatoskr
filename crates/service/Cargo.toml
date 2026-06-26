@@ -38,10 +38,7 @@ gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }
 imap = { path = "../imap" }
-# Phase 6d-B: sync trait + per-provider orphan impls. The action
-# handler constructs `Box<dyn ProviderSyncOps>` (which inherits
-# `ProviderOps`) so a single trait object covers both action and
-# sync surfaces.
+# Bifrost consumer support plus retained provider auxiliary sync helpers.
 provider-sync = { path = "../provider-sync" }
 async-trait = "0.1"
 # Action service deps brought in from core: futures for batch_execute's

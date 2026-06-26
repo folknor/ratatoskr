@@ -184,3 +184,21 @@ pub async fn run_gmail_auxiliary_sync(
     )
     .await;
 }
+
+pub async fn sync_imap_folder_map(
+    session: &mut crate::imap::connection::ImapSession,
+    account_id: &str,
+    write_db: &service_state::WriteDbState,
+) -> Result<HashMap<String, FolderKind>, String> {
+    crate::imap::aux_sync::sync_imap_folder_map(session, account_id, write_db).await
+}
+
+pub async fn run_imap_auxiliary_sync(
+    session: &mut crate::imap::connection::ImapSession,
+    account_id: &str,
+    write_db: &service_state::WriteDbState,
+    folder_paths: &[String],
+) {
+    crate::imap::aux_sync::run_imap_auxiliary_sync(session, account_id, write_db, folder_paths)
+        .await;
+}

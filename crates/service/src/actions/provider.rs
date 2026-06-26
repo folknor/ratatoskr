@@ -1,6 +1,5 @@
 use common::ops::ProviderOps;
 use db::db::ReadDbState;
-use provider_sync::ProviderSyncOps;
 use service_state::WriteDbState;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -13,13 +12,8 @@ use super::outcome::RemoteFailureKind;
 /// Reads the provider type from the database, decrypts credentials with
 /// the encryption key, and constructs the appropriate provider client.
 ///
-/// Returns `Box<dyn ProviderSyncOps>` (Phase 6d-B). The trait inherits
-/// `ProviderOps` so a single trait object covers both the action and
-/// sync surfaces - action callers continue to call `provider.archive(...)`
-/// etc. directly via supertrait method resolution; the sync dispatcher
-/// calls `provider.sync_initial(...)` / `sync_delta(...)`. The action
-/// service is the single point of provider resolution; the app crate
-/// must not construct providers directly.
+/// The action service is the single point of provider resolution; the app
+/// crate must not construct providers directly.
 pub async fn create_provider(
     db: &ReadDbState,
     write_db: &WriteDbState,
@@ -32,7 +26,7 @@ pub async fn create_provider(
         .await?;
     match raw_provider.as_str() {
         "harness-offline" => return Ok(Box::new(HarnessOfflineProvider::immediate())),
-        "harness-slow-sync" => return Ok(Box::new(HarnessOfflineProvider::slow_sync())),
+        "harness-slow-sync" => return Ok(Box::new(HarnessOfflineProvider)),
         _ => {}
     }
 
@@ -74,33 +68,6 @@ pub async fn create_provider(
     }
 }
 
-pub async fn create_sync_provider(
-    db: &ReadDbState,
-    write_db: &WriteDbState,
-    account_id: &str,
-    encryption_key: [u8; 32],
-) -> Result<Box<dyn ProviderSyncOps>, String> {
-    let aid = account_id.to_string();
-    let raw_provider = db
-        .with_read(move |conn| db::db::queries_extra::get_account_provider_raw_sync(conn, &aid))
-        .await?;
-    match raw_provider.as_str() {
-        "harness-offline" => return Ok(Box::new(HarnessOfflineProvider::immediate())),
-        "harness-slow-sync" => return Ok(Box::new(HarnessOfflineProvider::slow_sync())),
-        _ => {}
-    }
-
-    match MailProviderKind::parse(&raw_provider)? {
-        MailProviderKind::Gmail => Err("Gmail sync is handled by the bifrost runner".to_string()),
-        MailProviderKind::Graph => Err("Graph sync is handled by the bifrost runner".to_string()),
-        MailProviderKind::Jmap => Err("JMAP sync is handled by the bifrost runner".to_string()),
-        MailProviderKind::Imap => Ok(Box::new(imap::ops::ImapOps::new(
-            encryption_key,
-            write_db.writer_pool(),
-        ))),
-    }
-}
-
 /// Classify a provider-construction error for retry policy.
 pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
     let lower = error.to_lowercase();
@@ -124,44 +91,15 @@ pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
     }
 }
 
-#[derive(Clone, Copy)]
-enum HarnessOfflineMode {
-    Immediate,
-    SlowSync,
-}
-
-struct HarnessOfflineProvider {
-    mode: HarnessOfflineMode,
-}
+struct HarnessOfflineProvider;
 
 impl HarnessOfflineProvider {
     fn immediate() -> Self {
-        Self {
-            mode: HarnessOfflineMode::Immediate,
-        }
-    }
-
-    fn slow_sync() -> Self {
-        Self {
-            mode: HarnessOfflineMode::SlowSync,
-        }
+        Self
     }
 
     fn offline() -> common::error::ProviderError {
         common::error::ProviderError::Network("harness offline".into())
-    }
-
-    async fn sync_result(
-        &self,
-        ctx: &provider_sync::SyncProviderCtx<'_>,
-    ) -> Result<common::types::SyncResult, common::error::ProviderError> {
-        match self.mode {
-            HarnessOfflineMode::Immediate => Err(Self::offline()),
-            HarnessOfflineMode::SlowSync => {
-                ctx.cancellation_token.cancelled().await;
-                Err(Self::offline())
-            }
-        }
     }
 }
 
@@ -379,25 +317,6 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         _ctx: &common::types::ProviderCtx<'_>,
     ) -> Result<common::types::ProviderProfile, common::error::ProviderError> {
         Err(Self::offline())
-    }
-}
-
-#[async_trait::async_trait]
-impl provider_sync::ProviderSyncOps for HarnessOfflineProvider {
-    async fn sync_initial(
-        &self,
-        ctx: &provider_sync::SyncProviderCtx<'_>,
-        _days_back: i64,
-    ) -> Result<common::types::SyncResult, common::error::ProviderError> {
-        self.sync_result(ctx).await
-    }
-
-    async fn sync_delta(
-        &self,
-        ctx: &provider_sync::SyncProviderCtx<'_>,
-        _days_back: Option<i64>,
-    ) -> Result<common::types::SyncResult, common::error::ProviderError> {
-        self.sync_result(ctx).await
     }
 }
 

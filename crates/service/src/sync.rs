@@ -10,8 +10,8 @@
 //!    `<app_data>/sync_markers/<account_id>.json` with `status:
 //!    "in_progress"` (atomic temp-file-then-rename) before doing any
 //!    network or DB work.
-//! 3. The runner calls `service::sync_dispatch::sync_for_account`,
-//!    which dispatches to the provider's initial or delta sync impl.
+//! 3. The runner routes the account provider through the Bifrost sync
+//!    engine and consumer.
 //! 4. On exit (Ok / Err / cancelled), the runner updates the marker
 //!    status (`completed | cancelled | failed`) and emits a
 //!    `Notification::SyncCompleted` carrying the run id + result.
@@ -136,7 +136,6 @@ pub(crate) struct SyncRuntimeInner {
     pub(crate) inline_write: InlineImageStoreWriteState,
     pub(crate) search_write: SearchWriteHandle,
     pub(crate) encryption_key: SecretKey,
-    pub(crate) progress: Arc<dyn ProgressReporter>,
     pub(crate) notification_tx: NotificationSender,
     pub(crate) app_data_dir: PathBuf,
     pub(crate) service_generation: u32,
@@ -158,7 +157,7 @@ impl SyncRuntime {
         inline_write: InlineImageStoreWriteState,
         search_write: SearchWriteHandle,
         encryption_key: SecretKey,
-        progress: Arc<dyn ProgressReporter>,
+        _progress: Arc<dyn ProgressReporter>,
         notification_tx: NotificationSender,
         app_data_dir: PathBuf,
         service_generation: u32,
@@ -173,7 +172,6 @@ impl SyncRuntime {
                 inline_write,
                 search_write,
                 encryption_key,
-                progress,
                 notification_tx,
                 app_data_dir,
                 service_generation,
@@ -475,8 +473,8 @@ async fn run_sync_supervised(
     }
 }
 
-/// Inner runner. Calls `core::sync_dispatch::sync_for_account`,
-/// then emits the terminal notification + updates the marker.
+/// Inner runner. Drives provider sync, then emits the terminal notification
+/// and updates the marker.
 async fn run_sync(
     inner: Arc<SyncRuntimeInner>,
     account_id: String,
@@ -555,20 +553,24 @@ async fn run_sync(
             )
             .await
         }
-        Ok(_) => {
-            crate::sync_dispatch::sync_for_account(
-                &inner.db,
+        Ok(provider) if provider == "imap" => {
+            crate::bifrost::engine_sync::sync_imap_account(
+                &inner.bifrost_engine,
+                crate::bifrost::BifrostConsumerStores {
+                    db: inner.db.clone(),
+                    body_store: inner.body_write.clone(),
+                    inline_images: inner.inline_write.clone(),
+                    search: inner.search_write.clone(),
+                },
                 &read_db,
+                &inner.db,
                 &account_id,
                 encryption_key_bytes,
-                &inner.body_write,
-                &inner.inline_write,
-                &inner.search_write,
-                inner.progress.as_ref(),
                 &cancellation_token,
             )
             .await
         }
+        Ok(provider) => Err(format!("unsupported sync provider: {provider}")),
         Err(error) => Err(error),
     };
 

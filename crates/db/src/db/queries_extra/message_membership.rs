@@ -94,8 +94,10 @@ pub fn recompute_thread_folders_from_messages(
 
     tx.execute(
         "INSERT OR IGNORE INTO thread_folders (account_id, thread_id, folder_id) \
-         SELECT DISTINCT m.account_id, m.thread_id, m.imap_folder \
+         SELECT DISTINCT m.account_id, m.thread_id, f.id \
          FROM messages m \
+         JOIN folders f ON f.account_id = m.account_id \
+             AND (f.imap_folder_path = m.imap_folder OR f.id = m.imap_folder) \
          WHERE m.account_id = ?1 AND m.thread_id = ?2 AND m.imap_folder IS NOT NULL",
         params![account_id, thread_id],
     )
@@ -375,5 +377,27 @@ mod tests {
         assert_eq!(thread_labels(&conn, "old"), vec!["cat:Red"]);
         assert_eq!(thread_folders(&conn, "new"), vec!["INBOX"]);
         assert_eq!(thread_labels(&conn, "new"), vec!["cat:Blue"]);
+    }
+
+    #[test]
+    fn recompute_imap_folder_paths_to_folder_ids() {
+        let mut conn = setup_conn();
+        conn.execute(
+            "UPDATE folders SET imap_folder_path = 'Archive' \
+             WHERE account_id = 'acc' AND id = 'archive'",
+            [],
+        )
+        .unwrap();
+        insert_thread(&conn, "t1");
+        conn.execute(
+            "INSERT INTO messages (id, account_id, thread_id, date, subject, snippet, imap_folder) \
+             VALUES ('m1', 'acc', 't1', 1, 'subject', 'snippet', 'Archive')",
+            [],
+        )
+        .unwrap();
+
+        recompute(&mut conn, "t1");
+
+        assert_eq!(thread_folders(&conn, "t1"), vec!["archive"]);
     }
 }

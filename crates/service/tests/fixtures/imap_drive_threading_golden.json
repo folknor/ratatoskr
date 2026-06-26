@@ -1,0 +1,123 @@
+{
+  "attachments": [],
+  "message_folders": [],
+  "message_keywords": [
+    {
+      "account_id": "imap-acc",
+      "keyword": "Project",
+      "label_id": "kw:Project",
+      "message_id": "imap-imap-acc-INBOX-1"
+    }
+  ],
+  "message_labels": [],
+  "messages": [
+    {
+      "account_id": "imap-acc",
+      "auth_results": null,
+      "bcc_addresses": null,
+      "body_cached": 1,
+      "cc_addresses": null,
+      "date": 1700000060000,
+      "from_address": "me@example.test",
+      "from_name": null,
+      "has_meeting_invite": 0,
+      "id": "imap-imap-acc-Archive-9",
+      "in_reply_to_header": "imap-msg-1@example.com",
+      "internal_date": 1700000060000,
+      "is_forwarded": 0,
+      "is_reaction": 0,
+      "is_read": 1,
+      "is_replied": 1,
+      "is_starred": 0,
+      "list_unsubscribe": null,
+      "list_unsubscribe_post": null,
+      "mdn_requested": 0,
+      "meeting_invite_method": null,
+      "meeting_invite_uid": null,
+      "message_id_header": "imap-msg-2@example.com",
+      "raw_size": 208,
+      "references_header": "imap-msg-1@example.com",
+      "reply_to": null,
+      "snippet": "Archive reply body",
+      "subject": "Re: IMAP thread",
+      "thread_id": "imap-thread-e99d84f7",
+      "to_addresses": "sender@example.com"
+    },
+    {
+      "account_id": "imap-acc",
+      "auth_results": null,
+      "bcc_addresses": null,
+      "body_cached": 1,
+      "cc_addresses": null,
+      "date": 1700000000000,
+      "from_address": "sender@example.com",
+      "from_name": "Sender",
+      "has_meeting_invite": 0,
+      "id": "imap-imap-acc-INBOX-1",
+      "in_reply_to_header": null,
+      "internal_date": 1700000000000,
+      "is_forwarded": 0,
+      "is_reaction": 0,
+      "is_read": 1,
+      "is_replied": 0,
+      "is_starred": 1,
+      "list_unsubscribe": null,
+      "list_unsubscribe_post": null,
+      "mdn_requested": 0,
+      "meeting_invite_method": null,
+      "meeting_invite_uid": null,
+      "message_id_header": "imap-msg-1@example.com",
+      "raw_size": 128,
+      "references_header": null,
+      "reply_to": null,
+      "snippet": "Inbox body",
+      "subject": "IMAP thread",
+      "thread_id": "imap-thread-e99d84f7",
+      "to_addresses": "me@example.test"
+    }
+  ],
+  "thread_folders": [
+    {
+      "account_id": "imap-acc",
+      "folder_id": "INBOX",
+      "thread_id": "imap-thread-e99d84f7"
+    },
+    {
+      "account_id": "imap-acc",
+      "folder_id": "archive",
+      "thread_id": "imap-thread-e99d84f7"
+    }
+  ],
+  "thread_labels": [
+    {
+      "account_id": "imap-acc",
+      "label_id": "kw:Project",
+      "thread_id": "imap-thread-e99d84f7"
+    }
+  ],
+  "thread_participants": [
+    {
+      "account_id": "imap-acc",
+      "email": "me@example.test",
+      "thread_id": "imap-thread-e99d84f7"
+    },
+    {
+      "account_id": "imap-acc",
+      "email": "sender@example.com",
+      "thread_id": "imap-thread-e99d84f7"
+    }
+  ],
+  "threads": [
+    {
+      "account_id": "imap-acc",
+      "has_attachments": 0,
+      "id": "imap-thread-e99d84f7",
+      "is_chat_thread": 0,
+      "is_important": 0,
+      "is_read": 1,
+      "is_starred": 1,
+      "message_count": 2,
+      "shared_mailbox_id": null
+    }
+  ]
+}

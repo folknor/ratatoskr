@@ -25,9 +25,6 @@ use super::mailbox_mapper::{find_mailbox_id_by_role, map_mailbox_to_folder};
 
 /// JMAP implementation of the provider operations trait.
 pub struct JmapOps {
-    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
-    /// can reach the client when constructing sync entry-point calls.
-    /// Phase 6d-B carved the sync trait out of `common::ProviderOps`.
     pub client: JmapClient,
 }
 
@@ -37,10 +34,8 @@ impl JmapOps {
     }
 }
 
-// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
-// `ProviderOps`. The relocated `ProviderSyncOps` trait
-// (`provider-sync` crate) carries them; `provider-sync/src/jmap_impl.rs`
-// holds the orphan-impl and sync entry-point code.
+// JMAP mail sync now runs through the service-owned bifrost runner; this
+// type remains the JMAP action surface.
 #[async_trait]
 impl ProviderOps for JmapOps {
     async fn archive(

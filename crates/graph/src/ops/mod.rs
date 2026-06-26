@@ -38,9 +38,6 @@ const PID_TAG_DEFERRED_SEND_TIME: &str = "SystemTime 0x3FEF";
 
 /// Graph implementation of the provider operations trait.
 pub struct GraphOps {
-    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
-    /// can reach the client when constructing sync entry-point calls.
-    /// Phase 6d-B carved the sync trait out of `common::ProviderOps`.
     pub client: GraphClient,
 }
 
@@ -55,10 +52,8 @@ impl GraphOps {
     }
 }
 
-// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
-// `ProviderOps`. The relocated `ProviderSyncOps` trait
-// (`provider-sync` crate) carries them; `provider-sync/src/graph_impl.rs`
-// holds the orphan-impl and sync entry-point code.
+// Graph mail sync now runs through the service-owned bifrost runner for
+// personal accounts; this type remains the Graph action surface.
 #[async_trait]
 impl ProviderOps for GraphOps {
     async fn archive(

@@ -23,7 +23,7 @@ pub mod pending;
 mod permanent_delete;
 mod pin;
 // Public so the `core::actions::provider` shim can re-export
-// `create_provider` for `core::chat` / `core::sync_dispatch` callers.
+// `create_provider` for core callers.
 // Once those callers migrate off `crate::actions::provider::*` (Phase
 // 2 task 9 / 10), this can drop back to `pub(crate)`.
 pub mod provider;
@@ -56,7 +56,7 @@ pub use service_api::actions::{
     FolderId, LabelGroupId, LabelId, SendAttachment, SendIntent, SendRequest,
 };
 // create_provider is pub(crate) - only accessible within core, not to downstream crates.
-// The app must use action functions or sync_dispatch/jmap_push helpers.
+// The app must use action functions or service IPC helpers.
 pub use snooze::{snooze, unsnooze};
 pub use spam::spam;
 pub use star::star;

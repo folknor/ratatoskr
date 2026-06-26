@@ -15,12 +15,11 @@
 //! shared mailboxes onto the consumer.
 //!
 //! What the cut DID achieve: the PERSONAL-mail Graph path no longer routes
-//! through here at all - `graph_impl.rs` (the `ProviderSyncOps` orphan) is
-//! deleted and personal Graph mail persists through the service-owned bifrost
-//! consumer. `aux_sync.rs` resolves the folder map via the `graph` crate's own
-//! `::graph::sync::sync_folders_public` (its natural owner), not this tree.
-//! This module is therefore now exclusively the B12 shared-mailbox legacy leg;
-//! it is deleted/rewired by B12, not by B3a-cut-graph.
+//! through here at all; personal Graph mail persists through the service-owned
+//! bifrost consumer. `aux_sync.rs` resolves the folder map via the `graph`
+//! crate's own `::graph::sync::sync_folders_public` (its natural owner), not
+//! this tree. This module is therefore now exclusively the B12 shared-mailbox
+//! legacy leg; it is deleted/rewired by B12, not by B3a-cut-graph.
 
 mod delta_tokens;
 mod folders;
@@ -75,13 +74,8 @@ struct SyncCtx<'a> {
 
 /// Initial Graph sync: folders -> per-folder message fetch -> delta token bootstrap.
 ///
-/// Phase 6d-B flattened the parameter list: callers pass the writer-half
-/// handles individually instead of a `SyncProviderCtx`. The `provider-sync`
-/// crate destructures its `SyncProviderCtx` at the IPC boundary so the
-/// `provider-sync -> graph -> provider-sync` Cargo cycle is closed. The
-/// `service-state` dep stays in `crates/graph/Cargo.toml` until the per-
-/// store handle types relocate to a UI-safe crate. The structural
-/// lockdown is enforced by the transitive app dependency tests.
+/// Callers pass the writer-half handles individually so this shared-mailbox
+/// leg can stay isolated until B12 rewires it onto Bifrost scopes.
 #[allow(clippy::too_many_arguments)]
 pub async fn graph_initial_sync(
     client: &GraphClient,
@@ -248,9 +242,8 @@ pub async fn graph_initial_sync(
 ///
 /// Every 10th cycle, refreshes the folder tree and bootstraps new folders.
 ///
-/// Phase 6d-B flattened the parameter list: callers pass the writer-half
-/// handles individually instead of a `SyncProviderCtx`. See
-/// `graph_initial_sync` for the rationale.
+/// Callers pass the writer-half handles individually so this shared-mailbox
+/// leg can stay isolated until B12 rewires it onto Bifrost scopes.
 #[allow(clippy::too_many_arguments)]
 pub async fn graph_delta_sync(
     client: &GraphClient,

@@ -22,7 +22,7 @@ pub use super::raw::{raw_fetch_diagnostic, raw_fetch_messages};
 
 /// Check whether a mailbox's PERMANENTFLAGS includes `\*` (Flag::MayCreate),
 /// indicating that the server allows clients to define arbitrary custom keywords.
-pub(crate) fn mailbox_supports_custom_keywords(mailbox: &async_imap::types::Mailbox) -> bool {
+pub fn mailbox_supports_custom_keywords(mailbox: &async_imap::types::Mailbox) -> bool {
     mailbox
         .permanent_flags
         .iter()

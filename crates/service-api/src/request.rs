@@ -360,6 +360,7 @@ pub enum TestBifrostHook {
     },
     CrashBeforeAck,
     CrashAfterAckNoSentinel,
+    CrashBeforeDriveEndThreading,
     /// Force the consumer drive to report sustained lag, exercising the
     /// production bounded lag-backoff loop (B3a-cut-jmap 6.4).
     ForceLag,

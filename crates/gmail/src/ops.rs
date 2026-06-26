@@ -13,9 +13,6 @@ use super::client::GmailClient;
 
 /// Gmail implementation of the provider operations trait.
 pub struct GmailOps {
-    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
-    /// can reach the client when constructing sync entry-point calls.
-    /// Phase 6d-B carved the sync trait out of `common::ProviderOps`.
     pub client: GmailClient,
 }
 

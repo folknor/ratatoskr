@@ -35,9 +35,9 @@ pub struct AutoSyncResult {
 /// `get_profile`, `test_connection`, `list_folders`) never read or
 /// wrote them.
 ///
-/// Sync methods take `SyncProviderCtx`. Action methods take
-/// `ActionProviderCtx`. This narrow `ProviderCtx` covers everything
-/// in between.
+/// Action methods take `ActionProviderCtx`. This narrow `ProviderCtx`
+/// covers non-action provider calls such as attachment fetches and
+/// provider metadata.
 pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a ReadDbState,

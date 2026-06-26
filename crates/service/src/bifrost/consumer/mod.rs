@@ -1,4 +1,5 @@
 pub mod hydrate;
+pub mod imap_threading;
 pub mod post_persist;
 pub mod write;
 
@@ -15,7 +16,10 @@ use std::time::Duration;
 use bifrost_sync::CheckpointStore;
 use bifrost_sync::backfill::BackfillState;
 use bifrost_sync::{Error, SyncEngine};
-use bifrost_types::{AccountId, Checkpoint, CursorScope, ObjectType, SyncEvent};
+use bifrost_types::{
+    AccountId, BackfillCheckpoint, BackfillProgress, Checkpoint, CursorScope, ObjectType,
+    Partition, SyncEvent,
+};
 use common::types::FolderKind;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
@@ -23,7 +27,9 @@ use service_state::{
 use tokio::sync::{Mutex, broadcast};
 
 use self::hydrate::HydrateBatch;
+use self::imap_threading::ImapThreadAccumulator;
 use super::SqliteCheckpointStore;
+use super::checkpoint_store::BACKFILL_COMPLETION_PARTITION;
 
 const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -62,6 +68,7 @@ pub enum ConsumerHook {
     },
     CrashBeforeAck,
     CrashAfterAckNoSentinel,
+    CrashBeforeDriveEndThreading,
     /// Force the drive loop to report `lagged` (and detach) on the next
     /// event, simulating sustained structural broadcast lag WITHOUT needing
     /// a real overflow. The production bounded lag-backoff loop in
@@ -95,7 +102,7 @@ impl ConsumerHookRegistry {
     pub async fn peek_withholds_ack(&self, account_id: &str) -> bool {
         matches!(
             self.hooks.lock().await.get(account_id),
-            Some(ConsumerHook::CrashBeforeAck)
+            Some(ConsumerHook::CrashBeforeAck | ConsumerHook::CrashBeforeDriveEndThreading)
         )
     }
 }
@@ -132,6 +139,10 @@ pub struct ChangeStreamConsumer {
     /// distinguish "quiet" from "mid-burst"), and the empty-observed case is
     /// vacuously caught-up - the empty-stream "completes immediately" edge.
     observed_scopes: HashSet<CursorScope>,
+    imap_threading: ImapThreadAccumulator,
+    deferred_imap_acks: Vec<(CursorScope, Checkpoint)>,
+    imap_seen_by_scope: HashMap<CursorScope, u64>,
+    crash_before_drive_end_threading: bool,
 }
 
 impl ChangeStreamConsumer {
@@ -150,6 +161,10 @@ impl ChangeStreamConsumer {
             hook_registry: None,
             folder_map: HashMap::new(),
             observed_scopes: HashSet::new(),
+            imap_threading: ImapThreadAccumulator::default(),
+            deferred_imap_acks: Vec::new(),
+            imap_seen_by_scope: HashMap::new(),
+            crash_before_drive_end_threading: false,
         }
     }
 
@@ -216,6 +231,14 @@ impl ChangeStreamConsumer {
         // un-acked drive must not apply deletions.
         if outcome.is_ok() {
             self.flush_pending_deletions(&pending).await?;
+            if self.crash_before_drive_end_threading {
+                return Err(Error::Other(
+                    "bifrost consumer crash_before_drive_end_threading hook fired".to_string(),
+                ));
+            }
+            if !report.lagged {
+                self.flush_imap_drive_end(report).await?;
+            }
         }
         outcome
     }
@@ -293,7 +316,7 @@ impl ChangeStreamConsumer {
     /// Process one event. Returns `true` when the drive loop must stop
     /// (the stream terminated).
     async fn handle_event(
-        &self,
+        &mut self,
         event: bifrost_sync::multiplexer::MultiplexerEvent,
         hook: Option<ConsumerHook>,
         report: &mut ConsumerDriveReport,
@@ -313,6 +336,14 @@ impl ChangeStreamConsumer {
                 } else {
                     HydrateBatch::default()
                 };
+                let batch_checkpoint = batch.checkpoint.clone();
+                if self.provider == BifrostProviderKind::Imap {
+                    let seen = u64::try_from(batch.items.len()).unwrap_or(u64::MAX);
+                    self.imap_seen_by_scope
+                        .entry(event.scope.clone())
+                        .and_modify(|total| *total = total.saturating_add(seen))
+                        .or_insert(seen);
+                }
                 // Accumulate this batch's live ids and Graph removed-candidates
                 // into the drive-level reconcile state (finding A). The actual
                 // deletion of unreconciled candidates is deferred to drive end.
@@ -327,12 +358,23 @@ impl ChangeStreamConsumer {
                 )
                 .await
                 .map_err(|error| Error::Other(format!("bifrost persist: {error}")))?;
+                if self.provider == BifrostProviderKind::Imap {
+                    // Key the threadable accumulator on the id each row was
+                    // PERSISTED under: the IMAP write arm adopts the existing
+                    // local id of any `(account_id, imap_folder, imap_uid)`
+                    // row before insert, and the drive-end threading pass
+                    // reassigns by message id, so it must see the adopted id
+                    // (`affected.message_ids`, 1:1 with `hydrated.rows`), not
+                    // the provisional hydrate-time id.
+                    self.imap_threading
+                        .push_rows_with_ids(&hydrated.rows, &affected.message_ids);
+                }
                 post_persist::run(
                     &self.stores.db,
                     &self.account_id.0,
                     self.provider,
                     &event.scope,
-                    event.checkpoint.as_ref(),
+                    batch_checkpoint.as_ref(),
                     &hydrated.rows,
                     &affected,
                 )
@@ -344,20 +386,29 @@ impl ChangeStreamConsumer {
                         "bifrost consumer crash_before_ack hook fired".to_string(),
                     ));
                 }
-                if let (Some(checkpoint), false) = (event.checkpoint, hydrated.blocked) {
-                    self.ack_checkpoint(event.scope.clone(), checkpoint).await?;
-                    post_persist::prune_marker_window(
-                        &self.stores.db,
-                        &self.account_id.0,
-                        &event.scope,
-                    )
-                    .await
-                    .map_err(Error::Other)?;
-                    report.batches_acked = report.batches_acked.saturating_add(1);
-                    if matches!(hook, Some(ConsumerHook::CrashAfterAckNoSentinel)) {
-                        return Err(Error::Other(
-                            "bifrost consumer crash_after_ack_no_sentinel hook fired".to_string(),
-                        ));
+                if matches!(hook, Some(ConsumerHook::CrashBeforeDriveEndThreading)) {
+                    self.crash_before_drive_end_threading = true;
+                }
+                if let (Some(checkpoint), false) = (batch_checkpoint, hydrated.blocked) {
+                    if self.provider == BifrostProviderKind::Imap {
+                        self.deferred_imap_acks
+                            .push((event.scope.clone(), checkpoint));
+                    } else {
+                        self.ack_checkpoint(event.scope.clone(), checkpoint).await?;
+                        post_persist::prune_marker_window(
+                            &self.stores.db,
+                            &self.account_id.0,
+                            &event.scope,
+                        )
+                        .await
+                        .map_err(Error::Other)?;
+                        report.batches_acked = report.batches_acked.saturating_add(1);
+                        if matches!(hook, Some(ConsumerHook::CrashAfterAckNoSentinel)) {
+                            return Err(Error::Other(
+                                "bifrost consumer crash_after_ack_no_sentinel hook fired"
+                                    .to_string(),
+                            ));
+                        }
                     }
                 }
             }
@@ -371,7 +422,60 @@ impl ChangeStreamConsumer {
                 );
                 return Ok(true);
             }
-            SyncEvent::Done(_) | SyncEvent::Progress(_) | SyncEvent::Warning(_) => {}
+            SyncEvent::Done(checkpoint) => {
+                if let Some(checkpoint) = checkpoint.clone() {
+                    if self.provider == BifrostProviderKind::Imap {
+                        // IMAP-only: synthesize a durable Backfill COMPLETION
+                        // sentinel from the Done's Change cursor. The engine's
+                        // backfill orchestrator reads this sentinel on the next
+                        // attach (`get_backfill` -> `backfill_complete_recorded`)
+                        // to SKIP re-walking a scope's full inventory; without
+                        // it, every kick would re-fetch the whole mailbox.
+                        //
+                        // The HTTP siblings get this sentinel for free: their
+                        // backfill completion arrives as a real
+                        // `Checkpoint::Backfill` on the completion partition
+                        // (the engine's `emit_backfill_complete`, acked through
+                        // the normal batch path). The bifrost IMAP data path
+                        // never emits one - both its `inventory_stream` and
+                        // `changes_stream` checkpoint exclusively with
+                        // `Checkpoint::Change` (the QRESYNC/CONDSTORE folder
+                        // cursor) and signal per-folder completion via
+                        // `Done(Change)`. So for IMAP the consumer must derive
+                        // the completion sentinel itself, mirroring the
+                        // `items_done = seen + 1` / `items_estimated = seen`
+                        // shape `emit_backfill_complete` records (the
+                        // per-scope total accumulated in `imap_seen_by_scope`).
+                        if matches!(checkpoint, Checkpoint::Change(_)) {
+                            let seen = self
+                                .imap_seen_by_scope
+                                .get(&event.scope)
+                                .copied()
+                                .unwrap_or(0);
+                            self.deferred_imap_acks.push((
+                                event.scope.clone(),
+                                Checkpoint::Backfill(completion_backfill_checkpoint(
+                                    event.scope.clone(),
+                                    seen,
+                                )),
+                            ));
+                        }
+                        self.deferred_imap_acks
+                            .push((event.scope.clone(), checkpoint));
+                    } else {
+                        self.ack_checkpoint(event.scope.clone(), checkpoint).await?;
+                        post_persist::prune_marker_window(
+                            &self.stores.db,
+                            &self.account_id.0,
+                            &event.scope,
+                        )
+                        .await
+                        .map_err(Error::Other)?;
+                        report.batches_acked = report.batches_acked.saturating_add(1);
+                    }
+                }
+            }
+            SyncEvent::Progress(_) | SyncEvent::Warning(_) => {}
             _ => {}
         }
         Ok(false)
@@ -451,6 +555,47 @@ impl ChangeStreamConsumer {
         .map_err(|error| Error::Other(format!("bifrost drive-end delete: {error}")))?;
         Ok(())
     }
+
+    async fn flush_imap_drive_end(
+        &mut self,
+        report: &mut ConsumerDriveReport,
+    ) -> Result<(), Error> {
+        if self.provider != BifrostProviderKind::Imap {
+            return Ok(());
+        }
+        imap_threading::run_drive_end_threading(
+            &self.stores,
+            &self.account_id.0,
+            &self.imap_threading,
+        )
+        .await
+        .map_err(|error| Error::Other(format!("bifrost IMAP threading: {error}")))?;
+        self.stores.search.flush_now().await.map_err(Error::Other)?;
+        let deferred = std::mem::take(&mut self.deferred_imap_acks);
+        for (scope, checkpoint) in deferred {
+            self.ack_checkpoint(scope.clone(), checkpoint).await?;
+            post_persist::prune_marker_window(&self.stores.db, &self.account_id.0, &scope)
+                .await
+                .map_err(Error::Other)?;
+            report.batches_acked = report.batches_acked.saturating_add(1);
+        }
+        self.imap_threading.clear();
+        self.imap_seen_by_scope.clear();
+        Ok(())
+    }
+}
+
+fn completion_backfill_checkpoint(scope: CursorScope, seen: u64) -> BackfillCheckpoint {
+    BackfillCheckpoint {
+        scope,
+        partition: Partition(BACKFILL_COMPLETION_PARTITION.to_vec()),
+        progress_marker: None,
+        progress: BackfillProgress {
+            items_done: seen.saturating_add(1),
+            items_estimated: Some(seen),
+        },
+        envelope_version: bifrost_sync::ENGINE_VERSION,
+    }
 }
 
 /// Drive-level accumulator for the Graph move-vs-purge reconcile (finding A).
@@ -464,10 +609,19 @@ struct PendingDeletions {
 }
 
 fn is_email_scope(scope: &CursorScope) -> bool {
+    // `CursorScope::Folder(_)` is accepted unconditionally rather than gated to
+    // the IMAP provider. It is the scope IMAP drives on (the bifrost IMAP
+    // `Account` emits per-folder `Folder` scopes); the HTTP providers drive
+    // `Account` / `Type(Email)` / `FolderType` scopes and never emit a bare
+    // `Folder` scope, so this arm is exercised only by IMAP. Leaving it
+    // provider-agnostic keeps this predicate from having to thread the
+    // `BifrostProviderKind` through, and is harmless because no non-IMAP
+    // provider produces a `Folder`-scoped batch to mis-route here.
     matches!(
         scope,
         CursorScope::Account
             | CursorScope::Type(ObjectType::Email)
+            | CursorScope::Folder(_)
             | CursorScope::FolderType {
                 ty: ObjectType::Email,
                 ..
@@ -484,6 +638,7 @@ async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
         ConsumerHook::CrashBeforeAck | ConsumerHook::CrashAfterAckNoSentinel => Err(Error::Other(
             "bifrost consumer crash hook fired in in-process handler".to_string(),
         )),
+        ConsumerHook::CrashBeforeDriveEndThreading => Ok(()),
         // ForceLag is handled inline in `drive_receiver` (it short-circuits to
         // the lag arm before any batch work), so it never reaches here.
         ConsumerHook::ForceLag => Ok(()),
@@ -492,7 +647,8 @@ async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::BifrostProviderKind;
+    use super::{BifrostProviderKind, is_email_scope};
+    use bifrost_types::{CursorScope, FolderId};
 
     #[test]
     fn provider_kind_names_match_account_provider_values() {
@@ -500,5 +656,12 @@ mod tests {
         assert_eq!(BifrostProviderKind::Graph.as_str(), "graph");
         assert_eq!(BifrostProviderKind::Imap.as_str(), "imap");
         assert_eq!(BifrostProviderKind::Jmap.as_str(), "jmap");
+    }
+
+    #[test]
+    fn imap_folder_cursor_scope_is_email_scope() {
+        assert!(is_email_scope(&CursorScope::Folder(FolderId(
+            "INBOX".to_string(),
+        ))));
     }
 }

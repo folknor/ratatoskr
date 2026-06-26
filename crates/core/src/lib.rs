@@ -40,11 +40,6 @@ pub use smtp;
 pub use sync;
 pub use sync::smart_labels;
 pub use sync::threading;
-// Phase 3 task 8: `sync_dispatch` moved to `crates/service/src/sync_dispatch.rs`.
-// Service-side callers import directly from `service::sync_dispatch`. The
-// transitional `pub use service::sync_dispatch;` re-export was retired in
-// Phase 5's prerequisite (it was the second of two edges keeping the
-// `rtsk -> service` cycle alive).
 pub mod url_cleaning;
 
 // Re-exports for app-layer convenience - avoids direct common dependency.

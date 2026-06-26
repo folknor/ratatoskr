@@ -7,6 +7,8 @@ use bifrost_types::{
 };
 use db::db::{ReadDbState, WriterPool, params};
 
+pub(crate) const BACKFILL_COMPLETION_PARTITION: &[u8] = b"complete";
+
 #[derive(Clone)]
 pub struct SqliteCheckpointStore {
     writer: WriterPool,
@@ -212,9 +214,11 @@ async fn select_latest_backfill_blob(
             move |conn| match conn.query_row(
                 "SELECT checkpoint_blob FROM sync_cursors
                      WHERE account_id = ?1 AND kind = 'backfill' AND scope_key = ?2
-                     ORDER BY items_done DESC
+                     ORDER BY
+                         CASE WHEN partition_key = ?3 THEN 1 ELSE 0 END DESC,
+                         items_done DESC
                      LIMIT 1",
-                params![account_id, scope_key],
+                params![account_id, scope_key, BACKFILL_COMPLETION_PARTITION],
                 |row| row.get::<_, Vec<u8>>(0),
             ) {
                 Ok(blob) => Ok(Some(blob)),
@@ -501,6 +505,26 @@ mod tests {
                 .expect("get latest")
                 .expect("latest checkpoint"),
             &replacement,
+        );
+
+        let complete_lower_progress = backfill_checkpoint(
+            scope.clone(),
+            BACKFILL_COMPLETION_PARTITION.to_vec(),
+            1,
+            None,
+        );
+        store
+            .put_backfill(&account, complete_lower_progress.clone())
+            .await
+            .expect("put completion marker");
+        assert_eq!(count_rows(&writer, "backfill", "acct-a").await, 3);
+        assert_backfill_eq(
+            &store
+                .get_backfill(&account, &scope)
+                .await
+                .expect("get completion marker")
+                .expect("completion checkpoint"),
+            &complete_lower_progress,
         );
 
         remove_test_dir(dir);

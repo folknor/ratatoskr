@@ -10,11 +10,8 @@ use super::types::{
 /// Common operations that every email provider must support.
 ///
 /// This trait covers the action / send / draft / folder / profile /
-/// connection methods shared across the four providers. The sync trait
-/// (`provider_sync::ProviderSyncOps`) inherits this one, so any
-/// `&dyn ProviderSyncOps` is also usable via this trait's methods.
-/// Phase 6d-B carved the sync surface out of `common` so the crate no
-/// longer needs to depend on `service-state`.
+/// connection methods shared across the four providers. Production sync
+/// is driven by the Service-side Bifrost engine and consumer.
 #[async_trait]
 pub trait ProviderOps: Send + Sync {
     // ── Actions (thread-level) ──────────────────────────────────

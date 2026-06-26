@@ -274,6 +274,83 @@ pub async fn sync_gmail_account(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub async fn sync_imap_account(
+    engine: &BifrostSyncEngine,
+    stores: BifrostConsumerStores,
+    read_db: &ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+    cancellation_token: &CancellationToken,
+) -> Result<(), String> {
+    let initial_sync_completed = {
+        let aid = account_id.to_string();
+        write_db
+            .with_write(move |conn| {
+                conn.query_row(
+                    "SELECT initial_sync_completed FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|value| value != 0)
+                .map_err(|error| format!("read initial_sync_completed: {error}"))
+            })
+            .await?
+    };
+
+    let imap_ops = imap::ops::ImapOps::new(encryption_key, write_db.writer_pool());
+    let imap_config = imap_ops.load_config(read_db, account_id).await?;
+    let mut aux_session = imap::connection::connect(&imap_config).await?;
+    let imap_folder_map = provider_sync::consumer_support::sync_imap_folder_map(
+        &mut aux_session,
+        account_id,
+        write_db,
+    )
+    .await?;
+    let imap_folder_paths = imap_folder_map.keys().cloned().collect::<Vec<_>>();
+
+    let mut attempt = 0usize;
+    loop {
+        let report = drive_once(
+            engine,
+            stores.clone(),
+            read_db,
+            write_db,
+            account_id,
+            encryption_key,
+            cancellation_token,
+            BifrostProviderKind::Imap,
+            imap_folder_map.clone(),
+        )
+        .await?;
+        if !report.lagged {
+            if !initial_sync_completed {
+                let aid = account_id.to_string();
+                write_db
+                    .with_write(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
+                    .await?;
+            }
+            provider_sync::consumer_support::run_imap_auxiliary_sync(
+                &mut aux_session,
+                account_id,
+                write_db,
+                &imap_folder_paths,
+            )
+            .await;
+            return Ok(());
+        }
+        if attempt >= LAG_BACKOFF_DELAYS.len() {
+            return Err("bifrost IMAP consumer lagged after bounded reattach attempts".to_string());
+        }
+        tokio::select! {
+            () = tokio::time::sleep(LAG_BACKOFF_DELAYS[attempt]) => {}
+            () = cancellation_token.cancelled() => return Err("sync cancelled".to_string()),
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
 async fn run_auxiliary_sync(
     client: &jmap::client::JmapClient,
     read_db: &ReadDbState,

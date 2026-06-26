@@ -28,8 +28,10 @@ pub enum HydrationOutcome {
     Failed,
     /// An object the provider reports as destroyed. This is a deletion,
     /// NOT a hydration failure, so it must not be lumped into `Failed`.
-    /// The deletion write path is a B3a gap; for now the change is
-    /// skipped without a message-row write and without blocking the ack.
+    /// No message-row is written; the id is routed into the batch's
+    /// `deleted_ids` and applied by `write::persist`
+    /// (`delete_messages_and_cleanup_threads` + body/search cleanup). A
+    /// deletion never blocks the ack.
     Deleted,
     Uncertain,
 }
@@ -188,6 +190,12 @@ fn record_change_membership(
         {
             batch.live_ids.push(object.id.0.clone());
         }
+        Change::ScopeChange(scope)
+            if provider == BifrostProviderKind::Imap
+                && matches!(scope.kind, ScopeChangeKind::Removed) =>
+        {
+            batch.deleted_ids.push(scope.id.0.clone());
+        }
         Change::ScopeChange(scope) if matches!(scope.kind, ScopeChangeKind::Added) => {
             batch.live_ids.push(scope.id.0.clone());
         }
@@ -255,6 +263,18 @@ pub async fn hydrate_change_to_message_insert_row(
                     outcome,
                 ));
             }
+            // IMAP is deliberately NOT routed to `FullWithBlobs`. Bifrost IMAP
+            // never carries attachments as separate server blobs: its
+            // `get`/inventory path returns the raw RFC822 octets and always
+            // sets `HydratedObject.blobs = []`, and `Projection::Full` and
+            // `Projection::FullWithBlobs` request the IDENTICAL FETCH (UID +
+            // RFC822.SIZE + full BODY.PEEK) - the blob projection is a no-op
+            // for IMAP (research/bifrost imap `account/get.rs`). The IMAP arm
+            // of `build_consumer_row` rebuilds attachment + inline-image rows
+            // by re-parsing that RFC822 MIME tree, which is the SOLE source of
+            // IMAP attachment fidelity, so `FullWithBlobs` would only add a
+            // misleading intent (and, were bifrost IMAP to ever populate
+            // `blobs`, a wasted blob download that the MIME re-parse discards).
             let projection = if matches!(
                 provider,
                 BifrostProviderKind::Graph | BifrostProviderKind::Gmail
@@ -276,13 +296,22 @@ pub async fn hydrate_change_to_message_insert_row(
                 outcome,
             ))
         }
-        Change::ScopeChange(scope) if provider == BifrostProviderKind::Gmail => {
+        Change::ScopeChange(scope)
+            if provider == BifrostProviderKind::Gmail
+                || (provider == BifrostProviderKind::Imap
+                    && matches!(scope.kind, ScopeChangeKind::Added)) =>
+        {
+            // Gmail needs the blob projection (its attachments are server
+            // blobs); IMAP does not - it rebuilds attachments from the raw
+            // RFC822 MIME re-parse, and bifrost IMAP `Full` == `FullWithBlobs`
+            // (see the ObjectChange arm above), so route IMAP to `Full`.
+            let projection = if provider == BifrostProviderKind::Imap {
+                HydrationProjection::Full
+            } else {
+                HydrationProjection::FullWithBlobs
+            };
             let message = engine
-                .message_hydrate(
-                    account_id,
-                    ObjectId(scope.id.0.clone()),
-                    HydrationProjection::FullWithBlobs,
-                )
+                .message_hydrate(account_id, ObjectId(scope.id.0.clone()), projection)
                 .await?;
             Ok(HydratedChange::Message(
                 Box::new(
@@ -397,8 +426,11 @@ pub(crate) fn build_consumer_row(
     inline_hashes: HashMap<String, (db::blob_hash::BlobHash, InlineImage)>,
     outcome: HydrationOutcome,
 ) -> ConsumerMessageRow {
-    let message_id = message.id.0.clone();
-    let thread_id = message
+    let mut message_id = message.id.0.clone();
+    let decoded_imap = (provider == BifrostProviderKind::Imap)
+        .then(|| decode_imap_object_id(&message.id.0))
+        .flatten();
+    let mut thread_id = message
         .thread_id
         .as_ref()
         .map(|id| id.0.clone())
@@ -409,7 +441,7 @@ pub(crate) fn build_consumer_row(
     // on `Message`/`HydratedObject`/`InventoryEntry` and that does not live
     // in the RFC822 octets either; `Message::date` is the closest available
     // value, equal to `receivedAt` whenever `sentAt` is unset.
-    let date = message.date.map(system_time_ms).unwrap_or(0);
+    let mut date = message.date.map(system_time_ms).unwrap_or(0);
 
     let degraded = matches!(outcome, HydrationOutcome::SucceededWithDegradedBody);
 
@@ -509,7 +541,7 @@ pub(crate) fn build_consumer_row(
             }
             if matches!(
                 provider,
-                BifrostProviderKind::Jmap | BifrostProviderKind::Graph
+                BifrostProviderKind::Jmap | BifrostProviderKind::Graph | BifrostProviderKind::Imap
             ) && let Some(folder) = folder_map.get(&container.0)
             {
                 return Some(folder.clone());
@@ -541,7 +573,7 @@ pub(crate) fn build_consumer_row(
     // name, the Content-ID, or the inline disposition). The server returns
     // the structured attachment list and the MIME parts in the same order,
     // so the two are matched by ordinal position.
-    let attachments = message
+    let mut attachments = message
         .attachments
         .iter()
         .enumerate()
@@ -575,7 +607,7 @@ pub(crate) fn build_consumer_row(
             }
         })
         .collect::<Vec<_>>();
-    let inline_images = inline_hashes
+    let mut inline_images = inline_hashes
         .into_values()
         .map(|(_, image)| image)
         .collect::<Vec<_>>();
@@ -599,6 +631,71 @@ pub(crate) fn build_consumer_row(
     } else {
         flags.contains("$forwarded")
     };
+    let (imap_uid, imap_folder) = decoded_imap
+        .as_ref()
+        .map(|decoded| (Some(i64::from(decoded.uid)), Some(decoded.folder.clone())))
+        .unwrap_or((None, None));
+    if provider == BifrostProviderKind::Imap {
+        if let Some(decoded) = &decoded_imap {
+            message_id = format!("imap-{}-{}-{}", account_id.0, decoded.folder, decoded.uid);
+        }
+        let root = root_thread_reference(
+            message_id_header.as_deref(),
+            references_header.as_deref(),
+            in_reply_to_header.as_deref(),
+            &message_id,
+        );
+        thread_id = sync::threading::generate_thread_id(&root);
+        if let (Some(raw), Some(decoded)) = (raw, decoded_imap.as_ref())
+            && let Ok(parsed_imap) = imap::parse::parse_message(
+                &MessageParser::default(),
+                raw,
+                decoded.uid,
+                &decoded.folder,
+                u32::try_from(raw.len()).unwrap_or(u32::MAX),
+                flags.contains("$seen"),
+                flags.contains("$flagged"),
+                flags.contains("$answered"),
+                flags.contains("$forwarded"),
+                flags.contains("$draft"),
+                keywords.clone(),
+                message.date.map(system_time_secs),
+            )
+        {
+            if date == 0 {
+                date = parsed_imap.date;
+            }
+            attachments = parsed_imap
+                .attachments
+                .iter()
+                .map(|att| AttachmentInsertRow {
+                    id: format!("{}_{}", message_id, att.part_id),
+                    message_id: message_id.clone(),
+                    account_id: account_id.0.clone(),
+                    filename: Some(att.filename.clone()),
+                    mime_type: Some(att.mime_type.clone()),
+                    size: Some(i64::from(att.size)),
+                    remote_attachment_id: Some(att.part_id.clone()),
+                    content_hash: att.content_hash,
+                    content_id: att.content_id.clone(),
+                    is_inline: att.is_inline,
+                })
+                .collect();
+            inline_images = parsed_imap
+                .attachments
+                .iter()
+                .filter_map(|att| {
+                    let data = att.inline_data.clone()?;
+                    let hash = att.content_hash.as_ref()?;
+                    Some(InlineImage {
+                        content_hash: hash.to_hex(),
+                        data,
+                        mime_type: att.mime_type.clone(),
+                    })
+                })
+                .collect();
+        }
+    }
     let row = MessageInsertRow {
         id: message_id.clone(),
         account_id: account_id.0.clone(),
@@ -640,8 +737,8 @@ pub(crate) fn build_consumer_row(
         body_cached: body_html.is_some() || body_text.is_some(),
         mdn_requested,
         is_reaction: reaction_emoji.is_some(),
-        imap_uid: None,
-        imap_folder: None,
+        imap_uid,
+        imap_folder,
         has_meeting_invite: parsed_attachments
             .iter()
             .map(|att| att.mime_type.as_str())
@@ -713,7 +810,7 @@ fn normalized_flags(
     let mut normalized = flags.clone();
     if matches!(
         provider,
-        BifrostProviderKind::Graph | BifrostProviderKind::Gmail
+        BifrostProviderKind::Graph | BifrostProviderKind::Gmail | BifrostProviderKind::Imap
     ) {
         if flags.contains("\\seen") || flags.contains("\\Seen") {
             normalized.insert("$seen".to_string());
@@ -730,11 +827,69 @@ fn normalized_flags(
         if flags.contains("\\draft") || flags.contains("\\Draft") {
             normalized.insert("$draft".to_string());
         }
+        if flags.contains("$forwarded") || flags.contains("$Forwarded") {
+            normalized.insert("$forwarded".to_string());
+        }
         if flags.contains("$Important") {
             normalized.insert("$important".to_string());
         }
     }
     normalized
+}
+
+fn system_time_secs(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DecodedImapObjectId {
+    pub(super) folder: String,
+    pub(super) uid: u32,
+}
+
+pub(super) fn decode_imap_object_id(id: &str) -> Option<DecodedImapObjectId> {
+    let rest = id.strip_prefix("imap1:")?;
+    let (len_text, after_len) = rest.split_once(':')?;
+    let len = len_text.parse::<usize>().ok()?;
+    if after_len.len() < len {
+        return None;
+    }
+    let folder = after_len.get(..len)?.to_string();
+    let rest = after_len.get(len..)?.strip_prefix(':')?;
+    let mut parts = rest.split(':');
+    let _uidvalidity = parts.next()?.parse::<u32>().ok()?;
+    let uid = parts.next()?.parse::<u32>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(DecodedImapObjectId { folder, uid })
+}
+
+fn root_thread_reference(
+    message_id_header: Option<&str>,
+    references_header: Option<&str>,
+    in_reply_to_header: Option<&str>,
+    fallback: &str,
+) -> String {
+    sync::threading::parse_references(references_header)
+        .into_iter()
+        .next()
+        .or_else(|| {
+            sync::threading::parse_references(in_reply_to_header)
+                .into_iter()
+                .next()
+        })
+        .or_else(|| {
+            message_id_header.and_then(|header| {
+                sync::threading::parse_references(Some(header))
+                    .into_iter()
+                    .next()
+                    .or_else(|| Some(header.to_string()))
+            })
+        })
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn is_forwarded_subject(subject: &str) -> bool {
@@ -1165,11 +1320,12 @@ mod tests {
     };
     use crate::bifrost::consumer::BifrostProviderKind;
     use bifrost_types::{
-        Address, Change, ContainerId, Importance, Message, ObjectChange, ObjectChangeKind,
-        ObjectId, ScopeChange, ThreadId,
+        AccountId, Address, Change, ContainerId, Importance, Message, ObjectChange,
+        ObjectChangeKind, ObjectId, ScopeChange, ScopeChangeKind, ThreadId,
     };
     use common::types::{FolderKind, ImportanceLevel, LabelKind, SystemFolderId};
     use std::collections::{HashMap, HashSet};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn hydrate_change_to_message_insert_row_offline_maps_object_create() {
@@ -1225,6 +1381,113 @@ mod tests {
         assert_eq!(batch.rows[0].message.id, "keep");
         assert_eq!(batch.deleted_ids.len(), 1);
         assert!(!batch.blocked, "a deletion must not block the ack");
+    }
+
+    #[test]
+    fn hydrate_change_imap_flags_and_folder_mapping() {
+        let account = AccountId("acc".to_string());
+        let object_id = ObjectId("imap1:5:INBOX:7:42".to_string());
+        let raw = b"Message-ID: <root@example.test>\r\n\
+References: <ancestor@example.test>\r\n\
+In-Reply-To: <parent@example.test>\r\n\
+Subject: Re: IMAP\r\n\
+From: Alice <alice@example.test>\r\n\
+To: Me <me@example.test>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=x\r\n\
+\r\n\
+--x\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+hello body\r\n\
+--x\r\n\
+Content-Type: image/png\r\n\
+Content-Disposition: inline; filename=\"pixel.png\"\r\n\
+Content-ID: <pixel@example.test>\r\n\
+\r\n\
+pngbytes\r\n\
+--x--\r\n";
+        let message = Message {
+            id: object_id,
+            thread_id: None,
+            from: vec![Address {
+                name: Some("Alice".to_string()),
+                address: "alice@example.test".to_string(),
+            }],
+            to: vec![Address {
+                name: Some("Me".to_string()),
+                address: "me@example.test".to_string(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: Some("Re: IMAP".to_string()),
+            date: Some(UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000)),
+            containers: vec![ContainerId("INBOX".to_string())],
+            flags: ["\\seen", "\\flagged", "\\answered", "$Forwarded", "project"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            importance: Importance::Normal,
+            body_text: None,
+            body_html: None,
+            attachments: Vec::new(),
+            size_bytes: Some(raw.len() as u64),
+            in_reply_to: None,
+            references: Vec::new(),
+        };
+        let mut folder_map = HashMap::new();
+        folder_map.insert(
+            "INBOX".to_string(),
+            FolderKind::System(SystemFolderId::Inbox),
+        );
+
+        let row = build_consumer_row(
+            &account,
+            BifrostProviderKind::Imap,
+            &folder_map,
+            &message,
+            Some(raw),
+            HashMap::new(),
+            HydrationOutcome::Succeeded,
+        );
+
+        assert_eq!(row.message.imap_folder.as_deref(), Some("INBOX"));
+        assert_eq!(row.message.imap_uid, Some(42));
+        assert!(
+            row.folders
+                .contains(&FolderKind::System(SystemFolderId::Inbox))
+        );
+        assert!(row.message.is_read);
+        assert!(row.message.is_starred);
+        assert!(row.message.is_replied);
+        assert!(row.message.is_forwarded);
+        assert_eq!(
+            row.message.message_id_header.as_deref(),
+            Some("root@example.test")
+        );
+        assert_eq!(
+            row.message.references_header.as_deref(),
+            Some("ancestor@example.test")
+        );
+        assert_eq!(
+            row.message.in_reply_to_header.as_deref(),
+            Some("parent@example.test")
+        );
+        assert_eq!(row.keywords, vec!["project".to_string()]);
+        assert_eq!(row.attachments.len(), 1);
+        assert_eq!(row.inline_images.len(), 1);
+
+        let removed = Change::ScopeChange(ScopeChange {
+            id: ObjectId("imap1:5:INBOX:7:43".to_string()),
+            membership: bifrost_types::MembershipScope::Folder(bifrost_types::FolderId(
+                "INBOX".to_string(),
+            )),
+            kind: ScopeChangeKind::Removed,
+        });
+        let batch =
+            super::HydrateBatch::from_changes_offline("acc", BifrostProviderKind::Imap, &[removed]);
+        assert_eq!(batch.deleted_ids, vec!["imap1:5:INBOX:7:43".to_string()]);
     }
 
     fn synthetic_change(id: &str, forced: super::SyntheticOutcome) -> Change {
