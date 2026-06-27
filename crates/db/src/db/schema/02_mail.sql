@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS messages (
     in_reply_to_header TEXT,
     imap_uid INTEGER,
     imap_folder TEXT,
+    imap_uidvalidity INTEGER,
     mdn_requested INTEGER NOT NULL DEFAULT 0,
     is_reaction INTEGER NOT NULL DEFAULT 0,
     mdn_sent INTEGER NOT NULL DEFAULT 0,

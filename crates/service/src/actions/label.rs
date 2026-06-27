@@ -1,16 +1,14 @@
-use common::ops::ProviderOps;
+use bifrost_types::ObjectId;
 use common::typed_ids::LabelId;
-use common::types::ActionProviderCtx;
 use types::{LabelKind, MailProviderKind};
 
 use super::context::ActionContext;
 use super::log::MutationLog;
-use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable_with_id;
-use super::provider::{classify_provider_error, create_provider};
+use crate::bifrost::resident::ResidentActionAccount;
 use db::db::WriteTarget;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
-use db::progress::NoopProgressReporter;
 
 /// Captured shape of a local-step upsert. The dispatcher needs the parsed
 /// label kind (for the provider call), the intent list as actually written
@@ -289,184 +287,142 @@ fn label_write_metadata(label: &LabelKind) -> Option<(String, Option<i64>, bool)
     }
 }
 
-/// Classify provider failure for the dispatch decision: permanent failures
-/// clear the optimistic intent immediately, retryable failures enqueue and
-/// attach the action id.
-fn provider_retryability(error: &str) -> bool {
-    !matches!(classify_provider_error(error), RemoteFailureKind::Permanent,)
+fn intent_op(add: bool) -> PendingLabelIntentOp {
+    if add {
+        PendingLabelIntentOp::Add
+    } else {
+        PendingLabelIntentOp::Remove
+    }
 }
 
-/// Provider dispatch for add-label (assumes local mutation already applied).
-async fn add_label_dispatch(
+/// Apply or remove a single label on a thread through the resident bifrost
+/// engine, preserving the optimistic-intent lifecycle: the local step writes
+/// the pending thread-label intent, the engine dispatch runs, then on success
+/// the intent is confirmed (overlay cleared, truth written), on a retryable
+/// failure it is enqueued and the pending action id attached, and on a
+/// permanent failure it is cleared immediately (rather than waiting for the
+/// 48h stale sweep).
+///
+/// `action_account == None` is the degraded path (no resident engine handle):
+/// the local write lands and a retryable pending row is enqueued, exactly as
+/// the legacy provider-construction-failure path behaved.
+pub(crate) async fn dispatch_label_via_engine(
     ctx: &ActionContext,
-    provider: &dyn ProviderOps,
+    action_account: Option<&ResidentActionAccount>,
     account_id: &str,
     thread_id: &str,
     label_id: &LabelId,
-    local: LocalLabelStep,
+    add: bool,
 ) -> ActionOutcome {
-    add_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, local, true).await
-}
-
-async fn add_label_dispatch_no_enqueue(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-    local: LocalLabelStep,
-) -> ActionOutcome {
-    add_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, local, false).await
-}
-
-async fn add_label_dispatch_inner(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-    local: LocalLabelStep,
-    enqueue_pending: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("add_label", account_id, thread_id);
+    let (op_type, mlog_name) = if add {
+        ("addLabel", "add_label")
+    } else {
+        ("removeLabel", "remove_label")
+    };
+    let mlog = MutationLog::begin(mlog_name, account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
-    let provider_ctx = ActionProviderCtx {
-        account_id,
-        db: &ctx.db,
-        progress: &NoopProgressReporter,
+    let local = match label_local_step(ctx, account_id, thread_id, label_id, intent_op(add)).await {
+        Ok(local) => local,
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
     let LocalLabelStep {
         label_kind,
         intents,
         generation_seen,
     } = local;
-    let result = provider
-        .add_label(&provider_ctx, thread_id, &label_kind)
-        .await;
-    let outcome = match result {
-        Ok(()) => {
-            // Provider accepted the write. If the local confirm (truth-write
-            // + generation bump + overlay clear) fails we fall back to
-            // retryable LocalOnly so the action is re-driven; provider
-            // label add/remove are idempotent, so re-running through the
-            // retry queue is safe.
-            match confirm_provider_intents(ctx, account_id, thread_id, intents.clone()).await {
-                Ok(()) => ActionOutcome::Success,
-                Err(error) => ActionOutcome::LocalOnly {
-                    reason: error,
-                    retryable: true,
+
+    let outcome = match action_account {
+        None => ActionOutcome::LocalOnly {
+            reason: ActionError::remote("resident engine unavailable"),
+            retryable: true,
+        },
+        Some(account) => {
+            match super::dispatch_target::resolve_thread_messages(
+                ctx,
+                account_id,
+                thread_id,
+                account.provider,
+            )
+            .await
+            {
+                Err(e) => ActionOutcome::LocalOnly {
+                    retryable: e.is_retryable(),
+                    reason: e,
+                },
+                Ok(ids) => match super::dispatch_target::dispatch_label_engine(
+                    account,
+                    account_id,
+                    &label_kind,
+                    add,
+                    ids,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        match confirm_provider_intents(ctx, account_id, thread_id, intents.clone())
+                            .await
+                        {
+                            Ok(()) => ActionOutcome::Success,
+                            Err(error) => ActionOutcome::LocalOnly {
+                                reason: error,
+                                retryable: true,
+                            },
+                        }
+                    }
+                    Err(e) => ActionOutcome::LocalOnly {
+                        retryable: e.is_retryable(),
+                        reason: e,
+                    },
                 },
             }
         }
-        Err(e) => {
-            let reason_str = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(reason_str.clone()),
-                retryable: provider_retryability(&reason_str),
-            }
-        }
     };
+
     finalize_dispatch_outcome(
         ctx,
         account_id,
         thread_id,
-        "addLabel",
+        op_type,
         &params_json,
         intents,
         generation_seen,
         &outcome,
-        enqueue_pending,
+        true,
     )
     .await;
     mlog.emit(&outcome);
     outcome
 }
 
-/// Apply a label to a single thread.
-pub async fn add_label(
+/// Per-member engine dispatch for a composite label-group write. Reuses the
+/// group-captured `generation_seen` and the group-resolved message `ids`, and
+/// does NOT enqueue a per-member retry row (the composite enqueues one
+/// composite-typed row covering the failed members - the contract on
+/// `label_group::DispatchKind`). Member intents are still confirmed on success
+/// and cleared on a permanent failure.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn dispatch_member_label_via_engine(
     ctx: &ActionContext,
+    action_account: &ResidentActionAccount,
     account_id: &str,
     thread_id: &str,
     label_id: &LabelId,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("add_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
-
-    let local = match add_label_local(ctx, account_id, thread_id, label_id).await {
-        Ok(local) => local,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-
-    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(provider) => {
-            add_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, local).await
-        }
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(e.clone()),
-                retryable: provider_retryability(&e),
-            };
-            finalize_dispatch_outcome(
-                ctx,
-                account_id,
-                thread_id,
-                "addLabel",
-                &params_json,
-                local.intents,
-                local.generation_seen,
-                &outcome,
-                true,
-            )
-            .await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
-}
-
-/// Add label with a pre-constructed provider (for batch reuse).
-pub(crate) async fn add_label_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("add_label", account_id, thread_id);
-
-    let local = match add_label_local(ctx, account_id, thread_id, label_id).await {
-        Ok(local) => local,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-
-    add_label_dispatch(ctx, provider, account_id, thread_id, label_id, local).await
-}
-
-/// Add label with a pre-constructed provider without enqueueing a member retry.
-///
-/// Composite label-group writes enqueue their own retry row after the member
-/// loop, because only the composite retry path has the preflight that detects
-/// user-reversed intent. The composite has already upserted the member's
-/// pending intent at the group level, so we only validate here and reuse the
-/// composite-captured `generation_seen` for finalization.
-pub(crate) async fn add_label_with_provider_no_enqueue(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
+    add: bool,
     generation_seen: i64,
+    ids: &[ObjectId],
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("add_label", account_id, thread_id);
+    let (op_type, mlog_name) = if add {
+        ("addLabel", "add_label")
+    } else {
+        ("removeLabel", "remove_label")
+    };
+    let mlog = MutationLog::begin(mlog_name, account_id, thread_id);
+    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
     let label_kind = match resolve_member_label_kind(ctx, account_id, label_id).await {
         Ok(label_kind) => label_kind,
@@ -476,64 +432,17 @@ pub(crate) async fn add_label_with_provider_no_enqueue(
             return outcome;
         }
     };
-    let intents = label_intents(label_id.as_str(), &label_kind, PendingLabelIntentOp::Add);
-    let local = LocalLabelStep {
-        label_kind,
-        intents,
-        generation_seen,
-    };
-    add_label_dispatch_no_enqueue(ctx, provider, account_id, thread_id, label_id, local).await
-}
+    let intents = label_intents(label_id.as_str(), &label_kind, intent_op(add));
 
-/// Provider dispatch for remove-label (assumes local mutation already applied).
-async fn remove_label_dispatch(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-    local: LocalLabelStep,
-) -> ActionOutcome {
-    remove_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, local, true).await
-}
-
-async fn remove_label_dispatch_no_enqueue(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-    local: LocalLabelStep,
-) -> ActionOutcome {
-    remove_label_dispatch_inner(ctx, provider, account_id, thread_id, label_id, local, false).await
-}
-
-async fn remove_label_dispatch_inner(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-    local: LocalLabelStep,
-    enqueue_pending: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
-
-    let provider_ctx = ActionProviderCtx {
+    let outcome = match super::dispatch_target::dispatch_label_engine(
+        action_account,
         account_id,
-        db: &ctx.db,
-        progress: &NoopProgressReporter,
-    };
-    let LocalLabelStep {
-        label_kind,
-        intents,
-        generation_seen,
-    } = local;
-    let result = provider
-        .remove_label(&provider_ctx, thread_id, &label_kind)
-        .await;
-    let outcome = match result {
+        &label_kind,
+        add,
+        ids.to_vec(),
+    )
+    .await
+    {
         Ok(()) => match confirm_provider_intents(ctx, account_id, thread_id, intents.clone()).await
         {
             Ok(()) => ActionOutcome::Success,
@@ -542,125 +451,26 @@ async fn remove_label_dispatch_inner(
                 retryable: true,
             },
         },
-        Err(e) => {
-            let reason_str = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(reason_str.clone()),
-                retryable: provider_retryability(&reason_str),
-            }
-        }
+        Err(e) => ActionOutcome::LocalOnly {
+            retryable: e.is_retryable(),
+            reason: e,
+        },
     };
+
     finalize_dispatch_outcome(
         ctx,
         account_id,
         thread_id,
-        "removeLabel",
+        op_type,
         &params_json,
         intents,
         generation_seen,
         &outcome,
-        enqueue_pending,
+        false,
     )
     .await;
     mlog.emit(&outcome);
     outcome
-}
-
-/// Remove a label from a single thread.
-pub async fn remove_label(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
-
-    let local = match remove_label_local(ctx, account_id, thread_id, label_id).await {
-        Ok(local) => local,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-
-    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(provider) => {
-            remove_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, local).await
-        }
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(e.clone()),
-                retryable: provider_retryability(&e),
-            };
-            finalize_dispatch_outcome(
-                ctx,
-                account_id,
-                thread_id,
-                "removeLabel",
-                &params_json,
-                local.intents,
-                local.generation_seen,
-                &outcome,
-                true,
-            )
-            .await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
-}
-
-/// Remove label with a pre-constructed provider (for batch reuse).
-pub(crate) async fn remove_label_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-
-    let local = match remove_label_local(ctx, account_id, thread_id, label_id).await {
-        Ok(local) => local,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-
-    remove_label_dispatch(ctx, provider, account_id, thread_id, label_id, local).await
-}
-
-/// Remove label with a pre-constructed provider without enqueueing a member
-/// retry. See `add_label_with_provider_no_enqueue`.
-pub(crate) async fn remove_label_with_provider_no_enqueue(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    label_id: &LabelId,
-    generation_seen: i64,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-
-    let label_kind = match resolve_member_label_kind(ctx, account_id, label_id).await {
-        Ok(label_kind) => label_kind,
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
-    let intents = label_intents(label_id.as_str(), &label_kind, PendingLabelIntentOp::Remove);
-    let local = LocalLabelStep {
-        label_kind,
-        intents,
-        generation_seen,
-    };
-    remove_label_dispatch_no_enqueue(ctx, provider, account_id, thread_id, label_id, local).await
 }
 
 async fn resolve_member_label_kind(

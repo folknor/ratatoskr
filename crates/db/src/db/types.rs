@@ -119,6 +119,7 @@ pub struct DbMessage {
     pub in_reply_to_header: Option<String>,
     pub imap_uid: Option<i64>,
     pub imap_folder: Option<String>,
+    pub imap_uidvalidity: Option<i64>,
 }
 
 // ── Folder / label ───────────────────────────────────────────
@@ -791,6 +792,7 @@ pub struct ImapMessageRow {
     pub id: String,
     pub imap_uid: Option<i64>,
     pub imap_folder: Option<String>,
+    pub imap_uidvalidity: Option<i64>,
 }
 
 // ── Special folder lookup ──────────────────────────────────

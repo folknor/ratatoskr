@@ -151,7 +151,7 @@ pub(crate) struct SyncRuntimeInner {
 
 impl SyncRuntime {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         db: WriteDbState,
         body_write: BodyStoreWriteState,
         inline_write: InlineImageStoreWriteState,
@@ -448,6 +448,13 @@ impl SyncRuntime {
             .resident_engine
             .redrive_telemetry(account_id)
             .await
+    }
+
+    pub(crate) async fn resident_action_account(
+        &self,
+        account_id: &str,
+    ) -> Result<crate::bifrost::resident::ResidentActionAccount, String> {
+        self.inner.resident_engine.action_account(account_id).await
     }
 
     /// Drain step: cancel every runner + await all supervisor

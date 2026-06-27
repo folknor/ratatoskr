@@ -100,26 +100,3 @@ pub async fn star(
         }
     }
 }
-
-/// Star with a pre-constructed provider (for batch reuse).
-pub(crate) async fn star_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    starred: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("star", account_id, thread_id);
-
-    match star_local(ctx, account_id, thread_id, starred).await {
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-        Ok(false) => return ActionOutcome::NoOp,
-        Ok(true) => {}
-    }
-
-    star_dispatch(ctx, provider, account_id, thread_id, starred).await
-}

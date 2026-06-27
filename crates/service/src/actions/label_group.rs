@@ -1,12 +1,12 @@
-use common::ops::ProviderOps;
+use bifrost_types::ObjectId;
 use common::typed_ids::{LabelGroupId, LabelId};
 
 use super::context::ActionContext;
 use super::label;
 use super::log::MutationLog;
-use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable_with_id;
-use super::provider::{classify_provider_error, create_provider};
+use crate::bifrost::resident::ResidentActionAccount;
 use db::db::WriteTarget;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
 
@@ -184,85 +184,108 @@ fn upsert_group_intents(
     .map_err(ActionError::db)
 }
 
-pub(crate) async fn apply_label_group_with_provider(
+/// Composite label-group dispatch through the resident bifrost engine.
+///
+/// Fans the composite out to N per-member `apply_label` / `remove_label`
+/// engine calls inside ONE outcome / toast / undo (the composite contract).
+/// Crucially, the per-member dispatches do NOT enqueue per-member retries:
+/// on any retryable member failure the composite enqueues a SINGLE
+/// composite-typed `pending_operations` row (`applyLabelGroup` /
+/// `removeLabelGroup`) via [`finalize_composite_outcome`], never N raw
+/// `addLabel` / `removeLabel` rows.
+///
+/// A pending-ops drain (`ctx.suppress_pending_enqueue`) runs the
+/// `DispatchKind::Retry` preflight so a queued composite whose pill the user
+/// has since toggled back is skipped rather than re-driven against current
+/// intent (the `generation_seen` race guard). `action_account == None` is the
+/// degraded path: the member intents land locally and the single composite row
+/// is enqueued, with no remote dispatch.
+pub(crate) async fn dispatch_group_via_engine(
     ctx: &ActionContext,
-    provider: &dyn ProviderOps,
+    action_account: Option<&ResidentActionAccount>,
     account_id: &str,
     thread_id: &str,
     group_id: LabelGroupId,
+    apply: bool,
 ) -> ActionOutcome {
-    apply_label_group_with_provider_kind(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        group_id,
-        DispatchKind::Initial,
-    )
-    .await
-}
+    let mlog_name = if apply {
+        "apply_label_group"
+    } else {
+        "remove_label_group"
+    };
+    let mlog = MutationLog::begin(mlog_name, account_id, thread_id);
 
-pub(crate) async fn apply_label_group_with_provider_retry(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-) -> ActionOutcome {
-    apply_label_group_with_provider_kind(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        group_id,
-        DispatchKind::Retry,
-    )
-    .await
-}
+    let kind = if ctx.suppress_pending_enqueue {
+        DispatchKind::Retry
+    } else {
+        DispatchKind::Initial
+    };
 
-async fn apply_label_group_with_provider_kind(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-    kind: DispatchKind,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("apply_label_group", account_id, thread_id);
-    let (labels, generation_seen) =
-        match apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-            Ok(LocalStep::Proceed {
-                labels,
-                generation_seen,
-            }) => (labels, generation_seen),
-            Ok(LocalStep::Skip) => {
-                let outcome = ActionOutcome::Success;
-                mlog.emit(&outcome);
-                return outcome;
+    let local = if apply {
+        apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await
+    } else {
+        remove_label_group_local(ctx, account_id, thread_id, group_id, kind).await
+    };
+    let (labels, generation_seen) = match local {
+        Ok(LocalStep::Skip) => {
+            let outcome = ActionOutcome::Success;
+            mlog.emit(&outcome);
+            return outcome;
+        }
+        Ok(LocalStep::Proceed {
+            labels,
+            generation_seen,
+        }) => (labels, generation_seen),
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+
+    let outcome = match action_account {
+        None => ActionOutcome::LocalOnly {
+            reason: ActionError::remote("resident engine unavailable"),
+            retryable: true,
+        },
+        Some(account) => {
+            // Resolve the thread's message ids once for the whole member fan-out.
+            match super::dispatch_target::resolve_thread_messages(
+                ctx,
+                account_id,
+                thread_id,
+                account.provider,
+            )
+            .await
+            {
+                Err(e) => ActionOutcome::LocalOnly {
+                    retryable: e.is_retryable(),
+                    reason: e,
+                },
+                Ok(ids) => {
+                    dispatch_members(
+                        ctx,
+                        account,
+                        account_id,
+                        thread_id,
+                        &labels,
+                        generation_seen,
+                        apply,
+                        &ids,
+                    )
+                    .await
+                }
             }
-            Err(e) => {
-                let outcome = ActionOutcome::Failed { error: e };
-                mlog.emit(&outcome);
-                return outcome;
-            }
-        };
-    let outcome = dispatch_member_ops(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        labels.clone(),
-        generation_seen,
-        true,
-    )
-    .await;
+        }
+    };
+
     finalize_composite_outcome(
         ctx,
         &outcome,
         account_id,
         thread_id,
         group_id,
-        true,
+        apply,
         &labels,
         generation_seen,
     )
@@ -278,157 +301,7 @@ pub(crate) async fn apply_label_group(
     thread_id: &str,
     group_id: LabelGroupId,
 ) -> ActionOutcome {
-    apply_label_group_with_kind(ctx, account_id, thread_id, group_id, DispatchKind::Initial).await
-}
-
-pub(crate) async fn apply_label_group_retry(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-) -> ActionOutcome {
-    apply_label_group_with_kind(ctx, account_id, thread_id, group_id, DispatchKind::Retry).await
-}
-
-async fn apply_label_group_with_kind(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-    kind: DispatchKind,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("apply_label_group", account_id, thread_id);
-    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(provider) => {
-            let outcome = apply_label_group_with_provider_kind(
-                ctx, &*provider, account_id, thread_id, group_id, kind,
-            )
-            .await;
-            mlog.emit(&outcome);
-            outcome
-        }
-        Err(e) => match apply_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-            Ok(LocalStep::Skip) => {
-                let outcome = ActionOutcome::Success;
-                mlog.emit(&outcome);
-                outcome
-            }
-            Ok(LocalStep::Proceed {
-                labels,
-                generation_seen,
-            }) => {
-                let outcome = ActionOutcome::LocalOnly {
-                    reason: ActionError::remote(e.clone()),
-                    retryable: composite_retryability(&e),
-                };
-                finalize_composite_outcome(
-                    ctx,
-                    &outcome,
-                    account_id,
-                    thread_id,
-                    group_id,
-                    true,
-                    &labels,
-                    generation_seen,
-                )
-                .await;
-                mlog.emit(&outcome);
-                outcome
-            }
-            Err(le) => {
-                let outcome = ActionOutcome::Failed { error: le };
-                mlog.emit(&outcome);
-                outcome
-            }
-        },
-    }
-}
-
-pub(crate) async fn remove_label_group_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-) -> ActionOutcome {
-    remove_label_group_with_provider_kind(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        group_id,
-        DispatchKind::Initial,
-    )
-    .await
-}
-
-pub(crate) async fn remove_label_group_with_provider_retry(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-) -> ActionOutcome {
-    remove_label_group_with_provider_kind(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        group_id,
-        DispatchKind::Retry,
-    )
-    .await
-}
-
-async fn remove_label_group_with_provider_kind(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-    kind: DispatchKind,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("remove_label_group", account_id, thread_id);
-    let (labels, generation_seen) =
-        match remove_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-            Ok(LocalStep::Proceed {
-                labels,
-                generation_seen,
-            }) => (labels, generation_seen),
-            Ok(LocalStep::Skip) => {
-                let outcome = ActionOutcome::Success;
-                mlog.emit(&outcome);
-                return outcome;
-            }
-            Err(e) => {
-                let outcome = ActionOutcome::Failed { error: e };
-                mlog.emit(&outcome);
-                return outcome;
-            }
-        };
-    let outcome = dispatch_member_ops(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        labels.clone(),
-        generation_seen,
-        false,
-    )
-    .await;
-    finalize_composite_outcome(
-        ctx,
-        &outcome,
-        account_id,
-        thread_id,
-        group_id,
-        false,
-        &labels,
-        generation_seen,
-    )
-    .await;
-    mlog.emit(&outcome);
-    outcome
+    dispatch_group_via_engine(ctx, None, account_id, thread_id, group_id, true).await
 }
 
 #[cfg(test)]
@@ -438,123 +311,43 @@ pub(crate) async fn remove_label_group(
     thread_id: &str,
     group_id: LabelGroupId,
 ) -> ActionOutcome {
-    remove_label_group_with_kind(ctx, account_id, thread_id, group_id, DispatchKind::Initial).await
+    dispatch_group_via_engine(ctx, None, account_id, thread_id, group_id, false).await
 }
 
-pub(crate) async fn remove_label_group_retry(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-) -> ActionOutcome {
-    remove_label_group_with_kind(ctx, account_id, thread_id, group_id, DispatchKind::Retry).await
-}
-
-async fn remove_label_group_with_kind(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    group_id: LabelGroupId,
-    kind: DispatchKind,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("remove_label_group", account_id, thread_id);
-    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(provider) => {
-            let outcome = remove_label_group_with_provider_kind(
-                ctx, &*provider, account_id, thread_id, group_id, kind,
-            )
-            .await;
-            mlog.emit(&outcome);
-            outcome
-        }
-        Err(e) => {
-            match remove_label_group_local(ctx, account_id, thread_id, group_id, kind).await {
-                Ok(LocalStep::Skip) => {
-                    let outcome = ActionOutcome::Success;
-                    mlog.emit(&outcome);
-                    outcome
-                }
-                Ok(LocalStep::Proceed {
-                    labels,
-                    generation_seen,
-                }) => {
-                    let outcome = ActionOutcome::LocalOnly {
-                        reason: ActionError::remote(e.clone()),
-                        retryable: composite_retryability(&e),
-                    };
-                    finalize_composite_outcome(
-                        ctx,
-                        &outcome,
-                        account_id,
-                        thread_id,
-                        group_id,
-                        false,
-                        &labels,
-                        generation_seen,
-                    )
-                    .await;
-                    mlog.emit(&outcome);
-                    outcome
-                }
-                Err(le) => {
-                    let outcome = ActionOutcome::Failed { error: le };
-                    mlog.emit(&outcome);
-                    outcome
-                }
-            }
-        }
-    }
-}
-
-fn composite_retryability(error: &str) -> bool {
-    !matches!(classify_provider_error(error), RemoteFailureKind::Permanent,)
-}
-
-/// Per-member provider dispatch. Runs each member write through an explicit
-/// no-enqueue helper, so a per-member failure does NOT enqueue a raw
-/// `addLabel` / `removeLabel` row. Those would bypass the composite retry
-/// preflight described on `DispatchKind` above. Instead the composite
-/// caller enqueues a single composite-typed row covering the failed
-/// members via [`enqueue_composite_if_local_only`].
+/// Per-member engine dispatch. Runs each member through the no-enqueue engine
+/// helper, so a per-member failure does NOT enqueue a raw `addLabel` /
+/// `removeLabel` row; those would bypass the composite retry preflight. The
+/// composite caller enqueues a single composite-typed row covering the failed
+/// members.
 ///
-/// Continues past per-member `Failed` outcomes so a single hard error
-/// (e.g. a member whose label row was deleted between member-read and
-/// dispatch) does not abandon the remaining members. LocalOnly takes
-/// precedence over Failed so the composite retry path activates whenever
-/// any member is retryable.
-async fn dispatch_member_ops(
+/// Continues past per-member `Failed` outcomes so a single hard error does not
+/// abandon the remaining members. LocalOnly takes precedence over Failed so
+/// the composite retry path activates whenever any member is retryable.
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_members(
     ctx: &ActionContext,
-    provider: &dyn ProviderOps,
+    action_account: &ResidentActionAccount,
     account_id: &str,
     thread_id: &str,
-    labels: Vec<LabelId>,
+    labels: &[LabelId],
     generation_seen: i64,
     apply: bool,
+    ids: &[ObjectId],
 ) -> ActionOutcome {
     let mut saw_local_only = false;
     let mut last_failed: Option<ActionError> = None;
     for label_id in labels {
-        let outcome = if apply {
-            label::add_label_with_provider_no_enqueue(
-                ctx,
-                provider,
-                account_id,
-                thread_id,
-                &label_id,
-                generation_seen,
-            )
-            .await
-        } else {
-            label::remove_label_with_provider_no_enqueue(
-                ctx,
-                provider,
-                account_id,
-                thread_id,
-                &label_id,
-                generation_seen,
-            )
-            .await
-        };
+        let outcome = label::dispatch_member_label_via_engine(
+            ctx,
+            action_account,
+            account_id,
+            thread_id,
+            label_id,
+            apply,
+            generation_seen,
+            ids,
+        )
+        .await;
         match outcome {
             ActionOutcome::Success | ActionOutcome::NoOp => {}
             ActionOutcome::LocalOnly {
@@ -626,10 +419,8 @@ async fn finalize_composite_outcome(
         ActionOutcome::LocalOnly {
             retryable: false, ..
         } => {
-            // Composite-level permanent failure (e.g. permanent
-            // create_provider error): tear down every member intent
-            // the local step wrote rather than waiting for the stale
-            // sweep.
+            // Composite-level permanent failure: tear down every member intent
+            // the local step wrote rather than waiting for the stale sweep.
             clear_group_intents_immediate(
                 ctx,
                 account_id,

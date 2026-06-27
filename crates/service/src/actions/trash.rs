@@ -89,21 +89,3 @@ pub async fn trash(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Ac
         }
     }
 }
-
-/// Trash with a pre-constructed provider (for batch reuse).
-pub(crate) async fn trash_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("trash", account_id, thread_id);
-
-    if let Err(e) = trash_local(ctx, account_id, thread_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    trash_dispatch(ctx, provider, account_id, thread_id).await
-}

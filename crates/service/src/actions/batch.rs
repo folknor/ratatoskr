@@ -1,39 +1,43 @@
-//! Batch action executor - groups targets by account, creates one provider
-//! per account, dispatches with provider reuse. Parallel across accounts,
+//! Batch action executor - groups targets by account and dispatches
+//! provider-backed mail mutations through the resident bifrost engine.
+//! Parallel across accounts,
 //! sequential within each account.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
-use common::ops::ProviderOps;
+use bifrost_types::ObjectId;
 
 use super::context::ActionContext;
+use super::dispatch_target::{
+    RemoteBatchKey, dispatch_bulk_mutation, dispatch_mutation, outcome_from_remote_result,
+    resolve_thread_messages,
+};
 use super::log::MutationLog;
 use super::operation::MailOperation;
-use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
-use super::provider::{classify_provider_error, create_provider};
 use super::{
     archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
     spam, star, trash,
 };
-
-/// Maximum consecutive remote failures before short-circuiting to degraded mode.
-const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+use crate::sync::SyncRuntime;
 
 /// Execute operations across multiple threads.
 ///
 /// Each entry is `(account_id, thread_id, operation)` - per-target operations
 /// support mixed-value toggles and heterogeneous batches.
 ///
-/// Groups by account, creates one provider per account, dispatches sequentially
-/// within each account. Accounts run in parallel.
+/// Groups by account, resolves one resident bifrost engine handle per
+/// account, dispatches sequentially within each account. Accounts run in
+/// parallel.
 ///
 /// **Outcome ordering:** `outcomes[i]` corresponds to `operations[i]` regardless
 /// of internal regrouping. All undo/rollback bookkeeping must key off original
 /// operation order.
 pub async fn batch_execute(
     ctx: &ActionContext,
+    sync_runtime: Option<&SyncRuntime>,
     operations: Vec<(String, String, MailOperation)>,
 ) -> Vec<ActionOutcome> {
     crate::test_counters::delay_if_configured("action.batch_execute").await;
@@ -58,7 +62,7 @@ pub async fn batch_execute(
         .into_iter()
         .map(|(account_id, thread_ops)| {
             let ctx = ctx.clone();
-            async move { execute_account_group(&ctx, &account_id, thread_ops).await }
+            async move { execute_account_group(&ctx, sync_runtime, &account_id, thread_ops).await }
         })
         .collect();
     let group_results = futures::future::join_all(account_futures).await;
@@ -90,6 +94,7 @@ pub async fn batch_execute(
 /// Execute one account's thread group.
 async fn execute_account_group(
     ctx: &ActionContext,
+    sync_runtime: Option<&SyncRuntime>,
     account_id: &str,
     thread_ops: Vec<(usize, String, MailOperation)>,
 ) -> Vec<(usize, ActionOutcome)> {
@@ -120,25 +125,23 @@ async fn execute_account_group(
         return results;
     }
 
-    // Create provider once for this account
-    let provider =
-        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-            Ok(p) => p,
-            Err(e) => {
-                let kind = classify_provider_error(&e);
-                return degraded_fallback(ctx, account_id, &e, kind, thread_ops).await;
-            }
-        };
+    let Some(sync_runtime) = sync_runtime else {
+        return degraded_fallback(ctx, account_id, "resident engine unavailable", thread_ops).await;
+    };
+    let action_account = match sync_runtime.resident_action_account(account_id).await {
+        Ok(account) => account,
+        Err(error) => return degraded_fallback(ctx, account_id, &error, thread_ops).await,
+    };
 
-    // Dispatch sequentially with short-circuit on consecutive failures
-    let mut consecutive_remote_failures: u32 = 0;
-
-    for (idx, thread_id, op) in &thread_ops {
-        let _guard = match ctx.try_acquire_flight(account_id, thread_id) {
+    let use_bulk = thread_ops.len() > 1;
+    let mut guards = Vec::with_capacity(thread_ops.len());
+    let mut remote_batches: HashMap<RemoteBatchKey, Vec<PendingRemote>> = HashMap::new();
+    for (idx, thread_id, op) in thread_ops {
+        let guard = match ctx.try_acquire_flight(account_id, &thread_id) {
             Some(g) => g,
             None => {
                 results.push((
-                    *idx,
+                    idx,
                     ActionOutcome::Failed {
                         error: ActionError::invalid_state(
                             "action already in flight for this thread",
@@ -148,43 +151,174 @@ async fn execute_account_group(
                 continue;
             }
         };
+        guards.push(guard);
 
-        let outcome = if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
-            handle_thread_degraded(
-                ctx,
-                op,
-                account_id,
-                thread_id,
-                "provider presumed unavailable after consecutive failures",
-                RemoteFailureKind::Unknown,
-            )
-            .await
-        } else {
-            let o = dispatch_with_provider(ctx, &*provider, op, account_id, thread_id).await;
-            if let ActionOutcome::LocalOnly { reason, .. } = &o {
-                if reason.is_retryable() {
-                    consecutive_remote_failures += 1;
-                } else {
-                    consecutive_remote_failures = 0;
-                }
-            } else {
-                consecutive_remote_failures = 0;
-            }
-            o
+        if !use_bulk {
+            let outcome =
+                dispatch_with_engine(ctx, &action_account, &op, account_id, &thread_id).await;
+            results.push((idx, outcome));
+            continue;
+        }
+
+        if is_local_only(&op) {
+            let outcome = dispatch_local_only(ctx, &op, account_id, &thread_id).await;
+            results.push((idx, outcome));
+            continue;
+        }
+
+        let Some(batch_key) = RemoteBatchKey::from_operation(&op) else {
+            let outcome =
+                dispatch_with_engine(ctx, &action_account, &op, account_id, &thread_id).await;
+            results.push((idx, outcome));
+            continue;
         };
 
-        results.push((*idx, outcome));
+        if matches!(op, MailOperation::PermanentDelete) {
+            match resolve_thread_messages(ctx, account_id, &thread_id, action_account.provider)
+                .await
+            {
+                Ok(targets) => {
+                    remote_batches
+                        .entry(batch_key)
+                        .or_default()
+                        .push(PendingRemote {
+                            idx,
+                            thread_id,
+                            op,
+                            targets,
+                        });
+                }
+                Err(error) => {
+                    results.push((idx, ActionOutcome::Failed { error }));
+                }
+            }
+            continue;
+        }
+
+        let pre_local_targets = if is_container_move(&op) {
+            match resolve_thread_messages(ctx, account_id, &thread_id, action_account.provider)
+                .await
+            {
+                Ok(targets) => Some(targets),
+                Err(error) => {
+                    results.push((idx, ActionOutcome::Failed { error }));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+
+        let changed = match op_local(ctx, &op, account_id, &thread_id).await {
+            Ok(changed) => changed,
+            Err(error) => {
+                results.push((idx, ActionOutcome::Failed { error }));
+                continue;
+            }
+        };
+        if !changed {
+            results.push((idx, ActionOutcome::NoOp));
+            continue;
+        }
+        let targets = if let Some(targets) = pre_local_targets {
+            targets
+        } else {
+            match resolve_thread_messages(ctx, account_id, &thread_id, action_account.provider)
+                .await
+            {
+                Ok(targets) => targets,
+                Err(error) => {
+                    let outcome = ActionOutcome::LocalOnly {
+                        retryable: error.is_retryable(),
+                        reason: error,
+                    };
+                    let (op_type, params_json) = enqueue_params(&op);
+                    enqueue_if_retryable(
+                        ctx,
+                        &outcome,
+                        account_id,
+                        op_type,
+                        &thread_id,
+                        &params_json,
+                    )
+                    .await;
+                    results.push((idx, outcome));
+                    continue;
+                }
+            }
+        };
+        remote_batches
+            .entry(batch_key)
+            .or_default()
+            .push(PendingRemote {
+                idx,
+                thread_id,
+                op,
+                targets,
+            });
+    }
+
+    for (batch_key, pending) in remote_batches {
+        let ids = pending
+            .iter()
+            .flat_map(|entry| entry.targets.iter().cloned())
+            .collect::<Vec<_>>();
+        let remote = dispatch_bulk_mutation(&action_account, account_id, &batch_key, ids).await;
+        match remote {
+            Ok(()) => {
+                let mdn_on_read = matches!(batch_key, RemoteBatchKey::Read { to: true });
+                for entry in pending {
+                    let outcome = if matches!(entry.op, MailOperation::PermanentDelete) {
+                        match op_local(ctx, &entry.op, account_id, &entry.thread_id).await {
+                            Ok(_) => ActionOutcome::Success,
+                            Err(error) => ActionOutcome::Failed { error },
+                        }
+                    } else {
+                        ActionOutcome::Success
+                    };
+                    if mdn_on_read && outcome.is_success() {
+                        super::mdn_send::send_mdn_for_read(ctx, account_id, &entry.thread_id).await;
+                    }
+                    results.push((entry.idx, outcome));
+                }
+            }
+            Err(reason) => {
+                for entry in pending {
+                    let outcome = ActionOutcome::LocalOnly {
+                        retryable: reason.is_retryable(),
+                        reason: reason.clone(),
+                    };
+                    let (op_type, params_json) = enqueue_params(&entry.op);
+                    enqueue_if_retryable(
+                        ctx,
+                        &outcome,
+                        account_id,
+                        op_type,
+                        &entry.thread_id,
+                        &params_json,
+                    )
+                    .await;
+                    results.push((entry.idx, outcome));
+                }
+            }
+        }
     }
 
     results
 }
 
-/// Degraded fallback when provider creation fails.
+struct PendingRemote {
+    idx: usize,
+    thread_id: String,
+    op: MailOperation,
+    targets: Vec<ObjectId>,
+}
+
+/// Degraded fallback when the resident engine handle is unavailable.
 async fn degraded_fallback(
     ctx: &ActionContext,
     account_id: &str,
     provider_error: &str,
-    error_kind: RemoteFailureKind,
     thread_ops: Vec<(usize, String, MailOperation)>,
 ) -> Vec<(usize, ActionOutcome)> {
     let mut results = Vec::with_capacity(thread_ops.len());
@@ -204,8 +338,7 @@ async fn degraded_fallback(
             }
         };
         let outcome =
-            handle_thread_degraded(ctx, &op, account_id, &thread_id, provider_error, error_kind)
-                .await;
+            handle_thread_degraded(ctx, &op, account_id, &thread_id, provider_error).await;
         results.push((idx, outcome));
     }
     results
@@ -218,13 +351,43 @@ async fn handle_thread_degraded(
     account_id: &str,
     thread_id: &str,
     provider_error: &str,
-    error_kind: RemoteFailureKind,
 ) -> ActionOutcome {
+    // Degraded label / label-group ops still carry their optimistic-intent
+    // lifecycle; route through the label modules with no engine handle so the
+    // member intents are written and a single composite retry is enqueued.
+    match op {
+        MailOperation::AddLabel { label_id } => {
+            return label::dispatch_label_via_engine(
+                ctx, None, account_id, thread_id, label_id, true,
+            )
+            .await;
+        }
+        MailOperation::RemoveLabel { label_id } => {
+            return label::dispatch_label_via_engine(
+                ctx, None, account_id, thread_id, label_id, false,
+            )
+            .await;
+        }
+        MailOperation::ApplyLabelGroup { group_id } => {
+            return label_group::dispatch_group_via_engine(
+                ctx, None, account_id, thread_id, *group_id, true,
+            )
+            .await;
+        }
+        MailOperation::RemoveLabelGroup { group_id } => {
+            return label_group::dispatch_group_via_engine(
+                ctx, None, account_id, thread_id, *group_id, false,
+            )
+            .await;
+        }
+        _ => {}
+    }
+
     let name = op_name(op);
     let mlog = MutationLog::begin(name, account_id, thread_id);
 
     if matches!(op, MailOperation::PermanentDelete) {
-        let error = ActionError::remote_with_kind(error_kind, provider_error);
+        let error = ActionError::remote(provider_error.to_string());
         let retry_outcome = ActionOutcome::LocalOnly {
             reason: error.clone(),
             retryable: true,
@@ -252,13 +415,9 @@ async fn handle_thread_degraded(
             outcome
         }
         Ok(true) => {
-            let retryable = matches!(
-                error_kind,
-                RemoteFailureKind::Transient | RemoteFailureKind::Unknown
-            );
             let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote_with_kind(error_kind, provider_error),
-                retryable,
+                reason: ActionError::remote(provider_error.to_string()),
+                retryable: true,
             };
             let (op_type, params_json) = enqueue_params(op);
             enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;
@@ -285,69 +444,164 @@ fn is_local_only(op: &MailOperation) -> bool {
     )
 }
 
-/// Route to the correct `_with_provider` function.
-async fn dispatch_with_provider(
+fn is_container_move(op: &MailOperation) -> bool {
+    matches!(
+        op,
+        MailOperation::Archive
+            | MailOperation::Trash
+            | MailOperation::SetSpam { .. }
+            | MailOperation::MoveToFolder { .. }
+    )
+}
+
+async fn dispatch_with_engine(
     ctx: &ActionContext,
-    provider: &dyn ProviderOps,
+    action_account: &crate::bifrost::resident::ResidentActionAccount,
     op: &MailOperation,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
+    if is_local_only(op) {
+        return dispatch_local_only(ctx, op, account_id, thread_id).await;
+    }
+    // Label / label-group ops route through their own modules so the
+    // optimistic-intent lifecycle (confirm / clear / attach the pending
+    // action id) and the composite contract (single composite retry row,
+    // generation_seen race guard) are preserved across the engine cut.
     match op {
-        MailOperation::Archive => {
-            archive::archive_with_provider(ctx, provider, account_id, thread_id).await
-        }
-        MailOperation::Trash => {
-            trash::trash_with_provider(ctx, provider, account_id, thread_id).await
-        }
-        MailOperation::SetSpam { to } => {
-            spam::spam_with_provider(ctx, provider, account_id, thread_id, *to).await
-        }
-        MailOperation::MoveToFolder { dest, source } => {
-            move_to_folder::move_to_folder_with_provider(
+        MailOperation::AddLabel { label_id } => {
+            return label::dispatch_label_via_engine(
                 ctx,
-                provider,
+                Some(action_account),
                 account_id,
                 thread_id,
-                dest,
-                source.as_ref(),
+                label_id,
+                true,
             )
-            .await
-        }
-        MailOperation::SetStarred { to } => {
-            star::star_with_provider(ctx, provider, account_id, thread_id, *to).await
-        }
-        MailOperation::SetRead { to } => {
-            mark_read::mark_read_with_provider(ctx, provider, account_id, thread_id, *to).await
-        }
-        MailOperation::PermanentDelete => {
-            permanent_delete::permanent_delete_with_provider(ctx, provider, account_id, thread_id)
-                .await
-        }
-        MailOperation::AddLabel { label_id } => {
-            label::add_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
+            .await;
         }
         MailOperation::RemoveLabel { label_id } => {
-            label::remove_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
+            return label::dispatch_label_via_engine(
+                ctx,
+                Some(action_account),
+                account_id,
+                thread_id,
+                label_id,
+                false,
+            )
+            .await;
         }
         MailOperation::ApplyLabelGroup { group_id } => {
-            label_group::apply_label_group_with_provider(
-                ctx, provider, account_id, thread_id, *group_id,
+            return label_group::dispatch_group_via_engine(
+                ctx,
+                Some(action_account),
+                account_id,
+                thread_id,
+                *group_id,
+                true,
             )
-            .await
+            .await;
         }
         MailOperation::RemoveLabelGroup { group_id } => {
-            label_group::remove_label_group_with_provider(
-                ctx, provider, account_id, thread_id, *group_id,
+            return label_group::dispatch_group_via_engine(
+                ctx,
+                Some(action_account),
+                account_id,
+                thread_id,
+                *group_id,
+                false,
             )
-            .await
+            .await;
         }
-        // Local-only ops routed through provider path in mixed batches
-        op @ (MailOperation::SetPinned { .. }
-        | MailOperation::SetMuted { .. }
-        | MailOperation::Snooze { .. }
-        | MailOperation::Unsnooze) => dispatch_local_only(ctx, op, account_id, thread_id).await,
+        _ => {}
     }
+    let name = op_name(op);
+    let mlog = MutationLog::begin(name, account_id, thread_id);
+    if matches!(op, MailOperation::PermanentDelete) {
+        let targets = match resolve_thread_messages(
+            ctx,
+            account_id,
+            thread_id,
+            action_account.provider,
+        )
+        .await
+        {
+            Ok(targets) => targets,
+            Err(error) => {
+                let outcome = ActionOutcome::Failed { error };
+                mlog.emit(&outcome);
+                return outcome;
+            }
+        };
+        let remote = dispatch_mutation(action_account, account_id, op, targets).await;
+        let outcome = match remote {
+            Ok(()) => match op_local(ctx, op, account_id, thread_id).await {
+                Ok(_) => ActionOutcome::Success,
+                Err(error) => ActionOutcome::Failed { error },
+            },
+            Err(reason) => ActionOutcome::LocalOnly {
+                retryable: reason.is_retryable(),
+                reason,
+            },
+        };
+        let (op_type, params_json) = enqueue_params(op);
+        enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;
+        mlog.emit(&outcome);
+        return outcome;
+    }
+    let pre_local_targets = if is_container_move(op) {
+        match resolve_thread_messages(ctx, account_id, thread_id, action_account.provider).await {
+            Ok(targets) => Some(targets),
+            Err(error) => {
+                let outcome = ActionOutcome::Failed { error };
+                mlog.emit(&outcome);
+                return outcome;
+            }
+        }
+    } else {
+        None
+    };
+    let changed = match op_local(ctx, op, account_id, thread_id).await {
+        Ok(changed) => changed,
+        Err(error) => {
+            let outcome = ActionOutcome::Failed { error };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    if !changed {
+        let outcome = ActionOutcome::NoOp;
+        mlog.emit(&outcome);
+        return outcome;
+    }
+    let targets = if let Some(targets) = pre_local_targets {
+        targets
+    } else {
+        match resolve_thread_messages(ctx, account_id, thread_id, action_account.provider).await {
+            Ok(targets) => targets,
+            Err(error) => {
+                let outcome = ActionOutcome::LocalOnly {
+                    retryable: error.is_retryable(),
+                    reason: error,
+                };
+                let (op_type, params_json) = enqueue_params(op);
+                enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json)
+                    .await;
+                mlog.emit(&outcome);
+                return outcome;
+            }
+        }
+    };
+    let outcome = outcome_from_remote_result(
+        dispatch_mutation(action_account, account_id, op, targets).await,
+    );
+    if outcome.is_success() && matches!(op, MailOperation::SetRead { to: true }) {
+        super::mdn_send::send_mdn_for_read(ctx, account_id, thread_id).await;
+    }
+    let (op_type, params_json) = enqueue_params(op);
+    enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;
+    mlog.emit(&outcome);
+    outcome
 }
 
 /// Route to the correct `_local` function for degraded/short-circuit paths.

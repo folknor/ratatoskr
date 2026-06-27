@@ -79,38 +79,16 @@ local function execute_action(client, queue, account_id, thread_id, operation, f
     return completed
 end
 
-local function assert_move_requests(requests, label)
-    harness.assert(
-        harness.request_count(requests, "imap", "UID COPY") >= 1,
-        label .. " did not issue UID COPY"
-    )
-    harness.assert(
-        harness.request_count(requests, "imap", "UID STORE") >= 1,
-        label .. " did not mark source messages deleted"
-    )
-    harness.assert(
-        harness.request_count(requests, "imap", "EXPUNGE") >= 1
-            or harness.request_count(requests, "imap", "UID EXPUNGE") >= 1,
-        label .. " did not expunge source messages"
-    )
-end
-
-local function assert_delete_requests(requests, label)
-    harness.assert(
-        harness.request_count(requests, "imap", "UID STORE") >= 1,
-        label .. " did not mark messages deleted"
-    )
-    harness.assert(
-        harness.request_count(requests, "imap", "EXPUNGE") >= 1
-            or harness.request_count(requests, "imap", "UID EXPUNGE") >= 1,
-        label .. " did not expunge messages"
-    )
-end
+-- This gate verifies move/delete by SERVER ROUND-TRIP rather than by matching
+-- IMAP wire ops. bifrost performs moves via RFC 6851 UID MOVE (atomic - no
+-- separate UID COPY + UID STORE + EXPUNGE), so a wire-op needle would be both
+-- brittle and wrong. Instead we apply the action, then resync from saehrimnir
+-- and assert the server-reflected folder placement (destination present /
+-- source gone / message gone). The flag-writeback gate covers UID STORE.
 
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("sync_imap_writeback_move_delete")
 local client, err = harness.spawn(dir)
@@ -156,8 +134,6 @@ harness.assert(initial_thread.exists, "initial thread missing")
 assert_has_label(initial_thread, "INBOX", "initial thread")
 assert_lacks_label(initial_thread, "archive", "initial thread")
 
-harness.clear_mock_requests(admin_endpoint)
-
 execute_action(
     client,
     queue,
@@ -167,15 +143,10 @@ execute_action(
     { dest = "archive", source = "INBOX" }
 )
 
-local move_requests = harness.mock_requests(admin_endpoint)
-assert_move_requests(move_requests, "MoveToFolder")
-
 local after_move_thread = read_thread(client, account.account_id, hello.thread_id, "after move")
 harness.assert(after_move_thread.exists, "thread missing after move")
 assert_has_label(after_move_thread, "archive", "after move")
 assert_lacks_label(after_move_thread, "INBOX", "after move")
-
-harness.clear_mock_requests(admin_endpoint)
 
 local move_resync, move_resync_err = client:start_sync({
     account_id = account.account_id,
@@ -197,8 +168,6 @@ harness.assert(after_move_resync_thread.exists, "thread missing after move resyn
 assert_has_label(after_move_resync_thread, "archive", "after move resync")
 assert_lacks_label(after_move_resync_thread, "INBOX", "after move resync")
 
-harness.clear_mock_requests(admin_endpoint)
-
 execute_action(
     client,
     queue,
@@ -206,9 +175,6 @@ execute_action(
     hello.thread_id,
     "PermanentDelete"
 )
-
-local delete_requests = harness.mock_requests(admin_endpoint)
-assert_delete_requests(delete_requests, "PermanentDelete")
 
 local after_delete_thread = read_thread(client, account.account_id, hello.thread_id, "after delete")
 harness.assert(not after_delete_thread.exists, "thread still exists after delete")
@@ -220,8 +186,6 @@ local after_delete, after_delete_err = client:request("TestQueryDbState", {
 harness.assert(after_delete_err == nil, "TestQueryDbState after delete failed")
 harness.assert_eq(after_delete.message_count, 0, "message count after delete")
 harness.assert_eq(after_delete.thread_count, 0, "thread count after delete")
-
-harness.clear_mock_requests(admin_endpoint)
 
 local delete_resync, delete_resync_err = client:start_sync({
     account_id = account.account_id,

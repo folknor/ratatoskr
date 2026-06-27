@@ -5,7 +5,9 @@
 //! through the action service.
 
 use super::context::ActionContext;
+use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome};
+use crate::sync::SyncRuntime;
 use db::db::pending_ops::{
     db_pending_ops_delete_sync, db_pending_ops_enqueue_sync, db_pending_ops_get,
     db_pending_ops_increment_retry_sync, db_pending_ops_recover_executing_sync,
@@ -125,9 +127,10 @@ pub async fn enqueue_if_retryable_with_id(
 /// Process pending operations from the queue.
 ///
 /// Called periodically (e.g., on SyncTick). Fetches pending ops, groups by
-/// account (one provider per account), and dispatches sequentially.
-/// Respects the in-flight guard - skips threads with active mutations.
-pub async fn process_pending_ops(ctx: &ActionContext) {
+/// account, and re-dispatches each sequentially through the resident engine
+/// (via `batch_execute`). Respects the in-flight guard - skips threads with
+/// active mutations.
+pub async fn process_pending_ops(ctx: &ActionContext, sync_runtime: Option<&SyncRuntime>) {
     let ops = match db_pending_ops_get(&ctx.write_db.writer_pool(), None, Some(20)).await {
         Ok(ops) => ops,
         Err(e) => {
@@ -155,8 +158,8 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
     }
 
     // Process sequentially across account groups
-    for (account_id, account_ops) in groups {
-        process_account_group(ctx, &retry_ctx, &account_id, account_ops).await;
+    for account_ops in groups.into_values() {
+        process_account_group(ctx, &retry_ctx, sync_runtime, account_ops).await;
     }
 }
 
@@ -182,24 +185,14 @@ async fn sweep_stale_label_intents(ctx: &ActionContext) {
     }
 }
 
-/// Process one account's pending ops with a shared provider.
+/// Process one account's pending ops, re-dispatching each through the
+/// resident engine.
 async fn process_account_group(
     ctx: &ActionContext,
     retry_ctx: &ActionContext,
-    account_id: &str,
+    sync_runtime: Option<&SyncRuntime>,
     ops: Vec<db::db::pending_ops::PendingOperation>,
 ) {
-    use super::provider::create_provider;
-
-    let provider =
-        match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-            Ok(p) => Some(p),
-            Err(e) => {
-                log::warn!("[pending_ops] Provider creation failed for {account_id}: {e}");
-                None
-            }
-        };
-
     for op in ops {
         // In-flight guard: acquire to block concurrent user mutations,
         // or skip if already in flight from a user action.
@@ -229,27 +222,15 @@ async fn process_account_group(
             continue;
         }
 
-        let outcome = if let Some(ref provider) = provider {
-            dispatch_pending_op_with_provider(
-                retry_ctx,
-                &**provider,
-                account_id,
-                &op.operation_type,
-                &op.resource_id,
-                &op.params,
-            )
-            .await
-        } else {
-            // No provider - use public wrappers (which will also fail to create provider)
-            dispatch_pending_op(
-                retry_ctx,
-                &op.account_id,
-                &op.operation_type,
-                &op.resource_id,
-                &op.params,
-            )
-            .await
-        };
+        let outcome = dispatch_pending_op(
+            retry_ctx,
+            sync_runtime,
+            &op.account_id,
+            &op.operation_type,
+            &op.resource_id,
+            &op.params,
+        )
+        .await;
 
         match outcome {
             ActionOutcome::Success | ActionOutcome::NoOp => {
@@ -292,6 +273,7 @@ async fn process_account_group(
 /// JSON-encoded operation-specific arguments.
 async fn dispatch_pending_op(
     ctx: &ActionContext,
+    sync_runtime: Option<&SyncRuntime>,
     account_id: &str,
     operation_type: &str,
     resource_id: &str,
@@ -299,15 +281,15 @@ async fn dispatch_pending_op(
 ) -> ActionOutcome {
     let params: serde_json::Value = serde_json::from_str(params_json).unwrap_or_default();
 
-    match operation_type {
-        "archive" => super::archive::archive(ctx, account_id, resource_id).await,
-        "trash" => super::trash::trash(ctx, account_id, resource_id).await,
+    let op = match operation_type {
+        "archive" => MailOperation::Archive,
+        "trash" => MailOperation::Trash,
         "spam" => {
             let is_spam = params
                 .get("isSpam")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true);
-            super::spam::spam(ctx, account_id, resource_id, is_spam).await
+            MailOperation::SetSpam { to: is_spam }
         }
         "moveToFolder" => {
             let folder_id = common::typed_ids::FolderId::from(
@@ -320,32 +302,26 @@ async fn dispatch_pending_op(
                 .get("sourceFolderId")
                 .and_then(serde_json::Value::as_str)
                 .map(common::typed_ids::FolderId::from);
-            super::move_to_folder::move_to_folder(
-                ctx,
-                account_id,
-                resource_id,
-                &folder_id,
-                source.as_ref(),
-            )
-            .await
+            MailOperation::MoveToFolder {
+                dest: folder_id,
+                source,
+            }
         }
         "star" => {
             let starred = params
                 .get("starred")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true);
-            super::star::star(ctx, account_id, resource_id, starred).await
+            MailOperation::SetStarred { to: starred }
         }
         "markRead" => {
             let read = params
                 .get("read")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true);
-            super::mark_read::mark_read(ctx, account_id, resource_id, read).await
+            MailOperation::SetRead { to: read }
         }
-        "permanentDelete" => {
-            super::permanent_delete::permanent_delete(ctx, account_id, resource_id).await
-        }
+        "permanentDelete" => MailOperation::PermanentDelete,
         "addLabel" => {
             let label_id = common::typed_ids::LabelId::from(
                 params
@@ -353,7 +329,7 @@ async fn dispatch_pending_op(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(""),
             );
-            super::label::add_label(ctx, account_id, resource_id, &label_id).await
+            MailOperation::AddLabel { label_id }
         }
         "removeLabel" => {
             let label_id = common::typed_ids::LabelId::from(
@@ -362,7 +338,7 @@ async fn dispatch_pending_op(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(""),
             );
-            super::label::remove_label(ctx, account_id, resource_id, &label_id).await
+            MailOperation::RemoveLabel { label_id }
         }
         "applyLabelGroup" => {
             let group_id = common::typed_ids::LabelGroupId(
@@ -371,8 +347,7 @@ async fn dispatch_pending_op(
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0),
             );
-            super::label_group::apply_label_group_retry(ctx, account_id, resource_id, group_id)
-                .await
+            MailOperation::ApplyLabelGroup { group_id }
         }
         "removeLabelGroup" => {
             let group_id = common::typed_ids::LabelGroupId(
@@ -381,151 +356,24 @@ async fn dispatch_pending_op(
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0),
             );
-            super::label_group::remove_label_group_retry(ctx, account_id, resource_id, group_id)
-                .await
+            MailOperation::RemoveLabelGroup { group_id }
         }
         other => {
             log::warn!("[pending_ops] Unknown operation type: {other}");
-            ActionOutcome::Failed {
+            return ActionOutcome::Failed {
                 error: ActionError::invalid_state(format!("Unknown operation type: {other}")),
-            }
+            };
         }
-    }
-}
-
-/// Re-dispatch a pending op using a pre-constructed provider (for provider reuse).
-async fn dispatch_pending_op_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn common::ops::ProviderOps,
-    account_id: &str,
-    operation_type: &str,
-    resource_id: &str,
-    params_json: &str,
-) -> ActionOutcome {
-    let params: serde_json::Value = serde_json::from_str(params_json).unwrap_or_default();
-
-    match operation_type {
-        "archive" => {
-            super::archive::archive_with_provider(ctx, provider, account_id, resource_id).await
-        }
-        "trash" => super::trash::trash_with_provider(ctx, provider, account_id, resource_id).await,
-        "spam" => {
-            let is_spam = params
-                .get("isSpam")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true);
-            super::spam::spam_with_provider(ctx, provider, account_id, resource_id, is_spam).await
-        }
-        "moveToFolder" => {
-            let folder_id = common::typed_ids::FolderId::from(
-                params
-                    .get("folderId")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            );
-            let source = params
-                .get("sourceFolderId")
-                .and_then(serde_json::Value::as_str)
-                .map(common::typed_ids::FolderId::from);
-            super::move_to_folder::move_to_folder_with_provider(
-                ctx,
-                provider,
-                account_id,
-                resource_id,
-                &folder_id,
-                source.as_ref(),
-            )
-            .await
-        }
-        "star" => {
-            let starred = params
-                .get("starred")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true);
-            super::star::star_with_provider(ctx, provider, account_id, resource_id, starred).await
-        }
-        "markRead" => {
-            let read = params
-                .get("read")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true);
-            super::mark_read::mark_read_with_provider(ctx, provider, account_id, resource_id, read)
-                .await
-        }
-        "permanentDelete" => {
-            super::permanent_delete::permanent_delete_with_provider(
-                ctx,
-                provider,
-                account_id,
-                resource_id,
-            )
-            .await
-        }
-        "addLabel" => {
-            let label_id = common::typed_ids::LabelId::from(
-                params
-                    .get("labelId")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            );
-            super::label::add_label_with_provider(ctx, provider, account_id, resource_id, &label_id)
-                .await
-        }
-        "removeLabel" => {
-            let label_id = common::typed_ids::LabelId::from(
-                params
-                    .get("labelId")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            );
-            super::label::remove_label_with_provider(
-                ctx,
-                provider,
-                account_id,
-                resource_id,
-                &label_id,
-            )
-            .await
-        }
-        "applyLabelGroup" => {
-            let group_id = common::typed_ids::LabelGroupId(
-                params
-                    .get("groupId")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0),
-            );
-            super::label_group::apply_label_group_with_provider_retry(
-                ctx,
-                provider,
-                account_id,
-                resource_id,
-                group_id,
-            )
-            .await
-        }
-        "removeLabelGroup" => {
-            let group_id = common::typed_ids::LabelGroupId(
-                params
-                    .get("groupId")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0),
-            );
-            super::label_group::remove_label_group_with_provider_retry(
-                ctx,
-                provider,
-                account_id,
-                resource_id,
-                group_id,
-            )
-            .await
-        }
-        other => {
-            log::warn!("[pending_ops] Unknown operation type: {other}");
-            ActionOutcome::Failed {
-                error: ActionError::invalid_state(format!("Unknown operation type: {other}")),
-            }
-        }
-    }
+    };
+    let mut outcomes = super::batch_execute(
+        ctx,
+        sync_runtime,
+        vec![(account_id.to_string(), resource_id.to_string(), op)],
+    )
+    .await;
+    outcomes.pop().unwrap_or_else(|| ActionOutcome::Failed {
+        error: ActionError::invalid_state("pending op dispatch returned no outcome"),
+    })
 }
 
 /// Recover from crash - reset stale 'executing' ops to 'pending'.

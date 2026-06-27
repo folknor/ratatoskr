@@ -120,22 +120,3 @@ pub async fn mark_read(
         }
     }
 }
-
-/// Mark read with a pre-constructed provider (for batch reuse).
-pub(crate) async fn mark_read_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    read: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("mark_read", account_id, thread_id);
-
-    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    mark_read_dispatch(ctx, provider, account_id, thread_id, read).await
-}

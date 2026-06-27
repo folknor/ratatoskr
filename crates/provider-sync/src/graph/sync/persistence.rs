@@ -328,6 +328,7 @@ fn upsert_messages(
                 is_reaction: false,
                 imap_uid: None,
                 imap_folder: None,
+                imap_uidvalidity: None,
                 has_meeting_invite: invite_idx.is_some(),
                 meeting_invite_method: invite_method,
                 meeting_invite_uid: None,

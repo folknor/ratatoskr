@@ -430,6 +430,7 @@ async fn batch_pin_is_local_only_success() {
 
     let outcomes = super::batch::batch_execute(
         &ctx,
+        None,
         vec![
             (
                 "acc1".to_string(),
@@ -462,6 +463,7 @@ async fn batch_preserves_target_order() {
     // Mixed accounts - outcomes should be in same order as targets
     let outcomes = super::batch::batch_execute(
         &ctx,
+        None,
         vec![
             (
                 "acc1".to_string(),
@@ -494,6 +496,7 @@ async fn batch_archive_without_accounts_returns_local_only() {
 
     let outcomes = super::batch::batch_execute(
         &ctx,
+        None,
         vec![
             (
                 "nonexistent".to_string(),
@@ -528,6 +531,7 @@ async fn batch_respects_flight_guard() {
 
     let outcomes = super::batch::batch_execute(
         &ctx,
+        None,
         vec![
             (
                 "acc1".to_string(),
@@ -781,5 +785,83 @@ async fn apply_label_group_handles_member_label() {
     assert_eq!(
         raw_count, 0,
         "no per-member rows allowed in pending_operations"
+    );
+}
+
+// ── retry classification (RecoveryClass -> pending journal) ──────────
+
+/// Pins the enqueue gate that the B1 `account_error_to_action_error` mapping
+/// feeds: a mutation failing with a `RecoveryClass::Retry/Reconcile/Engine`
+/// error maps to `RemoteFailureKind::Transient` (retryable) and enqueues a
+/// `pending_operations` row, while `AuthLost/NoPermission/... ` map to
+/// `Permanent` and `Unsupported` to `NotImplemented` (both terminal) and
+/// enqueue nothing. The `RecoveryClass -> RemoteFailureKind` mapping itself is
+/// covered in `bifrost::error_map`; this pins that the retryable bit, not the
+/// `retryable:` field alone, gates the journal write.
+#[tokio::test]
+async fn pending_retry_classification() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_test_thread(&ctx, "acc1", "t2");
+
+    // Transient (RecoveryClass::Retry/Reconcile/Engine) -> enqueued.
+    let transient = ActionOutcome::LocalOnly {
+        reason: ActionError::remote_with_kind(RemoteFailureKind::Transient, "503 unavailable"),
+        retryable: true,
+    };
+    super::pending::enqueue_if_retryable(
+        &ctx,
+        &transient,
+        "acc1",
+        "star",
+        "t1",
+        r#"{"starred":true}"#,
+    )
+    .await;
+    assert!(
+        count_pending_ops(&ctx, "acc1", "t1", "star") > 0,
+        "transient mutation failure must enqueue a retry"
+    );
+
+    // Permanent (RecoveryClass::AuthLost): even with `retryable: true` on the
+    // outcome, the non-retryable reason kind must suppress the enqueue.
+    let permanent = ActionOutcome::LocalOnly {
+        reason: ActionError::remote_with_kind(RemoteFailureKind::Permanent, "401 revoked"),
+        retryable: true,
+    };
+    super::pending::enqueue_if_retryable(
+        &ctx,
+        &permanent,
+        "acc1",
+        "star",
+        "t2",
+        r#"{"starred":true}"#,
+    )
+    .await;
+    assert_eq!(
+        count_pending_ops(&ctx, "acc1", "t2", "star"),
+        0,
+        "auth-lost mutation failure must not enqueue a retry"
+    );
+
+    // Unsupported (RecoveryClass::Unsupported) -> NotImplemented -> terminal.
+    let unsupported = ActionOutcome::LocalOnly {
+        reason: ActionError::remote_with_kind(RemoteFailureKind::NotImplemented, "unsupported"),
+        retryable: true,
+    };
+    super::pending::enqueue_if_retryable(
+        &ctx,
+        &unsupported,
+        "acc1",
+        "star",
+        "t2",
+        r#"{"starred":true}"#,
+    )
+    .await;
+    assert_eq!(
+        count_pending_ops(&ctx, "acc1", "t2", "star"),
+        0,
+        "unsupported mutation failure must not enqueue a retry"
     );
 }

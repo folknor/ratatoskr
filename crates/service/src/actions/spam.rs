@@ -93,22 +93,3 @@ pub async fn spam(
         }
     }
 }
-
-/// Spam with a pre-constructed provider (for batch reuse).
-pub(crate) async fn spam_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    is_spam: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("spam", account_id, thread_id);
-
-    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    spam_dispatch(ctx, provider, account_id, thread_id, is_spam).await
-}

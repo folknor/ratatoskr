@@ -513,6 +513,7 @@ impl_from_row!(ImapMessageRow {
     id,
     imap_uid,
     imap_folder,
+    imap_uidvalidity,
 });
 
 impl_from_row!(SpecialFolderRow {

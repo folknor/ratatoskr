@@ -120,13 +120,3 @@ pub async fn permanent_delete(
         }
     }
 }
-
-/// Permanent delete with a pre-constructed provider (for batch reuse).
-pub(crate) async fn permanent_delete_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
-    permanent_delete_dispatch(ctx, provider, account_id, thread_id).await
-}

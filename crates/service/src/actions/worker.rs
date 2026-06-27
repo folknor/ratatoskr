@@ -50,14 +50,11 @@ use service_api::{
 use tokio::sync::mpsc;
 
 use super::context::ActionContext;
+use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
-use super::pending::enqueue_if_retryable;
-use super::provider::{classify_provider_error, create_provider};
 use super::wire_conversion::wire_to_mail;
 use crate::boot::BootSharedState;
 use crate::boot_progress::send_must_deliver_notification;
-use common::types::ActionProviderCtx;
-use db::progress::NoopProgressReporter;
 
 /// Lease duration for ops the worker is currently executing. The next
 /// boot's `recover_stale_leases` resets any lease whose
@@ -101,6 +98,18 @@ async fn run(
         log::warn!("action worker: read_db_state missing post-boot");
         return;
     };
+    // A missing sync runtime degrades action dispatch PER ACCOUNT (each
+    // `batch_execute` falls back to the local-only / pending-retry path via
+    // its `Option<&SyncRuntime>` parameter) rather than halting ALL job
+    // draining. Send, calendar, snooze, and local-only pin/mute/pending work
+    // must keep flowing even when the resident engine is unavailable.
+    let sync_runtime = boot_state.sync_runtime();
+    if sync_runtime.is_none() {
+        log::warn!(
+            "action worker: sync runtime missing post-boot; draining in degraded \
+             (local-only / pending-retry) mode"
+        );
+    }
     let action_ctx = match build_action_context(write_db, read_db, encryption_key, &app_data_dir) {
         Ok(ctx) => ctx,
         Err(error) => {
@@ -126,11 +135,12 @@ async fn run(
     // notify_one that fires while we're draining is observed by the next
     // await call - no race against handler-side notifies during drain.
     loop {
-        drain_one_pass(&action_ctx, &out_tx, &owner_bytes).await;
+        let sync_runtime = sync_runtime.as_deref();
+        drain_one_pass(&action_ctx, sync_runtime, &out_tx, &owner_bytes).await;
         // Phase 2 task 15: drain any queued mark_chat_read jobs. These
         // are quiet (no per-op outcomes); the worker emits one final
         // `ActionCompleted` per finalized job.
-        drain_mark_chat_read_jobs(&action_ctx, &out_tx, &owner_bytes).await;
+        drain_mark_chat_read_jobs(&action_ctx, sync_runtime, &out_tx, &owner_bytes).await;
         // Phase 2 task 13: drain any queued send jobs. Quiet jobs that
         // emit one `ActionCompleted` after SMTP submit (success or
         // failure). The vault directory is unlinked on terminal
@@ -148,7 +158,7 @@ async fn run(
         // kick handler (`pending_ops.kick`) and the journal handler
         // both fire `boot_state.notify_action_worker()` so either
         // trigger does the same work.
-        super::pending::process_pending_ops(&action_ctx).await;
+        super::pending::process_pending_ops(&action_ctx, sync_runtime).await;
         // Park until either the next handler-side wakeup OR shutdown.
         // Cooperative cancellation lets the worker exit immediately
         // instead of waiting for `Subsystems::abort_tasks` to abort
@@ -168,6 +178,7 @@ async fn run(
 
 async fn drain_mark_chat_read_jobs(
     ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
     out_tx: &mpsc::Sender<Vec<u8>>,
     owner: &[u8; 16],
 ) {
@@ -180,7 +191,7 @@ async fn drain_mark_chat_read_jobs(
                 return;
             }
         };
-        if let Err(error) = run_mark_chat_read(ctx, out_tx, &job).await {
+        if let Err(error) = run_mark_chat_read(ctx, sync_runtime, out_tx, &job).await {
             log::warn!(
                 "action worker: mark_chat_read job {:?} failed: {error}",
                 job.job_id,
@@ -226,6 +237,7 @@ async fn lease_next_quiet_job_via_blocking(
 
 async fn run_mark_chat_read(
     ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
     out_tx: &mpsc::Sender<Vec<u8>>,
     job: &LeasedQuietJob,
 ) -> Result<(), String> {
@@ -233,7 +245,7 @@ async fn run_mark_chat_read(
     let payload: JournaledChatRead = serde_json::from_slice(&job.payload)
         .map_err(|e| format!("deserialize JournaledChatRead: {e}"))?;
     let total = u32::try_from(payload.affected.len()).unwrap_or(u32::MAX);
-    mark_chat_read_remote(ctx, payload.affected).await;
+    mark_chat_read_remote(ctx, sync_runtime, payload.affected).await;
 
     // Finalize the job. Treat as Completed - mark_chat_read_remote
     // enqueues retryable failures into pending_operations rather
@@ -491,7 +503,12 @@ pub(crate) fn build_action_context(
 /// one op, dispatches via `batch_execute`, persists the outcome, and
 /// emits the wire notifications. Returns when `lease_next_ready_op`
 /// returns `None` (no more pending rows).
-async fn drain_one_pass(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>, owner: &[u8; 16]) {
+async fn drain_one_pass(
+    ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    owner: &[u8; 16],
+) {
     // Sweep mail-plan jobs whose ops are all terminal but whose parent
     // job_status is not. This is the recovery path for a crash between
     // mark_op_terminal (clears the op lease) and finalize_job (writes
@@ -524,7 +541,7 @@ async fn drain_one_pass(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>, own
             }
         };
 
-        match run_one(ctx, out_tx, leased.clone()).await {
+        match run_one(ctx, sync_runtime, out_tx, leased.clone()).await {
             Ok(()) => {}
             Err(error) => {
                 log::warn!(
@@ -572,11 +589,12 @@ async fn lease_next_via_blocking(
 
 async fn run_one(
     ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
     out_tx: &mpsc::Sender<Vec<u8>>,
     op: LeasedOp,
 ) -> Result<(), String> {
     match op.kind {
-        Some(PerOpJobKind::MailPlan) => run_one_mail(ctx, out_tx, op).await,
+        Some(PerOpJobKind::MailPlan) => run_one_mail(ctx, sync_runtime, out_tx, op).await,
         Some(PerOpJobKind::CalendarPlan) => run_one_calendar(ctx, out_tx, op).await,
         None => {
             // Corrupt journal row: parent's `kind` column did not parse
@@ -607,6 +625,7 @@ async fn run_one(
 
 async fn run_one_mail(
     ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
     out_tx: &mpsc::Sender<Vec<u8>>,
     op: LeasedOp,
 ) -> Result<(), String> {
@@ -615,6 +634,7 @@ async fn run_one_mail(
     let mail_op = wire_to_mail(wire_op);
     let outcomes = super::batch_execute(
         ctx,
+        sync_runtime,
         vec![(op.account_id.clone(), op.thread_id.clone(), mail_op)],
     )
     .await;
@@ -726,10 +746,34 @@ async fn maybe_finalize(
     if counts.non_terminal() > 0 {
         return Ok(());
     }
+    // Read every terminal op's result blob once. The coarse
+    // `OpTerminalStatus` collapses a real remote success and a local-only
+    // degrade onto the same `Done` status, so `counts.done` alone cannot tell
+    // them apart - a local-only op (provider call deferred to the retry queue)
+    // would be mis-counted as `remote_succeeded`. The per-op wire result blob
+    // tags a local-only commit with `"kind": "local_only"` (shared by the mail
+    // `OperationResult` and the calendar `CalendarOperationResult`), so the
+    // summary subtracts those from `remote_succeeded` and reports them on
+    // `local_only`. The calendar completion frame below reuses the same rows.
+    let plan_id_for_rows = *plan_id_bytes;
+    let terminal_rows: Vec<(u32, Vec<u8>)> = ctx
+        .write_db
+        .with_write(move |conn| terminal_ops_for_plan(conn, &plan_id_for_rows))
+        .await?;
+    let local_only = u32::try_from(
+        terminal_rows
+            .iter()
+            .filter(|(_, blob)| outcome_blob_is_local_only(blob))
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
     let summary = PlanSummary {
         total: counts.total(),
-        local_only: 0, // not tracked in journal; `Done` rolls up Success+LocalOnly
-        remote_succeeded: counts.done,
+        local_only,
+        // `counts.done` rolls up Success + LocalOnly; peel the local-only
+        // ones back out so a deferred (local-only) op never inflates the
+        // remote-success count.
+        remote_succeeded: counts.done.saturating_sub(local_only),
         remote_failed: counts.failed,
         conflicts: counts.conflict,
     };
@@ -764,20 +808,15 @@ async fn maybe_finalize(
     // rather than collapsing every terminal plan to `Ok(())`.
     let needs_cal_completion = matches!(kind, Some(PerOpJobKind::CalendarPlan) | None);
     let cal_results = if needs_cal_completion {
-        let plan_id_for_blocking = *plan_id_bytes;
-        let rows: Vec<(u32, Vec<u8>)> = ctx
-            .write_db
-            .with_write(move |conn| terminal_ops_for_plan(conn, &plan_id_for_blocking))
-            .await?;
-        let mut outcomes = Vec::with_capacity(rows.len());
-        for (operation_id, blob) in rows {
-            let result: service_api::CalendarOperationResult = serde_json::from_slice(&blob)
+        let mut outcomes = Vec::with_capacity(terminal_rows.len());
+        for (operation_id, blob) in &terminal_rows {
+            let result: service_api::CalendarOperationResult = serde_json::from_slice(blob)
                 .map_err(|e| {
                     format!("deserialize CalendarOperationResult for op {operation_id}: {e}")
                 })?;
             outcomes.push(CalendarOperationOutcome {
                 plan_id: plan_id_uuid,
-                operation_id: OperationId(operation_id),
+                operation_id: OperationId(*operation_id),
                 result,
                 service_generation: 0,
             });
@@ -917,6 +956,21 @@ async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
 /// shape is intentionally narrower than the domain shape - provider-
 /// specific error variants collapse into `RemoteFailure` with a
 /// `retryable` flag derived from `RemoteFailureKind`.
+/// True when a terminal op's serialized wire result is a local-only outcome.
+/// Both the mail `OperationResult` and the calendar `CalendarOperationResult`
+/// are `#[serde(tag = "kind")]` and spell their deferred-local commit as
+/// `"kind": "local_only"`, so the summary can count local-only ops off the
+/// shared tag without deserializing into either concrete type (and without a
+/// parse failure on a foreign-but-valid blob aborting finalization).
+fn outcome_blob_is_local_only(blob: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(blob)
+        .ok()
+        .as_ref()
+        .and_then(|value| value.get("kind"))
+        .and_then(serde_json::Value::as_str)
+        == Some("local_only")
+}
+
 fn action_outcome_to_wire(outcome: ActionOutcome) -> (OpTerminalStatus, OperationResult) {
     match outcome {
         ActionOutcome::Success | ActionOutcome::NoOp => {
@@ -966,7 +1020,11 @@ fn action_outcome_to_wire(outcome: ActionOutcome) -> (OpTerminalStatus, Operatio
 /// remote calls enqueue a pending op for the periodic retry. The
 /// chat read-state mutation has already committed locally inside the
 /// handler; this is best-effort remote propagation.
-async fn mark_chat_read_remote(ctx: &ActionContext, affected: Vec<(String, String)>) {
+async fn mark_chat_read_remote(
+    ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
+    affected: Vec<(String, String)>,
+) {
     if affected.is_empty() {
         return;
     }
@@ -976,56 +1034,23 @@ async fn mark_chat_read_remote(ctx: &ActionContext, affected: Vec<(String, Strin
         by_account.entry(aid).or_default().push(tid);
     }
     for (account_id, thread_ids) in by_account {
-        let provider =
-            match create_provider(&ctx.db, &ctx.write_db, &account_id, ctx.encryption_key).await {
-                Ok(p) => p,
-                Err(error) => {
-                    let kind = classify_provider_error(&error);
-                    let retryable = matches!(
-                        kind,
-                        RemoteFailureKind::Transient | RemoteFailureKind::Unknown
-                    );
-                    for thread_id in &thread_ids {
-                        let outcome = ActionOutcome::LocalOnly {
-                            reason: ActionError::remote_with_kind(kind, error.clone()),
-                            retryable,
-                        };
-                        enqueue_if_retryable(
-                            ctx,
-                            &outcome,
-                            &account_id,
-                            "markRead",
-                            thread_id,
-                            r#"{"read":true}"#,
-                        )
-                        .await;
-                    }
-                    continue;
-                }
-            };
-        for thread_id in thread_ids {
-            let provider_ctx = ActionProviderCtx {
-                account_id: &account_id,
-                db: &ctx.db,
-                progress: &NoopProgressReporter,
-            };
-            let outcome = match provider.mark_read(&provider_ctx, &thread_id, true).await {
-                Ok(()) => ActionOutcome::Success,
-                Err(error) => ActionOutcome::LocalOnly {
-                    reason: ActionError::remote(error.to_string()),
-                    retryable: true,
-                },
-            };
-            enqueue_if_retryable(
-                ctx,
-                &outcome,
-                &account_id,
-                "markRead",
-                &thread_id,
-                r#"{"read":true}"#,
-            )
-            .await;
-        }
+        let operations = thread_ids
+            .into_iter()
+            .map(|thread_id| {
+                (
+                    account_id.clone(),
+                    thread_id,
+                    MailOperation::SetRead { to: true },
+                )
+            })
+            .collect::<Vec<_>>();
+        // `batch_execute` self-enqueues retryable remote failures into
+        // `pending_operations` (the `markRead` retry row) on both the
+        // resident-engine and the degraded path, so a second enqueue here
+        // would only re-churn the replace-by-(account,resource,type) dedup row
+        // and reset its retry budget. Drive the batch and let it own the
+        // journal write.
+        let _ = super::batch_execute(ctx, sync_runtime, operations).await;
     }
 }
 

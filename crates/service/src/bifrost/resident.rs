@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
+use bifrost_sync::SyncEngine;
 use bifrost_types::{
     AccountControl, AccountId, CursorScope, FolderId, HintPayload, InvalidationHint, ObjectType,
     PauseReason, PushSource, WatchEvent,
@@ -89,6 +90,33 @@ struct ResidentSlot {
     /// `COMPLETION_IDLE_INTERVAL` while idle).
     initial_marked: AtomicBool,
     provider: BifrostProviderKind,
+    folder_map: Arc<HashMap<String, FolderKind>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ResidentActionAccount {
+    pub(crate) account_id: String,
+    pub(crate) engine: Arc<SyncEngine>,
+    pub(crate) provider: BifrostProviderKind,
+    pub(crate) folder_map: Arc<HashMap<String, FolderKind>>,
+    /// Handle back to the resident engine so an action dispatch can re-fetch
+    /// the container/folder map on a cache miss (spec 4.1: a `MoveToFolder`
+    /// to a folder absent from the cached map re-resolves before erroring,
+    /// rather than stranding the completed local write on a terminal
+    /// not-found).
+    resident: ResidentEngine,
+}
+
+impl ResidentActionAccount {
+    /// Re-fetch the account's native folder/container map. Called on a
+    /// dispatch-time cache miss (a folder created since attach is not yet in
+    /// the slot's snapshot), so a move to a freshly-created folder resolves
+    /// instead of failing terminally.
+    pub(crate) async fn refresh_folder_map(&self) -> Result<HashMap<String, FolderKind>, String> {
+        self.resident
+            .refresh_folder_map(&self.account_id, self.provider)
+            .await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +221,7 @@ impl ResidentEngine {
         }
 
         let provider = self.provider_for_account(account_id).await?;
-        let folder_map = self.prepare_folder_map(account_id, provider).await?;
+        let folder_map = Arc::new(self.prepare_folder_map(account_id, provider).await?);
         let factory = build_account_factory(
             &self.inner.read_db,
             self.inner.write_db.writer_pool(),
@@ -209,9 +237,9 @@ impl ResidentEngine {
             .attach(account.clone(), factory)
             .await
             .map_err(|error| format!("{error:?}"))?;
-        self.subscribe_push(account_id, &account, provider, &folder_map)
+        self.subscribe_push(account_id, &account, provider, folder_map.as_ref())
             .await;
-        self.register_routing_keys(account_id, provider, &folder_map)
+        self.register_routing_keys(account_id, provider, folder_map.as_ref())
             .await;
 
         let (caught_tx, _) = watch::channel(0);
@@ -228,12 +256,13 @@ impl ResidentEngine {
             redrive_attempt: AtomicU32::new(0),
             initial_marked: AtomicBool::new(false),
             provider,
+            folder_map: Arc::clone(&folder_map),
         });
         let task_slot = Arc::clone(&slot);
         let inner = Arc::clone(&self.inner);
         let account_for_task = account_id.to_string();
         let task = tokio::spawn(async move {
-            resident_consumer_loop(inner, task_slot, account_for_task, folder_map).await;
+            resident_consumer_loop(inner, task_slot, account_for_task, (*folder_map).clone()).await;
         });
         *slot.consumer_task.lock().await = Some(task);
         let control_inner = Arc::clone(&self.inner);
@@ -302,6 +331,37 @@ impl ResidentEngine {
                 slot.redrive_attempt.load(Ordering::SeqCst),
             )
         })
+    }
+
+    pub(crate) async fn action_account(
+        &self,
+        account_id: &str,
+    ) -> Result<ResidentActionAccount, String> {
+        self.attach_account(account_id).await?;
+        let slots = self.inner.slots.lock().await;
+        let slot = slots
+            .get(account_id)
+            .ok_or_else(|| format!("resident slot missing after attach for {account_id}"))?;
+        Ok(ResidentActionAccount {
+            account_id: account_id.to_string(),
+            engine: self.inner.engine.engine(),
+            provider: slot.provider,
+            folder_map: Arc::clone(&slot.folder_map),
+            resident: self.clone(),
+        })
+    }
+
+    /// Re-run the provider folder/container sync and return a fresh native
+    /// folder map. Backs `ResidentActionAccount::refresh_folder_map`; the
+    /// resident slot's cached `folder_map` is rebuilt only on (re)attach, so a
+    /// move dispatch that misses the cache calls here to resolve a
+    /// just-created destination against current server state.
+    pub(crate) async fn refresh_folder_map(
+        &self,
+        account_id: &str,
+        provider: BifrostProviderKind,
+    ) -> Result<HashMap<String, FolderKind>, String> {
+        self.prepare_folder_map(account_id, provider).await
     }
 
     pub async fn detach_account(&self, account_id: &str) -> Result<(), String> {

@@ -110,6 +110,46 @@ pub(crate) async fn send_mdn_responses(
     }
 }
 
+/// Engine-dispatch entry point for the read-receipt write-back.
+///
+/// The action pipeline now marks a thread read through the resident
+/// bifrost engine (`engine.set_read`), which has no MDN hook of its own.
+/// This restores the behavior the legacy `mark_read_dispatch` carried: on
+/// a successful mark-as-read, send any authorised MDNs for the thread.
+///
+/// The MDN *send* still rides the provider send path - composition / send
+/// is B5 territory and untouched by the action rewire - so a provider is
+/// constructed on demand here. The candidate query runs first so the
+/// common no-receipt thread never pays for a provider build.
+pub(crate) async fn send_mdn_for_read(ctx: &ActionContext, account_id: &str, thread_id: &str) {
+    match collect_candidates(ctx, account_id, thread_id).await {
+        Ok(c) if c.is_empty() => return,
+        Ok(_) => {}
+        Err(e) => {
+            log::warn!("[mdn] candidate lookup failed for {account_id}/{thread_id}: {e}");
+            return;
+        }
+    }
+
+    let provider = match super::provider::create_provider(
+        &ctx.db,
+        &ctx.write_db,
+        account_id,
+        ctx.encryption_key,
+    )
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            // Soft-fail: a missing receipt is better than blocking the
+            // read mutation, matching the legacy MDN error discipline.
+            log::warn!("[mdn] provider unavailable for {account_id}: {e}");
+            return;
+        }
+    };
+    send_mdn_responses(ctx, &*provider, account_id, thread_id).await;
+}
+
 fn collect_candidates_sync(
     conn: &ReadConn<'_>,
     account_id: &str,

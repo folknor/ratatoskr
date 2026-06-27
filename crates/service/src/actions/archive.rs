@@ -81,25 +81,3 @@ pub async fn archive(ctx: &ActionContext, account_id: &str, thread_id: &str) -> 
         }
     }
 }
-
-/// Archive with a pre-constructed provider (for batch reuse).
-pub(crate) async fn archive_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("archive", account_id, thread_id);
-
-    match archive_local(ctx, account_id, thread_id).await {
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-        Ok(false) => return ActionOutcome::NoOp,
-        Ok(true) => {}
-    }
-
-    archive_dispatch(ctx, provider, account_id, thread_id).await
-}

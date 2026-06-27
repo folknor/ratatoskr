@@ -747,6 +747,90 @@ unit tests, and the `bifrost-consumer-sustained-push-bound` / account-delete /
 `sigint-mid-prefetch` drain regression guards held green - read the B3c landing
 commit.
 
+B4a (the action-pipeline mutation-dispatch rewire, the first half of B4) is
+done; the B4 TODO entry below is kept but narrowed to its remaining open
+sub-item B4b (the error-model + retry-journal cleanup), per repo convention. It
+rewired the BOTTOM of the email-action pipeline off the per-provider
+`ProviderOps` mutation surface and onto the already-resident bifrost
+`SyncEngine`, driven through a new per-account mutation handle
+(`ResidentActionAccount`, `crates/service/src/bifrost/resident.rs`) - the top
+half (intent resolution, planning, the `action_jobs` durable plan journal and
+its crash-replay worker, the local `*_local` writes, optimistic-UI/undo/toast)
+is preserved exactly. For what it delivered - a new
+`crates/service/src/actions/dispatch_target.rs` that owns the single
+consumer-side thread->message expansion (`resolve_thread_messages` resolves the
+local `thread_id` to the thread's bifrost message `ObjectId`s from the
+`messages` table, uniform across all four providers and NOT dependent on a
+server thread id IMAP has none of), the declarative role->container resolution
+(archive/trash/spam/move expressed object-level over the `MutationTarget`-typed
+membership primitives `add_to_container` / `remove_from_container`, dest and
+per-message source resolved by `FolderRole`, never a `match` on provider kind),
+and the exhaustive `dispatch_mutation` / `dispatch_bulk_mutation` that replaced
+`dispatch_with_provider` (`SetStarred`/`SetRead` -> `set_starred`/`set_read`;
+`AddLabel`/`RemoveLabel` -> `apply_label`/`remove_label`, with
+`LabelKind::GraphImportance` routed to the exclusive `set_importance` primitive
+so the high/low exclusivity survives; `PermanentDelete` -> `bulk_destroy` kept
+provider-first so the local rows that carry the remote refs survive a retry);
+the same-account same-op coalescing (`RemoteBatchKey`) that accumulates resolved
+`ObjectId`s and dispatches through the bulk surface so a 200-thread campaign
+keeps the batched wire shape today's providers issue rather than regressing to N
+single-object calls; the `batch.rs` dispatch and the `pending.rs` retry
+re-dispatch both rewired onto the resident handle (no per-action
+`create_provider`); the composite label-group fan-out
+(`label_group.rs` / `label.rs`) rewired onto `apply_label`/`remove_label` while
+preserving the single-composite-row retry contract (never N member rows); and
+the `SetRead` action rewired onto `engine.set_read`, its read-receipt (MDN)
+follow-up re-homed onto the new dispatch path (`send_mdn_for_read`,
+`mark_read.rs` -> `mdn_send.rs`). One deliberate deviation from the spec's plan:
+where the spec called for routing the `mark_mdn_sent` write-back through
+`engine.mark_mdn_sent` as part of the `SetRead` dispatch, B4a instead LEFT the
+MDN send and its `mark_mdn_sent` keyword sync on the provider send path (a
+`ProviderOps` provider built on demand), because MDN composition/send is B5
+territory and splitting the keyword sync from the send it pairs with buys
+nothing - the engine MDN hook waits for B5. The send-path `mark_send_intent`
+likewise stays B5. The IMAP-only schema prerequisite landed inside
+this cut as its first step: an `imap_uidvalidity` column on `messages`
+(`crates/db/src/db/schema/02_mail.sql`) populated at consumer hydrate time
+(`bifrost/consumer/hydrate.rs` now keeps the `uidvalidity` it previously dropped
+out of the decoded IMAP object id), so `resolve_thread_messages` can reconstruct
+a valid IMAP `ObjectId` (`imap1:<len>:<folder>:<uidvalidity>:<uid>`);
+Gmail/JMAP/Graph ids round-trip from the stored provider message id and need no
+migration. The error half uses the EXISTING B1 `account_error_to_action_error`
+map (already `RecoveryClass`-derived, not a shim), so B4a is behavior-equivalent
+across the cut. B4-SQ (the additive `SyncEngine` mutation-passthrough cluster,
+mirroring the B3 read-only hydration passthrough so every action mutation runs
+against the freshly-installed `live_account` connection, never a stale snapshot)
+landed FIRST in `./research/bifrost` per the side-quest protocol and was
+promoted to the `../bifrost` dependency before any ratatoskr mutation brick - read
+the B4-SQ landing commit. Still OPEN as B4b: deleting the now-dead
+`classify_provider_error` string heuristic and the dead
+`create_provider`-for-actions arms (still present in the tree, no longer reached
+by the action dispatch, compile-gated for removal), and reconciling the per-op
+retry BUDGETS with the recovery taxonomy. Gated by `brokkr check` green,
+`brokkr service-suite`, the IMAP write-back scripts (`imap-writeback-flags.lua`,
+`imap-writeback-move-delete.lua` - the latter rewired to verify move/delete by
+server round-trip rather than IMAP wire-op needles, since bifrost moves via the
+atomic RFC 6851 UID MOVE), the three new per-provider
+`jmap-` / `graph-` / `gmail-action-writeback.lua` round-trip gates, the
+exhaustive `dispatch_mutation` mapping unit test, the composite
+`apply_label_group` contract test, and the journal/crash replay regression
+scripts held green - read the B4a landing commit. The
+`bulk_archive_200_threads_under_budget` throughput gate § 6.2 named was NOT
+built: B4a's coalescing is structural (the `RemoteBatchKey` grouping routes
+same-account / same-op entries through one `bulk_move` / `bulk_set_flags` /
+`bulk_destroy`, exercised one-element-deep by the writeback gates), but the
+explicit 200-thread wire-op-budget assertion is deferred to B4b. Three lateral
+follow-ups also ride into B4b: bulk star never coalesces (the capability-aware
+`set_starred` is per-id for any set size, so a large star campaign issues N wire
+ops); IMAP single-message Archive/Trash from a NON-inbox folder resolves
+`source = INBOX` and so degrades to a retryable LocalOnly (bounded - resync
+reconciles, the common archive-from-INBOX and advisory-source MoveToFolder cases
+are fine); and a latent FROZEN-bifrost Gmail un-spam divergence (`move_patch`
+adds INBOX without removing the SPAM label when the bulk destination is INBOX,
+so a bulk un-spam campaign on Gmail leaves the SPAM label - the singleton path's
+explicit add+remove avoids it, only the >1 bulk path hits it; a future bifrost
+side-quest).
+
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
@@ -771,11 +855,18 @@ commit.
   durability ordering, and the lag / hydration / completion policies each
   sub-spec was carved from - was produced during B3 spec review and consumed by
   each sub-spec's author.
-- B4. Action pipeline rewire. Dispatch onto `Account` conveniences plus bulk
-  mutations over `MutationTarget`; thread-to-message expansion; map
-  `AccountError` to `OperationResult`; rebuild the pending-ops / retry journal
-  on `RecoveryClass`. Likely splits into B4a (mutation dispatch) and B4b (error
-  plus retry). Needs B1, A1-A2.
+- B4. Action pipeline rewire. B4a (mutation dispatch) has LANDED - see the B4a
+  done-note above; the resident-engine mutation dispatch onto `Account`
+  conveniences plus bulk mutations over `MutationTarget`, the consumer-side
+  thread-to-message expansion, the role->container resolution, and the bulk
+  coalescing are in the tree, and the action pipeline no longer constructs a
+  `ProviderOps` per batch. The remaining open sub-item is B4b (error-model +
+  retry-journal cleanup): delete the now-dead `classify_provider_error` string
+  heuristic and the dead `create_provider`-for-actions arms (compile-gated), and
+  reconcile the per-op retry BUDGETS (`retry_policy`: folder 10 / label 7 /
+  flags 5) with the `RecoveryClass` recovery taxonomy so an `AuthLost` mutation
+  does not enqueue a retry that can never succeed while a `Reconcile` / `Retry`
+  one does. Needs B1, A1-A2 (satisfied; B4a landed on them).
 - B5. Send plus drafts. Rewire onto `send_message` / `draft_*` plus scheduled
   send. Needs A2, A4.
 - B6. Folders, labels, containers. Rewire onto `container_*` / `apply_label`
@@ -902,7 +993,7 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `db34ab4`: seven bifrost side-quests have landed since the
+frozen reference is `75cf810`: eight bifrost side-quests have landed since the
 A8-closing commit (see § 2's side-quest protocol), and both `./research/bifrost`
 and `../bifrost` were re-synced together to each in turn. First `aa9172d` ("sync:
 make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
@@ -949,7 +1040,20 @@ the `AccountControl` + `SyncEvent::Terminated` broadcasts) was already public at
 seven; B3c's only test additions were in-tree (a `ForceTerminated` consumer hook
 + `resident_redrive_*` probe telemetry) plus a `saehrimnir` budget-exhaustion
 affordance for the real-engine pause gate, again an installed external binary,
-not commit-pinned here. Each Track B spec records, in its ground
+not commit-pinned here. B4-SQ (B4a's bifrost prerequisite) advanced the freeze an
+eighth time, to `75cf810`: a `SyncEngine` mutation passthrough cluster - the
+single-object conveniences (`set_starred` / `set_read` / `apply_label` /
+`remove_label` / `set_importance` / `add_to_container` / `remove_from_container` /
+`set_keyword` / `set_label_membership` / `set_category` / `container_*`) dispatched
+direct through `live_account`, plus `bulk_move` / `bulk_destroy` routed through the
+same idempotency / read-back pipeline `bulk_set_flags` uses - mirroring the
+`dc670ef` read-only hydration passthrough, so the action pipeline drives
+object-level mutations through the resident engine without the engine-private
+`Arc<dyn Account>`. B4a's mock work was a separate `saehrimnir` mutation side-quest
+(Graph `@odata.etag` + `If-Match` on PATCH / move / DELETE including inside
+`$batch`, Gmail `messages.modify` / `batchModify` / `batchDelete`, and IMAP
+RFC 6851 `UID MOVE`), again an installed external binary, not commit-pinned here.
+Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
 including the hours a step-4 implement run can take. This is load-bearing: the

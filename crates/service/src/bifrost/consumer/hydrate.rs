@@ -631,10 +631,16 @@ pub(crate) fn build_consumer_row(
     } else {
         flags.contains("$forwarded")
     };
-    let (imap_uid, imap_folder) = decoded_imap
+    let (imap_uid, imap_folder, imap_uidvalidity) = decoded_imap
         .as_ref()
-        .map(|decoded| (Some(i64::from(decoded.uid)), Some(decoded.folder.clone())))
-        .unwrap_or((None, None));
+        .map(|decoded| {
+            (
+                Some(i64::from(decoded.uid)),
+                Some(decoded.folder.clone()),
+                Some(i64::from(decoded.uidvalidity)),
+            )
+        })
+        .unwrap_or((None, None, None));
     if provider == BifrostProviderKind::Imap {
         if let Some(decoded) = &decoded_imap {
             message_id = format!("imap-{}-{}-{}", account_id.0, decoded.folder, decoded.uid);
@@ -739,6 +745,7 @@ pub(crate) fn build_consumer_row(
         is_reaction: reaction_emoji.is_some(),
         imap_uid,
         imap_folder,
+        imap_uidvalidity,
         has_meeting_invite: parsed_attachments
             .iter()
             .map(|att| att.mime_type.as_str())
@@ -846,6 +853,7 @@ fn system_time_secs(time: SystemTime) -> i64 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DecodedImapObjectId {
     pub(super) folder: String,
+    pub(super) uidvalidity: u32,
     pub(super) uid: u32,
 }
 
@@ -859,12 +867,16 @@ pub(super) fn decode_imap_object_id(id: &str) -> Option<DecodedImapObjectId> {
     let folder = after_len.get(..len)?.to_string();
     let rest = after_len.get(len..)?.strip_prefix(':')?;
     let mut parts = rest.split(':');
-    let _uidvalidity = parts.next()?.parse::<u32>().ok()?;
+    let uidvalidity = parts.next()?.parse::<u32>().ok()?;
     let uid = parts.next()?.parse::<u32>().ok()?;
     if parts.next().is_some() {
         return None;
     }
-    Some(DecodedImapObjectId { folder, uid })
+    Some(DecodedImapObjectId {
+        folder,
+        uidvalidity,
+        uid,
+    })
 }
 
 fn root_thread_reference(
@@ -1176,6 +1188,7 @@ fn synthetic_to_row(
         is_reaction: synthetic.reaction_emoji.is_some(),
         imap_uid: None,
         imap_folder: None,
+        imap_uidvalidity: None,
         has_meeting_invite: false,
         meeting_invite_method: None,
         meeting_invite_uid: None,
@@ -1286,6 +1299,7 @@ fn minimal_message_row(account_id: &str, id: &str) -> MessageInsertRow {
         is_reaction: false,
         imap_uid: None,
         imap_folder: None,
+        imap_uidvalidity: None,
         has_meeting_invite: false,
         meeting_invite_method: None,
         meeting_invite_uid: None,

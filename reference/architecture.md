@@ -247,11 +247,11 @@ The action pipeline flows: `MailActionIntent -> resolve_intent -> build_executio
 4. **Arm in `to_wire_op` / `wire_to_mail`** (`crates/app/src/action_wire.rs` and `crates/service/src/actions/wire_conversion.rs`) - exhaustive matches catch a missing mirror at compile time.
 5. **Arm in `resolve_intent()`** - collapses intent + UI context into operation + compensation.
 6. **Arm in `completion_behavior()`** - defines view effect, post-success effect, undo behavior, toast label. Compiler-enforced exhaustive match.
-7. **Service-side action function** (e.g., `crates/service/src/actions/my_action.rs`) - local DB mutation + provider dispatch.
-8. **Arms in `batch.rs` routing** (`dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`) - route `MailOperation` to the action function.
+7. **Service-side action function** (e.g., `crates/service/src/actions/my_action.rs`) - local DB mutation + engine mutation dispatch.
+8. **Arms in `batch.rs` routing** (`op_local`, `enqueue_params`, `op_name`) plus the remote-dispatch match `dispatch_mutation` (`crates/service/src/actions/dispatch_target.rs`) - route `MailOperation` to the local write and its bifrost-engine mutation. (B4a rewired this remote half off the per-provider `ProviderOps` dispatch - the old `dispatch_with_provider` - onto the resident `SyncEngine` mutation passthrough; read the B4a landing commit.)
 9. **`MailUndoPayload` variant + compensation arm** (`action_resolve.rs`, `commands.rs::undo_payload_to_ops`) - if reversible. Phase 2's undo path goes through `dispatch_plan_with_undo`, which dispatches the inverse plan via the standard `action.execute_plan` IPC.
 
-**Enforcement:** `MailOperation` is an exhaustive enum, mirrored 1:1 by `WireMailOperation`. Adding a variant produces compiler errors in `completion_behavior()`, `dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`, `to_wire_op`, `wire_to_mail`, and `build_standard_undo_payloads`. No wildcards - a missing site is a compile error.
+**Enforcement:** `MailOperation` is an exhaustive enum, mirrored 1:1 by `WireMailOperation`. Adding a variant produces compiler errors in `completion_behavior()`, `dispatch_mutation`, `op_local`, `enqueue_params`, `op_name`, `to_wire_op`, `wire_to_mail`, and `build_standard_undo_payloads`. No wildcards - a missing site is a compile error.
 
 Toggle actions (boolean state flips) need only the `MailOperation` variant and a `ToggleField` entry - `build_execution_plan` handles per-thread resolution, optimistic UI, and rollback generically.
 

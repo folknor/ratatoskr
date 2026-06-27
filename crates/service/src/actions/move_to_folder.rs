@@ -133,32 +133,3 @@ pub async fn move_to_folder(
         }
     }
 }
-
-/// Move to folder with a pre-constructed provider (for batch reuse).
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn move_to_folder_with_provider(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    folder_id: &FolderId,
-    source_folder_id: Option<&FolderId>,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
-
-    if let Err(e) = move_local(ctx, account_id, thread_id, folder_id, source_folder_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    move_dispatch(
-        ctx,
-        provider,
-        account_id,
-        thread_id,
-        folder_id,
-        source_folder_id,
-    )
-    .await
-}
