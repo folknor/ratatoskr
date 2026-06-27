@@ -126,6 +126,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
     set_field_fn(state, table_idx, "sleep", lua_sleep)?;
     set_field_fn(state, table_idx, "free_tcp_addr", lua_free_tcp_addr)?;
     set_field_fn(state, table_idx, "now_ms", lua_now_ms)?;
+    set_field_fn(state, table_idx, "wall_ms", lua_wall_ms)?;
     set_field_fn(state, table_idx, "marker", lua_marker)?;
     set_field_fn(state, table_idx, "uuid", lua_uuid)?;
     set_field_fn(state, table_idx, "repeat_byte", lua_repeat_byte)?;
@@ -678,6 +679,20 @@ fn lua_now_ms(state: &mut State) -> dellingr::Result<u8> {
     };
     state.set_top(0);
     state.push_number(elapsed as f64);
+    Ok(1)
+}
+
+/// Wall-clock UNIX-epoch milliseconds. Unlike `now_ms` (monotonic since
+/// harness start), this returns absolute time so a script can compute an
+/// absolute future instant - e.g. a `scheduled_at` the Service validates
+/// against its own `SystemTime::now()`.
+fn lua_wall_ms(state: &mut State) -> dellingr::Result<u8> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| lua_error_message(format!("system clock before UNIX_EPOCH: {error}")))?
+        .as_millis();
+    state.set_top(0);
+    state.push_number(millis as f64);
     Ok(1)
 }
 

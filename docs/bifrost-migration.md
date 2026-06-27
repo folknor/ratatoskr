@@ -979,13 +979,18 @@ check` green - read the B4b landing commit.
   follow-up resync shows the draft GONE from the server. That gate required a
   `saehrimnir` fix: the IMAP mock implements `UID EXPUNGE` but never advertised
   `UIDPLUS`, so bifrost's `delete_messages` (`UID STORE \Deleted` + `UID EXPUNGE`)
-  returned `Unsupported(DraftDiscard)`; the mock now advertises `UIDPLUS`. Still OPEN
-  under this item: the per-provider MDN round-trip scripts and the delegated
-  `*-scheduled-send.lua` round-trip gates (the latter blocked on a real wall-clock
-  unix-time harness binding - `harness.now_ms()` is monotonic, so a computed
-  `scheduled_at` reads as a past instant that bifrost's `validate_scheduled` rejects,
-  and no hardcoded absolute timestamp stays valid against the 1-year `maxDelayedSend`
-  window). A latent finding surfaced
+  returned `Unsupported(DraftDiscard)`; the mock now advertises `UIDPLUS`.
+  `jmap-scheduled-send.lua` is also DONE: the capable-provider counterpart to the
+  `*-scheduled-send-rejected.lua` gates, it drives a scheduled `ActionSend` on a JMAP
+  account (which advertises a non-zero `maxDelayedSend`, so `pim_methods.scheduled_send
+  = true`) and asserts the send is ACCEPTED (clean remote dispatch via FUTURERELEASE
+  `holduntil`) and round-trips under `SENT`, rather than being rejected at the
+  capability gate. It needed a new `harness.wall_ms()` Lua binding returning wall-clock
+  UNIX-epoch milliseconds: `harness.now_ms()` is monotonic (ms since harness start), so
+  a computed `scheduled_at` read as a past instant that bifrost's `validate_scheduled`
+  rejected, and no hardcoded absolute timestamp stays valid against the 1-year
+  `maxDelayedSend` window. Still OPEN under this item: the per-provider MDN round-trip
+  scripts. A latent finding surfaced
   while building these: a JMAP submitted message keeps its `$draft` keyword after
   `EmailSubmission/set` (bifrost's `on_success_update_email` rewrites `mailboxIds` to
   `[Sent]` but never clears `keywords/$draft`), so the sent message shows under both
