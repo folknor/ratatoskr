@@ -22,6 +22,24 @@ local function label_by_name(labels, name)
     return nil
 end
 
+-- Gmail is OAuth-only: mint a bearer for the fixture's primary account
+-- (account-1) off the mock OAuth provider before seeding.
+local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
+local token_url = harness.join_url(admin_endpoint, "oauth/token")
+local token_response = harness.http_json({
+    method = "POST",
+    url = token_url,
+    body = {
+        grant_type = "authorization_code",
+        account_id = "account-1",
+        code = "harness-gmail-color-account-1",
+        client_id = "ratatoskr-gmail-harness",
+        redirect_uri = "http://127.0.0.1/oauth-callback",
+    },
+})
+harness.assert(token_response.access_token ~= nil, "/oauth/token did not return access_token")
+
 local dir = harness.data_dir("sync_gmail_label_color_roundtrip")
 local client, err = harness.spawn(dir)
 harness.assert(err == nil, "spawn failed")
@@ -35,6 +53,12 @@ local account, account_err = client:request("TestSeedAccount", {
     display_name = "Sync Gmail Color",
     account_name = "Sync Gmail Color",
     provider = "gmail_api",
+    access_token = token_response.access_token,
+    refresh_token = "gmail-color-refresh-unused",
+    token_expires_at = 2000000000,
+    oauth_provider = "google",
+    oauth_client_id = "ratatoskr-gmail-harness",
+    oauth_token_url = token_url,
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
