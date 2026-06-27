@@ -1,4 +1,4 @@
-use bifrost_types::{AccountError, RecoveryClass};
+use bifrost_types::{AccountError, EngineDirective, RecoveryClass};
 use service_api::actions::{ActionError, RemoteFailureKind};
 use service_api::{OperationResult, RemoteFailure, SyncPauseReason};
 
@@ -51,9 +51,29 @@ pub fn pause_reason_to_wire(result: &OperationResult) -> SyncPauseReason {
 
 fn recovery_to_failure_kind(recovery: &RecoveryClass) -> RemoteFailureKind {
     match recovery {
-        RecoveryClass::Retry(_) | RecoveryClass::Reconcile(_) | RecoveryClass::Engine(_) => {
-            RemoteFailureKind::Transient
-        }
+        RecoveryClass::Retry(_) | RecoveryClass::Reconcile(_) => RemoteFailureKind::Transient,
+        // Engine-class failures split by whether the engine can self-heal.
+        // Auto-recoverable directives (scope/account restart, strategy or
+        // capability downgrade, scope disable) leave a later pending-ops
+        // re-drive a path to success once the engine resumes -> retryable.
+        // SchemaIncompatible / OperatorOverrideRequired cannot clear without
+        // a migration or operator action, so an action retry can NEVER
+        // succeed -> terminal (the AuthLost analogue).
+        RecoveryClass::Engine(directive) => match directive {
+            EngineDirective::SchemaIncompatible
+            | EngineDirective::OperatorOverrideRequired { .. } => RemoteFailureKind::Permanent,
+            EngineDirective::RestartScope(_)
+            | EngineDirective::RestartAccount
+            | EngineDirective::DowngradeStrategy(_)
+            | EngineDirective::DowngradeCapabilityForScope(_)
+            | EngineDirective::DisableScope(_) => RemoteFailureKind::Transient,
+            // `EngineDirective` is `#[non_exhaustive]`: a new upstream
+            // directive defaults to the conservative auto-recoverable
+            // (retryable) classification - engine directives are recovery
+            // work, and the bounded per-op retry budget caps any wasted
+            // re-drive. Re-audited on every bifrost bump.
+            _ => RemoteFailureKind::Transient,
+        },
         RecoveryClass::Unsupported(_) => RemoteFailureKind::NotImplemented,
         RecoveryClass::AuthLost
         | RecoveryClass::NeedsAdminConsent { .. }
@@ -63,6 +83,11 @@ fn recovery_to_failure_kind(recovery: &RecoveryClass) -> RemoteFailureKind {
         | RecoveryClass::ProviderContractViolation
         | RecoveryClass::ProviderRefused
         | RecoveryClass::UnknownPermanent => RemoteFailureKind::Permanent,
+        // `RecoveryClass` is `#[non_exhaustive]` upstream, so this wildcard is
+        // REQUIRED to compile. It is the documented conservative-terminal
+        // default: a new upstream class is treated as terminal (never enqueues
+        // a doomed retry) until a bifrost-bump revalidation names it above. Do
+        // NOT delete this arm.
         _ => RemoteFailureKind::Permanent,
     }
 }
@@ -94,7 +119,9 @@ mod tests {
         let cases = [
             (retry_error(), RemoteFailureKind::Transient),
             (reconcile_error(), RemoteFailureKind::Transient),
-            (engine_error(), RemoteFailureKind::Transient),
+            (restart_account_error(), RemoteFailureKind::Transient),
+            (schema_incompatible_error(), RemoteFailureKind::Permanent),
+            (operator_override_error(), RemoteFailureKind::Permanent),
             (auth_lost_error(), RemoteFailureKind::Permanent),
             (admin_consent_error(), RemoteFailureKind::Permanent),
             (policy_error(), RemoteFailureKind::Permanent),
@@ -116,7 +143,7 @@ mod tests {
 
     #[test]
     fn bifrost_error_map_retryable_classes_are_transient() {
-        for err in [retry_error(), reconcile_error(), engine_error()] {
+        for err in [retry_error(), reconcile_error(), restart_account_error()] {
             assert!(
                 account_error_to_action_error(&err).is_retryable(),
                 "expected retryable for {:?}",
@@ -124,6 +151,8 @@ mod tests {
             );
         }
         for err in [
+            schema_incompatible_error(),
+            operator_override_error(),
             auth_lost_error(),
             admin_consent_error(),
             policy_error(),
@@ -235,13 +264,33 @@ mod tests {
         .expect("valid reconcile error")
     }
 
-    fn engine_error() -> bifrost_types::AccountError {
+    fn schema_incompatible_error() -> bifrost_types::AccountError {
         AccountErrorBuilder::new(
             AccountErrorKind::SyncState(SyncStateErrorKind::SchemaIncompatible),
             Cause::State(StateCause::SchemaIncompatible),
         )
         .try_build()
-        .expect("valid engine error")
+        .expect("valid schema-incompatible error")
+    }
+
+    fn restart_account_error() -> bifrost_types::AccountError {
+        AccountErrorBuilder::new(
+            AccountErrorKind::SyncState(SyncStateErrorKind::CapabilityChanged),
+            Cause::State(StateCause::CapabilityChanged { delta: None }),
+        )
+        .try_build()
+        .expect("valid restart-account error")
+    }
+
+    fn operator_override_error() -> bifrost_types::AccountError {
+        AccountErrorBuilder::new(
+            AccountErrorKind::SyncState(SyncStateErrorKind::OperatorOverrideNeeded),
+            Cause::State(StateCause::OperatorOverrideNeeded {
+                reason: "operator requested pause".to_string(),
+            }),
+        )
+        .try_build()
+        .expect("valid operator-override error")
     }
 
     fn auth_lost_error() -> bifrost_types::AccountError {

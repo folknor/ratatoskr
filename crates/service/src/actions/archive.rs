@@ -1,13 +1,6 @@
-use common::ops::ProviderOps;
-use common::types::ActionProviderCtx;
-
 use super::context::ActionContext;
-use super::log::MutationLog;
-use super::outcome::{ActionError, ActionOutcome};
-use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::outcome::ActionError;
 use db::db::queries_extra::remove_inbox_folder;
-use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for archive. Returns true if state changed.
 pub(crate) async fn archive_local(
@@ -22,62 +15,4 @@ pub(crate) async fn archive_local(
     db.with_write(move |conn| remove_inbox_folder(conn, &aid, &tid).map(|n| n > 0))
         .await
         .map_err(ActionError::db)
-}
-
-/// Provider dispatch for archive (assumes local mutation already applied).
-async fn archive_dispatch(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("archive", account_id, thread_id);
-
-    let provider_ctx = ActionProviderCtx {
-        account_id,
-        db: &ctx.db,
-        progress: &NoopProgressReporter,
-    };
-
-    let outcome = match provider.archive(&provider_ctx, thread_id).await {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(msg),
-                retryable: true,
-            }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
-    mlog.emit(&outcome);
-    outcome
-}
-
-/// Archive a single thread: remove from inbox locally, then dispatch to provider.
-pub async fn archive(ctx: &ActionContext, account_id: &str, thread_id: &str) -> ActionOutcome {
-    let mlog = MutationLog::begin("archive", account_id, thread_id);
-
-    match archive_local(ctx, account_id, thread_id).await {
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-        Ok(false) => return ActionOutcome::NoOp,
-        Ok(true) => {}
-    }
-
-    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(provider) => archive_dispatch(ctx, &*provider, account_id, thread_id).await,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(e),
-                retryable: true,
-            };
-            enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
 }

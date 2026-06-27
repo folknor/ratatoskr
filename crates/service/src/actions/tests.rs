@@ -243,8 +243,17 @@ async fn trash_local_removes_inbox_adds_trash() {
 #[tokio::test]
 async fn archive_nonexistent_thread_does_not_succeed() {
     let (ctx, _tmp) = make_test_ctx();
-    // No account/thread in DB → archive_local finds no INBOX label → NoOp or Failed
-    let outcome = super::archive::archive(&ctx, "nonexistent", "t1").await;
+    let outcomes = super::batch::batch_execute(
+        &ctx,
+        None,
+        vec![(
+            "nonexistent".to_string(),
+            "t1".to_string(),
+            super::MailOperation::Archive,
+        )],
+    )
+    .await;
+    let outcome = outcomes.into_iter().next().expect("one outcome");
     assert!(
         !outcome.is_success(),
         "archiving nonexistent thread should not return Success, got {outcome:?}"
@@ -492,7 +501,8 @@ async fn batch_preserves_target_order() {
 #[tokio::test]
 async fn batch_archive_without_accounts_returns_local_only() {
     let (ctx, _tmp) = make_test_ctx();
-    // No accounts → create_provider fails → degraded path
+    // No sync runtime means no resident engine handle, so the batch takes the
+    // degraded path.
 
     let outcomes = super::batch::batch_execute(
         &ctx,
@@ -513,7 +523,7 @@ async fn batch_archive_without_accounts_returns_local_only() {
     .await;
 
     assert_eq!(outcomes.len(), 2);
-    // Both should be LocalOnly or Failed (provider creation fails)
+    // Both should be LocalOnly or Failed.
     for o in &outcomes {
         assert!(o.is_local_only() || o.is_failed());
     }
@@ -556,7 +566,9 @@ async fn batch_respects_flight_guard() {
 
 #[test]
 fn action_error_retryable_classification() {
-    assert!(ActionError::remote("err").is_retryable()); // Unknown → retryable
+    // Bare remote errors default to Unknown, which remains retryable as a
+    // constructor fallback even though the engine classifier no longer emits it.
+    assert!(ActionError::remote("err").is_retryable());
     assert!(ActionError::remote_with_kind(RemoteFailureKind::Transient, "err").is_retryable());
     assert!(!ActionError::remote_with_kind(RemoteFailureKind::Permanent, "err").is_retryable());
     assert!(
@@ -791,12 +803,12 @@ async fn apply_label_group_handles_member_label() {
 // ── retry classification (RecoveryClass -> pending journal) ──────────
 
 /// Pins the enqueue gate that the B1 `account_error_to_action_error` mapping
-/// feeds: a mutation failing with a `RecoveryClass::Retry/Reconcile/Engine`
-/// error maps to `RemoteFailureKind::Transient` (retryable) and enqueues a
-/// `pending_operations` row, while `AuthLost/NoPermission/... ` map to
-/// `Permanent` and `Unsupported` to `NotImplemented` (both terminal) and
-/// enqueue nothing. The `RecoveryClass -> RemoteFailureKind` mapping itself is
-/// covered in `bifrost::error_map`; this pins that the retryable bit, not the
+/// feeds: a mutation failing with `RecoveryClass::Retry/Reconcile` or an
+/// auto-recoverable `Engine` directive maps to `RemoteFailureKind::Transient`
+/// and enqueues a `pending_operations` row, while terminal classes map to
+/// `Permanent` and `Unsupported` to `NotImplemented`, both suppressing enqueue.
+/// The `RecoveryClass -> RemoteFailureKind` mapping itself is covered in
+/// `bifrost::error_map`; this pins that the retryable bit, not the
 /// `retryable:` field alone, gates the journal write.
 #[tokio::test]
 async fn pending_retry_classification() {
@@ -805,7 +817,7 @@ async fn pending_retry_classification() {
     insert_test_thread(&ctx, "acc1", "t1");
     insert_test_thread(&ctx, "acc1", "t2");
 
-    // Transient (RecoveryClass::Retry/Reconcile/Engine) -> enqueued.
+    // Transient (Retry/Reconcile and auto-recoverable Engine) -> enqueued.
     let transient = ActionOutcome::LocalOnly {
         reason: ActionError::remote_with_kind(RemoteFailureKind::Transient, "503 unavailable"),
         retryable: true,
@@ -864,4 +876,50 @@ async fn pending_retry_classification() {
         0,
         "unsupported mutation failure must not enqueue a retry"
     );
+}
+
+#[tokio::test]
+async fn retry_budget_only_for_retryable() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+
+    let cases = [
+        ("archive", "folder-thread", 10),
+        ("applyLabelGroup", "label-thread", 7),
+        ("star", "flag-thread", 5),
+    ];
+
+    for (op_type, resource_id, _max_retries) in cases {
+        let permanent = ActionOutcome::LocalOnly {
+            reason: ActionError::remote_with_kind(RemoteFailureKind::Permanent, "auth revoked"),
+            retryable: true,
+        };
+        super::pending::enqueue_if_retryable(&ctx, &permanent, "acc1", op_type, resource_id, "{}")
+            .await;
+        assert_eq!(
+            count_pending_ops(&ctx, "acc1", resource_id, op_type),
+            0,
+            "terminal {op_type} failure must not reach the retry budget"
+        );
+    }
+
+    for (op_type, resource_id, max_retries) in cases {
+        let transient = ActionOutcome::LocalOnly {
+            reason: ActionError::remote_with_kind(RemoteFailureKind::Transient, "retry later"),
+            retryable: true,
+        };
+        super::pending::enqueue_if_retryable(&ctx, &transient, "acc1", op_type, resource_id, "{}")
+            .await;
+
+        let stored_max: i64 = with_test_conn(&ctx, |conn| {
+            conn.query_row(
+                "SELECT max_retries FROM pending_operations \
+                 WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3",
+                params!["acc1", resource_id, op_type],
+                |row| row.get(0),
+            )
+            .expect("query pending max_retries")
+        });
+        assert_eq!(stored_max, max_retries, "{op_type} retry ceiling");
+    }
 }

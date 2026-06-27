@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use types::MailProviderKind;
 
-use super::outcome::RemoteFailureKind;
-
 /// Create a provider ops instance for the given account.
 ///
 /// Reads the provider type from the database, decrypts credentials with
@@ -65,29 +63,6 @@ pub async fn create_provider(
             encryption_key,
             write_db.writer_pool(),
         ))),
-    }
-}
-
-/// Classify a provider-construction error for retry policy.
-pub(crate) fn classify_provider_error(error: &str) -> RemoteFailureKind {
-    let lower = error.to_lowercase();
-    if lower.contains("unknown provider")
-        || lower.contains("no rows returned")
-        || lower.contains("queryreturnednorows")
-        || lower.contains("not found")
-        || lower.contains("missing account")
-        || lower.contains("malformed stored secret")
-        || lower.contains("decrypt credential")
-    {
-        RemoteFailureKind::Permanent
-    } else if lower.contains("timeout")
-        || lower.contains("connection refused")
-        || lower.contains("dns")
-        || lower.contains("network")
-    {
-        RemoteFailureKind::Transient
-    } else {
-        RemoteFailureKind::Unknown
     }
 }
 
@@ -317,30 +292,5 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         _ctx: &common::types::ProviderCtx<'_>,
     ) -> Result<common::types::ProviderProfile, common::error::ProviderError> {
         Err(Self::offline())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_creation_errors_are_classified_for_retry() {
-        assert_eq!(
-            classify_provider_error("Unknown provider: bogus"),
-            RemoteFailureKind::Permanent,
-        );
-        assert_eq!(
-            classify_provider_error("network error: connection refused"),
-            RemoteFailureKind::Transient,
-        );
-        assert_eq!(
-            classify_provider_error("decrypt credential: Decryption failed"),
-            RemoteFailureKind::Permanent,
-        );
-        assert_eq!(
-            classify_provider_error("provider returned an odd response"),
-            RemoteFailureKind::Unknown,
-        );
     }
 }

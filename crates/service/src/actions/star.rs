@@ -1,13 +1,6 @@
-use common::ops::ProviderOps;
-use common::types::ActionProviderCtx;
-
 use super::context::ActionContext;
-use super::log::MutationLog;
-use super::outcome::{ActionError, ActionOutcome};
-use super::pending::enqueue_if_retryable;
-use super::provider::create_provider;
+use super::outcome::ActionError;
 use db::db::queries::{set_thread_messages_starred, set_thread_starred};
-use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for star. Returns true if state changed.
 pub(crate) async fn star_local(
@@ -33,70 +26,4 @@ pub(crate) async fn star_local(
     })
     .await
     .map_err(ActionError::db)
-}
-
-/// Provider dispatch for star (assumes local mutation already applied).
-async fn star_dispatch(
-    ctx: &ActionContext,
-    provider: &dyn ProviderOps,
-    account_id: &str,
-    thread_id: &str,
-    starred: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("star", account_id, thread_id);
-    let params_json = format!(r#"{{"starred":{starred}}}"#);
-
-    let provider_ctx = ActionProviderCtx {
-        account_id,
-        db: &ctx.db,
-        progress: &NoopProgressReporter,
-    };
-
-    let outcome = match provider.star(&provider_ctx, thread_id, starred).await {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly {
-                reason: ActionError::remote(msg),
-                retryable: true,
-            }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
-    mlog.emit(&outcome);
-    outcome
-}
-
-/// Toggle star on a single thread.
-pub async fn star(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    starred: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("star", account_id, thread_id);
-    let params_json = format!(r#"{{"starred":{starred}}}"#);
-
-    match star_local(ctx, account_id, thread_id, starred).await {
-        Err(e) => {
-            let outcome = ActionOutcome::Failed { error: e };
-            mlog.emit(&outcome);
-            return outcome;
-        }
-        Ok(false) => return ActionOutcome::NoOp,
-        Ok(true) => {}
-    }
-
-    match create_provider(&ctx.db, &ctx.write_db, account_id, ctx.encryption_key).await {
-        Ok(provider) => star_dispatch(ctx, &*provider, account_id, thread_id, starred).await,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(e),
-                retryable: true,
-            };
-            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
 }

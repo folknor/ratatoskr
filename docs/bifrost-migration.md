@@ -748,8 +748,9 @@ unit tests, and the `bifrost-consumer-sustained-push-bound` / account-delete /
 commit.
 
 B4a (the action-pipeline mutation-dispatch rewire, the first half of B4) is
-done; the B4 TODO entry below is kept but narrowed to its remaining open
-sub-item B4b (the error-model + retry-journal cleanup), per repo convention. It
+done; at the time it landed the B4 TODO entry below was kept and narrowed to its
+then-remaining open sub-item B4b (the error-model + retry-journal cleanup, since
+landed - see the B4b done-note below), per repo convention. It
 rewired the BOTTOM of the email-action pipeline off the per-provider
 `ProviderOps` mutation surface and onto the already-resident bifrost
 `SyncEngine`, driven through a new per-account mutation handle
@@ -802,11 +803,10 @@ mirroring the B3 read-only hydration passthrough so every action mutation runs
 against the freshly-installed `live_account` connection, never a stale snapshot)
 landed FIRST in `./research/bifrost` per the side-quest protocol and was
 promoted to the `../bifrost` dependency before any ratatoskr mutation brick - read
-the B4-SQ landing commit. Still OPEN as B4b: deleting the now-dead
-`classify_provider_error` string heuristic and the dead
-`create_provider`-for-actions arms (still present in the tree, no longer reached
-by the action dispatch, compile-gated for removal), and reconciling the per-op
-retry BUDGETS with the recovery taxonomy. Gated by `brokkr check` green,
+the B4-SQ landing commit. The error-model + retry-journal cleanup B4a deliberately left
+compile-gated (the dead `classify_provider_error` heuristic, the dead
+`create_provider`-for-actions arms, and the per-op retry-budget reconciliation)
+landed separately as B4b - see the B4b done-note below. Gated by `brokkr check` green,
 `brokkr service-suite`, the IMAP write-back scripts (`imap-writeback-flags.lua`,
 `imap-writeback-move-delete.lua` - the latter rewired to verify move/delete by
 server round-trip rather than IMAP wire-op needles, since bifrost moves via the
@@ -815,12 +815,12 @@ atomic RFC 6851 UID MOVE), the three new per-provider
 exhaustive `dispatch_mutation` mapping unit test, the composite
 `apply_label_group` contract test, and the journal/crash replay regression
 scripts held green - read the B4a landing commit. The
-`bulk_archive_200_threads_under_budget` throughput gate § 6.2 named was NOT
-built: B4a's coalescing is structural (the `RemoteBatchKey` grouping routes
-same-account / same-op entries through one `bulk_move` / `bulk_set_flags` /
-`bulk_destroy`, exercised one-element-deep by the writeback gates), but the
-explicit 200-thread wire-op-budget assertion is deferred to B4b. Three lateral
-follow-ups also ride into B4b: bulk star never coalesces (the capability-aware
+`bulk_archive_200_threads_under_budget` throughput gate (a `service-harness`
+`t1/` script; B4a's coalescing is structural - the `RemoteBatchKey` grouping
+routes same-account / same-op entries through one `bulk_move` / `bulk_set_flags` /
+`bulk_destroy`) held green within `service-suite` 63/63. Three lateral follow-ups
+are recorded as their own separate items (NOT B4b, which is scoped to the
+error-model cleanup): bulk star never coalesces (the capability-aware
 `set_starred` is per-id for any set size, so a large star campaign issues N wire
 ops); IMAP single-message Archive/Trash from a NON-inbox folder resolves
 `source = INBOX` and so degrades to a retryable LocalOnly (bounded - resync
@@ -830,6 +830,47 @@ adds INBOX without removing the SPAM label when the bulk destination is INBOX,
 so a bulk un-spam campaign on Gmail leaves the SPAM label - the singleton path's
 explicit add+remove avoids it, only the >1 bulk path hits it; a future bifrost
 side-quest).
+
+B4b (the error-model + retry-journal cleanup, the closing half of B4) is done;
+with it landed B4 is COMPLETE and its TODO entry below is updated accordingly,
+per repo convention. It ripped the pre-bifrost dead surface B4a left
+compile-gated and unified the action pipeline on a single remote-error
+classifier and a single retry authority. Concretely: the per-provider string
+heuristic `classify_provider_error` (and its
+`provider_creation_errors_are_classified_for_retry` test) is DELETED, leaving
+the `RecoveryClass`-derived `error_map.rs::account_error_to_action_error` as the
+only remote classifier in the action path; the seven dead
+`create_provider`-for-actions dispatch arms (`archive` / `star` / `trash` /
+`spam` / `mark_read` / `move_to_folder` / `permanent_delete` plus their
+`*_dispatch` halves and `enqueue_permanent_delete_retry`) are removed along with
+their now-dead `pub use` re-exports and pruned imports, keeping each module's
+live `*_local` DB-mutation half; `create_provider` itself STAYS (no action
+caller now, but live for the send / draft / folder-CRUD / attachment / MDN /
+prefetch paths, the MDN write-back deferred to B5). The genuine correctness fix
+is the `error_map.rs::recovery_to_failure_kind` Engine split: the previously
+collapsed `RecoveryClass::Engine(_) -> Transient` arm is split by directive so
+the operator-blocked terminal directives (`SchemaIncompatible` /
+`OperatorOverrideRequired`) map to `Permanent` and no longer enqueue a doomed
+retry, while the auto-recoverable directives (scope/account restart, strategy or
+capability downgrade, scope disable) stay `Transient`/retryable - the same
+single classifier also feeding `account_error_to_operation_result` and
+`pause_reason_to_wire`, so the `SchemaIncompatible` / `OperatorOverrideRequired`
+pause banner tightens too. The `batch.rs` degraded path is reclassified from the
+bare `ActionError::remote` (`Unknown`) to an explicit `Transient`, and
+`pending.rs::retry_policy` keeps its per-op budgets (folder 10 / label 7 / flags
+5) with its doc reconciled to state the budget is the retry CEILING consulted
+ONLY after `is_retryable()` (the one `RecoveryClass`-derived gate) admits the
+failure, so a terminal class never reaches the budget. Gated by the
+`bifrost_error_map_*` unit tests (the `SchemaIncompatible` case repointed from
+Transient to Permanent, a new auto-recoverable `CapabilityChanged ->
+RestartAccount` Transient case added), `pending_retry_classification` +
+`retry_budget_only_for_retryable`, `action_error_retryable_classification`, the
+rewritten `archive_nonexistent_thread_does_not_succeed` (now driven through the
+live `batch_execute` path, not the deleted `archive::archive`), the exhaustive
+`dispatch_mutation_mapping_is_exhaustive` guard, the five per-provider
+action-writeback sync-harness round-trip scripts, the `pause_reason_to_wire_*` +
+`jmap-pause-resume.lua` banner gates, and `brokkr service-suite` / `brokkr
+check` green - read the B4b landing commit.
 
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
@@ -855,18 +896,21 @@ side-quest).
   durability ordering, and the lag / hydration / completion policies each
   sub-spec was carved from - was produced during B3 spec review and consumed by
   each sub-spec's author.
-- B4. Action pipeline rewire. B4a (mutation dispatch) has LANDED - see the B4a
-  done-note above; the resident-engine mutation dispatch onto `Account`
-  conveniences plus bulk mutations over `MutationTarget`, the consumer-side
-  thread-to-message expansion, the role->container resolution, and the bulk
-  coalescing are in the tree, and the action pipeline no longer constructs a
-  `ProviderOps` per batch. The remaining open sub-item is B4b (error-model +
-  retry-journal cleanup): delete the now-dead `classify_provider_error` string
-  heuristic and the dead `create_provider`-for-actions arms (compile-gated), and
-  reconcile the per-op retry BUDGETS (`retry_policy`: folder 10 / label 7 /
-  flags 5) with the `RecoveryClass` recovery taxonomy so an `AuthLost` mutation
-  does not enqueue a retry that can never succeed while a `Reconcile` / `Retry`
-  one does. Needs B1, A1-A2 (satisfied; B4a landed on them).
+- B4. Action pipeline rewire. COMPLETE: B4a (mutation dispatch) and B4b
+  (error-model + retry-journal cleanup) have both landed - see the B4a and B4b
+  done-notes above. B4a moved the bottom of the email-action pipeline off the
+  per-provider `ProviderOps` mutation surface onto the resident bifrost
+  `SyncEngine` (resident-engine mutation dispatch onto `Account` conveniences
+  plus bulk mutations over `MutationTarget`, the consumer-side
+  thread-to-message expansion, role->container resolution, and bulk coalescing),
+  so the action pipeline no longer constructs a `ProviderOps` per batch; B4b
+  ripped the dead `classify_provider_error` heuristic and the
+  `create_provider`-for-actions dispatch arms B4a left compile-gated, split the
+  `RecoveryClass::Engine` arm so an operator-blocked engine failure (and the
+  already-correct `AuthLost`) does not enqueue a retry that can never succeed
+  while a `Reconcile` / `Retry` one does, and reconciled the per-op retry
+  BUDGETS (`retry_policy`: folder 10 / label 7 / flags 5) downstream of the one
+  `is_retryable()` gate. Needed B1, A1-A2 (all satisfied).
 - B5. Send plus drafts. Rewire onto `send_message` / `draft_*` plus scheduled
   send. Needs A2, A4.
 - B6. Folders, labels, containers. Rewire onto `container_*` / `apply_label`

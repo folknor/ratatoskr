@@ -15,7 +15,7 @@ use super::dispatch_target::{
 };
 use super::log::MutationLog;
 use super::operation::MailOperation;
-use super::outcome::{ActionError, ActionOutcome};
+use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::{
     archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
@@ -387,7 +387,8 @@ async fn handle_thread_degraded(
     let mlog = MutationLog::begin(name, account_id, thread_id);
 
     if matches!(op, MailOperation::PermanentDelete) {
-        let error = ActionError::remote(provider_error.to_string());
+        let error =
+            ActionError::remote_with_kind(RemoteFailureKind::Transient, provider_error.to_string());
         let retry_outcome = ActionOutcome::LocalOnly {
             reason: error.clone(),
             retryable: true,
@@ -416,7 +417,10 @@ async fn handle_thread_degraded(
         }
         Ok(true) => {
             let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(provider_error.to_string()),
+                reason: ActionError::remote_with_kind(
+                    RemoteFailureKind::Transient,
+                    provider_error.to_string(),
+                ),
                 retryable: true,
             };
             let (op_type, params_json) = enqueue_params(op);

@@ -21,12 +21,13 @@ struct RetryPolicy {
     max_retries: i64,
 }
 
-/// Look up retry policy by operation type.
+/// Look up the retry ceiling for failures admitted by `is_retryable()`.
 ///
-/// Folder-level actions (archive, trash, spam, move, delete) get the most
-/// aggressive retry - silent divergence is the #1 user-visible bug.
-/// Label actions get moderate retry. Flag actions (star, read) get lighter
-/// retry since sync reconciles them within 5 minutes.
+/// The RecoveryClass-derived failure kind is the single retry gate:
+/// terminal classes never reach this policy. Once a failure is retryable,
+/// folder-level actions keep the largest budget because silent divergence is
+/// the highest-risk case, label actions use a moderate budget, and flag
+/// actions use the lightest budget because sync reconciles them quickly.
 fn retry_policy(operation_type: &str) -> RetryPolicy {
     match operation_type {
         "archive" | "trash" | "spam" | "moveToFolder" | "permanentDelete" => {
