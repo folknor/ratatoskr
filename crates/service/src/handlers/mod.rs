@@ -58,6 +58,9 @@ pub(crate) async fn dispatch(
             action_mark_chat_read::handle(&boot_state, chat_email).await
         }
         RequestParams::ActionSend { request } => action_send::handle(&boot_state, *request).await,
+        RequestParams::TestDiscardDraft { params } => {
+            test_helpers::discard_draft_handle(&boot_state, params).await
+        }
         RequestParams::ActionCancelScheduledSend { params } => {
             action_scheduled_send::handle_cancel(&boot_state, params).await
         }

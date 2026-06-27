@@ -971,9 +971,21 @@ check` green - read the B4b landing commit.
   projects the structured compose properties - subject, the `from`/`to`/`cc`/`bcc`
   address lists, `messageId`, and the `bodyValues` text body - that the `Email/set`
   create carries; it previously dropped them, so a sent message round-tripped with an
-  empty subject). Still OPEN under this item: the per-provider MDN round-trip scripts,
-  the delegated `*-scheduled-send.lua` round-trip gates, and `imap-draft-discard.lua`
-  (the last needs a test-only `delete_draft` IPC trigger). A latent finding surfaced
+  empty subject). `imap-draft-discard.lua` is also DONE: it seeds an IMAP account on
+  the same fixture, syncs the seed draft, then drives the new harness-only
+  `test.discard_draft` trigger (`TestDiscardDraft` -> resolve the draft's bifrost
+  `ObjectId` via the action pipeline's `resolve_thread_messages` ->
+  `engine.draft_discard`, the remote leg of `actions::delete_draft`) and asserts a
+  follow-up resync shows the draft GONE from the server. That gate required a
+  `saehrimnir` fix: the IMAP mock implements `UID EXPUNGE` but never advertised
+  `UIDPLUS`, so bifrost's `delete_messages` (`UID STORE \Deleted` + `UID EXPUNGE`)
+  returned `Unsupported(DraftDiscard)`; the mock now advertises `UIDPLUS`. Still OPEN
+  under this item: the per-provider MDN round-trip scripts and the delegated
+  `*-scheduled-send.lua` round-trip gates (the latter blocked on a real wall-clock
+  unix-time harness binding - `harness.now_ms()` is monotonic, so a computed
+  `scheduled_at` reads as a past instant that bifrost's `validate_scheduled` rejects,
+  and no hardcoded absolute timestamp stays valid against the 1-year `maxDelayedSend`
+  window). A latent finding surfaced
   while building these: a JMAP submitted message keeps its `$draft` keyword after
   `EmailSubmission/set` (bifrost's `on_success_update_email` rewrites `mailboxIds` to
   `[Sent]` but never clears `keywords/$draft`), so the sent message shows under both

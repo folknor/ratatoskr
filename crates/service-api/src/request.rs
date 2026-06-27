@@ -210,6 +210,21 @@ pub struct TestThreadReadAck {
     pub unread_messages: u64,
 }
 
+/// Harness trigger for the server-side draft-discard path: resolves the
+/// thread's draft message to its bifrost `ObjectId` and drives
+/// `engine.draft_discard` (the remote leg of `actions::delete_draft`) so
+/// `imap-draft-discard.lua` can assert a draft is removed from the server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDiscardDraftParams {
+    pub account_id: String,
+    pub thread_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDiscardDraftAck {
+    pub discarded: bool,
+}
+
 /// Phase 8c harness probe params: a single hex-encoded BLAKE3 hash
 /// to look up in `attachment_blobs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1308,6 +1323,10 @@ pub enum RequestParams {
     TestThreadRead {
         params: TestThreadReadParams,
     },
+    /// Discards a server-side draft via the engine (harness).
+    TestDiscardDraft {
+        params: TestDiscardDraftParams,
+    },
     /// Reads pending retry-queue rows for harness assertions.
     TestPendingOpsRead {
         params: TestPendingOpsReadParams,
@@ -1437,6 +1456,7 @@ impl RequestParams {
             Self::TestSeedRemoteAttachment { .. } => "test.seed_remote_attachment",
             Self::TestRemoveCachedAttachmentBytes { .. } => "test.remove_cached_attachment_bytes",
             Self::TestThreadRead { .. } => "test.thread_read",
+            Self::TestDiscardDraft { .. } => "test.discard_draft",
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             Self::TestStartSync { .. } => "test.start_sync",
             Self::TestBifrostAttach { .. } => "test.bifrost_attach",
@@ -1576,6 +1596,7 @@ impl RequestParams {
             | Self::TestSeedRemoteAttachment { .. }
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestThreadRead { .. }
+            | Self::TestDiscardDraft { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
             | Self::TestBifrostAttach { .. }
@@ -1695,6 +1716,7 @@ impl RequestParams {
             | Self::TestSeedRemoteAttachment { .. }
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestBifrostArmHook { .. }
+            | Self::TestDiscardDraft { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
             Self::TestStartSync { .. }
@@ -1815,6 +1837,7 @@ impl RequestParams {
                 serde_json::json!({ "params": params })
             }
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
+            Self::TestDiscardDraft { params } => serde_json::json!({ "params": params }),
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
             Self::TestBifrostAttach { params } => serde_json::json!({ "params": params }),
@@ -2370,6 +2393,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.thread_read params: {e}"))?;
                 Ok(Self::TestThreadRead { params: p.params })
+            }
+            "test.discard_draft" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestDiscardDraftParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.discard_draft params: {e}"))?;
+                Ok(Self::TestDiscardDraft { params: p.params })
             }
             "test.pending_ops_read" => {
                 #[derive(Deserialize)]

@@ -10,7 +10,7 @@ mod archive;
 pub mod batch;
 pub mod contacts;
 mod context;
-mod dispatch_target;
+pub(crate) mod dispatch_target;
 mod folder;
 mod label;
 mod label_group;

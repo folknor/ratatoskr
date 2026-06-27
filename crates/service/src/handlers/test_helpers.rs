@@ -17,9 +17,10 @@ use service_api::{
     TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
     TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
     TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
-    TestDelayNextWriteAck, TestDelayNextWriteParams, TestPendingOpRow, TestPendingOpsReadAck,
-    TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams,
-    TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestDelayNextWriteAck, TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams,
+    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
+    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
     TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
@@ -1144,6 +1145,67 @@ pub(super) async fn thread_read_handle(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+/// Harness trigger for the server-side draft-discard path. Resolves the
+/// thread's draft message to its bifrost `ObjectId` (the same expansion the
+/// action pipeline uses) and drives `engine.draft_discard` - the remote leg of
+/// `actions::delete_draft` - so `imap-draft-discard.lua` can assert the draft
+/// is removed from the server by a follow-up resync.
+pub(super) async fn discard_draft_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestDiscardDraftParams,
+) -> Result<Value, ServiceError> {
+    let sync_runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.discard_draft received before SyncRuntime was installed".into(),
+        )
+    })?;
+    let ctx = crate::actions::worker::build_action_context(
+        boot_state.write_db_state()?,
+        boot_state
+            .read_db_state()
+            .ok_or_else(|| ServiceError::Internal("read DB is not initialized".into()))?,
+        boot_state
+            .encryption_key()
+            .ok_or_else(|| ServiceError::Internal("encryption key is not loaded".into()))?,
+        boot_state.app_data_dir(),
+    )
+    .map_err(ServiceError::Internal)?;
+
+    let action_account = sync_runtime
+        .resident_action_account(&params.account_id)
+        .await
+        .map_err(|error| ServiceError::Internal(format!("resident action account: {error}")))?;
+
+    let ids = crate::actions::dispatch_target::resolve_thread_messages(
+        &ctx,
+        &params.account_id,
+        &params.thread_id,
+        action_account.provider,
+    )
+    .await
+    .map_err(|error| ServiceError::Internal(format!("resolve draft message: {error:?}")))?;
+
+    let object_id = ids
+        .into_iter()
+        .next()
+        .ok_or_else(|| ServiceError::Internal("thread has no draft message to discard".into()))?;
+    let object_id_debug = object_id.0.clone();
+
+    action_account
+        .engine
+        .draft_discard(
+            &bifrost_types::AccountId(params.account_id.clone()),
+            bifrost_types::DraftHandle(object_id.0),
+        )
+        .await
+        .map_err(|error| {
+            ServiceError::Internal(format!("draft_discard ({object_id_debug}): {error}"))
+        })?;
+
+    serde_json::to_value(TestDiscardDraftAck { discarded: true })
+        .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
 pub(super) async fn pending_ops_read_handle(

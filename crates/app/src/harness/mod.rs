@@ -21,12 +21,12 @@ use service_api::{
     SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
     SettingValue, SettingsSetParams, TestBifrostArmHookParams, TestBifrostAttachParams,
     TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestCrashAfterNWritesParams,
-    TestDelayNextWriteParams, TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams,
-    TestSearchIndexParams, TestSeedAccountParams, TestSeedCachedAttachmentParams,
-    TestSeedRemoteAttachmentParams, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation, WireFolderId,
-    WireLabelGroupId, WireLabelId, WireMailOperation,
+    TestDelayNextWriteParams, TestDiscardDraftParams, TestPendingOpsReadParams,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
+    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
+    WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
 };
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write as _};
@@ -2795,6 +2795,21 @@ fn request_params_from_lua(
                 .ok_or_else(|| lua_error_message("TestThreadRead requires params.thread_id"))?;
             Ok(RequestParams::TestThreadRead {
                 params: TestThreadReadParams {
+                    account_id,
+                    thread_id,
+                },
+            })
+        }
+        "TestDiscardDraft" | "test.discard_draft" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestDiscardDraft requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestDiscardDraft requires params.account_id"))?;
+            let thread_id = get_string_field(state, params_idx, "thread_id")?
+                .ok_or_else(|| lua_error_message("TestDiscardDraft requires params.thread_id"))?;
+            Ok(RequestParams::TestDiscardDraft {
+                params: TestDiscardDraftParams {
                     account_id,
                     thread_id,
                 },
