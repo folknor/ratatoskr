@@ -464,23 +464,48 @@ impl DecryptedAccountCredentials {
         &self,
         oauth_source: Option<Arc<dyn TokenSource>>,
     ) -> Result<Option<SmtpSubmissionConfig>, BifrostBuildError> {
-        let Some(host) = self.row.smtp_host.clone().filter(|host| !host.is_empty()) else {
-            return Ok(None);
-        };
-        let tls = match self.row.smtp_security.as_deref().unwrap_or("starttls") {
-            "tls" | "ssl" => SubmissionTls::Implicit,
-            "starttls" => SubmissionTls::StartTls,
-            "none" => SubmissionTls::Plaintext,
-            other => {
-                return Err(BifrostBuildError::InvalidConfig {
+        // Harness redirect: when RATATOSKR_TEST_SMTP_ENDPOINT is set, the SMTP
+        // submission transport must target the saehrimnir mock (host:port,
+        // plaintext) instead of the persisted submission host, which under the
+        // harness is a non-resolvable placeholder (e.g. smtp.example.test).
+        // This mirrors the RATATOSKR_TEST_IMAP_ENDPOINT override in
+        // `build_imap_factory`. Plaintext (not STARTTLS) is required: the mock's
+        // self-signed cert would be rejected by `starttls_relay`'s native-tls
+        // verifier, and the mock accepts cleartext AUTH.
+        let test_endpoint = std::env::var("RATATOSKR_TEST_SMTP_ENDPOINT")
+            .ok()
+            .filter(|endpoint| !endpoint.is_empty());
+        let (host, tls, port_override) = if let Some(endpoint) = &test_endpoint {
+            let (host, port) =
+                parse_host_port(endpoint).ok_or_else(|| BifrostBuildError::InvalidConfig {
                     account_id: self.row.id.clone(),
-                    detail: format!("unknown SMTP security mode {other}"),
-                });
-            }
+                    detail: format!("invalid RATATOSKR_TEST_SMTP_ENDPOINT {endpoint}"),
+                })?;
+            (host, SubmissionTls::Plaintext, Some(port))
+        } else {
+            let Some(host) = self.row.smtp_host.clone().filter(|host| !host.is_empty()) else {
+                return Ok(None);
+            };
+            let tls = match self.row.smtp_security.as_deref().unwrap_or("starttls") {
+                "tls" | "ssl" => SubmissionTls::Implicit,
+                "starttls" => SubmissionTls::StartTls,
+                "none" => SubmissionTls::Plaintext,
+                other => {
+                    return Err(BifrostBuildError::InvalidConfig {
+                        account_id: self.row.id.clone(),
+                        detail: format!("unknown SMTP security mode {other}"),
+                    });
+                }
+            };
+            (host, tls, None)
         };
         let mut config =
             SmtpSubmissionConfig::new(host, tls, bifrost_types::Address::bare(&self.row.email));
-        if let Some(port) = self.optional_port(self.row.smtp_port, "smtp_port")? {
+        let port = match port_override {
+            Some(port) => Some(port),
+            None => self.optional_port(self.row.smtp_port, "smtp_port")?,
+        };
+        if let Some(port) = port {
             config = config.with_port(port);
         }
         if let Some(username) = self

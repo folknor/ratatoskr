@@ -936,14 +936,25 @@ check` green - read the B4b landing commit.
   `gmail-` / `imap-scheduled-send-rejected.lua` capability gates, and 45/46
   `service-suite` (the one red gate is the deferred B5-FIX below). Two follow-ups
   ride out of B5, each its own item:
-- B5-FIX. The `compose_send_50mb_attachment` service-harness gate regressed under
-  B5: a 50 MB-attachment send fails with `Remote(Transient): transport.network`
-  ~533 ms into bifrost's SMTP send. The ratatoskr-side double-buffer was fixed
-  (`SendAttachment.data` is now ref-counted `bytes::Bytes`) and saehrimnir's SMTP
-  `SIZE` was raised to 256 MiB, but the failure persists past the EHLO SIZE stage
-  (IMAP connect logs, then the SMTP send errors fast) - the root cause is a deeper
-  bifrost-smtp / large-DATA / transport issue still to be pinned. B5 landed with
-  this single gate red, by explicit decision; fixing it is this item.
+- B5-FIX. DONE. The `compose_send_50mb_attachment` failure was NOT a large-DATA /
+  bifrost-smtp transport issue - that framing was a misdiagnosis. The real cause:
+  the bifrost SMTP submission transport was never redirected to the `saehrimnir`
+  mock, so bifrost dialed the persisted placeholder host `smtp.example.test` and
+  failed at DNS resolution (`failed to lookup address information`, surfaced as
+  `transport.network` ~533 ms in) BEFORE any DATA was sent - the 50 MB body and the
+  EHLO SIZE stage were never reached. `build_imap_factory` already honored
+  `RATATOSKR_TEST_IMAP_ENDPOINT`; the fix adds the parallel
+  `RATATOSKR_TEST_SMTP_ENDPOINT` redirect in `smtp_submission`
+  (`crates/service/src/bifrost/factory.rs`): host:port from the endpoint, forced
+  `SubmissionTls::Plaintext` (the mock's self-signed STARTTLS cert is rejected by
+  `starttls_relay`'s native-tls verifier, and the mock accepts cleartext AUTH).
+  Production is unaffected - the override only fires when the env var is set. No
+  bifrost or saehrimnir change was needed; the earlier `SendAttachment.data ->
+  bytes::Bytes` double-buffer fix and saehrimnir's `SIZE` 256 MiB bump were
+  red-herring changes that landed harmlessly (the mock handles a 69 MB DATA body
+  over both plaintext and STARTTLS, confirmed in isolation). Gated by
+  `compose_send_50mb_attachment` green and `service-suite` 63/63 - read the landing
+  commit.
 - B5-GATES. The per-provider send / MDN / scheduled-send ROUND-TRIP harness gates
   (`jmap-` / `gmail-` / `graph-send-writeback.lua`, the MDN scripts, the delegated
   `*-scheduled-send.lua`, and `imap-draft-discard.lua` - the last needs a test-only
