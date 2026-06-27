@@ -1274,15 +1274,14 @@ pub(super) async fn container_crud_handle(
             (o, id)
         }
         "folder_rename" => {
-            let o = crate::actions::rename_folder(
+            crate::actions::rename_folder(
                 &ctx,
                 aa,
                 account_id,
                 &FolderId::from(id.ok_or_else(|| invalid("id"))?),
                 name.ok_or_else(|| invalid("name"))?,
             )
-            .await;
-            (o, None)
+            .await
         }
         "folder_move" => {
             let o = crate::actions::move_folder(

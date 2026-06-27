@@ -19,6 +19,7 @@ use bifrost_types::{AccountId, ContainerId, ContainerKind};
 use common::typed_ids::FolderId;
 use common::types::FolderKind;
 use db::db::queries_extra::{FolderWriteRow, insert_folders_batch};
+use rusqlite::OptionalExtension;
 
 use super::context::ActionContext;
 use super::dispatch_target::engine_error_to_action_error;
@@ -205,19 +206,22 @@ pub(crate) async fn create_folder(
     (outcome, Some(storage_id))
 }
 
-/// Rename a folder on the provider, then update the local row.
+/// Rename a folder on the provider, then update the local row. Returns the
+/// folder's storage id AFTER the rename - unchanged for stable-id providers,
+/// but re-keyed for path-based IMAP (whose `folder-{path}` id moves with the
+/// renamed mailbox path).
 pub(crate) async fn rename_folder(
     ctx: &ActionContext,
     action_account: Option<&ResidentActionAccount>,
     account_id: &str,
     folder_id: &FolderId,
     new_name: &str,
-) -> ActionOutcome {
+) -> (ActionOutcome, Option<String>) {
     let mlog = MutationLog::begin("rename_folder", account_id, folder_id.as_str());
     let Some(account) = action_account else {
         let outcome = no_resident();
         mlog.emit(&outcome);
-        return outcome;
+        return (outcome, None);
     };
 
     let native = match resolve_container_with_refresh(account, folder_id.as_str(), || {
@@ -229,7 +233,7 @@ pub(crate) async fn rename_folder(
         Err(error) => {
             let outcome = ActionOutcome::Failed { error };
             mlog.emit(&outcome);
-            return outcome;
+            return (outcome, None);
         }
     };
     let native_id = native.0.clone();
@@ -248,23 +252,102 @@ pub(crate) async fn rename_folder(
             error: engine_error_to_action_error(error),
         };
         mlog.emit(&outcome);
-        return outcome;
+        return (outcome, None);
     }
 
-    upsert_local_folder(
-        ctx,
-        account.provider,
-        account_id,
-        folder_id.as_str(),
-        &native_id,
-        new_name,
-        None,
-    )
-    .await;
+    let new_storage_id = if matches!(account.provider, BifrostProviderKind::Imap) {
+        // IMAP storage ids are `folder-{path}`, so the rename moved the id.
+        // Re-key the local row + its membership / child FKs (best-effort; the
+        // provider state is canonical and the next sync reconciles on failure).
+        rekey_imap_rename(ctx, account_id, folder_id, &native_id, new_name).await
+    } else {
+        // Stable-id providers (Gmail label, JMAP/Graph folder): the id is
+        // unchanged, so update the row's name in place.
+        upsert_local_folder(
+            ctx,
+            account.provider,
+            account_id,
+            folder_id.as_str(),
+            &native_id,
+            new_name,
+            None,
+        )
+        .await;
+        folder_id.as_str().to_string()
+    };
 
     let outcome = ActionOutcome::Success;
     mlog.emit(&outcome);
-    outcome
+    (outcome, Some(new_storage_id))
+}
+
+/// Re-key a path-based (IMAP) folder row after a server-side rename. The new
+/// native path is the old path with its trailing leaf (the folder's current
+/// `name`, which bifrost sets to the mailbox leaf) replaced by `new_name`;
+/// this matches bifrost's own `renamed_sibling` (parent prefix + delimiter +
+/// new leaf) without the consumer needing to know the server's hierarchy
+/// delimiter. Returns the new storage id, or the old id if the local re-key
+/// fails (the server rename already succeeded; the next sync reconciles).
+async fn rekey_imap_rename(
+    ctx: &ActionContext,
+    account_id: &str,
+    folder_id: &FolderId,
+    old_native: &str,
+    new_name: &str,
+) -> String {
+    let old_id = folder_id.as_str().to_string();
+
+    // IMAP folders carry the mailbox leaf as their `name`; read it so the new
+    // path can be derived delimiter-agnostically by suffix replacement.
+    let leaf_query_id = old_id.clone();
+    let leaf_query_account = account_id.to_string();
+    let old_leaf: Option<String> = ctx
+        .write_db
+        .with_write(move |conn| {
+            conn.query_row(
+                "SELECT name FROM folders WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params![leaf_query_account, leaf_query_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| format!("read folder leaf for rekey: {e}"))
+        })
+        .await
+        .ok()
+        .flatten();
+
+    let new_native = match old_leaf.as_deref() {
+        Some(leaf) => old_native.strip_suffix(leaf).map_or_else(
+            || new_name.to_string(),
+            |prefix| format!("{prefix}{new_name}"),
+        ),
+        // No row / unreadable name: assume a top-level mailbox (path == leaf).
+        None => new_name.to_string(),
+    };
+    let new_id = format!("folder-{new_native}");
+
+    let aid = account_id.to_string();
+    let old = old_id.clone();
+    let new = new_id.clone();
+    let native = new_native.clone();
+    let name = new_name.to_string();
+    if let Err(error) = ctx
+        .write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| format!("begin folder rekey tx: {e}"))?;
+            db::db::queries_extra::action_helpers::rekey_imap_folder_sync(
+                &tx, &aid, &old, &new, &native, &name,
+            )?;
+            tx.commit().map_err(|e| format!("commit folder rekey: {e}"))
+        })
+        .await
+    {
+        log::warn!("rename_folder IMAP rekey failed (provider succeeded): {error}");
+        return old_id;
+    }
+    new_id
 }
 
 /// Move a folder under a new parent on the provider. Folder-kind only - a

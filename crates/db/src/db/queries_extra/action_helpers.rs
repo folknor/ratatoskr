@@ -151,6 +151,63 @@ pub fn update_folder_parent_sync(
     Ok(())
 }
 
+/// Re-key a path-based (IMAP) folder row after a server-side rename moved its
+/// mailbox path.
+///
+/// IMAP folder storage ids are `folder-{path}`, so a rename (which changes the
+/// path) changes the id. The legacy in-place name update left the row keyed by
+/// the OLD id, so a later lookup-by-id (delete / move) missed with `NotFound`.
+/// This repoints the row and its membership (`message_folders`,
+/// `thread_folders`) plus any child folders (`folders.parent_id`) from `old_id`
+/// to `new_id`, and refreshes `imap_folder_path` / `name`.
+///
+/// `PRAGMA defer_foreign_keys` holds FK validation until commit, so the parent
+/// PK update can precede the child repoints inside one transaction even though
+/// the FKs are not declared `ON UPDATE CASCADE`; by commit every row is
+/// consistent. No-op-safe when `old_id == new_id` (only the name is refreshed).
+/// The caller owns the surrounding transaction.
+pub fn rekey_imap_folder_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    old_id: &str,
+    new_id: &str,
+    new_native_path: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    if old_id == new_id {
+        conn.execute(
+            "UPDATE folders SET name = ?3 WHERE account_id = ?1 AND id = ?2",
+            params![account_id, old_id, new_name],
+        )
+        .map_err(|e| format!("rename folder name in place: {e}"))?;
+        return Ok(());
+    }
+    conn.execute("PRAGMA defer_foreign_keys = ON", [])
+        .map_err(|e| format!("defer foreign keys for folder rekey: {e}"))?;
+    conn.execute(
+        "UPDATE folders SET id = ?3, imap_folder_path = ?4, name = ?5 \
+         WHERE account_id = ?1 AND id = ?2",
+        params![account_id, old_id, new_id, new_native_path, new_name],
+    )
+    .map_err(|e| format!("rekey folder row: {e}"))?;
+    conn.execute(
+        "UPDATE message_folders SET folder_id = ?3 WHERE account_id = ?1 AND folder_id = ?2",
+        params![account_id, old_id, new_id],
+    )
+    .map_err(|e| format!("rekey message_folders: {e}"))?;
+    conn.execute(
+        "UPDATE thread_folders SET folder_id = ?3 WHERE account_id = ?1 AND folder_id = ?2",
+        params![account_id, old_id, new_id],
+    )
+    .map_err(|e| format!("rekey thread_folders: {e}"))?;
+    conn.execute(
+        "UPDATE folders SET parent_id = ?3 WHERE account_id = ?1 AND parent_id = ?2",
+        params![account_id, old_id, new_id],
+    )
+    .map_err(|e| format!("rekey child folder parents: {e}"))?;
+    Ok(())
+}
+
 /// Delete a folder and its thread_folders associations.
 pub fn delete_folder_sync(
     conn: &impl WriteTarget,
