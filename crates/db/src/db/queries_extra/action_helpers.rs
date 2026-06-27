@@ -97,41 +97,11 @@ pub fn unsnooze_thread_sync(
     Ok(())
 }
 
-/// Upsert a single `folders` row reflecting a provider mutation result
-/// (create / rename). User-initiated by definition - `is_undeletable` is
-/// never set or cleared here; that classification belongs at sync ingest
-/// (the provider's own system flag is the source of truth). If a row
-/// already exists from sync, the existing `is_undeletable` flag is
-/// preserved.
-///
-/// Precondition: when `parent_id` is Some, the parent folder must already
-/// exist in `folders` for this account. The self-FK on
-/// `folders(account_id, parent_id)` rejects an orphan write outright;
-/// callers should rely on the provider sync that produced the parent
-/// rather than trying to upsert ancestors here. Batch ingest from sync
-/// goes through `insert_folders_batch`, which topologically sorts.
-pub fn upsert_folder_from_mutation_sync(
-    conn: &impl WriteTarget,
-    folder_id: &str,
-    account_id: &str,
-    name: &str,
-    path: Option<&str>,
-    special_use: Option<&str>,
-    parent_id: Option<&str>,
-) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO folders (id, account_id, name, imap_folder_path, imap_special_use, parent_id, is_undeletable) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0) \
-         ON CONFLICT(account_id, id) DO UPDATE SET \
-           name = excluded.name, \
-           imap_folder_path = excluded.imap_folder_path, \
-           imap_special_use = excluded.imap_special_use, \
-           parent_id = excluded.parent_id",
-        params![folder_id, account_id, name, path, special_use, parent_id],
-    )
-    .map_err(|e| format!("upsert folder: {e}"))?;
-    Ok(())
-}
+// `upsert_folder_from_mutation_sync` retired with the `ProviderOps` folder
+// CRUD surface (B6). The folder CRUD action handlers now upsert their
+// `folders` row directly through `insert_folders_batch` from the engine's
+// returned `ContainerId`, and the list sync writes rows via
+// `bifrost::containers::sync_containers`.
 
 /// Get all message IDs for an account.
 pub fn get_message_ids_for_account_sync(
@@ -157,6 +127,27 @@ pub fn delete_threads_for_account_sync(
         params![account_id],
     )
     .map_err(|e| format!("delete threads for account: {e}"))?;
+    Ok(())
+}
+
+/// Write back a folder's new parent after a container move succeeded on the
+/// provider. A targeted UPDATE of `parent_id` only, rather than a full
+/// `insert_folders_batch` upsert, so it does not clobber the row's `name`
+/// and other columns the move handler does not carry. A move to root passes
+/// `parent_id = None`. Mirrors the create/rename/delete local write-backs so
+/// a reparent lands locally instead of waiting on a resync delta that does
+/// not reconcile a container `updated` into `folders.parent_id`.
+pub fn update_folder_parent_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    folder_id: &str,
+    parent_id: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE folders SET parent_id = ?3 WHERE account_id = ?1 AND id = ?2",
+        params![account_id, folder_id, parent_id],
+    )
+    .map_err(|e| format!("update folder parent: {e}"))?;
     Ok(())
 }
 

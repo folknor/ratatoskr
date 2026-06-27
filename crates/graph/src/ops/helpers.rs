@@ -1,86 +1,23 @@
-use common::types::{ActionProviderCtx, FolderKind, ProviderCtx, ProviderFolderMutation};
+use common::types::ActionProviderCtx;
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;
-use super::super::types::{
-    BatchRequest, BatchRequestItem, GraphMailFolder, GraphMessagePatch, GraphMoveRequest,
-};
+use super::super::types::{BatchRequest, BatchRequestItem, GraphMessagePatch, GraphMoveRequest};
 use super::BATCH_CHUNK_SIZE;
 
 // ── Helper functions ────────────────────────────────────────
 
-/// Get the cached folder map or return an error if not built yet.
+/// Get the cached folder map or return an error if not built yet. The
+/// folder map is now populated by the B6a list sync
+/// (`bifrost::containers::sync_containers`) at attach; the legacy
+/// folder-CRUD helpers (`refresh_folder_map` / `resolve_graph_folder_id` /
+/// `graph_folder_to_mutation` / `delete_folder_delta_token`) went with the
+/// `ProviderOps` folder surface (B6b).
 pub(super) async fn require_folder_map(client: &GraphClient) -> Result<FolderMap, String> {
     client
         .folder_map()
         .await
         .ok_or_else(|| "Folder map not initialized - run sync first".to_string())
-}
-
-pub(super) async fn get_folder_map(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<FolderMap, String> {
-    if let Some(map) = client.folder_map().await {
-        return Ok(map);
-    }
-    refresh_folder_map(client, ctx).await
-}
-
-pub(super) async fn refresh_folder_map(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<FolderMap, String> {
-    let map = super::super::sync::sync_folders_public(client, ctx).await?;
-    client.set_folder_map(map.clone()).await;
-    client.set_folder_map_synced().await;
-    Ok(map)
-}
-
-pub(super) async fn resolve_graph_folder_id(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-    folder_id: &str,
-    require_user_folder: bool,
-) -> Result<String, String> {
-    let folder_map = get_folder_map(client, ctx).await?;
-    let graph_folder_id = folder_map
-        .resolve_graph_folder_id(folder_id)
-        .unwrap_or(folder_id)
-        .to_string();
-
-    if require_user_folder
-        && let Some(mapping) = folder_map.get_by_graph_folder_id(&graph_folder_id)
-        && mapping.folder_type == "system"
-    {
-        return Err("System folders cannot be renamed or deleted for Graph accounts.".to_string());
-    }
-
-    Ok(graph_folder_id)
-}
-
-pub(super) fn graph_folder_to_mutation(
-    folder: &GraphMailFolder,
-) -> Result<ProviderFolderMutation, String> {
-    Ok(ProviderFolderMutation {
-        id: FolderKind::graph_user(&folder.id)?.storage_id(),
-        name: folder.display_name.clone(),
-        path: folder.display_name.clone(),
-        folder_type: "user".to_string(),
-        special_use: None,
-        delimiter: Some("/".to_string()),
-        color_bg: None,
-        color_fg: None,
-    })
-}
-
-pub(super) async fn delete_folder_delta_token(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-    folder_id: &str,
-) -> Result<(), String> {
-    let writer = client.writer_pool();
-    sync::state::delete_graph_delta_token(&writer, ctx.account_id, folder_id).await
 }
 
 /// Query local DB for message IDs belonging to a thread.

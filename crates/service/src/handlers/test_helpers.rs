@@ -13,19 +13,20 @@ use service_api::{
     TestBifrostAttachAck, TestBifrostAttachParams, TestBifrostChangeKind, TestBifrostDurableCursor,
     TestBifrostFactoryOpenAck, TestBifrostFactoryOpenParams, TestBifrostHook,
     TestBifrostInjectBatchAck, TestBifrostInjectBatchParams, TestBifrostItemOutcome,
-    TestBifrostProbeAck, TestBifrostProbeParams, TestBifrostProviderKind, TestCounterReadAck,
-    TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
-    TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow,
-    TestDbFolderRow, TestDbLabelRow, TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow,
-    TestDelayNextWriteAck, TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams,
-    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
-    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
-    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
-    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
-    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
-    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadAck, TestThreadReadParams,
+    TestBifrostProbeAck, TestBifrostProbeParams, TestBifrostProviderKind, TestContainerCrudAck,
+    TestContainerCrudParams, TestCounterReadAck, TestCrashAfterNWritesAck,
+    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow,
+    TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow, TestDbFolderRow, TestDbLabelRow,
+    TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck,
+    TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams, TestPendingOpRow,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
+    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
+    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
+    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
+    TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1215,6 +1216,158 @@ pub(super) async fn discard_draft_handle(
 
     serde_json::to_value(TestDiscardDraftAck { discarded: true })
         .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn container_crud_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestContainerCrudParams,
+) -> Result<Value, ServiceError> {
+    use common::typed_ids::{FolderId, LabelId};
+
+    let sync_runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.container_crud received before SyncRuntime was installed".into(),
+        )
+    })?;
+    let ctx = crate::actions::worker::build_action_context(
+        boot_state.write_db_state()?,
+        boot_state
+            .read_db_state()
+            .ok_or_else(|| ServiceError::Internal("read DB is not initialized".into()))?,
+        boot_state
+            .encryption_key()
+            .ok_or_else(|| ServiceError::Internal("encryption key is not loaded".into()))?,
+        boot_state.app_data_dir(),
+    )
+    .map_err(ServiceError::Internal)?;
+
+    let action_account = sync_runtime
+        .resident_action_account(&params.account_id)
+        .await
+        .map_err(|error| ServiceError::Internal(format!("resident action account: {error}")))?;
+    let aa = Some(&action_account);
+    let account_id = params.account_id.as_str();
+
+    let style = match (params.color_bg.as_deref(), params.color_fg.as_deref()) {
+        (Some(bg), Some(fg)) => Some((bg, fg)),
+        _ => None,
+    };
+    let name = params.name.as_deref();
+    let id = params.id.as_deref();
+    let parent = params.parent.as_deref().map(FolderId::from);
+
+    let invalid = |what: &str| ServiceError::InvalidParams {
+        method: "test.container_crud".into(),
+        message: format!("{what} is required for op {}", params.op),
+    };
+
+    let (outcome, new_id) = match params.op.as_str() {
+        "folder_create" => {
+            let (o, id) = crate::actions::create_folder(
+                &ctx,
+                aa,
+                account_id,
+                name.ok_or_else(|| invalid("name"))?,
+                parent.as_ref(),
+            )
+            .await;
+            (o, id)
+        }
+        "folder_rename" => {
+            let o = crate::actions::rename_folder(
+                &ctx,
+                aa,
+                account_id,
+                &FolderId::from(id.ok_or_else(|| invalid("id"))?),
+                name.ok_or_else(|| invalid("name"))?,
+            )
+            .await;
+            (o, None)
+        }
+        "folder_move" => {
+            let o = crate::actions::move_folder(
+                &ctx,
+                aa,
+                account_id,
+                &FolderId::from(id.ok_or_else(|| invalid("id"))?),
+                parent.as_ref(),
+            )
+            .await;
+            (o, None)
+        }
+        "folder_delete" => {
+            let o = crate::actions::delete_folder(
+                &ctx,
+                aa,
+                account_id,
+                &FolderId::from(id.ok_or_else(|| invalid("id"))?),
+            )
+            .await;
+            (o, None)
+        }
+        "label_create" => {
+            let (o, id) = crate::actions::create_label(
+                &ctx,
+                aa,
+                account_id,
+                name.ok_or_else(|| invalid("name"))?,
+                style,
+            )
+            .await;
+            (o, id)
+        }
+        "label_rename" => {
+            let o = crate::actions::rename_label(
+                &ctx,
+                aa,
+                account_id,
+                &LabelId::from(id.ok_or_else(|| invalid("id"))?),
+                name.ok_or_else(|| invalid("name"))?,
+                style,
+            )
+            .await;
+            (o, None)
+        }
+        "label_recolor" => {
+            let (bg, fg) = style.ok_or_else(|| invalid("color_bg/color_fg"))?;
+            // `recolor_label` rides `container_rename`, so the label's
+            // current name MUST be supplied - an empty name would rename
+            // the label to "" on the provider while recoloring.
+            let o = crate::actions::recolor_label(
+                &ctx,
+                aa,
+                account_id,
+                &LabelId::from(id.ok_or_else(|| invalid("id"))?),
+                name.ok_or_else(|| invalid("name"))?,
+                (bg, fg),
+            )
+            .await;
+            (o, None)
+        }
+        "label_delete" => {
+            let o = crate::actions::delete_label(
+                &ctx,
+                aa,
+                account_id,
+                &LabelId::from(id.ok_or_else(|| invalid("id"))?),
+            )
+            .await;
+            (o, None)
+        }
+        other => {
+            return Err(ServiceError::InvalidParams {
+                method: "test.container_crud".into(),
+                message: format!("unknown container CRUD op: {other}"),
+            });
+        }
+    };
+
+    let ack = TestContainerCrudAck {
+        ok: matches!(outcome, service_api::actions::ActionOutcome::Success),
+        new_id,
+        outcome: format!("{outcome:?}"),
+    };
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
 pub(super) async fn pending_ops_read_handle(

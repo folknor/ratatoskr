@@ -1,159 +1,19 @@
 //! JMAP auxiliary sync passes preserved after the mail sync cutover.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use bifrost_jmap::mailbox::{MailboxGet, MailboxRights, Role};
-use common::types::{FolderKind, MailProviderKind};
+use bifrost_jmap::mailbox::MailboxGet;
 use db::db::ReadDbState;
-use db::db::queries_extra::{FolderWriteRow, insert_folders_batch};
 use service_state::WriteDbState;
 use sync::state as sync_state;
 
 use super::client::JmapClient;
-use super::mailbox_mapper::{MailboxInfo, map_mailbox_to_folder};
 
 pub struct AuxiliarySyncCtx<'a> {
     pub client: &'a JmapClient,
     pub account_id: &'a str,
     pub read_db: &'a ReadDbState,
     pub write_db: &'a WriteDbState,
-}
-
-struct MailboxFolderRow {
-    id: String,
-    account_id: String,
-    name: String,
-    folder_type: String,
-    parent_folder_id: Option<String>,
-    rights: Option<MailboxRights>,
-    is_subscribed: Option<bool>,
-}
-
-pub async fn sync_mailboxes(
-    ctx: &AuxiliarySyncCtx<'_>,
-) -> Result<
-    (
-        HashMap<String, MailboxInfo>,
-        Vec<(String, Option<String>, String)>,
-    ),
-    String,
-> {
-    let mailboxes = fetch_all_mailboxes_for(ctx.client, None).await?;
-    let mut mailbox_map = HashMap::new();
-    let mut mailbox_data = Vec::new();
-    let mut jmap_id_to_folder_id: HashMap<String, String> = HashMap::new();
-
-    for mb in &mailboxes {
-        let Some(id) = mb.id() else { continue };
-        let name = mb.name().unwrap_or("(unnamed)");
-        let role = mb.role();
-        let role_str = if role == Role::None {
-            None
-        } else {
-            Some(role_to_str(&role))
-        };
-        let mapping = map_mailbox_to_folder(role_str, id, name)?;
-        jmap_id_to_folder_id.insert(id.to_string(), mapping.folder_id);
-    }
-
-    let mut folder_rows = Vec::new();
-    for mb in &mailboxes {
-        let Some(id) = mb.id() else { continue };
-        let name = mb.name().unwrap_or("(unnamed)");
-        let role = mb.role();
-        let role_str = if role == Role::None {
-            None
-        } else {
-            Some(role_to_str(&role))
-        };
-
-        mailbox_map.insert(
-            id.to_string(),
-            MailboxInfo {
-                role: role_str.map(String::from),
-                name: name.to_string(),
-            },
-        );
-        mailbox_data.push((id.to_string(), role_str.map(String::from), name.to_string()));
-
-        let mapping = map_mailbox_to_folder(role_str, id, name)?;
-        let parent_folder_id = mb
-            .parent_id()
-            .and_then(|pid| jmap_id_to_folder_id.get(pid))
-            .cloned();
-        folder_rows.push(MailboxFolderRow {
-            id: mapping.folder_id,
-            account_id: ctx.account_id.to_string(),
-            name: mapping.folder_name,
-            folder_type: mapping.folder_type.to_string(),
-            parent_folder_id,
-            rights: mb.my_rights().cloned(),
-            is_subscribed: Some(mb.is_subscribed()),
-        });
-    }
-
-    ctx.write_db
-        .with_write(move |conn| {
-            let tx = conn.transaction().map_err(|e| format!("begin tx: {e}"))?;
-            let rows: Vec<FolderWriteRow> =
-                folder_rows
-                    .iter()
-                    .map(|row| {
-                        let (
-                            r_read,
-                            r_add,
-                            r_remove,
-                            r_seen,
-                            r_kw,
-                            r_child,
-                            r_rename,
-                            r_del,
-                            r_submit,
-                        ) = rights_to_ints(row.rights.as_ref());
-                        FolderWriteRow {
-                            id: row.id.clone(),
-                            account_id: row.account_id.clone(),
-                            name: row.name.clone(),
-                            visible: None,
-                            sort_order: None,
-                            imap_folder_path: None,
-                            imap_special_use: None,
-                            namespace_type: None,
-                            parent_id: row.parent_folder_id.clone(),
-                            right_read: r_read,
-                            right_add: r_add,
-                            right_remove: r_remove,
-                            right_set_seen: r_seen,
-                            right_set_keywords: r_kw,
-                            right_create_child: r_child,
-                            right_rename: r_rename,
-                            right_delete: r_del,
-                            right_submit: r_submit,
-                            is_subscribed: row.is_subscribed.map(i64::from),
-                            is_undeletable: row.folder_type == "system",
-                        }
-                    })
-                    .collect();
-            insert_folders_batch(&tx, &rows)?;
-            tx.commit().map_err(|e| format!("commit folders: {e}"))?;
-            Ok(())
-        })
-        .await?;
-
-    Ok((mailbox_map, mailbox_data))
-}
-
-pub async fn sync_mailbox_folder_map(
-    ctx: &AuxiliarySyncCtx<'_>,
-) -> Result<HashMap<String, FolderKind>, String> {
-    let (_, mailbox_data) = sync_mailboxes(ctx).await?;
-    let mut map = HashMap::new();
-    for (mailbox_id, role, name) in mailbox_data {
-        let mapping = map_mailbox_to_folder(role.as_deref(), &mailbox_id, &name)?;
-        let folder = FolderKind::parse(&mapping.folder_id, MailProviderKind::Jmap)?;
-        map.insert(mailbox_id, folder);
-    }
-    Ok(map)
 }
 
 pub async fn discover_shared_accounts(ctx: &AuxiliarySyncCtx<'_>) {
@@ -537,47 +397,4 @@ async fn get_share_notification_state(client: &JmapClient) -> Result<String, Str
         .get(&handle)
         .map(|r| r.state().to_string())
         .map_err(|e| format!("ShareNotification state: {e}"))
-}
-
-pub fn role_to_str(role: &Role) -> &'static str {
-    match role {
-        Role::Inbox => "inbox",
-        Role::Archive => "archive",
-        Role::Drafts => "drafts",
-        Role::Sent => "sent",
-        Role::Trash => "trash",
-        Role::Junk => "junk",
-        Role::Important => "important",
-        _ => "other",
-    }
-}
-
-#[allow(clippy::type_complexity)]
-fn rights_to_ints(
-    rights: Option<&MailboxRights>,
-) -> (
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-) {
-    match rights {
-        Some(r) => (
-            Some(i64::from(r.may_read_items())),
-            Some(i64::from(r.may_add_items())),
-            Some(i64::from(r.may_remove_items())),
-            Some(i64::from(r.may_set_seen())),
-            Some(i64::from(r.may_set_keywords())),
-            Some(i64::from(r.may_create_child())),
-            Some(i64::from(r.may_rename())),
-            Some(i64::from(r.may_delete())),
-            Some(i64::from(r.may_submit())),
-        ),
-        None => (None, None, None, None, None, None, None, None, None),
-    }
 }

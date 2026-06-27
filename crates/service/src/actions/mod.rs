@@ -38,9 +38,9 @@ pub(crate) mod wire_conversion;
 pub(crate) mod worker;
 
 pub use batch::batch_execute;
-pub use common::types::ProviderFolderMutation;
 pub use context::ActionContext;
-pub use folder::{create_folder, delete_folder, rename_folder};
+pub(crate) use folder::{create_folder, delete_folder, move_folder, rename_folder};
+pub(crate) use label::{create_label, delete_label, recolor_label, rename_label};
 pub use log::MutationLog;
 pub use mute::mute;
 pub use operation::MailOperation;

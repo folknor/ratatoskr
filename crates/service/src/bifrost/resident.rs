@@ -19,7 +19,7 @@ use tokio::sync::{Mutex, broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::engine_sync::{prepare_gmail_labels, prepare_graph_folders, prepare_jmap_mailboxes};
+use super::containers;
 use super::error_map;
 use super::{
     BifrostConsumerStores, BifrostProviderKind, BifrostSyncEngine, ChangeStreamConsumer,
@@ -221,7 +221,6 @@ impl ResidentEngine {
         }
 
         let provider = self.provider_for_account(account_id).await?;
-        let folder_map = Arc::new(self.prepare_folder_map(account_id, provider).await?);
         let factory = build_account_factory(
             &self.inner.read_db,
             self.inner.write_db.writer_pool(),
@@ -231,12 +230,32 @@ impl ResidentEngine {
         .await
         .map_err(|error| error.to_string())?;
         let account = AccountId(account_id.to_string());
+        // Attach BEFORE the container list sync (Obstacle A'):
+        // `sync_containers` resolves through `live_account`, so the engine
+        // slot must exist first or `containers_list` bails
+        // `AccountNotAttached` on every first attach. Nothing between the
+        // old folder-map site and the attach read the folder map, so the
+        // reorder is safe.
         self.inner
             .engine
             .engine()
             .attach(account.clone(), factory)
             .await
             .map_err(|error| format!("{error:?}"))?;
+        let folder_map = match self.prepare_folder_map(account_id, provider).await {
+            Ok(map) => Arc::new(map),
+            Err(error) => {
+                // The engine is attached but the slot was never built; tear
+                // the engine slot back down so a retry re-attaches cleanly
+                // and no half-attached account lingers.
+                if let Err(detach_error) = self.inner.engine.engine().detach(&account).await {
+                    log::debug!(
+                        "detach after failed container sync for {account_id}: {detach_error:?}"
+                    );
+                }
+                return Err(error);
+            }
+        };
         self.subscribe_push(account_id, &account, provider, folder_map.as_ref())
             .await;
         self.register_routing_keys(account_id, provider, folder_map.as_ref())
@@ -493,83 +512,22 @@ impl ResidentEngine {
         }
     }
 
+    /// Provider-agnostic list sync (B6a). One pass over the engine's
+    /// `containers_list` replaces the four per-provider folder-map
+    /// implementations. `provider` is no longer consulted here - the engine
+    /// is provider-agnostic at this seam - but the parameter stays so the
+    /// `refresh_folder_map` caller signature is unchanged.
     async fn prepare_folder_map(
         &self,
         account_id: &str,
-        provider: BifrostProviderKind,
+        _provider: BifrostProviderKind,
     ) -> Result<HashMap<String, common::types::FolderKind>, String> {
-        match provider {
-            BifrostProviderKind::Jmap => {
-                let client = jmap::client::JmapClient::from_account(
-                    &self.inner.read_db,
-                    self.inner.write_db.writer_pool(),
-                    account_id,
-                    &self.inner.encryption_key,
-                )
-                .await
-                .map_err(|error| error.clone())?;
-                client
-                    .ensure_valid_token()
-                    .await
-                    .map_err(|error| error.clone())?;
-                prepare_jmap_mailboxes(
-                    &client,
-                    account_id,
-                    &self.inner.read_db,
-                    &self.inner.write_db,
-                )
-                .await
-            }
-            BifrostProviderKind::Graph => {
-                let client = graph::client::GraphClient::from_account(
-                    &self.inner.read_db,
-                    self.inner.write_db.writer_pool(),
-                    account_id,
-                    self.inner.encryption_key,
-                )
-                .await?;
-                prepare_graph_folders(
-                    &client,
-                    account_id,
-                    &self.inner.read_db,
-                    &self.inner.write_db,
-                )
-                .await
-            }
-            BifrostProviderKind::Gmail => {
-                let client = gmail::client::GmailClient::from_account(
-                    &self.inner.read_db,
-                    self.inner.write_db.writer_pool(),
-                    account_id,
-                    self.inner.encryption_key,
-                )
-                .await?;
-                client.get_access_token(&self.inner.read_db).await?;
-                prepare_gmail_labels(
-                    &client,
-                    account_id,
-                    &self.inner.read_db,
-                    &self.inner.write_db,
-                )
-                .await
-            }
-            BifrostProviderKind::Imap => {
-                let imap_ops = imap::ops::ImapOps::new(
-                    self.inner.encryption_key,
-                    self.inner.write_db.writer_pool(),
-                );
-                let imap_config = imap_ops
-                    .load_config(&self.inner.read_db, account_id)
-                    .await?;
-                let mut aux_session = imap::connection::connect(&imap_config).await?;
-                provider_sync::consumer_support::sync_imap_folder_map(
-                    &mut aux_session,
-                    account_id,
-                    &self.inner.write_db,
-                )
-                .await
-            }
-        }
+        containers::sync_containers(
+            &self.inner.engine.engine(),
+            account_id,
+            &self.inner.write_db,
+        )
+        .await
     }
 
     async fn register_routing_keys(
@@ -1101,13 +1059,13 @@ async fn run_aux_pass(
                     imap::ops::ImapOps::new(inner.encryption_key, inner.write_db.writer_pool());
                 let imap_config = imap_ops.load_config(&inner.read_db, account_id).await?;
                 let mut session = imap::connection::connect(&imap_config).await?;
-                let folder_map = provider_sync::consumer_support::sync_imap_folder_map(
-                    &mut session,
-                    account_id,
-                    &inner.write_db,
-                )
-                .await?;
-                let folder_paths = folder_map.keys().cloned().collect::<Vec<_>>();
+                // The aux pass needs only the folder PATH strings for its
+                // per-folder PERMANENTFLAGS SELECT probe, not a folder-map
+                // sync. `sync_containers` already wrote the `folders` rows at
+                // attach, so source the paths from the `imap_folder_path`
+                // column rather than re-issuing a LIST through the deleted
+                // `sync_imap_folder_map` facade (B6a, spec 4.3).
+                let folder_paths = read_imap_folder_paths(&inner.read_db, account_id).await?;
                 provider_sync::consumer_support::run_imap_auxiliary_sync(
                     &mut session,
                     account_id,
@@ -1123,6 +1081,36 @@ async fn run_aux_pass(
     if let Err(error) = result {
         log::debug!("resident auxiliary pass for {account_id} skipped: {error}");
     }
+}
+
+/// Read the IMAP folder PATH strings off the already-synced `folders`
+/// table for the account (the `imap_folder_path` column the list sync
+/// wrote at attach). Backs the IMAP aux pass's per-folder keyword-capability
+/// SELECT probe after B6a deleted the `sync_imap_folder_map` facade it used
+/// to re-LIST through.
+async fn read_imap_folder_paths(
+    read_db: &ReadDbState,
+    account_id: &str,
+) -> Result<Vec<String>, String> {
+    let aid = account_id.to_string();
+    read_db
+        .with_read(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT imap_folder_path FROM folders \
+                     WHERE account_id = ?1 AND imap_folder_path IS NOT NULL",
+                )
+                .map_err(|error| format!("prepare imap folder paths: {error}"))?;
+            let rows = stmt
+                .query_map(rusqlite::params![aid], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("query imap folder paths: {error}"))?;
+            let mut paths = Vec::new();
+            for row in rows {
+                paths.push(row.map_err(|error| format!("read imap folder path: {error}"))?);
+            }
+            Ok(paths)
+        })
+        .await
 }
 
 async fn read_initial_sync_completed(

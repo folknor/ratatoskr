@@ -1,36 +1,7 @@
-use db::db::ReadDbState;
-use service_state::WriteDbState;
-
-pub(crate) async fn prepare_jmap_mailboxes(
-    client: &jmap::client::JmapClient,
-    account_id: &str,
-    read_db: &ReadDbState,
-    write_db: &WriteDbState,
-) -> Result<std::collections::HashMap<String, common::types::FolderKind>, String> {
-    provider_sync::consumer_support::sync_jmap_mailbox_folder_map(
-        client, account_id, read_db, write_db,
-    )
-    .await
-}
-
-pub(crate) async fn prepare_graph_folders(
-    client: &graph::client::GraphClient,
-    account_id: &str,
-    read_db: &ReadDbState,
-    write_db: &WriteDbState,
-) -> Result<std::collections::HashMap<String, common::types::FolderKind>, String> {
-    provider_sync::consumer_support::sync_graph_folder_map(client, account_id, read_db, write_db)
-        .await
-}
-
-pub(crate) async fn prepare_gmail_labels(
-    client: &gmail::client::GmailClient,
-    account_id: &str,
-    read_db: &ReadDbState,
-    write_db: &WriteDbState,
-) -> Result<std::collections::HashMap<String, common::types::FolderKind>, String> {
-    provider_sync::consumer_support::sync_gmail_label_folder_map(
-        client, account_id, read_db, write_db,
-    )
-    .await
-}
+//! B6a retired the per-provider folder-map preparation helpers
+//! (`prepare_jmap_mailboxes` / `prepare_graph_folders` /
+//! `prepare_gmail_labels`) that once lived here. The list sync is now the
+//! single provider-agnostic `bifrost::containers::sync_containers` pass
+//! over `SyncEngine::containers_list`. This module is intentionally empty;
+//! it is retained only because a source-scan test (`resident.rs`,
+//! `push_state_tables_have_no_writer`) `include_str!`s it.

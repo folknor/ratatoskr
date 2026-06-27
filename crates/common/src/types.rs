@@ -62,35 +62,9 @@ pub struct ActionProviderCtx<'a> {
     pub progress: &'a dyn ProgressReporter,
 }
 
-/// Provider-agnostic folder representation.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderFolderEntry {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    pub folder_type: String,
-    pub special_use: Option<String>,
-    pub delimiter: Option<String>,
-    pub message_count: Option<u32>,
-    pub unread_count: Option<u32>,
-    pub color_bg: Option<String>,
-    pub color_fg: Option<String>,
-}
-
-/// Provider-agnostic folder creation/rename result.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderFolderMutation {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    pub folder_type: String,
-    pub special_use: Option<String>,
-    pub delimiter: Option<String>,
-    pub color_bg: Option<String>,
-    pub color_fg: Option<String>,
-}
+// `ProviderFolderEntry` / `ProviderFolderMutation` retired with the
+// `ProviderOps` folder LIST + CRUD surface (B6). The folder/label object
+// path now flows through bifrost's `Container` / `container_*` types.
 
 /// Raw attachment bytes returned by a provider's `fetch_attachment` impl.
 /// Bytes never round-trip through base64 inside the Service.

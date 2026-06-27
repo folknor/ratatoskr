@@ -1,36 +1,9 @@
-use std::collections::HashMap;
-
-use common::types::{FolderKind, ProviderCtx};
 use db::db::ReadDbState;
 use db::db::queries_extra::{delete_message_reaction, upsert_message_reaction_update_type};
 use service_state::WriteDbState;
 
 use super::client::GraphClient;
 use super::types::{BatchRequest, BatchRequestItem, REACTIONS_GUID, SingleValueExtendedProperty};
-
-pub async fn sync_graph_folder_map(
-    client: &GraphClient,
-    account_id: &str,
-    read_db: &ReadDbState,
-) -> Result<HashMap<String, FolderKind>, String> {
-    let progress = db::progress::NoopProgressReporter;
-    let ctx = ProviderCtx {
-        account_id,
-        db: read_db,
-        progress: &progress,
-    };
-    let folder_map = ::graph::sync::sync_folders_public(client, &ctx).await?;
-    client.set_folder_map(folder_map.clone()).await;
-    client.set_folder_map_synced().await;
-    Ok(folder_map
-        .folder_entries()
-        .filter_map(|(graph_id, mapping)| {
-            FolderKind::parse(&mapping.folder_id, common::types::MailProviderKind::Graph)
-                .ok()
-                .map(|folder| (graph_id.to_string(), folder))
-        })
-        .collect())
-}
 
 pub async fn run_graph_auxiliary_sync(
     client: &GraphClient,

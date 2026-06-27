@@ -573,6 +573,8 @@ fn bifrost_label_for_kind(
         },
         name,
         role: None,
+        style: None,
+        system: false,
     })
 }
 

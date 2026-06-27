@@ -261,6 +261,111 @@ equal_to_baseline = true
 [ratatoskr.gate.imap_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
+# ── B6a containers-attach gates ──────────────────────────────────────
+#
+# `bifrost::containers::sync_containers` runs on EVERY account attach, so
+# the container list sync is a provider-sync hot path (B6 spec 6). Each
+# gate runs the provider's initial-sync script (which exercises attach +
+# the single `containers_list` pass) and pins the attach-path request
+# count, elapsed, and peak RSS at the host-recorded baseline. The
+# `meta.provider_requests` exact-match is the load-bearing metric: the
+# rewrite replaced four per-provider folder-map fetches with one
+# `containers_list`, and a regression here means a re-introduced extra
+# round trip. Baselines are host-specific - record with
+# `brokkr sync-bench <script> --gate <name> --as-baseline` before gating.
+
+[ratatoskr.gate.jmap_containers_attach]
+script = "crates/app/tests/sync-harness/jmap-initial.lua"
+baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_jmap_mailbox_folder_map)"
+
+[ratatoskr.gate.jmap_containers_attach.baseline]
+# Other hosts and CI must record their own baseline with --as-baseline.
+
+[ratatoskr.gate.jmap_containers_attach.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.jmap_containers_attach.metrics.success]
+equal = 1
+
+[ratatoskr.gate.jmap_containers_attach.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.jmap_containers_attach.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.jmap_containers_attach.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.graph_containers_attach]
+script = "crates/app/tests/sync-harness/graph-initial.lua"
+baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_graph_folder_map)"
+
+[ratatoskr.gate.graph_containers_attach.baseline]
+# Other hosts and CI must record their own baseline with --as-baseline.
+
+[ratatoskr.gate.graph_containers_attach.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.graph_containers_attach.metrics.success]
+equal = 1
+
+[ratatoskr.gate.graph_containers_attach.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.graph_containers_attach.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.graph_containers_attach.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.gmail_containers_attach]
+script = "crates/app/tests/sync-harness/gmail-initial.lua"
+baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_gmail_label_folder_map)"
+
+[ratatoskr.gate.gmail_containers_attach.baseline]
+# Other hosts and CI must record their own baseline with --as-baseline.
+
+[ratatoskr.gate.gmail_containers_attach.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.gmail_containers_attach.metrics.success]
+equal = 1
+
+[ratatoskr.gate.gmail_containers_attach.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.gmail_containers_attach.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.gmail_containers_attach.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.imap_containers_attach]
+script = "crates/app/tests/sync-harness/imap-initial.lua"
+baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_imap_folder_map)"
+
+[ratatoskr.gate.imap_containers_attach.baseline]
+# Other hosts and CI must record their own baseline with --as-baseline.
+
+[ratatoskr.gate.imap_containers_attach.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.imap_containers_attach.metrics.success]
+equal = 1
+
+[ratatoskr.gate.imap_containers_attach.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.imap_containers_attach.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.imap_containers_attach.metrics."meta.provider_requests"]
+max_delta = 0
+
 [ratatoskr.gate.bifrost-consumer-hot-path]
 script = "crates/app/tests/sync-harness/bifrost-consumer-hot-path.lua"
 baseline_label = "2026-06-18 B3a bifrost consumer hot-path baseline"

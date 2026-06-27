@@ -230,6 +230,42 @@ pub struct TestDiscardDraftAck {
     pub discarded: bool,
 }
 
+/// Harness trigger for the folder/label container CRUD action handlers
+/// (`actions::folder::*` / `actions::label::*`), which have no user-facing
+/// IPC of their own (out of B6 scope). Drives `engine.container_*` through the
+/// resident slot so `*-container-crud.lua` can assert a create / rename /
+/// move / delete round-trips to the provider. `op` selects the handler;
+/// the optional fields carry its arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestContainerCrudParams {
+    pub account_id: String,
+    /// One of `folder_create` / `folder_rename` / `folder_move` /
+    /// `folder_delete` / `label_create` / `label_rename` /
+    /// `label_recolor` / `label_delete`.
+    pub op: String,
+    /// Existing folder/label storage id (rename / move / delete / recolor).
+    #[serde(default)]
+    pub id: Option<String>,
+    /// New display name (create / rename).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Parent storage id (folder create / move).
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// Label color (create / rename / recolor); both must be present.
+    #[serde(default)]
+    pub color_bg: Option<String>,
+    #[serde(default)]
+    pub color_fg: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestContainerCrudAck {
+    pub ok: bool,
+    pub new_id: Option<String>,
+    pub outcome: String,
+}
+
 /// Phase 8c harness probe params: a single hex-encoded BLAKE3 hash
 /// to look up in `attachment_blobs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1332,6 +1368,10 @@ pub enum RequestParams {
     TestDiscardDraft {
         params: TestDiscardDraftParams,
     },
+    /// Drives a folder/label container CRUD action handler (harness).
+    TestContainerCrud {
+        params: TestContainerCrudParams,
+    },
     /// Reads pending retry-queue rows for harness assertions.
     TestPendingOpsRead {
         params: TestPendingOpsReadParams,
@@ -1462,6 +1502,7 @@ impl RequestParams {
             Self::TestRemoveCachedAttachmentBytes { .. } => "test.remove_cached_attachment_bytes",
             Self::TestThreadRead { .. } => "test.thread_read",
             Self::TestDiscardDraft { .. } => "test.discard_draft",
+            Self::TestContainerCrud { .. } => "test.container_crud",
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             Self::TestStartSync { .. } => "test.start_sync",
             Self::TestBifrostAttach { .. } => "test.bifrost_attach",
@@ -1602,6 +1643,7 @@ impl RequestParams {
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestThreadRead { .. }
             | Self::TestDiscardDraft { .. }
+            | Self::TestContainerCrud { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
             | Self::TestBifrostAttach { .. }
@@ -1722,6 +1764,7 @@ impl RequestParams {
             | Self::TestRemoveCachedAttachmentBytes { .. }
             | Self::TestBifrostArmHook { .. }
             | Self::TestDiscardDraft { .. }
+            | Self::TestContainerCrud { .. }
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
             Self::TestStartSync { .. }
@@ -1843,6 +1886,7 @@ impl RequestParams {
             }
             Self::TestThreadRead { params } => serde_json::json!({ "params": params }),
             Self::TestDiscardDraft { params } => serde_json::json!({ "params": params }),
+            Self::TestContainerCrud { params } => serde_json::json!({ "params": params }),
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
             Self::TestBifrostAttach { params } => serde_json::json!({ "params": params }),
@@ -2407,6 +2451,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.discard_draft params: {e}"))?;
                 Ok(Self::TestDiscardDraft { params: p.params })
+            }
+            "test.container_crud" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestContainerCrudParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.container_crud params: {e}"))?;
+                Ok(Self::TestContainerCrud { params: p.params })
             }
             "test.pending_ops_read" => {
                 #[derive(Deserialize)]

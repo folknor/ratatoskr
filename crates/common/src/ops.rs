@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use super::error::ProviderError;
 use super::typed_ids::FolderId;
 use super::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderFolderEntry,
-    ProviderFolderMutation, ProviderParsedMessage, ProviderProfile, ProviderTestResult, SendIntent,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderParsedMessage,
+    ProviderProfile, ProviderTestResult, SendIntent,
 };
 
 /// Common operations that every email provider must support.
@@ -152,33 +152,10 @@ pub trait ProviderOps: Send + Sync {
         ))
     }
 
-    // ── Folders ─────────────────────────────────────────────────
-
-    async fn list_folders(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, ProviderError>;
-    async fn create_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        name: &str,
-        parent_id: Option<&FolderId>,
-        text_color: Option<&str>,
-        bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError>;
-    async fn rename_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-        new_name: &str,
-        text_color: Option<&str>,
-        bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError>;
-    async fn delete_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-    ) -> Result<(), ProviderError>;
+    // Folder/label OBJECT CRUD moved off `ProviderOps` onto the bifrost
+    // engine's `container_*` primitives (B6b). The folder/label LIST sync
+    // moved off `list_folders` onto `SyncEngine::containers_list`
+    // (`bifrost::containers::sync_containers`, B6a).
 
     // ── Connection / Profile ────────────────────────────────────
 

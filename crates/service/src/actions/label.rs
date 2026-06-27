@@ -1,11 +1,14 @@
-use bifrost_types::ObjectId;
+use bifrost_types::{AccountId, ContainerId, ContainerKind, ContainerStyle, ObjectId};
 use common::typed_ids::LabelId;
+use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use types::{LabelKind, MailProviderKind};
 
 use super::context::ActionContext;
+use super::dispatch_target::engine_error_to_action_error;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable_with_id;
+use crate::bifrost::BifrostProviderKind;
 use crate::bifrost::resident::ResidentActionAccount;
 use db::db::WriteTarget;
 use db::db::queries_extra::{PendingLabelIntent, PendingLabelIntentOp};
@@ -535,4 +538,238 @@ async fn finalize_dispatch_outcome(
         }
         ActionOutcome::Success | ActionOutcome::NoOp | ActionOutcome::Failed { .. } => {}
     }
+}
+
+// ── Label CRUD (B6b) ────────────────────────────────────────────────
+//
+// Provider-first, local best-effort, mirroring the folder CRUD handlers.
+// Dispatch `ContainerKind::Label` through the engine's `container_*`
+// primitives (with the B6-SQ `style` arg for create/recolor), then upsert
+// or delete the local `labels` row. In practice only Gmail accepts a
+// label-kind container_create/rename/delete; the folder-shaped providers
+// return `Unsupported`, surfaced as a permanent failure.
+
+/// Storage id for a freshly-created user label (glossary Identity
+/// prefixing). Gmail user labels carry no prefix; keyword/category
+/// providers prefix `kw:` / `cat:` (those create paths are `Unsupported`
+/// on the wire today, so this only documents intent).
+fn new_label_storage_id(provider: BifrostProviderKind, native: &str) -> String {
+    match provider {
+        BifrostProviderKind::Gmail => native.to_string(),
+        BifrostProviderKind::Graph => format!("cat:{native}"),
+        BifrostProviderKind::Jmap | BifrostProviderKind::Imap => format!("kw:{native}"),
+    }
+}
+
+/// Provider-native id for a stored label storage id (strip the `kw:` /
+/// `cat:` prefix; Gmail ids pass through unchanged).
+fn native_label_id(storage_id: &str) -> String {
+    storage_id
+        .strip_prefix("kw:")
+        .or_else(|| storage_id.strip_prefix("cat:"))
+        .unwrap_or(storage_id)
+        .to_string()
+}
+
+fn container_style(style: Option<(&str, &str)>) -> Option<ContainerStyle> {
+    style.map(|(bg, fg)| ContainerStyle::new(bg, fg))
+}
+
+fn no_resident_label() -> ActionOutcome {
+    ActionOutcome::LocalOnly {
+        reason: ActionError::remote("resident engine unavailable"),
+        retryable: true,
+    }
+}
+
+async fn upsert_local_label(
+    ctx: &ActionContext,
+    account_id: &str,
+    storage_id: &str,
+    name: &str,
+    style: Option<(&str, &str)>,
+) {
+    let (server_color_bg, server_color_fg) = match style {
+        Some((bg, fg)) => (Some(bg.to_string()), Some(fg.to_string())),
+        None => (None, None),
+    };
+    let row = LabelWriteRow {
+        id: storage_id.to_string(),
+        account_id: account_id.to_string(),
+        name: name.to_string(),
+        visible: None,
+        sort_order: None,
+        server_color_bg,
+        server_color_fg,
+        user_color_bg: None,
+        user_color_fg: None,
+        is_undeletable: false,
+    };
+    if let Err(error) = ctx
+        .write_db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| format!("begin label upsert tx: {e}"))?;
+            upsert_labels(&tx, &[row])?;
+            tx.commit().map_err(|e| format!("commit label upsert: {e}"))
+        })
+        .await
+    {
+        log::warn!("label CRUD local upsert failed (provider succeeded): {error}");
+    }
+}
+
+/// Create a label on the provider, then upsert it locally.
+pub(crate) async fn create_label(
+    ctx: &ActionContext,
+    action_account: Option<&ResidentActionAccount>,
+    account_id: &str,
+    name: &str,
+    style: Option<(&str, &str)>,
+) -> (ActionOutcome, Option<String>) {
+    let mlog = MutationLog::begin("create_label", account_id, "(pending)");
+    let Some(account) = action_account else {
+        let outcome = no_resident_label();
+        mlog.emit(&outcome);
+        return (outcome, None);
+    };
+
+    let new_native = match account
+        .engine
+        .container_create(
+            &AccountId(account_id.to_string()),
+            ContainerKind::Label,
+            name.to_string(),
+            None,
+            container_style(style),
+        )
+        .await
+    {
+        Ok(id) => id.0,
+        Err(error) => {
+            let outcome = ActionOutcome::Failed {
+                error: engine_error_to_action_error(error),
+            };
+            mlog.emit(&outcome);
+            return (outcome, None);
+        }
+    };
+
+    let storage_id = new_label_storage_id(account.provider, &new_native);
+    upsert_local_label(ctx, account_id, &storage_id, name, style).await;
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    (outcome, Some(storage_id))
+}
+
+/// Rename (and optionally recolor) a label on the provider, then update
+/// the local row.
+pub(crate) async fn rename_label(
+    ctx: &ActionContext,
+    action_account: Option<&ResidentActionAccount>,
+    account_id: &str,
+    label_id: &LabelId,
+    new_name: &str,
+    style: Option<(&str, &str)>,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("rename_label", account_id, label_id.as_str());
+    let Some(account) = action_account else {
+        let outcome = no_resident_label();
+        mlog.emit(&outcome);
+        return outcome;
+    };
+
+    let native = ContainerId(native_label_id(label_id.as_str()));
+    if let Err(error) = account
+        .engine
+        .container_rename(
+            &AccountId(account_id.to_string()),
+            native,
+            new_name.to_string(),
+            container_style(style),
+        )
+        .await
+    {
+        let outcome = ActionOutcome::Failed {
+            error: engine_error_to_action_error(error),
+        };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    upsert_local_label(ctx, account_id, label_id.as_str(), new_name, style).await;
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    outcome
+}
+
+/// Recolor a label: a rename to its current name carrying the new style
+/// (the engine's recolor path rides `container_rename`'s `style` arg).
+pub(crate) async fn recolor_label(
+    ctx: &ActionContext,
+    action_account: Option<&ResidentActionAccount>,
+    account_id: &str,
+    label_id: &LabelId,
+    name: &str,
+    style: (&str, &str),
+) -> ActionOutcome {
+    rename_label(ctx, action_account, account_id, label_id, name, Some(style)).await
+}
+
+/// Delete a label on the provider, then remove the local rows.
+pub(crate) async fn delete_label(
+    ctx: &ActionContext,
+    action_account: Option<&ResidentActionAccount>,
+    account_id: &str,
+    label_id: &LabelId,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("delete_label", account_id, label_id.as_str());
+    let Some(account) = action_account else {
+        let outcome = no_resident_label();
+        mlog.emit(&outcome);
+        return outcome;
+    };
+
+    let native = ContainerId(native_label_id(label_id.as_str()));
+    if let Err(error) = account
+        .engine
+        .container_delete(&AccountId(account_id.to_string()), native)
+        .await
+    {
+        let outcome = ActionOutcome::Failed {
+            error: engine_error_to_action_error(error),
+        };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    let db = ctx.write_db.clone();
+    let aid = account_id.to_string();
+    let lid = label_id.as_str().to_string();
+    if let Err(error) = db
+        .with_write(move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| format!("begin label delete tx: {e}"))?;
+            tx.execute(
+                "DELETE FROM thread_labels WHERE account_id = ?1 AND label_id = ?2",
+                rusqlite::params![aid, lid],
+            )
+            .map_err(|e| format!("delete thread_labels: {e}"))?;
+            tx.execute(
+                "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params![aid, lid],
+            )
+            .map_err(|e| format!("delete label: {e}"))?;
+            tx.commit().map_err(|e| format!("commit label delete: {e}"))
+        })
+        .await
+    {
+        log::warn!("delete_label local delete failed (provider succeeded): {error}");
+    }
+
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    outcome
 }

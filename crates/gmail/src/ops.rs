@@ -4,8 +4,8 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderFolderEntry,
-    ProviderFolderMutation, ProviderProfile, ProviderTestResult,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderProfile,
+    ProviderTestResult,
 };
 use db::db::ReadDbState;
 
@@ -233,110 +233,6 @@ impl ProviderOps for GmailOps {
             common::encoding::decode_base64url_nopad(&att.data).map_err(ProviderError::Client)?;
         let size = bytes.len() as u64;
         Ok(FetchedAttachment { bytes, size })
-    }
-
-    async fn list_folders(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
-        let labels = self.client.list_labels(ctx.db).await?;
-        Ok(labels
-            .into_iter()
-            .map(|l| {
-                let special = match l.id.as_str() {
-                    "INBOX" => Some("inbox"),
-                    "SENT" => Some("sent"),
-                    "TRASH" => Some("trash"),
-                    "SPAM" => Some("spam"),
-                    "DRAFT" => Some("drafts"),
-                    _ => None,
-                };
-                ProviderFolderEntry {
-                    id: l.id.clone(),
-                    name: l.name.clone(),
-                    path: l.name,
-                    folder_type: if l.label_type.as_deref() == Some("system") {
-                        "system".to_string()
-                    } else {
-                        "user".to_string()
-                    },
-                    special_use: special.map(String::from),
-                    delimiter: Some("/".to_string()),
-                    message_count: l.messages_total.map(|v| u32::try_from(v).unwrap_or(0)),
-                    unread_count: l.messages_unread.map(|v| u32::try_from(v).unwrap_or(0)),
-                    color_bg: l.color.as_ref().map(|c| c.background_color.clone()),
-                    color_fg: l.color.as_ref().map(|c| c.text_color.clone()),
-                }
-            })
-            .collect())
-    }
-
-    async fn create_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        name: &str,
-        parent_id: Option<&FolderId>,
-        text_color: Option<&str>,
-        bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        let full_name =
-            parent_id.map_or_else(|| name.to_string(), |p| format!("{}/{name}", p.as_str()));
-        let color = match (text_color, bg_color) {
-            (Some(tc), Some(bc)) => Some((tc, bc)),
-            _ => None,
-        };
-        let label = self.client.create_label(&full_name, color, ctx.db).await?;
-        Ok(ProviderFolderMutation {
-            id: label.id,
-            name: label.name.clone(),
-            path: label.name,
-            folder_type: "user".to_string(),
-            special_use: None,
-            delimiter: Some("/".to_string()),
-            color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
-            color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
-        })
-    }
-
-    async fn rename_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-        new_name: &str,
-        text_color: Option<&str>,
-        bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        let color = match (text_color, bg_color) {
-            (Some(tc), Some(bc)) => Some(Some((tc, bc))),
-            _ => None,
-        };
-        let label = self
-            .client
-            .update_label(folder_id.as_str(), Some(new_name), color, ctx.db)
-            .await?;
-        Ok(ProviderFolderMutation {
-            id: label.id,
-            name: label.name.clone(),
-            path: label.name,
-            folder_type: if label.label_type.as_deref() == Some("system") {
-                "system".to_string()
-            } else {
-                "user".to_string()
-            },
-            special_use: None,
-            delimiter: Some("/".to_string()),
-            color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
-            color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
-        })
-    }
-
-    async fn delete_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-    ) -> Result<(), ProviderError> {
-        self.client.delete_label(folder_id.as_str(), ctx.db).await?;
-        Ok(())
     }
 
     async fn test_connection(

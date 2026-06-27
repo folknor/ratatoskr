@@ -191,7 +191,7 @@ The `ExtractRuntime` lifecycle mirrors `CalendarRuntime`: a `CancellationToken` 
 
 The four providers are unified behind `ProviderOps`. All provider-specific behavior is behind this trait - callers should never branch on provider type.
 
-**Enforcement:** `FolderId` and `LabelId` newtypes in `crates/common/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&LabelId` for `add_label`, `remove_label`. Passing a folder ID where a label ID is expected is a compile error. Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider - no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
+**Enforcement:** `FolderId` and `LabelId` newtypes in `crates/common/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder` and `&LabelId` for `add_label`, `remove_label`. Passing a folder ID where a label ID is expected is a compile error. (B6 removed the folder LIST + OBJECT-CRUD methods - `list_folders` / `create_folder` / `rename_folder` / `delete_folder` - from `ProviderOps`: the list sync runs through `bifrost::containers::sync_containers` over `SyncEngine::containers_list`, and the folder/label CRUD action handlers in `service::actions::{folder,label}` dispatch through `engine.container_*`.) Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider - no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
 
 For persistence, the provider boundary is:
 - providers fetch and translate protocol payloads

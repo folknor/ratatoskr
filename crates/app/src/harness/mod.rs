@@ -20,9 +20,9 @@ use service_api::{
     PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
     SettingValue, SettingsSetParams, TestBifrostArmHookParams, TestBifrostAttachParams,
-    TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestCrashAfterNWritesParams,
-    TestDelayNextWriteParams, TestDiscardDraftParams, TestPendingOpsReadParams,
-    TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
+    TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestContainerCrudParams,
+    TestCrashAfterNWritesParams, TestDelayNextWriteParams, TestDiscardDraftParams,
+    TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
     TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
@@ -2861,6 +2861,26 @@ fn request_params_from_lua(
                 .ok_or_else(|| lua_error_message("TestStartSync requires params.account_id"))?;
             Ok(RequestParams::TestStartSync {
                 params: TestStartSyncParams { account_id },
+            })
+        }
+        "TestContainerCrud" | "test.container_crud" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestContainerCrud requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestContainerCrud requires params.account_id"))?;
+            let op = get_string_field(state, params_idx, "op")?
+                .ok_or_else(|| lua_error_message("TestContainerCrud requires params.op"))?;
+            Ok(RequestParams::TestContainerCrud {
+                params: TestContainerCrudParams {
+                    account_id,
+                    op,
+                    id: get_string_field(state, params_idx, "id")?,
+                    name: get_string_field(state, params_idx, "name")?,
+                    parent: get_string_field(state, params_idx, "parent")?,
+                    color_bg: get_string_field(state, params_idx, "color_bg")?,
+                    color_fg: get_string_field(state, params_idx, "color_fg")?,
+                },
             })
         }
         "SyncResumeAccount" | "sync.resume_account" => {

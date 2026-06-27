@@ -5,10 +5,6 @@
 //! helpers through this named facade until the provider cutovers move the
 //! helpers to their final owner.
 
-use std::collections::HashMap;
-
-use common::types::FolderKind;
-
 // Raw-RFC822 re-parse for JMAP hydration fidelity (B3a-cut-jmap 4.2). The
 // consumer recovers the headers / body / attachment detail the bifrost
 // structured `Message` drops by re-parsing the `open_raw_rfc822` octets
@@ -65,13 +61,11 @@ pub async fn run_jmap_auxiliary_sync(
     };
 
     // NOTE: the mailbox enumeration + folder-row write is NOT re-issued here.
-    // The runner already fetched mailboxes once this kick via
-    // `sync_jmap_mailbox_folder_map` (which drives the same `sync_mailboxes`
-    // and writes the folder rows) to build the consumer's folder map. A
-    // second `Mailbox/get` here would double the per-kick request count and
-    // trip the section 6.2 `provider_requests max_delta = 0` gate, so the
-    // auxiliary pass shares that single fetch and starts at shared-account
-    // discovery.
+    // The B6a list sync (`bifrost::containers::sync_containers`) already wrote
+    // the JMAP folder rows at attach via `containers_list`; re-fetching
+    // mailboxes here would double the per-kick request count and trip the
+    // section 6.2 `provider_requests max_delta = 0` gate, so the auxiliary
+    // pass starts at shared-account discovery.
     crate::jmap::aux_sync::discover_shared_accounts(&ctx).await;
     crate::jmap::aux_sync::resolve_shared_account_identities(&ctx).await;
     if initial_sync_completed_before_run {
@@ -114,32 +108,6 @@ pub async fn run_jmap_auxiliary_sync(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn sync_jmap_mailbox_folder_map(
-    client: &crate::jmap::client::JmapClient,
-    account_id: &str,
-    read_db: &db::db::ReadDbState,
-    write_db: &service_state::WriteDbState,
-) -> Result<HashMap<String, FolderKind>, String> {
-    let ctx = crate::jmap::aux_sync::AuxiliarySyncCtx {
-        client,
-        account_id,
-        read_db,
-        write_db,
-    };
-    crate::jmap::aux_sync::sync_mailbox_folder_map(&ctx).await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn sync_graph_folder_map(
-    client: &crate::graph::client::GraphClient,
-    account_id: &str,
-    read_db: &db::db::ReadDbState,
-    _write_db: &service_state::WriteDbState,
-) -> Result<HashMap<String, FolderKind>, String> {
-    crate::graph::aux_sync::sync_graph_folder_map(client, account_id, read_db).await
-}
-
-#[allow(clippy::too_many_arguments)]
 pub async fn run_graph_auxiliary_sync(
     client: &crate::graph::client::GraphClient,
     account_id: &str,
@@ -158,16 +126,6 @@ pub async fn run_graph_auxiliary_sync(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn sync_gmail_label_folder_map(
-    client: &crate::gmail::client::GmailClient,
-    account_id: &str,
-    read_db: &db::db::ReadDbState,
-    write_db: &service_state::WriteDbState,
-) -> Result<HashMap<String, FolderKind>, String> {
-    crate::gmail::aux_sync::sync_gmail_label_folder_map(client, account_id, read_db, write_db).await
-}
-
-#[allow(clippy::too_many_arguments)]
 pub async fn run_gmail_auxiliary_sync(
     client: &crate::gmail::client::GmailClient,
     account_id: &str,
@@ -183,14 +141,6 @@ pub async fn run_gmail_auxiliary_sync(
         initial_sync_completed_before_run,
     )
     .await;
-}
-
-pub async fn sync_imap_folder_map(
-    session: &mut crate::imap::connection::ImapSession,
-    account_id: &str,
-    write_db: &service_state::WriteDbState,
-) -> Result<HashMap<String, FolderKind>, String> {
-    crate::imap::aux_sync::sync_imap_folder_map(session, account_id, write_db).await
 }
 
 pub async fn run_imap_auxiliary_sync(

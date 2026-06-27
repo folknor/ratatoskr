@@ -3,29 +3,24 @@ mod send;
 
 use async_trait::async_trait;
 
-/// TTL for the in-memory folder map cache.  Avoids redundant Graph API calls
-/// when multiple operations query folders in quick succession.
-const FOLDER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
-
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderFolderEntry,
-    ProviderFolderMutation, ProviderProfile, ProviderTestResult, SendIntent,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderProfile,
+    ProviderTestResult, SendIntent,
 };
 use db::db::ReadDbState;
 
 use super::client::GraphClient;
 use super::types::{
-    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder, GraphMessagePatch,
-    GraphRenameFolderRequest, LAST_VERB_EXECUTED_PROPERTY_ID, SingleValueExtendedProperty,
+    GraphAttachment, GraphFlagInput, GraphMessagePatch, LAST_VERB_EXECUTED_PROPERTY_ID,
+    SingleValueExtendedProperty,
 };
 
 use self::helpers::{
-    batch_get_categories, batch_set_categories, batch_set_importance, delete_folder_delta_token,
-    graph_folder_to_mutation, move_messages, patch_messages, query_thread_message_ids,
-    refresh_folder_map, require_folder_map, resolve_graph_folder_id,
+    batch_get_categories, batch_set_categories, batch_set_importance, move_messages,
+    patch_messages, query_thread_message_ids, require_folder_map,
 };
 use self::send::{create_draft_impl, send_via_draft};
 
@@ -334,137 +329,6 @@ impl ProviderOps for GraphOps {
 
         let size = data.len() as u64;
         Ok(FetchedAttachment { bytes: data, size })
-    }
-
-    async fn list_folders(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
-        // Use cached folder map if it was synced within the TTL window
-        let use_cache = if let Some(age) = self.client.folder_map_age().await {
-            age < FOLDER_CACHE_TTL && self.client.folder_map().await.is_some()
-        } else {
-            false
-        };
-
-        let folder_map = if use_cache {
-            self.client
-                .folder_map()
-                .await
-                .ok_or_else(|| ProviderError::Client("Folder map vanished".to_string()))?
-        } else {
-            let map = super::sync::sync_folders_public(&self.client, ctx).await?;
-            self.client.set_folder_map(map.clone()).await;
-            self.client.set_folder_map_synced().await;
-            map
-        };
-
-        let folders = folder_map
-            .all_mappings()
-            .map(|m| ProviderFolderEntry {
-                id: m.folder_id.clone(),
-                name: m.folder_name.clone(),
-                path: m.folder_name.clone(),
-                folder_type: m.folder_type.to_string(),
-                special_use: if m.folder_type == "system" {
-                    Some(m.folder_id.clone())
-                } else {
-                    None
-                },
-                delimiter: Some("/".to_string()),
-                message_count: None,
-                unread_count: None,
-                color_bg: None,
-                color_fg: None,
-            })
-            .collect();
-        Ok(folders)
-    }
-
-    async fn create_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        name: &str,
-        parent_id: Option<&FolderId>,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        let parent_graph_id = match parent_id {
-            Some(parent_id) => {
-                Some(resolve_graph_folder_id(&self.client, ctx, parent_id.as_str(), false).await?)
-            }
-            None => None,
-        };
-        let body = GraphCreateFolderRequest {
-            display_name: name.to_string(),
-        };
-        let me = self.me();
-        let created: GraphMailFolder = if let Some(parent_graph_id) = parent_graph_id {
-            let enc_parent_id = urlencoding::encode(&parent_graph_id);
-            self.client
-                .post(
-                    &format!("{me}/mailFolders/{enc_parent_id}/childFolders"),
-                    &body,
-                    ctx.db,
-                )
-                .await?
-        } else {
-            self.client
-                .post(&format!("{me}/mailFolders"), &body, ctx.db)
-                .await?
-        };
-
-        refresh_folder_map(&self.client, ctx).await?;
-        graph_folder_to_mutation(&created).map_err(ProviderError::Client)
-    }
-
-    async fn rename_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-        new_name: &str,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        let graph_folder_id =
-            resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
-        let enc_folder_id = urlencoding::encode(&graph_folder_id);
-        let body = GraphRenameFolderRequest {
-            display_name: new_name.to_string(),
-        };
-        let me = self.me();
-        self.client
-            .patch(&format!("{me}/mailFolders/{enc_folder_id}"), &body, ctx.db)
-            .await?;
-
-        refresh_folder_map(&self.client, ctx).await?;
-        Ok(ProviderFolderMutation {
-            id: folder_id.as_str().to_string(),
-            name: new_name.to_string(),
-            path: new_name.to_string(),
-            folder_type: "user".to_string(),
-            special_use: None,
-            delimiter: Some("/".to_string()),
-            color_bg: None,
-            color_fg: None,
-        })
-    }
-
-    async fn delete_folder(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-    ) -> Result<(), ProviderError> {
-        let graph_folder_id =
-            resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
-        let enc_folder_id = urlencoding::encode(&graph_folder_id);
-        let me = self.me();
-        self.client
-            .delete(&format!("{me}/mailFolders/{enc_folder_id}"), ctx.db)
-            .await?;
-        delete_folder_delta_token(&self.client, ctx, &graph_folder_id).await?;
-        refresh_folder_map(&self.client, ctx).await?;
-        Ok(())
     }
 
     async fn test_connection(

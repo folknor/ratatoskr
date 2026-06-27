@@ -872,6 +872,98 @@ action-writeback sync-harness round-trip scripts, the `pause_reason_to_wire_*` +
 `jmap-pause-resume.lua` banner gates, and `brokkr service-suite` / `brokkr
 check` green - read the B4b landing commit.
 
+B6 (folders, labels, containers) is done and its TODO entry is removed per repo
+convention; with it the folder/label OBJECT layer (the container objects
+themselves - names, hierarchy, system roles, label colors - and their CRUD) is
+off the legacy provider stack, leaving B7 (calendar) as the next open Track B
+item. B6 is the container leg the membership halves left open: B3 moved
+folder/label MEMBERSHIP onto the consumer and B4a moved thread-level
+`apply_label` / `remove_label` onto the engine, but the container OBJECTS and
+their create/rename/move/delete still spoke to `ProviderOps` / `create_provider`.
+B6 rewired both surviving seams onto bifrost's `SyncEngine` and deleted the
+legacy folder surface. It landed in three ratatoskr bricks on top of the B6-SQ
+bifrost prerequisite (see below). B6a (the list-sync rewire): a new
+provider-agnostic `crates/service/src/bifrost/containers.rs` whose
+`sync_containers` calls `SyncEngine::containers_list` once and whose
+`persist_containers` / `build_container_rows` partition the returned
+`Vec<Container>` into `folders` / `labels` rows through the UNCHANGED
+`insert_folders_batch` / `upsert_labels` seam, returning the same
+`HashMap<String, FolderKind>` folder map the action dispatch and push scopes
+consume; this collapsed `prepare_folder_map`'s four-arm per-provider dispatch
+(`crates/service/src/bifrost/resident.rs`) to a single call and the four
+hand-rolled system-role normalisers into one `FolderRole -> canonical id` table
+(`role_to_system_folder_id`, pinned against the glossary Identity table by
+`container_role_maps_to_canonical_id`). A container routes to the `folders`
+table when it is folder-shaped (`kind == Folder`), carries a `role`, OR is a
+native system container (the B6-SQ `system` flag, which reproduces Gmail's
+`CATEGORY_*` / `IMPORTANT` / `CHAT` system-label-as-folder split that `role`
+alone cannot - message-state ids like `STARRED` / `UNREAD` are filtered first),
+otherwise to `labels`; Gmail user-label server colors flow from `Container.style`
+into `server_color_*` while `user_color_*` stays a local override the sync never
+clobbers (`upsert_labels` COALESCE-preserves it). `attach_account` was reordered
+so `engine.attach` precedes the list sync (Obstacle A': `containers_list`
+resolves through `live_account`, which would `AccountNotAttached` under the old
+prepare-before-attach order), and the surviving IMAP keyword-capability aux pass
+now sources its folder-path list from the already-synced `folders` table instead
+of the deleted folder-map facade. B6a DELETED `prepare_jmap_mailboxes` /
+`prepare_graph_folders` / `prepare_gmail_labels`, the four
+`consumer_support::sync_*_folder_map` facades, and the
+`{jmap,graph,gmail,imap}/aux_sync.rs::sync_*_folder_map` impls. One recorded
+feature gap (feature-preserving mandate): the legacy JMAP folder-map pass
+populated the `right_*` ACL columns and `is_subscribed` from `Mailbox.myRights` /
+`isSubscribed`, which the frozen `Container` shape carries on neither field, so
+those columns (consumed by shared-mailbox submit gating, B12) now write `None`;
+restoring them needs a future bifrost container-field side-quest and is recorded,
+not deferred-as-a-hole. B6b (the CRUD rewire): `service::actions::folder::{create,
+rename,delete}` plus a new `move_folder`, and the parallel new
+`service::actions::label::{create,rename,delete,recolor}`, dispatch through
+`ResidentActionAccount` onto `engine.container_create` / `container_rename`
+(with the B6-SQ `style` arg for recolor) / `container_move` / `container_delete`,
+keeping the provider-first ordering, `MutationLog`, and outcome taxonomy
+unchanged; the vestigial folder color params were dropped (folders carry no
+color). B6b DELETED `ProviderOps::{list_folders, create_folder, rename_folder,
+delete_folder}` (the rest of `ProviderOps` survives to B15), their four
+per-provider impls, and the `OfflineOps` stubs. Because § 5 keeps a user-facing
+CRUD IPC + UI out of scope (no such request or affordance existed pre-B6), the
+handlers stay callable-but-unwired exactly as before, now on bifrost; a
+harness-only `TestContainerCrud` request (`test.container_crud`) was added so the
+`*-container-crud.lua` gates can drive them. IMAP container CRUD is a capability
+GAIN here (the legacy `ProviderOps` IMAP stub returned `Failed`; bifrost
+implements mailbox CREATE/RENAME/DELETE) - a documented deviation in the
+direction the migration intends, exercised by `imap-container-crud.lua` (carved
+to B6-FIX-GATES, below). B6c (residue
+sweep): removed `ProviderFolderMutation` and reconciled
+`reference/glossary/folders-labels.md` and `reference/architecture.md` (bundled
+with the code). The whole item rode on the already-promoted B6-SQ bifrost
+prerequisite: `../bifrost` + `./research/bifrost` are frozen at `60e979b` (§ 11),
+which added the `SyncEngine::containers_list` read passthrough, the optional
+`style: Option<ContainerStyle { color_bg, color_fg }>` and `system: bool` fields
+on `Container` / `Label` (Gmail-populated; Graph / JMAP / IMAP leave them unset -
+the earlier "Graph category preset color" carry was struck as dead work, Graph
+categories being message flags, not containers), and the optional `style` arg on
+`container_create` / `container_rename`. Out of scope, named not deferred: the
+new user-facing folder/label CRUD IPC + sidebar/Settings UI (a `UI.md` feature
+item), shared-mailbox / public-folder containers (B12), and the dropped JMAP
+ACL / subscription columns (a future bifrost SQ). Two action-layer bugs surfaced at gate time and were fixed in the landing: the
+B6b CRUD handlers resolved a target through the resident slot's CACHED folder map
+with no refresh-on-miss (so a folder created earlier in the same session could
+not be moved/renamed/deleted) - fixed with a `refresh_folder_map`-then-retry
+(`resolve_container_with_refresh`) in `actions::folder`; and `move_folder` alone
+skipped the local DB write-back that create/rename/delete perform, so a reparent
+never landed locally - fixed with a targeted `update_folder_parent_sync`. Gated
+by the `containers_persist_equals_legacy` golden (asserting the new rows match a
+captured legacy snapshot per provider, including the Gmail system-label-as-folder
+rows, a pre-seeded `user_color_*` override, and an `importance:*` undeletable
+row), the `container_role_maps_to_canonical_id` + container-CRUD-dispatch unit
+tests, the `jmap-container-crud.lua` + `graph-container-crud.lua` round-trip
+gates, and `brokkr service-suite` / `brokkr check` green. Three CRUD-path gates
+were carved to B6-FIX-GATES (below) rather than block the landing - the path is
+unwired: `imap-container-crud` (rename does not re-key the local path-based id),
+and `gmail-container-crud` + `gmail-label-color-roundtrip` (their scripts omit the
+OAuth seeding `gmail-initial.lua` carries). The `containers-attach` sync-bench
+gates exist with per-host baselines to record via `--as-baseline`. Read the B6
+landing commit.
+
 - B3. The bifrost-sync consumer (center of gravity), carved into per-provider
   cutovers so no single landing carries the whole rip. The `SyncEngine` and the
   change-stream-to-DB consumer that persists each batch (messages, body store,
@@ -1010,8 +1102,57 @@ check` green - read the B4b landing commit.
   `EmailSubmission/set` (bifrost's `on_success_update_email` rewrites `mailboxIds` to
   `[Sent]` but never clears `keywords/$draft`), so the sent message shows under both
   `DRAFT` and `SENT` - a bifrost send-fidelity follow-up, out of B5-GATES scope.
-- B6. Folders, labels, containers. Rewire onto `container_*` / `apply_label`
-  plus folder/label sync. Needs B3.
+- B6-FIX. JMAP folder ACL rights + `is_subscribed` restoration. B6's
+  `sync_containers` (the folder/label list-sync rewire onto bifrost
+  `containers_list`) dropped the `right_*` columns and `is_subscribed` the
+  legacy JMAP `sync_mailboxes` pass wrote from `Mailbox.myRights` /
+  `isSubscribed`; frozen bifrost's `Container` carries neither field, so the
+  consumer cannot reconstruct them (the gap is documented in-code at
+  `crates/service/src/bifrost/containers.rs` `build_container_rows`). These
+  feed `core/src/db/queries_extra/navigation.rs` `rights_from_folder` ->
+  `MailboxRightsInfo` (gating `may_submit` in the sidebar) and the nav
+  `is_subscribed` flag, so the drop is a JMAP feature-preservation regression.
+  Fix is bifrost-first (§ 2): a B6-FIX-SQ adds `rights` + `is_subscribed` to
+  `Container`, populated by JMAP's `containers_list` from `Mailbox.myRights` /
+  `isSubscribed` (other providers leave them `None`, matching legacy), then
+  ratatoskr `build_container_rows` reads them into the `right_*` /
+  `is_subscribed` columns and the `containers_persist_equals_legacy` golden is
+  extended to pin them. Ordered ahead of B12 (shared mailboxes leans on folder
+  rights). Discovered in B6 review; see the B6 landing commit.
+- B6-FIX-GATES. Complete the container-CRUD harness gates B6 left red. B6
+  landed with the live list-sync proven (the `containers_persist_equals_legacy`
+  golden, role-mapping, dispatch-exhaustiveness, `brokkr check`, service-suite)
+  and the `jmap-container-crud` / `graph-container-crud` round-trips GREEN, but
+  three gates on the (still-unwired, no IPC/UI) CRUD path were carved to here
+  rather than block the landing:
+  (a) `imap-container-crud` fails at delete-after-rename: `actions::folder::
+  rename_folder` updates the local `folders` row's name in place but keeps the
+  OLD path-based id (`folder-{oldpath}`), so a later delete-by-id misses
+  (`NotFound`). Same family as the move write-back bug B6 fixed, but the fix is
+  more invasive: re-key the local row to the new `folder-{newpath}` id on rename
+  for path-based providers (IMAP), cascading `thread_folders` / `message_folders`
+  FKs, and return the new id from the handler. The mock renames correctly; this
+  is purely ratatoskr's rename handler.
+  (b) `gmail-container-crud` and `gmail-label-color-roundtrip` fail at the
+  initial sync with OAuth `invalid_client`: their `TestSeedAccount` calls omit
+  the `access_token` / `oauth_provider` / `oauth_client_id` / `oauth_token_url`
+  block that `gmail-initial.lua` seeds, so the `gmail_api` account cannot
+  authenticate before any request reaches the mock. Test-script bug in B6's own
+  new scripts - mirror `gmail-initial.lua`'s OAuth seeding (mint a token via the
+  mock `/oauth/token` and pass the fields).
+  (c) `gmail-initial` itself (a pre-existing, non-B6 sync-harness gate) gets
+  `message_count == 0` against the installed mock even with OAuth seeded: the
+  sync completes cleanly (no error, B6's container attach succeeds), but 0 gmail
+  messages ingest. The saehrimnir Gmail mock was proven to serve the fixture's 2
+  messages over real HTTP (profile + labels + messages.list no-`q` + per-message
+  hydration), so this is a gmail message-ingestion / fixture interaction
+  independent of B6's container code (jmap/graph/imap initial syncs ingest fine
+  on the same B6 code). Investigate the `gmail-initial.lua` + `jmap-small.toml`
+  gmail projection / ingestion path; it is not a B6 container regression.
+  The saehrimnir side improvements this surfaced (JMAP move/rename round-trip via
+  `Mailbox/changes`, IMAP CREATE/RENAME/DELETE, Gmail label CRUD + color, a
+  shared id-collision fix, and the new mock-layer round-trip + gmail-initial-
+  replay tests) are landed in the `../sæhrimnir` repo, not commit-pinned here.
 - B7. Calendar. Replace the `calendar` crate's per-provider sync (the largest
   single auxiliary; Graph alone is ~41k LOC today) with the bifrost calendar
   surface. Needs B1; A7 for DAV.
@@ -1134,7 +1275,7 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `8ea29b6`: nine bifrost side-quests have landed since the
+frozen reference is `60e979b`: ten bifrost side-quests have landed since the
 A8-closing commit (see § 2's side-quest protocol), and both `./research/bifrost`
 and `../bifrost` were re-synced together to each in turn. First `aa9172d` ("sync:
 make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
@@ -1205,7 +1346,18 @@ feature-preservation type additions - `content_id` on `AttachmentInline` and
 send side-quest (SMTP `SIZE` raise + submission header projection, JMAP
 `Blob/upload` + `Email/import` + `EmailSubmission/set`, Gmail `messages.send`, Graph
 send-to-Sent, scheduled-send acknowledgement), again an installed external binary,
-not commit-pinned here.
+not commit-pinned here. B6-SQ (B6's bifrost prerequisite) advanced the freeze a
+tenth time, to `60e979b`: a `SyncEngine::containers_list` read passthrough
+(the read companion to the existing container-mutation cluster, resolving through
+`live_account` and bailing `AccountNotAttached` up front), an optional
+`style: Option<ContainerStyle { color_bg, color_fg }>` field and a `system: bool`
+flag on `Container` / `Label` - both Gmail-populated (the `style` carries the
+Gmail user-label color, the `system` flag the `label_type == "system"` split so
+the system-label-as-folder partition survives the cut; Graph / JMAP / IMAP leave
+them unset) - and an optional `style` argument on `container_create` /
+`container_rename` for the recolor path. B6's mock work was a separate
+`saehrimnir` container-CRUD side-quest, again an installed external binary, not
+commit-pinned here.
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -

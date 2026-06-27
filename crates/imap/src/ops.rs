@@ -4,32 +4,18 @@ use async_trait::async_trait;
 use db::db::{ReadConn, ReadError, WriterPool};
 
 use common::error::ProviderError;
-use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
+use common::folder_roles::imap_special_use_to_label_id;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
     ActionProviderCtx, FetchedAttachment, FolderKind, LabelKind, MailProviderKind, ProviderCtx,
-    ProviderFolderEntry, ProviderFolderMutation, ProviderParsedAttachment, ProviderParsedMessage,
-    ProviderProfile, ProviderTestResult, SendIntent,
+    ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
+    SendIntent,
 };
 use smtp;
 
 use super::client as imap_client;
 use super::connection::connect;
-
-/// Map an IMAP folder path + special-use flag to a canonical label ID.
-///
-/// Mirrors the old TS `mapFolderToLabel` logic:
-/// system folders get well-known IDs (INBOX, SENT, …), user folders get `folder-{path}`.
-fn canonical_folder_id(path: &str, special_use: Option<&str>) -> Result<String, String> {
-    let lower = path.to_lowercase();
-    if let Some(id) = imap_special_use_to_label_id(special_use.unwrap_or_default())
-        .or_else(|| imap_name_to_special_use(&lower).and_then(imap_special_use_to_label_id))
-    {
-        return Ok(id.to_string());
-    }
-    Ok(FolderKind::imap_user(path)?.storage_id())
-}
 
 /// Generate a short random hex string for pseudo-IDs.
 fn random_hex8() -> String {
@@ -1024,83 +1010,6 @@ impl ProviderOps for ImapOps {
         Ok(with_session!(&config, session => {
             imap_client::fetch_raw_message(&mut session, &folder, uid).await
         })?)
-    }
-
-    // ── Folders ─────────────────────────────────────────────────────────
-
-    async fn list_folders(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
-        let config = self.load_config(ctx.db, ctx.account_id).await?;
-
-        let folders = with_session!(&config, session => {
-            imap_client::list_folders(&mut session).await
-        })?;
-
-        folders
-            .into_iter()
-            .map(|f| {
-                let id = canonical_folder_id(&f.path, f.special_use.as_deref())
-                    .map_err(ProviderError::Client)?;
-                let special_use = f.special_use;
-                Ok(ProviderFolderEntry {
-                    id,
-                    name: f.name,
-                    path: f.path,
-                    folder_type: if special_use.is_some() {
-                        "system".to_string()
-                    } else {
-                        "user".to_string()
-                    },
-                    special_use,
-                    delimiter: Some(f.delimiter),
-                    message_count: Some(f.exists),
-                    unread_count: Some(f.unseen),
-                    color_bg: None,
-                    color_fg: None,
-                })
-            })
-            .collect()
-    }
-
-    async fn create_folder(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        _name: &str,
-        _parent_id: Option<&FolderId>,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        Err(ProviderError::Client(
-            "Creating folders is not supported for IMAP accounts via the current provider API."
-                .to_string(),
-        ))
-    }
-
-    async fn rename_folder(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        _folder_id: &FolderId,
-        _new_name: &str,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        Err(ProviderError::Client(
-            "Renaming folders is not supported for IMAP accounts via the current provider API."
-                .to_string(),
-        ))
-    }
-
-    async fn delete_folder(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        _folder_id: &FolderId,
-    ) -> Result<(), ProviderError> {
-        Err(ProviderError::Client(
-            "Deleting folders is not supported for IMAP accounts via the current provider API."
-                .to_string(),
-        ))
     }
 
     async fn test_connection(

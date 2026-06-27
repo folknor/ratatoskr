@@ -243,43 +243,6 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         Err(Self::offline())
     }
 
-    async fn list_folders(
-        &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-    ) -> Result<Vec<common::types::ProviderFolderEntry>, common::error::ProviderError> {
-        Err(Self::offline())
-    }
-
-    async fn create_folder(
-        &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-        _name: &str,
-        _parent_id: Option<&common::typed_ids::FolderId>,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<common::types::ProviderFolderMutation, common::error::ProviderError> {
-        Err(Self::offline())
-    }
-
-    async fn rename_folder(
-        &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-        _folder_id: &common::typed_ids::FolderId,
-        _new_name: &str,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<common::types::ProviderFolderMutation, common::error::ProviderError> {
-        Err(Self::offline())
-    }
-
-    async fn delete_folder(
-        &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-        _folder_id: &common::typed_ids::FolderId,
-    ) -> Result<(), common::error::ProviderError> {
-        Err(Self::offline())
-    }
-
     async fn test_connection(
         &self,
         _ctx: &common::types::ProviderCtx<'_>,

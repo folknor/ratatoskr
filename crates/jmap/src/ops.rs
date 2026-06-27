@@ -6,22 +6,21 @@ use bifrost_jmap::email::import::EmailImportRequest;
 use bifrost_jmap::email_submission::{
     Address as SubmissionAddress, EmailSubmissionSet, UndoStatus,
 };
-use bifrost_jmap::mailbox::Role;
 use chrono::{DateTime, Utc};
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
-    ActionProviderCtx, FetchedAttachment, FolderKind, LabelKind, ProviderCtx, ProviderFolderEntry,
-    ProviderFolderMutation, ProviderProfile, ProviderTestResult, SendIntent,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderProfile,
+    ProviderTestResult, SendIntent,
 };
 
 use super::client::JmapClient;
 use super::helpers::{
     get_first_identity_id, get_mailbox_list, query_thread_email_ids, resolve_mailbox_id,
 };
-use super::mailbox_mapper::{find_mailbox_id_by_role, map_mailbox_to_folder};
+use super::mailbox_mapper::find_mailbox_id_by_role;
 
 /// JMAP implementation of the provider operations trait.
 pub struct JmapOps {
@@ -540,119 +539,6 @@ impl ProviderOps for JmapOps {
         let bytes = data.to_vec();
         let size = bytes.len() as u64;
         Ok(FetchedAttachment { bytes, size })
-    }
-
-    async fn list_folders(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let mailboxes = super::sync::fetch_all_mailboxes(&self.client).await?;
-
-        let mut folders = Vec::new();
-        for mb in &mailboxes {
-            let Some(id) = mb.id() else { continue };
-            let name = mb.name().unwrap_or("(unnamed)");
-            let role = mb.role();
-            let role_str = if role == Role::None {
-                None
-            } else {
-                Some(super::sync::role_to_str(&role))
-            };
-            let mapping =
-                map_mailbox_to_folder(role_str, id, name).map_err(ProviderError::Client)?;
-
-            folders.push(ProviderFolderEntry {
-                id: mapping.folder_id,
-                name: mapping.folder_name,
-                path: name.to_string(),
-                folder_type: mapping.folder_type.to_string(),
-                special_use: role_str.map(String::from),
-                delimiter: Some("/".to_string()),
-                message_count: None,
-                unread_count: None,
-                color_bg: None,
-                color_fg: None,
-            });
-        }
-        Ok(folders)
-    }
-
-    async fn create_folder(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        name: &str,
-        parent_id: Option<&FolderId>,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let client = self.client.inner();
-        let mut mb = client
-            .mailbox_create(name, parent_id.map(|p| p.as_str().to_owned()), Role::None)
-            .await
-            .map_err(|e| ProviderError::Server(format!("Mailbox/set create: {e}")))?;
-
-        self.client.invalidate_mailbox_cache().await;
-        let id = mb.take_id();
-        let storage_id = FolderKind::jmap_user(&id)
-            .map_err(|e| ProviderError::Server(format!("encode JMAP mailbox id: {e}")))?
-            .storage_id();
-        Ok(ProviderFolderMutation {
-            id: storage_id,
-            name: name.to_string(),
-            path: name.to_string(),
-            folder_type: "user".to_string(),
-            special_use: None,
-            delimiter: Some("/".to_string()),
-            color_bg: None,
-            color_fg: None,
-        })
-    }
-
-    async fn rename_folder(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-        new_name: &str,
-        _text_color: Option<&str>,
-        _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let mailbox_id = resolve_mailbox_id(&self.client, folder_id.as_str()).await?;
-        let client = self.client.inner();
-        client
-            .mailbox_rename(&mailbox_id, new_name)
-            .await
-            .map_err(|e| ProviderError::Server(format!("Mailbox/set rename: {e}")))?;
-        self.client.invalidate_mailbox_cache().await;
-
-        Ok(ProviderFolderMutation {
-            id: folder_id.as_str().to_string(),
-            name: new_name.to_string(),
-            path: new_name.to_string(),
-            folder_type: "user".to_string(),
-            special_use: None,
-            delimiter: Some("/".to_string()),
-            color_bg: None,
-            color_fg: None,
-        })
-    }
-
-    async fn delete_folder(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        folder_id: &FolderId,
-    ) -> Result<(), ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let mailbox_id = resolve_mailbox_id(&self.client, folder_id.as_str()).await?;
-        let client = self.client.inner();
-        client
-            .mailbox_destroy(&mailbox_id, true)
-            .await
-            .map_err(|e| ProviderError::Server(format!("Mailbox/set destroy: {e}")))?;
-        self.client.invalidate_mailbox_cache().await;
-        Ok(())
     }
 
     async fn test_connection(

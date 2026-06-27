@@ -61,6 +61,9 @@ pub(crate) async fn dispatch(
         RequestParams::TestDiscardDraft { params } => {
             test_helpers::discard_draft_handle(&boot_state, params).await
         }
+        RequestParams::TestContainerCrud { params } => {
+            test_helpers::container_crud_handle(&boot_state, params).await
+        }
         RequestParams::ActionCancelScheduledSend { params } => {
             action_scheduled_send::handle_cancel(&boot_state, params).await
         }

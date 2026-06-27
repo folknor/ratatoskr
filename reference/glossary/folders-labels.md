@@ -159,6 +159,8 @@ For **system folders**, Ratatoskr defines its own canonical label IDs that are p
 
 The canonical ID is provider-agnostic. The normalisation mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/db/src/db/folder_roles.rs`, re-exported through `common::folder_roles`).
 
+Since B6 the folder/label LIST sync runs through one provider-agnostic pass - `bifrost::containers::sync_containers`, over bifrost's `SyncEngine::containers_list` - instead of four per-provider folder-map passes. System-role normalisation collapses into a single `FolderRole -> canonical id` table (`role_to_system_folder_id`, pinned by `container_role_maps_to_canonical_id` against this table); a container is routed to the `folders` table when it is folder-shaped (`kind == Folder`), carries a `role`, or is a native system container (`system`, which reproduces Gmail's `CATEGORY_*` / `IMPORTANT` / `CHAT` system-label-as-folder split that `role` alone cannot), otherwise to `labels`. Message-state ids (`STARRED` / `UNREAD`) are filtered first. Gmail user-label server colors flow from `Container.style` into `server_color_*`; `user_color_*` stays a local override the sync never writes. Folder/label OBJECT CRUD (`create` / `rename` / `move` / `delete`) likewise dispatches through `engine.container_*` (`service::actions::folder` / `::label`), not `ProviderOps`.
+
 Virtual navigation IDs are not folder rows: `"STARRED"` maps to `threads.is_starred`, `"SNOOZED"` maps to `threads.is_snoozed`, and `"all-mail"` means the single-account no-filter view. No `folders`, `labels`, `thread_folders`, or `thread_labels` row uses these virtual IDs.
 
 For **non-system folders and labels**, IDs are provider-specific with a crate prefix where required:

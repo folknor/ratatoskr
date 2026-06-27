@@ -3,91 +3,9 @@ use std::collections::HashMap;
 use sha2::{Digest, Sha256};
 
 use super::client::GmailClient;
-use super::types::{GmailLabel, GmailSendAs};
-use common::types::{FolderKind, MailProviderKind};
-use db::db::queries_extra::{FolderWriteRow, LabelWriteRow, insert_folders_batch, upsert_labels};
-use db::db::{ReadConn, ReadDbState, WriteConn, WriteTarget};
+use super::types::GmailSendAs;
+use db::db::{ReadConn, ReadDbState, WriteTarget};
 use service_state::WriteDbState;
-
-pub async fn sync_gmail_label_folder_map(
-    client: &GmailClient,
-    account_id: &str,
-    read_db: &ReadDbState,
-    write_db: &WriteDbState,
-) -> Result<HashMap<String, FolderKind>, String> {
-    let labels = client.list_labels(read_db).await?;
-    let aid = account_id.to_string();
-    let folder_map = write_db
-        .with_write(move |conn| persist_folders_and_labels(conn, &aid, &labels))
-        .await?;
-    Ok(folder_map)
-}
-
-fn persist_folders_and_labels(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-    labels: &[GmailLabel],
-) -> Result<HashMap<String, FolderKind>, String> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("begin label tx: {e}"))?;
-
-    let mut folder_rows = Vec::new();
-    let mut label_rows = Vec::new();
-    let mut folder_map = HashMap::new();
-
-    for label in labels
-        .iter()
-        .filter(|label| !common::folder_roles::is_message_state_label_id(&label.id))
-    {
-        let label_type = label.label_type.as_deref().unwrap_or("user");
-        if label_type == "system" {
-            let folder = FolderKind::parse(&label.id, MailProviderKind::Gmail)?;
-            folder_map.insert(label.id.clone(), folder);
-            folder_rows.push(FolderWriteRow {
-                id: label.id.clone(),
-                account_id: account_id.to_string(),
-                name: label.name.clone(),
-                visible: None,
-                sort_order: None,
-                imap_folder_path: None,
-                imap_special_use: None,
-                namespace_type: None,
-                parent_id: None,
-                right_read: None,
-                right_add: None,
-                right_remove: None,
-                right_set_seen: None,
-                right_set_keywords: None,
-                right_create_child: None,
-                right_rename: None,
-                right_delete: None,
-                right_submit: None,
-                is_subscribed: None,
-                is_undeletable: true,
-            });
-        } else {
-            label_rows.push(LabelWriteRow {
-                id: label.id.clone(),
-                account_id: account_id.to_string(),
-                name: label.name.clone(),
-                visible: None,
-                sort_order: None,
-                server_color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
-                server_color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
-                user_color_bg: None,
-                user_color_fg: None,
-                is_undeletable: false,
-            });
-        }
-    }
-
-    insert_folders_batch(&tx, &folder_rows)?;
-    upsert_labels(&tx, &label_rows)?;
-    tx.commit()
-        .map_err(|e| format!("commit folders + labels: {e}"))?;
-    Ok(folder_map)
-}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_gmail_auxiliary_sync(
