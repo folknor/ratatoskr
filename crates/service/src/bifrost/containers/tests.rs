@@ -12,7 +12,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use bifrost_types::{
-    Container, ContainerId, ContainerKind, ContainerStyle, FolderRole, ProtocolKind, Provenance,
+    Container, ContainerId, ContainerKind, ContainerRights, ContainerStyle, FolderRole,
+    ProtocolKind, Provenance,
 };
 use common::types::{FolderKind, SystemFolderId};
 use rusqlite::Connection;
@@ -290,6 +291,58 @@ fn containers_persist_equals_legacy() {
     // `user_color_*` override and an `importance:*` undeletable row must
     // survive a re-sync.
     assert_preservation_semantics();
+}
+
+/// B6-FIX: a JMAP mailbox's `myRights` / `isSubscribed` must flow from the
+/// bifrost `Container` into the `folders` row's `right_*` (as 0/1) and
+/// `is_subscribed` columns, which `navigation::rights_from_folder` reads to
+/// gate shared-mailbox submit. Other providers leave `Container::rights` /
+/// `is_subscribed` `None`, so their rows stay `None`.
+#[test]
+fn jmap_folder_rights_and_subscription_map_to_columns() {
+    let rights = ContainerRights {
+        may_read_items: Some(true),
+        may_add_items: Some(false),
+        may_remove_items: Some(true),
+        may_set_seen: Some(true),
+        may_set_keywords: Some(false),
+        may_create_child: Some(true),
+        may_rename: Some(false),
+        may_delete: Some(false),
+        may_submit: Some(true),
+    };
+    let shared = Container::new(
+        ContainerId("mbShared".to_string()),
+        ContainerKind::Folder,
+        None,
+        provenance(ProtocolKind::Jmap, ContainerKind::Folder, "mbShared"),
+        "Shared".to_string(),
+        None,
+    )
+    .with_rights(Some(rights))
+    .with_subscription(Some(true));
+
+    let (folders, _, _) = build_container_rows(ACCOUNT, &[shared]).unwrap();
+    let row = find_folder(&folders, "jmap-mbShared");
+    assert_eq!(row.right_read, Some(1));
+    assert_eq!(row.right_add, Some(0));
+    assert_eq!(row.right_remove, Some(1));
+    assert_eq!(row.right_set_seen, Some(1));
+    assert_eq!(row.right_set_keywords, Some(0));
+    assert_eq!(row.right_create_child, Some(1));
+    assert_eq!(row.right_rename, Some(0));
+    assert_eq!(row.right_delete, Some(0));
+    assert_eq!(row.right_submit, Some(1));
+    assert_eq!(row.is_subscribed, Some(1));
+
+    // A provider that surfaces no rights (Graph here) leaves every column
+    // `None`, matching the legacy "only JMAP wrote rights" behaviour.
+    let graph = folder(ProtocolKind::Graph, "g1", "Work", None, None);
+    let (gfolders, _, _) = build_container_rows(ACCOUNT, &[graph]).unwrap();
+    let grow = find_folder(&gfolders, "graph-g1");
+    assert_eq!(grow.right_read, None);
+    assert_eq!(grow.right_submit, None);
+    assert_eq!(grow.is_subscribed, None);
 }
 
 fn assert_preservation_semantics() {

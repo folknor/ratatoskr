@@ -220,6 +220,14 @@ fn build_container_rows(
                     .parent
                     .as_ref()
                     .and_then(|parent| id_to_persisted.get(parent).cloned());
+                // Per-folder JMAP ACL rights + subscription state. Only JMAP
+                // surfaces these (from `Mailbox.myRights` / `isSubscribed`);
+                // other providers leave `Container::rights` / `is_subscribed`
+                // `None`, so the columns stay `None` for them - matching the
+                // legacy behaviour where only the JMAP `sync_mailboxes` pass
+                // wrote them. Consumed by `navigation::rights_from_folder` ->
+                // `MailboxRightsInfo`, which gates shared-mailbox submit.
+                let rights = container.rights.as_ref();
                 folder_rows.push(FolderWriteRow {
                     id: storage_id.clone(),
                     account_id: account_id.to_string(),
@@ -234,27 +242,16 @@ fn build_container_rows(
                     },
                     namespace_type: None,
                     parent_id,
-                    // KNOWN GAP (feature-preserving mandate): the
-                    // legacy JMAP `sync_mailboxes` pass populated the
-                    // `right_*` ACL columns and `is_subscribed` from
-                    // `Mailbox.myRights` / `isSubscribed`; the other three
-                    // providers always wrote them `None`. Bifrost's frozen
-                    // `Container` shape carries neither, so the JMAP rights
-                    // (consumed by `navigation::rights_from_folder` ->
-                    // `MailboxRightsInfo`, gating shared-mailbox submit) and
-                    // subscription state are dropped here. Restoring them
-                    // needs a `Container` field in a future bifrost SQ; it
-                    // cannot be reconstructed consumer-side.
-                    right_read: None,
-                    right_add: None,
-                    right_remove: None,
-                    right_set_seen: None,
-                    right_set_keywords: None,
-                    right_create_child: None,
-                    right_rename: None,
-                    right_delete: None,
-                    right_submit: None,
-                    is_subscribed: None,
+                    right_read: rights.and_then(|r| r.may_read_items).map(i64::from),
+                    right_add: rights.and_then(|r| r.may_add_items).map(i64::from),
+                    right_remove: rights.and_then(|r| r.may_remove_items).map(i64::from),
+                    right_set_seen: rights.and_then(|r| r.may_set_seen).map(i64::from),
+                    right_set_keywords: rights.and_then(|r| r.may_set_keywords).map(i64::from),
+                    right_create_child: rights.and_then(|r| r.may_create_child).map(i64::from),
+                    right_rename: rights.and_then(|r| r.may_rename).map(i64::from),
+                    right_delete: rights.and_then(|r| r.may_delete).map(i64::from),
+                    right_submit: rights.and_then(|r| r.may_submit).map(i64::from),
+                    is_subscribed: container.is_subscribed.map(i64::from),
                     is_undeletable: container.role.is_some() || container.system,
                 });
                 folder_map.insert(container.native_id.clone(), kind);
