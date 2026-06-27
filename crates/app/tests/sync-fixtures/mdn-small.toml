@@ -4,7 +4,9 @@ name = "mdn-small"
 # message whose raw bytes request a disposition notification
 # (Disposition-Notification-To). When ratatoskr marks it read, it must compose
 # and send an RFC 8098 MDN back to the requesting sender. Sent is present so an
-# IMAP MDN send can append the MDN copy.
+# IMAP MDN send can append the MDN copy; Drafts is present because the
+# HTTP-API providers (JMAP Email/import, Graph raw draft create) stage the
+# raw MDN as a draft before submitting it.
 
 [[account]]
 id = "account-1"
@@ -18,10 +20,16 @@ role = "inbox"
 sort_order = 0
 
 [[mailbox]]
+id = "mbx-drafts"
+name = "Drafts"
+role = "drafts"
+sort_order = 1
+
+[[mailbox]]
 id = "mbx-sent"
 name = "Sent"
 role = "sent"
-sort_order = 1
+sort_order = 2
 
 [[email]]
 id = "email-mdn"
