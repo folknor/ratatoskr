@@ -956,12 +956,28 @@ check` green - read the B4b landing commit.
   `compose_send_50mb_attachment` green and `service-suite` 63/63 - read the landing
   commit.
 - B5-GATES. The per-provider send / MDN / scheduled-send ROUND-TRIP harness gates
-  (`jmap-` / `gmail-` / `graph-send-writeback.lua`, the MDN scripts, the delegated
-  `*-scheduled-send.lua`, and `imap-draft-discard.lua` - the last needs a test-only
-  `delete_draft` IPC trigger) were NOT built in B5: the `saehrimnir` send side-quest
-  that unblocks them only landed at B5's tail. The mock now supports them
-  (`EmailSubmission/set`, `messages.send`, Graph send-to-Sent, the SMTP header
-  projection); building and pinning these round-trip gates is this item.
+  that were NOT built in B5 (the `saehrimnir` send side-quest unblocking them only
+  landed at B5's tail). The three send-writeback gates are DONE:
+  `jmap-` / `gmail-` / `graph-send-writeback.lua` (sync-harness) drive the real
+  send action (`ActionSend` -> resident `SyncEngine` `engine.send_message`) against
+  `saehrimnir` over each provider's native submission surface (JMAP `Email/set` +
+  `EmailSubmission/set`, Gmail `messages.send`, Graph send), then verify two ways,
+  mirroring the B4a action-writeback gates: the `action.completed` summary shows the
+  send dispatched REMOTELY (`remote_succeeded >= 1`, `remote_failed == 0`,
+  `local_only == 0`, `conflicts == 0` - catching a silent local-only degrade), and a
+  fresh resync brings the sent message back filed under `SENT` (server round-trip).
+  They run on a new `send-small.toml` sync-fixture (Inbox/Drafts/Sent + a seed
+  draft). The JMAP gate required a `saehrimnir` fix (`build_email_from_create` now
+  projects the structured compose properties - subject, the `from`/`to`/`cc`/`bcc`
+  address lists, `messageId`, and the `bodyValues` text body - that the `Email/set`
+  create carries; it previously dropped them, so a sent message round-tripped with an
+  empty subject). Still OPEN under this item: the per-provider MDN round-trip scripts,
+  the delegated `*-scheduled-send.lua` round-trip gates, and `imap-draft-discard.lua`
+  (the last needs a test-only `delete_draft` IPC trigger). A latent finding surfaced
+  while building these: a JMAP submitted message keeps its `$draft` keyword after
+  `EmailSubmission/set` (bifrost's `on_success_update_email` rewrites `mailboxIds` to
+  `[Sent]` but never clears `keywords/$draft`), so the sent message shows under both
+  `DRAFT` and `SENT` - a bifrost send-fidelity follow-up, out of B5-GATES scope.
 - B6. Folders, labels, containers. Rewire onto `container_*` / `apply_label`
   plus folder/label sync. Needs B3.
 - B7. Calendar. Replace the `calendar` crate's per-provider sync (the largest

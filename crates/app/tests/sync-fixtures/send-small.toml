@@ -1,0 +1,50 @@
+name = "send-small"
+
+# Fixture for the client-send paths (JMAP EmailSubmission / Gmail
+# messages.send / Graph send). Carries the Drafts + Sent role mailboxes
+# those flows file into, plus one existing draft so a draft-send can be
+# exercised without first composing one.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mbx-drafts"
+name = "Drafts"
+role = "drafts"
+sort_order = 1
+
+[[mailbox]]
+id = "mbx-sent"
+name = "Sent"
+role = "sent"
+sort_order = 2
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Hello"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "First message body."
+
+[[email]]
+id = "draft-001"
+mailbox_ids = ["mbx-drafts"]
+keywords = ["$draft"]
+from = "test@example.com"
+to = ["bob@example.com"]
+subject = "Draft subject"
+received_at = "2026-01-15T12:00:00Z"
+message_id = ["<draft-001@example.com>"]
+body_text = "Draft body."
