@@ -23,14 +23,116 @@ flood a context or freeze a peek.
 """
 import json
 import os
+from pathlib import Path
+import signal
 import subprocess
 import sys
+import time
 
 MODEL = "gpt-5.5"
 
 
-# Future improvements, from a study of how cmux tracks a codex agent's
-# running/done state. cmux deliberately does NOT trust the codex stdout
+def _shorten(text, limit=1000):
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
+def _signal_name(returncode):
+    if returncode >= 0:
+        return None
+    signum = -returncode
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return f"signal {signum}"
+
+
+def _transcript_summary(path):
+    meta = None
+    task_complete = False
+    stream_error = False
+    last_event = None
+    in_flight = {}
+    event_count = 0
+    try:
+        with open(path) as f:
+            for line in f:
+                event_count += 1
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                last_event = event
+                payload = event.get("payload") or {}
+                if event.get("type") == "session_meta":
+                    meta = payload
+                payload_type = payload.get("type")
+                if payload_type == "task_complete":
+                    task_complete = True
+                elif payload_type == "stream_error":
+                    stream_error = True
+                elif payload_type in ("function_call", "custom_tool_call"):
+                    call_id = payload.get("call_id")
+                    if call_id:
+                        in_flight[call_id] = {
+                            "name": payload.get("name"),
+                            "arguments": payload.get("arguments") or payload.get("input"),
+                        }
+                elif payload_type in ("function_call_output", "custom_tool_call_output"):
+                    call_id = payload.get("call_id")
+                    if call_id:
+                        in_flight.pop(call_id, None)
+    except OSError:
+        return None
+
+    last_payload = (last_event or {}).get("payload") or {}
+    last_in_flight = None
+    if in_flight:
+        last_in_flight = next(reversed(in_flight.values()))
+    return {
+        "path": str(path),
+        "meta": meta or {},
+        "event_count": event_count,
+        "task_complete": task_complete,
+        "stream_error": stream_error,
+        "last_event_type": (last_event or {}).get("type"),
+        "last_payload_type": last_payload.get("type"),
+        "last_in_flight": last_in_flight,
+    }
+
+
+def _find_transcript(start_time, cwd):
+    codex_home = Path(os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex")))
+    sessions = codex_home / "sessions"
+    if not sessions.is_dir():
+        return None
+    cwd = os.path.realpath(cwd)
+    candidates = []
+    for path in sessions.rglob("*.jsonl"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if stat.st_mtime < start_time - 30:
+            continue
+        summary = _transcript_summary(path)
+        if not summary:
+            continue
+        meta = summary["meta"]
+        if meta.get("originator") != "codex_exec":
+            continue
+        if os.path.realpath(meta.get("cwd") or "") != cwd:
+            continue
+        candidates.append((stat.st_mtime, summary))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate[0])[1]
+
+
+# Future improvements, from a study of how cmux (research/cmux) tracks a codex
+# agent's running/done state. cmux deliberately does NOT trust the codex stdout
 # / --json stream for liveness or completion; it derives state from off-stream
 # signals. We do not need most of this for a blocking wait-for-exit wrapper -
 # the wrapping process is the liveness signal and -o is the completion signal -
@@ -103,6 +205,7 @@ def run_codex(prompt, effort, goal):
     # codex subtree instead of escalating up the shared launcher PG and
     # taking out this launcher or a sibling codex. At worst a stray
     # group-kill ends this run, which the relaunch-fresh model handles.
+    start_time = time.time()
     result = subprocess.run(cmd, stdin=subprocess.DEVNULL,
                             capture_output=True, text=True,
                             start_new_session=True)
@@ -154,9 +257,27 @@ def run_codex(prompt, effort, goal):
         final_message = stream_message
 
     print(f"exit_code: {result.returncode}")
+    signame = _signal_name(result.returncode)
+    if signame:
+        print(f"signal: {signame}")
     print(f"final_message_captured: {str(captured).lower()}")
     print(f"turns: {turns}")
     print(f"usage: {usage}")
+    transcript = _find_transcript(start_time, os.getcwd())
+    if transcript:
+        print(f"transcript: {transcript['path']}")
+        print(f"transcript_task_complete: {str(transcript['task_complete']).lower()}")
+        print(f"transcript_stream_error: {str(transcript['stream_error']).lower()}")
+        print("last_transcript_event: "
+              f"{transcript['last_event_type']}/{transcript['last_payload_type']}")
+        last_tool = transcript["last_in_flight"]
+        if last_tool:
+            print("last_in_flight_tool: "
+                  f"{last_tool.get('name')} {_shorten(last_tool.get('arguments'))}")
+    if signame and not captured:
+        print("diagnosis: codex exited from a signal before a final message; "
+              "if the transcript ends on a tool call, suspect a child command "
+              "or test harness killed the codex process group.")
     if result.stderr.strip():
         print("--- codex stderr ---")
         print(result.stderr.strip())
