@@ -28,7 +28,7 @@ use service_api::{
     TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation, WireFolderId,
     WireLabelGroupId, WireLabelId, WireMailOperation,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -174,6 +174,7 @@ struct HarnessContext {
     artefact_dir: PathBuf,
     trace: Arc<ServiceTraceSink>,
     resources: HashMap<u64, HarnessResource>,
+    owned_pids: HashSet<u32>,
     next_id: u64,
     data_dirs: Vec<PathBuf>,
     last_pid: Option<u32>,
@@ -203,6 +204,7 @@ impl HarnessContext {
             artefact_dir,
             trace,
             resources: HashMap::new(),
+            owned_pids: HashSet::new(),
             next_id: 1,
             data_dirs: Vec::new(),
             last_pid: None,
@@ -221,6 +223,17 @@ impl HarnessContext {
 
     fn remove(&mut self, id: u64) {
         self.resources.remove(&id);
+    }
+
+    fn remember_pid(&mut self, pid: Option<u32>) {
+        if let Some(pid) = pid {
+            self.last_pid = Some(pid);
+            self.owned_pids.insert(pid);
+        }
+    }
+
+    fn owns_pid(&self, pid: u32) -> bool {
+        self.owned_pids.contains(&pid)
     }
 
     fn client(&self, id: u64) -> dellingr::Result<Arc<ServiceClient>> {
@@ -370,7 +383,7 @@ fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
         Ok(client) => {
             let id = {
                 let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
-                guard.last_pid = client.child_pid();
+                guard.remember_pid(client.child_pid());
                 guard.record_step("spawn", "spawn", "ok");
                 guard.insert(HarnessResource::Client(client))
             };
@@ -478,6 +491,8 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
 
     {
         let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.remember_pid(Some(helper_pid));
+        guard.remember_pid(Some(service_pid));
         guard.record_step("spawn_parent_death_helper", "spawn", "ok");
         let _ = guard.insert(HarnessResource::Helper(child));
     }
@@ -509,11 +524,28 @@ fn parent_death_helper_path(app_binary: &Path) -> dellingr::Result<PathBuf> {
 }
 
 fn lua_kill(state: &mut State) -> dellingr::Result<u8> {
-    let pid = state.to_number(1)? as i32;
+    let raw_pid = state.to_number(1)?;
+    if !raw_pid.is_finite() || raw_pid < 1.0 || raw_pid.fract() != 0.0 {
+        return Err(lua_error_message(format!(
+            "invalid signal target pid {raw_pid}"
+        )));
+    }
+    let pid = raw_pid as u32;
     let signal = signal_number(state)?;
+    let ctx = context(state)?;
+    {
+        let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
+        if !guard.owns_pid(pid) {
+            return Err(lua_error_message(format!(
+                "refusing to signal unowned pid {pid}; harness.kill may only target pids returned by harness spawn helpers"
+            )));
+        }
+    }
     #[cfg(unix)]
     {
-        let result = unsafe { libc::kill(pid, signal) };
+        let signal_pid = i32::try_from(pid)
+            .map_err(|_| lua_error_message(format!("signal target pid {pid} out of range")))?;
+        let result = unsafe { libc::kill(signal_pid, signal) };
         if result != 0 {
             return Err(lua_io(std::io::Error::last_os_error()));
         }
@@ -525,11 +557,9 @@ fn lua_kill(state: &mut State) -> dellingr::Result<u8> {
             "harness.kill is only implemented on unix",
         ));
     }
-    if let Ok(ctx) = context(state) {
-        ctx.lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .record_step("kill", "process", "sent");
-    }
+    ctx.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .record_step("kill", "process", "sent");
     state.set_top(0);
     state.push_boolean(true);
     Ok(1)
@@ -1525,7 +1555,9 @@ fn lua_client_child_pid(state: &mut State) -> dellingr::Result<u8> {
     if let Some(pid) = pid
         && let Ok(ctx) = context(state)
     {
-        ctx.lock().unwrap_or_else(PoisonError::into_inner).last_pid = Some(pid);
+        ctx.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remember_pid(Some(pid));
     }
     state.set_top(0);
     match pid {
@@ -1950,7 +1982,7 @@ fn push_spawn_event(
             let (id, pid) = {
                 let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
                 let pid = client.child_pid();
-                guard.last_pid = pid;
+                guard.remember_pid(pid);
                 (guard.insert(HarnessResource::Client(client)), pid)
             };
             set_field_string(state, idx, "type", "ChildSpawned")?;
