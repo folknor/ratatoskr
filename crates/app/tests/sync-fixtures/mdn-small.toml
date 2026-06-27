@@ -1,0 +1,35 @@
+name = "mdn-small"
+
+# Fixture for the read-receipt (MDN) path. The Inbox carries one received
+# message whose raw bytes request a disposition notification
+# (Disposition-Notification-To). When ratatoskr marks it read, it must compose
+# and send an RFC 8098 MDN back to the requesting sender. Sent is present so an
+# IMAP MDN send can append the MDN copy.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mbx-sent"
+name = "Sent"
+role = "sent"
+sort_order = 1
+
+[[email]]
+id = "email-mdn"
+mailbox_ids = ["mbx-inbox"]
+from = "sender@example.com"
+to = ["test@example.com"]
+subject = "Please confirm receipt"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<mdn-req-1@example.com>"]
+body_text = "Please read and confirm."
+body_raw_bytes = "From: sender@example.com\r\nTo: test@example.com\r\nSubject: Please confirm receipt\r\nMessage-ID: <mdn-req-1@example.com>\r\nDisposition-Notification-To: sender@example.com\r\nDate: Thu, 15 Jan 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease read and confirm.\r\n"

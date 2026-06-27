@@ -118,6 +118,7 @@ pub(super) async fn seed_account_handle(
     let caldav_url = params.caldav_url;
     let caldav_username = params.caldav_username;
     let caldav_password = params.caldav_password;
+    let read_receipt_policy = params.read_receipt_policy;
     let encryption_key = boot_state.encryption_key().ok_or_else(|| {
         ServiceError::Internal(
             "test.seed_account received before encryption key was available".into(),
@@ -215,6 +216,14 @@ pub(super) async fn seed_account_handle(
                     params![caldav_url, caldav_username, caldav_password, &account_id],
                 )
                 .map_err(|e| format!("seed account caldav config: {e}"))?;
+            }
+            if let Some(policy) = &read_receipt_policy {
+                conn.execute(
+                    "INSERT INTO read_receipt_policy (id, account_id, scope, policy) \
+                     VALUES (?1, ?2, 'account', ?3)",
+                    params![uuid::Uuid::new_v4().to_string(), &account_id, policy],
+                )
+                .map_err(|e| format!("seed read_receipt_policy: {e}"))?;
             }
             let label_count = insert_harness_account_rows(conn, &account_id, &email)?;
             Ok((account_id, label_count))

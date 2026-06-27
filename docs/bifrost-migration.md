@@ -989,9 +989,24 @@ check` green - read the B4b landing commit.
   UNIX-epoch milliseconds: `harness.now_ms()` is monotonic (ms since harness start), so
   a computed `scheduled_at` read as a past instant that bifrost's `validate_scheduled`
   rejected, and no hardcoded absolute timestamp stays valid against the 1-year
-  `maxDelayedSend` window. Still OPEN under this item: the per-provider MDN round-trip
-  scripts. A latent finding surfaced
-  while building these: a JMAP submitted message keeps its `$draft` keyword after
+  `maxDelayedSend` window. The MDN (read-receipt) round-trip gates are DONE for two
+  providers: `imap-mdn.lua` and `gmail-mdn.lua` (on a new `mdn-small.toml` fixture whose
+  Inbox message carries a `Disposition-Notification-To` header via `body_raw_bytes`, so
+  the consumer's raw re-parse sets `mdn_requested = 1`). Each seeds an account-scoped
+  `always` read-receipt policy (via a new optional `read_receipt_policy` field on
+  `TestSeedAccount`, since the default global policy is `never` and only `Always`
+  auto-sends), marks the thread read, and asserts the RFC 8098 MDN dispatched via
+  `engine.send_raw_message` reached the requesting sender - IMAP by the mock's SMTP
+  submission log, Gmail by a resync finding the MDN filed under `SENT` addressed to the
+  sender. The remaining two providers are blocked by distinct mock gaps, recorded as
+  follow-ups: a JMAP MDN gate needs the consumer's whole-message raw-RFC822 download to
+  resolve (the mock's `/jmap/download` only serves attachment blobs, so `mdn_requested`
+  is never detected for JMAP - the same gap noted at the send-writeback gates), and a
+  Graph MDN gate needs the Graph mock to support `engine.send_raw_message` (raw-MIME
+  send); it currently models only the structured send the graph-send-writeback gate
+  uses, so the raw MDN send returns `Remote(Permanent): server.error`. A latent finding
+  surfaced while building these: a JMAP submitted message keeps its `$draft` keyword
+  after
   `EmailSubmission/set` (bifrost's `on_success_update_email` rewrites `mailboxIds` to
   `[Sent]` but never clears `keywords/$draft`), so the sent message shows under both
   `DRAFT` and `SENT` - a bifrost send-fidelity follow-up, out of B5-GATES scope.

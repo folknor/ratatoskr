@@ -2651,6 +2651,11 @@ fn request_params_from_lua(
                     oauth_token_url: get_string_field(state, params_idx, "oauth_token_url")?,
                     jmap_url: get_string_field(state, params_idx, "jmap_url")?,
                     oauth_extra_scopes: get_string_field(state, params_idx, "oauth_extra_scopes")?,
+                    read_receipt_policy: get_string_field(
+                        state,
+                        params_idx,
+                        "read_receipt_policy",
+                    )?,
                 }
             } else {
                 TestSeedAccountParams::default()

@@ -77,6 +77,11 @@ pub struct TestSeedAccountParams {
     /// Used by IT-distributable config and the (future) custom-OIDC wizard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_extra_scopes: Option<String>,
+    /// Seed an account-scoped read-receipt policy (`always` / `ask` / `never`)
+    /// into `read_receipt_policy`. The MDN-path gates set `always` to force the
+    /// auto-send branch (the default global policy is `never`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_receipt_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4058,6 +4063,7 @@ mod tests {
                 oauth_token_url: Some("http://127.0.0.1:12345/oauth/token".into()),
                 jmap_url: Some("http://127.0.0.1:12345/jmap".into()),
                 oauth_extra_scopes: Some("custom:scope".into()),
+                read_receipt_policy: Some("always".into()),
             },
         };
         let parsed = RequestParams::from_method_params(
