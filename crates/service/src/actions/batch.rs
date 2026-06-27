@@ -277,7 +277,13 @@ async fn execute_account_group(
                         ActionOutcome::Success
                     };
                     if mdn_on_read && outcome.is_success() {
-                        super::mdn_send::send_mdn_for_read(ctx, account_id, &entry.thread_id).await;
+                        super::mdn_send::send_mdn_for_read(
+                            ctx,
+                            &action_account,
+                            account_id,
+                            &entry.thread_id,
+                        )
+                        .await;
                     }
                     results.push((entry.idx, outcome));
                 }
@@ -600,7 +606,7 @@ async fn dispatch_with_engine(
         dispatch_mutation(action_account, account_id, op, targets).await,
     );
     if outcome.is_success() && matches!(op, MailOperation::SetRead { to: true }) {
-        super::mdn_send::send_mdn_for_read(ctx, account_id, thread_id).await;
+        super::mdn_send::send_mdn_for_read(ctx, action_account, account_id, thread_id).await;
     }
     let (op_type, params_json) = enqueue_params(op);
     enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;

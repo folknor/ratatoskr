@@ -2,24 +2,29 @@
 //!
 //! Triggered from the mark-as-read code path. For each message in the
 //! thread that requested a read receipt and hasn't had one sent yet,
-//! resolve the per-sender policy and, on `Always`, build + send an
-//! RFC 8098 disposition-notification via the provider's send path.
+//! resolve the per-sender policy and, on `Always`, build an RFC 8098
+//! disposition-notification (`rtsk::mdn::build_mdn_message`) and submit
+//! the pre-assembled bytes through the resident engine's raw-send
+//! passthrough (`engine.send_raw_message`) - bifrost's structured
+//! `SendRequest` cannot express a `multipart/report`, so the MDN keeps
+//! ratatoskr's assembler while the transport is bifrost's.
 //!
-//! Failures are soft: a provider send error logs and continues to the
-//! next candidate. Unmarking the read state would be a worse outcome
-//! than a missing receipt.
+//! Failures are soft: a send error logs and continues to the next
+//! candidate. Unmarking the read state would be a worse outcome than a
+//! missing receipt.
 
-use common::ops::ProviderOps;
-use common::types::ProviderCtx;
+use bifrost_types::{AccountId, ObjectId};
+use bytes::Bytes;
 use db::db::ReadConn;
 use db::db::queries_extra::mdn::{
     ReadReceiptPolicy, mark_mdn_sent_local, resolve_read_receipt_policy,
 };
-use db::progress::NoopProgressReporter;
 use rtsk::mdn::build_mdn_message;
 use rusqlite::params;
 
 use super::context::ActionContext;
+use super::dispatch_target::{engine_error_to_action_error, resolve_message_object_id};
+use crate::bifrost::resident::ResidentActionAccount;
 
 struct Candidate {
     message_id: String,
@@ -31,7 +36,7 @@ struct Candidate {
 /// MDNs the policy authorises.
 pub(crate) async fn send_mdn_responses(
     ctx: &ActionContext,
-    provider: &dyn ProviderOps,
+    action_account: &ResidentActionAccount,
     account_id: &str,
     thread_id: &str,
 ) {
@@ -56,12 +61,6 @@ pub(crate) async fn send_mdn_responses(
         }
     };
 
-    let provider_ctx = ProviderCtx {
-        account_id,
-        db: &ctx.db,
-        progress: &NoopProgressReporter,
-    };
-
     for candidate in candidates {
         let policy = resolve_policy(ctx, account_id, &candidate.from_address).await;
         if !matches!(policy, ReadReceiptPolicy::Always) {
@@ -76,9 +75,12 @@ pub(crate) async fn send_mdn_responses(
             account_display_name.as_deref().unwrap_or(""),
             false,
         );
-        let raw_b64 = common::encoding::encode_base64url_nopad(&raw);
-
-        match provider.send_email(&provider_ctx, &raw_b64, None).await {
+        match action_account
+            .engine
+            .send_raw_message(&AccountId(account_id.to_string()), Bytes::from(raw), None)
+            .await
+            .map_err(engine_error_to_action_error)
+        {
             Ok(_) => {
                 if let Err(e) = mark_sent(ctx, account_id, &candidate.message_id).await {
                     log::warn!(
@@ -90,14 +92,34 @@ pub(crate) async fn send_mdn_responses(
                 // Server-side keyword sync. Soft-fail: cross-client
                 // coordination is best-effort; the local mdn_sent flag
                 // already prevents our own double-sends.
-                if let Err(e) = provider
-                    .mark_mdn_sent(&provider_ctx, &candidate.message_id)
-                    .await
+                match resolve_message_object_id(
+                    ctx,
+                    account_id,
+                    &candidate.message_id,
+                    action_account.provider,
+                )
+                .await
                 {
-                    log::warn!(
-                        "[mdn] server keyword sync failed for {account_id}/{}: {e}",
+                    Ok(object_id) => {
+                        if let Err(e) = action_account
+                            .engine
+                            .mark_mdn_sent(
+                                &AccountId(account_id.to_string()),
+                                ObjectId(object_id.0),
+                            )
+                            .await
+                            .map_err(engine_error_to_action_error)
+                        {
+                            log::warn!(
+                                "[mdn] server keyword sync failed for {account_id}/{}: {e}",
+                                candidate.message_id
+                            );
+                        }
+                    }
+                    Err(e) => log::warn!(
+                        "[mdn] server keyword id resolution failed for {account_id}/{}: {e}",
                         candidate.message_id
-                    );
+                    ),
                 }
             }
             Err(e) => {
@@ -112,16 +134,22 @@ pub(crate) async fn send_mdn_responses(
 
 /// Engine-dispatch entry point for the read-receipt write-back.
 ///
-/// The action pipeline now marks a thread read through the resident
-/// bifrost engine (`engine.set_read`), which has no MDN hook of its own.
-/// This restores the behavior the legacy `mark_read_dispatch` carried: on
-/// a successful mark-as-read, send any authorised MDNs for the thread.
+/// The action pipeline marks a thread read through the resident bifrost
+/// engine (`bulk_set_flags`), which has no MDN hook of its own. On a
+/// successful mark-as-read, send any authorised MDNs for the thread.
 ///
-/// The MDN *send* still rides the provider send path - composition / send
-/// is B5 territory and untouched by the action rewire - so a provider is
-/// constructed on demand here. The candidate query runs first so the
-/// common no-receipt thread never pays for a provider build.
-pub(crate) async fn send_mdn_for_read(ctx: &ActionContext, account_id: &str, thread_id: &str) {
+/// Both call sites (the bulk and single-thread mark-as-read success arms
+/// in `batch.rs`) already hold a resolved `action_account`, so the handle
+/// is passed in directly rather than re-resolved per mark-as-read; the
+/// MDN send rides the SAME resident engine (`engine.send_raw_message`) the
+/// keep-attached mutation dispatch uses. The candidate query runs first so
+/// the common no-receipt thread never pays for the dispatch.
+pub(crate) async fn send_mdn_for_read(
+    ctx: &ActionContext,
+    action_account: &ResidentActionAccount,
+    account_id: &str,
+    thread_id: &str,
+) {
     match collect_candidates(ctx, account_id, thread_id).await {
         Ok(c) if c.is_empty() => return,
         Ok(_) => {}
@@ -131,23 +159,7 @@ pub(crate) async fn send_mdn_for_read(ctx: &ActionContext, account_id: &str, thr
         }
     }
 
-    let provider = match super::provider::create_provider(
-        &ctx.db,
-        &ctx.write_db,
-        account_id,
-        ctx.encryption_key,
-    )
-    .await
-    {
-        Ok(provider) => provider,
-        Err(e) => {
-            // Soft-fail: a missing receipt is better than blocking the
-            // read mutation, matching the legacy MDN error discipline.
-            log::warn!("[mdn] provider unavailable for {account_id}: {e}");
-            return;
-        }
-    };
-    send_mdn_responses(ctx, &*provider, account_id, thread_id).await;
+    send_mdn_responses(ctx, action_account, account_id, thread_id).await;
 }
 
 fn collect_candidates_sync(

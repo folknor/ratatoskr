@@ -68,7 +68,7 @@ impl ReadyApp {
             .map(|a| SendAttachment {
                 filename: a.name.clone(),
                 mime_type: a.mime_type.clone(),
-                data: a.data.as_ref().clone(),
+                data: a.data.as_ref().clone().into(),
                 content_id: None,
             })
             .collect();
@@ -280,8 +280,10 @@ fn stage_and_build_wire(
             thread_id: request.thread_id,
             source_message_id: request.source_message_id,
             intent: wire_send_intent(request.intent),
+            scheduled_at: None,
         },
         attachments: wire_attachments,
+        scheduled_at: None,
     })
 }
 

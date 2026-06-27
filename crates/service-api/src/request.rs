@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::account::{
     AccountCreateParams, AccountDeleteParams, AccountReorderParams, AccountUpdateParams,
@@ -794,6 +794,24 @@ pub struct TestBifrostFactoryOpenAck {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledSendHandleParams {
+    pub account_id: String,
+    pub remote_message_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RescheduleSendParams {
+    pub account_id: String,
+    pub remote_message_id: String,
+    pub scheduled_at: SystemTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledSendAck {
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestParams {
     HealthPing,
     Shutdown,
@@ -870,6 +888,12 @@ pub enum RequestParams {
     /// would otherwise dominate the enum size.
     ActionSend {
         request: Box<SendWireRequest>,
+    },
+    ActionCancelScheduledSend {
+        params: ScheduledSendHandleParams,
+    },
+    ActionRescheduleSend {
+        params: RescheduleSendParams,
     },
     /// Phase 3 plan scope item 1: kick a sync run for the given account.
     /// The handler returns within microseconds (acquires the per-account
@@ -1361,6 +1385,8 @@ impl RequestParams {
             Self::ActionJobStatus { .. } => "action.job_status",
             Self::ActionMarkChatRead { .. } => "action.mark_chat_read",
             Self::ActionSend { .. } => "action.send",
+            Self::ActionCancelScheduledSend { .. } => "action.cancel_scheduled_send",
+            Self::ActionRescheduleSend { .. } => "action.reschedule_send",
             Self::SyncStartAccount { .. } => "sync.start_account",
             Self::SyncCancelAccount { .. } => "sync.cancel_account",
             Self::SyncResumeAccount { .. } => "sync.resume_account",
@@ -1456,6 +1482,9 @@ impl RequestParams {
             // realistic attachment sizes (gigabyte-class hashes in a
             // few seconds on commodity hardware).
             Self::ActionSend { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            Self::ActionCancelScheduledSend { .. } | Self::ActionRescheduleSend { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(30))
+            }
             // Phase 6d-A: provider HTTPS round-trip dominates. Same
             // shape as ActionSend - the local DB leg is sub-ms; the
             // upstream call is the slow part.
@@ -1611,6 +1640,8 @@ impl RequestParams {
             | Self::ActionExecutePlan { .. }
             | Self::CalActionExecutePlan { .. }
             | Self::ActionSend { .. }
+            | Self::ActionCancelScheduledSend { .. }
+            | Self::ActionRescheduleSend { .. }
             | Self::OauthExchangeCode { .. }
             | Self::SyncCancelAccount { .. }
             | Self::SyncResumeAccount { .. }
@@ -1720,6 +1751,8 @@ impl RequestParams {
                 serde_json::json!({ "chat_email": chat_email })
             }
             Self::ActionSend { request } => serde_json::json!({ "request": request }),
+            Self::ActionCancelScheduledSend { params } => serde_json::json!({ "params": params }),
+            Self::ActionRescheduleSend { params } => serde_json::json!({ "params": params }),
             Self::SyncStartAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncCancelAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncResumeAccount { params } => serde_json::json!({ "params": params }),
@@ -1866,6 +1899,24 @@ impl RequestParams {
                 Ok(Self::ActionSend {
                     request: Box::new(p.request),
                 })
+            }
+            "action.cancel_scheduled_send" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ScheduledSendHandleParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.cancel_scheduled_send params: {e}"))?;
+                Ok(Self::ActionCancelScheduledSend { params: p.params })
+            }
+            "action.reschedule_send" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: RescheduleSendParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.reschedule_send params: {e}"))?;
+                Ok(Self::ActionRescheduleSend { params: p.params })
             }
             "sync.start_account" => {
                 #[derive(Deserialize)]
@@ -2598,8 +2649,10 @@ mod tests {
                 thread_id: None,
                 source_message_id: None,
                 intent: crate::action::SendIntent::New,
+                scheduled_at: None,
             },
             attachments: Vec::new(),
+            scheduled_at: None,
         };
         assert_eq!(
             RequestParams::ActionSend {
@@ -2629,8 +2682,10 @@ mod tests {
                 thread_id: None,
                 source_message_id: None,
                 intent: crate::action::SendIntent::New,
+                scheduled_at: None,
             },
             attachments: Vec::new(),
+            scheduled_at: None,
         };
         assert_eq!(
             RequestParams::ActionSend {
@@ -2662,6 +2717,7 @@ mod tests {
                 thread_id: None,
                 source_message_id: None,
                 intent: crate::action::SendIntent::New,
+                scheduled_at: None,
             },
             attachments: vec![SendWireAttachment {
                 source: SendAttachmentSource::StagingFile {
@@ -2673,6 +2729,7 @@ mod tests {
                 filename: "x.pdf".into(),
                 content_id: None,
             }],
+            scheduled_at: None,
         };
         let original = RequestParams::ActionSend {
             request: Box::new(req),

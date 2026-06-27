@@ -97,8 +97,15 @@ def run_codex(prompt, effort, goal):
     # Close stdin: the prompt is the positional arg, and an open stdin makes
     # codex try to read an extra `<stdin>` block ("Reading additional input
     # from stdin...") and could block on a TTY.
+    # start_new_session=True: setsid() before exec, so codex leads its own
+    # session + process group. Tools codex spawns that group-kill (e.g.
+    # brokkr's kill(-pgid) deadline / --hard paths) stay contained to this
+    # codex subtree instead of escalating up the shared launcher PG and
+    # taking out this launcher or a sibling codex. At worst a stray
+    # group-kill ends this run, which the relaunch-fresh model handles.
     result = subprocess.run(cmd, stdin=subprocess.DEVNULL,
-                            capture_output=True, text=True)
+                            capture_output=True, text=True,
+                            start_new_session=True)
 
     usage = {"input_tokens": 0, "cached_input_tokens": 0,
              "output_tokens": 0, "reasoning_output_tokens": 0}

@@ -91,7 +91,10 @@ pub use pinned_search::{
 };
 pub use push::PushEvent;
 pub use redacted::{RedactedBytes, RedactedString};
-pub use request::{RequestParams, RequestTimeoutKind};
+pub use request::{
+    RequestParams, RequestTimeoutKind, RescheduleSendParams, ScheduledSendAck,
+    ScheduledSendHandleParams,
+};
 pub use request::{
     TestBifrostArmHookAck, TestBifrostArmHookParams, TestBifrostAttachAck, TestBifrostAttachParams,
     TestBifrostChangeKind, TestBifrostDurableCursor, TestBifrostFactoryOpenAck,

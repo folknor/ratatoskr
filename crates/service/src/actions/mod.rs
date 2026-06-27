@@ -46,7 +46,7 @@ pub use mute::mute;
 pub use operation::MailOperation;
 pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 pub use pin::pin;
-pub use send::{delete_draft, send_email};
+pub use send::{cancel_scheduled_send, delete_draft, reschedule_send, send_email, send_scheduled};
 pub use service_api::actions::{
     FolderId, LabelGroupId, LabelId, SendAttachment, SendIntent, SendRequest,
 };

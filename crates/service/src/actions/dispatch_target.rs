@@ -145,6 +145,89 @@ pub(crate) async fn resolve_thread_messages(
     Ok(out)
 }
 
+pub(crate) async fn resolve_message_object_id(
+    ctx: &ActionContext,
+    account_id: &str,
+    message_id: &str,
+    provider: BifrostProviderKind,
+) -> Result<ObjectId, ActionError> {
+    let aid = account_id.to_string();
+    let mid = message_id.to_string();
+    let row = ctx
+        .db
+        .with_read(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, imap_folder, imap_uid, imap_uidvalidity \
+                     FROM messages WHERE account_id = ?1 AND id = ?2",
+                )
+                .map_err(|error| format!("prepare message object id: {error}"))?;
+            let mut rows = stmt
+                .query_map(rusqlite::params![aid, mid], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                })
+                .map_err(|error| format!("query message object id: {error}"))?;
+            match rows.next() {
+                Some(row) => {
+                    Ok(Some(row.map_err(|error| {
+                        format!("read message object id: {error}")
+                    })?))
+                }
+                None => Ok(None),
+            }
+        })
+        .await
+        .map_err(ActionError::db)?;
+
+    let Some((message_id, imap_folder, imap_uid, imap_uidvalidity)) = row else {
+        return Err(ActionError::not_found(format!(
+            "message {message_id} not found"
+        )));
+    };
+    if provider == BifrostProviderKind::Imap {
+        let folder = imap_folder.ok_or_else(|| ActionError::db("IMAP message missing folder"))?;
+        let uid = imap_uid.ok_or_else(|| ActionError::db("IMAP message missing UID"))?;
+        let uidvalidity =
+            imap_uidvalidity.ok_or_else(|| ActionError::db("IMAP message missing uidvalidity"))?;
+        Ok(ObjectId(format!(
+            "imap1:{}:{}:{}:{}",
+            folder.len(),
+            folder,
+            uidvalidity,
+            uid
+        )))
+    } else {
+        Ok(ObjectId(message_id))
+    }
+}
+
+pub(crate) async fn dispatch_send_intent_mark(
+    action_account: &ResidentActionAccount,
+    account_id: &str,
+    intent: service_api::actions::SendIntent,
+    object_id: ObjectId,
+) -> Result<(), ActionError> {
+    let account = AccountId(account_id.to_string());
+    match intent {
+        service_api::actions::SendIntent::New => Ok(()),
+        service_api::actions::SendIntent::Reply => action_account
+            .engine
+            .mark_replied(&account, object_id)
+            .await
+            .map_err(engine_error_to_action_error),
+        service_api::actions::SendIntent::Forward => action_account
+            .engine
+            .mark_forwarded(&account, object_id)
+            .await
+            .map_err(engine_error_to_action_error),
+    }
+}
+
 /// Single-thread engine dispatch: every provider arm maps a `MailOperation` to
 /// the bifrost `SyncEngine` mutation passthrough. The label arms are
 /// `unreachable!` because the action pipeline routes label / label-group ops
@@ -764,6 +847,44 @@ mod tests {
                 &dispatch_class(op),
                 expected,
                 "unexpected dispatch class for {op:?}"
+            );
+        }
+    }
+
+    /// The engine primitive each `SendIntent` arm of `dispatch_send_intent_mark`
+    /// targets. Kept as its own exhaustive match (no wildcard) so adding a
+    /// `SendIntent` variant is a compile error in BOTH the classifier and the
+    /// real reply/forward write-back dispatch - the same exhaustiveness guard
+    /// `dispatch_mutation_mapping_is_exhaustive` pins for the mutation path.
+    #[derive(Debug, PartialEq, Eq)]
+    enum SendIntentClass {
+        NoOp,
+        MarkReplied,
+        MarkForwarded,
+    }
+
+    fn send_intent_class(intent: service_api::actions::SendIntent) -> SendIntentClass {
+        use service_api::actions::SendIntent;
+        match intent {
+            SendIntent::New => SendIntentClass::NoOp,
+            SendIntent::Reply => SendIntentClass::MarkReplied,
+            SendIntent::Forward => SendIntentClass::MarkForwarded,
+        }
+    }
+
+    #[test]
+    fn send_intent_maps_to_engine_mark() {
+        use service_api::actions::SendIntent;
+        let cases = [
+            (SendIntent::New, SendIntentClass::NoOp),
+            (SendIntent::Reply, SendIntentClass::MarkReplied),
+            (SendIntent::Forward, SendIntentClass::MarkForwarded),
+        ];
+        for (intent, expected) in cases {
+            assert_eq!(
+                send_intent_class(intent),
+                expected,
+                "unexpected engine mark for {intent:?}"
             );
         }
     }

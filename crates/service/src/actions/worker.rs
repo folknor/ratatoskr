@@ -145,7 +145,14 @@ async fn run(
         // emit one `ActionCompleted` after SMTP submit (success or
         // failure). The vault directory is unlinked on terminal
         // status regardless of outcome.
-        drain_send_jobs(&action_ctx, &out_tx, &owner_bytes, &app_data_dir).await;
+        drain_send_jobs(
+            &action_ctx,
+            sync_runtime,
+            &out_tx,
+            &owner_bytes,
+            &app_data_dir,
+        )
+        .await;
         // Phase 2 task 17: walk the snooze table for due threads and
         // unsnooze them via the standard `snooze::unsnooze` action.
         // Triggered by `pending_ops.kick`; same wakeup as the journal
@@ -295,6 +302,7 @@ async fn run_mark_chat_read(
 /// final `ActionCompleted` is the only wire signal the UI receives.
 async fn drain_send_jobs(
     ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
     out_tx: &mpsc::Sender<Vec<u8>>,
     owner: &[u8; 16],
     app_data_dir: &std::path::Path,
@@ -308,7 +316,7 @@ async fn drain_send_jobs(
                 return;
             }
         };
-        if let Err(error) = run_send(ctx, out_tx, &job, app_data_dir).await {
+        if let Err(error) = run_send(ctx, sync_runtime, out_tx, &job, app_data_dir).await {
             log::warn!(
                 "action worker: send job {:?} failed at worker layer: {error}",
                 job.job_id,
@@ -352,6 +360,7 @@ async fn drain_send_jobs(
 
 async fn run_send(
     ctx: &ActionContext,
+    sync_runtime: Option<&crate::sync::SyncRuntime>,
     out_tx: &mpsc::Sender<Vec<u8>>,
     job: &LeasedQuietJob,
     app_data_dir: &std::path::Path,
@@ -361,6 +370,7 @@ async fn run_send(
     let payload: JournaledSend = serde_json::from_slice(&job.payload)
         .map_err(|e| format!("deserialize JournaledSend: {e}"))?;
     let send_id = payload.send_id;
+    let scheduled_at = payload.message.scheduled_at.or(payload.scheduled_at);
 
     // Read each vault file's bytes synchronously inside spawn_blocking
     // (the SendRequest carries inline Vec<u8>; the existing send_email
@@ -374,7 +384,11 @@ async fn run_send(
         }
     };
 
-    let outcome = super::send::send_email(ctx, request).await;
+    let outcome = if let Some(scheduled_at) = scheduled_at {
+        super::send::send_scheduled(ctx, sync_runtime, request, scheduled_at).await
+    } else {
+        super::send::send_email(ctx, sync_runtime, request).await
+    };
 
     let (status, summary) = match &outcome {
         ActionOutcome::Success | ActionOutcome::NoOp => (
@@ -432,7 +446,10 @@ async fn build_send_request(
             attachments.push(crate::send::SendAttachment {
                 filename: att.filename,
                 mime_type: att.mime,
-                data,
+                // `Bytes::from(Vec<u8>)` reuses the read buffer's allocation
+                // (no copy); from here the payload rides by ref-count all the
+                // way into bifrost's `AttachmentInline`.
+                data: data.into(),
                 content_id: att.content_id,
             });
         }

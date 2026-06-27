@@ -22,6 +22,7 @@
 //! enforces this at compile time.
 
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 use uuid::Uuid;
 
 use crate::notification::WithGeneration;
@@ -367,6 +368,8 @@ pub struct SendWireMessage {
     pub source_message_id: Option<String>,
     #[serde(default)]
     pub intent: SendIntent,
+    #[serde(default)]
+    pub scheduled_at: Option<SystemTime>,
 }
 
 /// Per-attachment metadata carried over the wire. The bytes themselves
@@ -413,6 +416,8 @@ pub struct SendWireRequest {
     pub from_account_id: String,
     pub message: SendWireMessage,
     pub attachments: Vec<SendWireAttachment>,
+    #[serde(default)]
+    pub scheduled_at: Option<SystemTime>,
 }
 
 /// Synchronous response to `action.send`. The handler has validated
@@ -710,6 +715,7 @@ mod tests {
                 thread_id: None,
                 source_message_id: None,
                 intent: SendIntent::New,
+                scheduled_at: None,
             },
             attachments: vec![SendWireAttachment {
                 source: SendAttachmentSource::StagingFile {
@@ -721,6 +727,7 @@ mod tests {
                 filename: "report.pdf".into(),
                 content_id: None,
             }],
+            scheduled_at: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         let recovered: SendWireRequest = serde_json::from_value(json).expect("deserialize");

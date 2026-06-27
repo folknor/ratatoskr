@@ -911,8 +911,46 @@ check` green - read the B4b landing commit.
   while a `Reconcile` / `Retry` one does, and reconciled the per-op retry
   BUDGETS (`retry_policy`: folder 10 / label 7 / flags 5) downstream of the one
   `is_retryable()` gate. Needed B1, A1-A2 (all satisfied).
-- B5. Send plus drafts. Rewire onto `send_message` / `draft_*` plus scheduled
-  send. Needs A2, A4.
+- B5. Send plus drafts. LANDED - the send / drafts / scheduled-send / MDN action
+  paths now dispatch through the resident bifrost `SyncEngine` (`engine.send_message`
+  / `send_raw_message` / `draft_discard` / `mark_replied` / `mark_forwarded`), with
+  `to_bifrost_send_request` mapping ratatoskr's `SendRequest` onto bifrost's
+  (per-element address parse, inline-attachment `content_id` carry,
+  `request_read_receipt` set to preserve the outgoing read-receipt request), the
+  RFC 8098 MDN sent as raw bytes via `engine.send_raw_message` at the two `batch.rs`
+  follow-up sites, the `lettre` assembler retired, Gmail header-based threading
+  preserved, scheduled send wired end-to-end (`scheduled_at` IPC field, journaled
+  job, worker route, cancel/reschedule verbs, capability-gated via
+  `engine.account_capabilities(..).pim_methods.scheduled_send`), and a failed send
+  job finalizing terminal (not re-leased). The legacy `ProviderOps` send impls stay
+  live until B15. Required two side-quests: B5-SQ advanced bifrost to `8ea29b6` (the
+  `SyncEngine` compose passthroughs - `send_message` / `draft_*` /
+  `cancel_scheduled_send` / `reschedule_send` / `account_capabilities`, the real new
+  `send_raw_message` `Account` trait method across all four mail crates, `content_id`
+  on `AttachmentInline`, `request_read_receipt` on `SendRequest`); and a `saehrimnir`
+  send side-quest (SMTP `SIZE` 256 MiB + submission header projection, JMAP
+  `Blob/upload` + `Email/import` + `EmailSubmission/set`, Gmail `messages.send`,
+  Graph send-to-Sent, scheduled-send acknowledgement) - an installed mock binary,
+  not commit-pinned. Gated by `brokkr check` green, the `scheduled_send_capability_gate`
+  / `send_intent_maps_to_engine_mark` / `to_bifrost_send_request` unit tests, the
+  `gmail-` / `imap-scheduled-send-rejected.lua` capability gates, and 45/46
+  `service-suite` (the one red gate is the deferred B5-FIX below). Two follow-ups
+  ride out of B5, each its own item:
+- B5-FIX. The `compose_send_50mb_attachment` service-harness gate regressed under
+  B5: a 50 MB-attachment send fails with `Remote(Transient): transport.network`
+  ~533 ms into bifrost's SMTP send. The ratatoskr-side double-buffer was fixed
+  (`SendAttachment.data` is now ref-counted `bytes::Bytes`) and saehrimnir's SMTP
+  `SIZE` was raised to 256 MiB, but the failure persists past the EHLO SIZE stage
+  (IMAP connect logs, then the SMTP send errors fast) - the root cause is a deeper
+  bifrost-smtp / large-DATA / transport issue still to be pinned. B5 landed with
+  this single gate red, by explicit decision; fixing it is this item.
+- B5-GATES. The per-provider send / MDN / scheduled-send ROUND-TRIP harness gates
+  (`jmap-` / `gmail-` / `graph-send-writeback.lua`, the MDN scripts, the delegated
+  `*-scheduled-send.lua`, and `imap-draft-discard.lua` - the last needs a test-only
+  `delete_draft` IPC trigger) were NOT built in B5: the `saehrimnir` send side-quest
+  that unblocks them only landed at B5's tail. The mock now supports them
+  (`EmailSubmission/set`, `messages.send`, Graph send-to-Sent, the SMTP header
+  projection); building and pinning these round-trip gates is this item.
 - B6. Folders, labels, containers. Rewire onto `container_*` / `apply_label`
   plus folder/label sync. Needs B3.
 - B7. Calendar. Replace the `calendar` crate's per-provider sync (the largest
@@ -1037,7 +1075,7 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `75cf810`: eight bifrost side-quests have landed since the
+frozen reference is `8ea29b6`: nine bifrost side-quests have landed since the
 A8-closing commit (see § 2's side-quest protocol), and both `./research/bifrost`
 and `../bifrost` were re-synced together to each in turn. First `aa9172d` ("sync:
 make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
@@ -1097,6 +1135,18 @@ object-level mutations through the resident engine without the engine-private
 (Graph `@odata.etag` + `If-Match` on PATCH / move / DELETE including inside
 `$batch`, Gmail `messages.modify` / `batchModify` / `batchDelete`, and IMAP
 RFC 6851 `UID MOVE`), again an installed external binary, not commit-pinned here.
+B5-SQ (B5's bifrost prerequisite) advanced the freeze a ninth time, to `8ea29b6`:
+the `SyncEngine` compose passthrough cluster (`send_message` / `draft_create` /
+`draft_update` / `draft_discard` / `draft_send` / `cancel_scheduled_send` /
+`reschedule_send` + the non-async `account_capabilities` accessor), a real new
+`send_raw_message` `Account` trait method (no raw-send existed) implemented across
+gmail / graph / jmap / imap for the pre-assembled RFC 8098 MDN, plus two send
+feature-preservation type additions - `content_id` on `AttachmentInline` and
+`request_read_receipt` on `SendRequest`. B5's mock work was a separate `saehrimnir`
+send side-quest (SMTP `SIZE` raise + submission header projection, JMAP
+`Blob/upload` + `Email/import` + `EmailSubmission/set`, Gmail `messages.send`, Graph
+send-to-Sent, scheduled-send acknowledgement), again an installed external binary,
+not commit-pinned here.
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -

@@ -25,6 +25,7 @@
 //! `<app_data>/send_vault/` live on the same volume.
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use db::db::action_journal::insert_quiet_job;
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,8 @@ pub(crate) struct JournaledSend {
     pub account_id: String,
     pub message: JournaledMessage,
     pub attachments: Vec<JournaledAttachment>,
+    #[serde(default)]
+    pub scheduled_at: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +68,8 @@ pub(crate) struct JournaledMessage {
     pub source_message_id: Option<String>,
     #[serde(default)]
     pub intent: service_api::SendIntent,
+    #[serde(default)]
+    pub scheduled_at: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,8 +205,10 @@ fn transfer_attachments(
             thread_id: request.message.thread_id,
             source_message_id: request.message.source_message_id,
             intent: request.message.intent,
+            scheduled_at: request.message.scheduled_at.or(request.scheduled_at),
         },
         attachments: journaled_attachments,
+        scheduled_at: request.scheduled_at,
     })
 }
 

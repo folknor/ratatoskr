@@ -249,8 +249,11 @@ pub struct SendAttachment {
     pub filename: String,
     /// MIME type (e.g. `application/pdf`).
     pub mime_type: String,
-    /// Raw file bytes.
-    pub data: Vec<u8>,
+    /// Raw file bytes. `Bytes` (not `Vec<u8>`) so the mapping into
+    /// bifrost's `AttachmentInline` is an O(1) ref-count bump sharing one
+    /// heap buffer, rather than a full re-copy of a (potentially 50 MB+)
+    /// payload. See `crate::send::to_bifrost_send_request`.
+    pub data: bytes::Bytes,
     /// Optional Content-ID for inline images (without angle brackets).
     pub content_id: Option<String>,
 }

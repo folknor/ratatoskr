@@ -1,6 +1,7 @@
 mod account;
 mod action;
 mod action_mark_chat_read;
+mod action_scheduled_send;
 mod action_send;
 mod action_status;
 mod attachment;
@@ -57,6 +58,12 @@ pub(crate) async fn dispatch(
             action_mark_chat_read::handle(&boot_state, chat_email).await
         }
         RequestParams::ActionSend { request } => action_send::handle(&boot_state, *request).await,
+        RequestParams::ActionCancelScheduledSend { params } => {
+            action_scheduled_send::handle_cancel(&boot_state, params).await
+        }
+        RequestParams::ActionRescheduleSend { params } => {
+            action_scheduled_send::handle_reschedule(&boot_state, params).await
+        }
         RequestParams::SyncStartAccount { params } => {
             sync::handle_start_account(&boot_state, params).await
         }

@@ -1,28 +1,23 @@
-//! Core email send pipeline - shared infrastructure for building and sending
-//! RFC 2822 MIME messages.
+//! Core email send pipeline helpers.
 //!
 //! This module provides:
 //! - [`SendRequest`] - all data needed to send an email
-//! - [`build_mime_message`] - assembles a proper MIME message and returns raw bytes
+//! - [`to_bifrost_send_request`] - maps the app-facing request to bifrost
 //! - Draft lifecycle helpers - `delete_local_draft`, `mark_draft_failed`
-//!
-//! Provider-specific send logic lives in each provider crate. This module
-//! produces the raw RFC 2822 bytes that providers consume (Gmail uploads raw
-//! MIME, SMTP sends raw MIME, JMAP may use parts differently).
 
-use chrono::Utc;
-use lettre::message::{
-    Attachment, Mailbox, MessageBuilder, MultiPart, SinglePart, header::ContentType,
-};
+use std::time::SystemTime;
 
-use common::encoding::encode_base64url_nopad;
+use bifrost_types::{Address, AttachmentInline};
+use lettre::message::Mailbox;
 pub use service_api::actions::{SendAttachment, SendIntent, SendRequest};
 use service_state::WriteDbState;
+
+use crate::actions::ActionError;
 
 /// Errors that can occur during the send pipeline.
 #[derive(Debug, Clone)]
 pub enum SendError {
-    /// The MIME message could not be assembled.
+    /// The request could not be mapped to bifrost's structured send shape.
     Build(String),
 }
 
@@ -36,8 +31,6 @@ impl std::fmt::Display for SendError {
 
 impl std::error::Error for SendError {}
 
-// ── MIME construction ────────────────────────────────────────
-
 /// Parse an address string into a lettre `Mailbox`.
 ///
 /// Accepts both `"alice@example.com"` and `"Alice <alice@example.com>"` forms.
@@ -46,103 +39,76 @@ fn parse_mailbox(addr: &str) -> Result<Mailbox, SendError> {
         .map_err(|e| SendError::Build(format!("Invalid address '{addr}': {e}")))
 }
 
-/// Build an RFC 2822 MIME message from a [`SendRequest`].
-///
-/// Returns the raw message bytes suitable for:
-/// - Gmail raw upload (base64url-encode the bytes)
-/// - SMTP transport (send directly)
-/// - JMAP blob upload
-///
-/// The message uses `multipart/alternative` for text/html bodies, wrapped in
-/// `multipart/mixed` when attachments are present.
-pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
-    // ── Headers ──────────────────────────────────────────
-    let from_mbox = parse_mailbox(&req.from)?;
-    let mut builder: MessageBuilder = lettre::Message::builder().from(from_mbox).date_now();
-
-    for addr in &req.to {
-        builder = builder.to(parse_mailbox(addr)?);
+fn address_from_mailbox(mailbox: Mailbox) -> Address {
+    let email = mailbox.email.to_string();
+    match mailbox.name {
+        Some(name) => Address::named(name, email),
+        None => Address::bare(email),
     }
-    for addr in &req.cc {
-        builder = builder.cc(parse_mailbox(addr)?);
-    }
-    for addr in &req.bcc {
-        builder = builder.bcc(parse_mailbox(addr)?);
-    }
-
-    builder = builder.subject(req.subject.as_deref().unwrap_or("").to_string());
-
-    if let Some(ref in_reply_to) = req.in_reply_to {
-        builder = builder.in_reply_to(in_reply_to.clone());
-    }
-    if let Some(ref refs) = req.references {
-        // References header contains space-separated Message-IDs.
-        // lettre's .references() adds one ID at a time.
-        for msg_id_ref in refs.split_whitespace() {
-            builder = builder.references(msg_id_ref.to_string());
-        }
-    }
-
-    // Generate a unique Message-ID
-    let msg_id = format!(
-        "<{}.{}@ratatoskr>",
-        uuid::Uuid::new_v4(),
-        Utc::now().timestamp()
-    );
-    builder = builder.message_id(Some(msg_id));
-
-    // ── Body ─────────────────────────────────────────────
-    let text_part = SinglePart::builder()
-        .header(ContentType::TEXT_PLAIN)
-        .body(req.body_text.clone());
-
-    let html_part = SinglePart::builder()
-        .header(ContentType::TEXT_HTML)
-        .body(req.body_html.clone());
-
-    let alternative = MultiPart::alternative()
-        .singlepart(text_part)
-        .singlepart(html_part);
-
-    let message = if req.attachments.is_empty() {
-        builder
-            .multipart(alternative)
-            .map_err(|e| SendError::Build(format!("Failed to build message: {e}")))?
-    } else {
-        // Wrap in multipart/mixed with attachments
-        let mut mixed = MultiPart::mixed().multipart(alternative);
-
-        for att in &req.attachments {
-            let content_type = att
-                .mime_type
-                .parse::<ContentType>()
-                .or_else(|_| ContentType::parse("application/octet-stream"))
-                .map_err(|e| SendError::Build(format!("Content-Type parse error: {e}")))?;
-
-            let attachment = if let Some(ref cid) = att.content_id {
-                // Inline attachment (e.g. embedded image referenced by cid)
-                Attachment::new_inline(cid.clone()).body(att.data.clone(), content_type)
-            } else {
-                Attachment::new(att.filename.clone()).body(att.data.clone(), content_type)
-            };
-
-            mixed = mixed.singlepart(attachment);
-        }
-
-        builder
-            .multipart(mixed)
-            .map_err(|e| SendError::Build(format!("Failed to build message: {e}")))?
-    };
-
-    Ok(message.formatted())
 }
 
-/// Build a MIME message and return it as a base64url-encoded string (no padding).
-///
-/// This is the format expected by `ProviderOps::send_email` and the Gmail API.
-pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendError> {
-    let raw = build_mime_message(req)?;
-    Ok(encode_base64url_nopad(&raw))
+fn parse_address(addr: &str) -> Result<Address, SendError> {
+    parse_mailbox(addr).map(address_from_mailbox)
+}
+
+fn parse_addresses(values: &[String]) -> Result<Vec<Address>, SendError> {
+    values.iter().map(|addr| parse_address(addr)).collect()
+}
+
+/// Map ratatoskr's consumer-facing send request to bifrost's structured
+/// `SendRequest`. Each `to` / `cc` / `bcc` entry is parsed as one full RFC
+/// 5322 address. Do not comma-split these Vec entries.
+pub fn to_bifrost_send_request(
+    req: &SendRequest,
+    scheduled: Option<SystemTime>,
+) -> Result<bifrost_types::SendRequest, ActionError> {
+    // `bifrost_types::SendRequest` is `#[non_exhaustive]`, so it cannot be
+    // built with a struct literal (even with `..Default::default()`) from
+    // outside its crate. Construct the default and assign the public fields.
+    // The unset fields (`identity`, `reply_to`, `attachments_uploaded`,
+    // `save_to_sent`, `send_as`) keep their protocol defaults:
+    // `save_to_sent = None` preserves today's behavior (the sent copy
+    // returns via sync); `send_as`/`identity` stay default until B12/B13.
+    let mut bifrost_request = bifrost_types::SendRequest::default();
+    bifrost_request.from =
+        Some(parse_address(&req.from).map_err(|e| ActionError::build(format!("{e}")))?);
+    bifrost_request.to =
+        parse_addresses(&req.to).map_err(|e| ActionError::build(format!("{e}")))?;
+    bifrost_request.cc =
+        parse_addresses(&req.cc).map_err(|e| ActionError::build(format!("{e}")))?;
+    bifrost_request.bcc =
+        parse_addresses(&req.bcc).map_err(|e| ActionError::build(format!("{e}")))?;
+    bifrost_request.subject = req.subject.clone();
+    bifrost_request.body_text = Some(req.body_text.clone());
+    bifrost_request.body_html = Some(req.body_html.clone());
+    bifrost_request.attachments_inline = req
+        .attachments
+        .iter()
+        .map(|att| AttachmentInline {
+            filename: att.filename.clone(),
+            mime: att.mime_type.clone(),
+            // `att.data` is already `Bytes`; cloning it is an O(1) ref-count
+            // bump that shares the one heap buffer with the consumer-facing
+            // request, NOT a re-copy of the payload. A 50 MB attachment is
+            // therefore resident exactly once across both request shapes
+            // (was `Bytes::copy_from_slice`, a full second allocation + memcpy
+            // held live alongside the original for the whole send).
+            data: att.data.clone(),
+            inline: att.content_id.is_some(),
+            content_id: att.content_id.clone(),
+        })
+        .collect();
+    bifrost_request.in_reply_to = req.in_reply_to.clone();
+    bifrost_request.references = req
+        .references
+        .as_deref()
+        .map(|refs| refs.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
+    bifrost_request.scheduled = scheduled;
+    // Preserve the unconditional outgoing read-receipt request the four
+    // legacy `ProviderOps::send_email` impls injected on every send.
+    bifrost_request.request_read_receipt = true;
+    Ok(bifrost_request)
 }
 
 // ── Draft lifecycle ──────────────────────────────────────────
@@ -221,95 +187,73 @@ mod tests {
     }
 
     #[test]
-    fn test_build_mime_no_attachments() {
+    fn to_bifrost_send_request_maps_addresses_without_comma_splitting() {
         let req = minimal_request();
-        let raw = build_mime_message(&req).expect("should build");
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("From: alice@example.com"));
-        assert!(text.contains("To: bob@example.com"));
-        assert!(text.contains("Subject: Test subject"));
-        assert!(text.contains("multipart/alternative"));
-        assert!(text.contains("Hello"));
-        assert!(text.contains("<p>Hello</p>"));
+        let mapped = to_bifrost_send_request(&req, None).expect("map");
+        assert_eq!(mapped.to.len(), 1);
+        assert_eq!(mapped.to[0].address, "bob@example.com");
+        assert_eq!(mapped.subject.as_deref(), Some("Test subject"));
+        assert_eq!(mapped.body_text.as_deref(), Some("Hello"));
+        assert_eq!(mapped.body_html.as_deref(), Some("<p>Hello</p>"));
+        assert!(mapped.request_read_receipt);
     }
 
     #[test]
-    fn test_build_mime_with_attachments() {
+    fn to_bifrost_send_request_carries_inline_content_id() {
         let mut req = minimal_request();
         req.attachments.push(SendAttachment {
             filename: "test.txt".to_string(),
             mime_type: "text/plain".to_string(),
-            data: b"file content".to_vec(),
+            data: b"file content".to_vec().into(),
             content_id: None,
         });
 
-        let raw = build_mime_message(&req).expect("should build");
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("multipart/mixed"));
-        assert!(text.contains("test.txt"));
+        req.attachments[0].content_id = Some("cid-1".to_string());
+        let mapped = to_bifrost_send_request(&req, None).expect("map");
+        assert_eq!(mapped.attachments_inline.len(), 1);
+        assert_eq!(
+            mapped.attachments_inline[0].content_id.as_deref(),
+            Some("cid-1")
+        );
+        assert!(mapped.attachments_inline[0].inline);
     }
 
     #[test]
-    fn test_build_mime_with_reply_headers() {
+    fn to_bifrost_send_request_carries_reply_headers_and_schedule() {
         let mut req = minimal_request();
         req.in_reply_to = Some("<original@example.com>".to_string());
         req.references = Some("<root@example.com> <original@example.com>".to_string());
+        let scheduled = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(42);
 
-        let raw = build_mime_message(&req).expect("should build");
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("In-Reply-To:"));
-        assert!(text.contains("References:"));
+        let mapped = to_bifrost_send_request(&req, Some(scheduled)).expect("map");
+        assert_eq!(
+            mapped.in_reply_to.as_deref(),
+            Some("<original@example.com>")
+        );
+        assert_eq!(
+            mapped.references,
+            vec!["<root@example.com>", "<original@example.com>"]
+        );
+        assert_eq!(mapped.scheduled, Some(scheduled));
     }
 
     #[test]
-    fn test_build_mime_with_display_name() {
+    fn to_bifrost_send_request_preserves_display_names() {
         let mut req = minimal_request();
         req.from = "Alice Smith <alice@example.com>".to_string();
         req.to = vec!["Bob Jones <bob@example.com>".to_string()];
 
-        let raw = build_mime_message(&req).expect("should build");
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("Alice Smith"));
-    }
-
-    #[test]
-    fn test_build_mime_cc_bcc() {
-        let mut req = minimal_request();
-        req.cc = vec!["carol@example.com".to_string()];
-        req.bcc = vec!["secret@example.com".to_string()];
-
-        let raw = build_mime_message(&req).expect("should build");
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("Cc: carol@example.com"));
-        // Bcc recipients are part of send-time envelope handling, but lettre
-        // does not serialize a Bcc header into the final MIME.
-        assert!(!text.contains("Bcc:"));
-    }
-
-    #[test]
-    fn test_build_mime_base64url() {
-        let req = minimal_request();
-        let encoded = build_mime_message_base64url(&req).expect("should encode");
-        // Should be valid base64url (no +, /, or = characters)
-        assert!(!encoded.contains('+'));
-        assert!(!encoded.contains('/'));
-        assert!(!encoded.contains('='));
-    }
-
-    #[test]
-    fn test_build_mime_message_id_present() {
-        let req = minimal_request();
-        let raw = build_mime_message(&req).expect("should build");
-        let text = String::from_utf8_lossy(&raw);
-        assert!(text.contains("Message-ID:"));
-        assert!(text.contains("@ratatoskr>"));
+        let mapped = to_bifrost_send_request(&req, None).expect("map");
+        let from = mapped.from.expect("from");
+        assert_eq!(from.name.as_deref(), Some("Alice Smith"));
+        assert_eq!(mapped.to[0].name.as_deref(), Some("Bob Jones"));
     }
 
     #[test]
     fn test_invalid_from_address() {
         let mut req = minimal_request();
         req.from = "not an email".to_string();
-        let result = build_mime_message(&req);
+        let result = to_bifrost_send_request(&req, None);
         assert!(result.is_err());
     }
 
@@ -317,7 +261,7 @@ mod tests {
     fn test_invalid_to_address() {
         let mut req = minimal_request();
         req.to = vec!["not an email".to_string()];
-        let result = build_mime_message(&req);
+        let result = to_bifrost_send_request(&req, None);
         assert!(result.is_err());
     }
 }

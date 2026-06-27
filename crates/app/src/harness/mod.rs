@@ -2375,6 +2375,14 @@ fn request_params_from_lua(
                 request: Box::new(request),
             })
         }
+        "ActionCancelScheduledSend" | "action.cancel_scheduled_send" => {
+            let params = parse_scheduled_send_handle(state, params_idx)?;
+            Ok(RequestParams::ActionCancelScheduledSend { params })
+        }
+        "ActionRescheduleSend" | "action.reschedule_send" => {
+            let params = parse_reschedule_send(state, params_idx)?;
+            Ok(RequestParams::ActionRescheduleSend { params })
+        }
         "ActionMarkChatRead" | "action.mark_chat_read" => {
             let chat_email = if state.get_top() >= params_idx as usize
                 && state.typ(params_idx) == LuaType::Table
@@ -3250,12 +3258,55 @@ fn parse_send_request(state: &mut State, params_idx: isize) -> dellingr::Result<
         .ok_or_else(|| lua_error_message("ActionSend requires from_account_id"))?;
     let message = parse_send_message(state, params_idx)?;
     let attachments = parse_send_attachments(state, params_idx)?;
+    let scheduled_at = parse_optional_system_time(state, params_idx, "scheduled_at")?;
     state.set_top(top as isize);
     Ok(SendWireRequest {
         send_id,
         from_account_id,
         message,
         attachments,
+        scheduled_at,
+    })
+}
+
+fn parse_scheduled_send_handle(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<service_api::ScheduledSendHandleParams> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message(
+            "ActionCancelScheduledSend requires params table",
+        ));
+    }
+    let account_id = get_string_field(state, params_idx, "account_id")?
+        .ok_or_else(|| lua_error_message("ActionCancelScheduledSend requires account_id"))?;
+    let remote_message_id = get_string_field(state, params_idx, "remote_message_id")?
+        .ok_or_else(|| lua_error_message("ActionCancelScheduledSend requires remote_message_id"))?;
+    Ok(service_api::ScheduledSendHandleParams {
+        account_id,
+        remote_message_id,
+    })
+}
+
+fn parse_reschedule_send(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<service_api::RescheduleSendParams> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message(
+            "ActionRescheduleSend requires params table",
+        ));
+    }
+    let account_id = get_string_field(state, params_idx, "account_id")?
+        .ok_or_else(|| lua_error_message("ActionRescheduleSend requires account_id"))?;
+    let remote_message_id = get_string_field(state, params_idx, "remote_message_id")?
+        .ok_or_else(|| lua_error_message("ActionRescheduleSend requires remote_message_id"))?;
+    let scheduled_at = parse_optional_system_time(state, params_idx, "scheduled_at")?
+        .ok_or_else(|| lua_error_message("ActionRescheduleSend requires scheduled_at"))?;
+    Ok(service_api::RescheduleSendParams {
+        account_id,
+        remote_message_id,
+        scheduled_at,
     })
 }
 
@@ -3286,9 +3337,28 @@ fn parse_send_message(state: &mut State, request_idx: isize) -> dellingr::Result
         thread_id: get_string_field(state, message_idx, "thread_id")?,
         source_message_id: get_string_field(state, message_idx, "source_message_id")?,
         intent: parse_send_intent(state, message_idx)?,
+        scheduled_at: parse_optional_system_time(state, message_idx, "scheduled_at")?,
     };
     state.set_top(top as isize);
     Ok(message)
+}
+
+fn parse_optional_system_time(
+    state: &mut State,
+    table_idx: isize,
+    key: &str,
+) -> dellingr::Result<Option<std::time::SystemTime>> {
+    let Some(seconds) = get_number_field(state, table_idx, key)? else {
+        return Ok(None);
+    };
+    if !seconds.is_finite() || seconds < 0.0 || seconds.fract() != 0.0 {
+        return Err(lua_error_message(format!(
+            "{key} must be a non-negative Unix timestamp in seconds"
+        )));
+    }
+    Ok(Some(
+        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds as u64),
+    ))
 }
 
 fn parse_send_intent(state: &mut State, message_idx: isize) -> dellingr::Result<SendIntent> {
