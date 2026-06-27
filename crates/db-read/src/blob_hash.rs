@@ -42,7 +42,8 @@ impl BlobHash {
             return Err(BlobHashError::WrongHexLen(s.len()));
         }
         let mut buf = [0u8; 32];
-        for (i, chunk) in s.as_bytes().chunks_exact(2).enumerate() {
+        let (chunks, _) = s.as_bytes().as_chunks::<2>();
+        for (i, chunk) in chunks.iter().enumerate() {
             let hi = hex_nibble(chunk[0])?;
             let lo = hex_nibble(chunk[1])?;
             buf[i] = (hi << 4) | lo;

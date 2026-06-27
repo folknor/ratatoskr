@@ -49,7 +49,7 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
 }
 
 pub async fn db_get_all_accounts(db: &ReadDbState) -> Result<Vec<DbAccount>, String> {
-    db.with_read(move |conn| get_all_accounts_sync(conn)).await
+    db.with_read(get_all_accounts_sync).await
 }
 
 pub async fn db_get_account(db: &ReadDbState, id: String) -> Result<Option<DbAccount>, String> {

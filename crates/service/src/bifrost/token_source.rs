@@ -145,6 +145,9 @@ struct TokenRefreshResult {
     expires_at: i64,
 }
 
+// `Error` is bifrost_net's error type, fixed by the `TokenSource` trait, so the
+// large `Err` variant can't be boxed away here.
+#[allow(clippy::result_large_err)]
 async fn refresh_oauth_token_typed(
     http: &reqwest::Client,
     token_endpoint: &str,

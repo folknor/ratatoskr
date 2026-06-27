@@ -388,9 +388,7 @@ impl Component for ReadingPane {
             }
             ReadingPaneMessage::ToggleAllMessages => {
                 let all_expanded = self.message_expanded.iter().all(|&e| e);
-                for e in &mut self.message_expanded {
-                    *e = !all_expanded;
-                }
+                self.message_expanded.fill(!all_expanded);
                 (Task::none(), None)
             }
             ReadingPaneMessage::ToggleAttachmentsCollapsed => {

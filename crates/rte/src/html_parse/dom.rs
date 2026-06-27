@@ -291,7 +291,7 @@ impl TreeSink for Sink {
     }
 
     fn reparent_children(&self, node: &Handle, new_parent: &Handle) {
-        let children: Vec<Handle> = node.borrow_mut().children.drain(..).collect();
+        let children: Vec<Handle> = std::mem::take(&mut node.borrow_mut().children);
         for child in children {
             child.borrow_mut().parent = Some(Rc::clone(new_parent));
             new_parent.borrow_mut().children.push(child);

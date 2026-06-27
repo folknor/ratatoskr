@@ -98,8 +98,9 @@ fn decode_utf7_part(text: &str) -> String {
         .expect("invalid modified UTF-7 mailbox name");
 
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    for chunk in bytes.chunks_exact(2) {
-        units.push(u16::from_be_bytes([chunk[0], chunk[1]]));
+    let (chunks, _) = bytes.as_chunks::<2>();
+    for chunk in chunks {
+        units.push(u16::from_be_bytes(*chunk));
     }
 
     std::char::decode_utf16(units)

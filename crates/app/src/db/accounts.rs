@@ -23,7 +23,7 @@ impl Db {
     }
 
     pub fn get_send_identity_emails_sync(&self) -> Result<Vec<String>, String> {
-        self.with_read_sync(|conn| rtsk::send_identity::get_all_send_identity_emails(conn))
+        self.with_read_sync(rtsk::send_identity::get_all_send_identity_emails)
     }
 
     pub async fn get_accounts(&self) -> Result<Vec<Account>, String> {
