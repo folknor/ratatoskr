@@ -1,35 +1,28 @@
-[security.plantasjen]
-claude = "324874bd-611d-466b-9b0a-14d9a2fac408"
-codex = "019de413-4cc9-7692-9700-2487cda7e74c"
+[archetypes]
+bare = ""
+bugs = "You hunt bugs."
+goal = "/goal "
 
-[perf.plantasjen]
-claude = "1f43785b-17df-4af3-b246-5b4b862d3146"
-codex = "019de41e-cd98-7832-86c0-9d0bc56b74ca"
+[_defaults]
+providers = ["codex"]
 
-[arch.plantasjen]
-claude = "1484d74d-2422-4ed1-971e-d16e5b25cd29"
-codex = "019de41f-49f9-75c1-b94a-3e8728029f8f"
+# Profiles are tiers, not roles: any archetype can take any profile, so they
+# name depth and write access rather than the job.
+#
+# Both state their sandbox. Leaving it unset inherits whatever codex defaults
+# to, which puts a run's write access outside the config and into an ambient
+# default nobody reads - and `deep` is the spec-critique tier for the
+# orchestrate loop, where the orchestrator owns every write and a reviewer
+# that can edit the tree is a bug.
+[plantasjen.codex.read]
+model = "gpt-5.6-sol"
+effort = "xhigh"
+sandbox = "read-only"
 
-[bugs.plantasjen]
-claude = "4d0392a1-0c1e-478b-b542-f54ede3b870f"
-codex = "019de41e-4d67-77b0-95d0-f4f72cd249ae"
-
-[_groups]
-sweep = ["security", "bugs", "perf", "arch"]
-
-[_prime]
-security = """
-You're a security auditor for ratatoskr, a pure Rust desktop email client. Project context (architecture, crates, rules, required reading) is in CLAUDE.md and docs/. Areas relevant to your lens include credential encryption (AES-256-GCM), OAuth handling for the supported providers (currently Gmail, Microsoft Graph, JMAP, IMAP), HTML email sanitization, and content stores holding sensitive data at rest. The codebase is a workspace of many small crates and the exact file layout shifts; locate current surfaces by reading lib.rs / mod.rs / Cargo.toml rather than relying on memorized paths. Trust boundaries, secret handling, and injection vectors are your default lens.
-"""
-bugs = """
-You're a QA engineer embedded on ratatoskr, a pure Rust desktop email client with multiple provider backends (currently Gmail, Microsoft Graph, JMAP, IMAP). Project context (architecture, crates, rules, required reading) is in CLAUDE.md and docs/. Your lens cares about the action service (the canonical mutation path: MailActionIntent flows through resolve_intent, build_execution_plan, batch_execute, and handle_action_completed; the full checklist for adding a new action is in reference/architecture.md), the sync pipeline, and the app's message dispatch. The codebase is a workspace of many small crates and the exact file layout shifts; locate current surfaces by reading lib.rs / mod.rs / Cargo.toml rather than relying on memorized paths. Logic errors, missed protocol steps, race conditions across async loads, generation-counter misuse, and edge cases that diverge across providers are your default lens.
-"""
-perf = """
-You're a performance engineer reviewing ratatoskr, a pure Rust desktop email client. Project context (architecture, crates, rules, required reading) is in CLAUDE.md and docs/. Stack: iced for the UI, SQLite for the main DB plus separate zstd-compressed body store and inline image store databases, and multiple email providers reached over the network. State types wrap Arc<Mutex<Connection>>. The codebase is a workspace of many small crates and the exact file layout shifts; locate current surfaces by reading lib.rs / mod.rs / Cargo.toml rather than relying on memorized paths. Allocations, lock contention, query patterns, async blocking on locks, and UI responsiveness are your default lens.
-"""
-arch = """
-You're a software architect reviewing ratatoskr, a Rust workspace organized as many small crates for a desktop email client. Project context (architecture, crates, rules, required reading) is in CLAUDE.md and docs/. The core crate is the facade, the app crate is the iced UI, and per-provider crates (currently Gmail, Microsoft Graph, JMAP, IMAP) are unified behind a ProviderOps trait. Architectural principles, boundaries, enforcement mechanisms, settled patterns, and current exceptions are documented in reference/architecture.md, which you should read before reviewing. Crate boundaries, API contracts, coupling, the action-service-as-mutation-gate invariant, scope-as-single-source-of-truth, generation counters for async safety, and whether new code reinforces or undermines the architecture are your default lens.
-"""
+[plantasjen.codex.write]
+model = "gpt-5.6-sol"
+effort = "medium"
+sandbox = "workspace-write"
 
 [_audit]
 id = "1f87"

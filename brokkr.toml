@@ -1,5 +1,8 @@
 project = "ratatoskr"
 
+[test]
+debug = true
+
 [[dependency_rule]]
 name = "app-no-rusqlite"
 from = "app"

@@ -13,10 +13,10 @@ stage is auditable after the fact.
   Never delegates the commit.
 - **Claude Opus agents (Agent tool)** author and repair: they write the spec,
   co-review it, and review-and-fix the implementation.
-- **Codex xhigh** (`scripts/codex-review.py`) is the deepest reasoner in the
+- **Codex xhigh** (`review bare --profile read`) is the deepest reasoner in the
   system. That depth is spent where an error is cheapest to catch: critiquing
   the spec document, before any code exists.
-- **Codex medium** (`scripts/codex-implement.py`) implements. This is not a
+- **Codex medium** (`review goal --profile write`) implements. This is not a
   cost compromise - it is the falsifiability test of
   `reference/technical-implementation-spec.md` itself. The contract promises
   "two implementers working from it independently produce the same artifact"
@@ -26,19 +26,25 @@ stage is auditable after the fact.
 
 ### Codex invocation
 
-Two scripts wrap the canonical `codex exec` call, one per role. Launch in the
-background, one Bash call, nothing before or after it:
+The codex roles run through the `review` tool, which fans a prompt out to a
+fresh codex session and blocks until that session's final response is in.
+Launch in the background, one Bash call, nothing before or after it. The prompt
+is piped in - `review` is the one tool exempt from the no-pipe rule:
 
-- Critique: `python3 scripts/codex-review.py '<prompt>'` (gpt-5.5 at xhigh).
-- Implement: `python3 scripts/codex-implement.py '<prompt>'` (gpt-5.5 at
-  medium; the script adds the `/goal` prefix).
+- Critique: `echo '<prompt>' | review bare --profile read` (gpt-5.6-sol at
+  xhigh, read-only sandbox). The `bare` archetype adds no persona, so the piped
+  prompt carries everything.
+- Implement: `echo '<prompt>' | review goal --profile write` (gpt-5.6-sol at
+  medium, workspace-write sandbox; the `goal` archetype prepends `/goal`).
 
-The single argument is the prompt: one line, no linebreaks, plain ascii, no
-escapes or quoting tricks, single-quoted; substitute X and Y with plain paths.
-The script owns the model, the reasoning effort, the workspace-write sandbox,
-and `/goal`. The caller owns only the prompt.
+Both roles default to the codex provider (`[_defaults].providers` in
+`.review.toml`). The prompt is one line, no linebreaks, plain ascii, no escapes
+or quoting tricks, single-quoted inside the `echo`; substitute X and Y with
+plain paths. The profile - not the caller - owns the model, the reasoning
+effort, and the sandbox: `read` is read-only (a spec critic that can edit the
+tree is a bug) and `write` is workspace-write. The caller owns only the prompt.
 
-The sandbox is also network-isolated: no outbound connections, no git fetch,
+The write sandbox is also network-isolated: no outbound connections, no git fetch,
 no cargo download. The load-bearing consequence is that codex cannot add a
 crate that is not already present in Cargo.lock and the local cargo registry
 cache - cargo cannot fetch it offline, so the build fails. The same applies
@@ -51,20 +57,22 @@ crate will fail at compile time with no path to recovery inside that run;
 the mitigation belongs in the spec review (steps 2-3) or a pre-step-4
 side-step, not inside the codex run itself.
 
-The script keeps the raw NDJSON inside its own process and prints a clean
-digest at exit: the final agent message in full, the token usage, and any
-plain-text log lines codex emitted (surfaced, not dropped). The final message
-is captured via `--output-last-message`, so it survives even when a mid-run
-codex error halts the stream. There is nothing to peek at and nothing to flood
-context: a run is opaque until it exits, and its exit IS the signal.
+`review` holds the raw session inside its own process and prints, at exit, the
+new session id followed by the agent's final response in full. It blocks until
+that response is in, so there is nothing to peek at mid-run and nothing to flood
+context: a run is opaque until it exits, and its exit - carrying the final
+response - IS the signal. A run that ends with no final response (the session
+crashed, was killed, or yielded out) is an interrupted run, handled the same as
+one whose goal is unmet.
 
-We never resume a codex thread. A run that ends with its goal unmet - a gate
-honestly reported unpassed, bricks left unbuilt, victory wrongly declared - is
-replaced by a FRESH `codex-implement.py` run pointed at what remains, never
-`codex exec resume`. Fresh-from-spec is the methodology: the spec is the only
+We never resume a codex thread. `review` can resume a session with `--session`,
+but the loop never does: a run that ends with its goal unmet - a gate honestly
+reported unpassed, bricks left unbuilt, victory wrongly declared - is replaced
+by a FRESH `review goal --profile write` run pointed at what remains, never
+`--session`. Fresh-from-spec is the methodology: the spec is the only
 communication channel, so a second implementer reads it exactly as the first.
 
-The `/goal` prefix (added by codex-implement.py) is mechanical, not
+The `/goal` prefix (added by the `goal` archetype) is mechanical, not
 motivational: whenever the agent yields - a status report, a question, a
 premature wrap-up - the harness auto-replies "that is not what the user said,
 continue work" and the agent resumes. It structurally cannot hand back control
@@ -161,7 +169,7 @@ more.
 Launch simultaneously, both background:
 
 - Agent(opus)
-- codex `gpt-5.5` at `xhigh`
+- codex via `review bare --profile read` (gpt-5.6-sol at xhigh)
 
 Both get the same prompt:
 
@@ -191,19 +199,19 @@ the consolidated Y is in.
 
 ### 4. Implement
 
-Launch `scripts/codex-implement.py`, background, with the prompt (the script
-adds `/goal`):
+Launch `review goal --profile write`, background, with the prompt piped in (the
+`goal` archetype adds `/goal`):
 
 > Please implement Y from beginning to end. If you hit a gate, please try
 > honestly to overcome it. Do not commit.
 
-When the run ends, read the digest - do not take "done" on faith. If
-`final_message_captured: false`, the run ended without a final report
-(crashed, killed, or yielded out); if it is `true` but the message says the
-goal is unmet (a gate honestly reported unpassed, bricks left unbuilt, victory
-wrongly declared), it is likewise not done. In either case launch a FRESH
-`codex-implement.py` run whose prompt names what remains. Never resume. Repeat
-until the implementation is whole, then go to step 5.
+When the run ends, read the final response - do not take "done" on faith. If
+`review` returned without a final response, the run ended interrupted (crashed,
+killed, or yielded out); if it returned one but it says the goal is unmet (a
+gate honestly reported unpassed, bricks left unbuilt, victory wrongly declared),
+it is likewise not done. In either case launch a FRESH
+`review goal --profile write` run whose prompt names what remains. Never resume.
+Repeat until the implementation is whole, then go to step 5.
 
 ### 5. Review and fix
 
@@ -320,8 +328,9 @@ These are rules, not guidance:
   ("continue: spec C, step 4 in flight") wakes you cleanly; the heartbeat does
   not need to re-enter any skill to do its job.
 - On each wake: check whether the task returned. "Returned" means exactly one
-  thing - the background process exited (for codex, the script then printed its
-  digest). A codex run is opaque until then: there is no live stream to read
+  thing - the background process exited (for codex, `review` then printed the
+  session id and final response). A codex run is opaque until then: there is no
+  live stream to read
   and no mid-run completion claim to misjudge. Process running = step running.
 - While the task has not returned, schedule the next wakeup and nothing else.
   Never kill a run (see Codex invocation).
@@ -395,10 +404,9 @@ nested second return into the work, and never reconstruct a contract document
 
 ## Telemetry
 
-`codex-review.py` and `codex-implement.py` print a digest at exit: the final
-agent message in full, the summed token usage, and any plain-text log lines
-codex emitted. Read the final message in full when a run ends - never a
+`review` prints, at exit, the new session id and the codex agent's final
+response in full. Read the final response in full when a run ends - never a
 truncated excerpt. The closing report is where deferred work, honest gate
 failures, and wrongly-declared victories surface; a capped read is how they get
-missed. Each codex call's usage folds into the per-item cost ledger alongside
-the Agent calls, so each landed item gets a true cost figure.
+missed. Any usage figures `review` surfaces fold into the per-item cost ledger
+alongside the Agent calls.
