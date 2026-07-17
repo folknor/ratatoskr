@@ -20,7 +20,7 @@ effort = "xhigh"
 sandbox = "read-only"
 
 [plantasjen.codex.write]
-model = "gpt-5.6-sol"
+model = "gpt-5.6-terra"
 effort = "medium"
 sandbox = "workspace-write"
 

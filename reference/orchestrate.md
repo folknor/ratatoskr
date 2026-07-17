@@ -132,9 +132,10 @@ complete before the next step launches. If a step fails, rerun that step -
 do not improvise a recovery that bypasses it.
 
 Each file-touching prompt below carries `Do not commit.` That guard is
-load-bearing, not boilerplate: the orchestrator owns the commit - step 7,
-exclusively - so an agent that commits its own work lands it before
-review-and-fix (step 5) has run and outside the orchestrator's git control. The
+load-bearing, not boilerplate: the orchestrator owns every commit - the
+step-3b spec commit and the step-7 landing, and no other - so an agent that
+commits its own work lands it before review-and-fix (step 5) has run and
+outside the orchestrator's git control. The
 failure mode is model-shaped - a codex agent does not commit unless asked, but a
 Claude agent will commit, push, and touch git at the first opportunity - and
 step 4 (like 1, 3, 5 and 6) may be run by either, so every file-touching prompt
@@ -196,6 +197,30 @@ The orchestrator does not do this itself: validating findings means reading
 code, and code readings must not accumulate in the orchestrator's context -
 it has to survive the whole loop. The orchestrator deletes R1 and R2 once
 the consolidated Y is in.
+
+### 3b. Commit the spec
+
+Once the consolidated Y is in and R1/R2 are deleted, the orchestrator commits
+the spec document as a standalone commit BEFORE step 4 launches. This is the
+single sanctioned markdown-only commit - it overrides the global "never commit
+markdown alone" rule by explicit user decision - and it exists for exactly one
+reason: an untracked spec is unrecoverable if an implementer deletes it, and a
+step-4 codex run has done exactly that (following a spec whose own Landing
+section told it to delete itself and reconcile docs). A committed spec is a
+`git restore` away instead. The spec is git-tracked for the lifetime of the item
+and removed at landing.
+
+    brokkr fmt      # no-op for a pure-markdown change; run for consistency
+    git add <spec>
+    git commit      # subject e.g. "spec: <item> implementation spec"
+
+The commit is spec-only; there is no code to stage yet. Step 7's landing commit
+then `git rm`s the spec inside the same commit that lands the code, so the spec's
+whole git lifetime is the one item's implementation window. Corollary for spec
+authoring (step 1): a spec must NOT instruct the implementer to reconcile
+documents, delete the spec, commit, or perform any other step-6/step-7 action -
+those are orchestrator-owned. 3b makes an implementer that ignores this
+recoverable; it does not license the instruction.
 
 ### 4. Implement
 
@@ -281,10 +306,12 @@ The orchestrator, in the main session:
    gate runs only steps 1-2. These gates are routine here, not exceptional:
    ratatoskr is where the integration, mock-server, and performance coverage
    lives, so most landings hold at least one.
-4. Delete the spec document (the orchestrator manages spec-doc lifecycle;
-   durable findings settle into TODO.md and git history per repo convention)
+4. `git rm` the spec document (committed at step 3b, git-tracked for the item's
+   lifetime; the orchestrator manages spec-doc lifecycle and durable findings
+   settle into TODO.md and git history per repo convention). The removal is
+   staged into the same landing commit below.
 5. Commit (per the repo git commit rules - `Cargo.lock` if changed, on the main
-   branch, no push)
+   branch, no push). This commit lands the code and the spec removal together.
 
 No further validation - fmt, check, and the spec's named gates, then commit.
 

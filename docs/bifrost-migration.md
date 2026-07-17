@@ -1118,9 +1118,60 @@ landing commit.
   `EmailSubmission/set` (bifrost's `on_success_update_email` rewrites `mailboxIds` to
   `[Sent]` but never clears `keywords/$draft`), so the sent message shows under both
   `DRAFT` and `SENT` - a bifrost send-fidelity follow-up, out of B5-GATES scope.
-- B7. Calendar. Replace the `calendar` crate's per-provider sync (the largest
-  single auxiliary; Graph alone is ~41k LOC today) with the bifrost calendar
-  surface. Needs B1; A7 for DAV.
+- B7. Calendar. Replace the `calendar` crate's per-provider sync with the
+  bifrost calendar surface. Carved into TWO bricks by the read/write seam
+  (B7a sync, B7b actions), NOT a per-provider cutover series like B3 - see the
+  decomposition note below. Needs B1; A7 for DAV (landed).
+
+  Decomposition (settled during B7 scoping, read against frozen bifrost
+  `0e71226`). B3 was carved four ways because it built a shared change-stream
+  consumer with asymmetric per-provider hydrate / write hooks that had to be
+  validated one provider at a time. NEITHER condition holds for calendar.
+  (1) There is no consumer to build: bifrost's `SyncEngine` (multiplexer,
+  change-stream, push reconciler) is mail-only; calendar is a direct PULL
+  surface on the `Account` trait (`calendars_list`, `events_in_range` paged,
+  `event_get` / `event_create` / `event_update` / `event_delete` / `event_rsvp`
+  / `event_search`), with `ObjectType::CalendarEvent` present only in the cursor
+  codec, not multiplexed by the engine. (2) The per-provider axis COLLAPSES:
+  ratatoskr's calendar today branches four ways on provider string in both
+  `sync.rs` (`google_` / `graph_` / `jmap_` / `caldav_..._impl`) and `actions.rs`
+  (the `CalendarProvider` enum), and bifrost has already unified all four behind
+  the one `Account` calendar surface, so after the rewire there is a single call
+  site per operation and nothing to cut over provider-by-provider - a B3-style
+  4-way split is meaningless here, not merely unnecessary. Calendar also runs on
+  its own `CalendarRuntime` (hourly-kick supervisor, separate from the mail
+  resident engine), so B7 rewires the runner body and leaves mail sync untouched.
+  Sizing correction: the earlier "~41k LOC Graph" figure was wrong (the whole
+  Graph crate is ~8.7k); the calendar protocol layer is ~10k LOC, MOST of it
+  deleted rather than rewired (`core/caldav` parse / ical / xml,
+  `graph/calendar_sync.rs`, `jmap/calendar_sync/`, the per-provider
+  `calendar/{google,graph,jmap}.rs` + `calendar/caldav/`), with the actual
+  rewire concentrated in `calendar/sync.rs` (~1k) and `calendar/actions.rs`
+  (~0.7k). The app / DB / stores / wire-contract calendar layers stay, exactly
+  as the mail consumer kept the DB.
+  - B7a. Calendar read sync. Collapse `CalendarRuntime`'s runner /
+    `calendar_sync_account_impl` onto `calendars_list` + `events_in_range`;
+    establish the id-translation seam (ratatoskr calendar / event ids to bifrost
+    `CalendarId` / `EventId` / `CalendarProvenance`); delete the four
+    per-provider sync impls. Gated by per-provider calendar-sync round-trip
+    harness scripts (compile-only is under-gated, per § 10).
+  - B7b. Calendar actions. Rewire `actions.rs` create / update / delete + RSVP
+    and `service/cal_actions` onto `event_create` / `event_update` /
+    `event_delete` / `event_rsvp`, reusing B7a's seam; delete the
+    `CalendarProvider` enum dispatch. Gated by per-provider calendar
+    action-writeback round-trip scripts.
+
+  Two questions the B7a spec author resolves in its ground survey, neither
+  blocking the decomposition: (i) a CalDAV asymmetry - bifrost-caldav DOES emit
+  `CursorScope::Type(CalendarEvent)` through a `changes_stream` while the HTTP
+  providers expose calendar only via the pull surface; per § 2 the spec drives
+  all calendar uniformly through `events_in_range` and treats the CalDAV
+  change-stream as an optional optimization or a bifrost side-quest, never a
+  consumer-side special-case; (ii) iMIP scope - the email-embedded ICS path
+  (`common/email_parsing.rs`: `has_meeting_invite`, `method` REQUEST / REPLY /
+  CANCEL, RSVP-from-reading-pane) is parsed app-side today and would route
+  through `event_rsvp`; whether it joins B7 (possibly as a small third brick) is
+  a scope call against the bifrost surface.
 - B8. Contacts. Replace Google People, Graph contacts, JMAP contacts, and
   Google other-contacts sync with the bifrost contact surface. Needs B1; A7 for
   DAV.
@@ -1185,8 +1236,12 @@ Estimated scope: ~8 bifrost specs plus ~16-20 ratatoskr specs.
   plus the relevant `brokkr sync-bench` so a compile-only replacement cannot pass
   the gate. See § 10 for the workspace-wide gate requirement this is an instance
   of.
-- Calendar (B7) is the largest single rewire and depends on bifrost calendar
-  maturity (high on native providers; A7 for DAV).
+- Calendar (B7) is a large rewire but lower structural risk than B3: bifrost
+  exposes calendar as a direct `Account` pull surface, not the mail
+  change-stream, so there is no persistence inversion and no consumer to build,
+  and the per-provider axis collapses to one call path. It is carved by the
+  read / write seam (B7a / B7b), not per-provider (see § 7). Depends on bifrost
+  calendar maturity (high on native providers; A7 for DAV, landed).
 - Shared mailboxes and public folders (A5 / B12) is the largest bifrost-side
   unknown; verify bifrost's current support before sizing.
 - Token rotation (A1) gates everything; it is the first task in the whole
