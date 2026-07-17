@@ -345,14 +345,15 @@ impl ReadyApp {
                     state,
                     ComposeMessage::ContextMenuPaste { field },
                 );
-                iced::clipboard::read().map(move |opt| {
-                    let Some(content) = opt else {
+                iced::clipboard::read_text().map(move |result| {
+                    let Ok(content) = result else {
                         return Message::PopOut(
                             window_id,
                             PopOutMessage::Compose(ComposeMessage::Noop),
                         );
                     };
-                    let inner = crate::ui::token_input::TokenInputMessage::Paste(content);
+                    let inner =
+                        crate::ui::token_input::TokenInputMessage::Paste(content.as_ref().clone());
                     let outer = match field {
                         crate::pop_out::compose::RecipientField::To => {
                             ComposeMessage::ToTokenInput(inner)

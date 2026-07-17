@@ -1,8 +1,9 @@
+use iced::advanced::clipboard;
 use iced::advanced::layout;
 use iced::advanced::renderer::{self, Renderer as _};
 use iced::advanced::text::Renderer as _;
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{Clipboard, Layout, Shell, Widget};
+use iced::advanced::{Layout, Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
 use iced::{Element, Event, Length, Point, Rectangle, Size, Theme, border};
@@ -34,6 +35,11 @@ pub(super) struct TokenInputState {
     /// is taller than the chips need (to match iced text_input's height
     /// for the same `TEXT_LG`). Computed in `layout()`.
     pub(super) chip_v_offset: f32,
+    /// Set when a paste has requested a clipboard read that has not yet
+    /// arrived. Clipboard reads are asynchronous; the runtime delivers the
+    /// contents via a `clipboard::Event::Read`, at which point we emit
+    /// `TokenInputMessage::Paste`.
+    pub(super) pending_paste: bool,
 }
 
 pub(super) struct TokenInputWidget<'a, M> {
@@ -288,7 +294,6 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, M>,
         _viewport: &Rectangle,
     ) {
@@ -400,7 +405,16 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 text,
                 ..
             }) if state.is_focused => {
-                handle_key_press(self, key, modifiers, text.as_deref(), clipboard, shell);
+                handle_key_press(self, state, key, modifiers, text.as_deref(), shell);
+            }
+
+            // ── Async clipboard read completing (paste) ─────
+            Event::Clipboard(clipboard::Event::Read(Ok(content))) if state.pending_paste => {
+                state.pending_paste = false;
+                if let clipboard::Content::Text(text) = content.as_ref() {
+                    shell.publish((self.on_message)(TokenInputMessage::Paste(text.clone())));
+                    shell.capture_event();
+                }
             }
 
             _ => {}

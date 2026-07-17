@@ -27,8 +27,7 @@ use rtsk::db::queries_extra::navigation::{
 pub(super) fn labels_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section_with_subtitle(
         "Labels",
@@ -340,8 +339,7 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
 
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(
         column![
@@ -458,8 +456,7 @@ pub(super) fn label_group_editor_sheet(state: &Settings) -> Element<'_, Settings
 
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(
         column![

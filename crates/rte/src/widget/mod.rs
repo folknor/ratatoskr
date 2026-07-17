@@ -45,6 +45,8 @@ use cursor::{BlockSelectionKind, CURSOR_WIDTH, SELECTION_ALPHA, SelectionRect};
 use input::KeyAction;
 use render::ParagraphCache;
 
+use iced::advanced::Shell;
+use iced::advanced::clipboard;
 use iced::advanced::layout;
 use iced::advanced::mouse::click::Click;
 use iced::advanced::renderer;
@@ -52,7 +54,6 @@ use iced::advanced::renderer::Renderer as _;
 use iced::advanced::text::Paragraph as _;
 use iced::advanced::text::Renderer as TextRenderer;
 use iced::advanced::widget::{self, Widget};
-use iced::advanced::{Clipboard, Shell};
 use iced::keyboard;
 use iced::mouse;
 use iced::time::{Duration, Instant};
@@ -78,6 +79,11 @@ struct WidgetState {
     /// Vertical scroll offset in pixels. 0.0 means the top of the document
     /// is aligned with the top of the viewport.
     scroll_offset: f32,
+    /// Set when a paste has requested a clipboard read but the contents have
+    /// not yet arrived. The runtime delivers the read asynchronously via a
+    /// `clipboard::Event::Read`; this flags that we are the widget waiting on
+    /// it so we know to emit `Action::Paste` when it lands.
+    pending_paste: bool,
 }
 
 /// Focus timing state for cursor blink.
@@ -257,7 +263,6 @@ impl<Message> RichTextEditor<'_, Message> {
         widget_state: &mut WidgetState,
         event: &Event,
         on_action: &dyn Fn(Action) -> Message,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
         if let Event::Keyboard(keyboard::Event::KeyPressed {
@@ -291,7 +296,7 @@ impl<Message> RichTextEditor<'_, Message> {
                 KeyAction::Copy => {
                     let text = self.state.selection_text();
                     if !text.is_empty() {
-                        clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
+                        shell.write_clipboard(clipboard::Content::Text(text));
                     }
                     // Emit Action::Copy so EditorState captures the structured slice.
                     shell.publish(on_action(Action::Copy));
@@ -300,7 +305,7 @@ impl<Message> RichTextEditor<'_, Message> {
                 KeyAction::Cut => {
                     let text = self.state.selection_text();
                     if !text.is_empty() {
-                        clipboard.write(iced::advanced::clipboard::Kind::Standard, text.clone());
+                        shell.write_clipboard(clipboard::Content::Text(text));
                         // Emit Action::Cut so EditorState captures the structured
                         // slice and then deletes the selection.
                         shell.publish(on_action(Action::Cut));
@@ -308,11 +313,11 @@ impl<Message> RichTextEditor<'_, Message> {
                     shell.capture_event();
                 }
                 KeyAction::Paste => {
-                    if let Some(contents) =
-                        clipboard.read(iced::advanced::clipboard::Kind::Standard)
-                    {
-                        shell.publish(on_action(Action::Paste(contents)));
-                    }
+                    // Clipboard reads are asynchronous: request the contents and
+                    // remember we are waiting. The paste is emitted from
+                    // `handle_clipboard` once the runtime delivers the read.
+                    shell.read_clipboard(clipboard::Kind::Text);
+                    widget_state.pending_paste = true;
                     shell.capture_event();
                 }
                 KeyAction::Undo => {
@@ -329,6 +334,27 @@ impl<Message> RichTextEditor<'_, Message> {
             // Reset blink on any handled key.
             if let Some(focus) = &mut widget_state.focus {
                 focus.updated_at = Instant::now();
+            }
+        }
+    }
+
+    /// Handle an asynchronous clipboard read completing. When a paste has
+    /// requested a read (`pending_paste`), emit `Action::Paste` with the
+    /// delivered text.
+    fn handle_clipboard(
+        &self,
+        widget_state: &mut WidgetState,
+        event: &Event,
+        on_action: &dyn Fn(Action) -> Message,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if let Event::Clipboard(clipboard::Event::Read(Ok(content))) = event
+            && widget_state.pending_paste
+        {
+            widget_state.pending_paste = false;
+            if let clipboard::Content::Text(text) = content.as_ref() {
+                shell.publish(on_action(Action::Paste(text.clone())));
+                shell.capture_event();
             }
         }
     }
@@ -847,6 +873,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
             last_click: None,
             dragging: false,
             scroll_offset: 0.0,
+            pending_paste: false,
         })
     }
 
@@ -882,13 +909,17 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         let content_height = total_height + self.padding.top + self.padding.bottom;
 
         let node = match self.height {
-            Length::Fill | Length::FillPortion(_) | Length::Fixed(_) => {
-                layout::Node::new(limits.max())
-            }
-            Length::Shrink => {
+            // Content-sized: the widget is as tall as its document.
+            Length::Shrink | Length::Fit => {
                 let size = limits.height(Length::Fixed(content_height)).max();
                 layout::Node::new(size)
             }
+            // Fill-like: the widget takes the offered height and scrolls.
+            Length::Fill
+            | Length::FillPortion(_)
+            | Length::Fixed(_)
+            | Length::Bounded { .. }
+            | Length::Fluid(_) => layout::Node::new(limits.max()),
         };
 
         // Clamp scroll offset to valid range after layout.
@@ -930,7 +961,6 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         layout: iced::advanced::Layout<'_>,
         cursor_pos: mouse::Cursor,
         _renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
@@ -942,7 +972,8 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         let bounds = layout.bounds();
 
         Self::handle_window_events(widget_state, event, shell);
-        self.handle_keyboard(widget_state, event, on_action, clipboard, shell);
+        self.handle_keyboard(widget_state, event, on_action, shell);
+        self.handle_clipboard(widget_state, event, on_action, shell);
         self.handle_mouse(widget_state, event, bounds, cursor_pos, on_action, shell);
     }
 

@@ -163,7 +163,7 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
 
     container(scrollable_content)
         .width(Length::Fixed(300.0))
-        .max_height(CALENDAR_OVERLAY_MAX_HEIGHT)
+        .height(Length::Fit.max(CALENDAR_OVERLAY_MAX_HEIGHT))
         .padding(PAD_CARD)
         .style(theme::ContainerClass::Elevated.style())
         .into()

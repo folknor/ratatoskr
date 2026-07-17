@@ -277,7 +277,7 @@ pub fn emoji_picker_view<'a, M: Clone + 'a>(
 
     container(content)
         .width(EMOJI_PICKER_WIDTH)
-        .max_height(EMOJI_PICKER_MAX_HEIGHT)
+        .height(Length::Fit.max(EMOJI_PICKER_MAX_HEIGHT))
         .padding(PAD_DROPDOWN)
         .style(theme::ContainerClass::SelectMenu.style())
         .into()

@@ -12,7 +12,6 @@ use iced_core::{
     renderer, touch, window,
 };
 use std::fmt::Debug;
-use std::vec;
 
 /// An element that can be dragged and dropped on a drop zone.
 pub struct Droppable<'a, Message, Theme = iced_widget::Theme, Renderer = iced_widget::Renderer>
@@ -238,12 +237,8 @@ where
         iced_core::widget::tree::State::new(DroppableState::default())
     }
 
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content)]
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.content));
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
     }
 
     fn operate(
@@ -273,7 +268,6 @@ where
         layout: Layout<'_>,
         cursor: Cursor,
         renderer: &Renderer,
-        clipboard: &mut dyn iced_core::Clipboard,
         shell: &mut iced_core::Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -287,7 +281,6 @@ where
                 layout,
                 cursor,
                 renderer,
-                clipboard,
                 shell,
                 viewport,
             );

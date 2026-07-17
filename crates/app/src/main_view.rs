@@ -175,7 +175,7 @@ impl ReadyApp {
 
         let modal = container(modal_content)
             .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
-            .max_height(ACCOUNT_MODAL_MAX_HEIGHT)
+            .height(Length::Fit.max(ACCOUNT_MODAL_MAX_HEIGHT))
             .padding(ui::layout::PAD_SETTINGS_CONTENT)
             .style(ui::theme::ContainerClass::Elevated.style());
 
@@ -204,7 +204,7 @@ impl ReadyApp {
         // dialogs rather than a generic Elevated card.
         let modal = container(modal_content)
             .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
-            .max_height(ACCOUNT_MODAL_MAX_HEIGHT)
+            .height(Length::Fit.max(ACCOUNT_MODAL_MAX_HEIGHT))
             .padding(ui::layout::PAD_SETTINGS_CONTENT)
             .style(ui::theme::ContainerClass::DialogCard.style());
 

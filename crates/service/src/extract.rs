@@ -432,7 +432,7 @@ async fn finalize_item(inner: &Arc<ExtractRuntimeInner>, content_hash: &db::blob
     // this is defense in depth.
     let prev = inner
         .queue_depth
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
             if v > 0 { Some(v - 1) } else { None }
         });
     let new_depth = match prev {

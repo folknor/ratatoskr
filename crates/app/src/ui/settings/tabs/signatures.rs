@@ -159,8 +159,7 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
 
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(
         column![

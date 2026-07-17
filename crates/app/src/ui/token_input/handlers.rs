@@ -1,5 +1,6 @@
 use iced::Rectangle;
-use iced::advanced::{Clipboard, Shell};
+use iced::advanced::Shell;
+use iced::advanced::clipboard;
 use iced::keyboard;
 use iced::mouse;
 
@@ -61,21 +62,22 @@ pub(super) fn handle_left_click<M: Clone>(
 
 pub(super) fn handle_key_press<M: Clone>(
     widget: &TokenInputWidget<'_, M>,
+    state: &mut TokenInputState,
     key: &keyboard::Key,
     modifiers: &keyboard::Modifiers,
     text: Option<&str>,
-    clipboard: &mut dyn Clipboard,
     shell: &mut Shell<'_, M>,
 ) {
     match key {
-        // Paste: Ctrl+V / Cmd+V
+        // Paste: Ctrl+V / Cmd+V. Clipboard reads are asynchronous: request the
+        // contents and mark the pending paste. The `Paste` message is emitted
+        // from `update` once the runtime delivers the `clipboard::Event::Read`.
         keyboard::Key::Character(c)
             if (c.as_str() == "v" || c.as_str() == "V") && modifiers.command() =>
         {
-            if let Some(content) = clipboard.read(iced::advanced::clipboard::Kind::Standard) {
-                shell.publish((widget.on_message)(TokenInputMessage::Paste(content)));
-                shell.capture_event();
-            }
+            shell.read_clipboard(clipboard::Kind::Text);
+            state.pending_paste = true;
+            shell.capture_event();
         }
 
         // Copy: Ctrl+C / Cmd+C - only when a token is selected (text-input

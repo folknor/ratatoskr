@@ -816,13 +816,13 @@ fn message_view_attachments<'a>(
     container(panel_inner)
         .padding(panel_padding)
         .width(Length::Fill)
-        .max_height(
+        .height(Length::Fit.max(
             POPOUT_ATTACHMENT_PANEL_INNER_HEIGHT
                 + panel_padding.top
                 + panel_padding.bottom
                 + 36.0
                 + SPACE_XS,
-        )
+        ))
         .into()
 }
 

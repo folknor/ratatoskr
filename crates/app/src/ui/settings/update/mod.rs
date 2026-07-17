@@ -41,7 +41,7 @@ impl Component for Settings {
                 return (iced::widget::operation::focus(id), None);
             }
             SettingsMessage::CopyToClipboard(contents) => {
-                return (iced::clipboard::write(contents), None);
+                return (iced::clipboard::write(contents).discard(), None);
             }
             SettingsMessage::DateDisplayChanged(v) => {
                 self.date_display = match v.as_str() {

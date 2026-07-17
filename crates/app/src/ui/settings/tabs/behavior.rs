@@ -10,8 +10,7 @@ use crate::ui::undoable_text_input::undoable_text_input;
 pub(super) fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(super::signatures::signature_list_section(state));
 
@@ -21,8 +20,7 @@ pub(super) fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section(
         "Notifications",

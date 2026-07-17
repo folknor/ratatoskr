@@ -359,7 +359,7 @@ pub(super) fn autocomplete_dropdown<'a>(
     }
 
     container(scrollable(items).height(Length::Shrink))
-        .max_height(AUTOCOMPLETE_MAX_HEIGHT)
+        .height(Length::Fit.max(AUTOCOMPLETE_MAX_HEIGHT))
         .width(Length::Fill)
         .style(theme::ContainerClass::Elevated.style())
         .into()

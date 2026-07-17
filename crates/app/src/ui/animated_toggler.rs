@@ -7,7 +7,7 @@
 use iced::advanced::layout;
 use iced::advanced::renderer::{self, Renderer as _};
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{Clipboard, Layout, Shell, Widget};
+use iced::advanced::{Layout, Shell, Widget};
 use iced::animation::{self, Easing};
 use iced::mouse;
 use iced::time::{Duration, Instant};
@@ -99,7 +99,6 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
-        _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {

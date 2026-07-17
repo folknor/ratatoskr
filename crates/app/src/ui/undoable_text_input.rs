@@ -12,7 +12,7 @@ use iced::advanced::layout;
 use iced::advanced::renderer;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{Clipboard, Layout, Shell, Widget};
+use iced::advanced::{Layout, Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
 use iced::widget::text_input::{self, TextInput};
@@ -179,12 +179,8 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         tree::State::new(WrapperState::default())
     }
 
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(self.inner.as_widget())]
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.inner.as_widget()));
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.inner));
     }
 
     fn size(&self) -> Size<Length> {
@@ -221,13 +217,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        self.handle_update(
-            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
-        );
+        self.handle_update(tree, event, layout, cursor, renderer, shell, viewport);
     }
 
     fn mouse_interaction(
@@ -297,7 +290,6 @@ impl<Message: Clone> UndoableWrapper<'_, Message> {
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -337,7 +329,6 @@ impl<Message: Clone> UndoableWrapper<'_, Message> {
             layout,
             cursor,
             renderer,
-            clipboard,
             shell,
             viewport,
         );

@@ -13,8 +13,7 @@ use crate::ui::widgets;
 pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section_untitled(vec![action_row(
         "Import Contacts",

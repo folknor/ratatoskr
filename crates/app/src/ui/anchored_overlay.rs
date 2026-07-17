@@ -1,4 +1,4 @@
-use iced::advanced::{Clipboard, Layout, Shell, Widget, layout, overlay, renderer, widget};
+use iced::advanced::{Layout, Shell, Widget, layout, overlay, renderer, widget};
 use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 const POINT_ANCHORED_POPUP_MIN_WIDTH: f32 = 160.0;
@@ -72,10 +72,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         self.base.as_widget().size()
     }
 
-    fn size_hint(&self) -> Size<Length> {
-        self.base.as_widget().size_hint()
-    }
-
     fn layout(
         &mut self,
         tree: &mut widget::Tree,
@@ -108,17 +104,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         );
     }
 
-    fn children(&self) -> Vec<widget::Tree> {
-        match &self.popup {
-            Some(popup) => vec![widget::Tree::new(&self.base), widget::Tree::new(popup)],
-            None => vec![widget::Tree::new(&self.base)],
-        }
-    }
-
-    fn diff(&self, tree: &mut widget::Tree) {
-        match &self.popup {
-            Some(popup) => tree.diff_children(&[&self.base, popup]),
-            None => tree.diff_children(&[&self.base]),
+    fn diff(&mut self, tree: &mut widget::Tree) {
+        match &mut self.popup {
+            Some(popup) => {
+                tree.diff_children(&mut [self.base.as_widget_mut(), popup.as_widget_mut()]);
+            }
+            None => tree.diff_children(std::slice::from_mut(&mut self.base)),
         }
     }
 
@@ -141,7 +132,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -151,7 +141,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
             layout,
             cursor,
             renderer,
-            clipboard,
             shell,
             viewport,
         );
@@ -323,7 +312,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
         self.content.as_widget_mut().update(
@@ -332,7 +320,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
             layout,
             cursor,
             renderer,
-            clipboard,
             shell,
             &layout.bounds(),
         );

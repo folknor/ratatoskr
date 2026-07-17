@@ -10,8 +10,7 @@ use crate::ui::widgets;
 pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section(
         "Appearance",

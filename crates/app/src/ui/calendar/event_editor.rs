@@ -261,7 +261,7 @@ pub(super) fn event_editor_card<'a>(
 
     container(scrollable_content)
         .width(Length::Fixed(CALENDAR_OVERLAY_WIDTH))
-        .max_height(CALENDAR_OVERLAY_MAX_HEIGHT)
+        .height(Length::Fit.max(CALENDAR_OVERLAY_MAX_HEIGHT))
         .padding(PAD_CARD)
         .style(theme::ContainerClass::Elevated.style())
         .into()

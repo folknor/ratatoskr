@@ -1334,7 +1334,7 @@ async fn finalize_item(inner: &Arc<PrefetchRuntimeInner>, work: &PrefetchItem) {
     };
     let new_depth = inner
         .queue_depth
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
             if v > 0 { Some(v - 1) } else { None }
         })
         .map(|p| p.saturating_sub(1))

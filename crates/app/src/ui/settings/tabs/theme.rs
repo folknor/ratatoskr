@@ -10,8 +10,7 @@ use crate::ui::widgets;
 pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     let mut grid = column![].spacing(SPACE_XS);
     let mut current_row = row![].spacing(SPACE_XS);

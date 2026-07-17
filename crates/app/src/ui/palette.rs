@@ -478,7 +478,7 @@ fn build_command_search_card(state: &Palette) -> Element<'_, PaletteMessage> {
 
     container(card_content)
         .width(PALETTE_WIDTH)
-        .max_height(PALETTE_MAX_HEIGHT)
+        .height(Length::Fit.max(PALETTE_MAX_HEIGHT))
         .padding(SPACE_XS)
         .style(ContainerClass::PaletteCard.style())
         .into()
@@ -508,7 +508,7 @@ fn build_option_pick_card(state: &Palette) -> Element<'_, PaletteMessage> {
 
     container(card_content)
         .width(PALETTE_WIDTH)
-        .max_height(PALETTE_MAX_HEIGHT)
+        .height(Length::Fit.max(PALETTE_MAX_HEIGHT))
         .padding(SPACE_XS)
         .style(ContainerClass::PaletteCard.style())
         .into()

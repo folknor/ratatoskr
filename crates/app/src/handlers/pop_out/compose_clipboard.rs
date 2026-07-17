@@ -43,13 +43,13 @@ pub(super) fn handle_compose_copy_or_cut(
         )
         .then(|expanded| match expanded {
             Ok(members) if !members.is_empty() => {
-                iced::clipboard::write(group_members_clipboard_string(&members))
+                iced::clipboard::write(group_members_clipboard_string(&members)).discard()
             }
             _ => Task::none(),
         })
     } else {
         match direct_string {
-            Some(s) if !s.is_empty() => iced::clipboard::write(s),
+            Some(s) if !s.is_empty() => iced::clipboard::write(s).discard(),
             _ => Task::none(),
         }
     }

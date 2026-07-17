@@ -304,7 +304,7 @@ fn chat_bubble<'a>(
 
     let bubble = container(content)
         .padding(PAD_CHAT_BUBBLE)
-        .max_width(CHAT_BUBBLE_MAX_WIDTH)
+        .width(Length::Fit.max(CHAT_BUBBLE_MAX_WIDTH))
         .style(style);
 
     // Inline images render as separate "image bubbles" above the text bubble -
@@ -349,7 +349,7 @@ fn inline_image_widget<'a>(handle: &'a image::Handle) -> Element<'a, ChatTimelin
             .height(Length::Shrink)
             .content_fit(iced::ContentFit::Contain),
     )
-    .max_width(CHAT_BUBBLE_MAX_WIDTH)
+    .width(Length::Fit.max(CHAT_BUBBLE_MAX_WIDTH))
     .into()
 }
 

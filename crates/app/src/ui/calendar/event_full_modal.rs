@@ -282,8 +282,7 @@ pub(super) fn event_full_modal<'a>(
     let two_panel = row![left_panel, right_panel].height(Length::Fill);
 
     container(two_panel)
-        .width(Length::FillPortion(4))
-        .max_width(1200.0)
+        .width(Length::FillPortion(4).max(1200.0))
         .height(Length::Fill)
         .padding(iced::Padding::from([SPACE_LG, 0.0]))
         .style(theme::ContainerClass::Elevated.style())

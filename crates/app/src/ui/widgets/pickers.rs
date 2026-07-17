@@ -278,7 +278,7 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
             grid = grid.push(current_row);
         }
 
-        grid.into()
+        grid
     })
     .into()
 }

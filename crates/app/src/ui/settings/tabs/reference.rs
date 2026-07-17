@@ -37,8 +37,7 @@ pub(super) fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
 
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     for (category, items) in sections {
         let rows: Vec<RowBuilder<'_>> = items
@@ -68,8 +67,7 @@ pub(super) fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
 pub(super) fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
-        .width(Length::Fill)
-        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section(
         "Application",

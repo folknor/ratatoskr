@@ -70,12 +70,16 @@ fn popover_stack<'a>(
     let backdrop = mouse_area(container("").width(Length::Fill).height(Length::Fill))
         .on_press(CalendarMessage::ClosePopover);
 
-    let positioned = container(container(card).align_y(Alignment::Center).max_width(320.0))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Alignment::End)
-        .align_y(Alignment::Center)
-        .padding(iced::Padding::from([SPACE_LG, SPACE_LG]));
+    let positioned = container(
+        container(card)
+            .align_y(Alignment::Center)
+            .width(Length::Fit.max(320.0)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(Alignment::End)
+    .align_y(Alignment::Center)
+    .padding(iced::Padding::from([SPACE_LG, SPACE_LG]));
 
     iced::widget::stack![base, backdrop, positioned].into()
 }
