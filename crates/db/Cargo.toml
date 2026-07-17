@@ -18,7 +18,7 @@ db-read = { path = "../db-read" }
 flate2 = "1"
 label-colors = { path = "../label-colors" }
 types = { path = "../types" }
-lol_html = "2.9.0"
+lol_html = "3.0.0"
 mail-parser = "0.11.3"
 serde.workspace = true
 serde_json.workspace = true

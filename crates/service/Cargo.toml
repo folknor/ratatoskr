@@ -77,7 +77,7 @@ thiserror.workspace = true
 # Phase 7: text extraction from cached attachments. All extractors run
 # inside `tokio::task::spawn_blocking`; dispatch / skip-list / truncation
 # logic is pure-Rust, no subprocess.
-pdf-extract = "0.10"
+pdf-extract = "0.12"
 quick-xml.workspace = true
 encoding_rs = "0.8"
 zip = { version = "8.5.1", default-features = false, features = ["deflate"] }

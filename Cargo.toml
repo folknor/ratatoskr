@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
 "crates/db",
 "crates/db-read",
@@ -48,7 +48,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["folknor <folk@folk.wtf>"]
 license = "Apache-2.0"
-rust-version = "1.92"
+rust-version = "1.97"
 
 [workspace.lints.clippy]
 # Style: modern idiomatic Rust
@@ -102,7 +102,7 @@ futures-util = "0.3"
 tokio = { version = "1.52.3" }
 
 # Database
-rusqlite = { version = "0.39" }
+rusqlite = { version = "0.40" }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
@@ -124,13 +124,13 @@ bifrost-google = { path = "../bifrost/crates/google" }
 base64 = "0.22"
 
 # XML
-quick-xml = "0.40.1"
+quick-xml = "0.41.0"
 
 # Text diffing (for undo/redo)
 dissimilar = "1"
 
 # Profiling
-hotpath = "0.16.1"
+hotpath = "0.21.4"
 
 # Optimized release profile
 [profile.release]

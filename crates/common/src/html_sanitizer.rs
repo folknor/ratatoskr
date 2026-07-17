@@ -168,10 +168,10 @@ fn strip_dangerous_elements(html: &str) -> String {
         Ok(())
     }));
 
-    let settings = RewriteStrSettings {
-        element_content_handlers: element_handlers,
-        ..RewriteStrSettings::default()
-    };
+    let settings = element_handlers.into_iter().fold(
+        RewriteStrSettings::new(),
+        RewriteStrSettings::append_element_content_handler,
+    );
 
     match rewrite_str(html, settings) {
         Ok(result) => result,
@@ -373,10 +373,9 @@ pub fn sanitize_html_body_with_image_policy(html: &str, policy: RemoteImagePolic
 fn strip_remote_images(html: &str) -> String {
     use lol_html::{RewriteStrSettings, element, rewrite_str};
 
-    let settings = RewriteStrSettings {
-        element_content_handlers: vec![
-            // Block remote <img src="http(s)://...">
-            element!("img[src]", |el| {
+    let settings = RewriteStrSettings::new()
+        // Block remote <img src="http(s)://...">
+        .append_element_content_handler(element!("img[src]", |el| {
                 if let Some(src) = el.get_attribute("src") {
                     let lower = src.trim().to_ascii_lowercase();
                     if lower.starts_with("http://") || lower.starts_with("https://") {
@@ -392,25 +391,22 @@ fn strip_remote_images(html: &str) -> String {
                     // cid: and data: URIs pass through untouched
                 }
                 Ok(())
-            }),
-            // Strip external url() references in style attributes to prevent
-            // tracking pixels via CSS background-image, list-style-image, etc.
-            element!("*[style]", |el| {
-                if let Some(style) = el.get_attribute("style")
-                    && CSS_URL_HTTP_RE.is_match(&style)
-                {
-                    let cleaned = CSS_URL_HTTP_REPLACE_RE
-                        .replace_all(&style, "none")
-                        .to_string();
-                    el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
-                        log::warn!("failed to rewrite style attribute: {e}");
-                    });
-                }
-                Ok(())
-            }),
-        ],
-        ..RewriteStrSettings::default()
-    };
+            }))
+        // Strip external url() references in style attributes to prevent
+        // tracking pixels via CSS background-image, list-style-image, etc.
+        .append_element_content_handler(element!("*[style]", |el| {
+            if let Some(style) = el.get_attribute("style")
+                && CSS_URL_HTTP_RE.is_match(&style)
+            {
+                let cleaned = CSS_URL_HTTP_REPLACE_RE
+                    .replace_all(&style, "none")
+                    .to_string();
+                el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
+                    log::warn!("failed to rewrite style attribute: {e}");
+                });
+            }
+            Ok(())
+        }));
 
     match rewrite_str(html, settings) {
         Ok(result) => result,
@@ -468,10 +464,10 @@ fn strip_amp_elements(html: &str) -> String {
         Ok(())
     }));
 
-    let settings = RewriteStrSettings {
-        element_content_handlers: handlers,
-        ..RewriteStrSettings::default()
-    };
+    let settings = handlers.into_iter().fold(
+        RewriteStrSettings::new(),
+        RewriteStrSettings::append_element_content_handler,
+    );
 
     match rewrite_str(html, settings) {
         Ok(result) => result,

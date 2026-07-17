@@ -72,9 +72,12 @@ pub fn decrypt_value(key: &[u8; 32], encrypted: &str) -> Result<String, String> 
 
     let cipher =
         Aes256Gcm::new_from_slice(key).map_err(|e| format!("Invalid encryption key: {e}"))?;
-    let nonce = Nonce::from_slice(&iv_bytes);
+    // aes-gcm 0.11 deprecated `Nonce::from_slice`; build via TryFrom. The
+    // length is already validated to 12 above, so this conversion cannot fail.
+    let nonce =
+        Nonce::try_from(iv_bytes.as_slice()).map_err(|e| format!("Invalid IV length: {e}"))?;
 
-    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|e| {
+    let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
         log::error!("AES-256-GCM decryption failed: {e}");
         format!("Decryption failed: {e}")
     })?;

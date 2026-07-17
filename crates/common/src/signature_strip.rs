@@ -131,22 +131,18 @@ fn is_on_wrote_line(line: &str) -> bool {
 fn strip_html_signature(body: &str) -> String {
     use lol_html::{RewriteStrSettings, element, rewrite_str};
 
-    let settings = RewriteStrSettings {
-        element_content_handlers: vec![
-            // Gmail's appended signature wrapper.
-            element!("div.gmail_signature", |el| {
-                el.remove();
-                Ok(())
-            }),
-            // Thunderbird's "On X, Y wrote:" prefix line element. The
-            // following <blockquote> is a quote, handled by collapse_quotes.
-            element!("div.moz-cite-prefix", |el| {
-                el.remove();
-                Ok(())
-            }),
-        ],
-        ..RewriteStrSettings::default()
-    };
+    let settings = RewriteStrSettings::new()
+        // Gmail's appended signature wrapper.
+        .append_element_content_handler(element!("div.gmail_signature", |el| {
+            el.remove();
+            Ok(())
+        }))
+        // Thunderbird's "On X, Y wrote:" prefix line element. The
+        // following <blockquote> is a quote, handled by collapse_quotes.
+        .append_element_content_handler(element!("div.moz-cite-prefix", |el| {
+            el.remove();
+            Ok(())
+        }));
     match rewrite_str(body, settings) {
         Ok(out) => out,
         Err(e) => {
@@ -159,27 +155,23 @@ fn strip_html_signature(body: &str) -> String {
 fn collapse_html_quotes(body: &str) -> String {
     use lol_html::{RewriteStrSettings, element, rewrite_str};
 
-    let settings = RewriteStrSettings {
-        element_content_handlers: vec![
-            element!("div.gmail_quote", |el| {
-                el.remove();
-                Ok(())
-            }),
-            element!("div.gmail_extra", |el| {
-                el.remove();
-                Ok(())
-            }),
-            element!("div.yahoo_quoted", |el| {
-                el.remove();
-                Ok(())
-            }),
-            element!(r#"blockquote[type="cite"]"#, |el| {
-                el.remove();
-                Ok(())
-            }),
-        ],
-        ..RewriteStrSettings::default()
-    };
+    let settings = RewriteStrSettings::new()
+        .append_element_content_handler(element!("div.gmail_quote", |el| {
+            el.remove();
+            Ok(())
+        }))
+        .append_element_content_handler(element!("div.gmail_extra", |el| {
+            el.remove();
+            Ok(())
+        }))
+        .append_element_content_handler(element!("div.yahoo_quoted", |el| {
+            el.remove();
+            Ok(())
+        }))
+        .append_element_content_handler(element!(r#"blockquote[type="cite"]"#, |el| {
+            el.remove();
+            Ok(())
+        }));
     match rewrite_str(body, settings) {
         Ok(out) => out,
         Err(e) => {

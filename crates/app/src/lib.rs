@@ -14,6 +14,17 @@
 //   - `handlers/*`   - feature-scoped handler methods on `App`
 // ────────────────────────────────────────────────────────
 
+// As of hotpath 0.21, CountingAllocator is a plain generic type the consumer
+// must declare as #[global_allocator] themselves - the crate no longer wires
+// it up internally under hotpath-alloc. Without this, --alloc builds fall back
+// to the system allocator and track_alloc/track_dealloc never fire, so every
+// measured function silently reports 0 bytes. This lives in the crate root so
+// it applies to both the `app` dev binary and the `runner` (`ratatoskr`)
+// binary that links `app`.
+#[cfg(feature = "hotpath-alloc")]
+#[global_allocator]
+static ALLOC: hotpath::CountingAllocator = hotpath::CountingAllocator::new();
+
 pub(crate) mod action_resolve;
 pub(crate) mod action_wire;
 mod admin_config;

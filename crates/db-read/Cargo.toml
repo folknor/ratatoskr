@@ -16,7 +16,7 @@ chrono-tz = "0.10"
 flate2 = "1"
 hotpath = { workspace = true, optional = true }
 log = "0.4"
-lol_html = "2.9.0"
+lol_html = "3.0.0"
 mail-parser = "0.11.3"
 rusqlite.workspace = true
 serde.workspace = true

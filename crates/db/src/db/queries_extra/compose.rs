@@ -628,24 +628,19 @@ pub fn html_to_plain_text(html: &str) -> String {
         "tr",
     ];
 
-    let element_handlers: Vec<_> = block_tags
+    // lol_html 3.0 made RewriteStrSettings fields private; handlers are now
+    // appended one at a time via the builder rather than set as a Vec field.
+    let settings = block_tags
         .iter()
-        .map(|&tag| {
-            element!(tag, |el| {
+        .fold(RewriteStrSettings::new(), |settings, &tag| {
+            settings.append_element_content_handler(element!(tag, |el| {
                 el.before("\n", lol_html::html_content::ContentType::Text);
                 Ok(())
-            })
-        })
-        .collect();
+            }))
+        });
 
     // Remove all tags but keep text content + the newlines we inserted.
-    let result = rewrite_str(
-        trimmed,
-        RewriteStrSettings {
-            element_content_handlers: element_handlers,
-            ..RewriteStrSettings::new()
-        },
-    );
+    let result = rewrite_str(trimmed, settings);
 
     match result {
         Ok(text) => {
