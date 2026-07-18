@@ -102,7 +102,7 @@ the user:
      runs BEFORE the commit, per the loop's check-before-commit discipline.
    - Commit it there (the commit is the orchestrator's job, never the agent's).
    - Promote it to the live dependency by running the bridge script from the
-     main session - `scripts/bifrost.sh` or `scripts/saehrimnir.sh`. Each pushes
+     main session - `bash scripts/bifrost.sh` or `bash scripts/saehrimnir.sh`. Each pushes
      the staged `./research/<repo>` commit to its shared remote and pulls it
      into the Cargo/install path (`../bifrost` / `../sæhrimnir`);
      `saehrimnir.sh` also reinstalls the mock binary. The scripts round-trip
@@ -1280,8 +1280,8 @@ serve two distinct purposes - do not conflate them:
   ground a bifrost-facing spec is judged against. Second, the staging area:
   side-quest edits to bifrost (§ 2) are made HERE, by an Opus agent confined to
   this folder, then committed by the orchestrator and promoted to the dependency
-  path by `scripts/bifrost.sh`. `./research/saehrimnir` works the same way for
-  the mock server, paired with `scripts/saehrimnir.sh`.
+  path by `bash scripts/bifrost.sh`. `./research/saehrimnir` works the same way for
+  the mock server, paired with `bash scripts/saehrimnir.sh`.
   `./research/bifrost/reference/` holds per-crate and per-protocol
   quick-reference sheets (`net.md`, `sync.md`, `error-model.md`, `jmap.md`,
   `imap.md`, `graph.md`, `google.md`, `smtp.md`, `caldav.md`, `carddav.md`,
@@ -1295,9 +1295,11 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `0e71226`: twelve bifrost side-quests have landed since the
-A8-closing commit (see § 2's side-quest protocol), and both `./research/bifrost`
-and `../bifrost` were re-synced together to each in turn. First `aa9172d` ("sync:
+frozen reference is `be11bbb`. Twelve bifrost side-quests landed between the
+A8-closing commit and `0e71226` (see § 2's side-quest protocol), and both
+`./research/bifrost` and `../bifrost` were re-synced together to each in turn; the
+B7a calendar side-quests then carried the freeze from `0e71226` on to `be11bbb`
+(closing note below). First `aa9172d` ("sync:
 make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
 review, made backfill checkpoints consumer-ack-deferred for at-least-once
 cold-start hydration. Then `dc670ef` ("sync: expose read-only hydration
@@ -1404,6 +1406,27 @@ constructed and threaded onto the backfill handle but nothing ever calls
 double-emit an object the live `changes_stream` already announced. It did not
 cause the zero-ingest bug (an empty set filters nothing) and the gates pass, but
 it is a real latent correctness gap worth a future bifrost side-quest.
+
+The B7a calendar side-quests then advanced the freeze to `be11bbb`. Two
+bookkeeping notes ride with it. First, the live `../bifrost` / `./research/bifrost`
+checkouts had already advanced past `0e71226` to `d3f9cca` before B7a began - an
+advance this narrative does not itemise (a known § 11 reconciliation gap), and the
+B7 decomposition (§ 7) plus the B7a spec still cite `0e71226` / `d3f9cca`, so a
+resume re-pins them to `be11bbb`. Second, the calendar work landed as one bifrost
+commit `be11bbb` ("calendar: uniform exclusive EventTime, multi-VEVENT, reminders,
+failed-set"): an exclusive all-day `EventTime` contract uniform across
+caldav / google / jmap / graph, full multi-VEVENT projection with a
+recurrence-aware caldav range filter, `CalendarEvent.reminders` from caldav VALARM
++ jmap JSCalendar alerts, and `Page.failed_ids` surfacing per-resource caldav
+failures; the matching `saehrimnir` pull-shape calendar mock coverage landed as an
+installed external binary, not commit-pinned here. Two findings ride out for the
+B7a consumer work: a literal non-2xx propstat inside a caldav 207 makes bifrost's
+`parse_multiget_report` return `Err` and abort the whole pull, so `Page.failed_ids`
+only surfaces a resource that fetched 200 but failed to tokenize (a transient
+whole-collection failure is caught by the empty-pull deletion guard, not
+`failed_ids`); and a pre-existing saehrimnir bug (caldav all-day emitted as
+`X-MICROSOFT-CDO-ALLDAYEVENT` rather than `VALUE=DATE`, which bifrost reads as
+timed-UTC) was fixed in passing.
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -

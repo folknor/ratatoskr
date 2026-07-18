@@ -590,7 +590,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "futures",
- "quick-xml 0.40.1",
+ "quick-xml 0.41.0",
  "reqwest",
  "uuid",
 ]
@@ -605,7 +605,7 @@ dependencies = [
  "bytes",
  "caldata",
  "futures",
- "quick-xml 0.40.1",
+ "quick-xml 0.41.0",
  "reqwest",
  "uuid",
 ]
@@ -641,7 +641,7 @@ dependencies = [
  "chrono",
  "futures",
  "getrandom 0.4.3",
- "quick-xml 0.40.1",
+ "quick-xml 0.41.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -1064,9 +1064,9 @@ dependencies = [
 
 [[package]]
 name = "caldata"
-version = "0.15.0"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18d0b0cbc271e44b6f0dc262c9469f10f10f8af3fa00c3ebcc10e49ac91d478"
+checksum = "5b069b3d5099e580d0c461ed3c24f538e28af02cac02b2fc0a78846a9dbd9479"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -5929,15 +5929,6 @@ name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "quick-xml"
-version = "0.40.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2474bd2e5029e7ccb6abb2ba48cf2383a333851dedf495901544281590c7da7f"
 dependencies = [
  "memchr",
 ]

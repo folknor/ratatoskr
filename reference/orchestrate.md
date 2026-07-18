@@ -324,7 +324,7 @@ These are rules, not guidance:
 - Launch every Agent call and every codex call in the background. No
   exceptions.
 - Flush before every Agent launch that follows an Agent's rest. The moment any
-  Agent comes to rest, fire scripts/prevent-harness-bug.sh as a background
+  Agent comes to rest, fire `bash scripts/prevent-harness-bug.sh` as a background
   task, wait for its exit, and only then launch the next Agent. This is the
   load-bearing fix for the sub-agent nesting bug (see the section below); it
   has no exemptions and applies between items as well as between steps. Codex
@@ -404,7 +404,7 @@ codex step is itself a gap that lets the prior Agent tear down. An all-Opus
 loop has an Agent at every hand-off, so without the flush it fires every time.
 
 The fix is PREVENTION, not recovery: never launch into the lingering window.
-The moment any Agent comes to rest, fire scripts/prevent-harness-bug.sh as a
+The moment any Agent comes to rest, fire `bash scripts/prevent-harness-bug.sh` as a
 background task, wait for it to exit, and only then launch the next Agent. The
 script is a 60-second wall-clock sleep - well clear of the measured 20-30s
 window - and its exit reliably re-invokes the orchestrator. Teardown is
