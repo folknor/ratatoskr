@@ -4,13 +4,13 @@
 
 ### The spec-loop
 
-- When the user asks to orchestrate, to run the loop, or to work a goal down to landed commits, read `reference/orchestrate.md` FIRST and follow it exactly - it is the standing procedure (roles, the seven steps, the waiting discipline, codex invocation).
+- When the user asks to orchestrate, to run the loop, or to work a goal down to landed commits, run `orchestrate` FIRST and follow it exactly - it is the standing procedure (roles, the seven steps, the waiting discipline, codex invocation).
 - Note its Input section: confirm the goal with the user before launching anything.
-- The orchestrate.md workflow, once invoked, overrides the foreground-subagent rule below (its launches are background by design, per the user's standing instruction in that document).
+- The orchestrate workflow, once invoked, overrides the foreground-subagent rule below (its launches are background by design, per the user's standing instruction in that document).
 
 ### General rules
 
-- Never suggest or use the `Workflow` tool (multi-agent orchestration / "ultracode"). Ratatoskr orchestration goes through the spec-loop in `reference/orchestrate.md`.
+- Never suggest or use the `Workflow` tool (multi-agent orchestration / "ultracode"). Ratatoskr orchestration goes through the spec-loop emitted by `orchestrate`.
 - Always get permission from the user before launching subagents outside the orchestration loop.
 - Subagents must always be launched in the foreground, (never use `run_in_background: true`) so the user can approve tool requests.
 
