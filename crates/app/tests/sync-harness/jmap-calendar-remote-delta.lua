@@ -161,17 +161,17 @@ local after_review = event_by_remote_id(after.calendar_events, "ev-002")
 harness.assert(after_review == nil, "remote-deleted review still present")
 
 local requests = harness.mock_requests(admin_endpoint)
-local event_changes_requests = harness.request_count(requests, "jmap", "CalendarEvent/changes")
+local event_query_requests = harness.request_count(requests, "jmap", "CalendarEvent/query")
 local event_get_requests = harness.request_count(requests, "jmap", "CalendarEvent/get")
-harness.assert(event_changes_requests >= 1, "delta sync did not call CalendarEvent/changes")
-harness.assert(event_get_requests >= 1, "delta sync did not call CalendarEvent/get")
+harness.assert(event_query_requests >= 1, "sync did not call CalendarEvent/query")
+harness.assert(event_get_requests >= 1, "sync did not call CalendarEvent/get")
 
 harness.write_summary({
     correct = 1,
     calendar_count = after.calendar_count,
     calendar_event_count = after.calendar_event_count,
     provider_requests = #requests,
-    jmap_calendar_event_changes_requests = event_changes_requests,
+    jmap_calendar_event_query_requests = event_query_requests,
     jmap_calendar_event_get_requests = event_get_requests,
 })
 

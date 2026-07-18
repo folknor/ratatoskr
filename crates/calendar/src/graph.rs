@@ -1,65 +1,11 @@
 use graph::calendar_sync::{
     GraphDateTimeTimeZone, GraphEventCreate, graph_create_event, graph_delete_event,
-    graph_list_calendars, graph_sync_calendar_events, graph_update_event,
+    graph_update_event,
 };
 use graph::client::GraphClient;
 use rtsk::db::ReadDbState;
-use tokio_util::sync::CancellationToken;
 
-use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
-
-/// List calendars for a Graph/Microsoft account.
-pub async fn graph_calendar_list_calendars_impl(
-    _account_id: &str,
-    db: &ReadDbState,
-    client: &GraphClient,
-) -> Result<Vec<CalendarInfoDto>, String> {
-    let calendars = graph_list_calendars(client, db).await?;
-
-    Ok(calendars
-        .into_iter()
-        .map(|cal| CalendarInfoDto {
-            remote_id: cal.remote_id,
-            display_name: cal.display_name,
-            color: cal.color,
-            is_primary: cal.is_primary,
-            can_edit: cal.can_edit,
-        })
-        .collect())
-}
-
-/// Sync events for a single calendar using Graph delta queries.
-pub async fn graph_calendar_sync_events_impl(
-    _account_id: &str,
-    calendar_remote_id: &str,
-    sync_token: Option<String>,
-    db: &ReadDbState,
-    client: &GraphClient,
-    cancellation_token: &CancellationToken,
-) -> Result<CalendarSyncResultDto, String> {
-    let result = graph_sync_calendar_events(
-        client,
-        db,
-        calendar_remote_id,
-        sync_token.as_deref(),
-        cancellation_token,
-    )
-    .await?;
-
-    let created: Result<Vec<CalendarEventDto>, String> =
-        result.created.into_iter().map(graph_event_to_dto).collect();
-    let updated: Result<Vec<CalendarEventDto>, String> =
-        result.updated.into_iter().map(graph_event_to_dto).collect();
-
-    Ok(CalendarSyncResultDto {
-        created: created?,
-        updated: updated?,
-        deleted_remote_ids: result.deleted_remote_ids,
-        // Graph uses delta links (full URLs) as the sync token
-        new_sync_token: result.new_delta_link,
-        new_ctag: None,
-    })
-}
+use super::types::CalendarEventDto;
 
 /// Create a calendar event via Graph API.
 pub async fn graph_calendar_create_event_impl(

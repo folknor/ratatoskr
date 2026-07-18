@@ -229,6 +229,140 @@ equal_to_baseline = true
 [ratatoskr.gate.gmail_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
+# ── B7a calendar steady-state pull gates ────────────────────────────
+#
+# The unified calendar pull deliberately replaces provider delta cursors with
+# a rolling-window fetch. These host-recorded baselines pin its request count,
+# elapsed time, RSS, and cache correctness for future changes.
+
+[ratatoskr.gate.gcal_calendar_steady_state]
+script = "crates/app/tests/sync-harness/gcal-calendar-steady-state.lua"
+baseline_label = "2026-07-18 bifrost B7a Google Calendar rolling-window steady-state pull"
+
+[ratatoskr.gate.gcal_calendar_steady_state.baseline]
+plantasjen = "e996f6e2aa4d4e3a97b860813ef48b49"
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics.success]
+equal = 1
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.calendar_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.calendar_event_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.correct"]
+equal = 1
+
+[ratatoskr.gate.graph_calendar_steady_state]
+script = "crates/app/tests/sync-harness/graph-calendar-steady-state.lua"
+baseline_label = "2026-07-18 bifrost B7a Graph Calendar rolling-window steady-state pull"
+
+[ratatoskr.gate.graph_calendar_steady_state.baseline]
+plantasjen = "87e157a0a4fe43d184206562e3f467f4"
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics.success]
+equal = 1
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.calendar_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.calendar_event_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.correct"]
+equal = 1
+
+[ratatoskr.gate.jmap_calendar_steady_state]
+script = "crates/app/tests/sync-harness/jmap-calendar-steady-state.lua"
+baseline_label = "2026-07-18 bifrost B7a JMAP Calendar rolling-window steady-state pull"
+
+[ratatoskr.gate.jmap_calendar_steady_state.baseline]
+plantasjen = "84b0880c56674963ac7e7bbdd07125a5"
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics.success]
+equal = 1
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.calendar_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.calendar_event_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.correct"]
+equal = 1
+
+[ratatoskr.gate.caldav_calendar_steady_state]
+script = "crates/app/tests/sync-harness/caldav-calendar-steady-state.lua"
+baseline_label = "2026-07-18 bifrost B7a CalDAV Calendar rolling-window steady-state pull"
+
+[ratatoskr.gate.caldav_calendar_steady_state.baseline]
+plantasjen = "dab74e011bcf4b0b92b2669049ef4b64"
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics.success]
+equal = 1
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.calendar_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.calendar_event_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.correct"]
+equal = 1
+
 [ratatoskr.gate.imap_steady_state_delta]
 script = "crates/app/tests/sync-harness/imap-steady-state-delta.lua"
 baseline_label = "2026-06-26 bifrost B3b keep-attached steady-state (CONDSTORE no-op delta, provider_requests=12: 1 LIST + 2 SELECT + 2 UID SEARCH, 0 body fetches; aux reconnects amortized)"

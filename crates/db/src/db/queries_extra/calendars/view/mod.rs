@@ -6,7 +6,7 @@ use crate::db::ReadConn;
 
 mod rrule;
 
-use rrule::expand_recurrence_with_overrides;
+use rrule::{expand_recurrence_with_overrides, master_intersects_window};
 
 /// A calendar event with resolved calendar color, suitable for view rendering.
 //
@@ -182,6 +182,70 @@ pub fn expand_view_events(
     }
     expanded.sort_by_key(|e| e.start_time);
     expanded
+}
+
+/// Does a recurring master's RRULE produce at least one occurrence that
+/// intersects `[window_start, window_end)` (Unix seconds)?
+///
+/// This is the occurrence-intersection test the windowed-deletion reconcile
+/// (`crates/calendar/src/sync.rs`) needs to avoid silently deleting a
+/// recurring MASTER whose own `DTSTART`/`DTEND` fall outside the active
+/// window but whose occurrences (or none of them) land inside it. A range
+/// pull matches by occurrence expansion and omits an ended / out-of-window
+/// series, so such a master is absent-from-seen; deleting it on that basis
+/// would discard exactly the multi-year history the § 2.6 backfill exists to
+/// create. The reconcile preserves the master unless this returns `true`
+/// (a genuinely-cancelled long-running series still reconciles because its
+/// live occurrences would otherwise keep rendering forever).
+///
+/// Reuses the same expander the calendar view itself uses, so the deletion
+/// decision matches what the user actually sees. An empty overrides set is
+/// correct here: the reconcile only asks about the master's own expansion.
+/// A malformed / unsupported RRULE falls back to the single master instance
+/// (see `expand_recurrence_with_overrides`), which the window clip then keeps
+/// only if the master interval overlaps - i.e. the conservative "preserve
+/// when uncertain" outcome.
+///
+/// CRITICAL: this must NOT expand relative to `DTSTART` with a fixed cap the
+/// way a plain view render does. A long-running unbounded series whose
+/// `DTSTART` sits well before the window (a standup running since 2024 seen
+/// against a 2027 window) would then never expand INTO the window - its
+/// DTSTART-anchored 2-year synthetic horizon and 800-instance count cap both
+/// stop short - and the reconcile would wrongly PRESERVE a remotely-deleted
+/// series forever. `master_intersects_window` re-anchors the day-cadence lattice
+/// forward and expands with `window_end` as the horizon so the decision is
+/// correct regardless of how far `DTSTART` precedes the window.
+pub fn recurring_master_intersects_window(
+    recurrence_rule: &str,
+    start_time: i64,
+    end_time: i64,
+    timezone: Option<&str>,
+    window_start: i64,
+    window_end: i64,
+) -> bool {
+    let master = CalendarViewEvent {
+        id: String::new(),
+        title: String::new(),
+        start_time,
+        end_time,
+        all_day: false,
+        color: String::new(),
+        calendar_name: None,
+        location: None,
+        recurrence_rule: Some(recurrence_rule.to_string()),
+        calendar_id: None,
+        account_id: String::new(),
+        organizer_name: None,
+        organizer_email: None,
+        rsvp_status: None,
+        description: None,
+        availability: None,
+        visibility: None,
+        timezone: timezone.map(str::to_string),
+        uid: None,
+        recurrence_id_canonical: None,
+    };
+    master_intersects_window(&master, recurrence_rule, window_start, window_end)
 }
 
 /// Compatibility wrapper: loads + expands in one synchronous call. Holds

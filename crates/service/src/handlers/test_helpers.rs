@@ -131,6 +131,7 @@ pub(super) async fn seed_account_handle(
             .transpose()
             .map_err(ServiceError::Internal)
     };
+    let caldav_username = encrypt_secret(caldav_username)?;
     let caldav_password = encrypt_secret(caldav_password)?;
     let requested_auth_method = params.auth_method;
     let default_oauth_provider = match provider.as_str() {

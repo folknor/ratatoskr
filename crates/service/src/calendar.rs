@@ -73,9 +73,6 @@ use std::time::{Duration, Instant};
 
 use crypto_key::SecretKey;
 use db::db::ReadDbState;
-use gmail::client::GmailState;
-use graph::client::GraphState;
-use jmap::client::JmapState;
 use service_api::{
     CalendarCancelAck, CalendarChanged, CalendarRunCompleted, CalendarRunId, CalendarStartAck,
     CalendarSyncResult, Notification,
@@ -113,16 +110,9 @@ pub(crate) struct CalendarRuntimeInner {
     last_completed: Mutex<HashMap<String, Instant>>,
     pub(crate) db: WriteDbState,
     pub(crate) read_db: ReadDbState,
-    /// Per-runtime client registries for Gmail, Graph, and JMAP,
-    /// constructed once at runtime construction so that clients inserted
-    /// during one run can be reused on subsequent runs (the registries
-    /// are an `Arc<RwLock<HashMap<_, _>>>` shared across clones). The
-    /// `ProviderState` retains its own copy of the encryption key, so
-    /// the `SecretKey` passed to `CalendarRuntime::new` is consumed at
-    /// construction time rather than stored on `Inner`.
-    pub(crate) gmail: GmailState,
-    pub(crate) graph: GraphState,
-    pub(crate) jmap: JmapState,
+    /// Calendar account construction needs the same key material as the mail
+    /// factory, but no longer owns per-provider client registries.
+    pub(crate) key_bytes: [u8; 32],
     pub(crate) notification_tx: NotificationSender,
     pub(crate) service_generation: u32,
     /// Concurrency cap on simultaneous runners (see
@@ -149,21 +139,13 @@ impl CalendarRuntime {
         service_generation: u32,
     ) -> Self {
         let key_bytes = *encryption_key.expose();
-        let gmail = gmail::client::new_gmail_state(key_bytes);
-        let graph = graph::client::new_graph_state(key_bytes);
-        let jmap = jmap::client::new_jmap_state(key_bytes);
-        // The bytes live on inside the ProviderState registries (same
-        // shape as every other OAuth-provider setup path); `SecretKey`
-        // ownership stays with the caller.
         Self {
             inner: Arc::new(CalendarRuntimeInner {
                 accounts: Mutex::new(HashMap::new()),
                 last_completed: Mutex::new(HashMap::new()),
                 db,
                 read_db,
-                gmail,
-                graph,
-                jmap,
+                key_bytes,
                 notification_tx,
                 service_generation,
                 semaphore: Arc::new(Semaphore::new(DEFAULT_CONCURRENCY_CAP)),
@@ -455,16 +437,34 @@ async fn run_calendar(
         }
     };
 
-    let outcome = cal::sync::calendar_sync_account_impl(
-        &account_id,
-        &inner.db,
+    let outcome = match crate::bifrost::factory::build_calendar_account_factory(
         &inner.read_db,
-        &inner.gmail,
-        &inner.graph,
-        &inner.jmap,
-        &cancellation_token,
+        inner.db.writer_pool(),
+        &account_id,
+        inner.key_bytes,
     )
-    .await;
+    .await
+    {
+        Ok(Some(factory)) => {
+            cal::sync::calendar_sync_account_impl(
+                &account_id,
+                &inner.db,
+                &inner.read_db,
+                factory,
+                chrono::Utc::now().timestamp_millis(),
+                &cancellation_token,
+            )
+            .await
+        }
+        Ok(None) => cal::sync::CalendarSyncOutcome {
+            mutated: false,
+            result: Ok(()),
+        },
+        Err(error) => cal::sync::CalendarSyncOutcome {
+            mutated: false,
+            result: Err(error.to_string()),
+        },
+    };
 
     // Phase 5 emission rule:
     //   - CalendarRunCompleted always fires (per-run_id awaiter contract).

@@ -1022,7 +1022,9 @@ name = "cal"
 version = "0.1.0"
 dependencies = [
  "action-types",
+ "bifrost-types",
  "chrono",
+ "chrono-tz",
  "db",
  "db-read",
  "gmail",
@@ -6823,6 +6825,7 @@ dependencies = [
  "action-types",
  "async-trait",
  "base64",
+ "bifrost-caldav",
  "bifrost-google",
  "bifrost-graph",
  "bifrost-imap",

@@ -1,0 +1,98 @@
+name = "calendar-recurrence-window"
+
+# Exercises the calendar windowed-deletion reconcile's recurring-master
+# handling on the CalDAV surface. One account, one calendar collection
+# (CalDAV path /calendars/account-1/cal-history/, per-event resources at
+# /calendars/account-1/cal-history/<event-id>.ics), holding TWO recurring
+# masters that differ ONLY in how their series terminate.
+#
+# Both masters set the STRUCTURED `recurrence_rule` field (the raw RRULE
+# value, no "RRULE:" prefix), NOT an RRULE hidden inside a raw_ical blob:
+# the occurrence-aware time-range matcher (src/recurrence.rs
+# event_matches_range, driven from caldav/mod.rs overlaps) reads
+# `Event::recurrence_rule` directly, and the ratatoskr DB row keys off the
+# same structured rule. A raw_ical-only RRULE (as calendar-pull-small's
+# ev-series does) would NOT be seen by the range matcher, so it would not
+# exercise recurring range-matching at all.
+#
+# Windows (ratatoskr calendar sync): active ~= [now-1y, now+2y],
+# history-backfill ~= [now-5y, now-1y). For any "now" in the 2026-2028 era:
+#
+# - Both DTSTARTs are 2024-01-01, inside the backfill window, so both
+#   masters load on the initial (backfill) sync.
+# - ev-ended-series: FREQ=WEEKLY;UNTIL=20240630T090000Z. All occurrences
+#   end 2024-06, BEFORE the active window opens (now-1y >= 2025). The
+#   matcher's UNTIL < range_start test drops it from an active-window pull,
+#   so the reconcile must PRESERVE it as out-of-window history rather than
+#   treat the empty active pull as a remote deletion.
+# - ev-active-old: FREQ=WEEKLY, unbounded (no UNTIL, no COUNT). The matcher
+#   treats an unbounded rule as never-terminated, so it matches the active
+#   window and the active pull returns it live. When the gate later DELETEs
+#   the CalDAV resource, the reconcile must PROPAGATE the deletion.
+#
+# The event ids ev-ended-series / ev-active-old are load-bearing: the
+# ratatoskr gate keys presence/absence assertions off the id, which flows
+# into the CalDAV href and the ratatoskr google_event_id column. Keep them
+# verbatim.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+# The single history calendar collection. CalDAV resource path:
+# /calendars/account-1/cal-history/ (the {user} segment resolves against
+# the account id, the collection segment is this calendar id).
+[[calendar]]
+id = "cal-history"
+name = "History"
+is_default = true
+
+# Already-ENDED weekly series: a bounded RRULE whose UNTIL (2024-06-30)
+# sits a year-plus before any 2026-era active window opens. Loads on the
+# backfill sync (DTSTART 2024-01-01 is inside [now-5y, now-1y)); absent
+# from the active-window pull; the reconcile must keep it.
+[[event]]
+id = "ev-ended-series"
+calendar_id = "cal-history"
+subject = "Ended weekly standup (2024 H1)"
+start = "2024-01-01T09:00:00Z"
+end = "2024-01-01T09:30:00Z"
+recurrence_rule = "FREQ=WEEKLY;UNTIL=20240630T090000Z"
+
+# Still-ACTIVE long-running weekly series: unbounded RRULE (no UNTIL, no
+# COUNT). Same 2024-01-01 DTSTART loads it on the backfill sync, and
+# because the series never terminates it recurs into the active window, so
+# the active-window pull returns it live. When the gate DELETEs this
+# resource, the reconcile must propagate the deletion.
+[[event]]
+id = "ev-active-old"
+calendar_id = "cal-history"
+subject = "Ongoing weekly standup (since 2024)"
+start = "2024-01-01T09:00:00Z"
+end = "2024-01-01T09:30:00Z"
+recurrence_rule = "FREQ=WEEKLY"
+
+# In-window ANCHOR event: a plain non-recurring event dated inside the active
+# window, present on every sync and never removed by the gate. It exists so
+# that after ev-active-old is DELETEd the active-window pull is NOT empty:
+# without it, both remaining masters sit outside the active window (ev-active-old
+# deleted, ev-ended-series ended in 2024), the pull returns zero events, and the
+# O16 empty-pull guard (skip deletion on an empty successful pull, since it may
+# be a transient failure - an adjudicated behavior) short-circuits the whole
+# windowed reconcile, so the ev-active-old deletion could never propagate. The
+# anchor keeps the pull non-empty so the reconcile runs and reaps ev-active-old.
+# Date chosen to sit inside the active window [now-1y, now+2y] for any "now"
+# across the 2026-2028 era (the robust intersection is [2027-07, 2028-07]).
+[[event]]
+id = "ev-anchor"
+calendar_id = "cal-history"
+subject = "Anchor meeting (in active window)"
+start = "2028-01-15T10:00:00Z"
+end = "2028-01-15T10:30:00Z"

@@ -65,13 +65,3 @@ pub struct CalendarEventDto {
 /// struct with identical fields. Code that receives events from the frontend
 /// can continue to use this name.
 pub type CalendarEventInput = CalendarEventDto;
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CalendarSyncResultDto {
-    pub created: Vec<CalendarEventDto>,
-    pub updated: Vec<CalendarEventDto>,
-    pub deleted_remote_ids: Vec<String>,
-    pub new_sync_token: Option<String>,
-    pub new_ctag: Option<String>,
-}

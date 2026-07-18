@@ -119,6 +119,7 @@ bifrost-jmap-new = { package = "bifrost-jmap", path = "../bifrost/crates/jmap" }
 bifrost-imap = { path = "../bifrost/crates/imap" }
 bifrost-graph = { path = "../bifrost/crates/graph" }
 bifrost-google = { path = "../bifrost/crates/google" }
+bifrost-caldav = { path = "../bifrost/crates/caldav" }
 
 # Encoding
 base64 = "0.22"

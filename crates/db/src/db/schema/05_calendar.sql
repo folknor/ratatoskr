@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS calendars (
     -- Source: Graph `canEdit`; mapped to 1 for owned Google/JMAP/CalDAV
     -- calendars until provider sync paths plumb a permission signal.
     can_edit INTEGER NOT NULL DEFAULT 1,
+    -- Set after the one-time five-year calendar history pull completes.
+    -- NULL makes a failed/cancelled backfill safely retryable.
+    history_backfilled_at INTEGER,
     UNIQUE(account_id, remote_id)
 );
 CREATE INDEX IF NOT EXISTS idx_calendars_account ON calendars(account_id);

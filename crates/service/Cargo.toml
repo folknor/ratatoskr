@@ -58,6 +58,7 @@ bifrost-jmap-new = { workspace = true, features = ["sync"] }
 bifrost-imap.workspace = true
 bifrost-graph.workspace = true
 bifrost-google.workspace = true
+bifrost-caldav.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

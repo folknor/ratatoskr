@@ -165,23 +165,23 @@ local after_review = event_by_remote_id(after.calendar_events, "ev-002")
 harness.assert(after_review == nil, "remote-deleted review still present")
 
 local requests = harness.mock_requests(admin_endpoint)
-local work_delta_requests = harness.request_count(
+local work_range_requests = harness.request_count(
     requests,
     "graph",
-    "GET /v1.0/me/calendars/cal-work/calendarView/delta"
+    "GET /v1.0/me/calendars/cal-work/calendarView"
 )
-local personal_delta_requests = harness.request_count(
+local personal_range_requests = harness.request_count(
     requests,
     "graph",
-    "GET /v1.0/me/calendars/cal-personal/calendarView/delta"
+    "GET /v1.0/me/calendars/cal-personal/calendarView"
 )
 harness.assert(
-    work_delta_requests >= 1,
-    "delta sync did not call Work calendar delta"
+    work_range_requests >= 1,
+    "sync did not pull Work in range"
 )
 harness.assert(
-    personal_delta_requests >= 1,
-    "delta sync did not call Personal calendar delta"
+    personal_range_requests >= 1,
+    "sync did not pull Personal in range"
 )
 
 harness.write_summary({
@@ -189,8 +189,8 @@ harness.write_summary({
     calendar_count = after.calendar_count,
     calendar_event_count = after.calendar_event_count,
     provider_requests = #requests,
-    graph_work_delta_requests = work_delta_requests,
-    graph_personal_delta_requests = personal_delta_requests,
+    graph_work_range_requests = work_range_requests,
+    graph_personal_range_requests = personal_range_requests,
 })
 
 local ok, shutdown_err = client:shutdown()

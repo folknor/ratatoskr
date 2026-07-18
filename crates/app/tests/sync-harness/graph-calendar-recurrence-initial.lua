@@ -102,7 +102,7 @@ harness.assert_eq(monthly.location, "Finance bot", "monthly location")
 harness.assert_eq(monthly.organizer_email, "alice@example.com", "monthly organizer_email")
 assert_rule_contains(monthly, "FREQ=MONTHLY", "monthly")
 assert_rule_contains(monthly, "BYMONTHDAY=15", "monthly")
-assert_rule_contains(monthly, "UNTIL=20261215T235959Z", "monthly")
+assert_rule_contains(monthly, "UNTIL=20261215", "monthly")
 
 local yearly = event_by_remote_id(state.calendar_events, "ev-yearly")
 harness.assert(yearly ~= nil, "missing yearly event")
@@ -124,13 +124,13 @@ harness.assert(single.recurrence_rule == nil, "single event should not have recu
 local requests = harness.mock_requests(admin_endpoint)
 local calendar_list_requests =
     harness.request_count(requests, "graph", "GET /v1.0/me/calendars")
-local work_delta_requests = harness.request_count(
+local work_range_requests = harness.request_count(
     requests,
     "graph",
-    "GET /v1.0/me/calendars/cal-work/calendarView/delta"
+    "GET /v1.0/me/calendars/cal-work/calendarView"
 )
 harness.assert(calendar_list_requests >= 1, "Graph sync did not list calendars")
-harness.assert(work_delta_requests >= 1, "Graph sync did not delta-sync Work")
+harness.assert(work_range_requests >= 1, "Graph sync did not pull Work in range")
 
 harness.write_summary({
     correct = 1,
@@ -138,7 +138,7 @@ harness.write_summary({
     calendar_event_count = state.calendar_event_count,
     provider_requests = #requests,
     graph_calendar_list_requests = calendar_list_requests,
-    graph_work_delta_requests = work_delta_requests,
+    graph_work_range_requests = work_range_requests,
 })
 
 local ok, shutdown_err = client:shutdown()

@@ -54,7 +54,7 @@ Audit date: 2026-03-30
 
 ### Medium - Other gaps
 
-26. **No permission-aware UI.** `canEdit` is now persisted on the `calendars` row (Graph populates it from `canEdit`; Google reads `accessRole`; CalDAV/JMAP default to editable until provider-specific permission probes land). UI gating on action buttons is still pending - actions are dispatched regardless of `can_edit`.
+26. **No permission-aware UI.** `canEdit` is now persisted on the `calendars` row (Graph populates it from `canEdit`; Google reads `accessRole`; CalDAV reads a WebDAV ACL probe, defaulting to editable when the server reports none; JMAP now derives it from the `Mailbox` rights (`mayWriteAll`/`mayWriteOwn`) via the bifrost calendar pull surface, no longer defaulting unconditionally true). UI gating on action buttons is still pending - actions are dispatched regardless of `can_edit`.
 
 27. **IMAP accounts: no auto-discovery for co-hosted CalDAV.** Routing now treats any account with `calendar_provider = "caldav"` and a non-empty `caldav_url` as a CalDAV calendar account, regardless of mail provider. Auto-discovery (probing `/.well-known/caldav` on the mail server's domain) and the settings UI to associate CalDAV with an IMAP account are still missing.
 

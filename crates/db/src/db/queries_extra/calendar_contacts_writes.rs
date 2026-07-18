@@ -48,34 +48,53 @@ pub struct DiscoveredCalendar<'a> {
     pub can_edit: bool,
 }
 
-/// Upsert a single discovered calendar row and return the stable local UUID.
+/// Upsert a single discovered calendar row and return `(id, changed)`.
 ///
 /// Generates a new UUID on first insert; on conflict updates metadata only
 /// (display_name, color, is_primary, can_edit) and returns the existing id.
+/// `changed` is `true` for a fresh insert or a real metadata update, `false`
+/// when the row existed with identical metadata - the O20 signal so calendar
+/// discovery on a full-window pull does not flag `mutated` on every kick. The
+/// guarded `DO UPDATE ... WHERE` skips the write (and `updated_at` bump) when
+/// no tracked column differs, so `execute` reports zero rows affected.
 pub fn upsert_discovered_calendar(
     conn: &WriteTxn<'_>,
     cal: &DiscoveredCalendar<'_>,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     let id = uuid::Uuid::new_v4().to_string();
-    conn.query_row(
-        "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
-         ON CONFLICT(account_id, remote_id) DO UPDATE SET \
-           display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch() \
-         RETURNING id",
-        params![
-            id,
-            cal.account_id,
-            cal.provider,
-            cal.remote_id,
-            cal.display_name,
-            cal.color,
-            cal.is_primary as i64,
-            cal.can_edit as i64,
-        ],
-        |row| row.get::<_, String>(0),
-    )
-    .map_err(|e| format!("upsert_discovered_calendar: {e}"))
+    let affected = conn
+        .execute(
+            "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+             ON CONFLICT(account_id, remote_id) DO UPDATE SET \
+               display_name = excluded.display_name, color = excluded.color, \
+               is_primary = excluded.is_primary, can_edit = excluded.can_edit, \
+               updated_at = unixepoch() \
+             WHERE calendars.display_name IS NOT excluded.display_name \
+                OR calendars.color IS NOT excluded.color \
+                OR calendars.is_primary IS NOT excluded.is_primary \
+                OR calendars.can_edit IS NOT excluded.can_edit",
+            params![
+                id,
+                cal.account_id,
+                cal.provider,
+                cal.remote_id,
+                cal.display_name,
+                cal.color,
+                cal.is_primary as i64,
+                cal.can_edit as i64,
+            ],
+        )
+        .map_err(|e| format!("upsert_discovered_calendar: {e}"))?;
+    let changed = affected > 0;
+    let cal_id: String = conn
+        .query_row(
+            "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
+            params![cal.account_id, cal.remote_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| format!("upsert_discovered_calendar lookup id: {e}"))?;
+    Ok((cal_id, changed))
 }
 
 /// Update the sync_token and/or ctag for a calendar row.
@@ -144,59 +163,106 @@ pub struct CalendarEventRow {
 /// The conflict key is `(account_id, google_event_id)` where
 /// `google_event_id` is stored as `remote_event_id` in the DTO.
 /// Generates a new UUID for the `id` column on first insert.
+///
+/// Returns `(id, changed)` where `changed` is `true` for a fresh insert or a
+/// real content update, and `false` when the row already existed and no
+/// tracked column differed. This is the O20 signal: under the provider-agnostic
+/// full-window pull the same rows are re-upserted on every hourly kick, so
+/// `mutated`/`CalendarChanged` must gate on genuine change rather than on "an
+/// upsert ran" - otherwise the app reloads the calendar view every hour even
+/// when nothing changed. The `ON CONFLICT ... DO UPDATE ... WHERE` clause skips
+/// the write (and the `updated_at` bump) when every tracked column is
+/// unchanged, so `execute` reports zero rows affected in that case.
 pub fn upsert_calendar_event_row(
     conn: &WriteTxn<'_>,
     row: &CalendarEventRow,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     let id = uuid::Uuid::new_v4().to_string();
-    conn.query_row(
-        "INSERT INTO calendar_events \
-         (id, account_id, google_event_id, summary, description, location, \
-          start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
-          html_link, calendar_id, remote_event_id, etag, ical_data, uid, title, \
-          timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
-          availability, visibility, recurrence_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25, ?26) \
-         ON CONFLICT(account_id, google_event_id) DO UPDATE SET \
-           summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8, \
-           is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12, \
-           html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16, \
-           ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21, \
-           organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25, \
-           recurrence_id = ?26, updated_at = unixepoch() \
-         RETURNING id",
-        params![
-            id,
-            row.account_id,
-            row.google_event_id,
-            row.summary,
-            row.description,
-            row.location,
-            row.start_time,
-            row.end_time,
-            row.is_all_day as i64,
-            row.status,
-            row.organizer_email,
-            row.attendees_json,
-            row.html_link,
-            row.calendar_id,
-            row.remote_event_id,
-            row.etag,
-            row.ical_data,
-            row.uid,
-            row.title,
-            row.timezone,
-            row.recurrence_rule,
-            row.organizer_name,
-            row.rsvp_status,
-            row.availability,
-            row.visibility,
-            row.recurrence_id,
-        ],
-        |row| row.get::<_, String>(0),
-    )
-    .map_err(|e| format!("upsert_calendar_event_row: {e}"))
+    let affected = conn
+        .execute(
+            "INSERT INTO calendar_events \
+             (id, account_id, google_event_id, summary, description, location, \
+              start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
+              html_link, calendar_id, remote_event_id, etag, ical_data, uid, title, \
+              timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
+              availability, visibility, recurrence_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25, ?26) \
+             ON CONFLICT(account_id, google_event_id) DO UPDATE SET \
+               summary = excluded.summary, description = excluded.description, \
+               location = excluded.location, start_time = excluded.start_time, \
+               end_time = excluded.end_time, is_all_day = excluded.is_all_day, \
+               status = excluded.status, organizer_email = excluded.organizer_email, \
+               attendees_json = excluded.attendees_json, html_link = excluded.html_link, \
+               calendar_id = excluded.calendar_id, remote_event_id = excluded.remote_event_id, \
+               etag = excluded.etag, ical_data = excluded.ical_data, uid = excluded.uid, \
+               title = excluded.title, timezone = excluded.timezone, \
+               recurrence_rule = excluded.recurrence_rule, \
+               organizer_name = excluded.organizer_name, rsvp_status = excluded.rsvp_status, \
+               availability = excluded.availability, visibility = excluded.visibility, \
+               recurrence_id = excluded.recurrence_id, updated_at = unixepoch() \
+             WHERE calendar_events.summary IS NOT excluded.summary \
+                OR calendar_events.description IS NOT excluded.description \
+                OR calendar_events.location IS NOT excluded.location \
+                OR calendar_events.start_time IS NOT excluded.start_time \
+                OR calendar_events.end_time IS NOT excluded.end_time \
+                OR calendar_events.is_all_day IS NOT excluded.is_all_day \
+                OR calendar_events.status IS NOT excluded.status \
+                OR calendar_events.organizer_email IS NOT excluded.organizer_email \
+                OR calendar_events.attendees_json IS NOT excluded.attendees_json \
+                OR calendar_events.html_link IS NOT excluded.html_link \
+                OR calendar_events.calendar_id IS NOT excluded.calendar_id \
+                OR calendar_events.remote_event_id IS NOT excluded.remote_event_id \
+                OR calendar_events.etag IS NOT excluded.etag \
+                OR calendar_events.ical_data IS NOT excluded.ical_data \
+                OR calendar_events.uid IS NOT excluded.uid \
+                OR calendar_events.title IS NOT excluded.title \
+                OR calendar_events.timezone IS NOT excluded.timezone \
+                OR calendar_events.recurrence_rule IS NOT excluded.recurrence_rule \
+                OR calendar_events.organizer_name IS NOT excluded.organizer_name \
+                OR calendar_events.rsvp_status IS NOT excluded.rsvp_status \
+                OR calendar_events.availability IS NOT excluded.availability \
+                OR calendar_events.visibility IS NOT excluded.visibility \
+                OR calendar_events.recurrence_id IS NOT excluded.recurrence_id",
+            params![
+                id,
+                row.account_id,
+                row.google_event_id,
+                row.summary,
+                row.description,
+                row.location,
+                row.start_time,
+                row.end_time,
+                row.is_all_day as i64,
+                row.status,
+                row.organizer_email,
+                row.attendees_json,
+                row.html_link,
+                row.calendar_id,
+                row.remote_event_id,
+                row.etag,
+                row.ical_data,
+                row.uid,
+                row.title,
+                row.timezone,
+                row.recurrence_rule,
+                row.organizer_name,
+                row.rsvp_status,
+                row.availability,
+                row.visibility,
+                row.recurrence_id,
+            ],
+        )
+        .map_err(|e| format!("upsert_calendar_event_row: {e}"))?;
+    let changed = affected > 0;
+    let event_id: String = conn
+        .query_row(
+            "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
+            params![row.account_id, row.google_event_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("upsert_calendar_event_row lookup id: {e}"))?;
+    Ok((event_id, changed))
 }
 
 pub fn replace_event_attendees(

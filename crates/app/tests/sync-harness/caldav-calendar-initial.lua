@@ -111,8 +111,6 @@ local principal_propfind_requests =
     harness.request_count(requests, "caldav", "PROPFIND /principals/account-1/")
 local calendar_home_propfind_requests =
     harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/")
-local personal_propfind_requests =
-    harness.request_count(requests, "caldav", "PROPFIND /calendars/account-1/cal-personal/")
 local work_report_requests =
     harness.request_count(requests, "caldav", "REPORT /calendars/account-1/cal-work/")
 harness.assert(
@@ -126,10 +124,6 @@ harness.assert(
 harness.assert(
     calendar_home_propfind_requests >= 1,
     "CalDAV sync did not list calendars"
-)
-harness.assert(
-    personal_propfind_requests >= 1,
-    "CalDAV sync did not inspect Personal events"
 )
 -- Personal is empty, so the CalDAV client lists it but has no event
 -- hrefs to fetch via calendar-multiget REPORT.
@@ -146,7 +140,6 @@ harness.write_summary({
     caldav_root_propfind_requests = root_propfind_requests,
     caldav_principal_propfind_requests = principal_propfind_requests,
     caldav_calendar_home_propfind_requests = calendar_home_propfind_requests,
-    caldav_personal_propfind_requests = personal_propfind_requests,
     caldav_work_report_requests = work_report_requests,
 })
 

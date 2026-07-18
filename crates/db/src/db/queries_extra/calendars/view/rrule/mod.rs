@@ -146,6 +146,27 @@ pub(super) fn expand_recurrence_with_overrides(
     rrule_str: &str,
     overrides: &HashSet<String>,
 ) -> Vec<CalendarViewEvent> {
+    // View path: no explicit horizon, so an unbounded rule falls back to the
+    // DTSTART-anchored 2-year synthesised window (`two_year_window_end`).
+    expand_recurrence_windowed(event, rrule_str, overrides, None)
+}
+
+/// Core expansion, parameterised by an optional expansion horizon for
+/// unbounded rules.
+///
+/// `expansion_horizon` only affects the `(no UNTIL, no COUNT)` case: when
+/// `Some(h)`, an unbounded rule expands up to `h` instead of the
+/// DTSTART-anchored `two_year_window_end`. The windowed-deletion reconcile
+/// (`recurring_master_intersects_window`) passes the active window's end so a
+/// master whose DTSTART sits far before the window still expands INTO it,
+/// rather than stopping two years past a long-ago DTSTART. UNTIL- and
+/// COUNT-bounded rules ignore the horizon (their own bound terminates them).
+fn expand_recurrence_windowed(
+    event: &CalendarViewEvent,
+    rrule_str: &str,
+    overrides: &HashSet<String>,
+    expansion_horizon: Option<i64>,
+) -> Vec<CalendarViewEvent> {
     let rule = parse_rrule(rrule_str);
     let tz = RecurrenceTz::from_event_timezone(event.timezone.as_deref());
     let Some(freq) = Freq::parse(&rule.freq) else {
@@ -266,7 +287,9 @@ pub(super) fn expand_recurrence_with_overrides(
     let window_end = match (until_ts, rule.count) {
         (Some(until), _) => until,
         (None, Some(_)) => i64::MAX,
-        (None, None) => two_year_window_end(event.start_time, tz),
+        (None, None) => {
+            expansion_horizon.unwrap_or_else(|| two_year_window_end(event.start_time, tz))
+        }
     };
 
     let mut instances = Vec::with_capacity(max_instances);
@@ -378,6 +401,95 @@ fn two_year_window_end(start: i64, tz: RecurrenceTz) -> i64 {
         .and_then(|n| n.with_year(n.year() + 2))
         .and_then(|n| tz.resolve(n))
         .unwrap_or(start + 730 * 86400)
+}
+
+/// Does the recurrence set of `(event, rrule_str)` produce at least one
+/// occurrence intersecting `[window_start, window_end)` (Unix seconds)?
+///
+/// This is the reconcile-side occurrence-intersection test. It differs from a
+/// plain `expand_recurrence_with_overrides` + clip in two ways that matter when
+/// the master's `DTSTART` sits far BEFORE the window (the common case for a
+/// long-running unbounded series - a standup running since 2024 seen against a
+/// 2027 window):
+///
+/// 1. It expands with the reconcile `window_end` as the horizon, so an
+///    unbounded rule is NOT truncated at the DTSTART-anchored 2-year synthetic
+///    window (`two_year_window_end`), which for a far-past DTSTART never
+///    reaches the window at all.
+/// 2. For day-cadence rules (DAILY/WEEKLY) it re-anchors DTSTART FORWARD by a
+///    whole number of base-period steps onto the same recurrence lattice, so
+///    the per-expander 800-instance count cap (~2.2y of DAILY, ~15y of WEEKLY)
+///    cannot exhaust before the walk reaches the window. Advancing by whole
+///    `interval`-day / `interval`-week steps lands on a genuine lattice point,
+///    so the expansion from the new anchor is exactly the tail of the original
+///    recurrence set at or after the new anchor - the intersection answer is
+///    preserved. MONTHLY/YEARLY are not re-anchored: their 800-instance caps
+///    span ~66y / ~800y, so no realistic DTSTART exhausts them, and the horizon
+///    override alone suffices.
+///
+/// An empty overrides set is correct: the reconcile only asks about the
+/// master's own expansion. A malformed / unsupported rule falls back to the
+/// single master instance (see `expand_recurrence_windowed`), kept only if the
+/// master interval itself overlaps - the conservative "preserve when uncertain"
+/// outcome.
+pub(super) fn master_intersects_window(
+    event: &CalendarViewEvent,
+    rrule_str: &str,
+    window_start: i64,
+    window_end: i64,
+) -> bool {
+    let rule = parse_rrule(rrule_str);
+    let tz = RecurrenceTz::from_event_timezone(event.timezone.as_deref());
+    let anchor = match Freq::parse(&rule.freq) {
+        Some(freq @ (Freq::Daily | Freq::Weekly)) => {
+            reanchor_day_cadence(event.start_time, &rule, freq, tz, window_start)
+        }
+        // MONTHLY/YEARLY: count cap never bites within a realistic window; the
+        // horizon override below is sufficient. Malformed FREQ: leave as-is,
+        // the fallback path keeps the single master only if it overlaps.
+        _ => event.start_time,
+    };
+    let master = if anchor == event.start_time {
+        event.clone()
+    } else {
+        let mut m = event.clone();
+        let span = event.end_time - event.start_time;
+        m.start_time = anchor;
+        m.end_time = anchor + span;
+        m
+    };
+    expand_recurrence_windowed(&master, rrule_str, &HashSet::new(), Some(window_end))
+        .into_iter()
+        .any(|inst| inst.start_time < window_end && inst.end_time > window_start)
+}
+
+/// Re-anchor a DAILY/WEEKLY `DTSTART` forward by a whole number of base-period
+/// steps so it lands at or just before `window_start` while staying on the
+/// original recurrence lattice. Returns `start` unchanged when the window opens
+/// at or before `DTSTART` (nothing to skip) or when zone arithmetic overflows.
+fn reanchor_day_cadence(
+    start: i64,
+    rule: &Rrule,
+    freq: Freq,
+    tz: RecurrenceTz,
+    window_start: i64,
+) -> i64 {
+    if window_start <= start {
+        return start;
+    }
+    let interval = rule.interval.max(1);
+    let step_days = match freq {
+        Freq::Weekly => interval * 7,
+        _ => interval,
+    };
+    // Whole steps to jump. Floor-division keeps the new anchor at or before
+    // window_start, and the multiple of `step_days` keeps it on the lattice.
+    let gap_days = (window_start - start).div_euclid(86_400);
+    let steps = gap_days / step_days;
+    if steps <= 0 {
+        return start;
+    }
+    add_days_in_zone(start, steps * step_days, tz).unwrap_or(start)
 }
 
 /// A single BYDAY entry. The ordinal prefix (e.g. `1MO`, `-1FR`) is captured

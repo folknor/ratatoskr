@@ -1,35 +1,12 @@
 use chrono::{SecondsFormat, TimeZone};
 use serde::Deserialize;
-use tokio_util::sync::CancellationToken;
 
 use gmail::client::GmailClient;
 use rtsk::db::ReadDbState;
 use rtsk::provider::http;
 
-use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
+use super::types::CalendarEventDto;
 use super::{GOOGLE_CALENDAR_RETRY_CONFIG, google_calendar_api_base, shared_http_client};
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GoogleCalendarListItem {
-    id: String,
-    summary: String,
-    #[serde(default)]
-    background_color: Option<String>,
-    #[serde(default)]
-    primary: Option<bool>,
-    /// Google calendarList accessRole values: "owner", "writer", "reader",
-    /// "freeBusyReader". Only owner/writer permit event mutation.
-    #[serde(default)]
-    access_role: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GoogleCalendarListResponse {
-    #[serde(default)]
-    items: Vec<GoogleCalendarListItem>,
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,172 +61,6 @@ struct GoogleCalendarOrganizer {
     display_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GoogleEventListResponse {
-    #[serde(default)]
-    items: Vec<GoogleCalendarEvent>,
-    #[serde(default)]
-    next_page_token: Option<String>,
-    #[serde(default)]
-    next_sync_token: Option<String>,
-}
-
-pub async fn google_calendar_list_calendars_impl(
-    _account_id: &str,
-    db: &ReadDbState,
-    client: &GmailClient,
-) -> Result<Vec<CalendarInfoDto>, String> {
-    let http = shared_http_client();
-    let api_base = google_calendar_api_base();
-    let url = format!("{api_base}/users/me/calendarList");
-    let response: GoogleCalendarListResponse =
-        google_calendar_request(http, client, db, &url).await?;
-
-    Ok(response
-        .items
-        .into_iter()
-        .map(|cal| {
-            let can_edit = cal
-                .access_role
-                .as_deref()
-                .is_none_or(|role| matches!(role, "owner" | "writer"));
-            CalendarInfoDto {
-                remote_id: cal.id,
-                display_name: cal.summary,
-                color: cal.background_color,
-                is_primary: cal.primary.unwrap_or(false),
-                can_edit,
-            }
-        })
-        .collect())
-}
-
-pub async fn google_calendar_sync_events_impl(
-    account_id: &str,
-    calendar_remote_id: &str,
-    sync_token: Option<String>,
-    db: &ReadDbState,
-    client: &GmailClient,
-    cancellation_token: &CancellationToken,
-) -> Result<CalendarSyncResultDto, String> {
-    let _ = account_id;
-    let http = shared_http_client();
-    let encoded_id = urlencoding::encode(calendar_remote_id);
-    let mut created = Vec::new();
-    let mut updated = Vec::new();
-    let mut deleted_remote_ids = Vec::new();
-    let mut page_token: Option<String> = None;
-    let mut next_sync_token: Option<String> = None;
-    let api_base = google_calendar_api_base();
-
-    loop {
-        // Per-page cancellation checkpoint. Each iteration is a network
-        // round-trip plus an in-memory event mapping pass; check
-        // between rather than mid-RPC.
-        if cancellation_token.is_cancelled() {
-            return Err("calendar sync cancelled".to_string());
-        }
-        let mut params = vec![("maxResults", "250".to_string())];
-        if let Some(token) = sync_token.as_ref() {
-            params.push(("syncToken", token.clone()));
-        } else {
-            let time_min = chrono::Utc::now() - chrono::Duration::days(90);
-            let time_max = chrono::Utc::now() + chrono::Duration::days(365);
-            params.push(("timeMin", time_min.to_rfc3339()));
-            params.push(("timeMax", time_max.to_rfc3339()));
-            params.push(("singleEvents", "true".to_string()));
-        }
-        if let Some(token) = page_token.as_ref() {
-            params.push(("pageToken", token.clone()));
-        }
-
-        let query = params
-            .into_iter()
-            .map(|(key, value)| format!("{key}={}", urlencoding::encode(&value)))
-            .collect::<Vec<_>>()
-            .join("&");
-        let url = format!("{api_base}/calendars/{encoded_id}/events?{query}");
-
-        let response = match google_calendar_request::<GoogleEventListResponse>(
-            http, client, db, &url,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                if error.contains("410") || error.to_lowercase().contains("sync token") {
-                    return Ok(CalendarSyncResultDto {
-                        created: Vec::new(),
-                        updated: Vec::new(),
-                        deleted_remote_ids: Vec::new(),
-                        new_sync_token: None,
-                        new_ctag: None,
-                    });
-                }
-                return Err(error);
-            }
-        };
-
-        for item in response.items {
-            if item.status.as_deref() == Some("cancelled") {
-                deleted_remote_ids.push(item.id);
-            } else {
-                let event = map_google_event(item)?;
-                if sync_token.is_some() {
-                    updated.push(event);
-                } else {
-                    created.push(event);
-                }
-            }
-        }
-
-        page_token = response.next_page_token;
-        if response.next_sync_token.is_some() {
-            next_sync_token = response.next_sync_token;
-        }
-
-        if page_token.is_none() {
-            break;
-        }
-    }
-
-    Ok(CalendarSyncResultDto {
-        created,
-        updated,
-        deleted_remote_ids,
-        new_sync_token: next_sync_token,
-        new_ctag: None,
-    })
-}
-
-pub async fn google_calendar_fetch_events_impl(
-    client: &GmailClient,
-    db: &ReadDbState,
-    calendar_remote_id: &str,
-    time_min: &str,
-    time_max: &str,
-) -> Result<Vec<CalendarEventDto>, String> {
-    let http = shared_http_client();
-    let encoded_id = urlencoding::encode(calendar_remote_id);
-    let api_base = google_calendar_api_base();
-    let query = [
-        ("timeMin", time_min),
-        ("timeMax", time_max),
-        ("singleEvents", "true"),
-        ("orderBy", "startTime"),
-        ("maxResults", "250"),
-    ]
-    .into_iter()
-    .map(|(key, value)| format!("{key}={}", urlencoding::encode(value)))
-    .collect::<Vec<_>>()
-    .join("&");
-    let url = format!("{api_base}/calendars/{encoded_id}/events?{query}");
-    let response: GoogleEventListResponse = google_calendar_request(http, client, db, &url).await?;
-
-    response.items.into_iter().map(map_google_event).collect()
-}
-
 pub async fn google_calendar_create_event_impl(
     client: &GmailClient,
     db: &ReadDbState,
@@ -296,15 +107,6 @@ pub async fn google_calendar_delete_event_impl(
     let api_base = google_calendar_api_base();
     let url = format!("{api_base}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
     google_calendar_request_empty(http, client, db, "DELETE", &url).await
-}
-
-async fn google_calendar_request<T: serde::de::DeserializeOwned>(
-    http: &reqwest::Client,
-    client: &GmailClient,
-    db: &ReadDbState,
-    url: &str,
-) -> Result<T, String> {
-    google_calendar_request_with_body::<T>(http, client, db, "GET", url, None).await
 }
 
 async fn google_calendar_request_with_body<T: serde::de::DeserializeOwned>(

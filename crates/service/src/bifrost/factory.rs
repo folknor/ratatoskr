@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use bifrost_caldav::{CalDavAccountFactory, CalDavConfig, CalDavCredentials};
 use bifrost_graph::account::{GraphAccountFactory, GraphClient};
 use bifrost_imap::{
     AuthPolicy, Credentials, ImapAccountConfig, ImapAccountFactory, ImapConfig,
@@ -107,17 +108,27 @@ pub async fn build_account_factory(
     let decrypted = row.decrypt(encryption_key)?;
     match provider {
         MailProviderKind::Gmail => {
-            let source = decrypted.oauth_token_source(provider, writer)?;
-            let mut factory = match std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
+            let test_api_base = std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
                 .ok()
-                .and_then(|endpoint| gmail_api_base_from_test_endpoint(&endpoint))
-            {
-                Some(api_base) => {
-                    bifrost_google::account::GoogleAccountFactory::from_token_source_with_api_base(
-                        source, api_base,
-                    )
-                }
-                None => bifrost_google::account::GoogleAccountFactory::from_token_source(source),
+                .and_then(|endpoint| gmail_api_base_from_test_endpoint(&endpoint));
+            let mut factory = if let Some(api_base) = test_api_base {
+                let access_token =
+                    decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
+                bifrost_google::account::GoogleAccountFactory::from_access_token_with_api_base(
+                    access_token,
+                    api_base,
+                )
+            } else if std::env::var("RATATOSKR_TEST_GCAL_ENDPOINT").is_ok() {
+                let access_token =
+                    decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
+                bifrost_google::account::GoogleAccountFactory::from_access_token_with_api_base(
+                    access_token,
+                    "https://www.googleapis.com/gmail/v1/users/me",
+                )
+            } else {
+                bifrost_google::account::GoogleAccountFactory::from_token_source(
+                    decrypted.oauth_token_source(provider, writer)?,
+                )
             };
             if let Ok(topic) = std::env::var("RATATOSKR_GMAIL_PUBSUB_TOPIC") {
                 factory =
@@ -150,6 +161,50 @@ pub async fn build_account_factory(
         }
         MailProviderKind::Jmap => build_jmap_factory(&decrypted, provider, writer),
         MailProviderKind::Imap => build_imap_factory(decrypted, provider, writer),
+    }
+}
+
+/// Build the calendar-facing factory. Calendar identity is intentionally
+/// independent from mail identity: a Gmail/Graph mailbox can have a separate
+/// CalDAV calendar configured on the same account row.
+pub async fn build_calendar_account_factory(
+    db: &ReadDbState,
+    writer: WriterPool,
+    account_id: &str,
+    encryption_key: [u8; 32],
+) -> Result<Option<Arc<dyn AccountFactory>>, BifrostBuildError> {
+    let account_id_for_read = account_id.to_string();
+    let row = db
+        .with_read(move |conn| read_bifrost_account_credentials(conn, &account_id_for_read))
+        .await
+        .map_err(BifrostBuildError::Db)??;
+    let calendar_is_caldav = row.calendar_provider.as_deref() == Some("caldav")
+        || (row.provider == "caldav"
+            && row
+                .caldav_url
+                .as_deref()
+                .is_some_and(|url| !url.trim().is_empty()));
+    if calendar_is_caldav {
+        let decrypted = row.decrypt(encryption_key)?;
+        let url = decrypted.required_plain("caldav_url", decrypted.row.caldav_url.as_deref())?;
+        let username =
+            decrypted.required_plain("caldav_username", decrypted.caldav_username.as_deref())?;
+        let password =
+            decrypted.required_plain("caldav_password", decrypted.caldav_password.as_deref())?;
+        return Ok(Some(Arc::new(CalDavAccountFactory::new(
+            CalDavConfig::new(
+                std::env::var("RATATOSKR_TEST_CALDAV_ENDPOINT").unwrap_or(url),
+                CalDavCredentials::Basic { username, password },
+            ),
+        ))));
+    }
+    match MailProviderKind::parse(&row.provider) {
+        Ok(MailProviderKind::Gmail | MailProviderKind::Graph | MailProviderKind::Jmap) => {
+            build_account_factory(db, writer, account_id, encryption_key)
+                .await
+                .map(Some)
+        }
+        Ok(MailProviderKind::Imap) | Err(_) => Ok(None),
     }
 }
 
@@ -286,6 +341,10 @@ struct AccountCredentialsRow {
     smtp_username: Option<String>,
     smtp_password: Option<String>,
     jmap_url: Option<String>,
+    calendar_provider: Option<String>,
+    caldav_url: Option<String>,
+    caldav_username: Option<String>,
+    caldav_password: Option<String>,
     accept_invalid_certs: bool,
 }
 
@@ -332,6 +391,18 @@ impl AccountCredentialsRow {
                 self.smtp_password.as_ref(),
                 &encryption_key,
             )?,
+            caldav_username: decrypt_optional(
+                &account_id,
+                "caldav_username",
+                self.caldav_username.as_ref(),
+                &encryption_key,
+            )?,
+            caldav_password: decrypt_optional(
+                &account_id,
+                "caldav_password",
+                self.caldav_password.as_ref(),
+                &encryption_key,
+            )?,
             encryption_key,
             row: self,
         })
@@ -346,6 +417,8 @@ struct DecryptedAccountCredentials {
     oauth_client_secret: Option<String>,
     imap_password: Option<String>,
     smtp_password: Option<String>,
+    caldav_username: Option<String>,
+    caldav_password: Option<String>,
     encryption_key: [u8; 32],
 }
 
@@ -543,6 +616,7 @@ fn read_bifrost_account_credentials(
                 oauth_client_secret, oauth_token_url, imap_host, imap_port,
                 imap_security, imap_username, imap_password, smtp_host, smtp_port,
                 smtp_security, smtp_username, smtp_password, jmap_url,
+                calendar_provider, caldav_url, caldav_username, caldav_password,
                 accept_invalid_certs
          FROM accounts
          WHERE id = ?1",
@@ -573,6 +647,10 @@ fn read_bifrost_account_credentials(
                 smtp_username: row.get("smtp_username")?,
                 smtp_password: row.get("smtp_password")?,
                 jmap_url: row.get("jmap_url")?,
+                calendar_provider: row.get("calendar_provider")?,
+                caldav_url: row.get("caldav_url")?,
+                caldav_username: row.get("caldav_username")?,
+                caldav_password: row.get("caldav_password")?,
                 accept_invalid_certs: row.get::<_, i64>("accept_invalid_certs")? != 0,
             })
         },
@@ -700,6 +778,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_calendar_account_factory_routes_each_backend() {
+        let (writer, reader, dir) = test_dbs("calendar-builds");
+        seed_oauth(&writer, "gmail", "gmail_api", "google", None, None).await;
+        seed_oauth(&writer, "graph", "graph", "microsoft", None, None).await;
+        seed_oauth(
+            &writer,
+            "jmap",
+            "jmap",
+            "custom",
+            Some("https://mail.example.test/jmap"),
+            Some("https://issuer.example.test/token"),
+        )
+        .await;
+        seed_calendar_caldav(&writer, "caldav", "caldav", None).await;
+        // A Gmail mail account with CalDAV configured proves calendar routing
+        // gives the explicit calendar backend precedence over mail transport.
+        seed_calendar_caldav(&writer, "gmail-caldav", "gmail_api", Some("caldav")).await;
+
+        for account_id in ["gmail", "graph", "jmap", "caldav", "gmail-caldav"] {
+            let factory = build_calendar_account_factory(&reader, writer.clone(), account_id, KEY)
+                .await
+                .expect("calendar factory builds")
+                .expect("calendar backend is available");
+            let _: Arc<dyn AccountFactory> = factory;
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn bifrost_factory_harness_strings_are_unknown() {
         let (writer, reader, dir) = test_dbs("harness");
         seed_provider_only(&writer, "harness-offline", "harness-offline").await;
@@ -745,6 +852,32 @@ mod tests {
             })
             .await
             .expect("seed provider row");
+    }
+
+    async fn seed_calendar_caldav(
+        writer: &WriterPool,
+        id: &str,
+        provider: &str,
+        calendar_provider: Option<&str>,
+    ) {
+        let username = encrypt("calendar-user");
+        let password = encrypt("calendar-password");
+        writer
+            .with_write({
+                let id = id.to_string();
+                let provider = provider.to_string();
+                let calendar_provider = calendar_provider.map(ToOwned::to_owned);
+                move |conn| {
+                    conn.execute(
+                        "INSERT INTO accounts (id, email, provider, auth_method, account_name, account_color, calendar_provider, caldav_url, caldav_username, caldav_password) VALUES (?1, ?2, ?3, 'password', 'Test', '#000000', ?4, 'https://caldav.example.test', ?5, ?6)",
+                        db::db::params![id, format!("{id}@example.test"), provider, calendar_provider, username, password],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("seed calendar CalDAV row");
     }
 
     async fn seed_oauth(

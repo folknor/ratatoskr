@@ -605,7 +605,7 @@ The minimum viable calendar for enterprise adoption:
 
 6. ~~**Offline event creation**~~ **Resolved.** There is no offline mode. Calendar operations require connectivity.
 
-7. ~~**Calendar data sync frequency**~~ **Resolved.** Same approach as email sync - use each provider's push/delta mechanism (Google Calendar push notifications, Graph subscriptions/delta tokens, JMAP state changes, CalDAV sync tokens). Not periodic polling.
+7. ~~**Calendar data sync frequency**~~ **Superseded.** The original per-provider push/delta design shipped, then was replaced: calendar read-sync now goes through one provider-agnostic pull surface (`calendars_list` + a windowed `events_in_range`) driven by `CalendarRuntime`'s hourly kick plus explicit `start_calendar_sync` - periodic polling of a rolling `[-365d, +730d]` window (with a one-time per-calendar history backfill to -5y), not push/delta. See the bifrost-migration history ledger (`docs/bifrost-migration.md` § 7, B7a) for the rationale and the accepted per-run cost tradeoff.
 
 ## Dependencies
 

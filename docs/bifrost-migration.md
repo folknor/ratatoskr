@@ -1121,7 +1121,9 @@ landing commit.
 - B7. Calendar. Replace the `calendar` crate's per-provider sync with the
   bifrost calendar surface. Carved into TWO bricks by the read/write seam
   (B7a sync, B7b actions), NOT a per-provider cutover series like B3 - see the
-  decomposition note below. Needs B1; A7 for DAV (landed).
+  decomposition note below. Needs B1; A7 for DAV (landed). B7a is done (see
+  the done-note below); what remains open is B7b (actions) and the B7c
+  follow-up filed out of B7a.
 
   Decomposition (settled during B7 scoping, read against frozen bifrost
   `0e71226`). B3 was carved four ways because it built a shared change-stream
@@ -1149,29 +1151,108 @@ landing commit.
   rewire concentrated in `calendar/sync.rs` (~1k) and `calendar/actions.rs`
   (~0.7k). The app / DB / stores / wire-contract calendar layers stay, exactly
   as the mail consumer kept the DB.
-  - B7a. Calendar read sync. Collapse `CalendarRuntime`'s runner /
-    `calendar_sync_account_impl` onto `calendars_list` + `events_in_range`;
-    establish the id-translation seam (ratatoskr calendar / event ids to bifrost
-    `CalendarId` / `EventId` / `CalendarProvenance`); delete the four
-    per-provider sync impls. Gated by per-provider calendar-sync round-trip
-    harness scripts (compile-only is under-gated, per § 10).
+
+  B7a (calendar read sync) is done and its TODO entry is removed per repo
+  convention; B7b's reuse of B7a's id-translation seam, and B7c's dependence
+  on B7a's stale-calendar retain-and-skip policy, are both available now. It
+  collapsed
+  the four per-provider calendar read-sync implementations -
+  `google_calendar_*_impl` / `graph_calendar_*_impl` /
+  `jmap::sync_jmap_calendar_account` / the CalDAV CTag/ETag machinery in
+  `sync.rs` and `caldav/` - onto bifrost's uniform `Account` pull surface
+  (`calendars_list` + paged `events_in_range`), reading
+  `capabilities().pim_methods.calendars_list` to no-op cleanly on an account
+  with no calendar backend. For what it delivered - the new
+  `crates/calendar/src/idmap.rs` id-translation seam (stripping bifrost's
+  composite `calendar_id::event_id` native-provider `native_id` back to the
+  legacy dedup key / write-back id, the moved-not-duplicated
+  `make_google_event_id` / `href_synthetic_uid` CalDAV keying, the single
+  `event_time_to_epoch` rule unifying all-day / zoned / floating / DST-gap
+  epoch semantics on the tz-independent CalDAV convention, and a total mapping
+  over bifrost's `#[non_exhaustive]` status/availability/visibility/RSVP
+  enums); the new Service-side `build_calendar_account_factory` router
+  (`crates/service/src/bifrost/factory.rs`) that makes `calendar_provider`
+  genuinely win over the mail provider (fixing a legacy silent short-circuit
+  that lost a configured CalDAV calendar on a gmail/graph mail account) and
+  builds `CalDavAccountFactory` from the account's dedicated
+  `caldav_username`/`caldav_password` columns via Basic auth, not
+  bearer-from-mail-OAuth; the rewritten `calendar_sync_account_impl` on an
+  injected `now_ms` clock, syncing a rolling `[-365d, +730d]` window plus a
+  one-time per-calendar history backfill (four 365-day upsert-only slices to
+  -5y, marked by the new `calendars.history_backfilled_at` column) so
+  Google/Graph gain history versus their legacy -90d anchor while JMAP/CalDAV
+  keep their 5-year fresh-setup coverage; a windowed deletion reconcile on an
+  overlap + RRULE-occurrence-intersection predicate
+  (`should_delete_absent_candidate` / `recurring_master_intersects_window`) so
+  an ended or future recurring series is preserved rather than deleted on mere
+  absence from the active window, an empty-pull transient-failure guard, and
+  (via bifrost surfacing the per-resource failed set) preservation of a
+  CalDAV row whose resource failed to fetch; and a retain-and-skip policy for a calendar
+  the current backend no longer lists (excluded from the fetch-target set,
+  not reaped - the reap-vs-hide lifecycle is the new B7c follow-up below) -
+  read the B7a landing commit. Deleted: `crates/calendar/src/jmap.rs` (whole
+  file, read-sync only); the read-sync bodies out of `google.rs` / `graph.rs`
+  / `caldav/mod.rs` (their B7b write helpers stay until B7b cuts them); and
+  the CalDAV CTag/ETag sync machinery in `sync.rs`. Required four bifrost
+  prerequisite side-quests, landed as one commit `be11bbb` (uniform
+  exclusive-end `EventTime` across all four backends, full multi-VEVENT
+  projection with a recurrence-aware CalDAV range filter,
+  `CalendarEvent.reminders` from CalDAV VALARM + JMAP JSCalendar alerts, and
+  `Page.failed_ids` surfacing per-resource CalDAV failures), plus a further
+  in-loop side-quest (a GCAL harness endpoint redirect + a spec-correct JMAP
+  range-filter time split) that advanced the freeze to `a0a18c2` (§ 11); the
+  matching `saehrimnir` calendar pull-shape mock coverage is an installed
+  external binary, not commit-pinned here. Two findings ride out: a literal
+  non-2xx propstat inside a CalDAV 207 still aborts bifrost's whole pull (so
+  `Page.failed_ids` only surfaces a resource that fetched 200 but failed to
+  tokenize; a transient whole-collection failure is caught by the empty-pull
+  guard instead), and a pre-existing saehrimnir bug (CalDAV all-day emitted as
+  `X-MICROSOFT-CDO-ALLDAYEVENT` rather than `VALUE=DATE`, which bifrost read
+  as timed-UTC) was fixed in passing. Gated by `brokkr check` green, the
+  `-p cal` / `-p service` / `-p db` unit gates (dedup-key, event-time,
+  recurrence-id, reminder, and stale-unlisted-calendar cases), and the
+  per-provider calendar sync-harness round-trip scripts.
   - B7b. Calendar actions. Rewire `actions.rs` create / update / delete + RSVP
     and `service/cal_actions` onto `event_create` / `event_update` /
     `event_delete` / `event_rsvp`, reusing B7a's seam; delete the
     `CalendarProvider` enum dispatch. Gated by per-provider calendar
     action-writeback round-trip scripts.
+  - B7c. Stale-calendar reap-vs-hide lifecycle. B7a's policy for a calendar
+    the current backend no longer lists is retain-and-skip: it is kept
+    and simply excluded from sync (`sync.rs::resolve_sync_targets`), so its
+    cached events render indefinitely and it never disappears from the
+    sidebar. B7c makes unlisting observable and eventually reaps it. Add
+    `calendars.unlisted_since INTEGER` (nullable); on a SUCCESSFUL
+    `calendars_list()` that omits a previously-known calendar, stamp
+    `unlisted_since = now` (and clear it back to NULL when the calendar
+    re-appears in a later list). While stamped, suppress the calendar in the
+    sidebar (hidden, not deleted, so a transient list omission does not lose
+    the user's events). After N consecutive unlisted SUCCESSFUL runs
+    (suggest ~7 days' worth at the hourly cadence, i.e. ~168 runs, or a
+    wall-clock `now - unlisted_since >= 7d` check to be robust against
+    missed kicks), REAP the calendar: cascade-delete its `calendar_events`,
+    `calendar_attendees`, `calendar_reminders`, `caldav_event_map` rows and
+    the `calendars` row itself. Only successful list runs count - a failed
+    `calendars_list()` must neither stamp nor advance the counter, so a
+    server outage cannot reap a live calendar. This is deferred out of B7a
+    because it needs a new schema column and B7a already spent its one
+    adjudicated schema addition (`history_backfilled_at`); B7c is the natural
+    home for the second calendar-schema change. Gated by a harness script
+    that lists a calendar, drops it from a later list, and asserts hide-then
+    -reap across the threshold.
 
-  Two questions the B7a spec author resolves in its ground survey, neither
-  blocking the decomposition: (i) a CalDAV asymmetry - bifrost-caldav DOES emit
-  `CursorScope::Type(CalendarEvent)` through a `changes_stream` while the HTTP
-  providers expose calendar only via the pull surface; per § 2 the spec drives
-  all calendar uniformly through `events_in_range` and treats the CalDAV
-  change-stream as an optional optimization or a bifrost side-quest, never a
-  consumer-side special-case; (ii) iMIP scope - the email-embedded ICS path
-  (`common/email_parsing.rs`: `has_meeting_invite`, `method` REQUEST / REPLY /
-  CANCEL, RSVP-from-reading-pane) is parsed app-side today and would route
-  through `event_rsvp`; whether it joins B7 (possibly as a small third brick) is
-  a scope call against the bifrost surface.
+  Two questions the B7 decomposition parked were resolved by B7a's ground
+  survey, neither blocking the decomposition: (i) a CalDAV asymmetry -
+  bifrost-caldav DOES emit `CursorScope::Type(CalendarEvent)` through a
+  `changes_stream` while the HTTP providers expose calendar only via the pull
+  surface; B7a drives all calendar uniformly through `events_in_range` (per
+  this document's § 2 first principle) and treats the CalDAV change-stream as
+  an optional future optimization or a
+  bifrost side-quest, never a consumer-side special-case; (ii) iMIP scope -
+  the email-embedded ICS path (`common/email_parsing.rs`: `has_meeting_invite`,
+  `method` REQUEST / REPLY / CANCEL, RSVP-from-reading-pane) is parsed
+  app-side today and routes through `event_rsvp`; it is a WRITE concern, so it
+  stays with B7b, not B7a.
 - B8. Contacts. Replace Google People, Graph contacts, JMAP contacts, and
   Google other-contacts sync with the bifrost contact surface. Needs B1; A7 for
   DAV.
@@ -1295,11 +1376,11 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `be11bbb`. Twelve bifrost side-quests landed between the
+frozen reference is `a0a18c2`. Twelve bifrost side-quests landed between the
 A8-closing commit and `0e71226` (see § 2's side-quest protocol), and both
 `./research/bifrost` and `../bifrost` were re-synced together to each in turn; the
 B7a calendar side-quests then carried the freeze from `0e71226` on to `be11bbb`
-(closing note below). First `aa9172d` ("sync:
+and then to `a0a18c2` (closing notes below). First `aa9172d` ("sync:
 make backfill checkpoints consumer-ack-deferred"), surfaced during B3's spec
 review, made backfill checkpoints consumer-ack-deferred for at-least-once
 cold-start hydration. Then `dc670ef` ("sync: expose read-only hydration
@@ -1411,11 +1492,11 @@ The B7a calendar side-quests then advanced the freeze to `be11bbb`. Two
 bookkeeping notes ride with it. First, the live `../bifrost` / `./research/bifrost`
 checkouts had already advanced past `0e71226` to `d3f9cca` before B7a began - an
 advance this narrative does not itemise (a known § 11 reconciliation gap), and the
-B7 decomposition (§ 7) plus the B7a spec still cite `0e71226` / `d3f9cca`, so a
-resume re-pins them to `be11bbb`. Second, the calendar work landed as one bifrost
-commit `be11bbb` ("calendar: uniform exclusive EventTime, multi-VEVENT, reminders,
-failed-set"): an exclusive all-day `EventTime` contract uniform across
-caldav / google / jmap / graph, full multi-VEVENT projection with a
+B7 decomposition note (§ 7) had cited `0e71226` / `d3f9cca` while B7a was in
+flight, since re-pinned to the final freeze below. Second, the calendar work
+landed as one bifrost commit `be11bbb` ("calendar: uniform exclusive EventTime,
+multi-VEVENT, reminders, failed-set"): an exclusive all-day `EventTime` contract
+uniform across caldav / google / jmap / graph, full multi-VEVENT projection with a
 recurrence-aware caldav range filter, `CalendarEvent.reminders` from caldav VALARM
 + jmap JSCalendar alerts, and `Page.failed_ids` surfacing per-resource caldav
 failures; the matching `saehrimnir` pull-shape calendar mock coverage landed as an
@@ -1426,7 +1507,21 @@ only surfaces a resource that fetched 200 but failed to tokenize (a transient
 whole-collection failure is caught by the empty-pull deletion guard, not
 `failed_ids`); and a pre-existing saehrimnir bug (caldav all-day emitted as
 `X-MICROSOFT-CDO-ALLDAYEVENT` rather than `VALUE=DATE`, which bifrost reads as
-timed-UTC) was fixed in passing.
+timed-UTC) was fixed in passing. A further in-loop B7a side-quest, surfaced during
+implementation, advanced the freeze a fourteenth time, to `a0a18c2` ("calendar:
+GCAL harness endpoint redirect + spec-correct JMAP range-filter time"): a Google
+`calendar_api_base()` honoring `RATATOSKR_TEST_GCAL_ENDPOINT` across all five
+Google Calendar URL sites (calendarList, events range, create, search, event_url),
+mirroring the existing Gmail/Graph harness-redirect seams; and a JMAP
+`jmap_utc_filter_time` fix for the `CalendarEvent/query` `after`/`before` range
+filter - per draft-ietf-jmap-calendars-26 § 5.11.1 those bounds are `LocalDateTime`
+(bare wall-clock, no zone, no trailing `Z`, interpreted in the query's `timeZone`
+argument), so the filter-only helper UTC-normalizes an offset-bearing RFC 3339
+bound and renders it bare rather than the UTC-with-`Z` serialization an earlier
+implementation pass had bent bifrost into emitting to satisfy the then-strict mock;
+the matching fix lives in the `saehrimnir` mock (bare JSCalendar date-time accepted
+in `after`/`before`), not commit-pinned here. `a0a18c2` is B7a's final freeze -
+the fourteenth bifrost side-quest overall.
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -

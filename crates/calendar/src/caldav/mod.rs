@@ -1,12 +1,10 @@
 mod ical;
 
-use db::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
 use rtsk::caldav::client::{AuthMethod, CalDavClient};
 use rtsk::caldav::parse::parse_icalendar;
 use rtsk::db::ReadDbState;
-use service_state::WriteDbState;
 
-use super::types::{CalendarEventDto, CalendarInfoDto};
+use super::types::CalendarEventDto;
 
 pub struct CaldavAccountConfig {
     server_url: String,
@@ -32,49 +30,6 @@ impl CaldavAccountConfig {
     pub fn home_url(&self) -> Option<&str> {
         self.home_url.as_deref()
     }
-}
-
-pub async fn caldav_list_calendars_impl(
-    account_id: &str,
-    write_db: &WriteDbState,
-    db: &ReadDbState,
-    encryption_key: &[u8; 32],
-) -> Result<Vec<CalendarInfoDto>, String> {
-    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
-    let client = build_client(&config).await?;
-    if config.home_url().is_none() {
-        persist_discovery_results(
-            write_db,
-            account_id,
-            client.principal_url(),
-            client.calendar_home_url(),
-        )
-        .await;
-    }
-    let discovered = client.list_calendars().await?;
-
-    Ok(discovered
-        .into_iter()
-        .enumerate()
-        .map(|(idx, cal)| CalendarInfoDto {
-            display_name: cal
-                .display_name
-                .unwrap_or_else(|| format!("Calendar {}", idx + 1)),
-            color: cal.color,
-            is_primary: idx == 0,
-            remote_id: cal.href,
-            // Honor what the parser saw on `<D:current-user-privilege-set>`.
-            // `None` (block absent on the server response) defaults to
-            // editable so older servers without the privilege block keep
-            // the pre-fix behavior; explicit `Some(false)` (read-only
-            // shared calendars on iCloud / Fastmail / SOGo) is preserved
-            // here so the action layer doesn't later 403/405 on a PUT
-            // it never should have offered. The CalDAV account sync path
-            // uses the same default, so this DTO conversion matches.
-            // (Round 3 #40.)
-            can_edit: cal.can_edit.unwrap_or(true),
-        })
-        .collect())
 }
 
 pub async fn caldav_create_event_impl(
@@ -309,12 +264,7 @@ async fn build_client(config: &CaldavAccountConfig) -> Result<CalDavClient, Stri
 /// previously discovered principal / home URLs so the second-and-later
 /// PROPFIND round-trips are skipped. If `home_url` was not persisted, runs
 /// full discovery.
-///
-/// Public so the sync path can use the same wiring without duplicating
-/// the build-then-discover dance.
-pub async fn build_client_from_config(
-    config: &CaldavAccountConfig,
-) -> Result<CalDavClient, String> {
+async fn build_client_from_config(config: &CaldavAccountConfig) -> Result<CalDavClient, String> {
     let mut client = CalDavClient::new(
         config.server_url(),
         config.username(),
@@ -331,57 +281,6 @@ pub async fn build_client_from_config(
         client.discover().await?;
     }
     Ok(client)
-}
-
-/// Clear the persisted principal / home URLs for an account, forcing the
-/// next `build_client_from_config` call to run full RFC 6764 discovery.
-/// Used by the sync layer as a recovery step when persisted URLs go stale
-/// (server migration, principal deletion, the user moving to a new
-/// hosting provider that kept the same credentials but changed the DAV
-/// root). Best-effort: a write failure is logged and swallowed so the
-/// caller can still attempt rediscovery in-memory.
-pub async fn clear_persisted_caldav_urls(db: &WriteDbState, account_id: &str) {
-    let account_id = account_id.to_string();
-    let result = db
-        .with_write(move |conn| clear_account_caldav_urls(conn, &account_id))
-        .await;
-    if let Err(e) = result {
-        log::warn!("Failed to clear persisted CalDAV URLs: {e}");
-    }
-}
-
-/// Persist freshly discovered principal / home URLs back to the `accounts`
-/// table so the next sync can skip discovery. Called after `build_client`
-/// completes for accounts that didn't already have these cached.
-///
-/// This is best-effort: a write failure is logged but not propagated, since
-/// discovery already succeeded and the operation that triggered the build
-/// can proceed regardless.
-pub async fn persist_discovery_results(
-    db: &WriteDbState,
-    account_id: &str,
-    principal_url: Option<&str>,
-    home_url: Option<&str>,
-) {
-    if principal_url.is_none() && home_url.is_none() {
-        return;
-    }
-    let account_id = account_id.to_string();
-    let principal = principal_url.map(String::from);
-    let home = home_url.map(String::from);
-    let result = db
-        .with_write(move |conn| {
-            set_account_caldav_discovered_urls(
-                conn,
-                &account_id,
-                principal.as_deref(),
-                home.as_deref(),
-            )
-        })
-        .await;
-    if let Err(err) = result {
-        log::warn!("CalDAV: failed to persist discovery URLs for account: {err}");
-    }
 }
 
 async fn fetch_caldav_event(

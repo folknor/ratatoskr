@@ -1,27 +1,24 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::sync::Arc;
 
+use bifrost_types::{AccountFactory, AccountId, Calendar, CalendarId, EventRange, EventTime};
 use rusqlite::{Row, params};
 use service_state::WriteDbState;
 use tokio_util::sync::CancellationToken;
 
-use db::db::WriteTxn;
 use db::db::queries_extra::calendar_contacts_writes::{
-    CalDavAttendee, CalDavReminder, CalendarEventRow, DiscoveredCalendar, delete_caldav_events,
-    delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id, reap_orphan_overrides,
-    sync_caldav_attendees, sync_caldav_reminders, update_calendar_sync_token,
-    upsert_caldav_event_map, upsert_calendar_event_row, upsert_discovered_calendar,
+    sync_caldav_attendees, sync_caldav_reminders, upsert_calendar_event_row,
+    upsert_discovered_calendar,
 };
-use gmail::client::GmailState;
-use graph::client::GraphState;
-use jmap::client::JmapState;
-use rtsk::caldav::client::CalDavClient;
-use rtsk::caldav::parse;
+use db::db::queries_extra::calendars::recurring_master_intersects_window;
 use rtsk::db::ReadDbState;
 use rtsk::db::types::DbCalendar;
 
-use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
-use super::graph::{graph_calendar_list_calendars_impl, graph_calendar_sync_events_impl};
-use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
+use super::idmap;
+
+const WINDOW_BACK_MS: i64 = 365 * 24 * 60 * 60 * 1000;
+const WINDOW_FORWARD_MS: i64 = 730 * 24 * 60 * 60 * 1000;
+const HISTORY_SLICE_MS: i64 = 365 * 24 * 60 * 60 * 1000;
 
 /// Outcome of a calendar sync run.
 ///
@@ -40,9 +37,8 @@ pub async fn calendar_sync_account_impl(
     account_id: &str,
     write_db: &WriteDbState,
     read_db: &ReadDbState,
-    gmail: &GmailState,
-    graph: &GraphState,
-    jmap: &JmapState,
+    factory: Arc<dyn AccountFactory>,
+    now_ms: i64,
     cancellation_token: &CancellationToken,
 ) -> CalendarSyncOutcome {
     if cancellation_token.is_cancelled() {
@@ -51,233 +47,524 @@ pub async fn calendar_sync_account_impl(
             result: Err("calendar sync cancelled".to_string()),
         };
     }
-    let provider_result = read_db
-        .with_read_mapped(
-            {
-                let account_id = account_id.to_string();
-                move |conn| {
-                    let row = match conn.query_row(
-                    "SELECT provider, calendar_provider, caldav_url FROM accounts WHERE id = ?1",
-                    params![account_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>("provider")?,
-                            row.get::<_, Option<String>>("calendar_provider")?,
-                            row.get::<_, Option<String>>("caldav_url")?,
-                        ))
-                    },
-                ) {
-                    Ok(row) => Some(row),
-                    Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => None,
-                    Err(e) => return Err(e.to_string()),
-                };
-                    Ok(row.and_then(|(provider, calendar_provider, caldav_url)| {
-                        let has_caldav_url = caldav_url
-                            .as_deref()
-                            .is_some_and(|value| !value.trim().is_empty());
-
-                        if calendar_provider.as_deref() == Some("google_api")
-                            || provider == "gmail_api"
-                        {
-                            Some("google_api")
-                        } else if calendar_provider.as_deref() == Some("graph")
-                            || provider == "graph"
-                        {
-                            Some("graph")
-                        } else if calendar_provider.as_deref() == Some("caldav")
-                            || (provider == "caldav" && has_caldav_url)
-                        {
-                            Some("caldav")
-                        } else if calendar_provider.as_deref() == Some("jmap") || provider == "jmap"
-                        {
-                            Some("jmap")
-                        } else {
-                            None
-                        }
-                    }))
-                }
-            },
-            |e| e,
-        )
-        .await;
-
-    let provider = match provider_result {
-        Ok(p) => p,
-        Err(e) => {
-            return CalendarSyncOutcome {
-                mutated: false,
-                result: Err(e),
-            };
-        }
-    };
-
     let mut mutated = false;
-    let result = match provider {
-        Some("google_api") => {
-            sync_google_calendar_account(
-                account_id,
-                write_db,
-                read_db,
-                gmail,
-                cancellation_token,
-                &mut mutated,
-            )
-            .await
-        }
-        Some("graph") => {
-            sync_graph_calendar_account(
-                account_id,
-                write_db,
-                read_db,
-                graph,
-                cancellation_token,
-                &mut mutated,
-            )
-            .await
-        }
-        Some("caldav") => {
-            sync_caldav_calendar_account(
-                account_id,
-                write_db,
-                read_db,
-                gmail.encryption_key(),
-                cancellation_token,
-                &mut mutated,
-            )
-            .await
-        }
-        Some("jmap") => {
-            super::jmap::sync_jmap_calendar_account(
-                account_id,
-                write_db,
-                read_db,
-                jmap,
-                cancellation_token,
-                &mut mutated,
-            )
-            .await
-        }
-        _ => Err(format!(
-            "No calendar provider configured for account {account_id}"
-        )),
-    };
+    let result = sync_bifrost_calendar_account(
+        account_id,
+        write_db,
+        read_db,
+        factory,
+        now_ms,
+        cancellation_token,
+        &mut mutated,
+    )
+    .await;
 
     CalendarSyncOutcome { mutated, result }
 }
 
-pub async fn upsert_discovered_calendars_impl(
-    db: &WriteDbState,
+async fn sync_bifrost_calendar_account(
     account_id: &str,
-    provider: &str,
-    calendars: Vec<CalendarInfoDto>,
+    write_db: &WriteDbState,
+    read_db: &ReadDbState,
+    factory: Arc<dyn AccountFactory>,
+    now_ms: i64,
+    cancellation_token: &CancellationToken,
+    mutated: &mut bool,
 ) -> Result<(), String> {
-    let account_id = account_id.to_string();
-    let provider = provider.to_string();
-    db.with_write(move |conn| {
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        for calendar in calendars {
-            upsert_discovered_calendar(
-                &tx,
-                &DiscoveredCalendar {
-                    account_id: &account_id,
-                    provider: &provider,
-                    remote_id: &calendar.remote_id,
-                    display_name: Some(&calendar.display_name),
-                    color: calendar.color.as_deref(),
-                    is_primary: calendar.is_primary,
-                    can_edit: calendar.can_edit,
-                },
-            )?;
+    let account = factory
+        .open(AccountId(account_id.to_string()))
+        .await
+        .map_err(|error| error.to_string())?;
+    if !account.capabilities().pim_methods.calendars_list
+        || !account.capabilities().pim_methods.events_in_range
+    {
+        return Ok(());
+    }
+    let calendars = account
+        .calendars_list()
+        .await
+        .map_err(|error| error.to_string())?;
+    let account_owned = account_id.to_string();
+    let discovered = calendars.clone();
+    // O20: gate `mutated` on rows ACTUALLY changed, not on "an upsert ran".
+    // Under the full-window pull the same calendars are re-discovered every
+    // hourly kick, so an unconditional flag would fire `CalendarChanged` every
+    // hour and churn the app's calendar view. `upsert_discovered_calendar`
+    // reports whether the metadata genuinely changed.
+    let calendars_changed = write_db
+        .with_write(move |conn| {
+            let tx = conn.transaction().map_err(|error| error.to_string())?;
+            let mut changed = false;
+            for calendar in &discovered {
+                let (_, row_changed) = upsert_discovered_calendar(
+                    &tx,
+                    &idmap::to_discovered_calendar(&account_owned, calendar),
+                )?;
+                changed |= row_changed;
+            }
+            tx.commit().map_err(|error| error.to_string())?;
+            Ok(changed)
+        })
+        .await?;
+    *mutated |= calendars_changed;
+
+    // Resolve the listed-and-visible intersection to (local id, remote id)
+    // pairs up front so the active-window pass and the history backfill pass
+    // can each iterate the full set (§ 4.2: every step-6 active-window sync
+    // precedes any step-7 backfill - freshness before archaeology).
+    let visible = load_visible_calendars(read_db, account_id).await?;
+    let targets = resolve_sync_targets(&calendars, visible);
+
+    // Step 6: active-window pull + windowed reconcile for every calendar. A
+    // page-fetch error aborts the run before any reconcile (§ 4.5: never
+    // delete on a transient failure), so this pass stays fail-fast.
+    for (calendar_id, remote_calendar_id) in &targets {
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
         }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
+        let pulled = pull_range(
+            account.as_ref(),
+            PullRange {
+                account_id,
+                write_db,
+                calendar_id,
+                remote_calendar_id: remote_calendar_id.clone(),
+                start: now_ms - WINDOW_BACK_MS,
+                end: now_ms + WINDOW_FORWARD_MS,
+                cancellation_token,
+            },
+            mutated,
+        )
+        .await?;
+        let deleted = reconcile_window(
+            write_db,
+            calendar_id,
+            (now_ms - WINDOW_BACK_MS).div_euclid(1000),
+            (now_ms + WINDOW_FORWARD_MS).div_euclid(1000),
+            &pulled.seen,
+            &pulled.failed,
+        )
+        .await?;
+        *mutated |= deleted > 0;
+    }
+
+    // Step 7: one-time per-calendar history backfill, AFTER every calendar's
+    // active-window work has committed. A backfill failure for one calendar is
+    // recorded but must NOT abort the remaining calendars' backfill nor undo
+    // the committed active-window work (§ 4.2); the first such error surfaces
+    // as the run's `result` after the loop, leaving `history_backfilled_at`
+    // NULL for an idempotent retry next kick.
+    let mut backfill_error: Option<String> = None;
+    for (calendar_id, remote_calendar_id) in &targets {
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
+        match backfill_history(
+            Backfill {
+                account: account.as_ref(),
+                account_id,
+                write_db,
+                read_db,
+                calendar_id,
+                remote_calendar_id: remote_calendar_id.clone(),
+                now_ms,
+                cancellation_token,
+            },
+            mutated,
+        )
+        .await
+        {
+            Ok(()) => {}
+            Err(error) if error == "calendar sync cancelled" => return Err(error),
+            Err(error) => {
+                log::warn!("calendar history backfill failed for {calendar_id}: {error}");
+                if backfill_error.is_none() {
+                    backfill_error = Some(error);
+                }
+            }
+        }
+    }
+    if let Some(error) = backfill_error {
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Resolve the `(local calendar id, remote calendar id)` pairs to sync this
+/// run: the intersection of the user-visible calendars with the calendars the
+/// current backend actually returned from `calendars_list()`.
+///
+/// This is the O17 stale-calendar guard. `load_visible_calendars` is
+/// provider-BLIND (it filters on `account_id` + `is_visible` only), so after
+/// the O10 precedence fix reroutes an account's calendar backend the cache can
+/// still hold visible rows minted by the OLD backend (e.g. a Google
+/// `calendarId` on an account now routed to CalDAV). Feeding such a stale
+/// remote id to the new backend's `events_in_range` would error and abort the
+/// run. B7a's policy (spec § 4.2 / O17) is RETAIN-AND-SKIP: a calendar the
+/// current backend no longer lists is RETAINED (its cached events keep
+/// rendering per `calendars.is_visible`) but excluded from the fetch here - it
+/// produces no target, so no `events_in_range` is issued against the wrong
+/// backend. The reap-vs-hide lifecycle is deferred to B7c.
+fn resolve_sync_targets(
+    calendars: &[Calendar],
+    visible: Vec<DbCalendar>,
+) -> Vec<(String, CalendarId)> {
+    let listed: HashSet<&str> = calendars.iter().map(idmap::calendar_remote_id).collect();
+    visible
+        .into_iter()
+        .filter(|calendar| listed.contains(calendar.remote_id.as_str()))
+        .filter_map(|calendar| {
+            calendars
+                .iter()
+                .find(|source| idmap::calendar_remote_id(source) == calendar.remote_id)
+                .map(|source| (calendar.id, source.id.clone()))
+        })
+        .collect()
+}
+
+/// Inputs for one calendar's history backfill. Bundled to keep
+/// `backfill_history` under the `too_many_arguments` lint cap (mirrors
+/// `PullRange`).
+struct Backfill<'a> {
+    account: &'a dyn bifrost_types::Account,
+    account_id: &'a str,
+    write_db: &'a WriteDbState,
+    read_db: &'a ReadDbState,
+    calendar_id: &'a str,
+    remote_calendar_id: bifrost_types::CalendarId,
+    now_ms: i64,
+    cancellation_token: &'a CancellationToken,
+}
+
+/// One-time per-calendar history backfill (§ 2.6): pull `[now - 1825d,
+/// now - 365d)` as four consecutive 365-day upsert-only slices (oldest
+/// first), then stamp `history_backfilled_at`. No deletion reconcile runs
+/// over backfill ranges (O22): out-of-window rows are never deletion
+/// candidates. `mutated` accumulates only genuine row changes (O20).
+async fn backfill_history(args: Backfill<'_>, mutated: &mut bool) -> Result<(), String> {
+    if calendar_history_backfilled_at(args.read_db, args.calendar_id)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    for slice in 0..4 {
+        if args.cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
+        let start = args.now_ms - (5 - slice) * HISTORY_SLICE_MS;
+        let end = start + HISTORY_SLICE_MS;
+        pull_range(
+            args.account,
+            PullRange {
+                account_id: args.account_id,
+                write_db: args.write_db,
+                calendar_id: args.calendar_id,
+                remote_calendar_id: args.remote_calendar_id.clone(),
+                start,
+                end,
+                cancellation_token: args.cancellation_token,
+            },
+            mutated,
+        )
+        .await?;
+    }
+    mark_history_backfilled(args.write_db, args.calendar_id, args.now_ms).await?;
+    Ok(())
+}
+
+struct PullRange<'a> {
+    account_id: &'a str,
+    write_db: &'a WriteDbState,
+    calendar_id: &'a str,
+    remote_calendar_id: bifrost_types::CalendarId,
+    start: i64,
+    end: i64,
+    cancellation_token: &'a CancellationToken,
+}
+
+/// Result of pulling one calendar's window: the dedup keys observed across all
+/// pages, and the provider-native ids of resources the provider fetched but
+/// could not materialize (`Page::failed_ids`, populated by CalDAV per-resource
+/// parse/fetch failures). The reconcile subtracts `failed` from the absence
+/// computation so a transiently-failing resource is preserved rather than
+/// mistaken for a remote deletion.
+struct PullResult {
+    seen: HashSet<String>,
+    failed: HashSet<String>,
+}
+
+async fn pull_range(
+    account: &dyn bifrost_types::Account,
+    range: PullRange<'_>,
+    mutated: &mut bool,
+) -> Result<PullResult, String> {
+    let mut cursor = None;
+    let mut seen = HashSet::new();
+    let mut failed = HashSet::new();
+    loop {
+        if range.cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
+        let page = account
+            .events_in_range(EventRange {
+                calendar_id: range.remote_calendar_id.clone(),
+                start: epoch_time(range.start),
+                end: epoch_time(range.end),
+                page_cursor: cursor,
+                limit: None,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        failed.extend(page.failed_ids);
+        let events = page.items;
+        for event in &events {
+            seen.insert(idmap::event_dedup_key(event));
+        }
+        let changed =
+            apply_event_page(range.write_db, range.account_id, range.calendar_id, events).await?;
+        // O20: flag mutation only when a row was actually inserted or its
+        // content changed, not merely because events were seen. The
+        // full-window pull re-fetches unchanged rows on every kick.
+        *mutated |= changed;
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    Ok(PullResult { seen, failed })
+}
+
+fn epoch_time(ms: i64) -> EventTime {
+    let seconds = ms.div_euclid(1000);
+    EventTime {
+        value: chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0).map_or_else(
+            || "1970-01-01T00:00:00Z".to_string(),
+            |value| value.to_rfc3339(),
+        ),
+        timezone: Some("UTC".to_string()),
+    }
+}
+
+/// Upsert one page of events (plus attendees/reminders) in a single txn.
+/// Returns whether any event row was inserted or had its content change
+/// (O20): the caller uses this to gate `mutated` so `CalendarChanged` fires
+/// only on genuine change under the full-window pull.
+async fn apply_event_page(
+    write_db: &WriteDbState,
+    account_id: &str,
+    calendar_id: &str,
+    events: Vec<bifrost_types::CalendarEvent>,
+) -> Result<bool, String> {
+    let account_id = account_id.to_string();
+    let calendar_id = calendar_id.to_string();
+    write_db
+        .with_write(move |conn| {
+            let tx = conn.transaction().map_err(|error| error.to_string())?;
+            let mut changed = false;
+            for event in events {
+                let Some(row) = idmap::to_event_row(&account_id, &calendar_id, &event) else {
+                    continue;
+                };
+                let key = row.google_event_id.clone();
+                let (_, row_changed) = upsert_calendar_event_row(&tx, &row)?;
+                changed |= row_changed;
+                let attendees = idmap::to_attendees(&event);
+                sync_caldav_attendees(
+                    &tx,
+                    &account_id,
+                    &key,
+                    &attendees,
+                    row.organizer_email.as_deref(),
+                    row.organizer_name.as_deref(),
+                )?;
+                let reminders = idmap::to_reminders(&event);
+                sync_caldav_reminders(&tx, &account_id, &key, &reminders)?;
+            }
+            tx.commit().map_err(|error| error.to_string())?;
+            Ok(changed)
+        })
+        .await
+}
+
+/// Windowed deletion reconcile (§ 4.5). Returns the number of events deleted
+/// so the caller can gate `mutated` on real deletions (O20).
+async fn reconcile_window(
+    write_db: &WriteDbState,
+    calendar_id: &str,
+    start: i64,
+    end: i64,
+    seen: &HashSet<String>,
+    failed: &HashSet<String>,
+) -> Result<usize, String> {
+    // Empty-pull guard (O16): a successful pull that returned zero events
+    // against a non-empty in-window cache is a suspected transient failure -
+    // skip the delete step rather than mass-delete. `full_resync` remains the
+    // intentional force-clear path.
+    if seen.is_empty() {
+        return Ok(0);
+    }
+    let calendar_id = calendar_id.to_string();
+    let seen = seen.clone();
+    let failed = failed.clone();
+    write_db
+        .with_write(move |conn| {
+            let tx = conn.transaction().map_err(|error| error.to_string())?;
+            // Overlap + recurring-master candidate set (O21), mirroring the
+            // view query (`calendars/view/mod.rs`): a recurring master is
+            // loaded regardless of its own DTSTART position because its
+            // in-window instances are what the load-path RRULE expansion
+            // renders. The occurrence-intersection decision below (FORK 6)
+            // then decides whether an absent master is a real delete.
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, google_event_id, remote_event_id, start_time, end_time, \
+                            recurrence_rule, timezone FROM calendar_events \
+                     WHERE calendar_id = ?1 \
+                       AND (recurrence_rule IS NOT NULL OR (start_time < ?2 AND end_time > ?3))",
+                )
+                .map_err(|error| error.to_string())?;
+            let candidates = stmt
+                .query_map(params![calendar_id, end, start], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                    ))
+                })
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            drop(stmt);
+            let mut deleted = 0usize;
+            for (id, key, remote_event_id, start_time, end_time, recurrence_rule, timezone) in
+                candidates
+            {
+                // Preserve a row still present in the pull, and preserve a row
+                // whose backing resource the provider reported as FAILED this
+                // run (CalDAV per-resource 207 failure, SQ-4) - its absence
+                // from `seen` is a transient fetch/parse failure, not a remote
+                // delete. Only a row that is absent AND not failed is a true
+                // deletion candidate.
+                if seen.contains(&key) {
+                    continue;
+                }
+                if let Some(remote_event_id) = &remote_event_id
+                    && failed.contains(remote_event_id)
+                {
+                    continue;
+                }
+                // FORK 6 (O21): an absent recurring MASTER whose occurrences
+                // all fall outside the active window is legitimately unseen by
+                // a range pull and must be PRESERVED, not deleted.
+                if !should_delete_absent_candidate(
+                    recurrence_rule.as_deref(),
+                    start_time,
+                    end_time,
+                    timezone.as_deref(),
+                    start,
+                    end,
+                ) {
+                    continue;
+                }
+                tx.execute(
+                    "DELETE FROM calendar_attendees WHERE event_id = ?1",
+                    params![id],
+                )
+                .map_err(|error| error.to_string())?;
+                tx.execute(
+                    "DELETE FROM calendar_reminders WHERE event_id = ?1",
+                    params![id],
+                )
+                .map_err(|error| error.to_string())?;
+                tx.execute("DELETE FROM calendar_events WHERE id = ?1", params![id])
+                    .map_err(|error| error.to_string())?;
+                deleted += 1;
+            }
+            tx.commit().map_err(|error| error.to_string())?;
+            Ok(deleted)
+        })
+        .await
+}
+
+/// Decide whether an absent-from-seen (and not-failed) cached candidate is a
+/// genuine remote deletion to reap, or a recurring MASTER whose occurrences
+/// all fall outside the active window and must be PRESERVED.
+///
+/// FORK 6 (spec § 4.5, O21): the range pull (JMAP `CalendarEvent/query`,
+/// CalDAV time-range `REPORT`) matches events by occurrence expansion and
+/// omits an ended / out-of-window series, so such a master is legitimately
+/// absent from the seen set. Deleting it would discard exactly the multi-year
+/// history the § 2.6 backfill exists to build. Google/Graph store expanded
+/// instances with `recurrence_rule` NULL (no master rows), so they never take
+/// the recurring branch. A non-recurring absent candidate is a real delete
+/// (the candidate SQL only loads non-recurring rows that already overlap the
+/// window). A recurring master is a real delete ONLY when it still yields an
+/// occurrence intersecting the window - so a genuinely cancelled long-running
+/// series does not keep rendering in the visible view forever.
+fn should_delete_absent_candidate(
+    recurrence_rule: Option<&str>,
+    start_time: i64,
+    end_time: i64,
+    timezone: Option<&str>,
+    window_start: i64,
+    window_end: i64,
+) -> bool {
+    let Some(rrule) = recurrence_rule else {
+        // Non-recurring: the candidate SQL guarantees window overlap already.
+        return true;
+    };
+    // Fast path: the master's own interval overlaps the window (it has, or is,
+    // an in-window occurrence) - a real delete without expanding the rule.
+    if start_time < window_end && end_time > window_start {
+        return true;
+    }
+    // Otherwise expand the RRULE over the window and delete only if some
+    // occurrence lands inside it; else preserve (out-of-window history the
+    // range pull cannot see).
+    recurring_master_intersects_window(
+        rrule,
+        start_time,
+        end_time,
+        timezone,
+        window_start,
+        window_end,
+    )
+}
+
+async fn calendar_history_backfilled_at(
+    db: &ReadDbState,
+    calendar_id: &str,
+) -> Result<Option<i64>, String> {
+    let calendar_id = calendar_id.to_string();
+    db.with_read(move |conn| {
+        conn.query_row(
+            "SELECT history_backfilled_at FROM calendars WHERE id = ?1",
+            params![calendar_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
     })
     .await
 }
 
-pub async fn apply_calendar_sync_result_impl(
+async fn mark_history_backfilled(
     db: &WriteDbState,
-    account_id: &str,
-    calendar_remote_id: &str,
-    sync_result: CalendarSyncResultDto,
+    calendar_id: &str,
+    now_ms: i64,
 ) -> Result<(), String> {
-    let account_id = account_id.to_string();
-    let calendar_remote_id = calendar_remote_id.to_string();
+    let calendar_id = calendar_id.to_string();
     db.with_write(move |conn| {
-        let calendar_id: String =
-            get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?.ok_or_else(
-                || format!("calendar not found: account={account_id} remote={calendar_remote_id}"),
-            )?;
-
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-        for event in sync_result.created.into_iter().chain(sync_result.updated) {
-            let row = calendar_event_dto_to_row(&account_id, &calendar_id, &event);
-            upsert_calendar_event_row(&tx, &row)?;
-        }
-
-        for remote_event_id in sync_result.deleted_remote_ids {
-            delete_calendar_event_by_remote_id(&tx, &calendar_id, &remote_event_id)?;
-        }
-
-        if sync_result.new_sync_token.is_some() || sync_result.new_ctag.is_some() {
-            update_calendar_sync_token(
-                &tx,
-                &calendar_id,
-                sync_result.new_sync_token.as_deref(),
-                sync_result.new_ctag.as_deref(),
-            )?;
-        }
-
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn upsert_provider_events_impl(
-    db: &WriteDbState,
-    account_id: &str,
-    calendar_remote_id: &str,
-    events: Vec<CalendarEventDto>,
-) -> Result<(), String> {
-    let account_id = account_id.to_string();
-    let calendar_remote_id = calendar_remote_id.to_string();
-    db.with_write(move |conn| {
-        let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
-            .ok_or_else(|| {
-                format!("Calendar with remote_id '{calendar_remote_id}' not found for account '{account_id}'")
-            })?;
-
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        for event in events {
-            let row = calendar_event_dto_to_row(&account_id, &calendar_id, &event);
-            upsert_calendar_event_row(&tx, &row)?;
-        }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn delete_provider_event_impl(
-    db: &WriteDbState,
-    account_id: &str,
-    calendar_remote_id: &str,
-    remote_event_id: &str,
-) -> Result<(), String> {
-    let account_id = account_id.to_string();
-    let calendar_remote_id = calendar_remote_id.to_string();
-    let remote_event_id = remote_event_id.to_string();
-    db.with_write(move |conn| {
-        let calendar_id: String =
-            get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?.ok_or_else(
-                || format!("calendar not found: account={account_id} remote={calendar_remote_id}"),
-            )?;
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        delete_calendar_event_by_remote_id(&tx, &calendar_id, &remote_event_id)?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
+        conn.execute(
+            "UPDATE calendars SET history_backfilled_at = ?1 WHERE id = ?2",
+            params![now_ms, calendar_id],
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
     })
     .await
 }
@@ -329,689 +616,216 @@ fn row_to_db_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
     })
 }
 
-async fn sync_google_calendar_account(
-    account_id: &str,
-    write_db: &WriteDbState,
-    read_db: &ReadDbState,
-    gmail: &GmailState,
-    cancellation_token: &CancellationToken,
-    mutated: &mut bool,
-) -> Result<(), String> {
-    let gmail_key = *gmail.encryption_key();
-    let writer_pool = write_db.writer_pool();
-    let client = gmail
-        .get_or_try_insert_with(account_id, || {
-            gmail::client::GmailClient::from_account(read_db, writer_pool, account_id, gmail_key)
-        })
-        .await?;
-    let calendars = google_calendar_list_calendars_impl(account_id, read_db, &client).await?;
-    upsert_discovered_calendars_impl(write_db, account_id, "google", calendars).await?;
-    *mutated = true;
-    let visible_calendars = load_visible_calendars(read_db, account_id).await?;
-
-    for calendar in visible_calendars {
-        // Cancellation checkpoint - mirrors the IMAP and JMAP per-mailbox
-        // patterns. Calendar sync is idempotent against CalDAV CTags /
-        // Exchange ETags, so a cancelled run resumes from wherever the next
-        // run finds the provider state - no marker-file repair needed.
-        // Point-checks between RPC boundaries, not mid-RPC.
-        if cancellation_token.is_cancelled() {
-            return Err("calendar sync cancelled".to_string());
-        }
-        let sync_result = google_calendar_sync_events_impl(
-            account_id,
-            &calendar.remote_id,
-            calendar.sync_token,
-            read_db,
-            &client,
-            cancellation_token,
-        )
-        .await?;
-        apply_calendar_sync_result_impl(write_db, account_id, &calendar.remote_id, sync_result)
-            .await?;
-    }
-
-    Ok(())
-}
-
-async fn sync_graph_calendar_account(
-    account_id: &str,
-    write_db: &WriteDbState,
-    read_db: &ReadDbState,
-    graph: &GraphState,
-    cancellation_token: &CancellationToken,
-    mutated: &mut bool,
-) -> Result<(), String> {
-    let graph_key = *graph.encryption_key();
-    let writer_pool = write_db.writer_pool();
-    let client = graph
-        .get_or_try_insert_with(account_id, || {
-            graph::client::GraphClient::from_account(read_db, writer_pool, account_id, graph_key)
-        })
-        .await?;
-    let calendars = graph_calendar_list_calendars_impl(account_id, read_db, &client).await?;
-    upsert_discovered_calendars_impl(write_db, account_id, "graph", calendars).await?;
-    *mutated = true;
-    let visible_calendars = load_visible_calendars(read_db, account_id).await?;
-
-    for calendar in visible_calendars {
-        if cancellation_token.is_cancelled() {
-            return Err("calendar sync cancelled".to_string());
-        }
-        let sync_result = graph_calendar_sync_events_impl(
-            account_id,
-            &calendar.remote_id,
-            calendar.sync_token,
-            read_db,
-            &client,
-            cancellation_token,
-        )
-        .await?;
-        apply_calendar_sync_result_impl(write_db, account_id, &calendar.remote_id, sync_result)
-            .await?;
-    }
-
-    Ok(())
-}
-
-async fn sync_caldav_calendar_account(
-    account_id: &str,
-    write_db: &WriteDbState,
-    db: &ReadDbState,
-    encryption_key: &[u8; 32],
-    cancellation_token: &CancellationToken,
-    mutated: &mut bool,
-) -> Result<(), String> {
-    let config = super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
-    let used_persisted = !(config.home_url().is_none() && config.principal_url().is_none());
-
-    // Both the client construction and the actual sync can fail when the
-    // persisted URLs (`caldav_principal_url`, `caldav_home_url`) point at
-    // a stale endpoint. Stale principal alone is enough: with persisted
-    // principal + no home, `build_client_from_config` runs `discover()`
-    // which skips principal discovery (since it's already set) and tries
-    // a calendar-home PROPFIND against the stale principal, which 404s
-    // and propagates here. The retry block below covers BOTH failure
-    // sites - construction *and* sync - so a stale principal doesn't
-    // wedge the account permanently. (Round 3 #32.)
-    let needs_discovery_now = config.home_url().is_none();
-    let attempt = run_caldav_sync_attempt(
-        account_id,
-        write_db,
-        db,
-        &config,
-        needs_discovery_now,
-        cancellation_token,
-        mutated,
-    )
-    .await;
-    match attempt {
-        Ok(()) => Ok(()),
-        Err(err) if used_persisted => {
-            log::warn!(
-                "CalDAV sync for {account_id} failed with persisted URLs ({err}); \
-                 clearing principal/home and rediscovering"
-            );
-            super::caldav::clear_persisted_caldav_urls(write_db, account_id).await;
-            let refreshed =
-                super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
-            // After clearing, both URLs are None so this branch always runs
-            // discovery; pass `true` to persist the freshly discovered values.
-            run_caldav_sync_attempt(
-                account_id,
-                write_db,
-                db,
-                &refreshed,
-                true,
-                cancellation_token,
-                mutated,
-            )
-            .await
-        }
-        Err(err) => Err(err),
-    }
-}
-
-async fn run_caldav_sync_attempt(
-    account_id: &str,
-    write_db: &WriteDbState,
-    db: &ReadDbState,
-    config: &super::caldav::CaldavAccountConfig,
-    persist_after_build: bool,
-    cancellation_token: &CancellationToken,
-    mutated: &mut bool,
-) -> Result<(), String> {
-    let client = super::caldav::build_client_from_config(config).await?;
-    if persist_after_build {
-        super::caldav::persist_discovery_results(
-            write_db,
-            account_id,
-            client.principal_url(),
-            client.calendar_home_url(),
-        )
-        .await;
-    }
-    let outcome =
-        sync_caldav_calendars(&client, write_db, db, account_id, cancellation_token).await?;
-    // Any non-zero CalDAV write counts means we touched the calendar tables.
-    // `calendars_discovered` triggers `db_upsert_calendar` per row even when
-    // the ctag turns out unchanged afterwards, so we conservatively flag it.
-    if outcome.calendars_discovered > 0 || outcome.events_upserted > 0 || outcome.events_deleted > 0
-    {
-        *mutated = true;
-    }
-    Ok(())
-}
-
-/// Convert a `CalendarEventDto` from the provider layer into the DB-crate row
-/// type, binding account and calendar context.
-pub fn calendar_event_dto_to_row(
-    account_id: &str,
-    calendar_id: &str,
-    event: &CalendarEventDto,
-) -> CalendarEventRow {
-    CalendarEventRow {
-        account_id: account_id.to_string(),
-        google_event_id: event.remote_event_id.clone(),
-        remote_event_id: event.remote_event_id.clone(),
-        calendar_id: calendar_id.to_string(),
-        summary: event.summary.clone(),
-        description: event.description.clone(),
-        location: event.location.clone(),
-        start_time: event.start_time,
-        end_time: event.end_time,
-        is_all_day: event.is_all_day,
-        status: event.status.clone(),
-        organizer_email: event.organizer_email.clone(),
-        attendees_json: event.attendees_json.clone(),
-        html_link: event.html_link.clone(),
-        etag: event.etag.clone(),
-        ical_data: event.ical_data.clone(),
-        uid: event.uid.clone(),
-        title: event.title.clone(),
-        timezone: event.timezone.clone(),
-        recurrence_rule: event.recurrence_rule.clone(),
-        organizer_name: event.organizer_name.clone(),
-        rsvp_status: event.rsvp_status.clone(),
-        availability: event.availability.clone(),
-        visibility: event.visibility.clone(),
-        recurrence_id: None,
-    }
-}
-
-#[derive(Debug)]
-struct CalDavSyncResult {
-    calendars_discovered: usize,
-    events_upserted: usize,
-    events_deleted: usize,
-}
-
-async fn sync_caldav_calendars(
-    client: &CalDavClient,
-    write_db: &WriteDbState,
-    read_db: &ReadDbState,
-    account_id: &str,
-    cancellation_token: &CancellationToken,
-) -> Result<CalDavSyncResult, String> {
-    if cancellation_token.is_cancelled() {
-        return Err("calendar sync cancelled".to_string());
-    }
-
-    let discovered = client.list_calendars().await?;
-
-    log::info!(
-        "CalDAV: discovered {} calendars for {account_id}",
-        discovered.len()
-    );
-
-    let mut total_upserted = 0;
-    let mut total_deleted = 0;
-    let mut skipped_unchanged = 0;
-
-    for cal in &discovered {
-        if cancellation_token.is_cancelled() {
-            return Err("calendar sync cancelled".to_string());
-        }
-
-        let can_edit = cal.can_edit.unwrap_or(true);
-        let account_id_owned = account_id.to_string();
-        let remote_id = cal.href.clone();
-        let display_name = cal.display_name.clone();
-        let color = cal.color.clone();
-        let calendar_id = write_db
-            .with_write(move |conn| {
-                let tx = conn.transaction().map_err(|e| e.to_string())?;
-                let id = upsert_discovered_calendar(
-                    &tx,
-                    &DiscoveredCalendar {
-                        account_id: &account_id_owned,
-                        provider: "caldav",
-                        remote_id: &remote_id,
-                        display_name: display_name.as_deref(),
-                        color: color.as_deref(),
-                        is_primary: false,
-                        can_edit,
-                    },
-                )?;
-                tx.commit().map_err(|e| e.to_string())?;
-                Ok(id)
-            })
-            .await?;
-
-        let stored_ctag = load_calendar_ctag(read_db, &calendar_id).await?;
-
-        if let Some(ref remote_ctag) = cal.ctag
-            && stored_ctag.as_ref() == Some(remote_ctag)
-        {
-            log::debug!(
-                "CalDAV: calendar {} ctag unchanged, skipping",
-                cal.display_name.as_deref().unwrap_or(&cal.href)
-            );
-            skipped_unchanged += 1;
-            continue;
-        }
-
-        let (upserted, deleted) = sync_caldav_calendar_events(
-            client,
-            write_db,
-            read_db,
-            account_id,
-            &calendar_id,
-            &cal.href,
-            cancellation_token,
-        )
-        .await?;
-
-        total_upserted += upserted;
-        total_deleted += deleted;
-
-        let calendar_id_for_update = calendar_id.clone();
-        let ctag = cal.ctag.clone();
-        write_db
-            .with_write(move |conn| {
-                let tx = conn.transaction().map_err(|e| e.to_string())?;
-                update_calendar_sync_token(&tx, &calendar_id_for_update, None, ctag.as_deref())?;
-                tx.commit().map_err(|e| e.to_string())?;
-                Ok(())
-            })
-            .await?;
-    }
-
-    log::info!(
-        "CalDAV sync complete for {account_id}: {} calendars ({skipped_unchanged} unchanged), \
-         {total_upserted} events upserted, {total_deleted} events deleted",
-        discovered.len()
-    );
-
-    Ok(CalDavSyncResult {
-        calendars_discovered: discovered.len(),
-        events_upserted: total_upserted,
-        events_deleted: total_deleted,
-    })
-}
-
-async fn sync_caldav_calendar_events(
-    client: &CalDavClient,
-    write_db: &WriteDbState,
-    read_db: &ReadDbState,
-    account_id: &str,
-    calendar_id: &str,
-    calendar_href: &str,
-    cancellation_token: &CancellationToken,
-) -> Result<(usize, usize), String> {
-    let remote_listing = client.list_events(calendar_href).await?;
-    let remote_entries = remote_listing.entries;
-    let failed_uris: HashSet<String> = remote_listing.failed_uris.into_iter().collect();
-    let stored_etags = load_stored_etags(read_db, calendar_id).await?;
-
-    let mut fetch_uris: Vec<String> = Vec::new();
-    let remote_uri_set: HashSet<String> = remote_entries.iter().map(|e| e.uri.clone()).collect();
-
-    for entry in &remote_entries {
-        match stored_etags.get(&entry.uri) {
-            Some(old_etag) if *old_etag == entry.etag => {}
-            _ => fetch_uris.push(entry.uri.clone()),
-        }
-    }
-
-    let deleted_uris: Vec<String> = if remote_entries.is_empty() && !stored_etags.is_empty() {
-        log::warn!(
-            "CalDAV sync for calendar {calendar_id}: server returned 0 events but local cache has {} - \
-             suspecting a transient server failure and skipping the deletion step. \
-             Use full_resync_calendar to force-clear if this is intentional.",
-            stored_etags.len()
-        );
-        Vec::new()
-    } else {
-        let candidates: Vec<String> = stored_etags
-            .keys()
-            .filter(|uri| !remote_uri_set.contains(*uri))
-            .filter(|uri| !failed_uris.contains(*uri))
-            .cloned()
-            .collect();
-        if !failed_uris.is_empty() {
-            let preserved = stored_etags
-                .keys()
-                .filter(|uri| failed_uris.contains(*uri))
-                .count();
-            if preserved > 0 {
-                log::warn!(
-                    "CalDAV sync for calendar {calendar_id}: server reported {preserved} stored events as failing in this 207; preserving local copies."
-                );
-            }
-        }
-        candidates
-    };
-
-    log::info!(
-        "CalDAV sync for calendar {calendar_id}: {} to fetch, {} unchanged, {} deleted",
-        fetch_uris.len(),
-        remote_entries.len() - fetch_uris.len(),
-        deleted_uris.len()
-    );
-
-    let etag_map: HashMap<&str, &str> = remote_entries
-        .iter()
-        .map(|e| (e.uri.as_str(), e.etag.as_str()))
-        .collect();
-
-    let uri_refs: Vec<&str> = fetch_uris.iter().map(String::as_str).collect();
-    let fetched_icals = client.fetch_events(calendar_href, &uri_refs).await?;
-
-    let mut upserted = 0;
-    for (uri, ical_data) in &fetched_icals {
-        if cancellation_token.is_cancelled() {
-            return Err("calendar sync cancelled".to_string());
-        }
-        let etag = etag_map
-            .get(uri.as_str())
-            .map(|etag| etag.trim())
-            .filter(|etag| !etag.is_empty())
-            .map(str::to_string);
-
-        match parse::parse_icalendar(ical_data) {
-            Ok(events) => {
-                let account_id_owned = account_id.to_string();
-                let calendar_id_owned = calendar_id.to_string();
-                let uri_owned = uri.clone();
-                let ical_data_owned = ical_data.clone();
-                let written = write_db
-                    .with_write(move |conn| {
-                        let tx = conn
-                            .transaction()
-                            .map_err(|e| format!("begin caldav resource tx: {e}"))?;
-                        let mut seen_keys: Vec<String> = Vec::with_capacity(events.len());
-                        let mut representative_uid: Option<String> = None;
-
-                        for event in &events {
-                            let key = upsert_caldav_parsed_event_tx(
-                                &tx,
-                                &account_id_owned,
-                                &calendar_id_owned,
-                                &uri_owned,
-                                etag.as_deref(),
-                                &ical_data_owned,
-                                event,
-                            )?;
-                            if representative_uid.is_none() {
-                                // RFC 5545 uses the same UID for a master and its
-                                // overrides. If a server lists an override before
-                                // the master, either UID is equivalent for the map.
-                                representative_uid = Some(
-                                    event
-                                        .uid
-                                        .clone()
-                                        .unwrap_or_else(|| href_synthetic_uid(&uri_owned)),
-                                );
-                            }
-                            seen_keys.push(key);
-                        }
-
-                        if let (Some(uid_for_map), Some(etag_for_map)) =
-                            (representative_uid, etag.as_deref())
-                        {
-                            upsert_caldav_event_map(
-                                &tx,
-                                &uri_owned,
-                                &calendar_id_owned,
-                                &uid_for_map,
-                                etag_for_map,
-                            )?;
-                        }
-                        if !seen_keys.is_empty() {
-                            reap_orphan_overrides(&tx, &calendar_id_owned, &uri_owned, &seen_keys)?;
-                        }
-
-                        tx.commit()
-                            .map_err(|e| format!("commit caldav resource tx: {e}"))?;
-                        Ok(seen_keys.len())
-                    })
-                    .await?;
-                upserted += written;
-            }
-            Err(e) => {
-                log::warn!("Failed to parse iCalendar at {uri}: {e}");
-            }
-        }
-    }
-
-    let deleted_count = deleted_uris.len();
-    if !deleted_uris.is_empty() {
-        let cal_id = calendar_id.to_string();
-        let deleted_owned = deleted_uris;
-        write_db
-            .with_write(move |conn| {
-                let tx = conn
-                    .transaction()
-                    .map_err(|e| format!("begin caldav delete tx: {e}"))?;
-                delete_caldav_events(&tx, &cal_id, &deleted_owned)?;
-                tx.commit()
-                    .map_err(|e| format!("commit caldav delete tx: {e}"))?;
-                Ok(())
-            })
-            .await?;
-    }
-
-    Ok((upserted, deleted_count))
-}
-
-fn upsert_caldav_parsed_event_tx(
-    tx: &WriteTxn<'_>,
-    account_id: &str,
-    calendar_id: &str,
-    uri: &str,
-    etag: Option<&str>,
-    ical_data: &str,
-    event: &parse::ParsedVEvent,
-) -> Result<String, String> {
-    let uid = event.uid.clone().unwrap_or_else(|| {
-        log::warn!(
-            "CalDAV VEVENT at {uri} has no UID (RFC 5545 violation); synthesizing dedup key from href"
-        );
-        href_synthetic_uid(uri)
-    });
-    let google_event_id = make_google_event_id(&uid, event.recurrence_id.as_deref());
-
-    let attendees_json = if event.attendees.is_empty() {
-        None
-    } else {
-        let attendees: Vec<serde_json::Value> = event
-            .attendees
-            .iter()
-            .map(|a| {
-                serde_json::json!({
-                    "email": a.email,
-                    "displayName": a.name,
-                    "responseStatus": a.partstat.as_deref()
-                        .unwrap_or("needsAction").to_lowercase(),
-                })
-            })
-            .collect();
-        serde_json::to_string(&attendees).ok()
-    };
-
-    let Some(start_time) = event.start_time else {
-        log::warn!(
-            "CalDAV VEVENT at {uri} has no usable DTSTART; refusing to persist as epoch event"
-        );
-        return Ok(google_event_id);
-    };
-    let end_time = event.end_time.unwrap_or(start_time);
-
-    let row = CalendarEventRow {
-        account_id: account_id.to_string(),
-        google_event_id: google_event_id.clone(),
-        remote_event_id: uri.to_string(),
-        calendar_id: calendar_id.to_string(),
-        summary: event.summary.clone(),
-        description: event.description.clone(),
-        location: event.location.clone(),
-        start_time,
-        end_time,
-        is_all_day: event.is_all_day,
-        status: event.status.clone(),
-        organizer_email: event.organizer_email.clone(),
-        attendees_json,
-        html_link: None,
-        etag: etag.map(str::to_string),
-        ical_data: Some(ical_data.to_string()),
-        uid: event.uid.clone(),
-        title: event.summary.clone(),
-        timezone: event.timezone.clone(),
-        recurrence_rule: event.rrule.clone(),
-        organizer_name: event.organizer_name.clone(),
-        rsvp_status: None,
-        availability: None,
-        visibility: None,
-        recurrence_id: event.recurrence_id.clone(),
-    };
-
-    upsert_calendar_event_row(tx, &row)?;
-
-    let db_attendees: Vec<CalDavAttendee> = event
-        .attendees
-        .iter()
-        .map(|a| CalDavAttendee {
-            email: a.email.clone(),
-            name: a.name.clone(),
-            partstat: a.partstat.clone(),
-            is_organizer: a.is_organizer,
-        })
-        .collect();
-    sync_caldav_attendees(
-        tx,
-        account_id,
-        &google_event_id,
-        &db_attendees,
-        event.organizer_email.as_deref(),
-        event.organizer_name.as_deref(),
-    )?;
-
-    let db_reminders: Vec<CalDavReminder> = event
-        .reminders
-        .iter()
-        .map(|r| CalDavReminder {
-            minutes_before: r.minutes_before,
-            method: r.method.clone(),
-        })
-        .collect();
-    sync_caldav_reminders(tx, account_id, &google_event_id, &db_reminders)?;
-
-    Ok(google_event_id)
-}
-
-fn href_synthetic_uid(uri: &str) -> String {
-    format!("href={uri}")
-}
-
-fn make_google_event_id(uid: &str, recurrence_id: Option<&str>) -> String {
-    match recurrence_id {
-        Some(rid) => format!("caldav:{uid}::recurrence-id={rid}"),
-        None => format!("caldav:{uid}"),
-    }
-}
-
-async fn load_calendar_ctag(db: &ReadDbState, calendar_id: &str) -> Result<Option<String>, String> {
-    let cid = calendar_id.to_string();
-    db.with_read(move |conn| {
-        match conn.query_row(
-            "SELECT ctag FROM calendars WHERE id = ?1",
-            params![cid],
-            |row| row.get::<_, Option<String>>("ctag"),
-        ) {
-            Ok(ctag) => Ok(ctag),
-            Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
-            Err(e) => Err(format!("load calendar ctag: {e}")),
-        }
-    })
-    .await
-}
-
-async fn load_stored_etags(
-    db: &ReadDbState,
-    calendar_id: &str,
-) -> Result<HashMap<String, String>, String> {
-    let cid = calendar_id.to_string();
-    db.with_read(move |conn| {
-        let mut stmt = conn
-            .prepare("SELECT uri, etag FROM caldav_event_map WHERE calendar_id = ?1")
-            .map_err(|e| format!("prepare etag query: {e}"))?;
-
-        let rows = stmt
-            .query_map(params![cid], |row| {
-                Ok((
-                    row.get::<_, String>("uri")?,
-                    row.get::<_, Option<String>>("etag")?,
-                ))
-            })
-            .map_err(|e| format!("query etags: {e}"))?;
-
-        let mut map = HashMap::new();
-        for row in rows {
-            let (uri, etag) = row.map_err(|e| format!("read etag row: {e}"))?;
-            if let Some(etag) = etag {
-                map.insert(uri, etag);
-            }
-        }
-
-        Ok(map)
-    })
-    .await
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{resolve_sync_targets, should_delete_absent_candidate};
+    use bifrost_types::{Calendar, CalendarId, CalendarProvenance, ProtocolKind};
+    use rtsk::db::types::DbCalendar;
 
-    #[test]
-    fn make_google_event_id_master_uses_uid_only() {
-        let key = make_google_event_id("uid-123@example.com", None);
-        assert_eq!(key, "caldav:uid-123@example.com");
+    const DAY: i64 = 86_400;
+    const NOW: i64 = 1_700_000_000;
+
+    fn bifrost_calendar(provider: ProtocolKind, native_id: &str) -> Calendar {
+        Calendar {
+            id: CalendarId(native_id.to_string()),
+            native_id: native_id.to_string(),
+            name: native_id.to_string(),
+            color: None,
+            provenance: CalendarProvenance {
+                provider,
+                native: native_id.to_string(),
+                calendar_native: None,
+            },
+            is_default: false,
+            can_create_events: true,
+            can_update_events: true,
+            can_delete_events: true,
+        }
     }
 
-    #[test]
-    fn make_google_event_id_override_includes_recurrence_id() {
-        let master = make_google_event_id("uid-123@example.com", None);
-        let override_a = make_google_event_id("uid-123@example.com", Some("20260315T100000Z"));
-        let override_b = make_google_event_id("uid-123@example.com", Some("20260322T100000Z"));
-        assert_ne!(master, override_a);
-        assert_ne!(master, override_b);
-        assert_ne!(override_a, override_b);
+    fn db_calendar(remote_id: &str) -> DbCalendar {
+        DbCalendar {
+            id: format!("local-{remote_id}"),
+            account_id: "acct".to_string(),
+            provider: "caldav".to_string(),
+            remote_id: remote_id.to_string(),
+            display_name: Some(remote_id.to_string()),
+            color: None,
+            is_primary: 0,
+            is_visible: 1,
+            sync_token: None,
+            ctag: None,
+            created_at: 0,
+            updated_at: 0,
+            sort_order: 0,
+            is_default: 0,
+            provider_id: None,
+            can_edit: 1,
+        }
     }
 
+    // O17: a visible calendar the current backend no longer lists (e.g. a
+    // stale Google calendarId left over on an account now routed to CalDAV)
+    // must NOT become a sync target, so no `events_in_range` is issued against
+    // the wrong backend. The listed CalDAV calendar still syncs.
     #[test]
-    fn make_google_event_id_keys_are_host_tz_independent() {
-        let floating = make_google_event_id("uid-1@example.com", Some("20260315T100000"));
-        let all_day = make_google_event_id("uid-1@example.com", Some("20260315"));
-        assert!(
-            floating
-                .strip_prefix("caldav:uid-1@example.com::recurrence-id=")
-                .is_some_and(|tail| tail == "20260315T100000")
+    fn stale_unlisted_calendar_is_not_fetched() {
+        let listed = vec![bifrost_calendar(
+            ProtocolKind::CalDav,
+            "https://dav/home/work/",
+        )];
+        let visible = vec![
+            db_calendar("https://dav/home/work/"), // listed by the CalDAV backend
+            db_calendar("google-calendar-id-123"), // stale Google row, unlisted now
+        ];
+        let targets = resolve_sync_targets(&listed, visible);
+        assert_eq!(
+            targets,
+            vec![(
+                "local-https://dav/home/work/".to_string(),
+                CalendarId("https://dav/home/work/".to_string()),
+            )],
+            "only the listed CalDAV calendar is a fetch target; the stale Google row is skipped"
         );
+    }
+
+    fn window_start() -> i64 {
+        NOW - 365 * DAY
+    }
+    fn window_end() -> i64 {
+        NOW + 730 * DAY
+    }
+
+    fn ical_utc(ts: i64) -> String {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+            .expect("valid timestamp")
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string()
+    }
+
+    // FORK 6 case (a): an ended series (UNTIL two years ago) whose master is
+    // absent from the pull's seen set is PRESERVED - its occurrences all fall
+    // before the active window, so the range pull legitimately omits it.
+    #[test]
+    fn ended_series_absent_is_preserved() {
+        let dtstart = NOW - 3 * 365 * DAY;
+        let until = NOW - 2 * 365 * DAY; // before window_start (one year ago)
+        let rrule = format!("FREQ=WEEKLY;UNTIL={}", ical_utc(until));
         assert!(
-            all_day
-                .strip_prefix("caldav:uid-1@example.com::recurrence-id=")
-                .is_some_and(|tail| tail == "20260315")
+            !should_delete_absent_candidate(
+                Some(&rrule),
+                dtstart,
+                dtstart + 3600,
+                None,
+                window_start(),
+                window_end(),
+            ),
+            "ended out-of-window series must be preserved, not deleted"
+        );
+    }
+
+    // FORK 6 case (b): an unbounded weekly series started two years ago, absent
+    // from the seen set, is DELETED - its occurrences continue into the active
+    // window, so a still-live series would have been returned by the pull; its
+    // absence is a genuine remote delete.
+    #[test]
+    fn unbounded_series_still_live_absent_is_deleted() {
+        let dtstart = NOW - 2 * 365 * DAY;
+        assert!(
+            should_delete_absent_candidate(
+                Some("FREQ=WEEKLY"),
+                dtstart,
+                dtstart + 3600,
+                None,
+                window_start(),
+                window_end(),
+            ),
+            "a live in-window recurring series absent from the pull is a real delete"
+        );
+    }
+
+    // FORK 6 regression (the reconcile's own bug): an unbounded weekly series
+    // whose DTSTART sits FAR before the active window (four years back, well
+    // beyond the DTSTART-anchored 2-year synthetic expansion horizon the view
+    // expander uses) still recurs into the window and, when absent from the
+    // seen set, must be DELETED. The earlier implementation expanded a fixed
+    // count from DTSTART and never reached the window, wrongly preserving a
+    // remotely-deleted series forever. Mirrors the
+    // caldav-calendar-recurrence-window-reconcile.lua fixture (DTSTART 2024-01
+    // vs a 2027-era window).
+    #[test]
+    fn far_dtstart_unbounded_series_still_live_absent_is_deleted() {
+        let dtstart = NOW - 4 * 365 * DAY;
+        assert!(
+            should_delete_absent_candidate(
+                Some("FREQ=WEEKLY"),
+                dtstart,
+                dtstart + 3600,
+                None,
+                window_start(),
+                window_end(),
+            ),
+            "an unbounded series with a far-past DTSTART still lands occurrences in \
+             the window; its absence from the pull is a real delete"
+        );
+    }
+
+    // Companion to the far-DTSTART case: an ended series whose UNTIL predates
+    // the window must STAY preserved even with a far-past DTSTART (no occurrence
+    // reaches the window). Guards against an over-eager reconcile that would
+    // delete on absence regardless of the rule's actual reach.
+    #[test]
+    fn far_dtstart_ended_series_absent_is_preserved() {
+        let dtstart = NOW - 4 * 365 * DAY;
+        let until = NOW - 2 * 365 * DAY; // still a year before window_start
+        let rrule = format!("FREQ=WEEKLY;UNTIL={}", ical_utc(until));
+        assert!(
+            !should_delete_absent_candidate(
+                Some(&rrule),
+                dtstart,
+                dtstart + 3600,
+                None,
+                window_start(),
+                window_end(),
+            ),
+            "a far-past ended series whose occurrences all predate the window is \
+             preserved, not deleted"
+        );
+    }
+
+    // FORK 6 case (c): a series whose DTSTART is beyond window_end, absent from
+    // the seen set, is PRESERVED - none of its occurrences intersect the active
+    // window yet, so the range pull cannot have returned it.
+    #[test]
+    fn future_series_beyond_window_absent_is_preserved() {
+        let dtstart = window_end() + 30 * DAY;
+        assert!(
+            !should_delete_absent_candidate(
+                Some("FREQ=WEEKLY"),
+                dtstart,
+                dtstart + 3600,
+                None,
+                window_start(),
+                window_end(),
+            ),
+            "a wholly-future recurring series must be preserved, not deleted"
+        );
+    }
+
+    // FORK 6 case (d): a non-recurring in-window row absent from the seen set is
+    // still a genuine remote delete.
+    #[test]
+    fn non_recurring_in_window_absent_is_deleted() {
+        assert!(
+            should_delete_absent_candidate(
+                None,
+                NOW,
+                NOW + 3600,
+                None,
+                window_start(),
+                window_end(),
+            ),
+            "a non-recurring in-window row absent from the pull is a real delete"
         );
     }
 }

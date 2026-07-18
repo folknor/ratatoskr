@@ -5,7 +5,7 @@ pub mod actions;
 pub mod caldav;
 pub mod google;
 pub mod graph;
-pub mod jmap;
+pub mod idmap;
 pub mod sync;
 pub mod types;
 
