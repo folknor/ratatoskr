@@ -233,7 +233,11 @@ service-to-app wire contract.
 Rewired: provider construction in `core` / `service`; the action pipeline
 bottom; the `calendar` crate; contacts sync; attachments; server-side search;
 server-side filters; identities/settings; shared-mailbox and public-folder
-scoping.
+scoping. B10 closed the server-side-search seam: B8 had already migrated its
+sole live instance, GAL directory enumeration, to `engine.directory_search`.
+Mail search remains the provider-free local Tantivy plus smart-folder SQL
+pipeline by design; `search` manifest isolation and the `rtsk` / `service`
+search-path lockdown tests gate that invariant.
 
 ## 6. Track A: making bifrost ideal (bifrost repo, lands first)
 
@@ -1481,8 +1485,19 @@ landing commit.
   yet (`#[allow(dead_code)]`), pinning the surface for a future compose
   item rather than wiring a UX that was never present. Read the B9 landing
   commit for the full accounting.
-- B10. Search. Drive bifrost server-side search/filters where used; the local
-  tantivy search stays app-level. Needs B1.
+- B10. Search. CLOSED - audit found no provider-side mail-search surface to
+  rewire. The seam's only live occupant, GAL directory enumeration, already
+  migrated onto `engine.directory_search` in B8; mail search itself is, and
+  stays, the local Tantivy plus smart-folder SQL pipeline (`core::search_pipeline`),
+  provider-free by design. Two invariant gates pin the seam shut:
+  `local_search_links_no_provider_surface` (`crates/search/tests/`) locks the
+  `search` crate's manifest against a provider/bifrost dependency, and
+  `search_pipeline_routes_local_only` (`crates/core/tests/`) walks the `rtsk`
+  and `service` source for any provider/`SyncEngine` search-shaped call
+  outside the single allow-listed B8 GAL call. IMAP's sync-time
+  `search_folder` / `uid_search` enumeration is unrelated (B3/B15 disposition,
+  not a user-search surface); server-side filters/Sieve are the separate B11
+  item.
 - B11. Server-side filters / Sieve. Rewire onto `filter_*`. Needs B1.
 - B12. Shared mailboxes plus public folders. Rewire
   `ViewScope::SharedMailbox` / `PublicFolder` onto bifrost scopes. Needs A5.

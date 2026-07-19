@@ -23,5 +23,6 @@ hotpath = ["dep:hotpath", "hotpath/hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [dev-dependencies]
+cargo_toml = "0.22.3"
 tempfile = "3"
 tokio = { workspace = true, features = ["sync", "macros", "rt"] }
