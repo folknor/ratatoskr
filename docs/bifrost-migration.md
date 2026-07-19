@@ -1498,7 +1498,13 @@ landing commit.
   `search_folder` / `uid_search` enumeration is unrelated (B3/B15 disposition,
   not a user-search surface); server-side filters/Sieve are the separate B11
   item.
-- B11. Server-side filters / Sieve. Rewire onto `filter_*`. Needs B1.
+- B11. Server-side filters / Sieve. CLOSED - deleted the dead hand-rolled
+  `crates/jmap/src/sieve.rs` duplicate, while leaving the demo Filters settings
+  tab and dormant local `sync/filters.rs` engine as app-level surfaces. The
+  capability-dispatched bifrost `filter_*` surface is pinned behind the
+  no-caller `ServerFilterSurface` (`#[allow(dead_code)]`), mirroring B9's
+  attachment pin; `server_filters_route_through_bifrost` locks the route and
+  duplicate deletion down.
 - B12. Shared mailboxes plus public folders. Rewire
   `ViewScope::SharedMailbox` / `PublicFolder` onto bifrost scopes. Needs A5.
 - B13. Identities, signatures, vacation, quota. Rewire onto the bifrost
@@ -1614,8 +1620,8 @@ its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
 Track A is complete at commit `ff56478` (the A8-closing commit). The frozen
-reference was `a0a18c2` through B7a; B9-SQ (below) has since advanced it to
-`1769367`, the current frozen reference. Twelve bifrost side-quests landed between the
+reference was `a0a18c2` through B7a; B11-SQ (below) has since advanced it to
+`bc97132`, the current frozen reference. Twelve bifrost side-quests landed between the
 A8-closing commit and `0e71226` (see § 2's side-quest protocol), and both
 `./research/bifrost` and `../bifrost` were re-synced together to each in turn; the
 B7a calendar side-quests then carried the freeze from `0e71226` on to `be11bbb`
@@ -1774,7 +1780,14 @@ to `Account::host_attachment` (already implemented for Google -> Drive and
 Graph -> OneDrive at `cf024ab`). No `saehrimnir` mock work was needed - B9
 wires no compose-side caller, so the pinned `host_large_attachment` surface
 has only compile-and-capability-dispatch unit coverage, no round-trip gate.
-`1769367` is the current frozen reference.
+`1769367` was the previous frozen reference.
+
+B11-SQ advanced the freeze a sixteenth time, from `1769367` to `bc97132`
+("sync: expose server-filter passthroughs on SyncEngine"): five additive,
+capability-dispatched `SyncEngine::filter_*` forwarders for list, create,
+update, delete, and validation. They resolve through `live_account`, return
+the flattened engine `Error`, and preserve account failures inside
+`Error::Account`.
 
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
