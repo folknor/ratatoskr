@@ -188,10 +188,17 @@ harness.assert(
     "created event missing after delta"
 )
 
+-- The post-action read sync re-reads the calendar and reconciles the DB
+-- state asserted above. Under the B7a bifrost range-pull surface a B7b
+-- write goes through a separate bifrost Account session that does not
+-- carry the previous session's JMAP sync state, so the resync
+-- full-refetches via `CalendarEvent/query` rather than issuing an
+-- incremental `CalendarEvent/changes` call. Assert only that the resync
+-- re-queried the calendar.
 local delta_requests = harness.mock_requests(admin_endpoint)
 harness.assert(
-    harness.request_count(delta_requests, "jmap", "CalendarEvent/changes") >= 1,
-    "post-action sync did not call CalendarEvent/changes"
+    harness.request_count(delta_requests, "jmap", "CalendarEvent/query") >= 1,
+    "post-action sync did not re-query CalendarEvent"
 )
 
 local ok, shutdown_err = client:shutdown()

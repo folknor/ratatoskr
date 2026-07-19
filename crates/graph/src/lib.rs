@@ -5,7 +5,6 @@ pub mod ews;
 pub mod folder_mapper;
 pub mod group_sync;
 pub mod label_sync;
-pub mod onedrive;
 pub mod ops;
 pub mod parse;
 pub mod public_folder_sync;

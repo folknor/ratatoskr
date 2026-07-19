@@ -1,0 +1,53 @@
+name = "imap-attach-onemsg-multi"
+
+# ONE INBOX message carrying THREE attachments. Drives the B9
+# once-per-message IMAP prefetch invariant: `process_imap_batch` groups
+# the folder batch by message, so a single message's three NULL-hash
+# attachment rows must hydrate the RFC822 exactly once
+# (`AttachmentByteSource::fetch_imap_rfc822` -> one `open_raw_rfc822` ->
+# one BODY.PEEK[] UID FETCH) and extract all three parts from that single
+# parse. A naive per-item rewire would download the whole message three
+# times; this fixture is what proves it does not.
+
+[[account]]
+id = "account-1"
+name = "imap-onemsg@example.test"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Three attachments, one message"
+sent_at = "2026-01-15T09:59:50Z"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-001@example.com>"]
+body_text = "See the three attached files."
+
+[[email.attachment]]
+blob_id = "blob-att-001"
+name = "first.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample.txt"
+
+[[email.attachment]]
+blob_id = "blob-att-002"
+name = "second.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample-second.txt"
+
+[[email.attachment]]
+blob_id = "blob-att-003"
+name = "third.txt"
+content_type = "text/plain"
+disposition = "attachment"
+data_path = "blobs/sample-third.txt"

@@ -327,7 +327,8 @@ enum HarnessResource {
     Events(mpsc::Receiver<SpawnEvent>),
     Notifications(ServiceNotificationReceiver),
     Request(tokio::task::JoinHandle<Result<serde_json::Value, ClientError>>),
-    /// A sibling-binary child the harness drives directly (parent_death_helper).
+    /// The parent-death helper child the harness drives directly (the
+    /// `ratatoskr --parent-death-helper` mode of the same binary).
     /// Held here so kill_on_drop fires on teardown and SIGCHLD reaps the child
     /// through the tokio runtime before the harness process exits. The Child
     /// itself is never read after insertion - it exists for Drop side effects.
@@ -431,17 +432,18 @@ fn lua_spawn_with_events(state: &mut State) -> dellingr::Result<u8> {
     Ok(1)
 }
 
-/// Spawn `parent_death_helper` as a child of the harness, which in turn
-/// spawns the Service with `PR_SET_PDEATHSIG = SIGTERM` set via
-/// `pre_exec`. The helper prints the Service's pid to stdout and sleeps;
-/// the Lua test then SIGKILLs the helper and polls the Service pid.
+/// Spawn the parent-death helper (the `--parent-death-helper` mode of the
+/// `ratatoskr` binary) as a child of the harness, which in turn spawns the
+/// Service with `PR_SET_PDEATHSIG = SIGTERM` set via `pre_exec`. The helper
+/// prints the Service's pid to stdout and sleeps; the Lua test then SIGKILLs
+/// the helper and polls the Service pid.
 ///
 /// Returns a Lua table `{ helper_pid, service_pid }`. The tokio Child
 /// handle is held in `HarnessResource::Helper` for the lifetime of the
 /// harness context so `kill_on_drop` fires on teardown and tokio's
 /// runtime reaps the zombie before the harness binary exits.
 ///
-/// Linux-only - the helper's `main` bails non-zero on other platforms,
+/// Linux-only - the helper mode bails non-zero on other platforms,
 /// so the read-pid step will fail with EOF.
 fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
     let data_dir = PathBuf::from(state.to_string(1)?);
@@ -450,7 +452,13 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         (guard.handle.clone(), guard.app_binary.clone())
     };
-    let helper_binary = parent_death_helper_path(&app_binary)?;
+    // The parent-death helper is a hidden mode of the same `ratatoskr`
+    // binary (`--parent-death-helper <service_binary> <data_dir>`), not a
+    // separately-built sibling executable. This guarantees the capability
+    // ships with the one binary the harness build always produces - a
+    // separate `parent_death_helper` bin could be (and was) left unbuilt in
+    // the harness bin dir, breaking the gate before the Service ever spawned.
+    // The helper then re-launches this same binary with `--service`.
 
     // tokio::process::Command::spawn requires the tokio runtime to be in
     // scope; the BufReader read for the pid line is async. Wrap both in
@@ -458,7 +466,8 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
     // the read.
     let (child, helper_pid, service_pid) = handle
         .block_on(async move {
-            let mut child = tokio::process::Command::new(&helper_binary)
+            let mut child = tokio::process::Command::new(&app_binary)
+                .arg("--parent-death-helper")
                 .arg(&app_binary)
                 .arg(&data_dir)
                 .stdout(std::process::Stdio::piped())
@@ -505,24 +514,6 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
     set_field_number(state, idx, "helper_pid", helper_pid as f64)?;
     set_field_number(state, idx, "service_pid", service_pid as f64)?;
     Ok(1)
-}
-
-fn parent_death_helper_path(app_binary: &Path) -> dellingr::Result<PathBuf> {
-    if let Some(dir) = std::env::var_os("BROKKR_TEST_BIN_DIR") {
-        let candidate = PathBuf::from(dir).join("parent_death_helper");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    if let Some(parent) = app_binary.parent() {
-        let candidate = parent.join("parent_death_helper");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    Err(lua_io(std::io::Error::other(
-        "parent_death_helper binary not found alongside app",
-    )))
 }
 
 fn lua_kill(state: &mut State) -> dellingr::Result<u8> {

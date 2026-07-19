@@ -457,6 +457,12 @@ impl SyncRuntime {
         self.inner.resident_engine.action_account(account_id).await
     }
 
+    pub(crate) fn attachment_byte_source(
+        &self,
+    ) -> crate::bifrost::attachment::AttachmentByteSource {
+        crate::bifrost::attachment::AttachmentByteSource::new(self.inner.resident_engine.clone())
+    }
+
     /// Drain step: cancel every runner + await all supervisor
     /// `JoinHandle`s. Phase 3 task 13 calls this from
     /// `lifecycle::run_drain` before the search-writer flush and the

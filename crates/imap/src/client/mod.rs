@@ -469,11 +469,20 @@ pub async fn fetch_attachment_on_selected(
         .body()
         .ok_or_else(|| format!("No body for UID {uid}"))?;
 
+    extract_attachment_from_rfc822(raw, part_id)
+}
+
+/// Extract one decoded MIME part from assembled RFC822 bytes.
+///
+/// This is shared by the legacy selected-session fetch and the bifrost
+/// `open_raw_rfc822` consumer path. Keeping the section-map traversal in one
+/// place ensures both paths identify IMAP parts identically.
+pub fn extract_attachment_from_rfc822(raw: &[u8], part_id: &str) -> Result<Vec<u8>, String> {
     // Parse the full message - mail-parser decodes content-transfer-encoding
     let parser = MessageParser::default();
     let message = parser
         .parse(raw)
-        .ok_or_else(|| format!("Failed to parse message UID {uid}"))?;
+        .ok_or_else(|| "Failed to parse MIME message".to_string())?;
 
     // Build section map and find the part index for the requested section path
     let section_map = build_imap_section_map(&message);
@@ -481,12 +490,12 @@ pub async fn fetch_attachment_on_selected(
         .iter()
         .find(|(_, section)| section.as_str() == part_id)
         .map(|(&idx, _)| idx)
-        .ok_or_else(|| format!("Section {part_id} not found in message UID {uid}"))?;
+        .ok_or_else(|| format!("Section {part_id} not found in message"))?;
 
     let part = message
         .parts
         .get(target_part_idx)
-        .ok_or_else(|| format!("Part index {target_part_idx} out of range for UID {uid}"))?;
+        .ok_or_else(|| format!("Part index {target_part_idx} out of range"))?;
 
     // Extract the decoded binary content from the part
     let data = match &part.body {

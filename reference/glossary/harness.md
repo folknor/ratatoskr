@@ -73,7 +73,7 @@ The harness needs `ServiceClient`'s typed classification (boot exit codes, `Clie
 
 - Argv: `app --test-harness <script.lua>` (script path; brokkr resolves it relative to the project root before passing).
 - Env var `BROKKR_HARNESS_ARTEFACT_DIR` - absolute path to the per-run artefact directory (brokkr creates it before spawning).
-- Env var `BROKKR_TEST_BIN_DIR` - absolute path to the directory containing the built `app` binary plus sibling helpers (`parent_death_helper`, future stub binaries).
+- Env var `BROKKR_TEST_BIN_DIR` - absolute path to the directory containing the built `ratatoskr` binary. The parent-death test helper is a hidden mode of that same binary (`ratatoskr --parent-death-helper <service_binary> <data_dir>`), not a separate sibling executable - the harness build emits only the one configured `binary`, so folding the helper in keeps the capability from silently going missing when no separate helper bin is built.
 - The harness binary's stdout/stderr are piped by brokkr; brokkr writes them to `binary-stdout.log` and `binary-stderr.log` in the artefact dir after the process exits. The runtime can `println!` for human-readable progress, but that is not a structured protocol.
 
 **What brokkr expects in return:**

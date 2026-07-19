@@ -2,15 +2,16 @@
 -- ceiling: 60s
 
 -- The Service is spawned with `PR_SET_PDEATHSIG = SIGTERM` set on the
--- child via `pre_exec`. When the parent process (parent_death_helper)
--- is SIGKILLed, the kernel delivers SIGTERM to the Service, which then
+-- child via `pre_exec`. When the parent process (the parent-death helper,
+-- a hidden `--parent-death-helper` mode of the `ratatoskr` binary) is
+-- SIGKILLed, the kernel delivers SIGTERM to the Service, which then
 -- exits within ~2s. This is the kernel-side line of defense for orphan
 -- Services if the App crashes hard; cross-platform fallback paths
 -- (kill_on_drop, JobObject KILL_ON_JOB_CLOSE) cover the case where
 -- the App exits cleanly.
 --
--- Linux-only: parent_death_helper's `main` is `#[cfg(target_os =
--- "linux")]`. On other platforms the helper bails with exit code 1 and
+-- Linux-only: the helper mode is `#[cfg(target_os = "linux")]`. On other
+-- platforms it bails with exit code 1 and
 -- harness.spawn_parent_death_helper would fail to read the pid.
 
 local dir = harness.data_dir("parent_sigkill")

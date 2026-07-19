@@ -604,6 +604,7 @@ pub(crate) fn build_consumer_row(
                     .map(|d| d.size)
                     .or_else(|| blob.size.and_then(|size| i64::try_from(size).ok())),
                 remote_attachment_id: Some(remote_attachment_id),
+                blob_id: Some(blob.id.0.clone()),
                 content_hash: inline_hashes.get(&blob.id.0).map(|entry| entry.0),
                 content_id: detail.and_then(|d| d.content_id.clone()),
                 is_inline: detail.map_or_else(
@@ -692,6 +693,7 @@ pub(crate) fn build_consumer_row(
                     mime_type: Some(att.mime_type.clone()),
                     size: Some(i64::from(att.size)),
                     remote_attachment_id: Some(att.part_id.clone()),
+                    blob_id: None,
                     content_hash: att.content_hash,
                     content_id: att.content_id.clone(),
                     is_inline: att.is_inline,

@@ -48,6 +48,9 @@ pub struct AttachmentInsertRow {
     pub mime_type: Option<String>,
     pub size: Option<i64>,
     pub remote_attachment_id: Option<String>,
+    /// Verbatim bifrost BlobHandle id. IMAP rows retain their MIME part id in
+    /// `remote_attachment_id` and leave this empty.
+    pub blob_id: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub content_id: Option<String>,
     pub is_inline: bool,
@@ -114,13 +117,14 @@ pub fn insert_attachments(tx: &WriteTxn<'_>, rows: &[AttachmentInsertRow]) -> Re
         tx.execute(
             "INSERT INTO attachments \
              (id, message_id, account_id, filename, mime_type, size, \
-              remote_attachment_id, content_hash, content_id, is_inline) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+              remote_attachment_id, blob_id, content_hash, content_id, is_inline) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
              ON CONFLICT(id) DO UPDATE SET \
                filename = ?4, mime_type = ?5, size = ?6, \
                remote_attachment_id = ?7, \
-               content_hash = COALESCE(?8, content_hash), \
-               content_id = ?9, is_inline = ?10",
+               blob_id = ?8, \
+               content_hash = COALESCE(?9, content_hash), \
+               content_id = ?10, is_inline = ?11",
             params![
                 row.id,
                 row.message_id,
@@ -129,6 +133,7 @@ pub fn insert_attachments(tx: &WriteTxn<'_>, rows: &[AttachmentInsertRow]) -> Re
                 row.mime_type,
                 row.size,
                 row.remote_attachment_id,
+                row.blob_id,
                 row.content_hash,
                 row.content_id,
                 row.is_inline,
@@ -158,6 +163,7 @@ mod tests {
                 mime_type TEXT,
                 size INTEGER,
                 remote_attachment_id TEXT,
+                blob_id TEXT,
                 content_hash BLOB,
                 content_id TEXT,
                 is_inline INTEGER NOT NULL DEFAULT 0
@@ -178,6 +184,7 @@ mod tests {
                 mime_type: Some("text/plain".to_string()),
                 size: Some(12),
                 remote_attachment_id: Some("remote-1".to_string()),
+                blob_id: Some("blob-1".to_string()),
                 content_hash: Some(hash),
                 content_id: None,
                 is_inline: false,
@@ -197,6 +204,7 @@ mod tests {
                 mime_type: Some("text/plain".to_string()),
                 size: Some(12),
                 remote_attachment_id: Some("remote-1".to_string()),
+                blob_id: Some("blob-1".to_string()),
                 content_hash: None,
                 content_id: None,
                 is_inline: false,

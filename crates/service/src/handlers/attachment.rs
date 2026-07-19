@@ -58,13 +58,6 @@ pub(crate) async fn handle_fetch(
     boot_state: &Arc<BootSharedState>,
     params: AttachmentFetchParams,
 ) -> Result<Value, ServiceError> {
-    let key = boot_state.encryption_key().ok_or_else(|| {
-        ServiceError::Internal(
-            "encryption key not loaded; UI must wait for boot.ready before calling \
-             attachment.fetch"
-                .into(),
-        )
-    })?;
     let write_db = boot_state.write_db_state()?;
     let read_db = boot_state.read_db_state().ok_or_else(|| {
         ServiceError::Internal(
@@ -180,29 +173,20 @@ pub(crate) async fn handle_fetch(
     // attachments row, then materialize. Also reached on a
     // tombstoned-cache-hit fallthrough so the same path revives the
     // blob via `PackStore::put`'s tombstone-revive branch.
-    let provider_attachment_id = info
-        .as_ref()
-        .and_then(|info| info.remote_attachment_id.as_deref())
-        .unwrap_or(&params.attachment_id)
-        .to_string();
     let local_attachment_id = info
         .as_ref()
         .map_or_else(|| params.attachment_id.clone(), |info| info.id.clone());
-
-    let provider =
-        crate::actions::provider::create_provider(&read_db, &write_db, &params.account_id, key)
-            .await
-            .map_err(ServiceError::Internal)?;
-
-    let provider_ctx = common::types::ProviderCtx {
-        account_id: &params.account_id,
-        db: &read_db,
-        progress: &db::progress::NoopProgressReporter,
-    };
-    let attachment = provider
-        .fetch_attachment(&provider_ctx, &params.message_id, &provider_attachment_id)
+    let info = info.ok_or_else(|| {
+        ServiceError::Internal("attachment row disappeared before cache-miss fetch".into())
+    })?;
+    let sync_runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal("sync runtime not installed; attachment.fetch unavailable".into())
+    })?;
+    let attachment_bytes = sync_runtime
+        .attachment_byte_source()
+        .fetch(&params.account_id, &info)
         .await
-        .map_err(|e| ServiceError::Internal(format!("provider fetch_attachment: {e}")))?;
+        .map_err(|error| ServiceError::Internal(format!("bifrost attachment fetch: {error}")))?;
 
     // Phase 9: optionally compress before put. Settings-gated and
     // non-fatal: a squeeze hiccup passes bytes through unchanged.
@@ -216,7 +200,7 @@ pub(crate) async fn handle_fetch(
     let bytes = crate::attachment_compress::maybe_compress(
         &write_db,
         local_attachment_id.clone(),
-        attachment.bytes,
+        attachment_bytes,
         boot_state.compress_attachments_enabled(),
         boot_state.allow_lossy_compression_enabled(),
     )
@@ -234,15 +218,13 @@ pub(crate) async fn handle_fetch(
         .await
         .map_err(|e| ServiceError::Internal(format!("PackStore::put: {e}")))?;
 
-    if let Some(info) = info {
-        let id = info.id;
-        write_db
-            .with_write(move |conn| {
-                db::db::queries_extra::update_attachment_cache_fields(conn, &id, &content_hash)
-            })
-            .await
-            .map_err(ServiceError::Internal)?;
-    }
+    let id = info.id;
+    write_db
+        .with_write(move |conn| {
+            db::db::queries_extra::update_attachment_cache_fields(conn, &id, &content_hash)
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
 
     let MaterializedBlob {
         path: _,

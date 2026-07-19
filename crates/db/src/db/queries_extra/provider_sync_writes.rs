@@ -130,8 +130,13 @@ pub fn sync_thread_read_starred_labels(
 pub struct AttachmentCacheInfo {
     pub id: String,
     pub remote_attachment_id: Option<String>,
+    pub blob_id: Option<String>,
     pub content_hash: Option<crate::blob_hash::BlobHash>,
     pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub imap_folder: Option<String>,
+    pub imap_uid: Option<i64>,
+    pub imap_uidvalidity: Option<i64>,
     pub is_inline: bool,
     pub text_indexed_at: Option<i64>,
     pub extraction_status: Option<String>,
@@ -168,12 +173,14 @@ pub fn find_attachment_cache_info(
 ) -> Result<Option<AttachmentCacheInfo>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT a.id, a.remote_attachment_id, a.content_hash, \
-                    a.mime_type, a.is_inline, a.text_indexed_at, \
+            "SELECT a.id, a.remote_attachment_id, a.blob_id, a.content_hash, \
+                    a.mime_type, a.size, a.is_inline, a.text_indexed_at, \
+                    m.imap_folder, m.imap_uid, m.imap_uidvalidity, \
                     t.status AS extraction_status, \
                     b.tombstoned_at AS blob_tombstoned_at, \
                     CASE WHEN b.content_hash IS NOT NULL THEN 1 ELSE 0 END AS blob_present \
              FROM attachments a \
+             LEFT JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id \
              LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash \
              LEFT JOIN attachment_blobs b ON b.content_hash = a.content_hash \
              WHERE a.account_id = ?1 AND a.message_id = ?2 \
@@ -189,8 +196,13 @@ pub fn find_attachment_cache_info(
                 Ok(AttachmentCacheInfo {
                     id: row.get("id")?,
                     remote_attachment_id: row.get("remote_attachment_id")?,
+                    blob_id: row.get("blob_id")?,
                     content_hash: row.get("content_hash")?,
                     mime_type: row.get("mime_type")?,
+                    size: row.get("size")?,
+                    imap_folder: row.get("imap_folder")?,
+                    imap_uid: row.get("imap_uid")?,
+                    imap_uidvalidity: row.get("imap_uidvalidity")?,
                     is_inline: row.get::<_, i64>("is_inline")? != 0,
                     text_indexed_at: row.get("text_indexed_at")?,
                     extraction_status: row.get("extraction_status")?,

@@ -281,6 +281,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     mime_type TEXT,
     size INTEGER,
     remote_attachment_id TEXT,
+    blob_id TEXT,
     content_id TEXT,
     is_inline INTEGER DEFAULT 0,
     content_hash BLOB,

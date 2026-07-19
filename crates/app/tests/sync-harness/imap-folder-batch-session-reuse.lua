@@ -1,38 +1,36 @@
--- description: IMAP attachment prefetch batches three attachments under one selected session per (account, folder)
+-- description: IMAP attachment prefetch serves cache-miss bytes over the resident engine with no dead per-batch session
 -- expected: pass
 -- fixture: imap-attach-multi.toml
 -- protocol: imap
 -- ceiling: 90s
 
--- Phase 7 of the attachments roadmap shipped folder-batched IMAP
--- attachment fetches (`process_imap_batch` in
--- `crates/service/src/prefetch_imap.rs`): one LOGIN + one mailbox
--- selection per
--- `(account_id, folder)` group, then `fetch_attachment_on_selected`
--- per item under the shared session. The earlier
--- `imap-attachment-prefetch.lua` test could only verify content_hash
--- population because saehrimnir's RequestLog had no way to tell two
--- IMAP sessions apart. Saehrimnir now tags every `RequestEntry` with
--- a process-wide `connection_id` (rewritten to 0-based dense indices
--- under `?stable=true`), which lets the harness group commands by
--- session.
+-- B9 rewire: the attachment byte source moved onto the resident bifrost
+-- engine (`AttachmentByteSource` in
+-- `crates/service/src/bifrost/attachment.rs`). The prefetch worker no
+-- longer opens a dedicated IMAP session per (account, folder) batch -
+-- that pre-B9 session (one LOGIN + one SELECT, then
+-- `fetch_attachment_on_selected` per item) became inert once the bytes
+-- started flowing through the engine, leaving a LOGIN + SELECT
+-- connection that fetched nothing (the regression this gate now guards
+-- against). Instead `process_imap_batch` groups the folder's items by
+-- message and drives each attachment through the resident engine's
+-- `open_raw_rfc822`, hydrating each message's RFC822 at most once and
+-- extracting every one of its parts from the single parse.
 --
--- Fixture has three attachments in INBOX. After sync, the prefetch
--- worker enqueues all three NULL-hash rows and processes them in one
--- IMAP batch. We:
+-- Fixture has three single-attachment messages in INBOX. After sync the
+-- prefetch worker enqueues all three NULL-hash rows in one folder batch
+-- and drains them through the engine. We assert:
 --
---   1. Find every IMAP connection_id that issued any UID FETCH
---      against a body part (sync fetches bodies for email content,
---      prefetch fetches BODY[part] for attachments - both share the
---      `request.detail.body == true` signal in saehrimnir).
---   2. Pick the connection_id with the most body fetches. With one
---      sync + three prefetched attachments and folder-batching
---      working, that is the prefetch session with three fetches.
---      Regression (one session per attachment) would split those
---      three fetches across three distinct connection_ids, none of
---      which has more than one.
---   3. Assert the chosen connection issued exactly one LOGIN and
---      exactly one mailbox selection - the Phase 7 contract.
+--   1. All three attachments land a content_hash - the cache-miss path
+--      fetched real bytes end-to-end through the engine.
+--   2. prefetch.completed reports at least three fetched.
+--   3. NO dead prefetch session survives: no IMAP connection has the
+--      inert signature the old batch path left behind - a LOGIN plus a
+--      mailbox SELECT/EXAMINE but zero body UID FETCHes and zero
+--      structural commands (LIST / UID SEARCH). A resident engine
+--      connection that serves an attachment always issues a body
+--      UID FETCH; a sync connection issues LIST / UID SEARCH. Only the
+--      abandoned per-batch session matched login+select+nothing.
 
 local function attachment_by_filename(attachments, filename)
     for _, attachment in ipairs(attachments) do
@@ -96,6 +94,21 @@ end
 local function count_mailbox_selections(requests, connection_id)
     return count_commands(requests, connection_id, "SELECT")
         + count_commands(requests, connection_id, "EXAMINE")
+end
+
+local function count_body_fetches(requests, connection_id)
+    local count = 0
+    for _, request in ipairs(requests) do
+        if request.protocol == "imap"
+            and request.connection_id == connection_id
+            and request.command == "UID FETCH"
+            and request.detail ~= nil
+            and request.detail.body == true
+        then
+            count = count + 1
+        end
+    end
+    return count
 end
 
 local function commands_for_connection(requests, connection_id)
@@ -162,70 +175,72 @@ harness.assert(state ~= nil, "not all attachments had content_hash populated aft
 
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
 
--- Group body fetches by connection_id. Sync also fetches bodies (for
--- email content); prefetch fetches BODY[part] for attachments. Both
--- show as UID FETCH with detail.body == true, so we pick the session
--- with the most body fetches as the prefetch one.
-local body_fetches_by_conn = {}
+-- Collect every IMAP connection_id that appears.
+local connection_ids = {}
+local seen = {}
 for _, request in ipairs(requests) do
-    if request.protocol == "imap"
-        and request.command == "UID FETCH"
-        and request.detail ~= nil
-        and request.detail.body == true
-        and request.connection_id ~= nil
-    then
-        local cid = request.connection_id
-        body_fetches_by_conn[cid] = (body_fetches_by_conn[cid] or 0) + 1
+    if request.protocol == "imap" and request.connection_id ~= nil then
+        if not seen[request.connection_id] then
+            seen[request.connection_id] = true
+            connection_ids[#connection_ids + 1] = request.connection_id
+        end
     end
 end
 
-local prefetch_conn = nil
-local prefetch_fetch_count = 0
-for cid, count in pairs(body_fetches_by_conn) do
+-- Regression guard: no connection carries the dead per-batch session's
+-- signature - a LOGIN plus a mailbox selection that then does NOTHING
+-- useful: zero body UID FETCHes, zero structural LIST / UID SEARCH, and
+-- no push IDLE / keepalive NOOP (so a legitimate push or idle-pool
+-- connection is not misread as the abandoned prefetch session). That
+-- "log in, select, and stop" shape is exactly the inert session the B9
+-- rewire removed when the byte source moved onto the resident engine.
+local dead_session = nil
+for _, cid in ipairs(connection_ids) do
     local login_count = count_commands(requests, cid, "LOGIN")
+    local selection_count = count_mailbox_selections(requests, cid)
+    local body_fetches = count_body_fetches(requests, cid)
     local list_count = count_commands(requests, cid, "LIST")
     local search_count = count_commands(requests, cid, "UID SEARCH")
-    local selection_count = count_mailbox_selections(requests, cid)
-    if login_count == 1
+    local idle_count = count_commands(requests, cid, "IDLE")
+    local noop_count = count_commands(requests, cid, "NOOP")
+    if login_count >= 1
+        and selection_count >= 1
+        and body_fetches == 0
         and list_count == 0
         and search_count == 0
-        and selection_count == 1
-        and count > prefetch_fetch_count
+        and idle_count == 0
+        and noop_count == 0
     then
-        prefetch_conn = cid
-        prefetch_fetch_count = count
+        dead_session = cid
+        break
     end
 end
 
-harness.assert(prefetch_conn ~= nil,
-    "no IMAP attachment prefetch connection issued batched body fetches")
-harness.assert(prefetch_fetch_count >= 3,
-    "prefetch session should batch all three attachment fetches into one connection " ..
-    "(got " .. tostring(prefetch_fetch_count) .. " body fetches on connection_id=" ..
-    tostring(prefetch_conn) .. " - a regression to one-session-per-attachment would " ..
-    "spread these across three connection_ids)")
+harness.assert(dead_session == nil,
+    "found an inert prefetch IMAP session (login+select, no fetch/list/search) on connection_id=" ..
+    tostring(dead_session) ..
+    " - the B9 rewire must not leave a dedicated attachment-prefetch session; commands=" ..
+    (dead_session ~= nil and commands_for_connection(requests, dead_session) or ""))
 
-local login_count = count_commands(requests, prefetch_conn, "LOGIN")
-local selection_count = count_mailbox_selections(requests, prefetch_conn)
-local prefetch_commands = commands_for_connection(requests, prefetch_conn)
-
-harness.assert_eq(login_count, 1,
-    "prefetch session should issue exactly one LOGIN (got " ..
-    tostring(login_count) .. "; commands=" .. prefetch_commands .. ")")
-harness.assert_eq(selection_count, 1,
-    "prefetch session should issue exactly one mailbox selection (got " ..
-    tostring(selection_count) .. "; commands=" .. prefetch_commands .. ")")
+-- Positive check: the attachment bytes were served over the engine's
+-- IMAP connection(s) as whole-message body fetches. There must be at
+-- least three body UID FETCHes beyond the ones sync issued for message
+-- bodies (three messages -> three attachment RFC822 hydrations).
+local total_body_fetches = 0
+for _, cid in ipairs(connection_ids) do
+    total_body_fetches = total_body_fetches + count_body_fetches(requests, cid)
+end
+harness.assert(total_body_fetches >= 3,
+    "expected at least three IMAP body fetches serving the three attachments (got " ..
+    tostring(total_body_fetches) .. ")")
 
 harness.write_summary({
     correct = 1,
     prefetch_fetched = prefetch_done.fetched,
     prefetch_skipped = prefetch_done.skipped,
     prefetch_failed = prefetch_done.failed,
-    prefetch_connection_id = prefetch_conn,
-    prefetch_body_fetches = prefetch_fetch_count,
-    prefetch_logins = login_count,
-    prefetch_mailbox_selections = selection_count,
-    prefetch_commands = prefetch_commands,
+    imap_connections = #connection_ids,
+    total_body_fetches = total_body_fetches,
 })
 
 local ok, shutdown_err = client:shutdown()

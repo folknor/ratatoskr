@@ -3,33 +3,10 @@ use std::sync::LazyLock;
 use base64::Engine as _;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
-use types::MailProviderKind;
 
 use crate::db::ReadDbState;
 
 use crate::graph::client::GraphClient;
-
-/// Maximum attachment size (in bytes) before suggesting cloud upload.
-/// 25 MB is the common limit for most email providers.
-pub const LARGE_ATTACHMENT_THRESHOLD: u64 = 25 * 1024 * 1024;
-
-/// Check whether an account's provider supports cloud attachment uploads.
-///
-/// Only Exchange (Graph → OneDrive) and Gmail (Google Drive) have cloud
-/// upload support. JMAP and IMAP accounts should show a "file too large"
-/// warning when attachments exceed [`LARGE_ATTACHMENT_THRESHOLD`].
-pub fn supports_cloud_upload(provider: MailProviderKind) -> bool {
-    matches!(provider, MailProviderKind::Graph | MailProviderKind::Gmail)
-}
-
-/// Build a human-readable warning for accounts without cloud upload support.
-pub fn large_attachment_warning(file_name: &str, file_size: u64) -> String {
-    let size_mb = file_size as f64 / (1024.0 * 1024.0);
-    format!(
-        "\"{file_name}\" is {size_mb:.1} MB. This may exceed the provider's attachment \
-         size limit. Consider compressing the file or using an external sharing service."
-    )
-}
 
 /// Cloud storage provider that hosts the linked file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,54 +102,6 @@ pub fn detect_cloud_links(html_body: &str) -> Vec<CloudLink> {
     }
 
     results
-}
-
-// ---------------------------------------------------------------------------
-// Upload state machine
-// ---------------------------------------------------------------------------
-
-/// Upload lifecycle status for outgoing cloud attachments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UploadStatus {
-    /// Queued, waiting for upload to start.
-    Pending,
-    /// Upload is in progress.
-    Uploading,
-    /// File fully uploaded to cloud storage (have drive item ID).
-    Uploaded,
-    /// Sharing link created and inserted into the email body.
-    Linked,
-    /// Email containing the link was sent successfully.
-    Sent,
-    /// Upload failed (may be retried).
-    Failed,
-}
-
-impl UploadStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Uploading => "uploading",
-            Self::Uploaded => "uploaded",
-            Self::Linked => "linked",
-            Self::Sent => "sent",
-            Self::Failed => "failed",
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)] // returns Option, not Result; FromStr would require an error type
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(Self::Pending),
-            "uploading" => Some(Self::Uploading),
-            "uploaded" => Some(Self::Uploaded),
-            "linked" => Some(Self::Linked),
-            "sent" => Some(Self::Sent),
-            "failed" => Some(Self::Failed),
-            _ => None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,14 +237,6 @@ pub fn extract_gdrive_file_id(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cloud_upload_support_is_typed_by_mail_provider() {
-        assert!(supports_cloud_upload(MailProviderKind::Gmail));
-        assert!(supports_cloud_upload(MailProviderKind::Graph));
-        assert!(!supports_cloud_upload(MailProviderKind::Jmap));
-        assert!(!supports_cloud_upload(MailProviderKind::Imap));
-    }
 
     #[test]
     fn detects_onedrive_links() {

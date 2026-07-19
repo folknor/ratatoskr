@@ -145,9 +145,9 @@ Sanitization pipeline, MDN detection, tracking pixel detection, URL cleaning all
 
 ### Cloud Attachments - `docs/roadmap/cloud-attachments.md`
 
-OneDrive and Google Drive upload both implemented. Remaining:
+The hand-rolled OneDrive (`gmail/src/gdrive.rs`) and Google Drive (`graph/src/onedrive.rs`) upload code has been deleted (bifrost-migration B9) - it had no production caller. Outgoing hosting now goes through bifrost's capability-gated `Account::host_attachment` (Google -> Drive, Graph -> OneDrive), reached via `AttachmentByteSource::host_large_attachment` in `crates/service/src/bifrost/attachment.rs`, which has no caller yet. `core/cloud_attachments.rs` now holds only incoming-link detection/enrichment (`detect_cloud_links`, `enrich_*_link`) - the upload orchestration it used to hold is gone. Remaining:
 
-- [ ] **Compose UI for cloud attachment flow** - Size threshold detection in compose, prompt to upload to cloud, upload progress indicator, insert link into message body. Orchestration logic exists in `core/cloud_attachments.rs`.
+- [ ] **Compose UI for cloud attachment flow** - Size threshold detection in compose, prompt to upload to cloud, upload progress indicator, insert link into message body, wired against `AttachmentByteSource::host_large_attachment`.
 - [ ] **Offline upload queue** - Queue uploads when offline, retry when connectivity returns.
 
 ### Public Folders - `docs/roadmap/public-folders.md`

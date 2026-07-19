@@ -1444,8 +1444,43 @@ landing commit.
     bifrost groups surface (new bifrost work, not yet a side-quest) before
     this can rewire uniformly; until then `group_sync.rs` and
     `sync_exchange_groups` stay in place, Graph-specific.
-- B9. Attachments plus cloud attachments. Rewire `fetch_attachment` onto blobs
-  and the cloud-storage surface. Needs B1, A6.
+- B9. Attachments plus cloud attachments. LANDED - both attachment seams now
+  dispatch through the resident bifrost `SyncEngine` instead of per-provider
+  `ProviderOps`. INCOMING: `attachment.fetch` and the prefetch worker pull
+  bytes through the new `AttachmentByteSource`
+  (`crates/service/src/bifrost/attachment.rs`) - HTTP providers (Gmail /
+  Graph / JMAP) reconstruct a `BlobHandle` from a new `attachments.blob_id`
+  column (the verbatim bifrost blob id, persisted by the consumer's
+  `hydrate.rs::build_consumer_row`) and call `engine.open_blob`; IMAP has no
+  server-side blob handle (only a persisted `part_id`), so it drains
+  `engine.open_raw_rfc822` and MIME-re-parses the part. The prefetch
+  worker's old dedicated IMAP session (LOGIN + SELECT +
+  `fetch_attachment_on_selected`) is gone - `process_imap_batch` now groups
+  a folder batch by message and hydrates each message's RFC822 at most
+  once, satisfying every one of that message's queued attachments from the
+  single parse (`imap-folder-batch-session-reuse.lua` rewritten to assert
+  no dead per-batch session survives; the new
+  `imap-attachment-multipart-single-download.lua` gate proves the
+  once-per-message invariant on a real multi-attachment message). A Graph
+  reference / non-byte-stream attachment (`SyncEvent::Warning(BlobNotByteStream)`)
+  surfaces as a distinct `AttachmentByteError::NotByteStream` rather than
+  being cached as an empty file. Errors carry a typed `AttachmentByteError`
+  (not `ServiceError`), so the prefetch worker's `SkipReason` circuit-breaker
+  classification survives the cut. OUTGOING: the hand-rolled
+  `crates/gmail/src/gdrive.rs` and `crates/graph/src/onedrive.rs` (resumable
+  upload + share-link code with no production caller) are DELETED along with
+  the `cloud_attachments` table's outgoing upload-state writers and
+  `core::cloud_attachments::UploadStatus` / `supports_cloud_upload` /
+  `LARGE_ATTACHMENT_THRESHOLD`; the incoming cloud-link carve-out
+  (`detect_cloud_links`, `enrich_*_link`, `CloudProvider`,
+  `insert_incoming_cloud_links_sync`) is kept whole, unwired as before. A
+  pinned `AttachmentByteSource::host_large_attachment` forwards to bifrost's
+  capability-gated `Account::host_attachment` through a new
+  `SyncEngine::host_attachment` passthrough (B9-SQ, bifrost commit
+  `1769367`, advancing the freeze from `cf024ab` - § 11); it has no caller
+  yet (`#[allow(dead_code)]`), pinning the surface for a future compose
+  item rather than wiring a UX that was never present. Read the B9 landing
+  commit for the full accounting.
 - B10. Search. Drive bifrost server-side search/filters where used; the local
   tantivy search stays app-level. Needs B1.
 - B11. Server-side filters / Sieve. Rewire onto `filter_*`. Needs B1.
@@ -1563,8 +1598,9 @@ A spec that touches bifrost cites `./research/bifrost` as required reading for
 its implementers and reviewers, and any spec that adds or changes a bifrost
 dependency pins the `../bifrost/` path explicitly.
 
-Track A is complete at commit `ff56478` (the A8-closing commit). The current
-frozen reference is `a0a18c2`. Twelve bifrost side-quests landed between the
+Track A is complete at commit `ff56478` (the A8-closing commit). The frozen
+reference was `a0a18c2` through B7a; B9-SQ (below) has since advanced it to
+`1769367`, the current frozen reference. Twelve bifrost side-quests landed between the
 A8-closing commit and `0e71226` (see § 2's side-quest protocol), and both
 `./research/bifrost` and `../bifrost` were re-synced together to each in turn; the
 B7a calendar side-quests then carried the freeze from `0e71226` on to `be11bbb`
@@ -1710,6 +1746,21 @@ implementation pass had bent bifrost into emitting to satisfy the then-strict mo
 the matching fix lives in the `saehrimnir` mock (bare JSCalendar date-time accepted
 in `after`/`before`), not commit-pinned here. `a0a18c2` is B7a's final freeze -
 the fourteenth bifrost side-quest overall.
+
+B9-SQ advanced the freeze a fifteenth time, from `cf024ab` (the B8-closing
+commit the B9 item's ground survey was authored and gated against; the
+intervening B7b and B8 freeze advances between `a0a18c2` and `cf024ab` are a
+known § 11 reconciliation gap this landing does not close, per that item's
+own note) to `1769367` ("sync: expose host_attachment passthrough on
+SyncEngine"): a pure additive `SyncEngine::host_attachment(account_id, bytes,
+meta)` forwarder mirroring the existing passthrough clusters, resolving
+through `live_account` (bailing `AccountNotAttached` up front) and forwarding
+to `Account::host_attachment` (already implemented for Google -> Drive and
+Graph -> OneDrive at `cf024ab`). No `saehrimnir` mock work was needed - B9
+wires no compose-side caller, so the pinned `host_large_attachment` surface
+has only compile-and-capability-dispatch unit coverage, no round-trip gate.
+`1769367` is the current frozen reference.
+
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -

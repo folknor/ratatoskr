@@ -1,0 +1,64 @@
+name = "jmap-extract"
+
+# Real extraction-fixture corpus served over JMAP so the B9 resident
+# engine byte source (open_blob) hydrates the bytes on a genuine
+# cache-miss. Bytes are the same real PDF/DOCX/XLSX/PPTX/zipbomb-shaped
+# blobs the legacy offline test seeded; saehrimnir returns them verbatim
+# from data_path on `/jmap/download/...`. See
+# service-harness/extract/real_fixture_cache_miss_roundtrip.lua.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[email]]
+id = "email-extract-001"
+mailbox_ids = ["mbx-inbox"]
+from = "alice@example.com"
+to = ["bob@example.com"]
+subject = "Extract real fixture corpus"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-extract-001@example.com>"]
+body_text = "Message body intentionally avoids the fixture search tokens."
+
+[[email.attachment]]
+blob_id = "blob-extract-pdf"
+name = "known-content.pdf"
+content_type = "application/pdf"
+disposition = "attachment"
+data_path = "blobs/extract/known-content.pdf"
+
+[[email.attachment]]
+blob_id = "blob-extract-docx"
+name = "known-content.docx"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+disposition = "attachment"
+data_path = "blobs/extract/known-content.docx"
+
+[[email.attachment]]
+blob_id = "blob-extract-xlsx"
+name = "known-content.xlsx"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+disposition = "attachment"
+data_path = "blobs/extract/known-content.xlsx"
+
+[[email.attachment]]
+blob_id = "blob-extract-pptx"
+name = "known-content.pptx"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+disposition = "attachment"
+data_path = "blobs/extract/known-content.pptx"
+
+[[email.attachment]]
+blob_id = "blob-extract-zipbomb"
+name = "zipbomb-shaped.docx"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+disposition = "attachment"
+data_path = "blobs/extract/zipbomb-shaped.docx"

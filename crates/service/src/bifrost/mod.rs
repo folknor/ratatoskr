@@ -1,3 +1,4 @@
+pub mod attachment;
 pub mod checkpoint_store;
 pub mod consumer;
 pub mod contacts;

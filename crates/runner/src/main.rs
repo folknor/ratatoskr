@@ -1,4 +1,16 @@
 fn main() -> app::RunResult {
+    // The parent-death test helper is a hidden mode of this same binary
+    // rather than a separate sibling executable. Folding it in means the
+    // single `ratatoskr` binary the harness build produces always carries
+    // the capability - there is no second binary that can be left unbuilt
+    // in the harness bin dir (which is exactly what silently broke the
+    // `parent_sigkill` gate when the harness build emitted only `ratatoskr`
+    // and no `parent_death_helper`). The flag is never passed in
+    // production; only the service-harness spawns it.
+    if let Some((service_binary, data_dir)) = parent_death_helper_args() {
+        run_parent_death_helper(&service_binary, &data_dir);
+    }
+
     if std::env::args().any(|arg| arg == "--service") {
         // `run_service_blocking` is divergent (`-> !`): it runs the
         // service event loop until shutdown and calls
@@ -32,6 +44,71 @@ fn test_harness_script_arg() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// Parse `--parent-death-helper <service_binary> <data_dir>`. Returns the two
+/// positional operands when the flag is present, `None` otherwise.
+fn parent_death_helper_args() -> Option<(std::ffi::OsString, std::ffi::OsString)> {
+    let mut args = std::env::args_os();
+    while let Some(arg) = args.next() {
+        if arg == "--parent-death-helper" {
+            let service_binary = args.next()?;
+            let data_dir = args.next()?;
+            return Some((service_binary, data_dir));
+        }
+    }
+    None
+}
+
+/// Test helper for the parent-death integration test (`parent_sigkill.lua`).
+///
+/// Spawns the Service binary with `PR_SET_PDEATHSIG = SIGTERM` set on the
+/// child via `pre_exec`, prints the resulting Service PID to stdout, and
+/// sleeps indefinitely. The test process reads the PID, then SIGKILLs this
+/// process; that fires the kernel's parent-death signal in the Service, which
+/// the test then polls to confirm exits within the deadline. Diverges: it
+/// either loops forever (Linux) or exits non-zero (other platforms), so it
+/// never falls through to the normal runner dispatch.
+#[cfg(target_os = "linux")]
+fn run_parent_death_helper(service_binary: &std::ffi::OsStr, data_dir: &std::ffi::OsStr) -> ! {
+    use std::io::Write;
+    use std::os::unix::process::CommandExt;
+
+    let mut command = std::process::Command::new(service_binary);
+    command.arg("--service").arg("--app-data-dir").arg(data_dir);
+
+    unsafe {
+        command.pre_exec(|| {
+            let result = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+            if result != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!("parent_death_helper: failed to spawn service: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    println!("{}", child.id());
+    if std::io::stdout().flush().is_err() {
+        std::process::exit(1);
+    }
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_parent_death_helper(_service_binary: &std::ffi::OsStr, _data_dir: &std::ffi::OsStr) -> ! {
+    eprintln!("parent_death_helper is Linux-only");
+    std::process::exit(1);
 }
 
 #[cfg(test)]

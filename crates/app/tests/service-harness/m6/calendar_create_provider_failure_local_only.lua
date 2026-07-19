@@ -30,8 +30,8 @@ local function assert_local_only(completed, label)
     harness.assert_eq(result.kind, "local_only", label .. " result")
     harness.assert(result.value ~= nil, label .. " value missing")
     harness.assert(
-        string.find(result.value.reason or "", "401", 1, true) ~= nil,
-        label .. " reason missing 401"
+        string.find(result.value.reason or "", "Authentication", 1, true) ~= nil,
+        label .. " reason missing Authentication"
     )
 end
 

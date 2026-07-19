@@ -110,12 +110,6 @@ pub struct PrefetchItem {
     pub message_id: String,
     /// Local `attachments.id` (PK).
     pub attachment_id: String,
-    /// Provider-side blob/part identifier
-    /// (`attachments.remote_attachment_id`). Resolved at enqueue time
-    /// so the worker doesn't need to revisit the row before calling
-    /// `fetch_attachment`. IMAP sync writes the part path into this
-    /// same column, so a single source of truth covers every provider.
-    pub remote_attachment_id: String,
     /// Provider type for the account (`"jmap"`, `"gmail"`, `"graph"`,
     /// `"imap"`). Resolved at enqueue time so the worker doesn't have
     /// to re-query the accounts row. Drives per-provider concurrency
@@ -599,15 +593,13 @@ impl PrefetchRuntime {
             let mut by_folder: HashMap<String, Vec<PrefetchItem>> = HashMap::new();
             let mut orphans: Vec<PrefetchItem> = Vec::new();
             for (attachment_id, message_id, remote, folder) in rows {
-                let remote_attachment_id = match remote {
-                    Some(s) if !s.is_empty() => s,
-                    _ => continue,
-                };
+                if !remote.is_some_and(|value| !value.is_empty()) {
+                    continue;
+                }
                 let item = PrefetchItem {
                     account_id: account_id.to_string(),
                     message_id,
                     attachment_id,
-                    remote_attachment_id,
                     provider: provider.to_string(),
                 };
                 match folder {
@@ -634,15 +626,13 @@ impl PrefetchRuntime {
             }
         } else {
             for (attachment_id, message_id, remote, _folder) in rows {
-                let remote_attachment_id = match remote {
-                    Some(s) if !s.is_empty() => s,
-                    _ => continue,
-                };
+                if !remote.is_some_and(|value| !value.is_empty()) {
+                    continue;
+                }
                 let work = PrefetchWork::Item(PrefetchItem {
                     account_id: account_id.to_string(),
                     message_id,
                     attachment_id,
-                    remote_attachment_id,
                     provider: provider.to_string(),
                 });
                 if let Ok(EnqueueOutcome::Newly) = self.enqueue(work, priority).await {
@@ -866,19 +856,28 @@ async fn process_item(inner: Arc<PrefetchRuntimeInner>, item: PrefetchItem) {
             return;
         }
     };
-    let outcome = run_item_pipeline(&inner, &item, ItemFetch::ViaProvider).await;
+    let outcome = run_item_pipeline(&inner, &item, ItemFetch::ViaEngine).await;
     record_item_outcome(&inner, &item, outcome).await;
 }
 
-/// IMAP folder-batch: hold the per-account semaphore once, open one
-/// session, SELECT the folder once, drain every item over the same
-/// connection. Each item still runs through the full pre/post-fetch
-/// invariant set (RowGone, AlreadyCached, account-deletion race), so a
-/// batch can land partial results without compromising correctness.
+/// IMAP folder-batch: hold the per-account semaphore once, then drain every
+/// item through the resident bifrost engine (the sole attachment byte
+/// source after B9). There is no dedicated prefetch IMAP session anymore -
+/// the old LOGIN + SELECT + reused-session shape fetched nothing once the
+/// byte source moved onto the engine, leaving an inert connection. Instead
+/// the items are grouped by message so each message's RFC822 is hydrated at
+/// most once (`AttachmentByteSource::fetch_imap_rfc822`) and every one of
+/// that message's queued attachments is extracted from the single parse -
+/// the "one download per message, not per attachment" invariant. Each item
+/// still runs through the full pre/post-fetch invariant set (RowGone,
+/// AlreadyCached, account-deletion race), so a batch can land partial
+/// results without compromising correctness.
 async fn process_imap_batch(
     inner: Arc<PrefetchRuntimeInner>,
     account_id: String,
-    folder_id: String,
+    // The folder is the batch key at enqueue time; the drain groups by
+    // message, so the folder id itself is no longer read here.
+    _folder_id: String,
     items: Vec<PrefetchItem>,
 ) {
     let semaphore = account_semaphore(&inner, &account_id, "imap").await;
@@ -892,9 +891,9 @@ async fn process_imap_batch(
         }
     };
 
-    // Gate the whole batch on shared invariants before paying for a
-    // session: the breaker, disk headroom, and per-account toggle
-    // apply to every item identically.
+    // Gate the whole batch on shared invariants once: the breaker, disk
+    // headroom, and per-account toggle apply to every item identically, so
+    // `run_item_pipeline` skips re-checking them for the batched path.
     if breaker_is_open(&inner, "imap", &account_id).await {
         for item in items {
             record_item_outcome(&inner, &item, Err(SkipReason::CircuitOpen)).await;
@@ -914,146 +913,82 @@ async fn process_imap_batch(
         return;
     }
 
-    // Load IMAP config + open session. Internal-state failures
-    // (no write_db, no encryption key) are surfaced as
-    // `InternalError`; LOGIN/SELECT/network failures use
-    // `ProviderTransient` because IMAP servers do drop and recover.
-    let read_db = match inner.boot_state.read_db_state() {
-        Some(db) => db,
-        None => {
-            for item in items {
-                record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
-            }
-            return;
+    // Group by message so the RFC822 hydrate is shared across a message's
+    // attachments; preserve first-seen order for deterministic behavior.
+    let mut order: Vec<String> = Vec::new();
+    let mut by_message: HashMap<String, Vec<PrefetchItem>> = HashMap::new();
+    for item in items {
+        let key = item.message_id.clone();
+        if !by_message.contains_key(&key) {
+            order.push(key.clone());
         }
-    };
-    let key = match inner.boot_state.encryption_key() {
-        Some(k) => k,
-        None => {
-            for item in items {
-                record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
-            }
-            return;
-        }
-    };
-    let write_db = match inner.boot_state.write_db_state() {
-        Ok(db) => db,
-        Err(_) => {
-            for item in items {
-                record_item_outcome(&inner, &item, Err(SkipReason::InternalError)).await;
-            }
-            return;
-        }
-    };
-    let writer_pool = write_db.writer_pool();
-    let config =
-        match imap::account_config::load_imap_config(&read_db, &writer_pool, &account_id, &key)
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                log::debug!("prefetch imap load_config {account_id}: {e}");
-                for item in items {
-                    record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
-                }
-                return;
-            }
-        };
-    let mut session = match imap::connection::connect(&config).await {
-        Ok(s) => s,
-        Err(e) => {
-            log::debug!("prefetch imap connect {account_id}: {e}");
-            for item in items {
+        by_message.entry(key).or_default().push(item);
+    }
+
+    for message_id in order {
+        let msg_items = by_message.remove(&message_id).unwrap_or_default();
+        if inner.cancellation.is_cancelled() {
+            for item in msg_items {
                 record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
             }
-            return;
-        }
-    };
-    if let Err(e) = tokio::time::timeout(Duration::from_secs(30), session.select(&folder_id))
-        .await
-        .map_err(|_| format!("SELECT {folder_id} timed out"))
-        .and_then(|r| r.map_err(|e| format!("SELECT {folder_id}: {e}")))
-    {
-        log::debug!("prefetch imap SELECT {account_id}/{folder_id}: {e}");
-        let _ = session.logout().await;
-        for item in items {
-            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
-        }
-        return;
-    }
-
-    // Drain the batch over the held session, but abandon the session
-    // on the first inner error or timeout. `tokio::time::timeout`
-    // cancels the in-flight `uid_fetch` mid-response when it fires,
-    // which can leave the async-imap session with un-drained bytes
-    // for the cancelled tagged command. Reusing it for the next
-    // FETCH would risk reading those stale bytes as if they were
-    // the new command's reply. Dropping + reconnecting for the
-    // remaining items is correct; we still record each remaining
-    // item so the in-flight set drains and counters advance.
-    let mut session_alive = true;
-    let mut remaining = items.into_iter();
-    while let Some(item) = remaining.next() {
-        if inner.cancellation.is_cancelled() {
-            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
-            // Mark the rest of the batch as Transient without
-            // touching the session - cancellation will tear it down
-            // along with the worker.
-            for stragglers in remaining.by_ref() {
-                record_item_outcome(&inner, &stragglers, Err(SkipReason::ProviderTransient)).await;
-            }
-            break;
-        }
-        if !session_alive {
-            record_item_outcome(&inner, &item, Err(SkipReason::ProviderTransient)).await;
             continue;
         }
-        let outcome = run_item_pipeline(
-            &inner,
-            &item,
-            ItemFetch::ImapSession {
-                session: &mut session,
-            },
-        )
-        .await;
-        let is_session_error = matches!(
-            outcome,
-            Err(SkipReason::ProviderTransient)
-                | Err(SkipReason::ProviderTimeout)
-                | Err(SkipReason::ProviderPermanent)
-        );
-        record_item_outcome(&inner, &item, outcome).await;
-        if is_session_error {
-            // Treat IMAP fetch errors as session-fatal. The fetch
-            // path's timeout cancels the underlying stream mid-
-            // command; even a clean `Err` from async-imap may leave
-            // pipelined responses pending. Tear down the session
-            // and mark the rest of the batch Transient - the next
-            // backfill kick will re-emit on a fresh session.
-            log::debug!(
-                "prefetch imap batch {account_id}/{folder_id}: session-fatal error; \
-                 abandoning {} remaining item(s)",
-                remaining.len(),
-            );
-            let _ = session.logout().await;
-            session_alive = false;
+        // Hydrated at most once, lazily, by the first item of this message
+        // that actually needs bytes (an all-cached message pays nothing).
+        let mut raw: Option<std::sync::Arc<Vec<u8>>> = None;
+        for item in msg_items {
+            let outcome =
+                run_item_pipeline(&inner, &item, ItemFetch::ImapBatched { raw: &mut raw }).await;
+            record_item_outcome(&inner, &item, outcome).await;
         }
-    }
-
-    if session_alive {
-        let _ = session.logout().await;
     }
 }
 
-/// How the fetch step should source the bytes. `ViaProvider` builds a
-/// fresh `ProviderOps` per call (the original Phase 4 path);
-/// `ImapSession` reuses an already-`SELECT`ed IMAP session held by the
-/// caller (Phase 7 batch path).
+/// How the fetch step should source the bytes. Both variants pull through
+/// the resident bifrost engine (there is no per-provider fetch branch);
+/// they differ only in the batching artifact:
+///
+/// - `ViaEngine` fetches one attachment through
+///   `AttachmentByteSource::fetch` (HTTP `open_blob`, or, for a single IMAP
+///   attachment, one `open_raw_rfc822` + part extraction).
+/// - `ImapBatched` shares one message's RFC822 across every queued
+///   attachment of that message: the first item that needs bytes hydrates
+///   the message once (`fetch_imap_rfc822`) and caches it in `raw`; the
+///   rest extract their part from the same parse. This is the message-level
+///   batching that keeps an N-attachment message at one download instead of
+///   N, replacing the old per-folder reused IMAP session (which, after the
+///   B9 rewire, fetched nothing and left an inert LOGIN+SELECT connection).
 enum ItemFetch<'a> {
-    ViaProvider,
-    ImapSession {
-        session: &'a mut imap::connection::ImapSession,
+    ViaEngine,
+    ImapBatched {
+        raw: &'a mut Option<std::sync::Arc<Vec<u8>>>,
     },
+}
+
+/// Map a byte-source failure onto the prefetch skip taxonomy. A genuine
+/// provider failure keeps its recovery class (the transient/permanent split
+/// the breaker and retry policy read); an internal precondition (missing blob
+/// id, a stranded IMAP part, a non-`Account` engine state error) is
+/// `InternalError` so it is never mis-charged against the provider circuit
+/// breaker. Timeouts are classified by the surrounding `timeout` wrapper.
+fn classify_byte_error(error: &crate::bifrost::attachment::AttachmentByteError) -> SkipReason {
+    use crate::bifrost::attachment::AttachmentByteError as E;
+    match error {
+        E::Account(account_error) => recovery_skip(account_error),
+        E::Engine(bifrost_sync::Error::Account(account_error)) => recovery_skip(account_error),
+        E::Engine(_) => SkipReason::InternalError,
+        E::Attach(_) => SkipReason::ProviderTransient,
+        E::MissingBlobId | E::ImapPart(_) => SkipReason::InternalError,
+        E::NotByteStream => SkipReason::ProviderPermanent,
+    }
+}
+
+fn recovery_skip(error: &bifrost_types::AccountError) -> SkipReason {
+    if error.recovery().is_retryable() {
+        SkipReason::ProviderTransient
+    } else {
+        SkipReason::ProviderPermanent
+    }
 }
 
 /// Item-level pipeline: pre-fetch invariants → fetch → post-fetch
@@ -1065,12 +1000,12 @@ async fn run_item_pipeline(
     item: &PrefetchItem,
     fetch: ItemFetch<'_>,
 ) -> Result<(), SkipReason> {
-    // For the per-item (ViaProvider) path these checks are caller
-    // serialized via the semaphore; for the batch path we've already
-    // gated on them in `process_imap_batch`. Re-checking per item in
-    // the batch path is cheap and lets a per-account toggle flip
-    // mid-batch take effect at the next item boundary.
-    if let ItemFetch::ViaProvider = &fetch {
+    // For the per-item (ViaEngine) path these checks are caller
+    // serialized via the semaphore; for the batched IMAP path we've
+    // already gated on them once in `process_imap_batch`, so they are
+    // skipped here (the whole batch shares one breaker/disk/toggle
+    // verdict).
+    if let ItemFetch::ViaEngine = &fetch {
         if breaker_is_open(inner, &item.provider, &item.account_id).await {
             return Err(SkipReason::CircuitOpen);
         }
@@ -1115,89 +1050,68 @@ async fn run_item_pipeline(
         return Err(SkipReason::AlreadyCached);
     }
 
+    // The resident engine is the sole attachment byte source. Keep the
+    // prefetch timeout outside it so the circuit breaker retains its existing
+    // timeout semantics.
+    let source = inner
+        .boot_state
+        .sync_runtime()
+        .ok_or(SkipReason::InternalError)?
+        .attachment_byte_source();
     let bytes = match fetch {
-        ItemFetch::ViaProvider => {
-            let key = inner
-                .boot_state
-                .encryption_key()
-                .ok_or(SkipReason::InternalError)?;
-            let write_db = inner
-                .boot_state
-                .write_db_state()
-                .map_err(|_| SkipReason::InternalError)?;
-            let provider = crate::actions::provider::create_provider(
-                &read_db,
-                &write_db,
-                &item.account_id,
-                key,
-            )
-            .await
-            .map_err(|e| {
-                log::debug!("prefetch create_provider {}: {e}", item.account_id);
-                SkipReason::InternalError
-            })?;
-            let provider_ctx = common::types::ProviderCtx {
-                account_id: &item.account_id,
-                db: &read_db,
-                progress: &db::progress::NoopProgressReporter,
-            };
-            let fetch_fut = provider.fetch_attachment(
-                &provider_ctx,
-                &item.message_id,
-                &item.remote_attachment_id,
-            );
+        ItemFetch::ViaEngine => {
+            let fetch_fut = source.fetch(&item.account_id, &info);
             match tokio::time::timeout(Duration::from_secs(PER_FETCH_TIMEOUT_SECS), fetch_fut).await
             {
-                Ok(Ok(a)) => a.bytes,
-                Ok(Err(e)) => {
-                    let kind = e.kind();
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(error)) => {
                     log::debug!(
-                        "prefetch fetch_attachment {}/{} ({:?}): {e}",
+                        "prefetch bifrost attachment {}/{}: {error}",
                         item.account_id,
-                        item.attachment_id,
-                        kind,
+                        item.attachment_id
                     );
-                    return Err(match kind {
-                        common::error::ProviderErrorKind::Transient => {
-                            SkipReason::ProviderTransient
-                        }
-                        common::error::ProviderErrorKind::Permanent => {
-                            SkipReason::ProviderPermanent
-                        }
-                    });
+                    return Err(classify_byte_error(&error));
                 }
                 Err(_) => return Err(SkipReason::ProviderTimeout),
             }
         }
-        ItemFetch::ImapSession { session } => {
-            let (_msg_folder, uid) =
-                imap::ops::parse_imap_message_id(&item.message_id, &item.account_id).map_err(
-                    |e| {
+        // Message-batched IMAP: hydrate the shared RFC822 once (the first
+        // needing item pays the download), then extract this attachment's
+        // part from the single parse. N attachments of one message cost one
+        // `open_raw_rfc822`, not N.
+        ItemFetch::ImapBatched { raw } => {
+            if raw.is_none() {
+                let fetch_fut = source.fetch_imap_rfc822(&item.account_id, &info);
+                let fetched = match tokio::time::timeout(
+                    Duration::from_secs(PER_FETCH_TIMEOUT_SECS),
+                    fetch_fut,
+                )
+                .await
+                {
+                    Ok(Ok(bytes)) => bytes,
+                    Ok(Err(error)) => {
                         log::debug!(
-                            "prefetch imap parse_message_id {}/{}: {e}",
+                            "prefetch bifrost imap rfc822 {}/{}: {error}",
                             item.account_id,
-                            item.attachment_id,
+                            item.attachment_id
                         );
-                        SkipReason::ProviderPermanent
-                    },
-                )?;
-            let fetch_fut = imap::client::fetch_attachment_on_selected(
-                session,
-                uid,
-                &item.remote_attachment_id,
-            );
-            match tokio::time::timeout(Duration::from_secs(PER_FETCH_TIMEOUT_SECS), fetch_fut).await
-            {
-                Ok(Ok(bytes)) => bytes,
-                Ok(Err(e)) => {
+                        return Err(classify_byte_error(&error));
+                    }
+                    Err(_) => return Err(SkipReason::ProviderTimeout),
+                };
+                *raw = Some(std::sync::Arc::new(fetched));
+            }
+            let raw_bytes = raw.as_ref().expect("hydrated above");
+            match crate::bifrost::attachment::extract_imap_part(raw_bytes, &info) {
+                Ok(bytes) => bytes,
+                Err(error) => {
                     log::debug!(
-                        "prefetch imap fetch {}/{}: {e}",
+                        "prefetch bifrost imap extract {}/{}: {error}",
                         item.account_id,
-                        item.attachment_id,
+                        item.attachment_id
                     );
-                    return Err(SkipReason::ProviderTransient);
+                    return Err(classify_byte_error(&error));
                 }
-                Err(_) => return Err(SkipReason::ProviderTimeout),
             }
         }
     };
@@ -1564,6 +1478,81 @@ fn statvfs_free_bytes(_path: &std::path::Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B9 error-classification gate (finding C). The byte source returns a
+    /// typed `AttachmentByteError` precisely so the prefetch worker can keep
+    /// the skip taxonomy `ServiceError` would have flattened: a genuine
+    /// provider failure keeps its recovery class (feeding the circuit
+    /// breaker's transient/permanent split), while an internal precondition
+    /// (missing blob id, a stranded IMAP part, a non-`Account` engine state
+    /// error) is `InternalError` so it is never mis-charged against the
+    /// provider breaker. Timeouts are classified by the surrounding `timeout`
+    /// wrapper in `run_item_pipeline` (a separate `ProviderTimeout`), not here.
+    #[test]
+    fn classify_byte_error_preserves_provider_vs_internal_split() {
+        use crate::bifrost::attachment::AttachmentByteError as E;
+
+        // Internal preconditions never touch the provider breaker.
+        assert!(matches!(
+            classify_byte_error(&E::MissingBlobId),
+            SkipReason::InternalError
+        ));
+        assert!(matches!(
+            classify_byte_error(&E::ImapPart("no such part".into())),
+            SkipReason::InternalError
+        ));
+
+        // A resident attach failure is transient (the account may attach on
+        // the next kick), not an internal bug.
+        assert!(matches!(
+            classify_byte_error(&E::Attach("not attached".into())),
+            SkipReason::ProviderTransient
+        ));
+
+        // A Graph reference / non-byte-stream attachment has no downloadable
+        // bytes: permanent, so the sweep stops re-queuing it.
+        assert!(matches!(
+            classify_byte_error(&E::NotByteStream),
+            SkipReason::ProviderPermanent
+        ));
+
+        // A structured provider AccountError keeps its recovery class: a
+        // retryable one is Transient (breaker-relevant), a terminal one
+        // Permanent. Assert the mapping follows `recovery().is_retryable()`
+        // rather than a hardcoded kind, so it stays correct across bifrost
+        // recovery-catalog changes.
+        let retryable = bifrost_types::AccountErrorBuilder::new(
+            bifrost_types::AccountErrorKind::Server(bifrost_types::ServerErrorKind::Unavailable),
+            bifrost_types::Cause::Server(bifrost_types::ServerCause::Unavailable {
+                retry_hint: None,
+            }),
+        )
+        .push_cause(bifrost_types::Cause::Attempt(
+            bifrost_types::AttemptCause::new(bifrost_types::TransmissionState::Unsent),
+        ))
+        .operation(bifrost_types::AccountOperation::OpenBlob)
+        .try_build()
+        .expect("valid retry error");
+        assert!(retryable.recovery().is_retryable());
+        assert!(matches!(
+            classify_byte_error(&E::Account(retryable)),
+            SkipReason::ProviderTransient
+        ));
+
+        let permanent = bifrost_types::AccountErrorBuilder::new(
+            bifrost_types::AccountErrorKind::Request(bifrost_types::RequestErrorKind::Malformed),
+            bifrost_types::Cause::Request(bifrost_types::RequestCause::Malformed {
+                detail: bifrost_types::DiagnosticText::support_only("malformed blob handle"),
+            }),
+        )
+        .try_build()
+        .expect("valid permanent error");
+        assert!(!permanent.recovery().is_retryable());
+        assert!(matches!(
+            classify_byte_error(&E::Account(permanent)),
+            SkipReason::ProviderPermanent
+        ));
+    }
 
     #[test]
     fn backoff_doubles_until_max() {
