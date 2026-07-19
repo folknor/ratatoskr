@@ -217,14 +217,13 @@ impl AddAccountWizard {
 
     pub(super) fn handle_oauth_success(
         &mut self,
-        success: OAuthSuccess,
+        success: &OAuthSuccess,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
-        // Phase 6b: re-auth tokens now persist Service-side inside
-        // `oauth.exchange_code` (when `reauth_account_id` is set).
-        // The IPC ack carries empty token fields in re-auth mode and
-        // run_capture_then_exchange surfaced this back as an
-        // OAuthSuccess with empty access_token. Drop the empty
-        // success and dispatch a synthetic ReauthTokensSaved.
+        // Re-auth: the freshly-exchanged tokens were verified AND persisted
+        // Service-side inside `oauth.exchange_code` (verify-before-persist,
+        // option b). The tokens never crossed the IPC - the ack carried no
+        // token fields, so there is nothing for the app to verify or write.
+        // Dispatch the synthetic ReauthTokensSaved so the wizard completes.
         if self.reauth_account_id.is_some() {
             let generation = self.generation.next();
             let _ = success;
@@ -234,11 +233,68 @@ impl AddAccountWizard {
             );
         }
 
-        self.oauth_success = Some(success);
-        self.prefill_identity_name();
-        self.step = AddAccountStep::Identity;
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            self.error = Some("Service not ready".into());
+            return (Task::none(), None);
+        };
+        self.step = AddAccountStep::Validating;
         self.error = None;
-        (Task::none(), None)
+        let generation = self.generation.next();
+        let params = self.verify_oauth_params(success);
+        let task_success = success.clone();
+        (
+            Task::perform(
+                async move {
+                    let result = client
+                        .verify_account(params)
+                        .await
+                        .map_err(|e| e.to_string())
+                        .and_then(|ack| {
+                            if ack.ok {
+                                Ok(())
+                            } else {
+                                Err(ack
+                                    .message
+                                    .unwrap_or_else(|| "Could not verify account.".to_string()))
+                            }
+                        });
+                    (generation, task_success, result)
+                },
+                |(g, success, result)| {
+                    AddAccountMessage::OAuthValidationComplete(g, success, result)
+                },
+            ),
+            None,
+        )
+    }
+
+    fn verify_oauth_params(&self, success: &OAuthSuccess) -> service_api::VerifyAccountParams {
+        use super::state::ManualProvider;
+        let oidc_imap = matches!(
+            self.manual_config.selected_provider,
+            Some(ManualProvider::CustomOidcImap)
+        );
+        let oidc_jmap = matches!(
+            self.manual_config.selected_provider,
+            Some(ManualProvider::CustomOidcJmap)
+        );
+        service_api::VerifyAccountParams {
+            provider: self.resolved_provider.clone(),
+            email: self.email.clone(),
+            imap_host: oidc_imap.then(|| self.auth_state.imap_host.clone()),
+            imap_port: oidc_imap
+                .then(|| self.auth_state.imap_port.parse().ok())
+                .flatten(),
+            imap_security: oidc_imap
+                .then(|| self.auth_state.imap_security.to_db_string().to_string()),
+            username: oidc_imap.then(|| self.auth_state.username.clone()),
+            imap_password: None,
+            accept_invalid_certs: oidc_imap && self.auth_state.accept_invalid_certs,
+            access_token: Some(service_api::RedactedString::new(
+                success.access_token.clone(),
+            )),
+            jmap_url: oidc_jmap.then(|| self.manual_config.jmap_url.clone()),
+        }
     }
 
     pub(super) fn handle_retry_oauth(

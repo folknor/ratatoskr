@@ -11,10 +11,7 @@ use chrono::{DateTime, Utc};
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
-use common::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderProfile,
-    ProviderTestResult, SendIntent,
-};
+use common::types::{ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, SendIntent};
 
 use super::client::JmapClient;
 use super::helpers::{
@@ -539,27 +536,6 @@ impl ProviderOps for JmapOps {
         let bytes = data.to_vec();
         let size = bytes.len() as u64;
         Ok(FetchedAttachment { bytes, size })
-    }
-
-    async fn test_connection(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-    ) -> Result<ProviderTestResult, ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let session = self.client.inner().session();
-        Ok(ProviderTestResult {
-            success: true,
-            message: format!("Connected as {}", session.username()),
-        })
-    }
-
-    async fn get_profile(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let session = self.client.inner().session();
-        Ok(ProviderProfile {
-            email: session.username().to_string(),
-            name: None,
-        })
     }
 }
 

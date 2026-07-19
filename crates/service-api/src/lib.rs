@@ -31,6 +31,7 @@ pub use account::{
     AccountCreateAck, AccountCreateParams, AccountCredentials, AccountDeleteAck,
     AccountDeleteParams, AccountReorderAck, AccountReorderEntry, AccountReorderParams,
     AccountUpdateAck, AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams,
+    VerifyAccountAck, VerifyAccountParams,
 };
 pub use action::{
     ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, JobStatusResponse,

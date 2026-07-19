@@ -17,18 +17,24 @@
 //! both. After Phase 6b the auth code never reaches the UI beyond
 //! the redirect handler that captures it; the IPC ships the code
 //! straight to Service. The handler runs token-endpoint exchange +
-//! userinfo round-trip, then either updates the existing row's
-//! tokens (re-auth, when `reauth_account_id` is set) or returns the
-//! tokens + userinfo for the UI to ship to `account.create` after
-//! the Identity step.
+//! userinfo round-trip, then either returns the tokens to the UI
+//! (initial create) or verifies-and-persists them Service-side
+//! (re-auth) without ever shipping them back.
 //!
 //! Two-IPCs-pragmatic shape: the create flow keeps today's UI
 //! ordering (OAuth -> Identity -> account.create) by having this
 //! handler return the tokens + email + name without a DB write.
 //! `service::accounts::create_account_inner` is then called by the
-//! existing `account.create` handler. The re-auth flow folds the
-//! token-persist into this handler because re-auth has no Identity
-//! step; the ack omits token fields when `reauth_account_id` is set.
+//! existing `account.create` handler; the UI verifies mailbox
+//! reachability (`account.verify`) before that create.
+//!
+//! Re-auth is different: it has no Identity step and must never let
+//! the freshly-exchanged tokens cross the Service->app IPC (the
+//! token-custody invariant). So the re-auth branch verifies the new
+//! tokens Service-side (build the in-flight factory, `open` then
+//! `close`), and only on success persists them via
+//! `update_account_tokens_sync` and reattaches the resident account.
+//! The ack omits every token field when `reauth_account_id` is set.
 
 use std::sync::Arc;
 
@@ -84,11 +90,20 @@ pub(crate) async fn handle_exchange_code(
     let token_expires_at = chrono::Utc::now().timestamp() + bundle.tokens.expires_in as i64;
 
     if let Some(account_id) = p.reauth_account_id {
-        // Re-auth: persist the new tokens onto the existing row,
-        // omit token fields from the ack. Replaces the UI-side
-        // with_write_conn callers in add_account/{state,oauth}.rs.
-        // Tokens encrypt at the handler boundary (same key + path
-        // as `account.update_tokens`).
+        // Re-auth (option b): verify-before-persist runs SERVICE-SIDE, and
+        // the freshly-exchanged tokens NEVER cross the Service->app IPC. We
+        // build an in-flight factory from the new tokens + the persisted row
+        // config, prove it can open the mailbox, and only then persist +
+        // reattach. On any verify failure we leave the old credentials
+        // intact (no DB write) and surface an error. The ack below omits
+        // every token field in all cases (token-custody invariant).
+        let read_db = boot_state.read_db_state().ok_or_else(|| {
+            ServiceError::Internal(
+                "db not available; UI must wait for boot.ready before calling \
+                 oauth.exchange_code"
+                    .into(),
+            )
+        })?;
         let write_db = boot_state.write_db_state()?;
         let key = boot_state.encryption_key().ok_or_else(|| {
             ServiceError::Internal(
@@ -97,6 +112,40 @@ pub(crate) async fn handle_exchange_code(
                     .into(),
             )
         })?;
+
+        // Verify-before-persist: prove the NEW tokens open the mailbox.
+        let factory = crate::bifrost::factory::build_reauth_verify_factory(
+            &read_db,
+            &account_id,
+            key,
+            bundle.tokens.access_token.clone(),
+        )
+        .await
+        .map_err(|error| {
+            ServiceError::Internal(
+                crate::handlers::account_verify::build_error_message(&error).to_string(),
+            )
+        })?;
+        let synthetic_id =
+            bifrost_types::AccountId(format!("reauth-verify-{}", uuid::Uuid::new_v4()));
+        match factory.open(synthetic_id).await {
+            Ok(account) => {
+                let _ = account.close().await;
+            }
+            Err(error) => {
+                log::warn!(
+                    "oauth.exchange_code: re-auth verify failed for account {account_id}; \
+                     leaving existing credentials intact"
+                );
+                return Err(ServiceError::Internal(
+                    crate::bifrost::error_map::account_error_to_action_error(&error).user_message(),
+                ));
+            }
+        }
+
+        // Verify succeeded: persist the new tokens onto the existing row.
+        // Tokens encrypt at the handler boundary (same key + path as
+        // `account.update_tokens`).
         let (access_token, refresh_token, _, _) =
             crate::handlers::account::encrypt_optional_credentials(
                 key,
@@ -114,9 +163,10 @@ pub(crate) async fn handle_exchange_code(
             smtp_password: None,
         };
         let id_for_log = account_id.clone();
+        let account_id_write = account_id.clone();
         write_db
             .with_write(move |conn| {
-                db::db::queries_extra::update_account_tokens_sync(conn, &account_id, reauth)
+                db::db::queries_extra::update_account_tokens_sync(conn, &account_id_write, reauth)
             })
             .await
             .map_err(ServiceError::Internal)?;

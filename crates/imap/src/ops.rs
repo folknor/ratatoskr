@@ -9,8 +9,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
 use common::types::{
     ActionProviderCtx, FetchedAttachment, FolderKind, LabelKind, MailProviderKind, ProviderCtx,
-    ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
-    SendIntent,
+    ProviderParsedAttachment, ProviderParsedMessage, SendIntent,
 };
 use smtp;
 
@@ -53,15 +52,6 @@ impl ImapOps {
         account_id: &str,
     ) -> Result<super::types::ImapConfig, String> {
         crate::account_config::load_imap_config(db, &self.writer, account_id, &self.encryption_key)
-            .await
-    }
-
-    async fn load_smtp_config(
-        &self,
-        db: &db::db::ReadDbState,
-        account_id: &str,
-    ) -> Result<smtp::types::SmtpConfig, String> {
-        crate::account_config::load_smtp_config(db, &self.writer, account_id, &self.encryption_key)
             .await
     }
 
@@ -1010,48 +1000,5 @@ impl ProviderOps for ImapOps {
         Ok(with_session!(&config, session => {
             imap_client::fetch_raw_message(&mut session, &folder, uid).await
         })?)
-    }
-
-    async fn test_connection(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<ProviderTestResult, ProviderError> {
-        let account_id = ctx.account_id.to_string();
-        let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
-        let smtp_config = self.load_smtp_config(ctx.db, &account_id).await?;
-
-        let imap_result = imap_client::test_connection(&imap_config).await?;
-        let smtp_result = smtp::client::test_connection(&smtp_config).await?;
-        if !smtp_result.success {
-            return Ok(ProviderTestResult {
-                success: false,
-                message: format!("IMAP OK, but SMTP failed: {}", smtp_result.message),
-            });
-        }
-
-        Ok(ProviderTestResult {
-            success: true,
-            message: format!("Connected: {imap_result}"),
-        })
-    }
-
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
-        let account_id = ctx.account_id.to_string();
-        ctx.db
-            .with_read(move |conn| {
-                conn.query_row(
-                    "SELECT email, display_name FROM accounts WHERE id = ?1",
-                    rusqlite::params![account_id],
-                    |row| {
-                        Ok(ProviderProfile {
-                            email: row.get("email")?,
-                            name: row.get("display_name")?,
-                        })
-                    },
-                )
-                .map_err(|e| format!("Failed to read account profile: {e}"))
-            })
-            .await
-            .map_err(ProviderError::from)
     }
 }

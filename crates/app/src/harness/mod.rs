@@ -26,8 +26,9 @@ use service_api::{
     TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
     TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
-    WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, VerifyAccountParams,
+    WireCalendarEventInput, WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId,
+    WireMailOperation,
 };
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write as _};
@@ -2509,6 +2510,42 @@ fn request_params_from_lua(
                     code: RedactedString::new(code),
                     code_verifier: get_string_field(state, params_idx, "code_verifier")?,
                     reauth_account_id: get_string_field(state, params_idx, "reauth_account_id")?,
+                }),
+            })
+        }
+        "AccountVerify" | "account.verify" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("AccountVerify requires params table"));
+            }
+            let provider = get_string_field(state, params_idx, "provider")?
+                .ok_or_else(|| lua_error_message("AccountVerify requires params.provider"))?;
+            let email = get_string_field(state, params_idx, "email")?
+                .ok_or_else(|| lua_error_message("AccountVerify requires params.email"))?;
+            let imap_port = get_u64_field(state, params_idx, "imap_port", "params.imap_port")?
+                .map(|port| {
+                    u16::try_from(port)
+                        .map_err(|_| lua_error_message("params.imap_port out of range"))
+                })
+                .transpose()?;
+            Ok(RequestParams::AccountVerify {
+                params: Box::new(VerifyAccountParams {
+                    provider,
+                    email,
+                    imap_host: get_string_field(state, params_idx, "imap_host")?,
+                    imap_port,
+                    imap_security: get_string_field(state, params_idx, "imap_security")?,
+                    username: get_string_field(state, params_idx, "username")?,
+                    imap_password: get_string_field(state, params_idx, "imap_password")?
+                        .map(RedactedString::new),
+                    accept_invalid_certs: get_bool_field(
+                        state,
+                        params_idx,
+                        "accept_invalid_certs",
+                    )?
+                    .unwrap_or(false),
+                    access_token: get_string_field(state, params_idx, "access_token")?
+                        .map(RedactedString::new),
+                    jmap_url: get_string_field(state, params_idx, "jmap_url")?,
                 }),
             })
         }

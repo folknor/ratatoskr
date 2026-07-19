@@ -1515,8 +1515,42 @@ landing commit.
   `vacation_get`, `vacation_set`, and `quota_get` are capability-dispatched pins
   behind `AccountSettingsSurface`, with no settings UI caller. The workspace-wide
   `account_settings_route_through_bifrost` gate locks the route down.
-- B14. Account construction, discovery, verify. Use `AccountFactory::open` as
-  the connection test; keep the five-stage discovery and OAuth authorization.
+- B14. Account construction, discovery, verify. LANDED - the connection test
+  is now a Service-side pre-persist probe built on bifrost `AccountFactory::
+  open`, not `rtsk::account::verify_imap` (deleted, along with `core`'s
+  `imap` / `async-imap` deps) and not the implicit OAuth exchange-only check.
+  `crates/service/src/bifrost/factory.rs::factory_from_decrypted` is the
+  extracted per-provider match, shared by the row-backed path
+  (`build_account_factory`) and a new in-flight path
+  (`DecryptedAccountCredentials::from_verify_params`, no DB row, no decrypt);
+  a `TokenMode { WriteBack | Static }` parameter threads through all four
+  provider arms so verify uses the freshly-exchanged token directly
+  (`bifrost_net::StaticTokenSource`) instead of a write-back refresher. The
+  new `account.verify` IPC (`crates/service/src/handlers/account_verify.rs`)
+  builds the factory from `VerifyAccountParams`, calls `factory.open` on a
+  synthetic, never-persisted account id, `close()`s immediately, and maps
+  `AccountError` / `BifrostBuildError` to a leak-safe `VerifyAccountAck`.
+  Both onboarding legs route through it. The password/IMAP leg
+  (`password_auth.rs::handle_submit_credentials`) and the FRESH-account OAuth
+  leg (`oauth.rs::handle_oauth_success`, via the new `OAuthValidationComplete`
+  message so OAuth failures re-show the OAuth step instead of falling into the
+  password re-auth branch) verify with the app-held credentials before
+  `account.create`. OAuth RE-AUTH instead verifies SERVICE-SIDE inside
+  `oauth.exchange_code` (`factory.rs::build_reauth_verify_factory` overrides
+  the persisted row's access token with the freshly-exchanged one via
+  `StaticTokenSource`, then `open`+`close`), persisting the new tokens and
+  reattaching the resident account only on verify success and writing nothing
+  on failure - so the re-auth ack stays token-free and no access token ever
+  crosses the service-to-app IPC (the `oauth_reauth_uses_mock_provider`
+  security invariant). Verify is inbound-mailbox-only (bifrost `open` does
+  not probe SMTP submission), so `VerifyAccountParams` carries no `smtp_*`
+  fields at all. The dead `ProviderOps::test_connection` / `get_profile`
+  trait methods, `ProviderTestResult` / `ProviderProfile`, and every
+  per-provider impl (zero production callers) are deleted in the same
+  landing. Gated by `crates/app/tests/sync-harness/account-verify-imap-
+  success.lua`, `account-verify-imap-bad-password.lua`, and
+  `account-verify-oauth.lua` against `saehrimnir`, plus unit tests on
+  `factory_from_decrypted` dispatch and the `account_verify` error mapping.
   Needs B1.
 - B15. Deletion and collapse. Remove the four provider crates, `provider-sync`,
   `common`'s provider surface, the external `jmap-client` dep, and the

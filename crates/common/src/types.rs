@@ -32,7 +32,7 @@ pub struct AutoSyncResult {
 /// also carried `&BodyStoreReadState`, `&InlineImageStoreReadState`,
 /// `&SearchReadState`). Those store handles only ever served sync
 /// methods; the non-sync methods (folder mutations, `fetch_*`,
-/// `get_profile`, `test_connection`, `list_folders`) never read or
+/// `list_folders`) never read or
 /// wrote them.
 ///
 /// Action methods take `ActionProviderCtx`. This narrow `ProviderCtx`
@@ -113,22 +113,6 @@ pub struct ProviderParsedMessage {
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
     pub auth_results: Option<String>,
-}
-
-/// Provider-agnostic connection test result.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderTestResult {
-    pub success: bool,
-    pub message: String,
-}
-
-/// Provider-agnostic account profile.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderProfile {
-    pub email: String,
-    pub name: Option<String>,
 }
 
 #[cfg(test)]

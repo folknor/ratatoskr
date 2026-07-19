@@ -6,9 +6,12 @@
 //! steps stay UI-side because the listener has to live in the
 //! visible app (firewall + focus). Once the UI has the code, this
 //! IPC ships it Service-side; the Service runs the token-endpoint
-//! round-trip + userinfo round-trip and returns the resulting
-//! tokens + email + name (or, in re-auth mode, persists the new
-//! tokens onto the existing account row before returning).
+//! round-trip + userinfo round-trip. For an initial create it returns
+//! the resulting tokens + email + name so the UI can verify mailbox
+//! reachability before `account.create`. For re-auth it instead
+//! verifies AND persists the new tokens Service-side, returning only
+//! email + name - the tokens never cross the IPC (token-custody
+//! invariant).
 //!
 //! The auth code is a one-shot bearer credential. The wire types
 //! wrap it in `RedactedString` so a stray `format!("{:?}")` or
@@ -31,11 +34,12 @@ use crate::redacted::RedactedString;
 /// - `None` (initial create): handler returns the tokens + userinfo
 ///   for the UI to feed into the existing `account.create` IPC after
 ///   the Identity step. No DB write happens inside this IPC.
-/// - `Some(id)` (re-auth): handler runs the token-exchange + userinfo
-///   round-trips and persists the new tokens via
-///   `update_account_tokens_sync` on the named account row. Replaces
-///   the UI-side `with_write_conn` token persists from
-///   `add_account/{state,oauth}.rs` (deferred from 6a-part-2).
+/// - `Some(id)` (re-auth): the handler verifies the freshly-exchanged
+///   tokens Service-side (in-flight factory `open`/`close`) and, on
+///   success, persists them onto the named row via
+///   `update_account_tokens_sync` + resident reattach. The tokens are
+///   never returned to the UI (token-custody invariant); verify failure
+///   leaves the old credentials intact and surfaces an error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OauthExchangeCodeParams {
     /// Provider id ("google" / "microsoft" / "fastmail" / "oidc:..."
@@ -59,11 +63,10 @@ pub struct OauthExchangeCodeParams {
 ///
 /// `email` and `display_name` always come from the userinfo
 /// round-trip. `access_token` / `refresh_token` / `token_expires_at`
-/// are populated only in initial-create mode (when
-/// `reauth_account_id` was `None`); in re-auth mode the Service
-/// already persisted those values via `update_account_tokens_sync`,
-/// and re-shipping them to the UI would duplicate sensitive bytes
-/// for no benefit.
+/// are populated ONLY in initial-create mode, so the UI can run
+/// `account.verify` before `account.create`. In re-auth mode they are
+/// omitted: the Service already verified and persisted the tokens, and
+/// re-shipping them would breach the token-custody invariant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OauthExchangeCodeAck {
     pub email: String,

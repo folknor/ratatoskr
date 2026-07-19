@@ -242,18 +242,4 @@ impl common::ops::ProviderOps for HarnessOfflineProvider {
         }
         Err(Self::offline())
     }
-
-    async fn test_connection(
-        &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-    ) -> Result<common::types::ProviderTestResult, common::error::ProviderError> {
-        Err(Self::offline())
-    }
-
-    async fn get_profile(
-        &self,
-        _ctx: &common::types::ProviderCtx<'_>,
-    ) -> Result<common::types::ProviderProfile, common::error::ProviderError> {
-        Err(Self::offline())
-    }
 }

@@ -218,6 +218,36 @@ pub struct AccountUpdateTokensParams {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountUpdateTokensAck;
 
+/// Pre-persist inbound-mailbox connection test. SMTP is deliberately absent:
+/// bifrost account open validates mailbox access, not mail submission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifyAccountParams {
+    pub provider: String,
+    pub email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_security: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_password: Option<RedactedString>,
+    pub accept_invalid_certs: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<RedactedString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jmap_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifyAccountAck {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 /// `account.delete` request body.
 ///
 /// Phase 6a-part-2: the Service-side handler runs the full deletion

@@ -3,8 +3,7 @@ use async_trait::async_trait;
 use super::error::ProviderError;
 use super::typed_ids::FolderId;
 use super::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderParsedMessage,
-    ProviderProfile, ProviderTestResult, SendIntent,
+    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderParsedMessage, SendIntent,
 };
 
 /// Common operations that every email provider must support.
@@ -156,12 +155,4 @@ pub trait ProviderOps: Send + Sync {
     // engine's `container_*` primitives (B6b). The folder/label LIST sync
     // moved off `list_folders` onto `SyncEngine::containers_list`
     // (`bifrost::containers::sync_containers`, B6a).
-
-    // ── Connection / Profile ────────────────────────────────────
-
-    async fn test_connection(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<ProviderTestResult, ProviderError>;
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError>;
 }

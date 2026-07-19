@@ -3,10 +3,7 @@ use common::encoding::encode_base64url_nopad;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
-use common::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderProfile,
-    ProviderTestResult,
-};
+use common::types::{ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx};
 use db::db::ReadDbState;
 
 use super::client::GmailClient;
@@ -233,25 +230,6 @@ impl ProviderOps for GmailOps {
             common::encoding::decode_base64url_nopad(&att.data).map_err(ProviderError::Client)?;
         let size = bytes.len() as u64;
         Ok(FetchedAttachment { bytes, size })
-    }
-
-    async fn test_connection(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<ProviderTestResult, ProviderError> {
-        let profile = self.client.get_profile(ctx.db).await?;
-        Ok(ProviderTestResult {
-            success: true,
-            message: format!("Connected as {}", profile.email_address),
-        })
-    }
-
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
-        let profile = self.client.get_profile(ctx.db).await?;
-        Ok(ProviderProfile {
-            email: profile.email_address,
-            name: None,
-        })
     }
 }
 

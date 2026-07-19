@@ -6,10 +6,7 @@ use async_trait::async_trait;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::FolderId;
-use common::types::{
-    ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, ProviderProfile,
-    ProviderTestResult, SendIntent,
-};
+use common::types::{ActionProviderCtx, FetchedAttachment, LabelKind, ProviderCtx, SendIntent};
 use db::db::ReadDbState;
 
 use super::client::GraphClient;
@@ -329,49 +326,6 @@ impl ProviderOps for GraphOps {
 
         let size = data.len() as u64;
         Ok(FetchedAttachment { bytes: data, size })
-    }
-
-    async fn test_connection(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<ProviderTestResult, ProviderError> {
-        let me = self.me();
-        let profile: super::types::GraphProfile = self
-            .client
-            .get_json(
-                &format!("{me}?$select=displayName,mail,userPrincipalName"),
-                ctx.db,
-            )
-            .await?;
-        let display = profile
-            .mail
-            .clone()
-            .or(profile.user_principal_name.clone())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        Ok(ProviderTestResult {
-            success: true,
-            message: format!("Connected as {display}"),
-        })
-    }
-
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
-        let me = self.me();
-        let profile: super::types::GraphProfile = self
-            .client
-            .get_json(
-                &format!("{me}?$select=displayName,mail,userPrincipalName"),
-                ctx.db,
-            )
-            .await?;
-
-        Ok(ProviderProfile {
-            email: profile
-                .mail
-                .or(profile.user_principal_name)
-                .unwrap_or_default(),
-            name: profile.display_name,
-        })
     }
 }
 

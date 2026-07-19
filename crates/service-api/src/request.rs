@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::account::{
     AccountCreateParams, AccountDeleteParams, AccountReorderParams, AccountUpdateParams,
-    AccountUpdateTokensParams,
+    AccountUpdateTokensParams, VerifyAccountParams,
 };
 use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::attachment::{
@@ -1251,6 +1251,17 @@ pub enum RequestParams {
     AccountUpdateTokens {
         params: Box<AccountUpdateTokensParams>,
     },
+    /// Pre-persist mailbox reachability probe. Three minutes comfortably
+    /// clears the realistic bifrost IMAP open failure modes - a 30 s connect
+    /// timeout, or a single stalled command at the 60 s command timeout - so
+    /// an unreachable/slow host surfaces as a mapped verify failure rather
+    /// than an IPC transport timeout. (A fully adversarial host that stalls
+    /// every one of the sequential open commands just under the 60 s ceiling
+    /// could in principle exceed this; that pathological case is not bounded
+    /// here and would fall back to a transport error.)
+    AccountVerify {
+        params: Box<VerifyAccountParams>,
+    },
     /// Phase 6a-part-2: orchestrated account deletion. The handler
     /// runs cancel-and-await for sync/push/calendar runners (so the
     /// runner-quiescence invariant closes Service-side rather than
@@ -1565,6 +1576,7 @@ impl RequestParams {
             Self::AccountReorder { .. } => "account.reorder",
             Self::AccountCreate { .. } => "account.create",
             Self::AccountUpdateTokens { .. } => "account.update_tokens",
+            Self::AccountVerify { .. } => "account.verify",
             Self::AccountDelete { .. } => "account.delete",
             Self::ReadBootstrapSnapshots { .. } => "internal.read_bootstrap_snapshots",
             Self::EncryptForStorage { .. } => "internal.encrypt_for_storage",
@@ -1684,6 +1696,7 @@ impl RequestParams {
             | Self::PinnedSearchDelete { .. }
             | Self::PinnedSearchDeleteAll { .. }
             | Self::SmartFolderCreate { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::AccountVerify { .. } => RequestTimeoutKind::Finite(Duration::from_secs(180)),
             // External-store cleanup is the bulk of the work and
             // routinely exceeds the 5 s default on a heavily-cached
             // account. 60 s absorbs that without converting correct
@@ -1793,7 +1806,8 @@ impl RequestParams {
             // dispatcher's retry and leave the UI without a signal
             // that the work succeeded.
             | Self::AttachmentClearCache { .. }
-            | Self::ExtractStatus { .. } => Idempotency::Idempotent,
+            | Self::ExtractStatus { .. }
+            | Self::AccountVerify { .. } => Idempotency::Idempotent,
 
             Self::Shutdown
             | Self::ActionExecutePlan { .. }
@@ -1891,7 +1905,10 @@ impl RequestParams {
     pub fn bypasses_admission(&self) -> bool {
         matches!(
             self,
-            Self::HealthPing | Self::BootReady | Self::OauthExchangeCode { .. },
+            Self::HealthPing
+                | Self::BootReady
+                | Self::OauthExchangeCode { .. }
+                | Self::AccountVerify { .. },
         )
     }
 
@@ -1947,6 +1964,7 @@ impl RequestParams {
             Self::AccountReorder { params } => serde_json::json!({ "params": params }),
             Self::AccountCreate { params } => serde_json::json!({ "params": params }),
             Self::AccountUpdateTokens { params } => serde_json::json!({ "params": params }),
+            Self::AccountVerify { params } => serde_json::json!({ "params": params }),
             Self::AccountDelete { params } => serde_json::json!({ "params": params }),
             Self::ReadBootstrapSnapshots { params } => serde_json::json!({ "params": params }),
             Self::EncryptForStorage { params } => serde_json::json!({ "params": params }),
@@ -2376,6 +2394,17 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("oauth.exchange_code params: {e}"))?;
                 Ok(Self::OauthExchangeCode {
+                    params: Box::new(p.params),
+                })
+            }
+            "account.verify" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: VerifyAccountParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("account.verify params: {e}"))?;
+                Ok(Self::AccountVerify {
                     params: Box::new(p.params),
                 })
             }

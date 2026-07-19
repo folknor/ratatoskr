@@ -1566,6 +1566,18 @@ impl ServiceClient {
         Ok(ack.id)
     }
 
+    /// Prove that in-flight mailbox credentials can open an account before
+    /// the onboarding wizard persists its account row.
+    pub async fn verify_account(
+        &self,
+        params: service_api::VerifyAccountParams,
+    ) -> Result<service_api::VerifyAccountAck, ClientError> {
+        self.request(RequestParams::AccountVerify {
+            params: Box::new(params),
+        })
+        .await
+    }
+
     /// Phase 6b: ensure an attachment's bytes are local in the
     /// flat cache. Returns the cache-relative path the UI can
     /// re-open. Bytes never cross the IPC; the open fd is the pin

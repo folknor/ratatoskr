@@ -9,10 +9,11 @@ use bifrost_imap::{
     SmtpSubmissionConfig, SubmissionCredentials, SubmissionTls,
 };
 use bifrost_jmap_new::sync::{JmapAccountFactory, JmapCredentials};
-use bifrost_net::{OAuthRefresher, TokenSource};
+use bifrost_net::{OAuthRefresher, StaticTokenSource, TokenSource};
 use bifrost_types::{AccountFactory, ProtocolKind};
 use common::crypto::StoredSecret;
 use db::db::{ReadConn, ReadDbState, WriterPool, params};
+use service_api::VerifyAccountParams;
 use service_api::actions::RemoteFailureKind;
 use types::MailProviderKind;
 
@@ -107,6 +108,54 @@ pub async fn build_account_factory(
     let provider = MailProviderKind::parse(&row.provider)
         .map_err(|_| BifrostBuildError::UnknownProvider(row.provider.clone()))?;
     let decrypted = row.decrypt(encryption_key)?;
+    factory_from_decrypted(&decrypted, provider, &TokenMode::WriteBack(writer))
+}
+
+/// Build an in-flight verify factory for an EXISTING account row (re-auth)
+/// using freshly-exchanged plaintext tokens that have NOT been persisted.
+///
+/// Re-auth verify-before-persist (option b): `oauth.exchange_code` proves the
+/// new tokens can open the mailbox BEFORE writing them to the row. Provider +
+/// transport config comes from the persisted row, but the access token is
+/// overridden with the freshly-exchanged one so verification exercises the NEW
+/// credential rather than the stale persisted value. `TokenMode::Static`
+/// (no refresh / no write-back) is used so the unpersisted token cannot trigger
+/// a rotation DB write. The tokens are verified Service-side and never cross
+/// the IPC - this reuses the same `factory_from_decrypted` + `open`/`close`
+/// path as `handle_verify_account`.
+pub(crate) async fn build_reauth_verify_factory(
+    db: &ReadDbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+    new_access_token: String,
+) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
+    let account_id_for_read = account_id.to_string();
+    let row = db
+        .with_read(move |conn| read_bifrost_account_credentials(conn, &account_id_for_read))
+        .await
+        .map_err(BifrostBuildError::Db)??;
+    let provider = MailProviderKind::parse(&row.provider)
+        .map_err(|_| BifrostBuildError::UnknownProvider(row.provider.clone()))?;
+    let mut decrypted = row.decrypt(encryption_key)?;
+    // Verify the freshly-exchanged token, not the persisted one. The
+    // test-endpoint factory arms read `decrypted.access_token` directly, while
+    // the production arms read the Static token_mode below; overriding the
+    // field keeps both paths on the new credential.
+    decrypted.access_token = Some(new_access_token.clone());
+    factory_from_decrypted(&decrypted, provider, &TokenMode::Static(new_access_token))
+}
+
+#[derive(Clone)]
+pub(crate) enum TokenMode {
+    WriteBack(WriterPool),
+    Static(String),
+}
+
+pub(crate) fn factory_from_decrypted(
+    decrypted: &DecryptedAccountCredentials,
+    provider: MailProviderKind,
+    token_mode: &TokenMode,
+) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
     match provider {
         MailProviderKind::Gmail => {
             let test_api_base = std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
@@ -128,7 +177,7 @@ pub async fn build_account_factory(
                 )
             } else {
                 bifrost_google::account::GoogleAccountFactory::from_token_source(
-                    decrypted.oauth_token_source(provider, writer)?,
+                    decrypted.token_source(provider, token_mode)?,
                 )
             };
             // Google's People (contacts + directory) API lives on a separate
@@ -159,7 +208,7 @@ pub async fn build_account_factory(
                     decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
                 GraphClient::with_api_bases(graph_base, graph_beta, access_token)
             } else {
-                let source = decrypted.oauth_token_source(provider, writer)?;
+                let source = decrypted.token_source(provider, token_mode)?;
                 GraphClient::with_source(graph_base, graph_beta, source)
             };
             let mut factory = GraphAccountFactory::new(client);
@@ -168,8 +217,8 @@ pub async fn build_account_factory(
             }
             Ok(Arc::new(factory))
         }
-        MailProviderKind::Jmap => build_jmap_factory(&decrypted, provider, writer),
-        MailProviderKind::Imap => build_imap_factory(decrypted, provider, writer),
+        MailProviderKind::Jmap => build_jmap_factory(decrypted, provider, token_mode),
+        MailProviderKind::Imap => build_imap_factory(decrypted, provider, token_mode),
     }
 }
 
@@ -250,7 +299,7 @@ pub async fn build_calendar_account_factory(
 fn build_jmap_factory(
     account: &DecryptedAccountCredentials,
     provider: MailProviderKind,
-    writer: WriterPool,
+    token_mode: &TokenMode,
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
     let url = match std::env::var("RATATOSKR_TEST_JMAP_ENDPOINT") {
         Ok(url) => url,
@@ -258,7 +307,7 @@ fn build_jmap_factory(
     };
     let credentials = if account.is_oauth() {
         JmapCredentials::Bearer {
-            token_source: account.oauth_token_source(provider, writer)?,
+            token_source: account.token_source(provider, token_mode)?,
         }
     } else {
         JmapCredentials::Basic {
@@ -274,9 +323,9 @@ fn build_jmap_factory(
 }
 
 fn build_imap_factory(
-    account: DecryptedAccountCredentials,
+    account: &DecryptedAccountCredentials,
     provider: MailProviderKind,
-    writer: WriterPool,
+    token_mode: &TokenMode,
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
     let (imap_host, imap_port, imap_security, allow_cleartext_auth) =
         if let Ok(endpoint) = std::env::var("RATATOSKR_TEST_IMAP_ENDPOINT") {
@@ -305,7 +354,7 @@ fn build_imap_factory(
         "none" => ImapConfig::plaintext(imap_host),
         other => {
             return Err(BifrostBuildError::InvalidConfig {
-                account_id: account.row.id,
+                account_id: account.row.id.clone(),
                 detail: format!("unknown IMAP security mode {other}"),
             });
         }
@@ -322,7 +371,7 @@ fn build_imap_factory(
     // against each other. Sharing one refresher is the single generic
     // rotation path (spec 3.1/4) realized across both transports.
     let shared_source = if account.is_oauth() {
-        Some(account.oauth_token_source(provider, writer)?)
+        Some(account.token_source(provider, token_mode)?)
     } else {
         None
     };
@@ -474,7 +523,7 @@ impl AccountCredentialsRow {
     }
 }
 
-struct DecryptedAccountCredentials {
+pub(crate) struct DecryptedAccountCredentials {
     row: AccountCredentialsRow,
     access_token: Option<String>,
     refresh_token: Option<String>,
@@ -488,6 +537,62 @@ struct DecryptedAccountCredentials {
 }
 
 impl DecryptedAccountCredentials {
+    pub(crate) fn row_provider(&self) -> String {
+        self.row.provider.clone()
+    }
+    pub(crate) fn from_verify_params(params: VerifyAccountParams) -> Self {
+        let auth_method = if params.access_token.is_some() {
+            "oauth2".to_string()
+        } else {
+            "password".to_string()
+        };
+        Self {
+            row: AccountCredentialsRow {
+                id: format!("verify-{}", uuid::Uuid::new_v4()),
+                email: params.email,
+                provider: params.provider,
+                auth_method,
+                access_token: None,
+                refresh_token: None,
+                token_expires_at: None,
+                oauth_provider: None,
+                oauth_client_id: None,
+                oauth_client_secret: None,
+                oauth_token_url: None,
+                imap_host: params.imap_host,
+                imap_port: params.imap_port.map(i64::from),
+                imap_security: params.imap_security,
+                imap_username: params.username,
+                imap_password: None,
+                smtp_host: None,
+                smtp_port: None,
+                smtp_security: None,
+                smtp_username: None,
+                smtp_password: None,
+                jmap_url: params.jmap_url,
+                calendar_provider: None,
+                caldav_url: None,
+                caldav_username: None,
+                caldav_password: None,
+                accept_invalid_certs: params.accept_invalid_certs,
+            },
+            access_token: params
+                .access_token
+                .map(service_api::RedactedString::into_inner),
+            refresh_token: None,
+            oauth_client_id: None,
+            oauth_client_secret: None,
+            imap_password: params
+                .imap_password
+                .map(service_api::RedactedString::into_inner),
+            smtp_password: None,
+            caldav_username: None,
+            caldav_password: None,
+            // Verify never decrypts or refreshes. Static TokenMode never
+            // reaches this key, so it is intentionally unused zero data.
+            encryption_key: [0; 32],
+        }
+    }
     fn is_oauth(&self) -> bool {
         matches!(self.row.auth_method.as_str(), "oauth2" | "oauth" | "bearer")
     }
@@ -536,11 +641,16 @@ impl DecryptedAccountCredentials {
             .transpose()
     }
 
-    fn oauth_token_source(
+    fn token_source(
         &self,
         provider: MailProviderKind,
-        writer: WriterPool,
+        mode: &TokenMode,
     ) -> Result<Arc<dyn TokenSource>, BifrostBuildError> {
+        if let TokenMode::Static(token) = mode {
+            let source: Arc<dyn TokenSource> =
+                Arc::new(StaticTokenSource::new(token.clone(), None));
+            return Ok(source);
+        }
         let access_token = self.required_plain("access_token", self.access_token.as_deref())?;
         let refresh_token = self.required_plain("refresh_token", self.refresh_token.as_deref())?;
         let client_id = self.required_plain("oauth_client_id", self.oauth_client_id.as_deref())?;
@@ -555,7 +665,10 @@ impl DecryptedAccountCredentials {
             provider,
             endpoint,
             self.encryption_key,
-            writer,
+            match mode {
+                TokenMode::WriteBack(writer) => writer.clone(),
+                TokenMode::Static(_) => unreachable!("static tokens returned above"),
+            },
             reqwest::Client::new(),
         );
         let source: Arc<dyn TokenSource> = Arc::new(source);
@@ -840,6 +953,104 @@ mod tests {
             let _: Arc<dyn AccountFactory> = factory;
         }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn factory_from_decrypted_accepts_inflight_credentials_for_each_provider() {
+        let cases = [
+            VerifyAccountParams {
+                provider: "gmail_api".to_string(),
+                email: "gmail@example.test".to_string(),
+                imap_host: None,
+                imap_port: None,
+                imap_security: None,
+                username: None,
+                imap_password: None,
+                accept_invalid_certs: false,
+                access_token: Some(service_api::RedactedString::new("gmail-token")),
+                jmap_url: None,
+            },
+            VerifyAccountParams {
+                provider: "graph".to_string(),
+                email: "graph@example.test".to_string(),
+                imap_host: None,
+                imap_port: None,
+                imap_security: None,
+                username: None,
+                imap_password: None,
+                accept_invalid_certs: false,
+                access_token: Some(service_api::RedactedString::new("graph-token")),
+                jmap_url: None,
+            },
+            VerifyAccountParams {
+                provider: "jmap".to_string(),
+                email: "jmap@example.test".to_string(),
+                imap_host: None,
+                imap_port: None,
+                imap_security: None,
+                username: None,
+                imap_password: None,
+                accept_invalid_certs: false,
+                access_token: Some(service_api::RedactedString::new("jmap-token")),
+                jmap_url: Some("https://mail.example.test/jmap".to_string()),
+            },
+            VerifyAccountParams {
+                provider: "imap".to_string(),
+                email: "imap@example.test".to_string(),
+                imap_host: Some("imap.example.test".to_string()),
+                imap_port: Some(993),
+                imap_security: Some("tls".to_string()),
+                username: Some("imap@example.test".to_string()),
+                imap_password: Some(service_api::RedactedString::new("password")),
+                accept_invalid_certs: false,
+                access_token: None,
+                jmap_url: None,
+            },
+        ];
+        for params in cases {
+            let decrypted = DecryptedAccountCredentials::from_verify_params(params);
+            let provider = MailProviderKind::parse(&decrypted.row.provider).expect("provider");
+            factory_from_decrypted(
+                &decrypted,
+                provider,
+                &TokenMode::Static("token".to_string()),
+            )
+            .expect("in-flight factory builds");
+        }
+    }
+
+    #[test]
+    fn from_verify_params_derives_auth_method_from_token_presence() {
+        // `is_oauth()` reads `row.auth_method`, not token presence (R1-1 /
+        // R2-4); `from_verify_params` must set it so OAuth verify builds an
+        // OAuth factory arm and password verify builds a password arm.
+        let oauth = DecryptedAccountCredentials::from_verify_params(VerifyAccountParams {
+            provider: "gmail_api".to_string(),
+            email: "a@example.test".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_security: None,
+            username: None,
+            imap_password: None,
+            accept_invalid_certs: false,
+            access_token: Some(service_api::RedactedString::new("tok")),
+            jmap_url: None,
+        });
+        assert!(oauth.is_oauth(), "token present must classify as OAuth");
+
+        let password = DecryptedAccountCredentials::from_verify_params(VerifyAccountParams {
+            provider: "imap".to_string(),
+            email: "a@example.test".to_string(),
+            imap_host: Some("imap.example.test".to_string()),
+            imap_port: Some(993),
+            imap_security: Some("tls".to_string()),
+            username: Some("a@example.test".to_string()),
+            imap_password: Some(service_api::RedactedString::new("pw")),
+            accept_invalid_certs: false,
+            access_token: None,
+            jmap_url: None,
+        });
+        assert!(!password.is_oauth(), "no token must classify as password");
     }
 
     #[tokio::test]

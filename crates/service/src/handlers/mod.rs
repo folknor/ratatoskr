@@ -1,4 +1,5 @@
 mod account;
+mod account_verify;
 mod action;
 mod action_mark_chat_read;
 mod action_scheduled_send;
@@ -121,6 +122,9 @@ pub(crate) async fn dispatch(
         }
         RequestParams::AccountCreate { params } => {
             account::handle_create(&boot_state, params).await
+        }
+        RequestParams::AccountVerify { params } => {
+            account_verify::handle_verify_account(&boot_state, params).await
         }
         RequestParams::PinnedSearchCreateOrUpdate { params } => {
             pinned_search::handle_create_or_update(&boot_state, params).await

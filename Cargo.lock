@@ -6418,7 +6418,6 @@ name = "rtsk"
 version = "0.1.0"
 dependencies = [
  "ammonia",
- "async-imap",
  "async-trait",
  "base64",
  "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
@@ -6434,7 +6433,6 @@ dependencies = [
  "graph",
  "hickory-resolver",
  "hotpath 0.21.4",
- "imap",
  "jmap",
  "label-colors",
  "log",

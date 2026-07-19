@@ -295,6 +295,11 @@ pub enum AddAccountMessage {
     ),
     CancelOAuth,
     RetryOAuth,
+    OAuthValidationComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        OAuthSuccess,
+        Result<(), String>,
+    ),
 
     // Password
     UsernameChanged(String),
@@ -665,9 +670,31 @@ impl Component for AddAccountWizard {
             AddAccountMessage::OAuthComplete(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
-            AddAccountMessage::OAuthComplete(_, Ok(success)) => self.handle_oauth_success(success),
+            AddAccountMessage::OAuthComplete(_, Ok(success)) => self.handle_oauth_success(&success),
             AddAccountMessage::OAuthComplete(_, Err(e)) => {
                 self.error = Some(e);
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthValidationComplete(g, _, _)
+                if !self.generation.is_current(g) =>
+            {
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthValidationComplete(_, success, Ok(())) => {
+                // Fresh-account OAuth verify only. Re-auth never routes through
+                // here: its tokens are verified + persisted Service-side inside
+                // `oauth.exchange_code`, and `handle_oauth_success` short-
+                // circuits re-auth straight to `ReauthTokensSaved` without an
+                // app-side verify or `account.update_tokens` round-trip.
+                self.oauth_success = Some(success);
+                self.prefill_identity_name();
+                self.step = AddAccountStep::Identity;
+                self.error = None;
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthValidationComplete(_, _, Err(e)) => {
+                self.error = Some(e);
+                self.step = AddAccountStep::OAuthWaiting;
                 (Task::none(), None)
             }
             AddAccountMessage::RetryOAuth => self.handle_retry_oauth(),

@@ -1,13 +1,12 @@
 use iced::widget::{Space, column, row, scrollable, text};
 use iced::{Alignment, Element, Length, Task};
+use service_api::{RedactedString, VerifyAccountParams};
 
 use crate::font;
 use crate::ui::layout::*;
 use crate::ui::widgets;
 
-use super::state::{
-    AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard, SecurityOption,
-};
+use super::state::{AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard};
 use super::views::{
     ghost_button, labeled_input, primary_button, security_selector, server_port_row,
 };
@@ -29,25 +28,47 @@ impl AddAccountWizard {
         self.step = AddAccountStep::Validating;
         self.error = None;
         let generation = self.generation.next();
-
-        let host = self.auth_state.imap_host.clone();
-        let port_str = self.auth_state.imap_port.clone();
-        let security = self.auth_state.imap_security;
-        let username = self.auth_state.username.clone();
-        let password = self.auth_state.password.clone();
-        let accept_invalid_certs = self.auth_state.accept_invalid_certs;
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            self.error = Some("Service not ready - try again in a moment.".to_string());
+            self.step = AddAccountStep::PasswordAuth;
+            return (Task::none(), None);
+        };
+        let port = match self.auth_state.imap_port.parse() {
+            Ok(port) => port,
+            Err(_) => {
+                self.error = Some("Invalid port number".to_string());
+                self.step = AddAccountStep::PasswordAuth;
+                return (Task::none(), None);
+            }
+        };
+        let params = VerifyAccountParams {
+            provider: self.resolved_provider.clone(),
+            email: self.email.clone(),
+            imap_host: Some(self.auth_state.imap_host.clone()),
+            imap_port: Some(port),
+            imap_security: Some(self.auth_state.imap_security.to_db_string().to_string()),
+            username: Some(self.auth_state.username.clone()),
+            imap_password: Some(RedactedString::new(self.auth_state.password.clone())),
+            accept_invalid_certs: self.auth_state.accept_invalid_certs,
+            access_token: None,
+            jmap_url: None,
+        };
 
         let task = Task::perform(
             async move {
-                let result = validate_imap_connection(
-                    &host,
-                    &port_str,
-                    security,
-                    &username,
-                    &password,
-                    accept_invalid_certs,
-                )
-                .await;
+                let result = client
+                    .verify_account(params)
+                    .await
+                    .map_err(|error| error.to_string())
+                    .and_then(|ack| {
+                        if ack.ok {
+                            Ok(())
+                        } else {
+                            Err(ack
+                                .message
+                                .unwrap_or_else(|| "Could not verify account.".to_string()))
+                        }
+                    });
                 (generation, result)
             },
             |(g, result)| AddAccountMessage::ValidationComplete(g, result),
@@ -205,31 +226,4 @@ pub(super) fn view_validating<'a>() -> Element<'a, AddAccountMessage> {
     .align_x(Alignment::Center)
     .width(Length::Fill)
     .into()
-}
-
-/// Test IMAP connection to validate credentials.
-async fn validate_imap_connection(
-    host: &str,
-    port_str: &str,
-    security: SecurityOption,
-    username: &str,
-    password: &str,
-    accept_invalid_certs: bool,
-) -> Result<(), String> {
-    let port: u16 = port_str
-        .parse()
-        .map_err(|_| "Invalid port number".to_string())?;
-
-    let security_str = security.to_db_string().to_string();
-
-    rtsk::account::verify_imap::verify_imap_credentials(
-        host,
-        port,
-        &security_str,
-        username,
-        password,
-        "password",
-        accept_invalid_certs,
-    )
-    .await
 }
