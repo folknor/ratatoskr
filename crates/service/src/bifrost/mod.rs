@@ -7,9 +7,11 @@ pub mod engine;
 pub mod engine_sync;
 pub mod error_map;
 pub mod factory;
+pub mod gmail_signatures;
 pub mod push_ingress;
 pub mod resident;
 pub mod server_filters;
+pub mod settings;
 pub mod token_source;
 
 pub use checkpoint_store::SqliteCheckpointStore;

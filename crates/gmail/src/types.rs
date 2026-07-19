@@ -192,27 +192,6 @@ pub struct ListDraftsResponse {
     pub next_page_token: Option<String>,
 }
 
-// ── Send-as ─────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GmailSendAs {
-    pub send_as_email: String,
-    pub display_name: Option<String>,
-    pub is_default: Option<bool>,
-    pub is_primary: Option<bool>,
-    pub treat_as_alias: Option<bool>,
-    pub verification_status: Option<String>,
-    pub signature: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ListSendAsResponse {
-    #[serde(default)]
-    pub send_as: Vec<GmailSendAs>,
-}
-
 // ── Profile ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -6,8 +6,9 @@ use crate::db::ReadConn;
 
 /// Raw auto-response row from the database.
 ///
-/// The `external_audience` field is stored as a string and parsed into
-/// the domain-level `ExternalAudience` enum by core.
+/// The `external_audience` field is stored as a raw string ("all",
+/// "contacts", or "none"); the per-provider parsing surface was retired
+/// in B13, so this row is now local status-bar scaffolding only.
 #[derive(Debug, Clone)]
 pub struct AutoResponseRow {
     pub enabled: bool,

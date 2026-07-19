@@ -1507,8 +1507,14 @@ landing commit.
   duplicate deletion down.
 - B12. Shared mailboxes plus public folders. Rewire
   `ViewScope::SharedMailbox` / `PublicFolder` onto bifrost scopes. Needs A5.
-- B13. Identities, signatures, vacation, quota. Rewire onto the bifrost
-  settings surface. Needs B1.
+- B13. Identities, signatures, vacation, quota. CLOSED - the live Gmail
+  signature reconciliation now uses bifrost `identities_list` / `identity_update`
+  and the hand-rolled Gmail sendAs API calls are deleted. The dead JMAP
+  signature module and per-provider vacation CRUD are deleted; local
+  `signatures`, `send_identities`, and `auto_responses` scaffolding remains.
+  `vacation_get`, `vacation_set`, and `quota_get` are capability-dispatched pins
+  behind `AccountSettingsSurface`, with no settings UI caller. The workspace-wide
+  `account_settings_route_through_bifrost` gate locks the route down.
 - B14. Account construction, discovery, verify. Use `AccountFactory::open` as
   the connection test; keep the five-stage discovery and OAuth authorization.
   Needs B1.
@@ -1788,6 +1794,12 @@ capability-dispatched `SyncEngine::filter_*` forwarders for list, create,
 update, delete, and validation. They resolve through `live_account`, return
 the flattened engine `Error`, and preserve account failures inside
 `Error::Account`.
+
+B13-SQ advanced the freeze a seventeenth time, from `bc97132` to `8e1006e`
+("sync: expose account-settings passthroughs on SyncEngine"): additive,
+capability-dispatched `identities_list`, `identity_update`, `vacation_get`,
+`vacation_set`, and `quota_get` forwarders return the flattened engine `Error`
+and preserve account failures inside `Error::Account`.
 
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and

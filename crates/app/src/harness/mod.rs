@@ -19,15 +19,15 @@ use service_api::{
     ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
     PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
-    SettingValue, SettingsSetParams, TestBifrostArmHookParams, TestBifrostAttachParams,
-    TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestContactPullParams,
-    TestContainerCrudParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
-    TestDiscardDraftParams, TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams,
-    TestSearchIndexParams, TestSeedAccountParams, TestSeedCachedAttachmentParams,
-    TestSeedRemoteAttachmentParams, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation, WireFolderId,
-    WireLabelGroupId, WireLabelId, WireMailOperation,
+    SettingValue, SettingsSetParams, SignatureUpdateParams, SyncCancelAccountParams,
+    TestBifrostArmHookParams, TestBifrostAttachParams, TestBifrostHook, TestBifrostProbeParams,
+    TestBifrostProviderKind, TestContactPullParams, TestContainerCrudParams,
+    TestCrashAfterNWritesParams, TestDelayNextWriteParams, TestDiscardDraftParams,
+    TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
+    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
+    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
+    WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
 };
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write as _};
@@ -2448,6 +2448,33 @@ fn request_params_from_lua(
             };
             Ok(RequestParams::AccountDelete {
                 params: AccountDeleteParams { account_id },
+            })
+        }
+        "SignatureUpdate" | "signature.update" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("SignatureUpdate requires params table"));
+            }
+            let id = get_string_field(state, params_idx, "id")?
+                .ok_or_else(|| lua_error_message("SignatureUpdate requires params.id"))?;
+            Ok(RequestParams::SignatureUpdate {
+                params: SignatureUpdateParams {
+                    id,
+                    name: get_string_field(state, params_idx, "name")?,
+                    body_html: get_string_field(state, params_idx, "body_html")?,
+                    body_text: get_string_field(state, params_idx, "body_text")?,
+                    is_default: get_bool_field(state, params_idx, "is_default")?,
+                    is_reply_default: get_bool_field(state, params_idx, "is_reply_default")?,
+                },
+            })
+        }
+        "SyncCancelAccount" | "sync.cancel_account" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("SyncCancelAccount requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("SyncCancelAccount requires params.account_id"))?;
+            Ok(RequestParams::SyncCancelAccount {
+                params: SyncCancelAccountParams { account_id },
             })
         }
         "OauthExchangeCode" | "oauth.exchange_code" => {

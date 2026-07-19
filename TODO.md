@@ -197,7 +197,12 @@ Backend reads + default-alias selection work (`db_get_aliases_for_account`, `db_
 
 ### Auto-Responses - `docs/auto-responses/problem-statement.md`
 
-Read/write API complete on all 3 providers. Remaining:
+The hand-rolled per-provider `fetch_*`/`push_*` read/write functions in
+`crates/core/src/auto_responses.rs` had no caller and were deleted in B13.
+Server-side vacation settings are now reachable only as a capability-dispatched
+pin (`vacation_get`/`vacation_set`) behind `AccountSettingsSurface`
+(`crates/service/src/bifrost/settings.rs`), with no UI caller yet. The local
+status-bar read (`any_auto_response_active`) is unaffected. Remaining:
 
 - [ ] **Auto-reply settings UI** - Per-account editor in settings. Toggle, date pickers, message editor, audience selector. Internal/external tabs for Exchange only. Provider HTML must be sanitized before rendering (stored unsanitized in DB).
 
@@ -303,11 +308,6 @@ and mirroring any needed upstream fixtures into
   expected HTML body, display-name-decorated `name`, `is_default`
   flag, and source `gmail_sync`. Local "Harness" signatures inserted
   by TestSeedAccount are filtered out.
-- [ ] **Gmail SendAs signature writeback** - Edit a Gmail-backed
-  signature through the Service/settings path and assert saehrimnir
-  receives `PATCH /gmail/v1/users/me/settings/sendAs/{email}` with
-  the sparse signature fields. Re-read the mock SendAs row and assert
-  the signature changed while read-only `isPrimary` stayed unchanged.
 - [ ] **Gmail SendAs fault injection** - Use Lua
   `on("gmail", "send_as", fn)` to force list/get/patch failures.
   Assert signature import reports a provider failure without corrupting

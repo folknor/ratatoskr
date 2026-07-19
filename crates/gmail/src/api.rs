@@ -5,8 +5,8 @@ use db::db::ReadDbState;
 use super::client::GmailClient;
 use super::types::{
     GmailAttachmentData, GmailDraft, GmailDraftStub, GmailHistoryResponse, GmailLabel,
-    GmailMessage, GmailProfile, GmailSendAs, GmailThread, GmailThreadStub, ListDraftsResponse,
-    ListLabelsResponse, ListSendAsResponse, ListThreadsResponse,
+    GmailMessage, GmailProfile, GmailThread, GmailThreadStub, ListDraftsResponse,
+    ListLabelsResponse, ListThreadsResponse,
 };
 
 // ── Profile ─────────────────────────────────────────────────
@@ -279,33 +279,5 @@ impl GmailClient {
         }
 
         Ok(all_drafts)
-    }
-}
-
-// ── Send-as ─────────────────────────────────────────────────
-
-impl GmailClient {
-    pub async fn list_send_as(&self, db: &ReadDbState) -> Result<Vec<GmailSendAs>, String> {
-        let resp: ListSendAsResponse = self.get("/settings/sendAs", db).await?;
-        Ok(resp.send_as)
-    }
-
-    /// Update the signature for a sendAs alias.
-    ///
-    /// Uses `PUT /settings/sendAs/{sendAsEmail}` with only the `signature` field.
-    /// Returns the updated `GmailSendAs` resource.
-    pub async fn update_send_as_signature(
-        &self,
-        send_as_email: &str,
-        signature_html: &str,
-        db: &ReadDbState,
-    ) -> Result<GmailSendAs, String> {
-        let encoded = urlencoding::encode(send_as_email);
-        self.put(
-            &format!("/settings/sendAs/{encoded}"),
-            &json!({ "signature": signature_html }),
-            db,
-        )
-        .await
     }
 }

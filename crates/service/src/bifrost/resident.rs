@@ -357,10 +357,20 @@ impl ResidentEngine {
         account_id: &str,
     ) -> Result<ResidentActionAccount, String> {
         self.attach_account(account_id).await?;
+        self.attached_action_account(account_id).await
+    }
+
+    /// Return an action account for a slot the resident lifecycle already
+    /// attached. Auxiliary passes run inside spawned tasks, where the cold
+    /// account factory future is intentionally not `Send`.
+    pub(crate) async fn attached_action_account(
+        &self,
+        account_id: &str,
+    ) -> Result<ResidentActionAccount, String> {
         let slots = self.inner.slots.lock().await;
         let slot = slots
             .get(account_id)
-            .ok_or_else(|| format!("resident slot missing after attach for {account_id}"))?;
+            .ok_or_else(|| format!("resident slot is not attached for {account_id}"))?;
         Ok(ResidentActionAccount {
             account_id: account_id.to_string(),
             engine: self.inner.engine.engine(),
@@ -970,15 +980,20 @@ async fn resident_aux_loop(
         if cancel.is_cancelled() {
             return;
         }
-        run_aux_pass(&inner, &account_id, provider).await;
+        run_aux_pass(
+            ResidentEngine {
+                inner: Arc::clone(&inner),
+            },
+            &account_id,
+            provider,
+        )
+        .await;
     }
 }
 
-async fn run_aux_pass(
-    inner: &ResidentEngineInner,
-    account_id: &str,
-    provider: BifrostProviderKind,
-) {
+async fn run_aux_pass(resident: ResidentEngine, account_id: &str, provider: BifrostProviderKind) {
+    let gmail_resident = resident.clone();
+    let inner = &resident.inner;
     // Read the marker fresh each pass, mirroring the legacy runner which read
     // it before each kick: a fresh account whose initial drive has not yet
     // completed gets the initial pass (full contacts pull etc.), later passes
@@ -1033,22 +1048,13 @@ async fn run_aux_pass(
         }
         BifrostProviderKind::Gmail => {
             async {
-                let client = gmail::client::GmailClient::from_account(
-                    &inner.read_db,
-                    inner.write_db.writer_pool(),
-                    account_id,
-                    inner.encryption_key,
-                )
-                .await?;
-                client.get_access_token(&inner.read_db).await?;
-                provider_sync::consumer_support::run_gmail_auxiliary_sync(
-                    &client,
+                super::gmail_signatures::sync_gmail_signatures(
+                    gmail_resident,
                     account_id,
                     &inner.read_db,
                     &inner.write_db,
-                    initial_sync_completed,
                 )
-                .await;
+                .await?;
                 Ok(())
             }
             .await
@@ -1079,7 +1085,7 @@ async fn run_aux_pass(
         }
     };
     if let Err(error) = result {
-        log::debug!("resident auxiliary pass for {account_id} skipped: {error}");
+        log::warn!("resident auxiliary pass for {account_id} skipped: {error}");
     }
     let cycle = next_contact_pull_cycle(inner, account_id, provider).await;
     if super::contacts::pull::should_pull_on_cycle(provider, cycle)
