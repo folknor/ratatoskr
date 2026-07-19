@@ -19,57 +19,9 @@ pub async fn run_gmail_auxiliary_sync(
         log::warn!("Gmail signature sync failed for account {account_id}: {error}");
     }
 
-    let should_sync_contacts = if initial_sync_completed_before_run {
-        match sync::state::increment_gmail_sync_cycle(&write_db.writer_pool(), account_id).await {
-            Ok(cycle) => cycle.is_multiple_of(20),
-            Err(error) => {
-                log::warn!("Gmail sync-cycle increment failed for account {account_id}: {error}");
-                false
-            }
-        }
-    } else {
-        true
-    };
-
-    if should_sync_contacts {
-        if let Err(error) = super::contacts::sync_google_contacts(
-            client,
-            account_id,
-            read_db,
-            &write_db.writer_pool(),
-        )
-        .await
-        {
-            log::warn!("Google contacts sync failed for account {account_id}: {error}");
-        }
-        let writer = write_db.clone();
-        if let Err(error) = super::contacts::sync_google_other_contacts(
-            client,
-            account_id,
-            read_db,
-            &write_db.writer_pool(),
-            move |write| {
-                let writer = writer.clone();
-                async move {
-                    writer
-                        .with_write(move |conn| {
-                            let tx = conn
-                                .transaction()
-                                .map_err(|e| format!("begin google other contacts tx: {e}"))?;
-                            super::contacts::persist_google_other_contacts_write(&tx, write)?;
-                            tx.commit()
-                                .map_err(|e| format!("commit google other contacts tx: {e}"))?;
-                            Ok(())
-                        })
-                        .await
-                }
-            },
-        )
-        .await
-        {
-            log::warn!("Google otherContacts sync failed for account {account_id}: {error}");
-        }
-    }
+    // Contacts moved to the provider-agnostic bifrost pull (B8); this flag is
+    // no longer consulted here but stays in the shared aux-runner signature.
+    let _ = initial_sync_completed_before_run;
 }
 
 async fn sync_gmail_signatures(

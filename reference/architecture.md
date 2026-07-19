@@ -319,13 +319,16 @@ These are intentional unresolved areas, not reasons to bypass the boundaries abo
 
 - **Signatures** are not yet a settled architecture surface. Gmail and JMAP signature sync/write behavior exists, but the product/spec is not finalized enough to treat that path as a completed shared persistence contract.
 - **Provider-local sync/state tables** may still live in provider or sync crates. That is acceptable only for provider-owned or protocol-owned state, not for shared application tables. The ownership is now explicit:
-  - **Provider-owned mapping/state tables** stay with the provider logic that interprets them:
-    - Gmail: `google_contact_map`, `google_other_contact_map`
-    - Graph: `graph_contact_map`
+  - The former per-provider contact mapping tables (Gmail's `google_contact_map` /
+    `google_other_contact_map`, Graph's `graph_contact_map`, and CardDAV's
+    `carddav_contact_map`) were retired by the bifrost B8 contacts landing and
+    replaced by ONE unified `contact_claims(account_id, source, server_id, email,
+    address_book_id, corpus)` remote-claim ledger in `crates/db/src/db/schema/03_contacts.sql`,
+    written by the provider-agnostic pull in `crates/service/src/bifrost/contacts/`
+    - not a provider-owned table, since no per-provider crate interprets it anymore.
   - **Sync-owned protocol coordination tables** stay with sync/protocol helpers until there is a clear benefit to moving them behind narrow `db` APIs:
     - `jmap_sync_state`
     - `graph_folder_delta_tokens`
-    - `graph_contact_delta_tokens`
     - `graph_shared_mailbox_delta_tokens`
     - `shared_mailbox_sync_state`
     - `folder_sync_state`

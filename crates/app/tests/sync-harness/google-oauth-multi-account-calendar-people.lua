@@ -117,6 +117,19 @@ end
 
 run_mail_sync(primary.account_id, "primary")
 run_mail_sync(secondary.account_id, "secondary")
+-- B8 moved People contacts off the mail change-stream and onto the resident
+-- auxiliary pull. Drive that production pull deterministically in the
+-- harness rather than depending on its five-minute wall-clock cadence.
+local primary_contacts, primary_contacts_err = client:request("TestContactPull", {
+    account_id = primary.account_id,
+})
+harness.assert(primary_contacts_err == nil, "primary contact pull failed")
+harness.assert(primary_contacts.imported >= 1, "primary contact pull imported no rows")
+local secondary_contacts, secondary_contacts_err = client:request("TestContactPull", {
+    account_id = secondary.account_id,
+})
+harness.assert(secondary_contacts_err == nil, "secondary contact pull failed")
+harness.assert(secondary_contacts.imported >= 1, "secondary contact pull imported no rows")
 run_calendar_sync(primary.account_id, "primary")
 run_calendar_sync(secondary.account_id, "secondary")
 

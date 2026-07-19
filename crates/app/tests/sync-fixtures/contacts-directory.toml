@@ -1,0 +1,28 @@
+name = "contacts-directory"
+
+# GAL / organization-directory gate. Graph directory_search (/v1.0/users)
+# projects the declared [[account]] rows, so the primary account itself answers
+# a non-empty Graph GAL. Google directory_search (people:listDirectoryPeople)
+# returns the [[directory_person]] rows below; an account with zero such rows
+# would 403 (personal-account empty). JMAP has no directory surface -> the pull
+# no-ops and writes no gal_cache rows.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[directory_person]]
+id = "people/dir1"
+display_name = "Directory Alice"
+emails = ["dir.alice@corp.test"]
+phones = [{ number = "+1 555 2000", kind = "work" }]
+company = "Corp"
+job_title = "Engineer"
+department = "Platform"
+
+[[directory_person]]
+id = "people/dir2"
+display_name = "Directory Bob"
+emails = ["dir.bob@corp.test"]
+company = "Corp"

@@ -22,17 +22,18 @@ Snapshot of the calendar surface as of the survey date, so the rest of the
 document has somewhere concrete to land. Verify line numbers if you're
 acting on this - they will drift.
 
-**calcard call sites (4):**
+**calcard call sites (3):**
 
 - `crates/core/src/caldav/parse/ical/mod.rs` (~690 lines) - iCalendar
   parsing. Uses `calcard::Parser`, `calcard::Entry`, `calcard::icalendar::*`,
   `calcard::common::PartialDateTime`. ~32 match sites against
   `ICalendarProperty::*` / `ICalendarValue::*` enums.
-- `crates/core/src/carddav/parse.rs` (~504 lines) - vCard parsing for live
-  CardDAV sync. Uses `calcard::vcard::{VCard, VCardProperty, VCardValue}`.
 - `crates/import/src/vcard_parser.rs` (~237 lines) - vCard parsing for
-  `.vcf` import. Same calcard surface as `carddav/parse.rs` -
-  near-duplicate code that could collapse if we owned the parser.
+  `.vcf` import. `crates/core/src/carddav/parse.rs`, the hand-rolled live
+  CardDAV vCard parser this used to near-duplicate, was deleted by the
+  bifrost B8 contacts landing (live CardDAV contact sync now goes through
+  bifrost-carddav); `vcard_parser.rs` is the only remaining vCard-parsing
+  call site.
 - `crates/graph/src/calendar_sync.rs:658` (~30 lines) - Microsoft Windows
   TZ name → IANA, via `calcard::common::timezone::Tz::from_str`. Only
   consumes calcard's baked-in Windows alias table; everything else in
@@ -475,9 +476,9 @@ Concrete change list:
   against `ICalendarProperty::*` / `ICalendarValue::*` with caldata's
   equivalents. Add an explicit unescape pass at consumption (caldata
   stores raw values).
-- `crates/core/src/carddav/parse.rs` + `crates/import/src/vcard_parser.rs`:
-  same pattern for ~16 vCard match sites. Likely candidate for
-  collapsing the duplication while we're in there.
+- `crates/import/src/vcard_parser.rs`: same pattern for its vCard match
+  sites (the `crates/core/src/carddav/parse.rs` twin this used to
+  duplicate is gone - deleted by the bifrost B8 contacts landing).
 - `crates/graph/src/calendar_sync.rs:658`: caldata's `PROPRIETARY_TZIDS`
   PHF can replace either calcard or our own vendored CLDR table from
   step 1. Decide which.

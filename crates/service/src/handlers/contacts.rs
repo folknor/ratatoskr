@@ -113,7 +113,23 @@ pub(crate) async fn handle_contact_save_with_writeback(
         source: params.source,
         server_id: params.server_id,
     };
-    let outcome = crate::actions::contacts::save_contact(&ctx, input).await;
+    let action_account = match input.account_id.as_deref() {
+        Some(account_id) if input.source.as_deref().unwrap_or("user") != "user" => Some(
+            boot_state
+                .sync_runtime()
+                .ok_or_else(|| {
+                    ServiceError::Internal(
+                        "contact write received before SyncRuntime was installed".into(),
+                    )
+                })?
+                .resident_action_account(account_id)
+                .await
+                .map_err(ServiceError::Internal)?,
+        ),
+        _ => None,
+    };
+    let outcome =
+        crate::actions::contacts::save_contact(&ctx, action_account.as_ref(), input).await;
     let ack = ContactSaveWithWritebackAck {
         writeback: outcome_to_writeback(outcome)?,
     };
@@ -125,7 +141,33 @@ pub(crate) async fn handle_contact_delete(
     params: ContactDeleteParams,
 ) -> Result<Value, ServiceError> {
     let ctx = action_context(boot_state)?;
-    let outcome = crate::actions::contacts::delete_contact(&ctx, &params.id).await;
+    let meta_id = params.id.clone();
+    let read_db = boot_state.read_db_state().ok_or_else(|| {
+        ServiceError::Internal("contact delete received before read DB was installed".into())
+    })?;
+    let meta = read_db
+        .with_read(move |conn| {
+            db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(conn, &meta_id)
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    let action_account = match meta.and_then(|meta| meta.account_id) {
+        Some(account_id) => Some(
+            boot_state
+                .sync_runtime()
+                .ok_or_else(|| {
+                    ServiceError::Internal(
+                        "contact delete received before SyncRuntime was installed".into(),
+                    )
+                })?
+                .resident_action_account(&account_id)
+                .await
+                .map_err(ServiceError::Internal)?,
+        ),
+        None => None,
+    };
+    let outcome =
+        crate::actions::contacts::delete_contact(&ctx, action_account.as_ref(), &params.id).await;
     let ack = ContactDeleteAck {
         writeback: outcome_to_writeback(outcome)?,
     };

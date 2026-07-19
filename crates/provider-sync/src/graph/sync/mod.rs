@@ -187,17 +187,6 @@ pub async fn graph_initial_sync(
         emit_progress(&sctx, "delta", "", current, total_folders, total_messages);
     }
 
-    if let Err(e) = super::contact_sync::graph_contacts_initial_sync(
-        client,
-        account_id,
-        read_db,
-        &db.writer_pool(),
-    )
-    .await
-    {
-        log::warn!("Contact initial sync failed (non-fatal): {e}");
-    }
-
     // Bootstrap the master category list as cat:<displayName> tag
     // labels. Delta-cadence runs again every 20th cycle from
     // `graph_delta_sync`; without this initial pass, a fresh account
@@ -387,19 +376,9 @@ pub async fn graph_delta_sync(
         }
     }
 
-    // Contacts + categories: every 20th cycle (change rarely). Calendar
+    // Categories: every 20th cycle (change rarely). Calendar
     // delta runs through `CalendarRuntime` (Phase 5), not from this path.
     if cycle.is_multiple_of(20) {
-        if let Err(e) = super::contact_sync::graph_contacts_delta_sync(
-            client,
-            account_id,
-            read_db,
-            &db.writer_pool(),
-        )
-        .await
-        {
-            log::warn!("Contact delta sync failed (non-fatal): {e}");
-        }
         if let Err(e) =
             super::label_sync::graph_label_sync(client, account_id, read_db, &db.writer_pool())
                 .await

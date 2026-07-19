@@ -1,0 +1,31 @@
+name = "contacts-graph-pull"
+
+# Graph contact pull gate. Alice has two emails; the Graph projection is
+# FanOutPerEmail, so she materializes as two `contacts` rows sharing one
+# server_id ("contact-001") plus one claim per fanned email. The enriched
+# phone/company/notes columns are populated from the same Graph fetch. The
+# single change step (id "delete") destroys the contact so graph_pull.lua can
+# assert the snapshot reconcile retires the claims on the second pull.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = ["alice@example.com", "alice.anderson@example.org"]
+phones = ["+1 555 0100"]
+company = "Acme"
+notes = "graph fan-out contact"
+
+[[change]]
+id = "delete"
+contact_destroy = ["contact-001"]

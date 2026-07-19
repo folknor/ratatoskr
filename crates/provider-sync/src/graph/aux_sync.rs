@@ -13,16 +13,6 @@ pub async fn run_graph_auxiliary_sync(
     initial_sync_completed_before_run: bool,
 ) {
     if !initial_sync_completed_before_run {
-        if let Err(error) = super::contact_sync::graph_contacts_initial_sync(
-            client,
-            account_id,
-            read_db,
-            &write_db.writer_pool(),
-        )
-        .await
-        {
-            log::warn!("Graph contacts initial sync failed for account {account_id}: {error}");
-        }
         if let Err(error) = super::label_sync::graph_label_sync(
             client,
             account_id,
@@ -65,16 +55,6 @@ pub async fn run_graph_auxiliary_sync(
             Err(error) => {
                 log::warn!("Graph reaction refresh failed for account {account_id}: {error}");
             }
-        }
-        if let Err(error) = super::contact_sync::graph_contacts_delta_sync(
-            client,
-            account_id,
-            read_db,
-            &write_db.writer_pool(),
-        )
-        .await
-        {
-            log::warn!("Graph contacts delta sync failed for account {account_id}: {error}");
         }
     }
 

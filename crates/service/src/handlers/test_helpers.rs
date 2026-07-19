@@ -13,20 +13,21 @@ use service_api::{
     TestBifrostAttachAck, TestBifrostAttachParams, TestBifrostChangeKind, TestBifrostDurableCursor,
     TestBifrostFactoryOpenAck, TestBifrostFactoryOpenParams, TestBifrostHook,
     TestBifrostInjectBatchAck, TestBifrostInjectBatchParams, TestBifrostItemOutcome,
-    TestBifrostProbeAck, TestBifrostProbeParams, TestBifrostProviderKind, TestContainerCrudAck,
-    TestContainerCrudParams, TestCounterReadAck, TestCrashAfterNWritesAck,
-    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow,
-    TestDbCalendarRow, TestDbContactGroupRow, TestDbContactRow, TestDbFolderRow, TestDbLabelRow,
-    TestDbLocalDraftRow, TestDbMessageRow, TestDbSignatureRow, TestDelayNextWriteAck,
-    TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams, TestPendingOpRow,
-    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
-    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
-    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
-    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
-    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
-    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
-    TestThreadReadParams,
+    TestBifrostProbeAck, TestBifrostProbeParams, TestBifrostProviderKind, TestContactPullAck,
+    TestContactPullParams, TestContainerCrudAck, TestContainerCrudParams, TestCounterReadAck,
+    TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
+    TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactClaimRow, TestDbContactGroupRow,
+    TestDbContactRow, TestDbFolderRow, TestDbGalCacheRow, TestDbLabelRow, TestDbLocalDraftRow,
+    TestDbMessageRow, TestDbSeenAddressRow, TestDbSignatureRow, TestDelayNextWriteAck,
+    TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams, TestGalKickAck,
+    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
+    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
+    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
+    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
+    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadAck, TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1399,6 +1400,52 @@ pub(super) async fn start_sync_handle(
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
+pub(super) async fn contact_pull_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestContactPullParams,
+) -> Result<Value, ServiceError> {
+    if params.account_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.contact_pull".into(),
+            message: "account_id is required".into(),
+        });
+    }
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal("test.contact_pull received before SyncRuntime was installed".into())
+    })?;
+    runtime
+        .attach_resident_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    let action_account = runtime
+        .resident_action_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    let write_db = boot_state.write_db_state()?;
+    let imported = crate::bifrost::contacts::pull::run_contact_pull(
+        &action_account.engine,
+        &params.account_id,
+        action_account.provider,
+        &write_db,
+    )
+    .await
+    .map_err(ServiceError::Internal)?;
+    let ack = TestContactPullAck {
+        imported: u64::try_from(imported)
+            .map_err(|error| ServiceError::Internal(format!("contact pull count: {error}")))?,
+    };
+    serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn gal_kick_handle(
+    boot_state: &Arc<BootSharedState>,
+) -> Result<Value, ServiceError> {
+    super::gal::handle_gal_kick(boot_state)
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(TestGalKickAck).map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
 pub(super) async fn query_db_state_handle(
     boot_state: &Arc<BootSharedState>,
     params: TestQueryDbStateParams,
@@ -2092,6 +2139,9 @@ fn read_harness_db_state(
         calendar_event_count: count_account_rows(conn, "calendar_events", account_id)?,
         contact_count: count_account_rows(conn, "contacts", account_id)?,
         contact_group_count: count_account_rows(conn, "contact_groups", account_id)?,
+        contact_claim_count: count_account_rows(conn, "contact_claims", account_id)?,
+        seen_address_count: count_account_rows(conn, "seen_addresses", account_id)?,
+        gal_cache_count: count_account_rows(conn, "gal_cache", account_id)?,
         accounts: read_harness_accounts(conn, account_id, encryption_key.as_ref())?,
         folders: read_harness_folders(conn, account_id)?,
         labels: read_harness_labels(conn, account_id)?,
@@ -2103,6 +2153,9 @@ fn read_harness_db_state(
         calendar_events: read_harness_calendar_events(conn, params)?,
         contacts: read_harness_contacts(conn, params)?,
         contact_groups: read_harness_contact_groups(conn, params)?,
+        contact_claims: read_harness_contact_claims(conn, params)?,
+        seen_addresses: read_harness_seen_addresses(conn, params)?,
+        gal_cache: read_harness_gal_cache(conn, params)?,
     })
 }
 
@@ -2760,6 +2813,102 @@ fn read_harness_contact_groups(
     }
 }
 
+fn read_harness_contact_claims(
+    conn: &impl db::db::WriteTransactionTarget,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbContactClaimRow>, String> {
+    let limit = i64::try_from(params.contact_claim_limit.unwrap_or(50).min(500))
+        .map_err(|e| format!("contact claim limit conversion: {e}"))?;
+    let (sql, scoped) = if params.account_id.is_some() {
+        (
+            "SELECT account_id, source, server_id, email, address_book_id, corpus FROM contact_claims WHERE account_id = ?1 ORDER BY source, server_id, email LIMIT ?2",
+            true,
+        )
+    } else {
+        (
+            "SELECT account_id, source, server_id, email, address_book_id, corpus FROM contact_claims ORDER BY account_id, source, server_id, email LIMIT ?1",
+            false,
+        )
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| format!("prepare contact claims query: {e}"))?;
+    let mapped = if scoped {
+        stmt.query_map(
+            params![params.account_id.as_deref(), limit],
+            test_db_contact_claim_from_row,
+        )
+    } else {
+        stmt.query_map(params![limit], test_db_contact_claim_from_row)
+    }
+    .map_err(|e| format!("query contact claims: {e}"))?;
+    collect_rows(mapped, "contact claims")
+}
+
+fn read_harness_seen_addresses(
+    conn: &impl db::db::WriteTransactionTarget,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbSeenAddressRow>, String> {
+    let limit = i64::try_from(params.seen_address_limit.unwrap_or(50).min(500))
+        .map_err(|e| format!("seen address limit conversion: {e}"))?;
+    let (sql, scoped) = if params.account_id.is_some() {
+        (
+            "SELECT account_id, email, display_name, source, source = 'local_observed' FROM seen_addresses WHERE account_id = ?1 ORDER BY email LIMIT ?2",
+            true,
+        )
+    } else {
+        (
+            "SELECT account_id, email, display_name, source, source = 'local_observed' FROM seen_addresses ORDER BY account_id, email LIMIT ?1",
+            false,
+        )
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| format!("prepare seen addresses query: {e}"))?;
+    let mapped = if scoped {
+        stmt.query_map(
+            params![params.account_id.as_deref(), limit],
+            test_db_seen_address_from_row,
+        )
+    } else {
+        stmt.query_map(params![limit], test_db_seen_address_from_row)
+    }
+    .map_err(|e| format!("query seen addresses: {e}"))?;
+    collect_rows(mapped, "seen addresses")
+}
+
+fn read_harness_gal_cache(
+    conn: &impl db::db::WriteTransactionTarget,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbGalCacheRow>, String> {
+    let limit = i64::try_from(params.gal_cache_limit.unwrap_or(50).min(500))
+        .map_err(|e| format!("GAL cache limit conversion: {e}"))?;
+    let (sql, scoped) = if params.account_id.is_some() {
+        (
+            "SELECT account_id, email, display_name, phone, company, title, department FROM gal_cache WHERE account_id = ?1 ORDER BY email LIMIT ?2",
+            true,
+        )
+    } else {
+        (
+            "SELECT account_id, email, display_name, phone, company, title, department FROM gal_cache ORDER BY account_id, email LIMIT ?1",
+            false,
+        )
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| format!("prepare GAL cache query: {e}"))?;
+    let mapped = if scoped {
+        stmt.query_map(
+            params![params.account_id.as_deref(), limit],
+            test_db_gal_cache_from_row,
+        )
+    } else {
+        stmt.query_map(params![limit], test_db_gal_cache_from_row)
+    }
+    .map_err(|e| format!("query GAL cache: {e}"))?;
+    collect_rows(mapped, "GAL cache")
+}
+
 fn test_db_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbMessageRow> {
     Ok(TestDbMessageRow {
         id: row.get(0)?,
@@ -2879,6 +3028,43 @@ fn test_db_contact_group_from_row(
         server_id: row.get(4)?,
         email: row.get(5)?,
         group_type: row.get(6)?,
+    })
+}
+
+fn test_db_contact_claim_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TestDbContactClaimRow> {
+    Ok(TestDbContactClaimRow {
+        account_id: row.get(0)?,
+        source: row.get(1)?,
+        server_id: row.get(2)?,
+        email: row.get(3)?,
+        address_book_id: row.get(4)?,
+        corpus: row.get(5)?,
+    })
+}
+
+fn test_db_seen_address_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TestDbSeenAddressRow> {
+    Ok(TestDbSeenAddressRow {
+        account_id: row.get(0)?,
+        email: row.get(1)?,
+        display_name: row.get(2)?,
+        source: row.get(3)?,
+        local_observed: row.get::<_, i64>(4)? != 0,
+    })
+}
+
+fn test_db_gal_cache_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDbGalCacheRow> {
+    Ok(TestDbGalCacheRow {
+        account_id: row.get(0)?,
+        email: row.get(1)?,
+        display_name: row.get(2)?,
+        phone: row.get(3)?,
+        company: row.get(4)?,
+        title: row.get(5)?,
+        department: row.get(6)?,
     })
 }
 

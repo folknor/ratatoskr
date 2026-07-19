@@ -23,8 +23,7 @@ const SCHEMA_V100: &str = concat!(
     "\n",
     // contacts (+ FTS + triggers), seen_addresses (+ FTS + triggers),
     // contact_groups, contact_group_members, contact_photo_cache, gal_cache,
-    // graph_contact_map, google_contact_map, google_other_contact_map,
-    // carddav_contact_map, graph_contact_delta_tokens
+    // contact_claims (remote identity ledger)
     include_str!("schema/03_contacts.sql"),
     "\n",
     // signatures, send_as_aliases, send_identities, local_drafts, scheduled_emails

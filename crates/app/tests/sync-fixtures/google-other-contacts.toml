@@ -1,0 +1,36 @@
+name = "google-other-contacts"
+
+# Google otherContacts corpus gate. The main People corpus lands in `contacts`;
+# the auto-collected otherContacts corpus (a synthetic OtherAutoCollected
+# address book) must route to `seen_addresses` with source 'google_other'
+# instead. The [[other_contact]] rows are what google_other_contacts.lua asserts
+# on; the folder + main contact keep the account-wide pull well-formed.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "people-contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = ["alice@example.com", "alice.anderson@example.org"]
+phones = ["+1 555 0100"]
+company = "Acme"
+notes = "main People contact"
+
+[[other_contact]]
+id = "otherContacts/oc1"
+display_name = "Auto Collected One"
+emails = ["auto1@example.test"]
+
+[[other_contact]]
+id = "otherContacts/oc2"
+display_name = "Auto Collected Two"
+emails = ["auto2@example.test"]

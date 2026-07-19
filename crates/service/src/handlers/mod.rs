@@ -216,6 +216,10 @@ pub(crate) async fn dispatch(
         RequestParams::TestStartSync { params } => {
             test_helpers::start_sync_handle(&boot_state, params).await
         }
+        RequestParams::TestContactPull { params } => {
+            test_helpers::contact_pull_handle(&boot_state, params).await
+        }
+        RequestParams::TestGalKick => test_helpers::gal_kick_handle(&boot_state).await,
         RequestParams::TestBifrostAttach { params } => {
             test_helpers::bifrost_attach_handle(&boot_state, params).await
         }

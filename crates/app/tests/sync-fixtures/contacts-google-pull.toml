@@ -1,0 +1,35 @@
+name = "contacts-google-pull"
+
+# Google People (main corpus) pull gate. Alice has two emails; the Google
+# projection is PackSecondEmail, so she is one `contacts` row with email2 set,
+# plus the enriched phone/company/notes columns. The single change step
+# (id "new") creates a second contact so google_pull.lua can drive one
+# incremental mutation and re-pull.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = ["alice@example.com", "alice.anderson@example.org"]
+phones = ["+1 555 0100"]
+company = "Acme"
+notes = "google main contact"
+
+[[change]]
+id = "new"
+
+[[change.contact_create]]
+id = "contact-003"
+folder_id = "cf-default"
+display_name = "Carol Clark"
+emails = ["carol@example.com"]

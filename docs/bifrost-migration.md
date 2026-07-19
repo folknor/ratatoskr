@@ -1365,7 +1365,85 @@ landing commit.
   stays with B7b, not B7a.
 - B8. Contacts. Replace Google People, Graph contacts, JMAP contacts, and
   Google other-contacts sync with the bifrost contact surface. Needs B1; A7 for
-  DAV.
+  DAV (landed). B8 is done and its TODO entry is removed per repo convention;
+  what remains open is the B8-groups follow-up filed out of it (see below).
+
+  It collapsed the four per-provider contact READ implementations -
+  `crates/gmail/src/contacts/` (People main + otherContacts),
+  `crates/graph/src/contact_sync.rs`, `crates/jmap/src/contacts_sync.rs`, and
+  the dormant unwired `crates/core/src/carddav/` parser - onto ONE
+  provider-agnostic pull, `run_contact_pull`
+  (`crates/service/src/bifrost/contacts/pull.rs`), driven off the resident
+  auxiliary loop (`resident.rs::run_aux_pass`) rather than the mail
+  change-stream consumer: contacts stay a pull-at-cadence surface, mirroring
+  B7a's calendar decomposition. The pull pages the account-wide
+  `contacts_list(None)` route (not a per-address-book loop, which would
+  amplify Google's per-group fan-out into a near-full-corpus refetch per
+  group), maps each `ContactCard` through a new pure `contact_write_rows`
+  mapper (`crates/service/src/bifrost/contacts/map.rs`) keyed on a
+  `ContactProjection` (`PackSecondEmail` for JMAP/Google/CardDAV vs
+  `FanOutPerEmail` for Graph, preserving Graph's one-row-per-email shape
+  across the cut), and snapshot-reconciles against a NEW unified
+  `contact_claims(account_id, source, server_id, email, address_book_id,
+  corpus)` remote-claim ledger that replaces the four per-provider
+  `graph_contact_map` / `google_contact_map` / `google_other_contact_map` /
+  `carddav_contact_map` tables (and drops `graph_contact_delta_tokens`
+  outright - the cursor is now bifrost's `Page::next_cursor`) in a v100
+  schema edit (`crates/db/src/db/schema/03_contacts.sql`), per the
+  migrations file's pre-release no-v101 policy. The claim ledger, not
+  `contacts.server_id`, is what preserves the pre-existing cross-provider
+  dedup guard (`contacts.email` is globally UNIQUE; a materialized row can be
+  claimed by several `(account, source, server_id)` tuples, and a row is only
+  deleted once no claim references its email). The reconcile excludes a
+  page's `failed_ids` from the "absent -> retire" set (a transient hydration
+  failure is not a remote delete) and only honors a clean, fully-enumerated
+  empty result as a real delete-all. Google `otherContacts` keeps writing
+  `seen_addresses` (`source='google_other'`), not `contacts`, preserving
+  `local_observed` rows. Per-source pull cadence is preserved (not
+  flattened to one interval): a DB-backed `(account_id, source)` cycle
+  counter in the `settings` table (surviving a Service restart, unlike an
+  in-memory counter) pulls JMAP every resident-aux pass, Graph and CardDAV
+  every fifth, and Google every twentieth - matching each provider's
+  pre-cut effective freshness. CardDAV contacts are lit up for the first
+  time (the one capability B8 adds, not merely preserves): the IMAP account
+  factory (`crates/service/src/bifrost/factory.rs::build_imap_factory`) now
+  calls `.with_carddav(..)` whenever the account carries CalDAV discovery
+  settings (`caldav_url` + either the shared OAuth bearer source or
+  `caldav_username`/`caldav_password` Basic credentials) - reusing the
+  existing CalDAV configuration surface rather than adding a separate DAV
+  credential path - so a plain IMAP account with no DAV config stays
+  contact-`Unsupported` and the pull no-ops on it. Write-back
+  (`crates/service/src/actions/contacts.rs::dispatch_write_back` /
+  `dispatch_delete`) collapsed its four provider arms (including the CardDAV
+  stub that used to return `ActionError::not_implemented`) into one
+  `ContactPatch` call through `engine.contact_update` / `contact_delete`; GAL
+  (`crates/service/src/handlers/gal.rs`, `crates/core/src/contacts/gal.rs`)
+  dropped `fetch_graph_gal` / `fetch_google_gal` for one
+  `engine.directory_search` call, keeping `gal_cache_age` and the `gal_cache`
+  table unchanged. `crates/graph/src/group_sync.rs` (Exchange distribution
+  list / M365 group sync) deliberately STAYS - bifrost's
+  `address_books_list` models contact folders, not directory groups, so it
+  has no bifrost equivalent and is carved out to the B8-groups item below
+  rather than forced into the shared model. Gated by `brokkr check`, the
+  `-p service` `contact_write_rows` and `contact_pull_reconcile` unit tests,
+  and the sync-harness suite under `crates/app/tests/sync-harness/contacts/`
+  (per-provider pull round-trips, delete-all-vs-transient-empty, the Google
+  otherContacts corpus, cross-provider dedup, the Graph fan-out
+  identity-equivalence check, per-provider write-back including CardDAV, and
+  GAL) plus the `contacts_cadence` sync-bench request-budget gate, replacing
+  the retired `jmap-contacts-initial.lua` / `graph-contacts-{initial,
+  incremental}.lua` / `people-contacts-{initial,incremental,
+  writeback-delete}.lua` scripts. Read the B8 landing commit for the full
+  accounting.
+  - B8-groups. Exchange distribution / M365 group sync onto a bifrost groups
+    surface. Carved out of B8 (disposition (b), not attempted there):
+    `crates/graph/src/group_sync.rs` enumerates `/groups`, classifies
+    Unified (M365) vs distribution-list groups, and fetches transitive
+    membership into `contact_groups` / `contact_group_members`, and bifrost
+    has no directory-group equivalent to `address_books_list` today. Needs a
+    bifrost groups surface (new bifrost work, not yet a side-quest) before
+    this can rewire uniformly; until then `group_sync.rs` and
+    `sync_exchange_groups` stay in place, Graph-specific.
 - B9. Attachments plus cloud attachments. Rewire `fetch_attachment` onto blobs
   and the cloud-storage surface. Needs B1, A6.
 - B10. Search. Drive bifrost server-side search/filters where used; the local

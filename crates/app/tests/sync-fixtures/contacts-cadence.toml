@@ -1,0 +1,23 @@
+name = "contacts-cadence"
+
+# Cadence sync-bench fixture. One account with a single contact so each
+# provider's account-wide pull issues its real request shape (the per-source
+# cadence divisors themselves are unit-pinned; this keeps the provider-facing
+# route measurable). All three seeded accounts (jmap / graph / gmail_api)
+# resolve to account-1 and project this same contact.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = ["alice@example.com"]

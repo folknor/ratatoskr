@@ -6824,6 +6824,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bifrost-caldav",
+ "bifrost-carddav",
  "bifrost-google",
  "bifrost-graph",
  "bifrost-imap",

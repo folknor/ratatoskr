@@ -120,6 +120,7 @@ bifrost-imap = { path = "../bifrost/crates/imap" }
 bifrost-graph = { path = "../bifrost/crates/graph" }
 bifrost-google = { path = "../bifrost/crates/google" }
 bifrost-caldav = { path = "../bifrost/crates/caldav" }
+bifrost-carddav = { path = "../bifrost/crates/carddav" }
 
 # Encoding
 base64 = "0.22"

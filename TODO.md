@@ -239,8 +239,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
   - **First-launch onboarding** (`main.rs::view_first_launch_modal`) is a full-screen surface, not a stacked modal; leave as-is.
   - **Inline confirmation rows** in settings (delete-account in `accounts.rs`, delete-signature in `signatures.rs`, delete-group in `groups.rs`, delete-contact in `contacts.rs`) live inside the settings *Sheet*, not a Modal stack. Different pattern; out of scope for `alert_dialog`. Should still get a unified inline-confirm helper, but distinct from the dialog primitive.
 
-- [ ] **CardDAV contact write-back** - CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
-
 - [ ] **Rich text editor (rte) post-review gaps** - Surfaced during the 12-finding correctness review. None are regressions; all are interactions between the recent fixes and the existing flat `DocPosition` model.
   - `is_atomic_block()` is defined as `!is_inline_block()`, so it includes `BlockQuote` alongside `Image` and `HorizontalRule`. Backspace at the start of a paragraph immediately following a `BlockQuote` now removes the entire quoted reply (not a no-op, not a merge). Acceptable but aggressive in the compose pop-out where BlockQuotes hold reply content - if user feedback bites, split atomic-vs-container behaviour in `resolve_delete_backward` / `resolve_delete_forward` (`crates/rte/src/rules.rs`).
   - `link_at_content_point` (`crates/rte/src/widget/mod.rs`) returns `None` when `entry.paragraph()` is `None`, which is the case for container blocks (`BlockQuote`, list groups). Single-clicking a link inside a quoted reply still falls through to caret placement instead of emitting `Action::LinkClicked`. Matches the existing "container content isn't `DocPosition`-addressable" limitation - revisit when/if container content becomes addressable.
@@ -272,11 +270,6 @@ and mirroring any needed upstream fixtures into
   shared-mailbox sync harness to cover Graph calendar reads through
   `/v1.0/users/{id}/...`. Assert per-account calendars, events, and
   delta links stay isolated.
-- [ ] **Graph contacts shared-mailbox path hardening** - Try contact
-  sync against `/v1.0/users/{id}/contactFolders/...`. This should
-  drive `contact_sync` to use `GraphClient::api_path_prefix()` instead
-  of hardcoded `/me` paths, then assert contact folders, contacts, and
-  delta links stay scoped to the shared mailbox.
 - [x] **Graph master category label sync** - Landed.
   `graph-categories-small.toml` exercises `graph_label_sync()`
   through the `graph-master-category-label-sync` script. Sync runs

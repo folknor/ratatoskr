@@ -1,0 +1,26 @@
+name = "contacts-dedup"
+
+# Cross-provider dedup gate. dedup_claims.lua seeds two ratatoskr accounts (one
+# Google, one Graph) that both talk to this single mock, so the same email
+# alice@example.com is claimed by both providers. The unified `contact_claims`
+# ledger records one claim per (account, source); the deduplicated `contacts`
+# materialization (email is UNIQUE) keeps exactly one row.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = ["alice@example.com"]
+phones = ["+1 555 0100"]
+company = "Acme"
+notes = "shared across providers"

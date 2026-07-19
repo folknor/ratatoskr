@@ -123,12 +123,12 @@ pub fn get_uncached_graph_contacts_sync(
 ) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT DISTINCT gcm.email, gcm.graph_contact_id \
-             FROM graph_contact_map gcm \
-             WHERE gcm.account_id = ?1 \
+            "SELECT DISTINCT c.email, cc.server_id AS graph_contact_id \
+             FROM contacts c INNER JOIN contact_claims cc ON cc.email = c.email \
+             WHERE cc.account_id = ?1 AND cc.source = 'graph' \
                AND NOT EXISTS ( \
                  SELECT 1 FROM contact_photo_cache cpc \
-                 WHERE cpc.email = gcm.email AND cpc.account_id = ?1 \
+                 WHERE cpc.email = c.email AND cpc.account_id = ?1 \
                )",
         )
         .map_err(|e| format!("prepare graph photo query: {e}"))?;
@@ -152,9 +152,8 @@ pub fn get_uncached_google_contacts_sync(
     let mut stmt = conn
         .prepare(
             "SELECT c.email, c.avatar_url \
-             FROM contacts c \
-             INNER JOIN google_contact_map gcm ON gcm.contact_email = c.email \
-               AND gcm.account_id = ?1 \
+             FROM contacts c INNER JOIN contact_claims cc ON cc.email = c.email \
+               AND cc.account_id = ?1 AND cc.source = 'google' \
              WHERE c.avatar_url IS NOT NULL \
                AND c.avatar_url LIKE 'http%' \
                AND NOT EXISTS ( \

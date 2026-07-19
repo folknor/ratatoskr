@@ -128,50 +128,19 @@ CREATE TABLE IF NOT EXISTS gal_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_gal_cache_email ON gal_cache(email);
 
--- Provider-specific contact mapping tables
-
-CREATE TABLE IF NOT EXISTS graph_contact_map (
-    account_id TEXT NOT NULL,
-    graph_contact_id TEXT NOT NULL,
+-- Remote identity claims. `contacts` is deduplicated by email, while a
+-- materialized row may be claimed by many provider/account/native-id tuples.
+CREATE TABLE IF NOT EXISTS contact_claims (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    server_id TEXT NOT NULL,
     email TEXT NOT NULL,
-    PRIMARY KEY (account_id, graph_contact_id, email),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+    address_book_id TEXT,
+    corpus TEXT NOT NULL DEFAULT 'main',
+    PRIMARY KEY (account_id, source, server_id, email)
 );
-CREATE INDEX IF NOT EXISTS idx_graph_contact_map_email ON graph_contact_map(email);
+CREATE INDEX IF NOT EXISTS idx_contact_claims_email ON contact_claims(email);
+CREATE INDEX IF NOT EXISTS idx_contact_claims_snapshot ON contact_claims(account_id, source, server_id);
 
-CREATE TABLE IF NOT EXISTS google_contact_map (
-    resource_name TEXT NOT NULL,
-    account_id TEXT NOT NULL,
-    contact_email TEXT NOT NULL,
-    PRIMARY KEY (resource_name, account_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_google_contact_map_email ON google_contact_map(contact_email);
-
-CREATE TABLE IF NOT EXISTS google_other_contact_map (
-    resource_name TEXT NOT NULL,
-    account_id TEXT NOT NULL,
-    contact_email TEXT NOT NULL,
-    PRIMARY KEY (resource_name, account_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_google_other_contact_map_email ON google_other_contact_map(contact_email);
-
-CREATE TABLE IF NOT EXISTS carddav_contact_map (
-    uri TEXT NOT NULL,
-    account_id TEXT NOT NULL,
-    contact_email TEXT NOT NULL,
-    etag TEXT,
-    PRIMARY KEY (uri, account_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_carddav_contact_map_email ON carddav_contact_map(contact_email);
-
-CREATE TABLE IF NOT EXISTS graph_contact_delta_tokens (
-    account_id TEXT NOT NULL,
-    folder_id TEXT NOT NULL,
-    delta_link TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (account_id, folder_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
+/* Legacy contact cursor/map tables are intentionally absent: B8's snapshot
+   pull owns reconciliation through contact_claims. */

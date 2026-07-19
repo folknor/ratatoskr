@@ -70,40 +70,6 @@ pub async fn run_jmap_auxiliary_sync(
     crate::jmap::aux_sync::resolve_shared_account_identities(&ctx).await;
     if initial_sync_completed_before_run {
         crate::jmap::aux_sync::poll_share_notifications(&ctx).await;
-        match crate::jmap::contacts_sync::jmap_contacts_delta_sync(
-            client,
-            account_id,
-            read_db,
-            &write_db.writer_pool(),
-        )
-        .await
-        {
-            Ok(count) if count > 0 => {
-                log::info!("[JMAP] Contacts delta sync: {count} affected for account {account_id}");
-            }
-            Ok(_) => {}
-            Err(error) => {
-                log::warn!("[JMAP] Contacts delta sync failed for account {account_id}: {error}");
-            }
-        }
-    } else {
-        match crate::jmap::contacts_sync::jmap_contacts_initial_sync(
-            client,
-            account_id,
-            read_db,
-            &write_db.writer_pool(),
-        )
-        .await
-        {
-            Ok(count) => {
-                log::info!(
-                    "[JMAP] Initial contacts sync: {count} contacts for account {account_id}"
-                );
-            }
-            Err(error) => {
-                log::warn!("[JMAP] Contacts initial sync failed for account {account_id}: {error}");
-            }
-        }
     }
 }
 

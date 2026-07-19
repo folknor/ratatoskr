@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bifrost_caldav::{CalDavAccountFactory, CalDavConfig, CalDavCredentials};
+use bifrost_carddav::{CardDavConfig, CardDavCredentials};
 use bifrost_graph::account::{GraphAccountFactory, GraphClient};
 use bifrost_imap::{
     AuthPolicy, Credentials, ImapAccountConfig, ImapAccountFactory, ImapConfig,
@@ -130,6 +131,14 @@ pub async fn build_account_factory(
                     decrypted.oauth_token_source(provider, writer)?,
                 )
             };
+            // Google's People (contacts + directory) API lives on a separate
+            // host from Gmail mail, so it carries its own base override. The
+            // harness redirects it to the saehrimnir People mock; bifrost's
+            // default base ends in `/v1`, which the mock routes mirror.
+            if let Ok(people_endpoint) = std::env::var("RATATOSKR_TEST_PEOPLE_ENDPOINT") {
+                factory = factory
+                    .with_people_api_base(format!("{}/v1", people_endpoint.trim_end_matches('/')));
+            }
             if let Ok(topic) = std::env::var("RATATOSKR_GMAIL_PUBSUB_TOPIC") {
                 factory =
                     factory.with_pubsub_config(bifrost_google::account::PubSubConfig::new(topic));
@@ -333,6 +342,32 @@ fn build_imap_factory(
         AuthPolicy::default().with_login()
     };
     let mut config = ImapAccountConfig::new(imap, credentials, auth_policy);
+    // CardDAV composes beneath the IMAP-shaped account in bifrost.  The
+    // existing CalDAV settings are the DAV discovery/configuration surface:
+    // an IMAP account only gains contacts with an endpoint and usable DAV
+    // credentials (the shared OAuth source or DAV basic credentials). This
+    // deliberately leaves ordinary IMAP accounts Unsupported for contacts.
+    if let Some(url) = account.row.caldav_url.as_deref() {
+        let endpoint = std::env::var("RATATOSKR_TEST_CARDDAV_ENDPOINT")
+            .or_else(|_| std::env::var("RATATOSKR_TEST_CALDAV_ENDPOINT"))
+            .unwrap_or_else(|_| url.to_string());
+        let carddav_credentials = match shared_source.clone() {
+            Some(source) => Some(CardDavCredentials::bearer_source(source)),
+            None => match (
+                account.caldav_username.as_deref(),
+                account.caldav_password.as_deref(),
+            ) {
+                (Some(username), Some(password)) => Some(CardDavCredentials::Basic {
+                    username: username.to_string(),
+                    password: password.to_string(),
+                }),
+                _ => None,
+            },
+        };
+        if let Some(credentials) = carddav_credentials {
+            config = config.with_carddav(CardDavConfig::new(endpoint, credentials));
+        }
+    }
     if let Some(submission) = account.smtp_submission(shared_source)? {
         config = config.with_submission(submission);
     }

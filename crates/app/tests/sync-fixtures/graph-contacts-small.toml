@@ -36,6 +36,11 @@ emails = [
     { name = "Alice Anderson", address = "alice@example.com" },
     "alice.anderson@example.org",
 ]
+# Enriched columns: B8 populates phone/company/notes from the same Graph fetch,
+# and the fan-out gate asserts they are non-null on each fanned row.
+phones = ["+1 555 0100"]
+company = "Acme"
+notes = "graph enriched contact"
 
 [[contact]]
 id = "contact-002"

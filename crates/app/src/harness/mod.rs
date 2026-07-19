@@ -20,13 +20,14 @@ use service_api::{
     PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
     SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
     SettingValue, SettingsSetParams, TestBifrostArmHookParams, TestBifrostAttachParams,
-    TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestContainerCrudParams,
-    TestCrashAfterNWritesParams, TestDelayNextWriteParams, TestDiscardDraftParams,
-    TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
-    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
-    TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
-    TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, WireCalendarEventInput,
-    WireCalendarOperation, WireFolderId, WireLabelGroupId, WireLabelId, WireMailOperation,
+    TestBifrostHook, TestBifrostProbeParams, TestBifrostProviderKind, TestContactPullParams,
+    TestContainerCrudParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
+    TestDiscardDraftParams, TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams,
+    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams,
+    TestSearchIndexParams, TestSeedAccountParams, TestSeedCachedAttachmentParams,
+    TestSeedRemoteAttachmentParams, TestSeedThreadParams, TestStartSyncParams,
+    TestThreadReadParams, WireCalendarEventInput, WireCalendarOperation, WireFolderId,
+    WireLabelGroupId, WireLabelId, WireMailOperation,
 };
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write as _};
@@ -2863,6 +2864,17 @@ fn request_params_from_lua(
                 params: TestStartSyncParams { account_id },
             })
         }
+        "TestContactPull" | "test.contact_pull" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestContactPull requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestContactPull requires params.account_id"))?;
+            Ok(RequestParams::TestContactPull {
+                params: TestContactPullParams { account_id },
+            })
+        }
+        "TestGalKick" | "test.gal_kick" => Ok(RequestParams::TestGalKick),
         "TestContainerCrud" | "test.container_crud" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
                 return Err(lua_error_message("TestContainerCrud requires params table"));
@@ -3069,6 +3081,16 @@ fn request_params_from_lua(
                         "contact_group_limit",
                     )?
                     .map(|value| value as u64),
+                    contact_claim_limit: get_number_field(
+                        state,
+                        params_idx,
+                        "contact_claim_limit",
+                    )?
+                    .map(|value| value as u64),
+                    seen_address_limit: get_number_field(state, params_idx, "seen_address_limit")?
+                        .map(|value| value as u64),
+                    gal_cache_limit: get_number_field(state, params_idx, "gal_cache_limit")?
+                        .map(|value| value as u64),
                 }
             } else {
                 TestQueryDbStateParams::default()

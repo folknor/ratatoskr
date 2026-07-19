@@ -1,0 +1,42 @@
+name = "contacts-jmap-pull"
+
+# JMAP ContactCard pull gate. The JMAP session advertises
+# urn:ietf:params:jmap:contacts only when a [[contact_folder]] exists, so the
+# folder is load-bearing: without it the account is contact-Unsupported and the
+# pull no-ops. Alice carries two emails (PackSecondEmail -> email2) plus the
+# enriched phone/company/notes columns B8 populates from the same fetch. The
+# single change step (id "change") lets jmap_pull.lua drive one incremental
+# mutation and re-pull.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Alice Anderson"
+emails = ["alice@example.com", "alice.anderson@example.org"]
+phones = ["+1 555 0100"]
+company = "Acme"
+notes = "primary JMAP contact"
+
+[[contact]]
+id = "contact-002"
+folder_id = "cf-default"
+display_name = "Bob Bell"
+emails = ["bob@example.com"]
+
+[[change]]
+id = "change"
+
+[[change.contact_update]]
+id = "contact-001"
+company = "Bifrost"
+notes = "updated JMAP note"

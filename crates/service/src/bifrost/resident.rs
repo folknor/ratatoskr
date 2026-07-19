@@ -1081,6 +1081,49 @@ async fn run_aux_pass(
     if let Err(error) = result {
         log::debug!("resident auxiliary pass for {account_id} skipped: {error}");
     }
+    let cycle = next_contact_pull_cycle(inner, account_id, provider).await;
+    if super::contacts::pull::should_pull_on_cycle(provider, cycle)
+        && let Err(error) = super::contacts::pull::run_contact_pull(
+            &inner.engine.engine(),
+            account_id,
+            provider,
+            &inner.write_db,
+        )
+        .await
+    {
+        log::debug!("resident contact pull for {account_id} skipped: {error}");
+    }
+}
+
+/// The auxiliary loop wakes every five minutes. Keep contact refreshes at
+/// their established per-source budget: JMAP every pass, Graph/CardDAV every
+/// fifth pass, and Google every twentieth pass. The first (zero) cycle always
+/// pulls, which is important for a newly attached resident account.
+///
+/// The counter is DB-backed (keyed `(account_id, source)` in the `settings`
+/// table, § 5.3) so the cadence survives a service restart - without it a
+/// restart would reset every source to cycle 0 and force an immediate Gmail
+/// contact pull instead of honoring its ~100 min budget - and there is no
+/// in-memory per-account map to prune on detach. A read/write failure returns
+/// cycle 0, which conservatively forces a pull rather than silently starving
+/// contacts.
+async fn next_contact_pull_cycle(
+    inner: &ResidentEngineInner,
+    account_id: &str,
+    provider: BifrostProviderKind,
+) -> u32 {
+    let account_id = account_id.to_string();
+    let source = provider.as_str();
+    inner
+        .write_db
+        .with_write(move |conn| {
+            db::db::queries_extra::next_contact_pull_cycle_sync(conn, &account_id, source)
+        })
+        .await
+        .unwrap_or_else(|error| {
+            log::debug!("contact pull cycle counter unavailable, forcing pull: {error}");
+            0
+        })
 }
 
 /// Read the IMAP folder PATH strings off the already-synced `folders`

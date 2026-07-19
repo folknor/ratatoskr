@@ -1,0 +1,2 @@
+-- Scenario steps `delete_all` and `failed_ids` are provided by saehrimnir's
+-- CardDAV contact fixture support.

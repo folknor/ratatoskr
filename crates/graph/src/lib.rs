@@ -1,7 +1,6 @@
 pub mod autodiscover;
 pub mod calendar_sync;
 pub mod client;
-pub mod contact_sync;
 pub mod ews;
 pub mod folder_mapper;
 pub mod group_sync;

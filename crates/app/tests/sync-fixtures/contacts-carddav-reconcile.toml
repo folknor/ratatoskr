@@ -1,0 +1,43 @@
+name = "contacts-carddav-reconcile"
+
+# Snapshot-reconcile delete-all gate (driven over CardDAV, composed beneath an
+# IMAP-shaped account). Two hydrated vCards seed the initial claim set; the
+# single change step (id "delete_all") destroys both contacts. Because the
+# enumeration then terminates cleanly (empty items, empty failed_ids), the
+# bounded transient-empty guard honors it as a real delete-all and the reconcile
+# retires every claim.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+# CardDAV composes beneath an IMAP-shaped account; a minimal inbox keeps the
+# IMAP open path happy.
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "contact-001"
+folder_id = "cf-default"
+display_name = "Reconcile Alice"
+emails = ["alice@example.com"]
+phones = ["+1 555 0100"]
+
+[[contact]]
+id = "contact-002"
+folder_id = "cf-default"
+display_name = "Reconcile Bob"
+emails = ["bob@example.com"]
+
+[[change]]
+id = "delete_all"
+contact_destroy = ["contact-001", "contact-002"]

@@ -1,6 +1,5 @@
 pub mod calendar_sync;
 pub mod client;
-pub mod contacts_sync;
 
 /// Maximum number of changes to request per JMAP `Foo/changes` call.
 ///

@@ -59,6 +59,7 @@ bifrost-imap.workspace = true
 bifrost-graph.workspace = true
 bifrost-google.workspace = true
 bifrost-caldav.workspace = true
+bifrost-carddav.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

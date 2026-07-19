@@ -1,0 +1,2 @@
+-- Shared B8 contact fixture scenario. saehrimnir serves Alice from both
+-- Google and Graph contact collections so the harness can assert two claims.

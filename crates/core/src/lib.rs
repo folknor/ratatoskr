@@ -4,7 +4,6 @@ pub mod bimi;
 pub mod constants;
 pub use store::body_store;
 pub mod caldav;
-pub mod carddav;
 pub mod chat;
 pub mod cloud_attachments;
 pub mod command_palette_queries;

@@ -62,10 +62,6 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
         log::debug!("gal.kick received before db_conn available; ignoring");
         return Ok(());
     };
-    let Some(encryption_key) = boot_state.encryption_key() else {
-        log::debug!("gal.kick received before encryption_key available; ignoring");
-        return Ok(());
-    };
     let write_db = boot_state
         .write_db_state()
         .map_err(|e| format!("gal.kick write db unavailable: {e}"))?;
@@ -92,7 +88,7 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
         }
         match tokio::time::timeout(
             PER_ACCOUNT_TIMEOUT,
-            refresh_gal_cache_for_account(&read_db, &write_db, &account_id, encryption_key),
+            refresh_gal_cache_for_account(boot_state, &read_db, &write_db, &account_id),
         )
         .await
         {
@@ -113,14 +109,12 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
 }
 
 async fn refresh_gal_cache_for_account(
+    boot_state: &Arc<BootSharedState>,
     read_db: &db::db::ReadDbState,
     write_db: &WriteDbState,
     account_id: &str,
-    encryption_key: [u8; 32],
 ) -> Result<usize, String> {
-    let Some(entries) =
-        fetch_gal_entries_if_stale(read_db, write_db, account_id, encryption_key).await?
-    else {
+    let Some(entries) = fetch_gal_entries_if_stale(boot_state, read_db, account_id).await? else {
         return Ok(0);
     };
 
@@ -147,10 +141,9 @@ async fn refresh_gal_cache_for_account(
 /// client requires the writer pool, and `rtsk` is reader-only by
 /// `core-no-writer-db` (brokkr.toml).
 async fn fetch_gal_entries_if_stale(
+    boot_state: &Arc<BootSharedState>,
     read_db: &db::db::ReadDbState,
-    write_db: &WriteDbState,
     account_id: &str,
-    encryption_key: [u8; 32],
 ) -> Result<Option<Vec<rtsk::contacts::gal::GalEntry>>, String> {
     let now = chrono::Utc::now().timestamp();
     let stale_threshold = now - 86400;
@@ -161,35 +154,46 @@ async fn fetch_gal_entries_if_stale(
         return Ok(None);
     }
 
-    let aid = account_id.to_string();
-    let provider = read_db
-        .with_read(move |conn| db::db::queries_extra::get_account_provider_sync(conn, &aid))
-        .await?;
-
-    let writer_pool = write_db.writer_pool();
-    let entries = match provider {
-        types::MailProviderKind::Graph => {
-            let client = graph::client::GraphClient::from_account(
-                read_db,
-                writer_pool,
-                account_id,
-                encryption_key,
-            )
-            .await?;
-            rtsk::contacts::gal::fetch_graph_gal(&client, read_db).await?
+    let runtime = boot_state
+        .sync_runtime()
+        .ok_or("GAL requested before SyncRuntime was installed")?;
+    let action_account = runtime.resident_action_account(account_id).await?;
+    let account = bifrost_types::AccountId(account_id.to_string());
+    let mut cursor = None;
+    let mut entries = Vec::new();
+    loop {
+        let page = match action_account
+            .engine
+            .directory_search(&account, String::new(), Some(1000), cursor)
+            .await
+        {
+            Ok(page) => page,
+            Err(bifrost_sync::Error::Account(error))
+                if matches!(
+                    error.recovery(),
+                    bifrost_types::RecoveryClass::Unsupported(_)
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(format!("directory search: {error}")),
+        };
+        entries.extend(
+            page.items
+                .into_iter()
+                .map(|card| rtsk::contacts::gal::GalEntry {
+                    email: card.email,
+                    display_name: card.display_name,
+                    phone: card.phones.into_iter().next(),
+                    company: card.company,
+                    title: card.title,
+                    department: card.department,
+                }),
+        );
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
         }
-        types::MailProviderKind::Gmail => {
-            let client = gmail::client::GmailClient::from_account(
-                read_db,
-                writer_pool,
-                account_id,
-                encryption_key,
-            )
-            .await?;
-            rtsk::contacts::gal::fetch_google_gal(&client, read_db).await?
-        }
-        types::MailProviderKind::Jmap | types::MailProviderKind::Imap => return Ok(None),
-    };
-
+    }
     Ok(Some(entries))
 }

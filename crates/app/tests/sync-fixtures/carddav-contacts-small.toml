@@ -1,0 +1,33 @@
+name = "carddav-contacts-small"
+
+# CardDAV contact read + write-back gate. A contact-folder is required (it is
+# the CardDAV address book), and every contact must carry a folder_id. Enriched
+# columns use the canonical array/scalar shape (`phones`, `company`, `notes`);
+# the earlier singular `phone` key was silently dropped by the loader.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+# The CardDAV contact backend composes beneath an IMAP-shaped account, so the
+# account opens an IMAP session; a minimal inbox keeps that open path happy.
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[contact_folder]]
+id = "cf-default"
+display_name = "Contacts"
+is_default = true
+
+[[contact]]
+id = "carddav-contact-001"
+folder_id = "cf-default"
+display_name = "CardDAV Alice"
+emails = ["alice@example.com"]
+phones = ["+1 555 0100"]
+company = "CardDAV Co"
+notes = "hydrated vCard"

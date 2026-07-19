@@ -331,6 +331,23 @@ pub struct TestStartSyncParams {
     pub account_id: String,
 }
 
+/// Deterministically runs the resident contact pull after attaching the
+/// account. The production auxiliary timer remains unchanged; this exists so
+/// sync-harness gates need not wait five minutes per assertion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestContactPullParams {
+    pub account_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestContactPullAck {
+    pub imported: u64,
+}
+
+/// Synchronous request counterpart to the UI's fire-and-forget `gal.kick`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestGalKickAck;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TestBifrostProviderKind {
@@ -540,6 +557,12 @@ pub struct TestQueryDbStateParams {
     pub contact_limit: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact_group_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_claim_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seen_address_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gal_cache_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -754,6 +777,45 @@ pub struct TestDbContactGroupRow {
     pub group_type: Option<String>,
 }
 
+/// A remote contact identity claim. Kept separate from the deduplicated
+/// `contacts` materialization so harness gates can assert reconcile behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbContactClaimRow {
+    pub account_id: String,
+    pub source: String,
+    pub server_id: String,
+    pub email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address_book_id: Option<String>,
+    pub corpus: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbSeenAddressRow {
+    pub account_id: String,
+    pub email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub source: String,
+    pub local_observed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbGalCacheRow {
+    pub account_id: String,
+    pub email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub department: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
@@ -772,6 +834,12 @@ pub struct TestQueryDbStateAck {
     pub contact_count: u64,
     #[serde(default)]
     pub contact_group_count: u64,
+    #[serde(default)]
+    pub contact_claim_count: u64,
+    #[serde(default)]
+    pub seen_address_count: u64,
+    #[serde(default)]
+    pub gal_cache_count: u64,
     pub accounts: Vec<TestDbAccountRow>,
     #[serde(default)]
     pub folders: Vec<TestDbFolderRow>,
@@ -788,6 +856,12 @@ pub struct TestQueryDbStateAck {
     pub contacts: Vec<TestDbContactRow>,
     #[serde(default)]
     pub contact_groups: Vec<TestDbContactGroupRow>,
+    #[serde(default)]
+    pub contact_claims: Vec<TestDbContactClaimRow>,
+    #[serde(default)]
+    pub seen_addresses: Vec<TestDbSeenAddressRow>,
+    #[serde(default)]
+    pub gal_cache: Vec<TestDbGalCacheRow>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1387,6 +1461,12 @@ pub enum RequestParams {
     TestStartSync {
         params: TestStartSyncParams,
     },
+    /// Drives one provider-agnostic resident contact pull (harness).
+    TestContactPull {
+        params: TestContactPullParams,
+    },
+    /// Drives GAL refresh and waits for its DB writes (harness).
+    TestGalKick,
     /// Harness-only Bifrost engine attach plus consumer drive.
     TestBifrostAttach {
         params: TestBifrostAttachParams,
@@ -1512,6 +1592,8 @@ impl RequestParams {
             Self::TestContainerCrud { .. } => "test.container_crud",
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             Self::TestStartSync { .. } => "test.start_sync",
+            Self::TestContactPull { .. } => "test.contact_pull",
+            Self::TestGalKick => "test.gal_kick",
             Self::TestBifrostAttach { .. } => "test.bifrost_attach",
             Self::TestBifrostInjectBatch { .. } => "test.bifrost_inject_batch",
             Self::TestBifrostArmHook { .. } => "test.bifrost_arm_hook",
@@ -1653,6 +1735,8 @@ impl RequestParams {
             | Self::TestContainerCrud { .. }
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
+            | Self::TestContactPull { .. }
+            | Self::TestGalKick
             | Self::TestBifrostAttach { .. }
             | Self::TestBifrostInjectBatch { .. }
             | Self::TestBifrostArmHook { .. }
@@ -1775,6 +1859,8 @@ impl RequestParams {
             | Self::TestDelayNextWrite { .. } => Idempotency::Mutating,
 
             Self::TestStartSync { .. }
+            | Self::TestContactPull { .. }
+            | Self::TestGalKick
             | Self::TestBifrostFactoryOpen { .. }
             | Self::TestBifrostAttach { .. }
             | Self::TestBifrostInjectBatch { .. } => Idempotency::Conditional,
@@ -1896,6 +1982,8 @@ impl RequestParams {
             Self::TestContainerCrud { params } => serde_json::json!({ "params": params }),
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
+            Self::TestContactPull { params } => serde_json::json!({ "params": params }),
+            Self::TestGalKick => serde_json::json!({}),
             Self::TestBifrostAttach { params } => serde_json::json!({ "params": params }),
             Self::TestBifrostInjectBatch { params } => {
                 serde_json::json!({ "params": params })
@@ -2486,6 +2574,16 @@ impl RequestParams {
                     .map_err(|e| format!("test.start_sync params: {e}"))?;
                 Ok(Self::TestStartSync { params: p.params })
             }
+            "test.contact_pull" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestContactPullParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.contact_pull params: {e}"))?;
+                Ok(Self::TestContactPull { params: p.params })
+            }
+            "test.gal_kick" => Ok(Self::TestGalKick),
             "test.bifrost_attach" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -4336,6 +4434,9 @@ mod tests {
                 calendar_limit: Some(30),
                 contact_limit: Some(40),
                 contact_group_limit: Some(50),
+                contact_claim_limit: Some(60),
+                seen_address_limit: Some(70),
+                gal_cache_limit: Some(80),
             },
         };
         let parsed = RequestParams::from_method_params(

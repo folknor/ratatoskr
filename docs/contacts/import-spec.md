@@ -20,7 +20,7 @@ This is a self-contained problem warranting its own crate (`crates/import/`).
 
 3. **vCard (.vcf)** - standard contact interchange format
    - RFC 6350 (vCard 4.0) and RFC 2426 (vCard 3.0)
-   - CardDAV vCard parsing already exists in `crates/core/src/carddav/parse.rs`
+   - vCard parsing already exists in `crates/import/src/vcard_parser.rs`
    - A single .vcf file can contain multiple contacts
 
 ## Recipient Paste Input
@@ -209,7 +209,7 @@ The principle is: clean what is unambiguously wrong (stray whitespace, mixed-cas
 - Delimiter detection
 - Column header heuristic matching
 - Parsed contact rows as structured output
-- vCard parsing (reuse or depend on existing CardDAV parser)
+- vCard parsing (`crates/import/src/vcard_parser.rs`)
 
 The UI for the import wizard lives in the app crate. The import crate provides the data; the app provides the interaction.
 
@@ -232,5 +232,5 @@ How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) map t
 ### Gaps
 
 - **Encoding detection** (UTF-8, UTF-16, Windows-1252): Library crate concern (`chardetng`, `encoding_rs`) - no iced involvement
-- **vCard parsing**: Internal (existing CardDAV parser in `crates/core/src/carddav/parse.rs`)
+- **vCard parsing**: Internal (`crates/import/src/vcard_parser.rs`)
 - **Duplicate handling**: Library crate concern - matching logic is entirely backend, no UI pattern needed
