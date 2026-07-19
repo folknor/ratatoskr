@@ -357,6 +357,23 @@ impl ReadyApp {
                 }
                 Task::none()
             }
+            CalendarMessage::RsvpEvent {
+                event_id,
+                account_id,
+                response,
+            } => self.handle_rsvp_event(event_id, account_id, response),
+            CalendarMessage::RsvpCompleted(result) => match result {
+                Ok(()) => {
+                    self.status_bar
+                        .show_confirmation("RSVP updated".to_string());
+                    self.reload_calendar_events()
+                }
+                Err(error) => {
+                    self.status_bar
+                        .show_confirmation(format!("RSVP failed: {error}"));
+                    Task::none()
+                }
+            },
             CalendarMessage::SwitchToMail => self.update(Message::SetAppMode(crate::AppMode::Mail)),
             CalendarMessage::PopOutCalendar => {
                 // Check if a calendar pop-out already exists.
@@ -598,6 +615,42 @@ impl ReadyApp {
         }
     }
 
+    fn handle_rsvp_event(
+        &mut self,
+        event_id: String,
+        account_id: String,
+        response: service_api::RsvpResponse,
+    ) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            self.status_bar
+                .show_confirmation("Cannot respond: service not connected".to_string());
+            return Task::none();
+        };
+        let plan = service_api::CalendarActionPlan {
+            plan_id: service_api::PlanId::new_v7(),
+            operations: vec![service_api::CalendarActionWireOperation {
+                operation_id: service_api::OperationId(0),
+                account_id,
+                operation: service_api::WireCalendarOperation::RsvpEvent { event_id, response },
+            }],
+        };
+        let plan_id = plan.plan_id;
+        Task::perform(
+            async move {
+                client
+                    .execute_calendar_plan(plan)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let completed = client
+                    .subscribe_or_consume_calendar_action(plan_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                completion_to_result(&completed)
+            },
+            |result| Message::Calendar(Box::new(CalendarMessage::RsvpCompleted(result))),
+        )
+    }
+
     fn handle_save_event(&mut self) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             self.status = "Cannot save: service not connected".to_string();
@@ -748,16 +801,31 @@ impl ReadyApp {
 /// the wire shape, and the Service-side `cal_actions::batch_execute`
 /// converts back to the in-process domain shape.
 fn build_wire_input(draft: &CalendarEventData) -> service_api::WireCalendarEventInput {
-    let start_ts = data_to_timestamp(
-        draft.start_date,
-        draft.start_hour_u32(),
-        draft.start_minute_u32(),
-    );
-    let end_ts = data_to_timestamp(
-        draft.start_date,
-        draft.end_hour_u32(),
-        draft.end_minute_u32(),
-    );
+    let (start_ts, end_ts) = if draft.all_day {
+        // All-day events are date-anchored, not wall-clock. `idmap::
+        // epoch_to_event_time` formats an all-day epoch as its UTC date, so the
+        // epoch must be UTC-midnight of the intended day: deriving it in local
+        // time (as timed events do) would shift the stored date by one day for a
+        // far-eastern/western offset. The end is the exclusive following date,
+        // so a single-day event lowers to start = D, end = D+1 (never a zero-day
+        // span). This matches the read-sync round-trip, which also anchors
+        // all-day epochs at UTC midnight.
+        let start = utc_midnight_timestamp(draft.start_date);
+        let end = utc_midnight_timestamp(draft.start_date.succ_opt().unwrap_or(draft.start_date));
+        (start, end)
+    } else {
+        let start = data_to_timestamp(
+            draft.start_date,
+            draft.start_hour_u32(),
+            draft.start_minute_u32(),
+        );
+        let end = data_to_timestamp(
+            draft.start_date,
+            draft.end_hour_u32(),
+            draft.end_minute_u32(),
+        );
+        (start, end)
+    };
     service_api::WireCalendarEventInput {
         title: draft.title.clone(),
         description: draft.description.clone(),
@@ -770,6 +838,16 @@ fn build_wire_input(draft: &CalendarEventData) -> service_api::WireCalendarEvent
         availability: draft.availability.clone(),
         visibility: draft.visibility.clone(),
     }
+}
+
+/// Unix timestamp for UTC midnight of a date. All-day events are date-anchored
+/// and their epochs must round-trip through `idmap::epoch_to_event_time`, which
+/// reads the UTC date - so they are anchored here at UTC midnight rather than in
+/// the user's local zone.
+fn utc_midnight_timestamp(date: chrono::NaiveDate) -> i64 {
+    use chrono::TimeZone;
+    let naive = date.and_time(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default());
+    chrono::Utc.from_utc_datetime(&naive).timestamp()
 }
 
 /// Convert date + hour + minute to a Unix timestamp (local time).
@@ -796,7 +874,9 @@ fn data_to_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32) -> i64 {
 /// applied (the user sees the event with the "not synced" indicator
 /// driven by `CalendarChanged`-reload); a future revision can promote
 /// it to `Err` once the editor has UI for it.
-fn completion_to_result(completed: &service_api::CalendarActionCompleted) -> Result<(), String> {
+pub(crate) fn completion_to_result(
+    completed: &service_api::CalendarActionCompleted,
+) -> Result<(), String> {
     use service_api::CalendarOperationResult;
     let mut first_failure: Option<String> = None;
     for outcome in &completed.results {
@@ -851,5 +931,69 @@ fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData
         reminders: Vec::new(),
         calendar_name: None,
         color: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, TimeZone};
+
+    fn local_date(ts: i64) -> NaiveDate {
+        chrono::Local
+            .timestamp_opt(ts, 0)
+            .single()
+            .expect("valid local timestamp")
+            .date_naive()
+    }
+
+    fn utc_date(ts: i64) -> NaiveDate {
+        chrono::Utc
+            .timestamp_opt(ts, 0)
+            .single()
+            .expect("valid utc timestamp")
+            .date_naive()
+    }
+
+    fn ymd(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).expect("valid date")
+    }
+
+    #[test]
+    fn build_wire_input_all_day_single_day_is_one_day_exclusive_span() {
+        let mut draft = CalendarEventData::new_at(ymd(2026, 2, 3), 9);
+        draft.all_day = true;
+        let wire = build_wire_input(&draft);
+        assert!(wire.is_all_day);
+        assert!(wire.end_time > wire.start_time, "span must be positive");
+        // All-day epochs are UTC-anchored (idmap formats them as their UTC
+        // date), so the UTC date - not the local date - is the identity that
+        // survives the round-trip. Deriving these in local time would shift the
+        // stored day by one for a far-eastern/western offset.
+        let start_date = utc_date(wire.start_time);
+        assert_eq!(
+            start_date,
+            ymd(2026, 2, 3),
+            "start UTC date is the draft day"
+        );
+        assert_eq!(
+            wire.end_time - wire.start_time,
+            86_400,
+            "single-day all-day spans exactly one exclusive day"
+        );
+        // Exclusive end: end date is exactly one day after the start date,
+        // never the same day (which would lower to a zero-day span).
+        assert_eq!(
+            utc_date(wire.end_time),
+            start_date.succ_opt().expect("successor date")
+        );
+    }
+
+    #[test]
+    fn build_wire_input_timed_keeps_same_day() {
+        let draft = CalendarEventData::new_at(ymd(2026, 2, 3), 9);
+        let wire = build_wire_input(&draft);
+        assert!(!wire.is_all_day);
+        assert_eq!(local_date(wire.start_time), local_date(wire.end_time));
     }
 }

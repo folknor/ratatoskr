@@ -85,6 +85,13 @@ pub enum CalendarMessage {
     DiscardChanges,
     /// Async delete completed.
     EventDeleted(Result<(), String>),
+    RsvpEvent {
+        event_id: String,
+        account_id: String,
+        response: service_api::RsvpResponse,
+    },
+    /// Completion for an RSVP dispatched from an event detail or meeting invite.
+    RsvpCompleted(Result<(), String>),
     /// Create a new event (from command palette or UI action).
     CreateEvent,
     /// Event detail was loaded from DB after clicking an event.

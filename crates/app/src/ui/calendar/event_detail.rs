@@ -136,6 +136,27 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
         );
     }
 
+    if let (Some(event_id), Some(account_id)) = (&event.id, &event.account_id) {
+        let rsvp_button = |label, response| {
+            button(text(label).size(TEXT_SM))
+                .on_press(CalendarMessage::RsvpEvent {
+                    event_id: event_id.clone(),
+                    account_id: account_id.clone(),
+                    response,
+                })
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Ghost.style())
+        };
+        content = content.push(
+            row![
+                rsvp_button("Accept", service_api::RsvpResponse::Accepted),
+                rsvp_button("Decline", service_api::RsvpResponse::Declined),
+                rsvp_button("Tentative", service_api::RsvpResponse::Tentative),
+            ]
+            .spacing(SPACE_XS),
+        );
+    }
+
     let edit_btn = button(text("Edit").size(TEXT_SM))
         .on_press(CalendarMessage::OpenEventEditor(Some(event.clone())))
         .padding(PAD_BUTTON)

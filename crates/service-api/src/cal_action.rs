@@ -106,6 +106,21 @@ pub enum WireCalendarOperation {
     /// for synced events; falls back to local-only delete for events
     /// with no `remote_event_id`.
     DeleteEvent { event_id: String },
+    /// Update the authenticated user's participation status. This operation
+    /// never sends organizer email; bifrost's RSVP contract has no delivery
+    /// flag and providers do not implement notification uniformly.
+    RsvpEvent {
+        event_id: String,
+        response: RsvpResponse,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RsvpResponse {
+    Accepted,
+    Declined,
+    Tentative,
 }
 
 // ---------------------------------------------------------------------------

@@ -48,6 +48,13 @@ pub enum ReadingPaneMessage {
     EditContact(String),
     /// Create a calendar event from this message (calendar button).
     CreateEventFromEmail(usize),
+    /// Respond to a meeting invite after resolving its iMIP UID in the local
+    /// calendar cache. Unsynced invites deliberately have no standalone iMIP
+    /// mail-reply path here.
+    RsvpInvite {
+        message_index: usize,
+        response: service_api::RsvpResponse,
+    },
     /// Navigate to the next message in the thread (expand it).
     NextMessage,
     /// Navigate to the previous message in the thread (expand it).
@@ -88,6 +95,10 @@ pub enum ReadingPaneEvent {
     /// User clicked the calendar button on a message to create a calendar event.
     CreateEventFromEmail {
         message_index: usize,
+    },
+    RespondToMeetingInvite {
+        message_index: usize,
+        response: service_api::RsvpResponse,
     },
     /// User toggled the star on the thread.
     ToggleStar,
@@ -492,6 +503,16 @@ impl Component for ReadingPane {
                     message_index: index,
                 }),
             ),
+            ReadingPaneMessage::RsvpInvite {
+                message_index,
+                response,
+            } => (
+                Task::none(),
+                Some(ReadingPaneEvent::RespondToMeetingInvite {
+                    message_index,
+                    response,
+                }),
+            ),
             ReadingPaneMessage::NextMessage => {
                 let len = self.thread_messages.len();
                 if len == 0 {
@@ -835,6 +856,10 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 ReadingPaneMessage::Forward,
                 ReadingPaneMessage::EditContact,
                 ReadingPaneMessage::CreateEventFromEmail,
+                |message_index, response| ReadingPaneMessage::RsvpInvite {
+                    message_index,
+                    response,
+                },
                 ReadingPaneMessage::LinkClicked,
             ));
         } else {

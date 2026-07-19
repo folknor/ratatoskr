@@ -763,6 +763,39 @@ pub fn delete_calendar_event_sync(conn: &WriteConn<'_>, event_id: &str) -> Resul
     Ok(())
 }
 
+/// Persist the authenticated user's RSVP after the provider accepted it.
+pub fn set_calendar_event_rsvp_sync(
+    conn: &WriteConn<'_>,
+    event_id: &str,
+    rsvp_status: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE calendar_events SET rsvp_status = ?2, updated_at = unixepoch() WHERE id = ?1",
+        params![event_id, rsvp_status],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Resolve an iMIP UID to one cached event for an account. A UID can appear
+/// in multiple calendars, so callers receive `None` unless the match is
+/// unambiguous.
+pub fn resolve_calendar_event_by_uid_sync(
+    conn: &ReadConn<'_>,
+    account_id: &str,
+    uid: &str,
+) -> Result<Option<String>, String> {
+    let mut statement = conn
+        .prepare("SELECT id FROM calendar_events WHERE account_id = ?1 AND uid = ?2 LIMIT 2")
+        .map_err(|error| format!("prepare invite event lookup: {error}"))?;
+    let ids = statement
+        .query_map(params![account_id, uid], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("query invite event lookup: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("map invite event lookup: {error}"))?;
+    Ok((ids.len() == 1).then(|| ids[0].clone()))
+}
+
 // ── All-account calendar queries (for unified calendar) ────
 
 pub async fn db_get_all_visible_calendars(db: &WriterPool) -> Result<Vec<DbCalendar>, String> {

@@ -6,6 +6,7 @@ use crate::message::Message;
 use crate::pop_out::{self, PopOutWindow, compose::ComposeMode};
 use crate::ui;
 use crate::ui::add_account::AddAccountMessage;
+use crate::ui::calendar::CalendarMessage;
 use crate::ui::reading_pane::{ReadingPaneEvent, ReadingPaneMessage};
 use crate::ui::settings::{SettingsEvent, SettingsMessage};
 use crate::ui::sidebar::{SidebarEvent, SidebarMessage};
@@ -256,10 +257,69 @@ impl ReadyApp {
             ReadingPaneEvent::CreateEventFromEmail { message_index } => {
                 self.create_event_from_email(message_index)
             }
+            ReadingPaneEvent::RespondToMeetingInvite {
+                message_index,
+                response,
+            } => self.respond_to_meeting_invite(message_index, response),
             ReadingPaneEvent::ToggleStar => {
                 self.update(Message::ExecuteCommand(CommandId::EmailStar))
             }
         }
+    }
+
+    /// Resolve a reading-pane iMIP invite against the locally synced calendar
+    /// cache, then use the normal calendar-action pipeline. Ambiguous and
+    /// unsynced UIDs intentionally do not compose a standalone iMIP reply.
+    fn respond_to_meeting_invite(
+        &mut self,
+        message_index: usize,
+        response: service_api::RsvpResponse,
+    ) -> Task<Message> {
+        let Some(message) = self.reading_pane.thread_messages.get(message_index) else {
+            return Task::none();
+        };
+        let Some(uid) = message.meeting_invite_uid.clone() else {
+            self.status_bar
+                .show_confirmation("Sync this calendar to respond".to_string());
+            return Task::none();
+        };
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            self.status_bar
+                .show_confirmation("Cannot respond: service not connected".to_string());
+            return Task::none();
+        };
+        let account_id = message.account_id.clone();
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                let event_id = db
+                    .resolve_meeting_invite_event(account_id.clone(), uid)
+                    .await?
+                    .ok_or_else(|| "Sync this calendar to respond".to_string())?;
+                let plan = service_api::CalendarActionPlan {
+                    plan_id: service_api::PlanId::new_v7(),
+                    operations: vec![service_api::CalendarActionWireOperation {
+                        operation_id: service_api::OperationId(0),
+                        account_id,
+                        operation: service_api::WireCalendarOperation::RsvpEvent {
+                            event_id,
+                            response,
+                        },
+                    }],
+                };
+                let plan_id = plan.plan_id;
+                client
+                    .execute_calendar_plan(plan)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let completed = client
+                    .subscribe_or_consume_calendar_action(plan_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                crate::handlers::calendar::completion_to_result(&completed)
+            },
+            |result| Message::Calendar(Box::new(CalendarMessage::RsvpCompleted(result))),
+        )
     }
 
     /// Create a calendar event pre-filled from the given email message.

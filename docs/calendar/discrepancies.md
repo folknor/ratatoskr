@@ -42,15 +42,11 @@ Audit date: 2026-03-30
 
 ### Medium - Provider integration gaps
 
-21. **RSVP action buttons not wired.** RSVP status is displayed. Action buttons (Accept/Decline/Tentative) require provider API calls to send responses.
+22. **No "Email organizer" checkbox.** RSVP Accept/Decline/Tentative are now wired end-to-end (event-detail popover and the reading-pane invite card both dispatch a real provider RSVP), but neither offers an "Email organizer" option: bifrost's `event_rsvp` trait carries no delivery flag and providers do not send the reply uniformly (Graph posts `send_response: false`). Adding the choice needs a bifrost trait extension plus a matching wire field; out of scope until that lands.
 
-22. **No "Email organizer" checkbox.** Depends on RSVP actions being wired.
+23. **Meeting invite detection and reading-pane RSVP: done. Thread-card indicator and inline summary: still pending.** `messages.has_meeting_invite`, `meeting_invite_method`, and `meeting_invite_uid` (parsed from the ICS `UID` property at hydration time) are now populated across all four providers. The reading pane's expanded message card shows Accept/Decline/Tentative for a message with `has_meeting_invite`, resolving `(account_id, uid)` against the synced calendar cache (ambiguity - multiple matches - treated as a miss) and dispatching the same one-op RSVP plan as the event-detail popover on a hit; on a miss the controls render disabled with a "sync this calendar to respond" affordance. Still missing: a calendar/invite indicator on thread cards and an inline meeting summary in the reading pane.
 
-23. **Meeting invite detection: backend done, UI pending.** `messages.has_meeting_invite` and `meeting_invite_method` are now populated at message-insert time across all four providers (Gmail/Graph/JMAP/IMAP) by inspecting the attachment list for `text/calendar` / `application/ics` MIME parts. `meeting_invite_uid` is still `NULL` (requires reading + parsing the iCal payload, which means a follow-up that fetches the attachment bytes during sync). UI affordances - calendar pill on thread cards, RSVP buttons in the reading pane, inline meeting summary - are not wired.
-
-24. **No inline RSVP in reading pane.** Depends on meeting invite detection + RSVP action wiring.
-
-25. **No calendar indicator on thread cards.** Depends on meeting invite detection.
+25. **No calendar indicator on thread cards.** Meeting-invite detection and reading-pane RSVP are both wired now (see 23); this is purely the remaining UI gap - a pill or badge on the thread-list row.
 
 ### Medium - Other gaps
 

@@ -14,8 +14,6 @@ mod payload;
 mod persist;
 mod protocol;
 
-pub use protocol::{create_event_remote, delete_event_remote, update_event_remote};
-
 use persist::jmap_event_record;
 pub use persist::{
     JmapCalendarAttendeeRecord, JmapCalendarEventRecord, JmapCalendarReminderRecord,

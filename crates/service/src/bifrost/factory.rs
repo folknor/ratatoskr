@@ -9,7 +9,7 @@ use bifrost_imap::{
 };
 use bifrost_jmap_new::sync::{JmapAccountFactory, JmapCredentials};
 use bifrost_net::{OAuthRefresher, TokenSource};
-use bifrost_types::AccountFactory;
+use bifrost_types::{AccountFactory, ProtocolKind};
 use common::crypto::StoredSecret;
 use db::db::{ReadConn, ReadDbState, WriterPool, params};
 use service_api::actions::RemoteFailureKind;
@@ -164,6 +164,34 @@ pub async fn build_account_factory(
     }
 }
 
+/// The calendar-provider precedence rule, resolved once. Calendar identity is
+/// intentionally independent from mail identity (a Gmail/Graph mailbox can carry
+/// a separate CalDAV calendar), so `calendar_provider = "caldav"` - or a
+/// `provider = "caldav"` account with a non-empty `caldav_url` - routes to
+/// CalDAV; otherwise the mail provider drives calendar identity. Returns `None`
+/// for IMAP-only / unrecognised accounts (no calendar backend). This is the
+/// single source of truth for the rule: both `build_calendar_account_factory`
+/// (which needs the CalDAV/mail split) and the calendar action opener (which
+/// needs the `ProtocolKind` for id translation) resolve it here rather than each
+/// re-deriving the precedence and drifting.
+pub(crate) fn calendar_protocol_kind(
+    provider: &str,
+    calendar_provider: Option<&str>,
+    caldav_url: Option<&str>,
+) -> Option<ProtocolKind> {
+    let is_caldav = calendar_provider == Some("caldav")
+        || (provider == "caldav" && caldav_url.is_some_and(|url| !url.trim().is_empty()));
+    if is_caldav {
+        return Some(ProtocolKind::CalDav);
+    }
+    match MailProviderKind::parse(provider) {
+        Ok(MailProviderKind::Gmail) => Some(ProtocolKind::Gmail),
+        Ok(MailProviderKind::Graph) => Some(ProtocolKind::Graph),
+        Ok(MailProviderKind::Jmap) => Some(ProtocolKind::Jmap),
+        Ok(MailProviderKind::Imap) | Err(_) => None,
+    }
+}
+
 /// Build the calendar-facing factory. Calendar identity is intentionally
 /// independent from mail identity: a Gmail/Graph mailbox can have a separate
 /// CalDAV calendar configured on the same account row.
@@ -178,12 +206,14 @@ pub async fn build_calendar_account_factory(
         .with_read(move |conn| read_bifrost_account_credentials(conn, &account_id_for_read))
         .await
         .map_err(BifrostBuildError::Db)??;
-    let calendar_is_caldav = row.calendar_provider.as_deref() == Some("caldav")
-        || (row.provider == "caldav"
-            && row
-                .caldav_url
-                .as_deref()
-                .is_some_and(|url| !url.trim().is_empty()));
+    let calendar_is_caldav = matches!(
+        calendar_protocol_kind(
+            &row.provider,
+            row.calendar_provider.as_deref(),
+            row.caldav_url.as_deref(),
+        ),
+        Some(ProtocolKind::CalDav)
+    );
     if calendar_is_caldav {
         let decrypted = row.decrypt(encryption_key)?;
         let url = decrypted.required_plain("caldav_url", decrypted.row.caldav_url.as_deref())?;

@@ -52,6 +52,24 @@ pub fn extract_imip_method(content_type: &str) -> Option<String> {
     }
 }
 
+/// Extract the first RFC 5545 `UID` property from an iCalendar payload.
+/// Folding is handled before matching so an unfolded UID is persisted exactly.
+pub fn extract_imip_uid(ical: &str) -> Option<String> {
+    let unfolded = ical
+        .replace("\r\n ", "")
+        .replace("\r\n\t", "")
+        .replace("\n ", "")
+        .replace("\n\t", "");
+    unfolded.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.split(';')
+            .next()?
+            .eq_ignore_ascii_case("UID")
+            .then(|| value.trim().to_string())
+            .filter(|uid| !uid.is_empty())
+    })
+}
+
 pub fn parse_single_address_header(raw: Option<&str>) -> (Option<String>, Option<String>) {
     let Some(raw) = raw else {
         return (None, None);
@@ -168,6 +186,18 @@ mod tests {
         );
         assert_eq!(extract_imip_method("text/calendar"), None);
         assert_eq!(extract_imip_method("application/octet-stream"), None);
+    }
+
+    #[test]
+    fn extracts_imip_uid_from_folded_calendar_payload() {
+        use super::extract_imip_uid;
+        assert_eq!(
+            extract_imip_uid(
+                "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:invite-\r\n 123@example.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            ),
+            Some("invite-123@example.test".to_string())
+        );
+        assert_eq!(extract_imip_uid("BEGIN:VCALENDAR\nEND:VCALENDAR"), None);
     }
 
     #[test]

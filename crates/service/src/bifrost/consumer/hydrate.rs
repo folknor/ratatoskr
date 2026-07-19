@@ -468,6 +468,16 @@ pub(crate) fn build_consumer_row(
         body_html: parsed_body_html,
         attachments: parsed_attachments,
     } = parsed;
+    // The raw MIME re-parse is the one point where the calendar part's
+    // decoded payload is available without an additional attachment fetch.
+    // Persist the first VEVENT UID so the reading pane can resolve a synced
+    // cached event by (account_id, uid) before offering RSVP controls.
+    let meeting_invite_uid = parsed_attachments.iter().find_map(|attachment| {
+        attachment
+            .calendar_payload
+            .as_deref()
+            .and_then(common::email_parsing::extract_imip_uid)
+    });
 
     let (body_html, body_text) = if body_degraded {
         (None, None)
@@ -753,7 +763,7 @@ pub(crate) fn build_consumer_row(
         meeting_invite_method: parsed_attachments
             .iter()
             .find_map(|att| common::email_parsing::extract_imip_method(&att.mime_type)),
-        meeting_invite_uid: None,
+        meeting_invite_uid,
     };
     let search_document = SearchDocument {
         message_id,

@@ -97,6 +97,7 @@ fn serialize_ops(plan: CalendarActionPlan) -> Result<Vec<PlanOpInsert>, ServiceE
                 event_id.clone()
             }
             WireCalendarOperation::DeleteEvent { event_id } => event_id.clone(),
+            WireCalendarOperation::RsvpEvent { event_id, .. } => event_id.clone(),
         };
         let blob = serde_json::to_vec(&op.operation).map_err(|e| {
             ServiceError::Internal(format!(

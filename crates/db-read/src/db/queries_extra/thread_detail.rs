@@ -44,6 +44,9 @@ pub struct ThreadDetailMessage {
     pub is_starred: bool,
     pub is_replied: bool,
     pub is_forwarded: bool,
+    /// iMIP metadata used to offer cache-backed RSVP actions in the reading pane.
+    pub has_meeting_invite: bool,
+    pub meeting_invite_uid: Option<String>,
 
     // Computed fields
     pub is_own_message: bool,
@@ -320,7 +323,8 @@ fn query_messages(
         .prepare(
             "SELECT id, thread_id, account_id, from_address, from_name, \
                     to_addresses, cc_addresses, bcc_addresses, \
-                    subject, message_id_header, date, is_read, is_starred, is_replied, is_forwarded \
+                    subject, message_id_header, date, is_read, is_starred, is_replied, is_forwarded, \
+                    has_meeting_invite, meeting_invite_uid \
              FROM messages \
              WHERE account_id = ?1 AND thread_id = ?2 \
              ORDER BY date DESC",
@@ -345,6 +349,8 @@ fn query_messages(
                 is_starred: row.get::<_, i64>("is_starred")? != 0,
                 is_replied: row.get::<_, i64>("is_replied")? != 0,
                 is_forwarded: row.get::<_, i64>("is_forwarded")? != 0,
+                has_meeting_invite: row.get::<_, i64>("has_meeting_invite")? != 0,
+                meeting_invite_uid: row.get("meeting_invite_uid")?,
                 // Populated later
                 body_html: None,
                 body_text: None,

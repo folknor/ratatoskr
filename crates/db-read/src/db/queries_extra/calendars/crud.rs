@@ -39,6 +39,25 @@ pub fn get_calendar_event_sync(
     }
 }
 
+/// Resolve an iMIP UID to one cached event for an account. A UID can appear
+/// in multiple calendars, so callers receive `None` unless the match is
+/// unambiguous.
+pub fn resolve_calendar_event_by_uid_sync(
+    conn: &ReadConn<'_>,
+    account_id: &str,
+    uid: &str,
+) -> Result<Option<String>, String> {
+    let mut statement = conn
+        .prepare("SELECT id FROM calendar_events WHERE account_id = ?1 AND uid = ?2 LIMIT 2")
+        .map_err(|error| format!("prepare invite event lookup: {error}"))?;
+    let ids = statement
+        .query_map(params![account_id, uid], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("query invite event lookup: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("map invite event lookup: {error}"))?;
+    Ok((ids.len() == 1).then(|| ids[0].clone()))
+}
+
 pub fn get_event_attendees_sync(
     conn: &ReadConn<'_>,
     account_id: &str,

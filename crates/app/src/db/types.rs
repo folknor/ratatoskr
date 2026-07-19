@@ -212,6 +212,8 @@ pub struct ThreadMessage {
     pub is_starred: bool,
     pub is_replied: bool,
     pub is_forwarded: bool,
+    pub has_meeting_invite: bool,
+    pub meeting_invite_uid: Option<String>,
     /// Whether this message was sent by the account owner.
     pub is_own_message: bool,
 }

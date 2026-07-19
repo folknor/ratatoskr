@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use async_trait::async_trait;
+use bifrost_types::{Account, ProtocolKind};
+
 use db::db::ReadDbState;
 use search::SearchReadState;
 use store::body_store::BodyStoreReadState;
@@ -134,4 +137,17 @@ pub struct CalendarActionContext {
     pub write_db: service_state::WriteDbState,
     pub read_db: ReadDbState,
     pub encryption_key: [u8; 32],
+    /// Service-owned bridge to the calendar Account factory. Keeping this
+    /// trait here lets `cal` use the bifrost write surface without depending on
+    /// the Service factory graph.
+    pub opener: Arc<dyn CalendarAccountOpener>,
+}
+
+#[async_trait]
+pub trait CalendarAccountOpener: Send + Sync {
+    /// `None` means the account has no calendar backend (for example IMAP).
+    async fn open(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<(Arc<dyn Account>, ProtocolKind)>, super::outcome::ActionError>;
 }

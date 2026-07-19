@@ -1,0 +1,58 @@
+name = "calendar-rsvp-small"
+
+# Shared RSVP-writeback fixture for the four B7b section-6.3 gates
+# (gcal / graph / jmap / caldav). The authed user is the primary
+# account, whose email every provider derives as `account.name`:
+#   - Google : the Gmail `/profile` `emailAddress` (mock returns
+#              `account.name`).
+#   - JMAP   : the account's self email / session username
+#              (`account.name`).
+#   - CalDAV : the principal's `calendar-user-address-set` mailto
+#              (`principal_email` = `account.name`).
+#   - Graph  : no client-side self-match; the server-side accept route
+#              matches the caller's own attendee by `account.name`.
+# So a single self-attendee whose email is `test@example.com` matches
+# the authed identity as EACH provider derives it - one fixture, four
+# gates.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[calendar]]
+id = "cal-work"
+name = "Work"
+color = "lightBlue"
+is_default = true
+
+[[calendar]]
+id = "cal-personal"
+name = "Personal"
+color = "lightGreen"
+
+# A meeting invite: someone else organizes it, the authed user is an
+# invited attendee sitting at NEEDS-ACTION until it RSVPs. `bob` is a
+# second attendee (already accepted) so the RSVP write must target the
+# self attendee specifically, not just "the first attendee".
+[[event]]
+id = "ev-rsvp-001"
+calendar_id = "cal-work"
+subject = "Team offsite"
+body_preview = "Annual planning offsite."
+body_text = "Annual planning offsite. Please RSVP."
+start = "2026-03-10T09:00:00Z"
+end = "2026-03-10T17:00:00Z"
+location = "Grand Hall"
+organizer = { name = "Alice Organizer", email = "alice@example.com" }
+attendees = [
+    { name = "Test User", email = "test@example.com", status = "needs-action" },
+    { name = "Bob", email = "bob@example.com", status = "accepted" },
+]
+is_all_day = false

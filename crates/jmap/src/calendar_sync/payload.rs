@@ -246,46 +246,19 @@ fn parse_iso8601_duration(s: &str) -> i64 {
     }
 }
 
-/// Format Unix timestamps into JSCalendar start + duration strings.
-pub(super) fn format_jscalendar_times(
-    start_time: i64,
-    end_time: i64,
-    is_all_day: bool,
-) -> (String, String) {
-    use chrono::TimeZone;
-    let start_dt = chrono::Utc
-        .timestamp_opt(start_time, 0)
-        .single()
-        .unwrap_or_else(chrono::Utc::now);
-
-    if is_all_day {
-        let start_str = start_dt.format("%Y-%m-%d").to_string();
-        let duration_days = (end_time - start_time) / 86400;
-        let duration_days = if duration_days < 1 { 1 } else { duration_days };
-        let duration_str = format!("P{duration_days}D");
-        (start_str, duration_str)
-    } else {
-        let start_str = start_dt.format("%Y-%m-%dT%H:%M:%S").to_string();
-        let duration_secs = end_time - start_time;
-        let duration_str = format_duration_iso8601(duration_secs);
-        (start_str, duration_str)
-    }
-}
-
-/// Format a duration in seconds as ISO 8601 (e.g. "PT1H30M").
+/// Format a duration in seconds as ISO 8601. Kept for the read-side JSCalendar
+/// payload tests, independent of the removed write dispatch.
+#[cfg(test)]
 fn format_duration_iso8601(mut secs: i64) -> String {
     if secs <= 0 {
         return "PT1H".to_string();
     }
-
     let mut parts = String::from("P");
-
-    let days = secs / 86400;
+    let days = secs / 86_400;
     if days > 0 {
         parts.push_str(&format!("{days}D"));
-        secs %= 86400;
+        secs %= 86_400;
     }
-
     if secs > 0 {
         parts.push('T');
         let hours = secs / 3600;
@@ -302,7 +275,6 @@ fn format_duration_iso8601(mut secs: i64) -> String {
             parts.push_str(&format!("{secs}S"));
         }
     }
-
     parts
 }
 

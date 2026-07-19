@@ -709,6 +709,13 @@ pub struct TestDbCalendarEventRow {
     pub attendees_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurrence_rule: Option<String>,
+    /// The authenticated user's own participation status
+    /// (`calendar_events.rsvp_status`). Populated by the read sync from
+    /// the event's `self_response` and by the RSVP action's local
+    /// write-back. Surfaced so the calendar RSVP-writeback harness gates
+    /// can assert the local column moved after an `RsvpEvent` op.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rsvp_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

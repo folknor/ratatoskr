@@ -96,6 +96,8 @@ fn convert_message(msg: thread_detail::ThreadDetailMessage) -> ThreadMessage {
         is_starred: msg.is_starred,
         is_replied: msg.is_replied,
         is_forwarded: msg.is_forwarded,
+        has_meeting_invite: msg.has_meeting_invite,
+        meeting_invite_uid: msg.meeting_invite_uid,
         is_own_message: msg.is_own_message,
     }
 }

@@ -27,14 +27,80 @@
 //! `ActionOutcome::Failed { error }` for `Update` / `Delete`.
 //! `CalendarOperationResult` mirrors that narrower taxonomy.
 
-use action_types::{ActionOutcome, CalendarActionContext};
+use action_types::{ActionError, ActionOutcome, CalendarAccountOpener, CalendarActionContext};
+use async_trait::async_trait;
+use bifrost_types::{Account, AccountId, ProtocolKind};
 use cal::actions::{
-    CalendarEventInput, create_calendar_event, delete_calendar_event, update_calendar_event,
+    CalendarEventInput, create_calendar_event, delete_calendar_event, rsvp_calendar_event,
+    update_calendar_event,
 };
 use service_api::{
-    CalendarActionWireOperation, CalendarOperationResult, WireCalendarEventInput,
+    CalendarActionWireOperation, CalendarOperationResult, RsvpResponse, WireCalendarEventInput,
     WireCalendarOperation,
 };
+use std::sync::Arc;
+
+/// Service implementation of the calendar factory seam. `cal` only knows the
+/// small trait, keeping the service factory graph out of the calendar crate.
+pub struct ServiceCalendarAccountOpener {
+    read_db: db::db::ReadDbState,
+    write_db: service_state::WriteDbState,
+    encryption_key: [u8; 32],
+}
+
+impl ServiceCalendarAccountOpener {
+    pub fn new(
+        read_db: db::db::ReadDbState,
+        write_db: service_state::WriteDbState,
+        encryption_key: [u8; 32],
+    ) -> Self {
+        Self {
+            read_db,
+            write_db,
+            encryption_key,
+        }
+    }
+}
+
+#[async_trait]
+impl CalendarAccountOpener for ServiceCalendarAccountOpener {
+    async fn open(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<(Arc<dyn Account>, ProtocolKind)>, ActionError> {
+        let aid = account_id.to_string();
+        let provider = self.read_db.with_read_mapped(move |conn| {
+            conn.query_row("SELECT provider, calendar_provider, caldav_url FROM accounts WHERE id = ?1", rusqlite::params![aid], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)))
+                .map_err(|e| ActionError::db(format!("calendar account lookup: {e}")))
+        }, |e| ActionError::db(e.clone())).await?;
+        // Resolve calendar-provider precedence through the SAME helper the
+        // factory uses, so the CalDAV-vs-mail rule lives in one place. `None`
+        // (IMAP-only / unrecognised) means no calendar backend.
+        let Some(kind) = crate::bifrost::factory::calendar_protocol_kind(
+            &provider.0,
+            provider.1.as_deref(),
+            provider.2.as_deref(),
+        ) else {
+            return Ok(None);
+        };
+        let factory = crate::bifrost::factory::build_calendar_account_factory(
+            &self.read_db,
+            self.write_db.writer_pool(),
+            account_id,
+            self.encryption_key,
+        )
+        .await
+        .map_err(|e| ActionError::remote(e.to_string()))?;
+        let Some(factory) = factory else {
+            return Ok(None);
+        };
+        let account = factory
+            .open(AccountId(account_id.to_string()))
+            .await
+            .map_err(|e| ActionError::remote(e.to_string()))?;
+        Ok(Some((account, kind)))
+    }
+}
 
 /// Run every operation in `ops` sequentially, returning per-op
 /// results in original order.
@@ -76,6 +142,14 @@ async fn run_one(ctx: &CalendarActionContext, op: &CalendarActionWireOperation) 
         }
         WireCalendarOperation::DeleteEvent { event_id } => {
             delete_calendar_event(ctx, &op.account_id, event_id).await
+        }
+        WireCalendarOperation::RsvpEvent { event_id, response } => {
+            let status = match response {
+                RsvpResponse::Accepted => bifrost_types::RsvpStatus::Accepted,
+                RsvpResponse::Declined => bifrost_types::RsvpStatus::Declined,
+                RsvpResponse::Tentative => bifrost_types::RsvpStatus::Tentative,
+            };
+            rsvp_calendar_event(ctx, &op.account_id, event_id, status).await
         }
     }
 }

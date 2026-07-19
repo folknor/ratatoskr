@@ -16,9 +16,6 @@ db = { path = "../db" }
 db-read = { path = "../db-read" }
 action-types = { path = "../action-types" }
 service-state = { path = "../service-state" }
-gmail = { path = "../gmail" }
-graph = { path = "../graph" }
-jmap = { path = "../jmap" }
 sync = { path = "../sync" }
 bifrost-types.workspace = true
 
@@ -26,16 +23,17 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 chrono-tz = "0.10"
-reqwest.workspace = true
-quick-xml.workspace = true
 rusqlite.workspace = true
-tokio = { workspace = true, features = ["time"] }
 tokio-util = "0.7"
 log = "0.4"
-urlencoding = "2"
 uuid = { version = "1.23.1", features = ["v4"] }
 hotpath = { workspace = true, optional = true }
 
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+async-trait = "0.1"
+
 [features]
-hotpath = ["dep:hotpath", "hotpath/hotpath", "rtsk/hotpath", "gmail/hotpath", "graph/hotpath", "jmap/hotpath"]
-hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "rtsk/hotpath-alloc", "gmail/hotpath-alloc", "graph/hotpath-alloc", "jmap/hotpath-alloc"]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "rtsk/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "rtsk/hotpath-alloc"]

@@ -49,7 +49,7 @@ pub use boot::{
 };
 pub use cal_action::{
     CalendarActionCompleted, CalendarActionPlan, CalendarActionPlanAck,
-    CalendarActionWireOperation, CalendarOperationOutcome, CalendarOperationResult,
+    CalendarActionWireOperation, CalendarOperationOutcome, CalendarOperationResult, RsvpResponse,
     WireCalendarEventInput, WireCalendarOperation,
 };
 pub use calendar::{

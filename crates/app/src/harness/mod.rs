@@ -3756,6 +3756,23 @@ fn parse_wire_calendar_operation(
                 .ok_or_else(|| lua_error_message("DeleteEvent requires event_id"))?;
             Ok(WireCalendarOperation::DeleteEvent { event_id })
         }
+        "rsvpevent" | "rsvp" => {
+            let event_id = get_string_field(state, op_idx, "event_id")?
+                .ok_or_else(|| lua_error_message("RsvpEvent requires event_id"))?;
+            let response = get_string_field(state, op_idx, "response")?
+                .ok_or_else(|| lua_error_message("RsvpEvent requires response"))?;
+            let response = match normalize_name(&response).as_str() {
+                "accepted" | "accept" => service_api::RsvpResponse::Accepted,
+                "declined" | "decline" => service_api::RsvpResponse::Declined,
+                "tentative" => service_api::RsvpResponse::Tentative,
+                _ => {
+                    return Err(lua_error_message(
+                        "RsvpEvent response must be accepted, declined, or tentative",
+                    ));
+                }
+            };
+            Ok(WireCalendarOperation::RsvpEvent { event_id, response })
+        }
         other => Err(lua_error_message(format!(
             "unknown calendar operation {other:?}"
         ))),

@@ -22,6 +22,8 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 name = "action-types"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bifrost-types",
  "db",
  "log",
  "search",
@@ -1022,27 +1024,23 @@ name = "cal"
 version = "0.1.0"
 dependencies = [
  "action-types",
+ "async-trait",
  "bifrost-types",
  "chrono",
  "chrono-tz",
  "db",
  "db-read",
- "gmail",
- "graph",
  "hotpath 0.21.4",
- "jmap",
  "log",
- "quick-xml 0.41.0",
- "reqwest",
  "rtsk",
  "rusqlite",
  "serde",
  "serde_json",
  "service-state",
  "sync",
+ "tempfile",
  "tokio",
  "tokio-util",
- "urlencoding",
  "uuid",
 ]
 

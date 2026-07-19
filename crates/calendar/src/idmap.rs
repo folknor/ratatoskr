@@ -5,11 +5,13 @@
 //! `calendar_id::event_id` ids while the existing cache and write path use the
 //! bare event id.
 
+use super::actions::CalendarEventInput;
 use bifrost_types::{
-    Calendar, CalendarEvent, CalendarId, EventAvailability, EventReminder, EventStatus, EventTime,
-    EventVisibility, ProtocolKind, ReminderTrigger, RsvpStatus,
+    Calendar, CalendarEvent, CalendarId, EventAvailability, EventCreate, EventPatch,
+    EventRecurrence, EventReminder, EventStatus, EventTime, EventVisibility, ProtocolKind,
+    ReminderTrigger, RsvpStatus,
 };
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Offset, SecondsFormat, TimeZone, Utc};
 use chrono_tz::Tz;
 use db::db::queries_extra::calendar_contacts_writes::{
     CalDavAttendee, CalDavReminder, CalendarEventRow, DiscoveredCalendar,
@@ -62,6 +64,17 @@ fn native_event_id(event: &CalendarEvent) -> &str {
             .rsplit_once("::")
             .map_or(&event.native_id, |(_, event_id)| event_id),
         _ => &event.native_id,
+    }
+}
+
+/// Remove the composite calendar prefix used by Gmail and Graph event ids.
+pub fn strip_event_id(provider: ProtocolKind, event_id: &bifrost_types::EventId) -> String {
+    match provider {
+        ProtocolKind::Gmail | ProtocolKind::Graph => event_id
+            .0
+            .rsplit_once("::")
+            .map_or_else(|| event_id.0.clone(), |(_, id)| id.to_string()),
+        _ => event_id.0.clone(),
     }
 }
 
@@ -134,6 +147,150 @@ pub fn event_time_to_epoch(time: &EventTime, is_all_day: bool) -> Option<i64> {
     Some(Utc.from_utc_datetime(&local).timestamp())
 }
 
+/// Inverse of `event_time_to_epoch`. All-day values use UTC dates and retain
+/// bifrost's exclusive-end convention; callers must pass an exclusive end.
+pub fn epoch_to_event_time(epoch_secs: i64, is_all_day: bool, timezone: Option<&str>) -> EventTime {
+    if is_all_day {
+        return EventTime {
+            value: Utc
+                .timestamp_opt(epoch_secs, 0)
+                .single()
+                .unwrap_or_else(|| Utc.timestamp_nanos(0))
+                .format("%Y-%m-%d")
+                .to_string(),
+            timezone: None,
+        };
+    }
+    if let Some(zone) = timezone.and_then(|zone| zone.parse::<Tz>().ok()) {
+        let zoned = zone
+            .timestamp_opt(epoch_secs, 0)
+            .single()
+            .unwrap_or_else(|| zone.timestamp_nanos(0));
+        // A zero-offset zone (e.g. "UTC") emits the canonical `Z` form rather
+        // than `+00:00`, matching the legacy wire format providers received.
+        let value = if zoned.offset().fix().local_minus_utc() == 0 {
+            zoned
+                .with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Secs, true)
+        } else {
+            zoned.to_rfc3339()
+        };
+        return EventTime {
+            value,
+            timezone: timezone.map(str::to_string),
+        };
+    }
+    EventTime {
+        value: Utc
+            .timestamp_opt(epoch_secs, 0)
+            .single()
+            .unwrap_or_else(|| Utc.timestamp_nanos(0))
+            .to_rfc3339_opts(SecondsFormat::Secs, true),
+        timezone: None,
+    }
+}
+
+/// Parse form values for write payloads. Missing and unrecognised values share
+/// the neutral defaults because bifrost write enums are non-optional.
+pub fn parse_availability(value: &str) -> EventAvailability {
+    match value.to_ascii_lowercase().as_str() {
+        "free" => EventAvailability::Free,
+        "tentative" => EventAvailability::Tentative,
+        "out_of_office" | "outofoffice" => EventAvailability::OutOfOffice,
+        _ => EventAvailability::Busy,
+    }
+}
+pub fn parse_visibility(value: &str) -> EventVisibility {
+    match value.to_ascii_lowercase().as_str() {
+        "public" => EventVisibility::Public,
+        "private" => EventVisibility::Private,
+        "confidential" => EventVisibility::Confidential,
+        _ => EventVisibility::Default,
+    }
+}
+pub fn parse_rsvp(value: &str) -> RsvpStatus {
+    match value.to_ascii_lowercase().as_str() {
+        "accepted" => RsvpStatus::Accepted,
+        "declined" => RsvpStatus::Declined,
+        "tentative" => RsvpStatus::Tentative,
+        "delegated" => RsvpStatus::Delegated,
+        _ => RsvpStatus::NeedsAction,
+    }
+}
+
+pub fn input_to_event_create(calendar_remote_id: &str, input: &CalendarEventInput) -> EventCreate {
+    EventCreate {
+        calendar_id: CalendarId(calendar_remote_id.to_string()),
+        title: Some(input.title.clone()),
+        description: Some(input.description.clone()),
+        location: Some(input.location.clone()),
+        start: epoch_to_event_time(
+            input.start_time,
+            input.is_all_day,
+            input.timezone.as_deref(),
+        ),
+        end: epoch_to_event_time(input.end_time, input.is_all_day, input.timezone.as_deref()),
+        is_all_day: input.is_all_day,
+        status: EventStatus::Confirmed,
+        availability: input
+            .availability
+            .as_deref()
+            .map(parse_availability)
+            .unwrap_or(EventAvailability::Busy),
+        visibility: input
+            .visibility
+            .as_deref()
+            .map(parse_visibility)
+            .unwrap_or(EventVisibility::Default),
+        organizer: None,
+        attendees: Vec::new(),
+        recurrence: EventRecurrence {
+            rrule: input.recurrence_rule.clone(),
+            ..EventRecurrence::default()
+        },
+    }
+}
+
+pub fn input_to_event_patch(input: &CalendarEventInput) -> EventPatch {
+    EventPatch {
+        calendar_id: None,
+        title: Some(Some(input.title.clone())),
+        description: Some(Some(input.description.clone())),
+        location: Some(Some(input.location.clone())),
+        start: Some(epoch_to_event_time(
+            input.start_time,
+            input.is_all_day,
+            input.timezone.as_deref(),
+        )),
+        end: Some(epoch_to_event_time(
+            input.end_time,
+            input.is_all_day,
+            input.timezone.as_deref(),
+        )),
+        is_all_day: Some(input.is_all_day),
+        status: None,
+        availability: Some(
+            input
+                .availability
+                .as_deref()
+                .map(parse_availability)
+                .unwrap_or(EventAvailability::Busy),
+        ),
+        visibility: Some(
+            input
+                .visibility
+                .as_deref()
+                .map(parse_visibility)
+                .unwrap_or(EventVisibility::Default),
+        ),
+        attendees: None,
+        recurrence: Some(EventRecurrence {
+            rrule: input.recurrence_rule.clone(),
+            ..EventRecurrence::default()
+        }),
+    }
+}
+
 fn recurrence_id(event: &CalendarEvent) -> Option<String> {
     // Graph's seriesMasterId is not an RFC5545 RECURRENCE-ID.
     (event.provenance.provider != ProtocolKind::Graph)
@@ -173,7 +330,7 @@ fn status(status: EventStatus) -> String {
     .to_string()
 }
 
-fn availability(value: EventAvailability) -> String {
+pub fn availability(value: EventAvailability) -> String {
     match value {
         EventAvailability::Busy => "busy",
         EventAvailability::Free => "free",
@@ -184,7 +341,7 @@ fn availability(value: EventAvailability) -> String {
     .to_string()
 }
 
-fn visibility(value: EventVisibility) -> String {
+pub fn visibility(value: EventVisibility) -> String {
     match value {
         EventVisibility::Default => "default",
         EventVisibility::Public => "public",
@@ -195,7 +352,7 @@ fn visibility(value: EventVisibility) -> String {
     .to_string()
 }
 
-fn rsvp(value: RsvpStatus) -> String {
+pub fn rsvp(value: RsvpStatus) -> String {
     match value {
         RsvpStatus::NeedsAction => "needsaction",
         RsvpStatus::Accepted => "accepted",
@@ -570,5 +727,149 @@ mod tests {
             can_delete_events: true,
         };
         assert!(!to_discovered_calendar("account", &calendar).can_edit);
+    }
+
+    fn sample_input() -> CalendarEventInput {
+        CalendarEventInput {
+            title: "Launch".to_string(),
+            description: "desc".to_string(),
+            location: "Room 1".to_string(),
+            start_time: 1_770_112_800, // 2026-02-03T10:00:00Z
+            end_time: 1_770_114_600,
+            is_all_day: false,
+            timezone: Some("UTC".to_string()),
+            recurrence_rule: Some("FREQ=WEEKLY".to_string()),
+            availability: Some("free".to_string()),
+            visibility: None,
+        }
+    }
+
+    #[test]
+    fn idmap_epoch_to_event_time_roundtrips_all_day() {
+        let epoch = 1_767_312_000; // 2026-01-02 UTC midnight
+        let time = epoch_to_event_time(epoch, true, Some("Europe/Oslo"));
+        assert_eq!(time.value, "2026-01-02");
+        assert_eq!(time.timezone, None);
+        assert_eq!(event_time_to_epoch(&time, true), Some(epoch));
+    }
+
+    #[test]
+    fn idmap_epoch_to_event_time_roundtrips_zoned_and_floating() {
+        let epoch = 1_767_319_445; // 2026-01-02T02:04:05Z
+        // A UTC zone emits the canonical `Z` form, not `+00:00`.
+        let utc = epoch_to_event_time(epoch, false, Some("UTC"));
+        assert_eq!(utc.value, "2026-01-02T02:04:05Z");
+        assert_eq!(event_time_to_epoch(&utc, false), Some(epoch));
+        // Floating (no timezone) also emits `Z` and round-trips.
+        let floating = epoch_to_event_time(epoch, false, None);
+        assert_eq!(floating.value, "2026-01-02T02:04:05Z");
+        assert_eq!(event_time_to_epoch(&floating, false), Some(epoch));
+        // A non-UTC zone keeps its offset and still round-trips.
+        let oslo = epoch_to_event_time(epoch, false, Some("Europe/Oslo"));
+        assert_eq!(oslo.value, "2026-01-02T03:04:05+01:00");
+        assert_eq!(event_time_to_epoch(&oslo, false), Some(epoch));
+    }
+
+    #[test]
+    fn idmap_parse_availability_visibility_rsvp_inverse() {
+        for value in [
+            EventAvailability::Busy,
+            EventAvailability::Free,
+            EventAvailability::Tentative,
+            EventAvailability::OutOfOffice,
+        ] {
+            assert_eq!(parse_availability(&availability(value)), value);
+        }
+        for value in [
+            EventVisibility::Default,
+            EventVisibility::Public,
+            EventVisibility::Private,
+            EventVisibility::Confidential,
+        ] {
+            assert_eq!(parse_visibility(&visibility(value)), value);
+        }
+        for value in [
+            RsvpStatus::NeedsAction,
+            RsvpStatus::Accepted,
+            RsvpStatus::Declined,
+            RsvpStatus::Tentative,
+            RsvpStatus::Delegated,
+        ] {
+            assert_eq!(parse_rsvp(&rsvp(value)), value);
+        }
+        // Unknown strings collapse to the neutral write defaults.
+        assert_eq!(parse_availability("nonsense"), EventAvailability::Busy);
+        assert_eq!(parse_visibility("nonsense"), EventVisibility::Default);
+        assert_eq!(parse_rsvp("nonsense"), RsvpStatus::NeedsAction);
+    }
+
+    #[test]
+    fn idmap_input_to_event_create_maps_recurrence_and_defaults() {
+        let create = input_to_event_create("cal-remote", &sample_input());
+        assert_eq!(create.calendar_id, CalendarId("cal-remote".to_string()));
+        assert_eq!(create.title, Some("Launch".to_string()));
+        assert_eq!(create.status, EventStatus::Confirmed);
+        assert_eq!(create.availability, EventAvailability::Free);
+        // `visibility: None` from the form collapses to the neutral default.
+        assert_eq!(create.visibility, EventVisibility::Default);
+        assert!(create.organizer.is_none());
+        assert!(create.attendees.is_empty());
+        assert_eq!(create.recurrence.rrule, Some("FREQ=WEEKLY".to_string()));
+        assert_eq!(create.start.value, "2026-02-03T10:00:00Z");
+    }
+
+    #[test]
+    fn idmap_input_to_event_patch_sends_all_form_fields() {
+        let patch = input_to_event_patch(&sample_input());
+        assert_eq!(patch.calendar_id, None);
+        assert_eq!(patch.title, Some(Some("Launch".to_string())));
+        assert_eq!(patch.description, Some(Some("desc".to_string())));
+        assert_eq!(patch.location, Some(Some("Room 1".to_string())));
+        assert_eq!(patch.is_all_day, Some(false));
+        assert_eq!(patch.availability, Some(EventAvailability::Free));
+        assert_eq!(patch.visibility, Some(EventVisibility::Default));
+        assert!(patch.start.is_some());
+        assert!(patch.end.is_some());
+        // Fields the form does not edit stay `None` (patch semantics).
+        assert!(patch.status.is_none());
+        assert!(patch.attendees.is_none());
+        assert_eq!(
+            patch.recurrence.as_ref().and_then(|r| r.rrule.clone()),
+            Some("FREQ=WEEKLY".to_string())
+        );
+    }
+
+    #[test]
+    fn idmap_strip_event_id_reverses_composite_for_gmail_graph() {
+        assert_eq!(
+            strip_event_id(ProtocolKind::Gmail, &EventId("cal::evt".to_string())),
+            "evt"
+        );
+        assert_eq!(
+            strip_event_id(ProtocolKind::Graph, &EventId("cal::evt".to_string())),
+            "evt"
+        );
+        // JMAP / CalDAV ids are bare and pass through unchanged.
+        assert_eq!(
+            strip_event_id(ProtocolKind::Jmap, &EventId("evt".to_string())),
+            "evt"
+        );
+        assert_eq!(
+            strip_event_id(ProtocolKind::CalDav, &EventId("/cal/evt.ics".to_string())),
+            "/cal/evt.ics"
+        );
+    }
+
+    #[test]
+    fn idmap_event_id_for_writeback_composes_gmail_graph_and_passes_bare() {
+        let (gmail, gmail_cal) =
+            event_id_for_writeback(ProtocolKind::Gmail, "evt", None, Some("cal"));
+        assert_eq!(gmail, EventId("cal::evt".to_string()));
+        assert_eq!(gmail_cal, Some(CalendarId("cal".to_string())));
+        let (jmap, _) = event_id_for_writeback(ProtocolKind::Jmap, "evt", None, Some("cal"));
+        assert_eq!(jmap, EventId("evt".to_string()));
+        // Gmail without a calendar id falls back to the bare event id.
+        let (bare, _) = event_id_for_writeback(ProtocolKind::Gmail, "evt", None, None);
+        assert_eq!(bare, EventId("evt".to_string()));
     }
 }

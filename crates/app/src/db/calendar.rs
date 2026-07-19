@@ -1,12 +1,25 @@
 use rtsk::db::queries_extra::calendars::{
     expand_view_events, get_calendar_event_sync, get_event_attendees_sync,
     get_event_reminders_sync, load_calendars_for_sidebar_sync, load_view_event_rows_sync,
+    resolve_calendar_event_by_uid_sync,
 };
 
 use super::connection::Db;
 use super::types::*;
 
 impl Db {
+    /// Resolve an iMIP UID to exactly one cached calendar event for its
+    /// account. Multiple rows are intentionally ambiguous: an invite must not
+    /// guess which calendar copy should receive an RSVP.
+    pub async fn resolve_meeting_invite_event(
+        &self,
+        account_id: String,
+        uid: String,
+    ) -> Result<Option<String>, String> {
+        self.with_read(move |conn| resolve_calendar_event_by_uid_sync(conn, &account_id, &uid))
+            .await
+    }
+
     /// Load a single calendar event by its DB id.
     pub async fn get_calendar_event(
         &self,

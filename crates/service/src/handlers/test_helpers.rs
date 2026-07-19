@@ -2645,7 +2645,7 @@ fn read_harness_calendar_events(
                             remote_event_id, summary, title, description,
                             location, start_time, end_time, is_all_day, status,
                             organizer_email, organizer_name, attendees_json,
-                            recurrence_rule
+                            recurrence_rule, rsvp_status
                      FROM calendar_events
                      WHERE account_id = ?1
                      ORDER BY start_time ASC, id ASC
@@ -2664,7 +2664,7 @@ fn read_harness_calendar_events(
                             remote_event_id, summary, title, description,
                             location, start_time, end_time, is_all_day, status,
                             organizer_email, organizer_name, attendees_json,
-                            recurrence_rule
+                            recurrence_rule, rsvp_status
                      FROM calendar_events
                      ORDER BY account_id ASC, start_time ASC, id ASC
                      LIMIT ?1",
@@ -2848,6 +2848,7 @@ fn test_db_calendar_event_from_row(
         organizer_name: row.get(14)?,
         attendees_json: row.get(15)?,
         recurrence_rule: row.get(16)?,
+        rsvp_status: row.get(17)?,
     })
 }
 

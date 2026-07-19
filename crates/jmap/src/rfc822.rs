@@ -31,6 +31,9 @@ pub struct Rfc822Attachment {
     pub size: i64,
     pub content_id: Option<String>,
     pub is_inline: bool,
+    /// Decoded MIME-part text for calendar parts. Kept only for iMIP UID
+    /// extraction during hydration; ordinary attachments do not retain bytes.
+    pub calendar_payload: Option<String>,
 }
 
 /// The RFC822-derived field set the legacy JMAP persist wrote that the
@@ -129,12 +132,15 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
             let is_inline = part
                 .content_disposition()
                 .is_some_and(mail_parser::ContentType::is_inline);
+            let calendar_payload = common::email_parsing::is_calendar_content_type(&mime_type)
+                .then(|| String::from_utf8_lossy(part.contents()).into_owned());
             Some(Rfc822Attachment {
                 filename: part.attachment_name().unwrap_or("attachment").to_string(),
                 mime_type,
                 size: i64::try_from(part.len()).unwrap_or(i64::MAX),
                 content_id: part.content_id().map(ToString::to_string),
                 is_inline,
+                calendar_payload,
             })
         })
         .collect();

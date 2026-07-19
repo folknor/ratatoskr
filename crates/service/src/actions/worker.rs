@@ -677,6 +677,11 @@ async fn run_one_calendar(
         write_db: ctx.write_db.clone(),
         read_db: ctx.db.clone(),
         encryption_key: ctx.encryption_key,
+        opener: std::sync::Arc::new(crate::cal_actions::ServiceCalendarAccountOpener::new(
+            ctx.db.clone(),
+            ctx.write_db.clone(),
+            ctx.encryption_key,
+        )),
     };
     let cal_op = service_api::CalendarActionWireOperation {
         operation_id: OperationId(op.operation_id),

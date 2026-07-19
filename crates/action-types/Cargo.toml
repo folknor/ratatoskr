@@ -22,4 +22,6 @@ service-api = { path = "../service-api" }
 service-state = { path = "../service-state" }
 store = { path = "../stores" }
 search = { path = "../search" }
+bifrost-types.workspace = true
+async-trait = "0.1"
 log = "0.4"

@@ -1121,8 +1121,8 @@ landing commit.
 - B7. Calendar. Replace the `calendar` crate's per-provider sync with the
   bifrost calendar surface. Carved into TWO bricks by the read/write seam
   (B7a sync, B7b actions), NOT a per-provider cutover series like B3 - see the
-  decomposition note below. Needs B1; A7 for DAV (landed). B7a is done (see
-  the done-note below); what remains open is B7b (actions) and the B7c
+  decomposition note below. Needs B1; A7 for DAV (landed). B7a and B7b are
+  both done (see the done-notes below); what remains open is the B7c
   follow-up filed out of B7a.
 
   Decomposition (settled during B7 scoping, read against frozen bifrost
@@ -1212,11 +1212,121 @@ landing commit.
   `-p cal` / `-p service` / `-p db` unit gates (dedup-key, event-time,
   recurrence-id, reminder, and stale-unlisted-calendar cases), and the
   per-provider calendar sync-harness round-trip scripts.
-  - B7b. Calendar actions. Rewire `actions.rs` create / update / delete + RSVP
-    and `service/cal_actions` onto `event_create` / `event_update` /
-    `event_delete` / `event_rsvp`, reusing B7a's seam; delete the
-    `CalendarProvider` enum dispatch. Gated by per-provider calendar
-    action-writeback round-trip scripts.
+  B7b (calendar actions) is done and its TODO entry is removed per repo
+  convention. It rewired `crates/calendar/src/actions.rs`'s create / update /
+  delete, and added a new RSVP action, onto bifrost's `Account` write surface
+  (`event_create` / `event_update` / `event_delete` / `event_rsvp`), collapsing
+  the four-way `enum CalendarProvider { Google | Graph | Jmap | CalDav }`
+  dispatch and its per-variant `dispatch_create` / `dispatch_update` /
+  `dispatch_delete` matches into one bifrost call site per operation. Deleted
+  whole: `crates/calendar/src/google.rs`, `graph.rs`, `caldav/mod.rs`,
+  `caldav/ical.rs` (the write-side iCal generator - bifrost's CalDAV account
+  now generates its own on write), and the `create_event_remote` /
+  `update_event_remote` / `delete_event_remote` functions out of
+  `crates/jmap/src/calendar_sync/protocol.rs` (the module's non-write record
+  types survive, narrowed). `CalendarEventDto` and its `CalendarEventInput`
+  alias went with them. `idmap.rs` grew the write direction B7a's seam was
+  built to host - inverse mappers (`epoch_to_event_time`, `parse_availability`
+  / `parse_visibility` / `parse_rsvp`), the `input_to_event_create` /
+  `input_to_event_patch` lowering functions, and `strip_event_id` - and
+  `event_id_for_writeback` (landed inert by B7a) got its first caller.
+
+  The crate-boundary problem - `cal` cannot call the Service's
+  `build_calendar_account_factory` without a circular dep - is resolved by an
+  injected `CalendarAccountOpener` trait: `action-types` gained a
+  `bifrost-types` dependency to hold `pub opener: Arc<dyn
+  CalendarAccountOpener>` on `CalendarActionContext`, and the Service's
+  `ServiceCalendarAccountOpener` (`cal_actions/mod.rs`) wraps the factory,
+  returning the account's `ProtocolKind` alongside the opened `Arc<dyn
+  Account>` so the write path never re-parses a provider string. One adopted
+  behavior change: calendar-provider routing now follows the factory's
+  richer precedence rule (`calendar_provider == "caldav"` OR `provider ==
+  "caldav"` with a non-empty `caldav_url`, else `MailProviderKind::parse`)
+  rather than the legacy dispatcher's plain string match, which disagreed on
+  the edge case of `provider == "caldav"` paired with a mail-provider
+  `calendar_provider`. Capability gating mirrors the read path
+  (`pim_methods.event_create` / `.event_update` / `.event_delete` /
+  `.event_rsvp`), degrading to `LocalOnly` (create) or `Failed`
+  (update/delete/rsvp) without a provider call when an account's calendar
+  backend cannot write. The consumer-side etag/`If-Match` writeback contract
+  is retired - concurrency becomes each bifrost `Account` impl's
+  responsibility, advertised via `capabilities().mutation.concurrency` -
+  named honestly as an intentional last-write-wins downgrade for Gmail
+  (`MutationConcurrency::None`) and CalDAV delete (bifrost sends no
+  `If-Match` there), not a lossless hand-off. A previously-undiscovered
+  app-side bug rides along as an in-scope fix: an all-day save lowered both
+  `start_time` and `end_time` from the same `draft.start_date`, producing a
+  zero-day span; `build_wire_input` now derives an exclusive one-day-minimum
+  end for all-day events.
+
+  RSVP landed as a fourth `WireCalendarOperation::RsvpEvent { event_id,
+  response: RsvpResponse }` wire variant (a typed, fallible `accepted` /
+  `declined` / `tentative` enum, not a defaulting string parse), a new
+  `cal::actions::rsvp_calendar_event` domain function, and a `run_one` arm -
+  all as a one-op plan, closing this document's architecture-note question
+  (`reference/architecture.md`'s calendar-action-pipeline section) of whether
+  RSVP would need an N-op plan shape: it does not. RSVP updates only the
+  user's own participation status and does NOT email the organizer (bifrost's
+  `event_rsvp` trait has no delivery flag, and Graph posts `send_response:
+  false`), so the calendar design doc's "Email organizer" checkbox stays out
+  of scope pending a bifrost trait extension. The app gained RSVP
+  Accept/Decline/Tentative controls in both the event-detail popover and the
+  reading-pane's meeting-invite card. The previously-missing ICS `UID` parser
+  (`common::email_parsing::extract_imip_uid`) now persists
+  `messages.meeting_invite_uid` at hydration time, so the reading pane can
+  resolve `(account_id, uid)` against the synced calendar cache and either
+  dispatch the same `RsvpEvent` plan on a hit or render disabled with a "sync
+  this calendar to respond" affordance on a miss (ambiguity - multiple synced
+  events for one UID - treated as a miss, not a guess). Emitting a standalone
+  iMIP REPLY email for an invite that never resolves to a synced event stays
+  out of scope, filed as a mail-send-surface concern (B4/B5), not a calendar
+  action.
+  - RSVP round-trip gates: the four
+    `crates/app/tests/sync-harness/{gcal,graph,jmap,caldav}-calendar-rsvp-writeback.lua`
+    scripts sync an invite with the authed user as an attendee, RSVP
+    Accept through the `RsvpEvent` op, and prove the change on three
+    planes - the local `rsvp_status` column (now surfaced through
+    `TestQueryDbState` / `TestDbCalendarEventRow`), the provider request
+    log (pinned per-op counts), and a load-bearing read-back: a follow-up
+    sync must show the self attendee's persisted participation status flip
+    to accepted in `attendees_json`, so a mock that recorded nothing fails.
+    Unblocked by the saehrimnir side-quest that added a per-attendee
+    participation-status round-trip across all four providers (Graph
+    `attendees[].status.response`, Google `attendees[].responseStatus`,
+    JMAP `participants/{id}/participationStatus`, CalDAV `PARTSTAT` plus a
+    schedule-outbox POST) and the Graph calendar-scoped event routes
+    (`/v1.0/me/calendars/{cal}/events/{id}` GET/PATCH/DELETE + POST
+    accept|decline|tentativelyAccept). The Graph action-writeback gate's
+    update/delete request-log needles were moved onto those calendar-scoped
+    routes at the same time. Two harness realities are pinned, not bugs:
+    (a) the mock's `log_request` middleware records every request, so a
+    mutating handler that also logs (Google RSVP PATCH) shows a log count of
+    2 for a single wire PATCH; (b) bifrost-jmap resolves the RSVP self
+    participant from its `self_emails` set, which saehrimnir's JMAP session
+    leaves empty (no participant-identity surface), so the JMAP RSVP gate
+    uses a single-attendee fixture (`calendar-rsvp-jmap.toml`) where
+    bifrost's sole-non-owner-attendee fallback applies; gcal/graph/caldav
+    match the self attendee by email and share the two-attendee
+    `calendar-rsvp-small.toml`.
+  - bifrost follow-up (CalDAV `event_rsvp` capability): bifrost-caldav's
+    capabilities hardcode `pim_methods.event_rsvp = true` regardless of what
+    RFC 6638 scheduling the server actually advertises. A scheduling-less
+    CalDAV server (no `schedule-outbox-URL` / no calendar-user-address) would
+    pass ratatoskr's capability gate and then fail `event_rsvp` at runtime
+    when bifrost cannot post the iTIP REPLY. ratatoskr's `ActionOutcome::Failed`
+    mapping covers the UX (the RSVP surfaces as failed, not a silent no-op),
+    so this is not a ratatoskr defect; the durable fix is bifrost deriving the
+    `event_rsvp` flag from discovery rather than hardcoding it.
+
+  Gated by `brokkr check`; the `-p cal` idmap inverse-mapper and round-trip
+  unit tests; the `-p service` `cal_actions` unit tests (outcome mapping, the
+  `run_one` RSVP arm, the factory `Ok(None)` no-op); the `-p app`
+  `build_wire_input` all-day exclusive-end unit tests; a `-p cal` unit test
+  for `rsvp_calendar_event`'s unsynced-event `Failed` path; and the eight
+  per-provider calendar action-writeback and RSVP sync-harness round-trip
+  scripts, with per-op provider-request counts pinned in the harness
+  assertions as the performance instrument (no `brokkr sync-bench` regression
+  surfaced). Read the B7b landing commit for the full accounting.
   - B7c. Stale-calendar reap-vs-hide lifecycle. B7a's policy for a calendar
     the current backend no longer lists is retain-and-skip: it is kept
     and simply excluded from sync (`sync.rs::resolve_sync_targets`), so its

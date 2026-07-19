@@ -1,0 +1,51 @@
+name = "calendar-rsvp-jmap"
+
+# JMAP-specific RSVP-writeback fixture. Same shape as
+# calendar-rsvp-small.toml but the invite carries ONLY the authed
+# user's own attendee (no second attendee). bifrost-jmap resolves the
+# "self" participant to RSVP from its `self_emails` set (gathered at
+# account open); saehrimnir's JMAP session does not advertise a
+# participant-identity / self-address surface, so bifrost's self_emails
+# come up empty and it falls back to "the sole non-owner attendee". A
+# second attendee would make that fallback ambiguous
+# ("multiple attendee participants"), so the JMAP invite is authored
+# single-attendee. gcal / graph / caldav match the self attendee by
+# email, so they keep the two-attendee calendar-rsvp-small.toml where
+# self-targeting-among-multiple is exercised.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[calendar]]
+id = "cal-work"
+name = "Work"
+color = "lightBlue"
+is_default = true
+
+[[calendar]]
+id = "cal-personal"
+name = "Personal"
+color = "lightGreen"
+
+[[event]]
+id = "ev-rsvp-001"
+calendar_id = "cal-work"
+subject = "Team offsite"
+body_preview = "Annual planning offsite."
+body_text = "Annual planning offsite. Please RSVP."
+start = "2026-03-10T09:00:00Z"
+end = "2026-03-10T17:00:00Z"
+location = "Grand Hall"
+organizer = { name = "Alice Organizer", email = "alice@example.com" }
+attendees = [
+    { name = "Test User", email = "test@example.com", status = "needs-action" },
+]
+is_all_day = false

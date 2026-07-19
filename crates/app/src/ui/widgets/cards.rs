@@ -271,6 +271,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_forward: impl Fn(usize) -> M,
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
+    on_rsvp: impl Fn(usize, service_api::RsvpResponse) -> M,
     on_link_click: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
     let sender_name = msg
@@ -428,6 +429,39 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::Ghost.style());
 
+    let rsvp_actions: Option<Element<'_, M>> = msg.has_meeting_invite.then(|| {
+        let respond = |label, response| {
+            let button = button(text(label).size(TEXT_SM).style(text::secondary))
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::Ghost.style());
+            if msg.meeting_invite_uid.is_some() {
+                button.on_press(on_rsvp(index, response))
+            } else {
+                button
+            }
+        };
+        let controls = row![
+            text("Meeting invite").size(TEXT_SM).style(text::secondary),
+            respond("Accept", service_api::RsvpResponse::Accepted),
+            respond("Decline", service_api::RsvpResponse::Declined),
+            respond("Tentative", service_api::RsvpResponse::Tentative),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+        if msg.meeting_invite_uid.is_some() {
+            controls.into()
+        } else {
+            column![
+                controls,
+                text("Sync this calendar to respond")
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Muted.style())
+            ]
+            .spacing(SPACE_XXXS)
+            .into()
+        }
+    });
+
     let actions = row![
         reply_button(icon::reply(), "Reply", on_reply(index)),
         reply_button(icon::reply_all(), "Reply All", on_reply_all(index)),
@@ -436,7 +470,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     ]
     .spacing(SPACE_XS);
 
-    let card_content = column![header, body, actions].spacing(SPACE_XS);
+    let mut card_content = column![header, body, actions].spacing(SPACE_XS);
+    if let Some(rsvp_actions) = rsvp_actions {
+        card_content = card_content.push(rsvp_actions);
+    }
 
     container(card_content)
         .padding(PAD_CARD)
