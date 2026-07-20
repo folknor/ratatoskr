@@ -57,6 +57,10 @@ impl std::fmt::Display for CalendarRunId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CalendarStartAccountSyncParams {
     pub account_id: String,
+    /// Test harness clock override. Production callers leave this absent and
+    /// use the wall clock.
+    #[serde(default)]
+    pub now_ms: Option<i64>,
 }
 
 /// Synchronous response to `calendar.start_account_sync`. Mirrors
@@ -199,11 +203,17 @@ mod tests {
     fn calendar_start_account_sync_params_round_trips_through_serde() {
         let params = CalendarStartAccountSyncParams {
             account_id: "acc-7".into(),
+            now_ms: Some(1_700_000_000_000),
         };
         let json = serde_json::to_value(&params).expect("serialize");
         let recovered: CalendarStartAccountSyncParams =
             serde_json::from_value(json).expect("deserialize");
         assert_eq!(params, recovered);
+
+        let legacy: CalendarStartAccountSyncParams =
+            serde_json::from_value(serde_json::json!({ "account_id": "acc-legacy" }))
+                .expect("deserialize legacy params");
+        assert_eq!(legacy.now_ms, None);
     }
 
     #[test]

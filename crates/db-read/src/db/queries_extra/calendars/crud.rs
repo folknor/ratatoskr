@@ -100,6 +100,7 @@ pub fn load_calendars_for_sidebar_sync(conn: &ReadConn<'_>) -> Result<Vec<DbCale
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {CALENDAR_COLS} FROM calendars
+             WHERE unlisted_since IS NULL
              ORDER BY account_id, sort_order ASC, is_primary DESC, display_name ASC"
         ))
         .map_err(|e| e.to_string())?;

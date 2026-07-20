@@ -1312,10 +1312,11 @@ impl ServiceClient {
     pub async fn start_calendar_sync(
         &self,
         account_id: String,
+        now_ms: Option<i64>,
     ) -> Result<CalendarSyncResult, ClientError> {
         let ack: CalendarStartAck = self
             .request(RequestParams::CalendarStartAccountSync {
-                params: CalendarStartAccountSyncParams { account_id },
+                params: CalendarStartAccountSyncParams { account_id, now_ms },
             })
             .await?;
         self.subscribe_or_consume_calendar(ack.run_id).await

@@ -165,7 +165,11 @@ impl CalendarRuntime {
     /// Diverging is a refactor smell. Returns
     /// `Result<CalendarStartAck, String>` so post-shutdown calls produce
     /// a testable `Err`, not a silently-dropped start.
-    pub async fn start_account(&self, account_id: String) -> Result<CalendarStartAck, String> {
+    pub async fn start_account(
+        &self,
+        account_id: String,
+        now_ms: Option<i64>,
+    ) -> Result<CalendarStartAck, String> {
         if self.inner.closed.load(Ordering::Acquire) {
             return Err("CalendarRuntime is shutting down".into());
         }
@@ -211,7 +215,14 @@ impl CalendarRuntime {
         let supervisor_account_id = account_id.clone();
         let supervisor_token = cancellation_token.clone();
         let supervisor = tokio::spawn(async move {
-            run_calendar_supervised(inner, supervisor_account_id, run_id, supervisor_token).await;
+            run_calendar_supervised(
+                inner,
+                supervisor_account_id,
+                run_id,
+                now_ms,
+                supervisor_token,
+            )
+            .await;
         });
 
         map.insert(
@@ -374,13 +385,21 @@ async fn run_calendar_supervised(
     inner: Arc<CalendarRuntimeInner>,
     account_id: String,
     run_id: CalendarRunId,
+    now_ms: Option<i64>,
     cancellation_token: CancellationToken,
 ) {
     let inner_for_runner = Arc::clone(&inner);
     let runner_account = account_id.clone();
     let runner_token = cancellation_token.clone();
     let runner = tokio::spawn(async move {
-        run_calendar(inner_for_runner, runner_account, run_id, runner_token).await;
+        run_calendar(
+            inner_for_runner,
+            runner_account,
+            run_id,
+            now_ms,
+            runner_token,
+        )
+        .await;
     });
 
     match runner.await {
@@ -419,6 +438,7 @@ async fn run_calendar(
     inner: Arc<CalendarRuntimeInner>,
     account_id: String,
     run_id: CalendarRunId,
+    now_ms: Option<i64>,
     cancellation_token: CancellationToken,
 ) {
     let _permit = match Arc::clone(&inner.semaphore).acquire_owned().await {
@@ -451,7 +471,7 @@ async fn run_calendar(
                 &inner.db,
                 &inner.read_db,
                 factory,
-                chrono::Utc::now().timestamp_millis(),
+                now_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
                 &cancellation_token,
             )
             .await
@@ -570,7 +590,7 @@ mod tests {
     async fn start_account_returns_err_after_shutdown() {
         let (runtime, _rx, _tmp) = fresh_runtime();
         runtime.shutdown().await;
-        let result = runtime.start_account("acc-1".into()).await;
+        let result = runtime.start_account("acc-1".into(), None).await;
         assert!(
             result.is_err(),
             "expected Err after shutdown, got {result:?}"

@@ -1456,6 +1456,34 @@ pub(super) async fn query_db_state_handle(
         .with_write(move |conn| read_harness_db_state(conn, &params, encryption_key))
         .await
         .map_err(ServiceError::Internal)?;
+    let read_db = boot_state
+        .read_db_state()
+        .ok_or_else(|| ServiceError::Internal("read DB state unavailable".into()))?;
+    let (sidebar_calendar_ids, view_calendar_event_ids) = read_db
+        .with_read(|conn| {
+            let sidebar_calendar_ids =
+                rtsk::db::queries_extra::calendars::load_calendars_for_sidebar_sync(conn)?
+                    .into_iter()
+                    .map(|calendar| calendar.id)
+                    .collect();
+            let view_calendar_event_ids =
+                rtsk::db::queries_extra::calendars::load_view_event_rows_sync(
+                    conn,
+                    i64::MIN,
+                    i64::MAX,
+                )?
+                .into_iter()
+                .map(|event| event.id)
+                .collect();
+            Ok::<_, String>((sidebar_calendar_ids, view_calendar_event_ids))
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    let ack = TestQueryDbStateAck {
+        sidebar_calendar_ids,
+        view_calendar_event_ids,
+        ..ack
+    };
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
@@ -2137,6 +2165,8 @@ fn read_harness_db_state(
         local_draft_count: count_account_rows(conn, "local_drafts", account_id)?,
         calendar_count: count_account_rows(conn, "calendars", account_id)?,
         calendar_event_count: count_account_rows(conn, "calendar_events", account_id)?,
+        calendar_attendee_count: count_account_rows(conn, "calendar_attendees", account_id)?,
+        calendar_reminder_count: count_account_rows(conn, "calendar_reminders", account_id)?,
         contact_count: count_account_rows(conn, "contacts", account_id)?,
         contact_group_count: count_account_rows(conn, "contact_groups", account_id)?,
         contact_claim_count: count_account_rows(conn, "contact_claims", account_id)?,
@@ -2151,6 +2181,8 @@ fn read_harness_db_state(
         attachments: read_harness_attachments(conn, params)?,
         calendars: read_harness_calendars(conn, params)?,
         calendar_events: read_harness_calendar_events(conn, params)?,
+        sidebar_calendar_ids: Vec::new(),
+        view_calendar_event_ids: Vec::new(),
         contacts: read_harness_contacts(conn, params)?,
         contact_groups: read_harness_contact_groups(conn, params)?,
         contact_claims: read_harness_contact_claims(conn, params)?,
@@ -2653,7 +2685,7 @@ fn read_harness_calendars(
                 .prepare(
                     "SELECT id, account_id, provider, remote_id, display_name,
                             color, is_primary, is_visible, is_default,
-                            provider_id, can_edit
+                            provider_id, can_edit, unlisted_since
                      FROM calendars
                      WHERE account_id = ?1
                      ORDER BY sort_order ASC, display_name ASC, id ASC
@@ -2670,7 +2702,7 @@ fn read_harness_calendars(
                 .prepare(
                     "SELECT id, account_id, provider, remote_id, display_name,
                             color, is_primary, is_visible, is_default,
-                            provider_id, can_edit
+                            provider_id, can_edit, unlisted_since
                      FROM calendars
                      ORDER BY account_id ASC, sort_order ASC, display_name ASC, id ASC
                      LIMIT ?1",
@@ -2973,6 +3005,7 @@ fn test_db_calendar_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestDb
         is_default: row.get::<_, i64>(8)? != 0,
         provider_id: row.get(9)?,
         can_edit: row.get::<_, i64>(10)? != 0,
+        unlisted_since: row.get(11)?,
     })
 }
 

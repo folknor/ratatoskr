@@ -7,8 +7,8 @@ use service_state::WriteDbState;
 use tokio_util::sync::CancellationToken;
 
 use db::db::queries_extra::calendar_contacts_writes::{
-    sync_caldav_attendees, sync_caldav_reminders, upsert_calendar_event_row,
-    upsert_discovered_calendar,
+    reap_expired_unlisted_calendars, stamp_unlisted_calendars, sync_caldav_attendees,
+    sync_caldav_reminders, upsert_calendar_event_row, upsert_discovered_calendar,
 };
 use db::db::queries_extra::calendars::recurring_master_intersects_window;
 use rtsk::db::ReadDbState;
@@ -19,6 +19,7 @@ use super::idmap;
 const WINDOW_BACK_MS: i64 = 365 * 24 * 60 * 60 * 1000;
 const WINDOW_FORWARD_MS: i64 = 730 * 24 * 60 * 60 * 1000;
 const HISTORY_SLICE_MS: i64 = 365 * 24 * 60 * 60 * 1000;
+const REAP_THRESHOLD_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Outcome of a calendar sync run.
 ///
@@ -101,6 +102,22 @@ async fn sync_bifrost_calendar_account(
                     &idmap::to_discovered_calendar(&account_owned, calendar),
                 )?;
                 changed |= row_changed;
+            }
+            let listed: Vec<String> = discovered
+                .iter()
+                .map(|calendar| idmap::calendar_remote_id(calendar).to_string())
+                .collect();
+            // A successful empty list is not strong enough evidence that every
+            // cached calendar disappeared, so it neither hides nor reaps rows.
+            if !listed.is_empty() {
+                let stamped = stamp_unlisted_calendars(&tx, &account_owned, &listed, now_ms)?;
+                let reaped = reap_expired_unlisted_calendars(
+                    &tx,
+                    &account_owned,
+                    now_ms,
+                    REAP_THRESHOLD_MS,
+                )?;
+                changed |= stamped > 0 || reaped > 0;
             }
             tx.commit().map_err(|error| error.to_string())?;
             Ok(changed)
@@ -582,6 +599,7 @@ pub async fn load_visible_calendars(
                             is_primary, is_visible, sync_token, ctag, created_at, \
                             updated_at, sort_order, is_default, provider_id, can_edit \
                      FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
+                     AND unlisted_since IS NULL \
                      ORDER BY is_primary DESC, display_name ASC",
                 )
                 .map_err(|e| e.to_string())?;

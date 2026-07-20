@@ -1797,6 +1797,7 @@ dependencies = [
  "blake3",
  "chrono",
  "chrono-tz",
+ "db",
  "flate2",
  "hotpath 0.21.4",
  "log",

@@ -708,6 +708,8 @@ pub struct TestDbCalendarRow {
     pub is_default: bool,
     pub provider_id: Option<String>,
     pub can_edit: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unlisted_since: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -831,6 +833,10 @@ pub struct TestQueryDbStateAck {
     pub calendar_count: u64,
     pub calendar_event_count: u64,
     #[serde(default)]
+    pub calendar_attendee_count: u64,
+    #[serde(default)]
+    pub calendar_reminder_count: u64,
+    #[serde(default)]
     pub contact_count: u64,
     #[serde(default)]
     pub contact_group_count: u64,
@@ -852,6 +858,12 @@ pub struct TestQueryDbStateAck {
     pub attachments: Vec<TestDbAttachmentRow>,
     pub calendars: Vec<TestDbCalendarRow>,
     pub calendar_events: Vec<TestDbCalendarEventRow>,
+    /// IDs returned by the production sidebar calendar loader.
+    #[serde(default)]
+    pub sidebar_calendar_ids: Vec<String>,
+    /// IDs returned by the production agenda event loader.
+    #[serde(default)]
+    pub view_calendar_event_ids: Vec<String>,
     #[serde(default)]
     pub contacts: Vec<TestDbContactRow>,
     #[serde(default)]

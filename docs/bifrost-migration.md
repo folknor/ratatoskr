@@ -1125,9 +1125,8 @@ landing commit.
 - B7. Calendar. Replace the `calendar` crate's per-provider sync with the
   bifrost calendar surface. Carved into TWO bricks by the read/write seam
   (B7a sync, B7b actions), NOT a per-provider cutover series like B3 - see the
-  decomposition note below. Needs B1; A7 for DAV (landed). B7a and B7b are
-  both done (see the done-notes below); what remains open is the B7c
-  follow-up filed out of B7a.
+  decomposition note below. Needs B1; A7 for DAV (landed). B7a, B7b, and the
+  B7c stale-calendar follow-up are all done (see the done-notes below).
 
   Decomposition (settled during B7 scoping, read against frozen bifrost
   `0e71226`). B3 was carved four ways because it built a shared change-stream
@@ -1193,8 +1192,8 @@ landing commit.
   (via bifrost surfacing the per-resource failed set) preservation of a
   CalDAV row whose resource failed to fetch; and a retain-and-skip policy for a calendar
   the current backend no longer lists (excluded from the fetch-target set,
-  not reaped - the reap-vs-hide lifecycle is the new B7c follow-up below) -
-  read the B7a landing commit. Deleted: `crates/calendar/src/jmap.rs` (whole
+  not reaped at the time - the reap-vs-hide lifecycle was completed as the
+  B7c follow-up below) - read the B7a landing commit. Deleted: `crates/calendar/src/jmap.rs` (whole
   file, read-sync only); the read-sync bodies out of `google.rs` / `graph.rs`
   / `caldav/mod.rs` (their B7b write helpers stay until B7b cuts them); and
   the CalDAV CTag/ETag sync machinery in `sync.rs`. Required four bifrost
@@ -1331,29 +1330,51 @@ landing commit.
   scripts, with per-op provider-request counts pinned in the harness
   assertions as the performance instrument (no `brokkr sync-bench` regression
   surfaced). Read the B7b landing commit for the full accounting.
-  - B7c. Stale-calendar reap-vs-hide lifecycle. B7a's policy for a calendar
-    the current backend no longer lists is retain-and-skip: it is kept
-    and simply excluded from sync (`sync.rs::resolve_sync_targets`), so its
-    cached events render indefinitely and it never disappears from the
-    sidebar. B7c makes unlisting observable and eventually reaps it. Add
-    `calendars.unlisted_since INTEGER` (nullable); on a SUCCESSFUL
-    `calendars_list()` that omits a previously-known calendar, stamp
-    `unlisted_since = now` (and clear it back to NULL when the calendar
-    re-appears in a later list). While stamped, suppress the calendar in the
-    sidebar (hidden, not deleted, so a transient list omission does not lose
-    the user's events). After N consecutive unlisted SUCCESSFUL runs
-    (suggest ~7 days' worth at the hourly cadence, i.e. ~168 runs, or a
-    wall-clock `now - unlisted_since >= 7d` check to be robust against
-    missed kicks), REAP the calendar: cascade-delete its `calendar_events`,
-    `calendar_attendees`, `calendar_reminders`, `caldav_event_map` rows and
-    the `calendars` row itself. Only successful list runs count - a failed
-    `calendars_list()` must neither stamp nor advance the counter, so a
-    server outage cannot reap a live calendar. This is deferred out of B7a
-    because it needs a new schema column and B7a already spent its one
-    adjudicated schema addition (`history_backfilled_at`); B7c is the natural
-    home for the second calendar-schema change. Gated by a harness script
-    that lists a calendar, drops it from a later list, and asserts hide-then
-    -reap across the threshold.
+  - B7c (stale-calendar reap-vs-hide lifecycle) is done and its TODO entry is
+    removed per repo convention. It superseded B7a's retain-and-skip policy
+    (a calendar the current backend no longer lists was kept and merely
+    excluded from `resolve_sync_targets`, so it rendered forever) with a
+    wall-clock stamp/hide/reap lifecycle: `05_calendar.sql` gained
+    `calendars.unlisted_since INTEGER` (nullable, no index - the stamp/reap
+    sweeps are per-account and single-digit row counts); the discovery
+    transaction in `sync_bifrost_calendar_account`
+    (`crates/calendar/src/sync.rs`) now calls two new
+    `calendar_contacts_writes.rs` helpers, `stamp_unlisted_calendars` (self-
+    guarded against an empty listed set, which SQLite's `NOT IN ()` would
+    otherwise treat as true-for-every-row) and `reap_expired_unlisted_calendars`
+    (`REAP_THRESHOLD_MS = 7d`; deletes `calendar_attendees` +
+    `calendar_reminders` by subselect, `caldav_event_map`, `calendar_events`,
+    then the `calendars` row - explicit, not cascade-reliant, since attendees
+    and reminders key on `account_id`/`event_id` with no FK to `calendars`),
+    both no-ops on an empty or failed `calendars_list()` so a provider outage
+    or transient empty pull cannot reap a live calendar; and the clear-on-
+    reappear is folded into `upsert_discovered_calendar`'s existing DO-UPDATE
+    rather than shipped as a separate helper. The hide predicate
+    (`unlisted_since IS NULL`) was added to the live sidebar/agenda read path
+    in `db-read` (`load_calendars_for_sidebar_sync`,
+    `load_view_event_rows_sync`) and, in lockstep, to the same-named stale
+    duplicates in `db` plus `db_get_visible_calendars` and
+    `calendar::sync::load_visible_calendars`. A clock seam was added so the
+    harness can drive `now_ms` across the 7-day boundary without a sleep loop:
+    `CalendarStartAccountSyncParams` gained `#[serde(default)] now_ms:
+    Option<i64>`, threaded through `CalendarRuntime::start_account` /
+    `run_calendar_supervised` / `run_calendar`, the sync handler, the
+    staleness auto-kick call site, and `ServiceClient::start_calendar_sync` /
+    the `start_calendar_sync` Lua binding, defaulting to `Utc::now()` when
+    absent so every production caller is unaffected. `TestQueryDbState`'s
+    calendar row surfaces `unlisted_since` for harness assertions. Gated by
+    `brokkr check`; new `-p db` unit coverage of stamp/clear/reap (including
+    the cascade-independent attendee/reminder deletes and the empty-list
+    no-op); a new `-p db-read` test proving the hide predicate through the
+    real sidebar/agenda loaders, not a proxy; the existing `-p cal`
+    `stale_unlisted_calendar_is_not_fetched` and `-p service-api`
+    `calendar_start_account_sync_params_round_trips_through_serde` tests
+    (extended for the new field, wire back-compat asserted); and the new
+    `crates/app/tests/sync-harness/caldav-calendar-unlisted-reap.lua` script,
+    which drives a `saehrimnir` side-quest (a CalDAV collection-level DELETE,
+    previously unimplemented, plus its `MKCALENDAR` restore) through
+    seed -> stamp -> reappear-clears -> restamp -> reap -> failed-list-does-
+    not-reap. Read the B7c landing commit for the full accounting.
 
   Two questions the B7 decomposition parked were resolved by B7a's ground
   survey, neither blocking the decomposition: (i) a CalDAV asymmetry -

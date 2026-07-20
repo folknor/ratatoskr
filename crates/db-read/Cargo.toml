@@ -27,6 +27,7 @@ types = { path = "../types" }
 uuid = { version = "1.23.1", features = ["v4"] }
 
 [dev-dependencies]
+db = { path = "../db" }
 tempfile = "3"
 
 [features]

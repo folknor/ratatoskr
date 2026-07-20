@@ -13,7 +13,7 @@ pub use super::calendars::{
     CalendarAttendeeWriteRow, CalendarReminderWriteRow, LocalCalendarEventParams,
 };
 use crate::db::{WriteConn, WriteTxn};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, params, params_from_iter};
 
 // ---------------------------------------------------------------------------
 // `calendars` table helpers
@@ -56,7 +56,8 @@ pub struct DiscoveredCalendar<'a> {
 /// when the row existed with identical metadata - the O20 signal so calendar
 /// discovery on a full-window pull does not flag `mutated` on every kick. The
 /// guarded `DO UPDATE ... WHERE` skips the write (and `updated_at` bump) when
-/// no tracked column differs, so `execute` reports zero rows affected.
+/// no tracked column differs and the calendar is not marked unlisted, so
+/// `execute` reports zero rows affected.
 pub fn upsert_discovered_calendar(
     conn: &WriteTxn<'_>,
     cal: &DiscoveredCalendar<'_>,
@@ -69,11 +70,13 @@ pub fn upsert_discovered_calendar(
              ON CONFLICT(account_id, remote_id) DO UPDATE SET \
                display_name = excluded.display_name, color = excluded.color, \
                is_primary = excluded.is_primary, can_edit = excluded.can_edit, \
+               unlisted_since = NULL, \
                updated_at = unixepoch() \
              WHERE calendars.display_name IS NOT excluded.display_name \
                 OR calendars.color IS NOT excluded.color \
                 OR calendars.is_primary IS NOT excluded.is_primary \
-                OR calendars.can_edit IS NOT excluded.can_edit",
+                OR calendars.can_edit IS NOT excluded.can_edit \
+                OR calendars.unlisted_since IS NOT NULL",
             params![
                 id,
                 cal.account_id,
@@ -95,6 +98,246 @@ pub fn upsert_discovered_calendar(
         )
         .map_err(|e| format!("upsert_discovered_calendar lookup id: {e}"))?;
     Ok((cal_id, changed))
+}
+
+/// Stamp previously-known calendars omitted by a successful, non-empty
+/// discovery list. An empty list is always a no-op: SQLite treats `NOT IN ()`
+/// as true, which would otherwise mark every calendar in the account.
+pub fn stamp_unlisted_calendars(
+    conn: &WriteTxn<'_>,
+    account_id: &str,
+    listed_remote_ids: &[String],
+    now_ms: i64,
+) -> Result<usize, String> {
+    if listed_remote_ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders = std::iter::repeat_n("?", listed_remote_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "UPDATE calendars SET unlisted_since = ?, updated_at = unixepoch() \
+         WHERE account_id = ? AND unlisted_since IS NULL \
+         AND remote_id NOT IN ({placeholders})"
+    );
+    let values = std::iter::once(rusqlite::types::Value::Integer(now_ms))
+        .chain(std::iter::once(rusqlite::types::Value::Text(
+            account_id.into(),
+        )))
+        .chain(
+            listed_remote_ids
+                .iter()
+                .cloned()
+                .map(rusqlite::types::Value::Text),
+        );
+    conn.execute(&sql, params_from_iter(values))
+        .map_err(|error| format!("stamp_unlisted_calendars: {error}"))
+}
+
+/// Remove calendars whose successful discovery omission has persisted for at
+/// least `threshold_ms`. Child deletes are explicit because attendees and
+/// reminders are keyed by event id, not by calendar id.
+pub fn reap_expired_unlisted_calendars(
+    conn: &WriteTxn<'_>,
+    account_id: &str,
+    now_ms: i64,
+    threshold_ms: i64,
+) -> Result<usize, String> {
+    let calendar_ids = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM calendars WHERE account_id = ?1 \
+                 AND unlisted_since IS NOT NULL AND (?2 - unlisted_since) >= ?3",
+            )
+            .map_err(|error| format!("prepare reap calendars: {error}"))?;
+        stmt.query_map(params![account_id, now_ms, threshold_ms], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| format!("query reap calendars: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("collect reap calendars: {error}"))?
+    };
+
+    for calendar_id in &calendar_ids {
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id IN \
+             (SELECT id FROM calendar_events WHERE calendar_id = ?2)",
+            params![account_id, calendar_id],
+        )
+        .map_err(|error| format!("reap calendar attendees: {error}"))?;
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id IN \
+             (SELECT id FROM calendar_events WHERE calendar_id = ?2)",
+            params![account_id, calendar_id],
+        )
+        .map_err(|error| format!("reap calendar reminders: {error}"))?;
+        conn.execute(
+            "DELETE FROM caldav_event_map WHERE calendar_id = ?1",
+            params![calendar_id],
+        )
+        .map_err(|error| format!("reap CalDAV event map: {error}"))?;
+        conn.execute(
+            "DELETE FROM calendar_events WHERE calendar_id = ?1",
+            params![calendar_id],
+        )
+        .map_err(|error| format!("reap calendar events: {error}"))?;
+        conn.execute("DELETE FROM calendars WHERE id = ?1", params![calendar_id])
+            .map_err(|error| format!("reap calendar: {error}"))?;
+    }
+    Ok(calendar_ids.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_writer_pool;
+
+    const NOW_MS: i64 = 2_000_000_000_000;
+    const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+    async fn seeded_db() -> (tempfile::TempDir, crate::db::WriterPool) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = open_writer_pool(dir.path()).expect("open writer");
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.test', 'caldav')",
+                [],
+            )
+            .expect("seed account");
+            let tx = conn.transaction().expect("transaction");
+            for (remote_id, name) in [("listed", "Listed"), ("gone", "Gone")] {
+                upsert_discovered_calendar(
+                    &tx,
+                    &DiscoveredCalendar {
+                        account_id: "acc",
+                        provider: "caldav",
+                        remote_id,
+                        display_name: Some(name),
+                        color: None,
+                        is_primary: false,
+                        can_edit: true,
+                    },
+                )
+                .expect("seed calendar");
+            }
+            tx.commit().expect("commit seed calendars");
+            Ok(())
+        })
+        .await
+        .expect("write seed");
+        (dir, db)
+    }
+
+    #[test]
+    fn calendar_unlisted_lifecycle_stamps_clears_and_reaps_children() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+        let (_dir, db) = seeded_db().await;
+        db.with_write(|conn| {
+            let tx = conn.transaction().expect("stamp transaction");
+            assert_eq!(stamp_unlisted_calendars(&tx, "acc", &[], NOW_MS).expect("empty guard"), 0);
+            assert_eq!(
+                stamp_unlisted_calendars(&tx, "acc", &["listed".into()], NOW_MS)
+                    .expect("stamp"),
+                1
+            );
+            assert_eq!(
+                stamp_unlisted_calendars(&tx, "acc", &["listed".into()], NOW_MS + 1)
+                    .expect("idempotent stamp"),
+                0
+            );
+            tx.commit().expect("commit stamp");
+            Ok(())
+        })
+        .await
+        .expect("stamp write");
+
+        db.with_write(|conn| {
+            let tx = conn.transaction().expect("clear transaction");
+            let (_, changed) = upsert_discovered_calendar(
+                &tx,
+                &DiscoveredCalendar {
+                    account_id: "acc",
+                    provider: "caldav",
+                    remote_id: "gone",
+                    display_name: Some("Gone"),
+                    color: None,
+                    is_primary: false,
+                    can_edit: true,
+                },
+            )
+            .expect("clear by upsert");
+            assert!(changed, "reappearance must clear the hidden stamp");
+            tx.commit().expect("commit clear");
+            Ok(())
+        })
+        .await
+        .expect("clear write");
+
+        db.with_write(|conn| {
+            let gone_id: String = conn
+                .query_row("SELECT id FROM calendars WHERE remote_id = 'gone'", [], |row| row.get(0))
+                .expect("gone id");
+            conn.execute(
+                "UPDATE calendars SET unlisted_since = ?1 WHERE id = ?2",
+                params![NOW_MS - WEEK_MS, gone_id],
+            )
+            .expect("restamp gone");
+            conn.execute(
+                "INSERT INTO calendar_events (id, account_id, google_event_id, start_time, end_time, calendar_id) \
+                 VALUES ('gone-event', 'acc', 'gone-event', 1, 2, ?1)",
+                params![gone_id],
+            )
+            .expect("seed event");
+            conn.execute(
+                "INSERT INTO calendar_attendees (account_id, event_id, email) VALUES ('acc', 'gone-event', 'x@example.test')",
+                [],
+            )
+            .expect("seed attendee");
+            conn.execute(
+                "INSERT INTO calendar_reminders (account_id, event_id, minutes_before) VALUES ('acc', 'gone-event', 5)",
+                [],
+            )
+            .expect("seed reminder");
+            conn.execute(
+                "INSERT INTO caldav_event_map (calendar_id, uri, event_uid, etag) VALUES (?1, 'gone.ics', 'gone-event', 'tag')",
+                params![gone_id],
+            )
+            .expect("seed map");
+
+            let tx = conn.transaction().expect("reap transaction");
+            assert_eq!(
+                reap_expired_unlisted_calendars(&tx, "acc", NOW_MS - 1, WEEK_MS)
+                    .expect("before boundary"),
+                0
+            );
+            assert_eq!(
+                reap_expired_unlisted_calendars(&tx, "acc", NOW_MS, WEEK_MS).expect("reap"),
+                1
+            );
+            tx.commit().expect("commit reap");
+
+            let remaining_calendars: i64 = conn
+                .query_row("SELECT COUNT(*) FROM calendars", [], |row| row.get(0))
+                .expect("count calendars");
+            assert_eq!(remaining_calendars, 1, "listed sibling survives");
+            let orphan_attendees: i64 = conn
+                .query_row("SELECT COUNT(*) FROM calendar_attendees", [], |row| row.get(0))
+                .expect("count attendees");
+            let orphan_reminders: i64 = conn
+                .query_row("SELECT COUNT(*) FROM calendar_reminders", [], |row| row.get(0))
+                .expect("count reminders");
+            assert_eq!(orphan_attendees, 0);
+            assert_eq!(orphan_reminders, 0);
+            Ok(())
+        })
+        .await
+        .expect("reap write");
+        });
+    }
 }
 
 /// Update the sync_token and/or ctag for a calendar row.

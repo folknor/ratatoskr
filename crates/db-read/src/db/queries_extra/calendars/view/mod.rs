@@ -79,7 +79,7 @@ pub fn load_view_event_rows_sync(
              FROM calendar_events e
              LEFT JOIN calendars c
                ON c.account_id = e.account_id AND c.id = e.calendar_id
-             WHERE (c.is_visible = 1 OR e.calendar_id IS NULL)
+             WHERE ((c.is_visible = 1 AND c.unlisted_since IS NULL) OR e.calendar_id IS NULL)
                AND (
                  e.recurrence_rule IS NOT NULL
                  OR (e.start_time < ?1 AND e.end_time > ?2)

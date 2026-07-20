@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS calendars (
     -- Set after the one-time five-year calendar history pull completes.
     -- NULL makes a failed/cancelled backfill safely retryable.
     history_backfilled_at INTEGER,
+    -- Set when a successful non-empty discovery omits this calendar. While
+    -- stamped the cached calendar is hidden; after seven days it is reaped.
+    -- See docs/bifrost-migration.md B7c.
+    unlisted_since INTEGER,
     UNIQUE(account_id, remote_id)
 );
 CREATE INDEX IF NOT EXISTS idx_calendars_account ON calendars(account_id);

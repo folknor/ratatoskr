@@ -45,7 +45,7 @@ pub(crate) async fn handle_start_account_sync(
         )
     })?;
     let ack = runtime
-        .start_account(params.account_id)
+        .start_account(params.account_id, params.now_ms)
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
@@ -119,7 +119,7 @@ pub(crate) async fn handle_calendar_kick(boot_state: &Arc<BootSharedState>) -> R
     );
 
     for account_id in stale {
-        if let Err(e) = runtime.start_account(account_id.clone()).await {
+        if let Err(e) = runtime.start_account(account_id.clone(), None).await {
             log::warn!("[calendar] kick start failed for {account_id}: {e}");
         }
     }

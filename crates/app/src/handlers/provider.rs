@@ -258,7 +258,7 @@ impl ReadyApp {
         };
         Task::perform(
             async move {
-                match client.start_calendar_sync(account_id.clone()).await {
+                match client.start_calendar_sync(account_id.clone(), None).await {
                     Ok(service_api::CalendarSyncResult::Completed)
                     | Ok(service_api::CalendarSyncResult::Cancelled) => {}
                     Ok(service_api::CalendarSyncResult::Failed(e)) => {

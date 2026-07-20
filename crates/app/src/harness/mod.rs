@@ -1702,11 +1702,13 @@ fn lua_client_start_calendar_sync(state: &mut State) -> dellingr::Result<u8> {
     if state.get_top() < 2 {
         return Err(lua_error_message("start_calendar_sync requires account_id"));
     }
-    let account_id = if state.typ(2) == LuaType::Table {
-        get_string_field(state, 2, "account_id")?
-            .ok_or_else(|| lua_error_message("start_calendar_sync requires params.account_id"))?
+    let (account_id, now_ms) = if state.typ(2) == LuaType::Table {
+        let account_id = get_string_field(state, 2, "account_id")?
+            .ok_or_else(|| lua_error_message("start_calendar_sync requires params.account_id"))?;
+        let now_ms = get_number_field(state, 2, "now_ms")?.map(|value| value as i64);
+        (account_id, now_ms)
     } else {
-        state.to_string(2)?
+        (state.to_string(2)?, None)
     };
     let seconds = if state.get_top() >= 3 {
         state.to_number(3)?
@@ -1721,7 +1723,7 @@ fn lua_client_start_calendar_sync(state: &mut State) -> dellingr::Result<u8> {
     let result = handle.block_on(async {
         tokio::time::timeout(
             duration_from_seconds(seconds),
-            client.start_calendar_sync(account_id),
+            client.start_calendar_sync(account_id, now_ms),
         )
         .await
     });
