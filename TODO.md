@@ -2,6 +2,62 @@
 
 As a general rule, TODO.md items are **removed** when completed.
 
+## Post-B12 combined investigation
+
+Four findings surfaced while restoring the sync-bench baselines after the
+B12 landing (`9b9b4d36`). Grouped because the first two look like one root
+cause with two expressions. All measured on `plantasjen` at that commit.
+
+- [ ] **B12 steady-state request-count regressions.** Two personal-account
+  steady-state gates now issue more provider requests than their labels
+  document, on fixtures with no shared mailboxes and no public folders at
+  all. `graph_steady_state_delta` measures `provider_requests=4` against a
+  documented 2, with the extra two attributed to NONE of the existing
+  counters (`graph_mail_requests=2`, `graph_folder_requests=0`,
+  `graph_master_category_requests=0`) - the shape you would expect from an
+  Autodiscover or EWS probe that predates that instrumentation.
+  `imap_steady_state_delta` measures 33 against a documented 12, with
+  `list=2 select=2 uid_search=4` against a documented `1 LIST + 2 SELECT +
+  2 UID SEARCH`; `body_fetch=0` holds, so this is control traffic and not
+  refetched mail. The discriminating evidence is that `jmap` and `gmail`
+  match their labels exactly, and Graph and IMAP are precisely the two
+  providers where B12 added shared-folder discovery - Graph delegate and
+  public-folder probes, and for IMAP a per-kick discovery rebuild added so
+  a post-attach ACL grant becomes visible. Leading hypothesis: shared-folder
+  discovery runs on personal accounts that have no shared folders, every
+  sync kick. Both baselines are pinned PROVISIONALLY in `brokkr.toml` so the
+  gates are runnable; neither measured value is believed correct. Re-record
+  both, and update the labels, once the cause is fixed. Not yet excluded:
+  that the B3b labels went stale at B6a and the regression predates B12 -
+  decidable by running both gates at `9b9b4d36~1`.
+
+- [ ] **B12 Graph inbox folder name regression.** `graph-initial.lua:96`
+  fails: `INBOX folder name: expected "INBOX", got "Inbox"`. B12's container
+  persistence (`crates/service/src/bifrost/containers.rs`,
+  `build_container_rows`) writes `container.name` verbatim, and bifrost
+  hands Graph's inbox its display name `Inbox`, where the legacy folder-map
+  pass wrote the canonical `INBOX`. This has been failing since the B12
+  commit; it was missed at landing because the `*-initial` family was only
+  spot-checked on IMAP. Blocks recording a `graph_containers_attach`
+  baseline - that gate has no pinned baseline until this is fixed, because
+  recording one now would pin whatever the broken run produces.
+
+- [ ] **Two B12 sync-bench gates were never built.** The B12 spec named
+  `graph_shared_mailbox_steady_state` and `graph_public_folder_steady_state`
+  with their scripts; neither the scripts
+  (`graph-shared-mailbox-steady-state.lua`,
+  `graph-public-folder-steady-state.lua`) nor the `brokkr.toml` gate blocks
+  exist. These are the cost contract for the feature B12 adds: there are
+  thorough correctness gates for namespaces and no performance gate on them.
+  Build both, add both gate blocks, record baselines. Directly relevant to
+  the first item, since whatever explains the personal-account regression
+  also determines what a correct per-namespace budget looks like.
+
+- [ ] **`jmap-bulk-steady-state-delta.lua` has no gate.** The script exists
+  under `crates/app/tests/sync-harness/` but no `[ratatoskr.gate.*]` block
+  references it. Probably deliberate (driven directly rather than gated);
+  confirm and either add a gate or note why not.
+
 ## Remaining Work
 
 - [ ] **JMAP-Basic and CustomOIDC manual account setup write dead rows (pre-existing)** - Surfaced during B14 (account verify) but out of that item's scope, which excludes `account.create` changes. For `ManualProvider::Jmap` with password auth, `password_auth.rs::handle_submit_credentials` and `identity.rs::build_create_params` (~line 157) both send `jmap_url: None`, so `build_jmap_factory` fails `required_plain("jmap_url", ...)` with `MissingEndpoint` - the account can be neither verified nor synced. Separately, `CustomOidc{Imap,Jmap}` persist `resolved_provider = "oidc:{issuer}"` (`manual_config.rs:143`), which `MailProviderKind::parse` rejects, so those rows also fail the bifrost factory build (this wizard leg is gated/not-live today per the `oauth.rs` dead-code note). B14 verify correctly mirrors create for both (verify fails exactly where create writes a dead row - the intended verify/create parity), so no new divergence was introduced; the durable fix is to resolve/persist a real `jmap_url` on the JMAP-Basic create path and a parseable provider identity for CustomOIDC.
