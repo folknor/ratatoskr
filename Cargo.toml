@@ -123,7 +123,7 @@ bifrost-caldav = { path = "../bifrost/crates/caldav" }
 bifrost-carddav = { path = "../bifrost/crates/carddav" }
 
 # Encoding
-base64 = "0.22"
+base64 = "0.23"
 
 # XML
 quick-xml = "0.41.0"
@@ -132,7 +132,7 @@ quick-xml = "0.41.0"
 dissimilar = "1"
 
 # Profiling
-hotpath = "0.21.4"
+hotpath = "0.22.0"
 
 # Optimized release profile
 [profile.release]

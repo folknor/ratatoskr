@@ -105,7 +105,7 @@ fn run_script(
 }
 
 fn install_globals(state: &mut State) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let table_idx = state.get_top() as isize;
     set_field_fn(state, table_idx, "data_dir", lua_data_dir)?;
     set_field_fn(state, table_idx, "spawn", lua_spawn)?;
@@ -356,8 +356,8 @@ fn lua_data_dir(state: &mut State) -> dellingr::Result<u8> {
         guard.record_step("data_dir", "fixture", "created");
         root
     };
-    state.set_top(0);
-    state.push_string(path.display().to_string());
+    state.set_top(0)?;
+    state.push_string(path.display().to_string())?;
     Ok(1)
 }
 
@@ -382,7 +382,7 @@ fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
         &env_overrides,
         trace,
     ));
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(client) => {
             let id = {
@@ -392,10 +392,10 @@ fn lua_spawn(state: &mut State) -> dellingr::Result<u8> {
                 guard.insert(HarnessResource::Client(client))
             };
             push_client_table(state, id)?;
-            state.push_nil();
+            state.push_nil()?;
         }
         Err(error) => {
-            state.push_nil();
+            state.push_nil()?;
             push_client_error(state, &error)?;
         }
     }
@@ -428,7 +428,7 @@ fn lua_spawn_with_events(state: &mut State) -> dellingr::Result<u8> {
         guard.record_step("spawn_with_events", "spawn", "started");
         guard.insert(HarnessResource::Events(rx))
     };
-    state.set_top(0);
+    state.set_top(0)?;
     push_events_table(state, id)?;
     Ok(1)
 }
@@ -509,8 +509,8 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
         let _ = guard.insert(HarnessResource::Helper(child));
     }
 
-    state.set_top(0);
-    state.new_table();
+    state.set_top(0)?;
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_number(state, idx, "helper_pid", helper_pid as f64)?;
     set_field_number(state, idx, "service_pid", service_pid as f64)?;
@@ -554,22 +554,22 @@ fn lua_kill(state: &mut State) -> dellingr::Result<u8> {
     ctx.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .record_step("kill", "process", "sent");
-    state.set_top(0);
-    state.push_boolean(true);
+    state.set_top(0)?;
+    state.push_boolean(true)?;
     Ok(1)
 }
 
 fn lua_pid_is_alive(state: &mut State) -> dellingr::Result<u8> {
     let pid = state.to_number(1)? as u32;
-    state.set_top(0);
-    state.push_boolean(pid_is_alive(pid).map_err(lua_io)?);
+    state.set_top(0)?;
+    state.push_boolean(pid_is_alive(pid).map_err(lua_io)?)?;
     Ok(1)
 }
 
 fn lua_path_exists(state: &mut State) -> dellingr::Result<u8> {
     let path = PathBuf::from(state.to_string(1)?);
-    state.set_top(0);
-    state.push_boolean(path.exists());
+    state.set_top(0)?;
+    state.push_boolean(path.exists())?;
     Ok(1)
 }
 
@@ -586,8 +586,8 @@ fn lua_dir_has_prefix(state: &mut State) -> dellingr::Result<u8> {
             })
         })
         .unwrap_or(false);
-    state.set_top(0);
-    state.push_boolean(exists);
+    state.set_top(0)?;
+    state.push_boolean(exists)?;
     Ok(1)
 }
 
@@ -595,7 +595,7 @@ fn lua_read_json(state: &mut State) -> dellingr::Result<u8> {
     let path = PathBuf::from(state.to_string(1)?);
     let text = std::fs::read_to_string(path).map_err(lua_io)?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(lua_json)?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -603,16 +603,16 @@ fn lua_read_json(state: &mut State) -> dellingr::Result<u8> {
 fn lua_read_text(state: &mut State) -> dellingr::Result<u8> {
     let path = PathBuf::from(state.to_string(1)?);
     let text = std::fs::read_to_string(path).map_err(lua_io)?;
-    state.set_top(0);
-    state.push_string(text);
+    state.set_top(0)?;
+    state.push_string(text)?;
     Ok(1)
 }
 
 fn lua_read_base64(state: &mut State) -> dellingr::Result<u8> {
     let path = PathBuf::from(state.to_string(1)?);
     let bytes = std::fs::read(path).map_err(lua_io)?;
-    state.set_top(0);
-    state.push_string(STANDARD.encode(bytes));
+    state.set_top(0)?;
+    state.push_string(STANDARD.encode(bytes))?;
     Ok(1)
 }
 
@@ -623,7 +623,7 @@ fn lua_write_text(state: &mut State) -> dellingr::Result<u8> {
         std::fs::create_dir_all(parent).map_err(lua_io)?;
     }
     std::fs::write(path, text).map_err(lua_io)?;
-    state.set_top(0);
+    state.set_top(0)?;
     Ok(0)
 }
 
@@ -644,23 +644,23 @@ fn lua_write_summary(state: &mut State) -> dellingr::Result<u8> {
         guard.artefact_dir.join("summary.json")
     };
     std::fs::write(&path, text).map_err(lua_io)?;
-    state.set_top(0);
-    state.push_string(path.display().to_string());
+    state.set_top(0)?;
+    state.push_string(path.display().to_string())?;
     Ok(1)
 }
 
 fn lua_sleep(state: &mut State) -> dellingr::Result<u8> {
     let millis = state.to_number(1)? as u64;
     std::thread::sleep(Duration::from_millis(millis));
-    state.set_top(0);
+    state.set_top(0)?;
     Ok(0)
 }
 
 fn lua_free_tcp_addr(state: &mut State) -> dellingr::Result<u8> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(lua_io)?;
     let addr = listener.local_addr().map_err(lua_io)?;
-    state.set_top(0);
-    state.push_string(addr.to_string());
+    state.set_top(0)?;
+    state.push_string(addr.to_string())?;
     Ok(1)
 }
 
@@ -670,8 +670,8 @@ fn lua_now_ms(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.started.elapsed().as_millis()
     };
-    state.set_top(0);
-    state.push_number(elapsed as f64);
+    state.set_top(0)?;
+    state.push_number(elapsed as f64)?;
     Ok(1)
 }
 
@@ -684,8 +684,8 @@ fn lua_wall_ms(state: &mut State) -> dellingr::Result<u8> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| lua_error_message(format!("system clock before UNIX_EPOCH: {error}")))?
         .as_millis();
-    state.set_top(0);
-    state.push_number(millis as f64);
+    state.set_top(0)?;
+    state.push_number(millis as f64)?;
     Ok(1)
 }
 
@@ -693,8 +693,8 @@ fn lua_marker(state: &mut State) -> dellingr::Result<u8> {
     let name = state.to_string(1)?;
     validate_sidecar_marker_name(&name)?;
     let emitted = emit_sidecar_marker(&name)?;
-    state.set_top(0);
-    state.push_boolean(emitted);
+    state.set_top(0)?;
+    state.push_boolean(emitted)?;
     Ok(1)
 }
 
@@ -738,15 +738,15 @@ fn sidecar_timestamp_us() -> dellingr::Result<i64> {
 }
 
 fn lua_uuid(state: &mut State) -> dellingr::Result<u8> {
-    state.set_top(0);
-    state.push_string(PlanId::new_v7().to_string());
+    state.set_top(0)?;
+    state.push_string(PlanId::new_v7().to_string())?;
     Ok(1)
 }
 
 /// `harness.repeat_byte(b, n)` -> string of length `n`, every byte equal
 /// to the first byte of `b`.
 ///
-/// ASCII-only by construction: `dellingr::push_string` takes `&str`, so
+/// ASCII-only by construction: `dellingr::push_string` takes `impl AsRef<str>`, so
 /// the produced buffer must be valid UTF-8. The cheapest UTF-8 guarantee
 /// is to require `b[0] < 0x80` - repeating any single ASCII byte yields
 /// valid UTF-8. High bytes are rejected up front with a clear message
@@ -769,8 +769,8 @@ fn lua_repeat_byte(state: &mut State) -> dellingr::Result<u8> {
     // byte < 0x80, so `vec![byte; len]` is valid UTF-8.
     let repeated =
         String::from_utf8(vec![byte; len]).map_err(|error| lua_error_message(error.to_string()))?;
-    state.set_top(0);
-    state.push_string(repeated);
+    state.set_top(0)?;
+    state.push_string(repeated)?;
     Ok(1)
 }
 
@@ -832,14 +832,14 @@ fn lua_stage_attachment(state: &mut State) -> dellingr::Result<u8> {
             "content_hash": content_hash_vec,
         },
     });
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
 
 fn lua_assert(state: &mut State) -> dellingr::Result<u8> {
     if state.to_boolean(1) {
-        state.set_top(0);
+        state.set_top(0)?;
         return Ok(0);
     }
     let message = if state.get_top() >= 2 {
@@ -852,7 +852,7 @@ fn lua_assert(state: &mut State) -> dellingr::Result<u8> {
 
 fn lua_assert_eq(state: &mut State) -> dellingr::Result<u8> {
     if state.raw_equal(1, 2) {
-        state.set_top(0);
+        state.set_top(0)?;
         return Ok(0);
     }
     let actual = state.to_string(1)?;
@@ -880,17 +880,17 @@ fn lua_same_client(state: &mut State) -> dellingr::Result<u8> {
             _ => false,
         }
     };
-    state.set_top(0);
-    state.push_boolean(same);
+    state.set_top(0)?;
+    state.push_boolean(same)?;
     Ok(1)
 }
 
 fn lua_env(state: &mut State) -> dellingr::Result<u8> {
     let name = state.to_string(1)?;
-    state.set_top(0);
+    state.set_top(0)?;
     match std::env::var(&name) {
-        Ok(value) => state.push_string(&value),
-        Err(_) => state.push_nil(),
+        Ok(value) => state.push_string(&value)?,
+        Err(_) => state.push_nil()?,
     }
     Ok(1)
 }
@@ -899,8 +899,8 @@ fn lua_join_url(state: &mut State) -> dellingr::Result<u8> {
     let base = state.to_string(1)?;
     let suffix = state.to_string(2)?;
     let url = join_url(&base, &suffix);
-    state.set_top(0);
-    state.push_string(&url);
+    state.set_top(0)?;
+    state.push_string(&url)?;
     Ok(1)
 }
 
@@ -914,7 +914,7 @@ fn lua_mock_requests(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     let value = http_get_json(handle, url, "mock_requests")?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -928,7 +928,7 @@ fn lua_clear_mock_requests(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     http_delete(handle, url, "clear_mock_requests")?;
-    state.set_top(0);
+    state.set_top(0)?;
     Ok(0)
 }
 
@@ -941,7 +941,7 @@ fn lua_snapshot_state(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     let value = http_get_json(handle, url, "snapshot_state")?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -955,7 +955,7 @@ fn lua_latency(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     let value = http_get_json(handle, url, "latency")?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -977,7 +977,7 @@ fn lua_set_latency(state: &mut State) -> dellingr::Result<u8> {
         "set_latency",
     )?
     .ok_or_else(|| lua_error_message("set_latency returned an empty response body"))?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -1007,7 +1007,7 @@ fn lua_request_count_impl(
     let mut count = 0u64;
     for i in 1..=len {
         let top = state.get_top();
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(requests_idx)?;
         if state.typ(-1) == LuaType::Table {
             let request_idx = state.get_top() as isize;
@@ -1024,10 +1024,10 @@ fn lua_request_count_impl(
                 count = count.saturating_add(1);
             }
         }
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
     }
-    state.set_top(0);
-    state.push_number(count as f64);
+    state.set_top(0)?;
+    state.push_number(count as f64)?;
     Ok(1)
 }
 
@@ -1047,10 +1047,10 @@ fn lua_http_json(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     let value = http_request_json(handle, method, url, request_body, "http_json")?;
-    state.set_top(0);
+    state.set_top(0)?;
     match value {
         Some(value) => push_json(state, &value)?,
-        None => state.push_nil(),
+        None => state.push_nil()?,
     }
     Ok(1)
 }
@@ -1063,7 +1063,7 @@ fn lua_http_get(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     let value = http_get_json(handle, url, "http_get")?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -1084,7 +1084,7 @@ fn lua_http_post_json(state: &mut State) -> dellingr::Result<u8> {
         "http_post_json",
     )?
     .ok_or_else(|| lua_error_message("http_post_json returned an empty response body"))?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &value)?;
     Ok(1)
 }
@@ -1097,7 +1097,7 @@ fn lua_http_delete(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     http_delete(handle, url, "http_delete")?;
-    state.set_top(0);
+    state.set_top(0)?;
     Ok(0)
 }
 
@@ -1119,7 +1119,7 @@ fn lua_http(state: &mut State) -> dellingr::Result<u8> {
         guard.handle.clone()
     };
     let response = http_request_text(handle, method, url, body, content_type, if_match, "http")?;
-    state.set_top(0);
+    state.set_top(0)?;
     push_json(state, &response)?;
     Ok(1)
 }
@@ -1192,19 +1192,19 @@ fn latency_per_protocol_field(
     table_idx: isize,
 ) -> dellingr::Result<Option<serde_json::Value>> {
     let top = state.get_top();
-    state.push_string("per_protocol");
+    state.push_string("per_protocol")?;
     state.get_table(table_idx)?;
     let result = match state.typ(-1) {
         LuaType::Nil => Ok(None),
         LuaType::Table => {
             let per_idx = absolute_stack_idx(state, -1);
             let mut object = serde_json::Map::new();
-            state.push_nil();
+            state.push_nil()?;
             loop {
                 let has_next = match state.table_next(per_idx) {
                     Ok(has_next) => has_next,
                     Err(error) => {
-                        state.set_top(top as isize);
+                        state.set_top(top as isize)?;
                         return Err(error);
                     }
                 };
@@ -1240,11 +1240,11 @@ fn latency_per_protocol_field(
                         );
                     }
                     Err(error) => {
-                        state.set_top(top as isize);
+                        state.set_top(top as isize)?;
                         return Err(error);
                     }
                 }
-                state.pop(1);
+                state.pop(1)?;
             }
             Ok(Some(serde_json::Value::Object(object)))
         }
@@ -1253,7 +1253,7 @@ fn latency_per_protocol_field(
             other.as_str()
         ))),
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     result
 }
 
@@ -1264,7 +1264,7 @@ fn get_u64_field(
     label: &str,
 ) -> dellingr::Result<Option<u64>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     let result = match state.typ(-1) {
         LuaType::Nil => Ok(None),
@@ -1274,7 +1274,7 @@ fn get_u64_field(
             other.as_str()
         ))),
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     result
 }
 
@@ -1294,7 +1294,7 @@ fn http_json_body_from_field(
     key: &str,
 ) -> dellingr::Result<Option<String>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     let result = match state.typ(-1) {
         LuaType::Nil => Ok(None),
@@ -1308,7 +1308,7 @@ fn http_json_body_from_field(
             other.as_str()
         ))),
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     result
 }
 
@@ -1448,19 +1448,19 @@ fn lua_expect_quiet(state: &mut State) -> dellingr::Result<u8> {
             tokio::time::timeout(duration_from_seconds(seconds), rx.recv()).await
         })
     };
-    state.set_top(0);
+    state.set_top(0)?;
     match event {
         Err(_) => {
-            state.push_boolean(true);
+            state.push_boolean(true)?;
             Ok(1)
         }
         Ok(None) => {
-            state.push_boolean(true);
+            state.push_boolean(true)?;
             Ok(1)
         }
         Ok(Some(event)) => {
             push_spawn_event(state, event, &ctx)?;
-            state.push_boolean(false);
+            state.push_boolean(false)?;
             state.insert(-2)?;
             Ok(2)
         }
@@ -1477,7 +1477,7 @@ fn lua_client_request(state: &mut State) -> dellingr::Result<u8> {
         (guard.handle.clone(), guard.client(id)?)
     };
     let result = handle.block_on(client.request_value_for_harness(params));
-    state.set_top(0);
+    state.set_top(0)?;
     push_result_pair(state, result)?;
     Ok(2)
 }
@@ -1496,7 +1496,7 @@ fn lua_client_request_async(state: &mut State) -> dellingr::Result<u8> {
         let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.insert(HarnessResource::Request(task))
     };
-    state.set_top(0);
+    state.set_top(0)?;
     push_request_table(state, request_id)?;
     Ok(1)
 }
@@ -1517,14 +1517,14 @@ fn lua_client_notify(state: &mut State) -> dellingr::Result<u8> {
         (guard.handle.clone(), guard.client(id)?)
     };
     let result = handle.block_on(client.send_notification(notification));
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(()) => {
-            state.push_boolean(true);
-            state.push_nil();
+            state.push_boolean(true)?;
+            state.push_nil()?;
         }
         Err(error) => {
-            state.push_boolean(false);
+            state.push_boolean(false)?;
             push_client_error(state, &error)?;
         }
     }
@@ -1539,14 +1539,14 @@ fn lua_client_shutdown(state: &mut State) -> dellingr::Result<u8> {
         (guard.handle.clone(), guard.client(id)?)
     };
     let result = handle.block_on(client.shutdown());
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(()) => {
-            state.push_boolean(true);
-            state.push_nil();
+            state.push_boolean(true)?;
+            state.push_nil()?;
         }
         Err(error) => {
-            state.push_boolean(false);
+            state.push_boolean(false)?;
             push_client_error(state, &error)?;
         }
     }
@@ -1567,10 +1567,10 @@ fn lua_client_child_pid(state: &mut State) -> dellingr::Result<u8> {
             .unwrap_or_else(PoisonError::into_inner)
             .remember_pid(Some(pid));
     }
-    state.set_top(0);
+    state.set_top(0)?;
     match pid {
-        Some(pid) => state.push_number(pid as f64),
-        None => state.push_nil(),
+        Some(pid) => state.push_number(pid as f64)?,
+        None => state.push_nil()?,
     }
     Ok(1)
 }
@@ -1582,8 +1582,8 @@ fn lua_client_current_generation(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.client(id)?.current_generation()
     };
-    state.set_top(0);
-    state.push_number(generation as f64);
+    state.set_top(0)?;
+    state.push_number(generation as f64)?;
     Ok(1)
 }
 
@@ -1609,8 +1609,8 @@ fn lua_client_notification_should_dispatch(state: &mut State) -> dellingr::Resul
         current_generation,
         &method_name,
     );
-    state.set_top(0);
-    state.push_boolean(dispatch);
+    state.set_top(0)?;
+    state.push_boolean(dispatch)?;
     Ok(1)
 }
 
@@ -1624,8 +1624,8 @@ fn lua_client_set_respawn_args(state: &mut State) -> dellingr::Result<u8> {
             .client(id)?
             .set_respawn_extra_args_for_harness(extra_args)
     };
-    state.set_top(0);
-    state.push_boolean(updated);
+    state.set_top(0)?;
+    state.push_boolean(updated)?;
     Ok(1)
 }
 
@@ -1640,7 +1640,7 @@ fn lua_client_notifications(state: &mut State) -> dellingr::Result<u8> {
         let mut guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         guard.insert(HarnessResource::Notifications(notifications))
     };
-    state.set_top(0);
+    state.set_top(0)?;
     push_notifications_table(state, queue_id)?;
     Ok(1)
 }
@@ -1673,18 +1673,18 @@ fn lua_client_start_sync(state: &mut State) -> dellingr::Result<u8> {
         )
         .await
     });
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(Ok(sync_result)) => {
             push_sync_result_table(state, &sync_result)?;
-            state.push_nil();
+            state.push_nil()?;
         }
         Ok(Err(error)) => {
-            state.push_nil();
+            state.push_nil()?;
             push_client_error(state, &error)?;
         }
         Err(_) => {
-            state.push_nil();
+            state.push_nil()?;
             push_json(
                 state,
                 &serde_json::json!({
@@ -1727,18 +1727,18 @@ fn lua_client_start_calendar_sync(state: &mut State) -> dellingr::Result<u8> {
         )
         .await
     });
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(Ok(sync_result)) => {
             push_calendar_sync_result_table(state, &sync_result)?;
-            state.push_nil();
+            state.push_nil()?;
         }
         Ok(Err(error)) => {
-            state.push_nil();
+            state.push_nil()?;
             push_client_error(state, &error)?;
         }
         Err(_) => {
-            state.push_nil();
+            state.push_nil()?;
             push_json(
                 state,
                 &serde_json::json!({
@@ -1778,18 +1778,18 @@ fn lua_client_execute_calendar_plan(state: &mut State) -> dellingr::Result<u8> {
         })
         .await
     });
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(Ok(completed)) => {
             push_json(state, &serde_json::to_value(&completed).map_err(lua_json)?)?;
-            state.push_nil();
+            state.push_nil()?;
         }
         Ok(Err(error)) => {
-            state.push_nil();
+            state.push_nil()?;
             push_client_error(state, &error)?;
         }
         Err(_) => {
-            state.push_nil();
+            state.push_nil()?;
             push_json(
                 state,
                 &serde_json::json!({
@@ -1808,7 +1808,7 @@ fn lua_client_drop(state: &mut State) -> dellingr::Result<u8> {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .remove(id);
-    state.set_top(0);
+    state.set_top(0)?;
     Ok(0)
 }
 
@@ -1832,10 +1832,10 @@ fn lua_notifications_recv(state: &mut State) -> dellingr::Result<u8> {
     let result = handle.block_on(async {
         tokio::time::timeout(duration_from_seconds(seconds), queue.recv()).await
     });
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(Some(notification)) => push_notification(state, &notification)?,
-        Ok(None) | Err(_) => state.push_nil(),
+        Ok(None) | Err(_) => state.push_nil()?,
     }
     Ok(1)
 }
@@ -1868,11 +1868,11 @@ fn lua_notifications_drain_for(state: &mut State) -> dellingr::Result<u8> {
         }
         notifications
     });
-    state.set_top(0);
-    state.new_table();
+    state.set_top(0)?;
+    state.new_table()?;
     let idx = state.get_top() as isize;
     for (offset, notification) in notifications.iter().enumerate() {
-        state.push_number((offset + 1) as f64);
+        state.push_number((offset + 1) as f64)?;
         push_notification(state, notification)?;
         state.set_table_raw(idx)?;
     }
@@ -1900,14 +1900,14 @@ fn lua_events_next(state: &mut State) -> dellingr::Result<u8> {
             tokio::time::timeout(duration_from_seconds(seconds), rx.recv()).await
         })
     };
-    state.set_top(0);
+    state.set_top(0)?;
     match event {
         Ok(Some(event)) => {
             push_spawn_event(state, event, &ctx)?;
             Ok(1)
         }
         Ok(None) => {
-            state.push_nil();
+            state.push_nil()?;
             Ok(1)
         }
         Err(_) => Err(lua_error_message(format!(
@@ -1936,11 +1936,11 @@ fn lua_request_await(state: &mut State) -> dellingr::Result<u8> {
     };
     let result =
         handle.block_on(async { tokio::time::timeout(duration_from_seconds(seconds), task).await });
-    state.set_top(0);
+    state.set_top(0)?;
     match result {
         Ok(Ok(request_result)) => push_result_pair(state, request_result)?,
         Ok(Err(error)) => {
-            state.push_nil();
+            state.push_nil()?;
             push_json(
                 state,
                 &serde_json::json!({
@@ -1950,7 +1950,7 @@ fn lua_request_await(state: &mut State) -> dellingr::Result<u8> {
             )?;
         }
         Err(_) => {
-            state.push_nil();
+            state.push_nil()?;
             push_json(
                 state,
                 &serde_json::json!({
@@ -1970,10 +1970,10 @@ fn push_result_pair(
     match result {
         Ok(value) => {
             push_json(state, &value)?;
-            state.push_nil();
+            state.push_nil()?;
         }
         Err(error) => {
-            state.push_nil();
+            state.push_nil()?;
             push_client_error(state, &error)?;
         }
     }
@@ -1985,7 +1985,7 @@ fn push_spawn_event(
     event: SpawnEvent,
     ctx: &Arc<Mutex<HarnessContext>>,
 ) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     match event {
         SpawnEvent::ChildSpawned(client) => {
@@ -2080,7 +2080,7 @@ fn push_client_error(state: &mut State, error: &ClientError) -> dellingr::Result
 }
 
 fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "__harness_type", "client")?;
     set_field_number(state, idx, "__harness_id", id as f64)?;
@@ -2121,7 +2121,7 @@ fn push_client_table(state: &mut State, id: u64) -> dellingr::Result<()> {
 }
 
 fn push_events_table(state: &mut State, id: u64) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "__harness_type", "events")?;
     set_field_number(state, idx, "__harness_id", id as f64)?;
@@ -2130,7 +2130,7 @@ fn push_events_table(state: &mut State, id: u64) -> dellingr::Result<()> {
 }
 
 fn push_request_table(state: &mut State, id: u64) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "__harness_type", "request")?;
     set_field_number(state, idx, "__harness_id", id as f64)?;
@@ -2139,7 +2139,7 @@ fn push_request_table(state: &mut State, id: u64) -> dellingr::Result<()> {
 }
 
 fn push_notifications_table(state: &mut State, id: u64) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "__harness_type", "notifications")?;
     set_field_number(state, idx, "__harness_id", id as f64)?;
@@ -2149,7 +2149,7 @@ fn push_notifications_table(state: &mut State, id: u64) -> dellingr::Result<()> 
 }
 
 fn push_notification(state: &mut State, notification: &Notification) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "method", notification.method_name())?;
     match notification {
@@ -2360,7 +2360,7 @@ fn push_sync_result_table(
     state: &mut State,
     result: &service_api::SyncResult,
 ) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "result", sync_result_name(result))?;
     if let service_api::SyncResult::Failed(error) = result {
@@ -2381,7 +2381,7 @@ fn push_calendar_sync_result_table(
     state: &mut State,
     result: &service_api::CalendarSyncResult,
 ) -> dellingr::Result<()> {
-    state.new_table();
+    state.new_table()?;
     let idx = state.get_top() as isize;
     set_field_string(state, idx, "result", calendar_sync_result_name(result))?;
     if let service_api::CalendarSyncResult::Failed(error) = result {
@@ -3033,7 +3033,7 @@ fn request_params_from_lua(
                     lua_error_message("TestBifrostArmHook requires params.account_id")
                 })?;
             let top = state.get_top();
-            state.push_string("hook");
+            state.push_string("hook")?;
             state.get_table(params_idx)?;
             let hook_idx = state.get_top() as isize;
             if state.typ(hook_idx) != LuaType::Table {
@@ -3090,7 +3090,7 @@ fn request_params_from_lua(
                     )));
                 }
             };
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             Ok(RequestParams::TestBifrostArmHook {
                 params: TestBifrostArmHookParams { account_id, hook },
             })
@@ -3252,27 +3252,27 @@ fn parse_settings_set_params(
         return Err(lua_error_message("SettingsSet requires params table"));
     }
     let top = state.get_top();
-    state.push_string("values");
+    state.push_string("values")?;
     state.get_table(params_idx)?;
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message("SettingsSet requires values table"));
     }
     let values_idx = state.get_top() as isize;
     let len = state.table_len(values_idx);
     let mut values = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(values_idx)?;
         if state.typ(-1) != LuaType::Table {
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             return Err(lua_error_message("setting value must be table"));
         }
         let value_idx = state.get_top() as isize;
         values.push(parse_setting_value(state, value_idx)?);
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(SettingsSetParams { values })
 }
 
@@ -3335,12 +3335,12 @@ fn parse_action_plan(state: &mut State, params_idx: isize) -> dellingr::Result<A
     }
 
     let top = state.get_top();
-    state.push_string("plan");
+    state.push_string("plan")?;
     state.get_table(params_idx)?;
     let plan_idx = if state.typ(-1) == LuaType::Table {
         state.get_top() as isize
     } else {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         params_idx
     };
 
@@ -3349,7 +3349,7 @@ fn parse_action_plan(state: &mut State, params_idx: isize) -> dellingr::Result<A
         None => PlanId::new_v7(),
     };
     let operations = parse_action_operations(state, plan_idx)?;
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(ActionWirePlan {
         plan_id,
         operations,
@@ -3367,12 +3367,12 @@ fn parse_calendar_action_plan(
     }
 
     let top = state.get_top();
-    state.push_string("plan");
+    state.push_string("plan")?;
     state.get_table(params_idx)?;
     let plan_idx = if state.typ(-1) == LuaType::Table {
         state.get_top() as isize
     } else {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         params_idx
     };
 
@@ -3381,7 +3381,7 @@ fn parse_calendar_action_plan(
         None => PlanId::new_v7(),
     };
     let operations = parse_calendar_action_operations(state, plan_idx)?;
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(CalendarActionPlan {
         plan_id,
         operations,
@@ -3425,7 +3425,7 @@ fn parse_send_request(state: &mut State, params_idx: isize) -> dellingr::Result<
     let message = parse_send_message(state, params_idx)?;
     let attachments = parse_send_attachments(state, params_idx)?;
     let scheduled_at = parse_optional_system_time(state, params_idx, "scheduled_at")?;
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(SendWireRequest {
         send_id,
         from_account_id,
@@ -3478,10 +3478,10 @@ fn parse_reschedule_send(
 
 fn parse_send_message(state: &mut State, request_idx: isize) -> dellingr::Result<SendWireMessage> {
     let top = state.get_top();
-    state.push_string("message");
+    state.push_string("message")?;
     state.get_table(request_idx)?;
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message("ActionSend requires message table"));
     }
     let message_idx = state.get_top() as isize;
@@ -3505,7 +3505,7 @@ fn parse_send_message(state: &mut State, request_idx: isize) -> dellingr::Result
         intent: parse_send_intent(state, message_idx)?,
         scheduled_at: parse_optional_system_time(state, message_idx, "scheduled_at")?,
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(message)
 }
 
@@ -3547,31 +3547,31 @@ fn parse_send_attachments(
     request_idx: isize,
 ) -> dellingr::Result<Vec<SendWireAttachment>> {
     let top = state.get_top();
-    state.push_string("attachments");
+    state.push_string("attachments")?;
     state.get_table(request_idx)?;
     if state.typ(-1) == LuaType::Nil {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Ok(Vec::new());
     }
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message("ActionSend attachments must be a table"));
     }
     let attachments_idx = state.get_top() as isize;
     let len = state.table_len(attachments_idx);
     let mut attachments = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(attachments_idx)?;
         if state.typ(-1) != LuaType::Table {
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             return Err(lua_error_message("ActionSend attachment must be table"));
         }
         let att_idx = state.get_top() as isize;
         attachments.push(parse_send_attachment(state, att_idx)?);
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(attachments)
 }
 
@@ -3598,18 +3598,18 @@ fn parse_send_attachment_source(
     att_idx: isize,
 ) -> dellingr::Result<SendAttachmentSource> {
     let top = state.get_top();
-    state.push_string("source");
+    state.push_string("source")?;
     state.get_table(att_idx)?;
     let source_idx = if state.typ(-1) == LuaType::Table {
         state.get_top() as isize
     } else {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         att_idx
     };
     let kind =
         get_string_field(state, source_idx, "kind")?.unwrap_or_else(|| "staging_file".to_string());
     if kind != "staging_file" {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message(format!(
             "unsupported ActionSend attachment source {kind:?}"
         )));
@@ -3623,7 +3623,7 @@ fn parse_send_attachment_source(
                 .flatten()
         })
         .ok_or_else(|| lua_error_message("ActionSend source requires content_hash"))?;
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(SendAttachmentSource::StagingFile {
         relative_path,
         content_hash,
@@ -3636,7 +3636,7 @@ fn get_content_hash_field(
     key: &str,
 ) -> dellingr::Result<Option<[u8; 32]>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     let result = match state.typ(-1) {
         LuaType::Nil => None,
@@ -3645,36 +3645,36 @@ fn get_content_hash_field(
             let values_idx = state.get_top() as isize;
             let len = state.table_len(values_idx);
             if len != 32 {
-                state.set_top(top as isize);
+                state.set_top(top as isize)?;
                 return Err(lua_error_message(format!(
                     "{key} must have 32 byte values, got {len}"
                 )));
             }
             let mut bytes = [0_u8; 32];
             for i in 1..=len {
-                state.push_number(i as f64);
+                state.push_number(i as f64)?;
                 state.get_table(values_idx)?;
                 let value = state.to_number(-1)?;
                 if !(0.0..=255.0).contains(&value) {
-                    state.set_top(top as isize);
+                    state.set_top(top as isize)?;
                     return Err(lua_error_message(format!(
                         "{key}[{i}] byte out of range: {value}"
                     )));
                 }
                 bytes[i - 1] = value as u8;
-                state.pop(1);
+                state.pop(1)?;
             }
             Some(bytes)
         }
         other => {
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             return Err(lua_error_message(format!(
                 "{key} must be a 32-byte table or 64-char hex string, got {}",
                 other.as_str()
             )));
         }
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(result)
 }
 
@@ -3699,10 +3699,10 @@ fn parse_action_operations(
     plan_idx: isize,
 ) -> dellingr::Result<Vec<ActionWireOperation>> {
     let top = state.get_top();
-    state.push_string("operations");
+    state.push_string("operations")?;
     state.get_table(plan_idx)?;
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message(
             "ActionExecutePlan requires operations table",
         ));
@@ -3711,18 +3711,18 @@ fn parse_action_operations(
     let len = state.table_len(operations_idx);
     let mut operations = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(operations_idx)?;
         if state.typ(-1) != LuaType::Table {
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             return Err(lua_error_message("action operation must be table"));
         }
         let op_idx = state.get_top() as isize;
         let operation = parse_action_operation(state, op_idx, i)?;
         operations.push(operation);
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(operations)
 }
 
@@ -3731,10 +3731,10 @@ fn parse_calendar_action_operations(
     plan_idx: isize,
 ) -> dellingr::Result<Vec<CalendarActionWireOperation>> {
     let top = state.get_top();
-    state.push_string("operations");
+    state.push_string("operations")?;
     state.get_table(plan_idx)?;
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message(
             "CalActionExecutePlan requires operations table",
         ));
@@ -3743,18 +3743,18 @@ fn parse_calendar_action_operations(
     let len = state.table_len(operations_idx);
     let mut operations = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(operations_idx)?;
         if state.typ(-1) != LuaType::Table {
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             return Err(lua_error_message("calendar action operation must be table"));
         }
         let op_idx = state.get_top() as isize;
         let operation = parse_calendar_action_operation(state, op_idx, i)?;
         operations.push(operation);
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(operations)
 }
 
@@ -3864,12 +3864,12 @@ fn parse_wire_calendar_event_input(
     op_name: &str,
 ) -> dellingr::Result<WireCalendarEventInput> {
     let top = state.get_top();
-    state.push_string("input");
+    state.push_string("input")?;
     state.get_table(op_idx)?;
     let input_idx = if state.typ(-1) == LuaType::Table {
         state.get_top() as isize
     } else {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         op_idx
     };
 
@@ -3899,7 +3899,7 @@ fn parse_wire_calendar_event_input(
         availability: get_string_field(state, input_idx, "availability")?,
         visibility: get_string_field(state, input_idx, "visibility")?,
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(input)
 }
 
@@ -4006,10 +4006,10 @@ fn read_extra_args(state: &mut State, idx: isize) -> dellingr::Result<Vec<String
     let len = state.table_len(idx);
     let mut args = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(idx)?;
         args.push(state.to_string(-1)?);
-        state.pop(1);
+        state.pop(1)?;
     }
     Ok(args)
 }
@@ -4023,12 +4023,12 @@ fn read_env_overrides(state: &mut State, idx: isize) -> dellingr::Result<Vec<(St
     }
     let top = state.get_top();
     let mut out = Vec::new();
-    state.push_nil();
+    state.push_nil()?;
     loop {
         let has_next = match state.table_next(idx) {
             Ok(has_next) => has_next,
             Err(error) => {
-                state.set_top(top as isize);
+                state.set_top(top as isize)?;
                 return Err(error);
             }
         };
@@ -4036,40 +4036,40 @@ fn read_env_overrides(state: &mut State, idx: isize) -> dellingr::Result<Vec<(St
             break;
         }
         if state.typ(-2) != LuaType::String {
-            state.set_top(top as isize);
+            state.set_top(top as isize)?;
             return Err(lua_error_message("env override keys must be strings"));
         }
         let key = state.to_string(-2)?;
         let value = state.to_string(-1)?;
         out.push((key, value));
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(out)
 }
 
 fn push_json(state: &mut State, value: &serde_json::Value) -> dellingr::Result<()> {
     match value {
-        serde_json::Value::Null => state.push_nil(),
-        serde_json::Value::Bool(value) => state.push_boolean(*value),
+        serde_json::Value::Null => state.push_nil()?,
+        serde_json::Value::Bool(value) => state.push_boolean(*value)?,
         serde_json::Value::Number(value) => {
-            state.push_number(value.as_f64().unwrap_or(0.0));
+            state.push_number(value.as_f64().unwrap_or(0.0))?;
         }
-        serde_json::Value::String(value) => state.push_string(value),
+        serde_json::Value::String(value) => state.push_string(value)?,
         serde_json::Value::Array(values) => {
-            state.new_table();
+            state.new_table()?;
             let idx = state.get_top() as isize;
             for (offset, item) in values.iter().enumerate() {
-                state.push_number((offset + 1) as f64);
+                state.push_number((offset + 1) as f64)?;
                 push_json(state, item)?;
                 state.set_table_raw(idx)?;
             }
         }
         serde_json::Value::Object(values) => {
-            state.new_table();
+            state.new_table()?;
             let idx = state.get_top() as isize;
             for (key, item) in values {
-                state.push_string(key);
+                state.push_string(key)?;
                 push_json(state, item)?;
                 state.set_table_raw(idx)?;
             }
@@ -4120,12 +4120,12 @@ fn lua_table_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_js
     let top = state.get_top();
     let mut array_entries = Vec::new();
     let mut object_entries = Vec::new();
-    state.push_nil();
+    state.push_nil()?;
     loop {
         let has_next = match state.table_next(idx) {
             Ok(has_next) => has_next,
             Err(error) => {
-                state.set_top(top as isize);
+                state.set_top(top as isize)?;
                 return Err(error);
             }
         };
@@ -4135,14 +4135,14 @@ fn lua_table_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_js
         let key = match lua_json_key(state, -2) {
             Ok(key) => key,
             Err(error) => {
-                state.set_top(top as isize);
+                state.set_top(top as isize)?;
                 return Err(error);
             }
         };
         let value = match lua_value_to_json(state, -1) {
             Ok(value) => value,
             Err(error) => {
-                state.set_top(top as isize);
+                state.set_top(top as isize)?;
                 return Err(error);
             }
         };
@@ -4150,9 +4150,9 @@ fn lua_table_to_json(state: &mut State, idx: isize) -> dellingr::Result<serde_js
             LuaJsonKey::ArrayIndex(index) => array_entries.push((index, value)),
             LuaJsonKey::ObjectKey(key) => object_entries.push((key, value)),
         }
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
 
     if object_entries.is_empty() && !array_entries.is_empty() {
         array_entries.sort_by_key(|(index, _)| *index);
@@ -4215,8 +4215,8 @@ fn set_field_fn(
     key: &str,
     func: dellingr::RustFunc,
 ) -> dellingr::Result<()> {
-    state.push_string(key);
-    state.push_rust_fn(func);
+    state.push_string(key)?;
+    state.push_rust_fn(func)?;
     state.set_table_raw(table_idx)
 }
 
@@ -4226,8 +4226,8 @@ fn set_field_string(
     key: &str,
     value: &str,
 ) -> dellingr::Result<()> {
-    state.push_string(key);
-    state.push_string(value);
+    state.push_string(key)?;
+    state.push_string(value)?;
     state.set_table_raw(table_idx)
 }
 
@@ -4237,8 +4237,8 @@ fn set_field_number(
     key: &str,
     value: f64,
 ) -> dellingr::Result<()> {
-    state.push_string(key);
-    state.push_number(value);
+    state.push_string(key)?;
+    state.push_number(value)?;
     state.set_table_raw(table_idx)
 }
 
@@ -4248,13 +4248,13 @@ fn set_field_bool(
     key: &str,
     value: bool,
 ) -> dellingr::Result<()> {
-    state.push_string(key);
-    state.push_boolean(value);
+    state.push_string(key)?;
+    state.push_boolean(value)?;
     state.set_table_raw(table_idx)
 }
 
 fn set_pushed_field(state: &mut State, table_idx: isize, key: &str) -> dellingr::Result<()> {
-    state.push_string(key);
+    state.push_string(key)?;
     state.insert(-2)?;
     state.set_table_raw(table_idx)
 }
@@ -4265,14 +4265,14 @@ fn get_string_field(
     key: &str,
 ) -> dellingr::Result<Option<String>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     let result = if state.typ(-1) == LuaType::Nil {
         None
     } else {
         Some(state.to_string(-1)?)
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(result)
 }
 
@@ -4295,14 +4295,14 @@ fn get_number_field(
     key: &str,
 ) -> dellingr::Result<Option<f64>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     let result = if state.typ(-1) == LuaType::Nil {
         None
     } else {
         Some(state.to_number(-1)?)
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(result)
 }
 
@@ -4325,14 +4325,14 @@ fn get_bool_field(
     key: &str,
 ) -> dellingr::Result<Option<bool>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     let result = if state.typ(-1) == LuaType::Nil {
         None
     } else {
         Some(state.to_boolean(-1))
     };
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(result)
 }
 
@@ -4342,26 +4342,26 @@ fn get_string_array_field(
     key: &str,
 ) -> dellingr::Result<Vec<String>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     if state.typ(-1) == LuaType::Nil {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Ok(Vec::new());
     }
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message(format!("{key} must be a table")));
     }
     let values_idx = state.get_top() as isize;
     let len = state.table_len(values_idx);
     let mut values = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(values_idx)?;
         values.push(state.to_string(-1)?);
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(values)
 }
 
@@ -4371,26 +4371,26 @@ fn get_byte_array_field(
     key: &str,
 ) -> dellingr::Result<Option<Vec<u8>>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     if state.typ(-1) == LuaType::Nil {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Ok(None);
     }
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message(format!("{key} must be a table")));
     }
     let values_idx = state.get_top() as isize;
     let len = state.table_len(values_idx);
     let mut values = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(values_idx)?;
         values.push(state.to_number(-1)? as u8);
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(Some(values))
 }
 
@@ -4400,21 +4400,21 @@ fn get_bifrost_messages_field(
     key: &str,
 ) -> dellingr::Result<Vec<service_api::TestBifrostSyntheticMessage>> {
     let top = state.get_top();
-    state.push_string(key);
+    state.push_string(key)?;
     state.get_table(table_idx)?;
     if state.typ(-1) == LuaType::Nil {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Ok(Vec::new());
     }
     if state.typ(-1) != LuaType::Table {
-        state.set_top(top as isize);
+        state.set_top(top as isize)?;
         return Err(lua_error_message(format!("{key} must be a table")));
     }
     let values_idx = state.get_top() as isize;
     let len = state.table_len(values_idx);
     let mut messages = Vec::with_capacity(len);
     for i in 1..=len {
-        state.push_number(i as f64);
+        state.push_number(i as f64)?;
         state.get_table(values_idx)?;
         let message_idx = state.get_top() as isize;
         let change_kind = match get_string_field(state, message_idx, "change_kind")?
@@ -4427,7 +4427,7 @@ fn get_bifrost_messages_field(
             "scope_added" | "ScopeAdded" => service_api::TestBifrostChangeKind::ScopeAdded,
             "scope_removed" | "ScopeRemoved" => service_api::TestBifrostChangeKind::ScopeRemoved,
             other => {
-                state.set_top(top as isize);
+                state.set_top(top as isize)?;
                 return Err(lua_error_message(format!(
                     "unknown bifrost message change_kind {other:?}"
                 )));
@@ -4448,9 +4448,9 @@ fn get_bifrost_messages_field(
                 .unwrap_or_default()
                 .into_bytes(),
         });
-        state.pop(1);
+        state.pop(1)?;
     }
-    state.set_top(top as isize);
+    state.set_top(top as isize)?;
     Ok(messages)
 }
 
