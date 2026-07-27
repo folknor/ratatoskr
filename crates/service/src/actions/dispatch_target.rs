@@ -3,11 +3,11 @@ use std::collections::{HashMap, HashSet};
 use bifrost_sync::Error as EngineError;
 use bifrost_sync::IdempotencyVendor;
 use bifrost_types::{
-    AccountId, ContainerId, ContainerKind, FlagOp, FolderId as BifrostFolderId, Importance,
-    Label as BifrostLabel, LabelId as BifrostLabelId, MailboxId, MembershipScope, MutationTarget,
-    ObjectId, ProtocolKind, Provenance,
+    AccountId, ContainerId, ContainerKind, FlagOp, FolderId as BifrostFolderId, FolderRole,
+    Importance, Label as BifrostLabel, LabelId as BifrostLabelId, MailboxId, MembershipScope,
+    MutationTarget, ObjectId, ProtocolKind, Provenance,
 };
-use common::types::FolderKind;
+use common::types::{FolderKind, NamespaceAttribution};
 use types::{ImportanceLevel, LabelKind};
 
 use super::context::ActionContext;
@@ -239,6 +239,7 @@ pub(crate) async fn dispatch_mutation(
     account_id: &str,
     op: &MailOperation,
     ids: Vec<ObjectId>,
+    namespace: &NamespaceAttribution,
 ) -> Result<(), ActionError> {
     let account = AccountId(account_id.to_string());
     match op {
@@ -247,8 +248,8 @@ pub(crate) async fn dispatch_mutation(
         }
         MailOperation::SetRead { to } => dispatch_read(action_account, &account, ids, *to).await,
         MailOperation::Archive => {
-            let dest = native_folder_for_storage_id_opt(&action_account.folder_map, "archive");
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX");
+            let dest = role_destination(action_account, namespace, FolderRole::Archive);
+            let source = role_destination(action_account, namespace, FolderRole::Inbox);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -259,8 +260,9 @@ pub(crate) async fn dispatch_mutation(
             .await
         }
         MailOperation::Trash => {
-            let dest = resolve_move_destination(action_account, "TRASH").await?;
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX");
+            let dest =
+                resolve_role_destination(action_account, namespace, FolderRole::Trash).await?;
+            let source = role_destination(action_account, namespace, FolderRole::Inbox);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -275,12 +277,12 @@ pub(crate) async fn dispatch_mutation(
             // source role is the inverse of the destination so the single-object
             // compose removes the message from the container it actually leaves.
             let (dest_role, source_role) = if *to {
-                ("SPAM", "INBOX")
+                (FolderRole::Spam, FolderRole::Inbox)
             } else {
-                ("INBOX", "SPAM")
+                (FolderRole::Inbox, FolderRole::Spam)
             };
-            let dest = resolve_move_destination(action_account, dest_role).await?;
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, source_role);
+            let dest = resolve_role_destination(action_account, namespace, dest_role).await?;
+            let source = role_destination(action_account, namespace, source_role);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -292,7 +294,7 @@ pub(crate) async fn dispatch_mutation(
         }
         MailOperation::MoveToFolder { dest, source } => {
             let native = resolve_move_destination(action_account, dest.as_str()).await?;
-            let native_source = move_source_native(action_account, source.as_ref());
+            let native_source = move_source_native(action_account, namespace, source.as_ref());
             dispatch_container_move(
                 action_account,
                 &account,
@@ -325,13 +327,14 @@ pub(crate) async fn dispatch_mutation(
 /// per message from each `ObjectId`'s own container context.
 fn move_source_native(
     action_account: &ResidentActionAccount,
+    namespace: &NamespaceAttribution,
     source: Option<&common::typed_ids::FolderId>,
 ) -> Option<String> {
     match source {
         Some(source) => {
-            native_folder_for_storage_id_opt(&action_account.folder_map, source.as_str())
+            native_folder_for_storage_id_opt(action_account.folder_map(), source.as_str())
         }
-        None => native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX"),
+        None => role_destination(action_account, namespace, FolderRole::Inbox),
     }
 }
 
@@ -346,14 +349,15 @@ pub(crate) async fn dispatch_bulk_mutation(
     account_id: &str,
     key: &RemoteBatchKey,
     ids: Vec<ObjectId>,
+    namespace: &NamespaceAttribution,
 ) -> Result<(), ActionError> {
     let account = AccountId(account_id.to_string());
     match key {
         RemoteBatchKey::Star { to } => set_starred_each(action_account, &account, ids, *to).await,
         RemoteBatchKey::Read { to } => dispatch_read(action_account, &account, ids, *to).await,
         RemoteBatchKey::Archive => {
-            let dest = native_folder_for_storage_id_opt(&action_account.folder_map, "archive");
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX");
+            let dest = role_destination(action_account, namespace, FolderRole::Archive);
+            let source = role_destination(action_account, namespace, FolderRole::Inbox);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -364,8 +368,9 @@ pub(crate) async fn dispatch_bulk_mutation(
             .await
         }
         RemoteBatchKey::Trash => {
-            let dest = resolve_move_destination(action_account, "TRASH").await?;
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX");
+            let dest =
+                resolve_role_destination(action_account, namespace, FolderRole::Trash).await?;
+            let source = role_destination(action_account, namespace, FolderRole::Inbox);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -377,12 +382,12 @@ pub(crate) async fn dispatch_bulk_mutation(
         }
         RemoteBatchKey::Spam { to } => {
             let (dest_role, source_role) = if *to {
-                ("SPAM", "INBOX")
+                (FolderRole::Spam, FolderRole::Inbox)
             } else {
-                ("INBOX", "SPAM")
+                (FolderRole::Inbox, FolderRole::Spam)
             };
-            let dest = resolve_move_destination(action_account, dest_role).await?;
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, source_role);
+            let dest = resolve_role_destination(action_account, namespace, dest_role).await?;
+            let source = role_destination(action_account, namespace, source_role);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -396,7 +401,7 @@ pub(crate) async fn dispatch_bulk_mutation(
             let native = resolve_move_destination(action_account, dest).await?;
             // The coalescing key drops the per-op advisory source; the single
             // compose falls back to INBOX (bulk_move derives source per id).
-            let source = native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX");
+            let source = role_destination(action_account, namespace, FolderRole::Inbox);
             dispatch_container_move(
                 action_account,
                 &account,
@@ -630,7 +635,7 @@ async fn dispatch_container_move(
             // container resolved.
             let Some(inbox) = native_source
                 .map(str::to_string)
-                .or_else(|| native_folder_for_storage_id_opt(&action_account.folder_map, "INBOX"))
+                .or_else(|| native_folder_for_storage_id_opt(action_account.folder_map(), "INBOX"))
             else {
                 return Ok(());
             };
@@ -673,17 +678,49 @@ async fn resolve_move_destination(
     action_account: &ResidentActionAccount,
     storage_id: &str,
 ) -> Result<String, ActionError> {
-    if let Some(native) = native_folder_for_storage_id_opt(&action_account.folder_map, storage_id) {
+    if let Some(native) = native_folder_for_storage_id_opt(action_account.folder_map(), storage_id)
+    {
         return Ok(native);
     }
-    let fresh = action_account.refresh_folder_map().await.map_err(|error| {
+    let fresh = action_account.refresh_containers().await.map_err(|error| {
         ActionError::remote_with_kind(
             RemoteFailureKind::Transient,
             format!("refresh container map: {error}"),
         )
     })?;
-    native_folder_for_storage_id_opt(&fresh, storage_id)
+    native_folder_for_storage_id_opt(fresh.folder_map(), storage_id)
         .ok_or_else(|| ActionError::not_found(format!("container {storage_id} not found")))
+}
+
+fn role_destination(
+    action_account: &ResidentActionAccount,
+    namespace: &NamespaceAttribution,
+    role: FolderRole,
+) -> Option<String> {
+    action_account
+        .containers
+        .role_target(namespace, role)
+        .map(str::to_string)
+}
+
+async fn resolve_role_destination(
+    action_account: &ResidentActionAccount,
+    namespace: &NamespaceAttribution,
+    role: FolderRole,
+) -> Result<String, ActionError> {
+    if let Some(native) = role_destination(action_account, namespace, role) {
+        return Ok(native);
+    }
+    let fresh = action_account.refresh_containers().await.map_err(|error| {
+        ActionError::remote_with_kind(
+            RemoteFailureKind::Transient,
+            format!("refresh container map: {error}"),
+        )
+    })?;
+    fresh
+        .role_target(namespace, role)
+        .map(str::to_string)
+        .ok_or_else(|| ActionError::not_found(format!("role destination {role:?} not found")))
 }
 
 fn native_folder_for_storage_id_opt(

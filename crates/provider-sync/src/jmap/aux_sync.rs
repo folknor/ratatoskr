@@ -1,7 +1,5 @@
 //! JMAP auxiliary sync passes preserved after the mail sync cutover.
 
-use std::collections::HashSet;
-
 use bifrost_jmap::mailbox::MailboxGet;
 use db::db::ReadDbState;
 use service_state::WriteDbState;
@@ -14,81 +12,6 @@ pub struct AuxiliarySyncCtx<'a> {
     pub account_id: &'a str,
     pub read_db: &'a ReadDbState,
     pub write_db: &'a WriteDbState,
-}
-
-pub async fn discover_shared_accounts(ctx: &AuxiliarySyncCtx<'_>) {
-    let writer_pool = ctx.write_db.writer_pool();
-    let session = ctx.client.inner().session();
-    let mut session_shared_ids: Vec<(String, String)> = Vec::new();
-
-    for jmap_account_id in session.accounts() {
-        let Some(account) = session.account(jmap_account_id) else {
-            continue;
-        };
-        if account.is_personal() {
-            continue;
-        }
-        session_shared_ids.push((jmap_account_id.clone(), account.name().to_string()));
-    }
-
-    for (jmap_id, display_name) in &session_shared_ids {
-        let dn = if display_name.is_empty() {
-            None
-        } else {
-            Some(display_name.as_str())
-        };
-        if let Err(e) =
-            sync_state::enable_shared_mailbox_sync(&writer_pool, ctx.account_id, jmap_id, dn).await
-        {
-            log::warn!(
-                "[JMAP] Failed to enable shared account {jmap_id} for {}: {e}",
-                ctx.account_id
-            );
-        }
-    }
-
-    let known_ids = match sync_state::get_all_shared_mailbox_ids(ctx.read_db, ctx.account_id).await
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            log::warn!(
-                "[JMAP] Failed to load known shared mailboxes for {}: {e}",
-                ctx.account_id
-            );
-            return;
-        }
-    };
-    let session_id_set: HashSet<&str> = session_shared_ids
-        .iter()
-        .map(|(id, _)| id.as_str())
-        .collect();
-
-    for known_id in &known_ids {
-        if !session_id_set.contains(known_id.as_str()) {
-            log::info!(
-                "[JMAP] Shared account {known_id} no longer in Session for {} - disabling",
-                ctx.account_id
-            );
-            if let Err(e) = sync_state::disable_shared_mailbox_sync_with_error(
-                &writer_pool,
-                ctx.account_id,
-                known_id,
-                "Access revoked - account no longer in JMAP Session",
-            )
-            .await
-            {
-                log::warn!("[JMAP] Failed to disable revoked shared account {known_id}: {e}");
-            }
-        }
-    }
-
-    if !session_shared_ids.is_empty() {
-        log::info!(
-            "[JMAP] Discovered {} shared account(s) for {}",
-            session_shared_ids.len(),
-            ctx.account_id
-        );
-    }
 }
 
 pub async fn resolve_shared_account_identities(ctx: &AuxiliarySyncCtx<'_>) {
@@ -308,8 +231,10 @@ pub async fn poll_share_notifications(ctx: &AuxiliarySyncCtx<'_>) {
         }
 
         if has_mailbox_change {
-            log::info!("[JMAP] Mailbox sharing changed - re-running session discovery");
-            discover_shared_accounts(ctx).await;
+            // The resident container snapshot owns foreign-account discovery
+            // and reconciliation. Its next refresh observes the changed
+            // session without a JMAP-only registry side path here.
+            log::info!("[JMAP] Mailbox sharing changed; container refresh will reconcile it");
         }
     }
 

@@ -26,7 +26,7 @@ pub use crate::persistence::{index_search_documents, store_inline_images, store_
 // includes "folder-row creation"). The message_folders FK targets
 // folders(account_id, id), so the consumer must ensure the folder row
 // exists before writing membership.
-pub use db::db::queries_extra::{FolderWriteRow, insert_folders_batch};
+pub use db::db::queries_extra::{FolderWriteRow, ensure_folder_rows, insert_folders_batch};
 // Reached unchanged by the marker-gated post-persist arm. NOTE: the
 // consumer's seen-ingest is re-implemented inline in `post_persist.rs`
 // rather than calling this helper, because the marker insert MUST share the
@@ -66,7 +66,6 @@ pub async fn run_jmap_auxiliary_sync(
     // mailboxes here would double the per-kick request count and trip the
     // section 6.2 `provider_requests max_delta = 0` gate, so the auxiliary
     // pass starts at shared-account discovery.
-    crate::jmap::aux_sync::discover_shared_accounts(&ctx).await;
     crate::jmap::aux_sync::resolve_shared_account_identities(&ctx).await;
     if initial_sync_completed_before_run {
         crate::jmap::aux_sync::poll_share_notifications(&ctx).await;

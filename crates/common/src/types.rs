@@ -4,8 +4,8 @@ use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 
 pub use ::types::{
-    FolderKind, GmailSystemLabelId, ImportanceLevel, LabelKind, MailProviderKind, SendIntent,
-    SystemFolderId,
+    FolderKind, GmailSystemLabelId, ImportanceLevel, LabelKind, MailProviderKind,
+    NamespaceAttribution, NamespaceKind, SendIntent, SystemFolderId,
 };
 
 /// Standardized sync result across all providers.

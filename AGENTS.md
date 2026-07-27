@@ -41,21 +41,8 @@ Read the doc before starting work in its area. Subagents launched for these task
 
 ### Bash rules
 
-- Never chain commands with `&&`.
-- Never chain commands with `;`.
-- Never chain/pipe commands with `|`.
-- Never capture stdout into env vars (`UUID=$(...)`).
 - Never read or write from `/tmp`. All data lives in the project.
 - Never run raw `cargo`, `curl`, `pkill`. Use `brokkr`.
-
-### git commit rules
-
-- Always run `brokkr fmt` before a commit.
-- Never commit markdown changes alone. Bundle them with upcoming code commits.
-- When committing other changes: always tag along markdown files if dirty.
-- Write substantive engineering-focused commit messages.
-- Has `Cargo.lock` changed? Commit it.
-- Never `git push` unless the user explicitly asks. Stop after the commit.
 
 ## Commands
 
@@ -111,7 +98,7 @@ exercise ratatoskr's real provider sync against those endpoints.
 
 State types are `Clone` - `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<Connection>>` or similar and implement `Clone`. Both `DbState` and `BodyStoreState` expose `pub fn conn(&self) -> Arc<Mutex<Connection>>` for synchronous access.
 
-Scoped queries (`core/src/db/queries_extra/scoped_queries.rs`) - Cross-account query infrastructure. `ViewScope` enum (`AllAccounts`/`Account`/`SharedMailbox`/`PublicFolder`) in `core/src/scope.rs` is the sidebar's single source of truth. Personal-account queries use `AccountScope` internally and filter `shared_mailbox_id IS NULL`. Shared mailbox and public folder scopes route to dedicated query functions. Predicate-based virtual folder queries for Starred/Snoozed use boolean flags on `threads`, not label joins. Draft counts include `local_drafts` table.
+Scoped queries (`core/src/db/queries_extra/scoped_queries.rs`) - Cross-account query infrastructure. `ViewScope` enum (`AllAccounts`/`Account`/`SharedMailbox`/`PublicFolder`) in `core/src/scope.rs` is the sidebar's single source of truth. Personal-account queries use `AccountScope` internally and filter `t.namespace_kind IS NULL`. Shared mailbox scopes route through the dedicated `get_threads_for_shared_mailbox{,_starred,_snoozed,_label_group}` functions; public folder scopes route through `get_threads_for_namespace`, keyed on `(namespace_kind, namespace_id)`. Predicate-based virtual folder queries for Starred/Snoozed use boolean flags on `threads`, not label joins. Draft counts include `local_drafts` table.
 
 Navigation state (`core/src/db/queries_extra/navigation.rs`) - `get_navigation_state()` returns the full sidebar state in one call: universal folders (Inbox, Starred, Snoozed, Sent, Drafts, Trash) with unread counts, smart folders (real unread counts via `count_smart_folder_unread` per folder - N+1 today, see `docs/search/implementation-spec.md` § Known semantic issues), and per-account labels when scoped. Per-label unread counts are scaffolded (return 0).
 

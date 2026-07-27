@@ -149,47 +149,6 @@ impl GraphClient {
         }
     }
 
-    /// Create a new client scoped to a shared mailbox.
-    ///
-    /// Shares the HTTP client, token infrastructure, and semaphore with the
-    /// parent client (the delegate authenticates with their own token to access
-    /// the shared mailbox). Has its own folder map and category lock because
-    /// the shared mailbox is a separate folder tree.
-    pub fn for_shared_mailbox(&self, mailbox_id: String) -> Self {
-        // We need a separate ClientInner because folder_map/category_lock
-        // are per-mailbox, but we share the token state via Arc.
-        // Since ClientInner isn't Arc-wrapped for individual fields, we clone
-        // the token state snapshot - the parent's ensure_valid_token/do_refresh
-        // will keep the DB in sync, and the shared client will re-read on 401.
-        //
-        // The semaphore is shared because Graph rate limits are per-app per-user,
-        // not per-mailbox.
-        Self {
-            inner: Arc::new(ClientInner {
-                http: self.inner.http.clone(),
-                api_base: self.inner.api_base.clone(),
-                api_beta_base: self.inner.api_beta_base.clone(),
-                account_id: self.inner.account_id.clone(),
-                mailbox_id: Some(mailbox_id),
-                // Token refresh works via DB - shared client gets fresh tokens
-                // from the same account row, so copying the snapshot is fine.
-                token: RwLock::new(TokenState {
-                    access_token: String::new(),
-                    refresh_token: String::new(),
-                    expires_at: 0, // Forces refresh on first call
-                }),
-                refresh_lock: Mutex::new(()),
-                category_lock: Mutex::new(()),
-                client_id: self.inner.client_id.clone(),
-                encryption_key: self.inner.encryption_key,
-                semaphore: Arc::clone(&self.inner.semaphore),
-                folder_map: RwLock::new(None),
-                folder_map_last_sync: RwLock::new(None),
-                writer: self.inner.writer.clone(),
-            }),
-        }
-    }
-
     /// Whether this client is scoped to a shared mailbox.
     pub fn is_shared_mailbox(&self) -> bool {
         self.inner.mailbox_id.is_some()
@@ -748,18 +707,6 @@ mod tests {
     fn api_path_prefix_returns_users_path_for_shared_mailbox() {
         let client = test_client(Some("shared@example.com".to_string()));
         assert_eq!(client.api_path_prefix(), "/users/shared%40example.com");
-    }
-
-    #[test]
-    fn for_shared_mailbox_creates_scoped_client() {
-        let client = test_client(None);
-        assert!(!client.is_shared_mailbox());
-        assert!(client.mailbox_id().is_none());
-
-        let shared = client.for_shared_mailbox("team@contoso.com".to_string());
-        assert!(shared.is_shared_mailbox());
-        assert_eq!(shared.mailbox_id(), Some("team@contoso.com"));
-        assert_eq!(shared.api_path_prefix(), "/users/team%40contoso.com");
     }
 
     #[test]

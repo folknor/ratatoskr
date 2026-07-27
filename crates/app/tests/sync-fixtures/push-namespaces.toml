@@ -1,0 +1,87 @@
+name = "push-namespaces"
+
+[[account]]
+id = "account-primary"
+name = "test@example.com"
+is_personal = true
+primary = true
+
+[[account]]
+id = "alice@example.test"
+name = "alice@example.test"
+is_personal = false
+
+[[mailbox]]
+id = "primary-inbox"
+account_id = "account-primary"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "alice-inbox"
+account_id = "alice@example.test"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "primary-archive"
+account_id = "account-primary"
+name = "Archive"
+role = "archive"
+
+[[email]]
+id = "email-001"
+mailbox_ids = ["primary-inbox"]
+from = "alice@example.test"
+to = ["test@example.com"]
+subject = "Welcome"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<001@example.test>"]
+body_text = "Hello there."
+
+[[email]]
+id = "email-002"
+mailbox_ids = ["primary-inbox"]
+from = "bob@example.test"
+to = ["test@example.com"]
+subject = "Status update"
+received_at = "2026-01-15T11:00:00Z"
+message_id = ["<002@example.test>"]
+body_text = "Things are progressing."
+
+[[email]]
+id = "alice-message"
+mailbox_ids = ["alice-inbox"]
+from = "sender@example.test"
+to = ["alice@example.test"]
+subject = "Shared Graph copy"
+received_at = "2026-01-15T11:30:00Z"
+message_id = ["<shared@example.test>"]
+body_text = "Shared body."
+
+[[public_folder]]
+id = "pf-notices"
+display_name = "Notices"
+folder_class = "IPF.Note"
+
+[[public_item]]
+id = "notice-1"
+folder_id = "pf-notices"
+subject = "Public notice"
+from = "admin@example.test"
+to = ["test@example.com"]
+received_at = "2026-01-15T11:45:00Z"
+body_text = "Public body."
+
+[[change]]
+id = "new"
+
+[[change.email_create]]
+id = "email-003"
+mailbox_ids = ["primary-inbox"]
+from = "carol@example.test"
+to = ["test@example.com"]
+subject = "Lunch?"
+received_at = "2026-01-15T12:00:00Z"
+message_id = ["<003@example.test>"]
+body_text = "Free at 12:30?"

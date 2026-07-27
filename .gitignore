@@ -50,8 +50,28 @@ nul
 # Claude Code — ignore local settings but track shared skills
 .claude
 
-# brokkr local cache
-.brokkr
+# brokkr local cache, with one deliberate exception.
+#
+# gate.db holds the sync-bench baseline rows that brokkr.toml pins by UUID.
+# It was the ONLY copy of those numbers: the pin is committed, the row it
+# points at was not, so anything that removed the file orphaned every
+# baseline on the host with no recovery path. That is not hypothetical -
+# `brokkr clean` deleted this directory wholesale (fixed upstream in
+# 9e0d0ce), and `brokkr kill`'s graceful path calls it, so one SIGTERM'd
+# bench wiped every baseline at once. Losing a baseline is worse than it
+# sounds: gates like `meta.provider_requests` are `max_delta = 0`, and
+# re-recording silently rebases them onto current numbers, so a regression
+# gets blessed as the new reference and the gate goes blind.
+#
+# Tracking it costs a binary diff whenever a baseline is recorded, which is
+# rare and deliberate. That is the cheaper side of the trade.
+#
+# The three-step form is required: git will not re-include a file whose
+# parent directory is excluded, so the directories must stay walkable.
+.brokkr/*
+!.brokkr/ratatoskr/
+.brokkr/ratatoskr/*
+!.brokkr/ratatoskr/gate.db
 
 # Signing keys
 *.key

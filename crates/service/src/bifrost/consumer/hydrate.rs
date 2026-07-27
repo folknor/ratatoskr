@@ -6,7 +6,9 @@ use bifrost_types::{
     AccountId, BlobHandle, Change, HydrationProjection, Importance, Message, ObjectChangeKind,
     ObjectId, ScopeChangeKind, SyncEvent,
 };
-use common::types::{FolderKind, ImportanceLevel, LabelKind, MailProviderKind};
+use common::types::{
+    FolderKind, ImportanceLevel, LabelKind, MailProviderKind, NamespaceAttribution,
+};
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow};
 use futures::StreamExt;
 use mail_parser::{MessageParser, MimeHeaders};
@@ -91,6 +93,45 @@ pub struct ConsumerMessageRow {
 }
 
 impl HydrateBatch {
+    /// Storage identity is account-local, while provider ids are only unique
+    /// inside an owner namespace. Qualify every locally persisted identity at
+    /// the consumer boundary and leave the provider-facing hydration ids
+    /// untouched above this point.
+    pub fn qualify_namespace(&mut self, namespace: &NamespaceAttribution) {
+        let Some(prefix) = namespace.id_prefix() else {
+            return;
+        };
+        for row in &mut self.rows {
+            let old_message_id = std::mem::take(&mut row.message.id);
+            let old_thread_id = std::mem::take(&mut row.message.thread_id);
+            let message_id = format!("{prefix}:{old_message_id}");
+            let thread_id = format!("{prefix}:{old_thread_id}");
+            row.message.id = message_id.clone();
+            row.message.thread_id = thread_id.clone();
+            row.search_document.message_id = message_id.clone();
+            row.search_document.thread_id = thread_id;
+            for attachment in &mut row.attachments {
+                attachment.message_id = message_id.clone();
+                attachment.id = format!("{prefix}:{}", attachment.id);
+            }
+        }
+        self.deleted_ids = self
+            .deleted_ids
+            .iter()
+            .map(|id| format!("{prefix}:{id}"))
+            .collect();
+        self.removed_ids = self
+            .removed_ids
+            .iter()
+            .map(|id| format!("{prefix}:{id}"))
+            .collect();
+        self.live_ids = self
+            .live_ids
+            .iter()
+            .map(|id| format!("{prefix}:{id}"))
+            .collect();
+    }
+
     pub async fn from_changes(
         engine: &SyncEngine,
         account_id: &AccountId,

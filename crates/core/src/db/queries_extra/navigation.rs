@@ -406,7 +406,7 @@ fn get_folder_unread_counts(
              INNER JOIN thread_folders tf
                ON tf.account_id = t.account_id AND tf.thread_id = t.id
              WHERE t.account_id = ?1 AND t.is_read = 0
-               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+               AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
              GROUP BY tf.folder_id",
         )
         .map_err(|e| e.to_string())?;
@@ -476,7 +476,7 @@ fn load_label_group_unread_counts(
            INNER JOIN label_groups lg_outer
            WHERE {scope_clause}
              AND t.is_read = 0
-             AND t.shared_mailbox_id IS NULL
+             AND t.namespace_kind IS NULL
              AND t.is_chat_thread = 0
              AND {group_fragment}
            GROUP BY t.account_id, t.id, lg_outer.id
@@ -517,7 +517,7 @@ fn load_label_group_unread_counts_for_shared_mailbox(
            FROM threads t
            INNER JOIN label_groups lg_outer
            WHERE t.account_id = ?1
-             AND t.shared_mailbox_id = ?2
+             AND t.namespace_kind = 'shared' AND t.namespace_id = ?2
              AND t.is_read = 0
              AND t.is_chat_thread = 0
              AND {group_fragment}
@@ -560,7 +560,7 @@ pub fn get_shared_mailbox_navigation(
              FROM threads t
              INNER JOIN thread_folders tf
                ON tf.account_id = t.account_id AND tf.thread_id = t.id
-             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+             WHERE t.account_id = ?1 AND t.namespace_kind = 'shared' AND t.namespace_id = ?2
                AND t.is_read = 0
              GROUP BY tf.folder_id",
         )
@@ -665,19 +665,24 @@ pub struct SharedMailboxRow {
     pub display_name: Option<String>,
     pub account_id: String,
     pub is_sync_enabled: bool,
-    pub last_synced_at: Option<i64>,
-    pub sync_error: Option<String>,
+    /// `Some` once the container reconcile stopped seeing the mailbox in the
+    /// account's own enumeration. Replaces the dropped `sync_error` column as
+    /// the "access revoked" surface (B12 lateral finding 5).
+    pub revoked_at: Option<i64>,
 }
 
 /// Load all shared mailboxes for sidebar display, across all active accounts.
+///
+/// Revoked mailboxes are still returned so the sidebar can render them as
+/// revoked rather than have them silently disappear.
 pub fn get_shared_mailboxes_sync(conn: &ReadConn<'_>) -> Result<Vec<SharedMailboxRow>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT s.mailbox_id, s.display_name, s.account_id,
-                    s.is_sync_enabled, s.last_synced_at, s.sync_error
-             FROM shared_mailbox_sync_state s
+                    s.is_sync_enabled, s.revoked_at
+             FROM shared_mailboxes s
              JOIN accounts a ON s.account_id = a.id
-             WHERE a.is_active = 1
+             WHERE a.is_active = 1 AND s.is_visible = 1
              ORDER BY a.sort_order ASC, s.display_name ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -688,8 +693,7 @@ pub fn get_shared_mailboxes_sync(conn: &ReadConn<'_>) -> Result<Vec<SharedMailbo
             display_name: row.get("display_name")?,
             account_id: row.get("account_id")?,
             is_sync_enabled: row.get::<_, i64>("is_sync_enabled")? != 0,
-            last_synced_at: row.get("last_synced_at")?,
-            sync_error: row.get("sync_error")?,
+            revoked_at: row.get("revoked_at")?,
         })
     })
     .map_err(|e| e.to_string())?
@@ -707,7 +711,7 @@ pub fn get_shared_mailbox_email_sync(
     mailbox_id: &str,
 ) -> Result<Option<String>, String> {
     match conn.query_row(
-        "SELECT email_address FROM shared_mailbox_sync_state
+        "SELECT email_address FROM shared_mailboxes
          WHERE account_id = ?1 AND mailbox_id = ?2",
         params![account_id, mailbox_id],
         |row| row.get::<_, Option<String>>(0),
@@ -732,20 +736,29 @@ pub struct PinnedPublicFolderRow {
 }
 
 /// Load pinned public folders for sidebar display, across all active accounts.
+///
+/// The hierarchy itself lives in `folders` (`namespace_type = 'public'`) since
+/// B12; `public_folder_pins` carries only the sync gate, visibility, and
+/// ordering. Unread counts come from the folder's real namespaced threads.
 pub fn get_pinned_public_folders_sync(
     conn: &ReadConn<'_>,
 ) -> Result<Vec<PinnedPublicFolderRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT p.folder_id, p.display_name, p.account_id,
-                    p.sync_enabled, p.position,
-                    COALESCE(f.unread_count, 0) AS unread_count
+            "SELECT p.folder_id, COALESCE(f.name, p.folder_id) AS display_name, p.account_id,
+                    p.is_sync_enabled, p.sort_order,
+                    (SELECT COUNT(*) FROM threads t
+                      WHERE t.account_id = p.account_id
+                        AND t.namespace_kind = 'public'
+                        AND t.namespace_id = p.folder_id
+                        AND t.is_read = 0) AS unread_count
              FROM public_folder_pins p
-             LEFT JOIN public_folders f
-               ON p.folder_id = f.id AND p.account_id = f.account_id
+             LEFT JOIN folders f
+               ON f.id = p.folder_id AND f.account_id = p.account_id
+              AND f.namespace_type = 'public'
              JOIN accounts a ON p.account_id = a.id
-             WHERE a.is_active = 1
-             ORDER BY p.position ASC",
+             WHERE a.is_active = 1 AND p.is_visible = 1
+             ORDER BY p.sort_order ASC, display_name ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -754,8 +767,8 @@ pub fn get_pinned_public_folders_sync(
             folder_id: row.get("folder_id")?,
             display_name: row.get("display_name")?,
             account_id: row.get("account_id")?,
-            sync_enabled: row.get::<_, i64>("sync_enabled")? != 0,
-            position: row.get("position")?,
+            sync_enabled: row.get::<_, i64>("is_sync_enabled")? != 0,
+            position: row.get("sort_order")?,
             unread_count: row.get("unread_count")?,
         })
     })

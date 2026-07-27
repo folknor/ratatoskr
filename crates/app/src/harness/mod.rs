@@ -2708,6 +2708,23 @@ fn request_params_from_lua(
                     oauth_client_id: get_string_field(state, params_idx, "oauth_client_id")?,
                     oauth_token_url: get_string_field(state, params_idx, "oauth_token_url")?,
                     jmap_url: get_string_field(state, params_idx, "jmap_url")?,
+                    delegate_discovery_enabled: get_bool_field(
+                        state,
+                        params_idx,
+                        "delegate_discovery_enabled",
+                    )?
+                    .unwrap_or(false),
+                    public_folders_enabled: get_bool_field(
+                        state,
+                        params_idx,
+                        "public_folders_enabled",
+                    )?
+                    .unwrap_or(false),
+                    public_folder_pins: get_string_array_field(
+                        state,
+                        params_idx,
+                        "public_folder_pins",
+                    )?,
                     oauth_extra_scopes: get_string_field(state, params_idx, "oauth_extra_scopes")?,
                     read_receipt_policy: get_string_field(
                         state,

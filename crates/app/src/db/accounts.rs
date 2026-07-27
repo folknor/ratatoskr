@@ -57,8 +57,7 @@ impl Db {
                     display_name: row.display_name,
                     account_id: row.account_id,
                     is_sync_enabled: row.is_sync_enabled,
-                    last_synced_at: row.last_synced_at,
-                    sync_error: row.sync_error,
+                    revoked_at: row.revoked_at,
                 })
                 .collect())
         })

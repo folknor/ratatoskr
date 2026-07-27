@@ -1,6 +1,6 @@
 -- description: IMAP read/star action writeback persists across follow-up sync
 -- expected: pass
--- fixture: imap-small.toml
+-- fixture: shared-imap-small.toml
 -- protocol: imap
 -- ceiling: 120s
 
@@ -53,15 +53,19 @@ local function execute_action(client, queue, account_id, thread_id, operation, f
     return completed
 end
 
-local function assert_messages_read(state, expected, label)
+local function assert_thread_read(state, thread_id, expected, label)
     for _, message in ipairs(state.messages) do
-        harness.assert_eq(message.is_read, expected, label .. " read flag")
+        if message.thread_id == thread_id then
+            harness.assert_eq(message.is_read, expected, label .. " read flag")
+        end
     end
 end
 
-local function assert_messages_starred(state, expected, label)
+local function assert_thread_starred(state, thread_id, expected, label)
     for _, message in ipairs(state.messages) do
-        harness.assert_eq(message.is_starred, expected, label .. " starred flag")
+        if message.thread_id == thread_id then
+            harness.assert_eq(message.is_starred, expected, label .. " starred flag")
+        end
     end
 end
 
@@ -103,8 +107,6 @@ local initial, initial_err = client:request("TestQueryDbState", {
     message_limit = 10,
 })
 harness.assert(initial_err == nil, "initial TestQueryDbState failed")
-harness.assert_eq(initial.message_count, 2, "initial message count")
-harness.assert_eq(initial.unread_message_count, 1, "initial unread count")
 
 local hello = message_by_subject(initial.messages, "Hello")
 harness.assert(hello ~= nil, "missing Hello")
@@ -138,8 +140,7 @@ local after_read, after_read_err = client:request("TestQueryDbState", {
     message_limit = 10,
 })
 harness.assert(after_read_err == nil, "TestQueryDbState after SetRead failed")
-harness.assert_eq(after_read.unread_message_count, 0, "unread count after SetRead")
-assert_messages_read(after_read, true, "after SetRead")
+assert_thread_read(after_read, hello.thread_id, true, "after SetRead")
 
 harness.clear_mock_requests(admin_endpoint)
 
@@ -154,8 +155,7 @@ local after_read_resync, after_read_resync_err = client:request("TestQueryDbStat
     message_limit = 10,
 })
 harness.assert(after_read_resync_err == nil, "TestQueryDbState after SetRead resync failed")
-harness.assert_eq(after_read_resync.unread_message_count, 0, "unread count after SetRead resync")
-assert_messages_read(after_read_resync, true, "after SetRead resync")
+assert_thread_read(after_read_resync, hello.thread_id, true, "after SetRead resync")
 
 harness.clear_mock_requests(admin_endpoint)
 
@@ -179,7 +179,7 @@ local after_star, after_star_err = client:request("TestQueryDbState", {
     message_limit = 10,
 })
 harness.assert(after_star_err == nil, "TestQueryDbState after SetStarred failed")
-assert_messages_starred(after_star, false, "after SetStarred")
+assert_thread_starred(after_star, hello.thread_id, false, "after SetStarred")
 
 harness.clear_mock_requests(admin_endpoint)
 
@@ -197,7 +197,26 @@ harness.assert(
     after_star_resync_err == nil,
     "TestQueryDbState after SetStarred resync failed"
 )
-assert_messages_starred(after_star_resync, false, "after SetStarred resync")
+assert_thread_starred(after_star_resync, hello.thread_id, false, "after SetStarred resync")
+
+local shared = message_by_subject(after_star_resync.messages, "Shared copy")
+harness.assert(shared ~= nil, "read-only shared message missing")
+local read_only_ack, read_only_err = client:request("ActionExecutePlan", {
+    operations = {{ account_id = account.account_id, thread_id = shared.thread_id, operation = "SetRead", to = true }},
+})
+harness.assert(read_only_err == nil and read_only_ack.journaled, "read-only plan was not journaled")
+local read_only = wait_for_action_completed(queue, read_only_ack.plan_id, 15)
+harness.assert(read_only ~= nil, "read-only action missing action.completed")
+harness.assert_eq(read_only.summary_remote_succeeded, 0, "read-only action reached IMAP")
+harness.assert_eq(read_only.summary_local_only, 0, "read-only action mutated locally")
+local after_read_only, after_read_only_err = client:request("TestQueryDbState", {
+    account_id = account.account_id,
+    message_limit = 10,
+})
+harness.assert(after_read_only_err == nil, "TestQueryDbState after read-only action failed")
+local shared_after = message_by_subject(after_read_only.messages, "Shared copy")
+harness.assert(shared_after ~= nil, "read-only action removed shared message")
+harness.assert_eq(shared_after.is_read, shared.is_read, "read-only action changed local shared flag")
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

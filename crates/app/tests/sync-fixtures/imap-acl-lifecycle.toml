@@ -1,0 +1,71 @@
+name = "imap-acl-lifecycle"
+
+[[account]]
+id = "account-primary"
+name = "viewer@example.test"
+is_personal = true
+primary = true
+
+[[account]]
+id = "account-alice"
+name = "alice@example.test"
+is_personal = false
+
+[[mailbox]]
+id = "primary-inbox"
+account_id = "account-primary"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "alice-shared"
+account_id = "account-alice"
+name = "Shared"
+
+[[email]]
+id = "personal-initial"
+mailbox_ids = ["primary-inbox"]
+from = "sender@example.test"
+to = ["viewer@example.test"]
+subject = "Personal initial"
+received_at = "2026-02-01T10:00:00Z"
+message_id = ["<personal-initial@example.test>"]
+body_text = "Personal initial body."
+
+[[email]]
+id = "alice-shared-message"
+mailbox_ids = ["alice-shared"]
+from = "sender@example.test"
+to = ["alice@example.test"]
+subject = "ACL shared message"
+received_at = "2026-02-01T11:00:00Z"
+message_id = ["<acl-shared@example.test>"]
+body_text = "Shared body."
+
+[[change]]
+id = "grant"
+
+[[change.acl_grant]]
+mailbox_id = "alice-shared"
+identifier = "account-primary"
+rights = "lr"
+
+[[change]]
+id = "revoke"
+
+[[change.acl_revoke]]
+mailbox_id = "alice-shared"
+identifier = "account-primary"
+
+[[change]]
+id = "personal-delta"
+
+[[change.email_create]]
+id = "personal-after-revoke"
+mailbox_ids = ["primary-inbox"]
+from = "sender@example.test"
+to = ["viewer@example.test"]
+subject = "Personal after revoke"
+received_at = "2026-02-01T12:00:00Z"
+message_id = ["<personal-after-revoke@example.test>"]
+body_text = "Personal delta body."

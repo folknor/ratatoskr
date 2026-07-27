@@ -3,13 +3,14 @@ use std::sync::Arc;
 
 use bifrost_caldav::{CalDavAccountFactory, CalDavConfig, CalDavCredentials};
 use bifrost_carddav::{CardDavConfig, CardDavCredentials};
-use bifrost_graph::account::{GraphAccountFactory, GraphClient};
+use bifrost_graph::account::{GraphAccountFactory, GraphClient, PublicFolderScope};
 use bifrost_imap::{
     AuthPolicy, Credentials, ImapAccountConfig, ImapAccountFactory, ImapConfig,
     SmtpSubmissionConfig, SubmissionCredentials, SubmissionTls,
 };
 use bifrost_jmap_new::sync::{JmapAccountFactory, JmapCredentials};
 use bifrost_net::{OAuthRefresher, StaticTokenSource, TokenSource};
+use bifrost_types::FolderId;
 use bifrost_types::{AccountFactory, ProtocolKind};
 use common::crypto::StoredSecret;
 use db::db::{ReadConn, ReadDbState, WriterPool, params};
@@ -214,6 +215,26 @@ pub(crate) fn factory_from_decrypted(
             let mut factory = GraphAccountFactory::new(client);
             if let Ok(webhook_url) = std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL") {
                 factory = factory.with_push_endpoint(webhook_url);
+            }
+            for mailbox in &decrypted.row.enabled_shared_mailboxes {
+                factory = factory.with_shared_mailbox(mailbox.clone());
+            }
+            if decrypted.row.delegate_discovery_enabled {
+                factory = factory.with_delegate_discovery();
+            }
+            if decrypted.row.public_folders_enabled {
+                let pins = decrypted
+                    .row
+                    .enabled_public_folder_pins
+                    .iter()
+                    .cloned()
+                    .map(FolderId);
+                let scope = if decrypted.row.enabled_public_folder_pins.is_empty() {
+                    PublicFolderScope::hierarchy_only()
+                } else {
+                    PublicFolderScope::pinned(pins)
+                };
+                factory = factory.with_public_folders(scope);
             }
             Ok(Arc::new(factory))
         }
@@ -460,6 +481,10 @@ struct AccountCredentialsRow {
     caldav_username: Option<String>,
     caldav_password: Option<String>,
     accept_invalid_certs: bool,
+    delegate_discovery_enabled: bool,
+    public_folders_enabled: bool,
+    enabled_shared_mailboxes: Vec<String>,
+    enabled_public_folder_pins: Vec<String>,
 }
 
 impl AccountCredentialsRow {
@@ -575,6 +600,10 @@ impl DecryptedAccountCredentials {
                 caldav_username: None,
                 caldav_password: None,
                 accept_invalid_certs: params.accept_invalid_certs,
+                delegate_discovery_enabled: false,
+                public_folders_enabled: false,
+                enabled_shared_mailboxes: Vec::new(),
+                enabled_public_folder_pins: Vec::new(),
             },
             access_token: params
                 .access_token
@@ -788,6 +817,29 @@ fn read_bifrost_account_credentials(
     conn: &ReadConn<'_>,
     account_id: &str,
 ) -> Result<Result<AccountCredentialsRow, BifrostBuildError>, String> {
+    let enabled_shared_mailboxes = conn
+        .prepare("SELECT mailbox_id FROM shared_mailboxes WHERE account_id = ?1 AND is_sync_enabled = 1 AND revoked_at IS NULL")
+        .map_err(|error| format!("prepare enabled shared mailboxes: {error}"))?
+        .query_map(params![account_id], |row| row.get(0))
+        .map_err(|error| format!("query enabled shared mailboxes: {error}"))?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|error| format!("collect enabled shared mailboxes: {error}"))?;
+    let enabled_public_folder_pins = conn
+        .prepare("SELECT folder_id FROM public_folder_pins WHERE account_id = ?1 AND is_sync_enabled = 1")
+        .map_err(|error| format!("prepare enabled public-folder pins: {error}"))?
+        .query_map(params![account_id], |row| row.get(0))
+        .map_err(|error| format!("query enabled public-folder pins: {error}"))?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|error| format!("collect enabled public-folder pins: {error}"))?;
+    let enabled_public_folder_pins: Vec<String> = enabled_public_folder_pins
+        .into_iter()
+        .map(|storage_id| {
+            storage_id
+                .strip_prefix("public:")
+                .unwrap_or(&storage_id)
+                .to_string()
+        })
+        .collect();
     conn.query_row(
         "SELECT id, email, provider, auth_method, access_token, refresh_token,
                 token_expires_at, oauth_provider, oauth_client_id,
@@ -795,7 +847,7 @@ fn read_bifrost_account_credentials(
                 imap_security, imap_username, imap_password, smtp_host, smtp_port,
                 smtp_security, smtp_username, smtp_password, jmap_url,
                 calendar_provider, caldav_url, caldav_username, caldav_password,
-                accept_invalid_certs
+                accept_invalid_certs, delegate_discovery_enabled, public_folders_enabled
          FROM accounts
          WHERE id = ?1",
         params![account_id],
@@ -830,6 +882,10 @@ fn read_bifrost_account_credentials(
                 caldav_username: row.get("caldav_username")?,
                 caldav_password: row.get("caldav_password")?,
                 accept_invalid_certs: row.get::<_, i64>("accept_invalid_certs")? != 0,
+                delegate_discovery_enabled: row.get::<_, i64>("delegate_discovery_enabled")? != 0,
+                public_folders_enabled: row.get::<_, i64>("public_folders_enabled")? != 0,
+                enabled_shared_mailboxes: enabled_shared_mailboxes.clone(),
+                enabled_public_folder_pins: enabled_public_folder_pins.clone(),
             })
         },
     )

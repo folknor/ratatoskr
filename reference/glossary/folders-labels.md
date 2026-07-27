@@ -174,6 +174,18 @@ For **non-system folders and labels**, IDs are provider-specific with a crate pr
 - JMAP user mailboxes - `jmap-{id}`.
 - IMAP user folders - `folder-{path}`.
 
+### Namespace storage identity
+
+Folders, messages, and threads outside an account's personal mailbox carry an
+authoritative namespace pair. `Personal` rows have `namespace_kind IS NULL`.
+Shared rows use `shared:{owner}:{owner-local-id}` folder storage IDs and carry
+`namespace_kind = 'shared'`, `namespace_id = owner`; public rows use
+`public:{native-folder-id}` and carry `namespace_kind = 'public'`,
+`namespace_id = public folder storage ID`. Bifrost native IDs remain confined
+to the service container index, including Graph and JMAP foreign-ID encodings.
+The namespace-qualified message and thread storage IDs prevent same-provider
+IDs or IMAP Message-IDs from colliding across scopes.
+
 ---
 
 ## Universal Folders

@@ -36,10 +36,9 @@ pub struct SharedMailbox {
     pub account_id: String,
     /// Whether sync is enabled for this shared mailbox.
     pub is_sync_enabled: bool,
-    /// Last successful sync timestamp.
-    pub last_synced_at: Option<i64>,
-    /// Last sync error, if any.
-    pub sync_error: Option<String>,
+    /// Set once the account stopped enumerating this mailbox (access
+    /// revoked). Replaces the dropped per-mailbox `sync_error` column.
+    pub revoked_at: Option<i64>,
 }
 
 /// A pinned public folder for sidebar display.
@@ -133,31 +132,6 @@ impl Thread {
             from_name: None,
             from_address: d.from_email,
             is_local_draft: true,
-            // not a search hit - no field attribution to carry
-            match_kind: None,
-            also_matched: Vec::new(),
-        }
-    }
-
-    pub fn from_public_folder_item(item: rtsk::db::queries_extra::PublicFolderItem) -> Self {
-        Self {
-            id: item.item_id,
-            account_id: item.account_id,
-            subject: item.subject,
-            snippet: item.body_preview,
-            last_message_at: item.received_at,
-            message_count: 1,
-            is_read: item.is_read,
-            is_starred: false,
-            is_replied: false,
-            is_forwarded: false,
-            is_pinned: false,
-            is_muted: false,
-            has_attachments: false,
-            label_paints: Vec::new(),
-            from_name: item.sender_name,
-            from_address: item.sender_email,
-            is_local_draft: false,
             // not a search hit - no field attribution to carry
             match_kind: None,
             also_matched: Vec::new(),

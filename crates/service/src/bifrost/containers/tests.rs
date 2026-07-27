@@ -12,15 +12,42 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use bifrost_types::{
-    Container, ContainerId, ContainerKind, ContainerRights, ContainerStyle, FolderRole,
+    Container, ContainerContentClass, ContainerId, ContainerKind, ContainerNamespace,
+    ContainerRights, ContainerStyle, CursorScope, FolderId, FolderRole, MailboxId, ObjectType,
     ProtocolKind, Provenance,
 };
-use common::types::{FolderKind, SystemFolderId};
+use common::types::{FolderKind, NamespaceAttribution, SystemFolderId};
 use rusqlite::Connection;
 
-use super::{build_container_rows, folder_kind_for, role_to_system_folder_id};
+use super::{ContainerIndex, build_container_rows, folder_kind_for, role_to_system_folder_id};
 
 const ACCOUNT: &str = "acct-1";
+
+#[test]
+fn role_destination_resolves_within_source_namespace() {
+    let mut index = ContainerIndex::default();
+    let personal = NamespaceAttribution::Personal;
+    let shared = NamespaceAttribution::Shared {
+        owner: "alice@example.test".to_string(),
+    };
+    index.roles.insert(
+        (personal.clone(), FolderRole::Trash),
+        "personal-trash".to_string(),
+    );
+    index.roles.insert(
+        (shared.clone(), FolderRole::Trash),
+        "alice-trash".to_string(),
+    );
+
+    assert_eq!(
+        index.role_target(&personal, FolderRole::Trash),
+        Some("personal-trash")
+    );
+    assert_eq!(
+        index.role_target(&shared, FolderRole::Trash),
+        Some("alice-trash")
+    );
+}
 
 fn provenance(provider: ProtocolKind, kind: ContainerKind, native: &str) -> Provenance {
     Provenance {
@@ -68,6 +95,120 @@ fn folder(
     )
     // JMAP marks role-bearing mailboxes system; the others leave it false.
     .with_system(matches!(provider, ProtocolKind::Jmap) && role.is_some())
+}
+
+/// A namespaced (shared or public) folder container, built through the
+/// builder setters B12-SQ added rather than a widened `Container::new`.
+fn namespaced(
+    provider: ProtocolKind,
+    native: &str,
+    name: &str,
+    namespace: ContainerNamespace,
+    owner: Option<&str>,
+    owner_local_id: Option<&str>,
+    content_class: Option<ContainerContentClass>,
+) -> Container {
+    folder(provider, native, name, None, None)
+        .with_namespace(namespace)
+        .with_owner(owner.map(|owner| MailboxId(owner.to_string())))
+        .with_owner_local_id(owner_local_id.map(str::to_string))
+        .with_content_class(content_class)
+}
+
+#[test]
+fn container_index_attributes_scope_to_namespace() {
+    let containers = vec![
+        folder(
+            ProtocolKind::Imap,
+            "INBOX",
+            "Inbox",
+            Some(FolderRole::Inbox),
+            None,
+        ),
+        namespaced(
+            ProtocolKind::Imap,
+            "#user/alice/INBOX",
+            "Alice Inbox",
+            ContainerNamespace::Shared,
+            Some("alice"),
+            Some("#user/alice/INBOX"),
+            None,
+        ),
+        namespaced(
+            ProtocolKind::Graph,
+            "pf-notices",
+            "Notices",
+            ContainerNamespace::Public,
+            None,
+            None,
+            Some(ContainerContentClass::Mail),
+        ),
+        namespaced(
+            ProtocolKind::Graph,
+            "pf-calendar",
+            "Calendar",
+            ContainerNamespace::Public,
+            None,
+            None,
+            Some(ContainerContentClass::Calendar),
+        ),
+    ];
+    let (rows, _, index) = build_container_rows(ACCOUNT, &containers).unwrap();
+
+    // Account-level scopes are personal by construction: bifrost cannot
+    // express a foreign account-level scope.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Account),
+        Some(NamespaceAttribution::Personal)
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("INBOX".into()))),
+        Some(NamespaceAttribution::Personal)
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("#user/alice/INBOX".into()))),
+        Some(NamespaceAttribution::Shared {
+            owner: "alice".into()
+        })
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::FolderType {
+            folder: FolderId("pf-notices".into()),
+            ty: ObjectType::Email,
+        }),
+        Some(NamespaceAttribution::Public {
+            folder_storage_id: "public:pf-notices".into()
+        })
+    );
+
+    // Obstacle Q: an unknown folder scope NEVER defaults to personal.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("#user/bob/INBOX".into()))),
+        None
+    );
+
+    // Obstacle T: a non-mail public container is not a mail scope.
+    assert!(index.is_mail_container("pf-notices"));
+    assert!(!index.is_mail_container("pf-calendar"));
+
+    // Obstacle C: the storage ids are namespace-prefixed and carry the id
+    // WITHIN the owner namespace, never the foreign-encoded native id.
+    assert_eq!(
+        index.storage_id_for_native("#user/alice/INBOX"),
+        Some("shared:alice:folder-#user/alice/INBOX")
+    );
+    assert_eq!(
+        index.storage_id_for_native("pf-notices"),
+        Some("public:pf-notices")
+    );
+
+    let shared_row = find_folder(&rows, "shared:alice:folder-#user/alice/INBOX");
+    assert_eq!(shared_row.namespace_type.as_deref(), Some("shared"));
+    assert_eq!(shared_row.owner_id.as_deref(), Some("alice"));
+    let public_row = find_folder(&rows, "public:pf-calendar");
+    assert_eq!(public_row.namespace_type.as_deref(), Some("public"));
+    assert_eq!(public_row.content_class.as_deref(), Some("Calendar"));
+    assert_eq!(find_folder(&rows, "INBOX").namespace_type, None);
 }
 
 fn find_folder<'a>(

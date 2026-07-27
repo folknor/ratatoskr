@@ -1,0 +1,46 @@
+name = "shared-jmap-small"
+
+[[account]]
+id = "account-primary"
+name = "primary@example.test"
+is_personal = true
+primary = true
+
+[[account]]
+id = "account-team"
+name = "team@example.test"
+is_personal = false
+
+[[mailbox]]
+id = "primary-inbox"
+account_id = "account-primary"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "team-inbox"
+account_id = "account-team"
+name = "Inbox"
+role = "inbox"
+
+[[email]]
+id = "primary-message"
+thread_id = "same-thread-id"
+mailbox_ids = ["primary-inbox"]
+from = "sender@example.test"
+to = ["primary@example.test"]
+subject = "Personal copy"
+received_at = "2026-02-01T10:00:00Z"
+message_id = ["<same-message-id@example.test>"]
+body_text = "Personal body."
+
+[[email]]
+id = "team-message"
+thread_id = "same-thread-id"
+mailbox_ids = ["team-inbox"]
+from = "sender@example.test"
+to = ["team@example.test"]
+subject = "Shared copy"
+received_at = "2026-02-01T11:00:00Z"
+message_id = ["<same-message-id@example.test>"]
+body_text = "Shared body."

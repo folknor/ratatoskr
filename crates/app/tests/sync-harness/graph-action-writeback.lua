@@ -1,6 +1,6 @@
 -- description: Graph action writeback dispatches remotely and survives a server round-trip
 -- expected: pass
--- fixture: graph-initial.toml
+-- fixture: push-namespaces.toml
 -- protocol: graph
 -- ceiling: 120s
 --
@@ -122,6 +122,9 @@ local account, account_err = client:request("TestSeedAccount", {
     display_name = "Sync Graph Writeback",
     account_name = "Sync Graph Writeback",
     provider = "graph",
+    delegate_discovery_enabled = true,
+    public_folders_enabled = true,
+    public_folder_pins = { "public:pf-notices" },
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
@@ -136,27 +139,24 @@ harness.assert_eq(
 )
 
 local initial = query(client, account.account_id, "initial")
-harness.assert_eq(initial.message_count, 1, "initial message count")
-local message = message_by_subject(initial.messages, "Graph initial")
-harness.assert(message ~= nil, "missing Graph initial message")
+local message = message_by_subject(initial.messages, "Welcome")
+harness.assert(message ~= nil, "missing personal message")
 
 -- SetRead: dispatch remotely, then resync and assert the message comes back
 -- read from the server.
 execute_action(client, queue, account.account_id, message.thread_id, "SetRead", { to = true })
 resync(client, account.account_id, "SetRead")
-harness.assert_eq(
-    query(client, account.account_id, "after SetRead resync").unread_message_count,
-    0,
-    "unread after SetRead resync"
-)
+local after_read = query(client, account.account_id, "after SetRead resync")
+local read_message = message_by_subject(after_read.messages, "Welcome")
+harness.assert(read_message ~= nil and read_message.is_read, "personal message read after SetRead resync")
 
 -- SetStarred: dispatch remotely, then resync and assert the message comes back
 -- starred from the server.
 execute_action(client, queue, account.account_id, message.thread_id, "SetStarred", { to = true })
 resync(client, account.account_id, "SetStarred")
-for _, msg in ipairs(query(client, account.account_id, "after SetStarred resync").messages) do
-    harness.assert(msg.is_starred, "message starred after SetStarred resync")
-end
+local after_star = query(client, account.account_id, "after SetStarred resync")
+local starred_message = message_by_subject(after_star.messages, "Welcome")
+harness.assert(starred_message ~= nil and starred_message.is_starred, "personal message starred after SetStarred resync")
 
 -- Archive: dispatch remotely, then resync and assert the thread left the inbox
 -- on the server.
@@ -173,11 +173,8 @@ harness.assert(
 -- gone from the server.
 execute_action(client, queue, account.account_id, message.thread_id, "PermanentDelete")
 resync(client, account.account_id, "PermanentDelete")
-harness.assert_eq(
-    query(client, account.account_id, "after delete resync").message_count,
-    0,
-    "message count after delete resync"
-)
+local after_delete = query(client, account.account_id, "after delete resync")
+harness.assert(message_by_subject(after_delete.messages, "Welcome") == nil, "personal message remains after delete resync")
 
 local ok, shutdown_err = client:shutdown()
 harness.assert(ok, "shutdown failed")

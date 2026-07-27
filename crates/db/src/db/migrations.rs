@@ -48,14 +48,11 @@ const SCHEMA_V100: &str = concat!(
     include_str!("schema/09_security.sql"),
     "\n",
     // folder_sync_state, jmap_sync_state, graph_folder_delta_tokens,
-    // graph_shared_mailbox_delta_tokens, sync_cursors,
-    // shared_mailbox_sync_state, jmap_push_state, graph_subscriptions,
-    // pending_operations
+    // sync_cursors, seen_ingest_markers, shared_mailboxes, jmap_push_state,
+    // graph_subscriptions, pending_operations
     include_str!("schema/10_sync.sql"),
     "\n",
-    // public_folders, public_folder_items, public_folder_pins,
-    // public_folder_sync_state, public_folder_content_routing,
-    // chat_contacts, thread_participants
+    // public_folder_pins, chat_contacts, thread_participants
     include_str!("schema/11_collaboration.sql"),
     "\n",
     // action_jobs, action_job_ops (Phase 2 sibling-job journal)

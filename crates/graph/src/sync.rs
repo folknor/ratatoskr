@@ -68,6 +68,8 @@ async fn persist_folders_with_writer(
             imap_folder_path: None,
             imap_special_use: None,
             namespace_type: None,
+            owner_id: None,
+            content_class: None,
             parent_id: m.parent_folder_id.clone(),
             right_read: None,
             right_add: None,

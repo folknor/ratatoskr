@@ -1,0 +1,41 @@
+name = "shared-graph-small"
+
+[[account]]
+id = "viewer@example.test"
+name = "viewer@example.test"
+is_personal = true
+primary = true
+
+[[account]]
+id = "alice@example.test"
+name = "alice@example.test"
+is_personal = false
+
+[[mailbox]]
+id = "primary-inbox"
+account_id = "viewer@example.test"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "alice-inbox"
+account_id = "alice@example.test"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "alice-archive"
+account_id = "alice@example.test"
+name = "Archive"
+role = "archive"
+
+[[email]]
+id = "alice-message"
+thread_id = "shared-thread"
+mailbox_ids = ["alice-inbox"]
+from = "sender@example.test"
+to = ["alice@example.test"]
+subject = "Shared Graph copy"
+received_at = "2026-02-01T11:00:00Z"
+message_id = ["<shared-graph@example.test>"]
+body_text = "Shared Graph body."

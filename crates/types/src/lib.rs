@@ -8,7 +8,8 @@ mod typed_ids;
 pub use date_bound::DateBound;
 pub use folder_label::{
     CategoryName, FolderKind, GmailLabelId, GmailSystemLabelId, GraphGuid, ImapPath,
-    ImportanceLevel, JmapId, KeywordName, LabelKind, MailLocator, Namespace, SystemFolderId,
+    ImportanceLevel, JmapId, KeywordName, LabelKind, MailLocator, Namespace, NamespaceAttribution,
+    NamespaceKind, SystemFolderId,
 };
 pub use mail_provider::MailProviderKind;
 pub use send_intent::SendIntent;

@@ -1,5 +1,13 @@
 # Public Folders
 
+> **B12 migration note (July 2026).** The implementation history below predates
+> the bifrost scope cut. Pinned Graph public folders are bifrost cursor scopes
+> that hydrate into ordinary namespaced mail threads and use the standard
+> reading-pane path. The old EWS, Autodiscover, Graph public-folder sync, IMAP
+> public-folder, `public_folders`, and `public_folder_items` paths were
+> retired. `public_folder_pins` remains the discovery allowlist and visibility
+> registry; public-namespace actions are rejected before local mutation.
+
 **Tier**: 1 - Blocks switching from Outlook
 **Status**: (yellow) **Backend done; UI plumbing partial.** EWS SOAP client in `crates/graph/src/ews/` (4 modules, ~1650 lines: `mod.rs`, `client.rs`, `parsers.rs`, `xml_helpers.rs`) covers FindFolder, GetFolder, FindItem (with paging), GetItem, CreateItem, `decode_replica_list()`, and `EwsEffectiveRights` parsing. Autodiscover routing in `crates/graph/src/autodiscover.rs` (~600 lines). Offline sync for pinned folders in `crates/graph/src/public_folder_sync.rs` (~720 lines) including `browse_public_folders()` and `sync_all_pinned_folders()`. IMAP NAMESPACE public folders in `crates/imap/src/public_folders.rs` (~735 lines) with `discover_imap_public_folders()` and `sync_imap_public_folder()` bridging into the same `public_folders` DB table. Schema lives in `crates/db/src/db/schema/11_collaboration.sql` (tables: `public_folders`, `public_folder_items`, `public_folder_pins`, `public_folder_sync_state`, `public_folder_content_routing`), not in `migrations.rs`.
 

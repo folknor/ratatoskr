@@ -19,7 +19,7 @@ use tokio::sync::{Mutex, broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::containers;
+use super::containers::{self, ContainerIndex};
 use super::error_map;
 use super::{
     BifrostConsumerStores, BifrostProviderKind, BifrostSyncEngine, ChangeStreamConsumer,
@@ -90,7 +90,7 @@ struct ResidentSlot {
     /// `COMPLETION_IDLE_INTERVAL` while idle).
     initial_marked: AtomicBool,
     provider: BifrostProviderKind,
-    folder_map: Arc<HashMap<String, FolderKind>>,
+    containers: Arc<ContainerIndex>,
 }
 
 #[derive(Clone)]
@@ -98,7 +98,10 @@ pub(crate) struct ResidentActionAccount {
     pub(crate) account_id: String,
     pub(crate) engine: Arc<SyncEngine>,
     pub(crate) provider: BifrostProviderKind,
-    pub(crate) folder_map: Arc<HashMap<String, FolderKind>>,
+    /// Full native-container index. Folder-map storage ids alone are not
+    /// sufficient for a system action: archive/trash/spam must resolve the
+    /// role inside the source thread's namespace.
+    pub(crate) containers: Arc<ContainerIndex>,
     /// Handle back to the resident engine so an action dispatch can re-fetch
     /// the container/folder map on a cache miss (spec 4.1: a `MoveToFolder`
     /// to a folder absent from the cached map re-resolves before erroring,
@@ -112,9 +115,13 @@ impl ResidentActionAccount {
     /// dispatch-time cache miss (a folder created since attach is not yet in
     /// the slot's snapshot), so a move to a freshly-created folder resolves
     /// instead of failing terminally.
-    pub(crate) async fn refresh_folder_map(&self) -> Result<HashMap<String, FolderKind>, String> {
+    pub(crate) fn folder_map(&self) -> &HashMap<String, FolderKind> {
+        self.containers.folder_map()
+    }
+
+    pub(crate) async fn refresh_containers(&self) -> Result<ContainerIndex, String> {
         self.resident
-            .refresh_folder_map(&self.account_id, self.provider)
+            .refresh_containers(&self.account_id, self.provider)
             .await
     }
 }
@@ -165,6 +172,25 @@ impl ResidentEngine {
         account_id: &str,
         cancellation_token: &CancellationToken,
     ) -> Result<(), String> {
+        // IMAP discovers other-user folders only while opening the account.
+        // A resident slot otherwise keeps its attach-time scope inventory
+        // forever, so an ACL grant made after attach can never produce the
+        // unknown Folder event that obstacle Q refreshes and retries. Rebuild
+        // an existing IMAP slot at an explicit sync boundary: the old slot is
+        // drained before the engine is reattached, which re-runs NAMESPACE /
+        // MYRIGHTS discovery and the container persistence pass. Other
+        // providers have their own account-scope lifecycle surfaces and stay
+        // resident across kicks.
+        let refresh_imap_containers = {
+            let slots = self.inner.slots.lock().await;
+            matches!(
+                slots.get(account_id).map(|slot| slot.provider),
+                Some(BifrostProviderKind::Imap)
+            )
+        };
+        if refresh_imap_containers {
+            self.detach_account(account_id).await?;
+        }
         self.attach_account(account_id).await?;
         let slot = {
             let slots = self.inner.slots.lock().await;
@@ -242,8 +268,8 @@ impl ResidentEngine {
             .attach(account.clone(), factory)
             .await
             .map_err(|error| format!("{error:?}"))?;
-        let folder_map = match self.prepare_folder_map(account_id, provider).await {
-            Ok(map) => Arc::new(map),
+        let containers = match self.prepare_containers(account_id, provider).await {
+            Ok(index) => Arc::new(index),
             Err(error) => {
                 // The engine is attached but the slot was never built; tear
                 // the engine slot back down so a retry re-attaches cleanly
@@ -256,9 +282,9 @@ impl ResidentEngine {
                 return Err(error);
             }
         };
-        self.subscribe_push(account_id, &account, provider, folder_map.as_ref())
+        self.subscribe_push(account_id, &account, provider, containers.as_ref())
             .await;
-        self.register_routing_keys(account_id, provider, folder_map.as_ref())
+        self.register_routing_keys(account_id, provider, containers.as_ref())
             .await;
 
         let (caught_tx, _) = watch::channel(0);
@@ -275,13 +301,13 @@ impl ResidentEngine {
             redrive_attempt: AtomicU32::new(0),
             initial_marked: AtomicBool::new(false),
             provider,
-            folder_map: Arc::clone(&folder_map),
+            containers: Arc::clone(&containers),
         });
         let task_slot = Arc::clone(&slot);
         let inner = Arc::clone(&self.inner);
         let account_for_task = account_id.to_string();
         let task = tokio::spawn(async move {
-            resident_consumer_loop(inner, task_slot, account_for_task, (*folder_map).clone()).await;
+            resident_consumer_loop(inner, task_slot, account_for_task, (*containers).clone()).await;
         });
         *slot.consumer_task.lock().await = Some(task);
         let control_inner = Arc::clone(&self.inner);
@@ -375,22 +401,22 @@ impl ResidentEngine {
             account_id: account_id.to_string(),
             engine: self.inner.engine.engine(),
             provider: slot.provider,
-            folder_map: Arc::clone(&slot.folder_map),
+            containers: Arc::clone(&slot.containers),
             resident: self.clone(),
         })
     }
 
     /// Re-run the provider folder/container sync and return a fresh native
-    /// folder map. Backs `ResidentActionAccount::refresh_folder_map`; the
-    /// resident slot's cached `folder_map` is rebuilt only on (re)attach, so a
-    /// move dispatch that misses the cache calls here to resolve a
+    /// folder map. Backs `ResidentActionAccount::refresh_containers`; the
+    /// resident slot's cached container index is rebuilt only on (re)attach,
+    /// so a move dispatch that misses the cache calls here to resolve a
     /// just-created destination against current server state.
-    pub(crate) async fn refresh_folder_map(
+    pub(crate) async fn refresh_containers(
         &self,
         account_id: &str,
         provider: BifrostProviderKind,
-    ) -> Result<HashMap<String, FolderKind>, String> {
-        self.prepare_folder_map(account_id, provider).await
+    ) -> Result<ContainerIndex, String> {
+        self.prepare_containers(account_id, provider).await
     }
 
     pub async fn detach_account(&self, account_id: &str) -> Result<(), String> {
@@ -480,9 +506,9 @@ impl ResidentEngine {
         account_id: &str,
         account: &AccountId,
         provider: BifrostProviderKind,
-        folder_map: &HashMap<String, FolderKind>,
+        containers: &ContainerIndex,
     ) {
-        let scopes = push_subscribe_scopes(provider, folder_map);
+        let scopes = push_subscribe_scopes(provider, containers);
         match self
             .inner
             .engine
@@ -526,12 +552,12 @@ impl ResidentEngine {
     /// `containers_list` replaces the four per-provider folder-map
     /// implementations. `provider` is no longer consulted here - the engine
     /// is provider-agnostic at this seam - but the parameter stays so the
-    /// `refresh_folder_map` caller signature is unchanged.
-    async fn prepare_folder_map(
+    /// `refresh_containers` caller signature is unchanged.
+    async fn prepare_containers(
         &self,
         account_id: &str,
         _provider: BifrostProviderKind,
-    ) -> Result<HashMap<String, common::types::FolderKind>, String> {
+    ) -> Result<ContainerIndex, String> {
         containers::sync_containers(
             &self.inner.engine.engine(),
             account_id,
@@ -544,7 +570,7 @@ impl ResidentEngine {
         &self,
         account_id: &str,
         provider: BifrostProviderKind,
-        folder_map: &HashMap<String, FolderKind>,
+        containers: &ContainerIndex,
     ) {
         match provider {
             BifrostProviderKind::Gmail => {
@@ -556,7 +582,11 @@ impl ResidentEngine {
                 }
             }
             BifrostProviderKind::Graph => {
-                for folder_id in folder_map.keys() {
+                for folder_id in containers
+                    .folder_map()
+                    .keys()
+                    .filter(|id| containers.is_personal(id))
+                {
                     self.inner
                         .ingress
                         .register(
@@ -594,24 +624,30 @@ impl ResidentEngine {
 
 fn push_subscribe_scopes(
     provider: BifrostProviderKind,
-    folder_map: &HashMap<String, FolderKind>,
+    containers: &ContainerIndex,
 ) -> Vec<CursorScope> {
     match provider {
-        BifrostProviderKind::Graph => folder_map
+        BifrostProviderKind::Graph => containers
+            .folder_map()
             .keys()
+            .filter(|folder_id| containers.is_personal(folder_id))
             .map(|folder_id| CursorScope::FolderType {
                 folder: FolderId(folder_id.clone()),
                 ty: ObjectType::Email,
             })
             .collect(),
         BifrostProviderKind::Imap => {
-            let mut scopes = folder_map
+            let mut scopes = containers
+                .folder_map()
                 .iter()
-                .filter(|(_, kind)| {
-                    matches!(
-                        kind,
-                        FolderKind::System(SystemFolderId::Inbox) | FolderKind::ImapUser(_)
-                    )
+                .filter(|(native, kind)| {
+                    (containers.is_personal(native) || containers.is_shared(native))
+                        && matches!(
+                            kind,
+                            FolderKind::System(SystemFolderId::Inbox)
+                                | FolderKind::ImapUser(_)
+                                | FolderKind::Shared { .. }
+                        )
                 })
                 .map(|(folder_id, _)| CursorScope::Folder(FolderId(folder_id.clone())))
                 .collect::<Vec<_>>();
@@ -747,7 +783,7 @@ async fn resident_consumer_loop(
     inner: Arc<ResidentEngineInner>,
     slot: Arc<ResidentSlot>,
     account_id: String,
-    folder_map: HashMap<String, common::types::FolderKind>,
+    containers: ContainerIndex,
 ) {
     let account = AccountId(account_id.clone());
     loop {
@@ -760,7 +796,7 @@ async fn resident_consumer_loop(
             slot.provider,
             inner.stores.clone(),
         )
-        .with_folder_map(folder_map.clone())
+        .with_containers(containers.clone())
         .with_checkpoint_store(inner.engine.checkpoints())
         .with_hooks(crate::handlers::test_helpers::bifrost_hooks());
         let result = tokio::select! {
@@ -1182,6 +1218,7 @@ async fn read_initial_sync_completed(
 
 #[cfg(test)]
 mod tests {
+    use super::{BifrostProviderKind, CursorScope, FolderId, ObjectType};
     fn index_after(source: &str, needle: &str, after: usize) -> usize {
         source[after..]
             .find(needle)
@@ -1248,5 +1285,96 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Obstacles H, I, and R: a Graph shared-mailbox scope cannot carry a
+    /// delegated change subscription and a `Folder` scope (every public
+    /// folder) is `Unsupported(PushSubscribe)`. `push_subscribe` rejects the
+    /// WHOLE request if any scope is unsubscribable, so one namespaced scope
+    /// in the set would turn push off for the entire account.
+    #[test]
+    fn push_subscribe_scopes_excludes_public_and_graph_shared() {
+        use bifrost_types::{
+            Container, ContainerId, ContainerKind, ContainerNamespace, MailboxId, ProtocolKind,
+            Provenance,
+        };
+
+        fn container(
+            provider: ProtocolKind,
+            native: &str,
+            namespace: ContainerNamespace,
+            owner: Option<&str>,
+        ) -> Container {
+            Container::new(
+                ContainerId(native.to_string()),
+                ContainerKind::Folder,
+                None,
+                Provenance {
+                    provider,
+                    kind: ContainerKind::Folder,
+                    native: native.to_string(),
+                },
+                native.to_string(),
+                None,
+            )
+            .with_namespace(namespace)
+            .with_owner(owner.map(|owner| MailboxId(owner.to_string())))
+            .with_owner_local_id(owner.map(|_| native.to_string()))
+        }
+
+        let graph = [
+            container(
+                ProtocolKind::Graph,
+                "AAMkPersonal",
+                ContainerNamespace::Personal,
+                None,
+            ),
+            container(
+                ProtocolKind::Graph,
+                "AAMkShared",
+                ContainerNamespace::Shared,
+                Some("alice@example.test"),
+            ),
+            container(
+                ProtocolKind::Graph,
+                "pf-notices",
+                ContainerNamespace::Public,
+                None,
+            ),
+        ];
+        let (_, _, index) = super::super::containers::build_container_rows("acct", &graph)
+            .expect("graph containers classify");
+        let scopes = super::push_subscribe_scopes(BifrostProviderKind::Graph, &index);
+        assert_eq!(
+            scopes,
+            vec![CursorScope::FolderType {
+                folder: FolderId("AAMkPersonal".to_string()),
+                ty: ObjectType::Email,
+            }],
+            "only the personal Graph folder may carry a subscription"
+        );
+
+        // IMAP IDLE is per-folder, so a shared folder IS subscribable there.
+        let imap = [
+            container(
+                ProtocolKind::Imap,
+                "Work",
+                ContainerNamespace::Personal,
+                None,
+            ),
+            container(
+                ProtocolKind::Imap,
+                "#user/alice/INBOX",
+                ContainerNamespace::Shared,
+                Some("alice"),
+            ),
+        ];
+        let (_, _, index) = super::super::containers::build_container_rows("acct", &imap)
+            .expect("imap containers classify");
+        let scopes = super::push_subscribe_scopes(BifrostProviderKind::Imap, &index);
+        assert!(scopes.contains(&CursorScope::Folder(FolderId("Work".to_string()))));
+        assert!(scopes.contains(&CursorScope::Folder(FolderId(
+            "#user/alice/INBOX".to_string()
+        ))));
     }
 }

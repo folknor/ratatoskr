@@ -1,0 +1,34 @@
+name = "public-folder-small"
+
+[[account]]
+id = "account-primary"
+name = "viewer@example.test"
+is_personal = true
+
+[[public_folder]]
+id = "pf-notices"
+display_name = "Notices"
+folder_class = "IPF.Note"
+
+[[public_folder]]
+id = "pf-calendar"
+display_name = "Calendar"
+folder_class = "IPF.Appointment"
+
+[[public_item]]
+id = "notice-1"
+folder_id = "pf-notices"
+subject = "Public notice"
+from = "admin@example.test"
+to = ["viewer@example.test"]
+received_at = "2026-02-01T12:00:00Z"
+body_text = "Public folder body."
+
+[[public_item]]
+id = "appointment-1"
+folder_id = "pf-calendar"
+subject = "Public appointment"
+from = "admin@example.test"
+to = ["viewer@example.test"]
+received_at = "2026-02-01T13:00:00Z"
+body_text = "Must not enter the mail path."

@@ -319,7 +319,11 @@ B12), moves to bifrost ownership (B3b), or is retained app-side - so none is lef
 orphaned when its writer is dropped. Two pinned open questions ride into the
 cutover: the JMAP `shared_account_id` dimension does not fold cleanly into any
 `CursorScope` variant (a B3/B12 concern gated on bifrost growing a shared-mailbox
-scope), and `jmap_push_state` / `graph_subscriptions` are subscription state, not
+scope; resolved by B12 - bifrost puts the foreign account id inside the
+`Folder` scope's `FolderId`, so `scope_key = folder:<encoded>` already
+discriminates it and no `CursorScope` variant was needed;
+`jmap_sync_state.shared_account_id` itself goes with the table at B15), and
+`jmap_push_state` / `graph_subscriptions` are subscription state, not
 checkpoint cursors, dispositioned at B3b (the B3b done-note below carries the
 corrected split, which the original B2-note conflated: `graph_subscriptions`
 retired into bifrost's `SubscriptionRegistry`, while `jmap_push_state` - a JMAP
@@ -1526,8 +1530,32 @@ landing commit.
   no-caller `ServerFilterSurface` (`#[allow(dead_code)]`), mirroring B9's
   attachment pin; `server_filters_route_through_bifrost` locks the route and
   duplicate deletion down.
-- B12. Shared mailboxes plus public folders. Rewire
-  `ViewScope::SharedMailbox` / `PublicFolder` onto bifrost scopes. Needs A5.
+- B12. Shared mailboxes plus public folders. CLOSED - `ViewScope::SharedMailbox`
+  and `PublicFolder` now read ordinary bifrost-consumed namespace rows;
+  namespace-local destination resolution and preflight reject unsupported
+  public, JMAP-foreign, rights-denied, and cross-namespace mutations. The
+  dead legacy Graph shared/public, EWS/Autodiscover, and IMAP public-folder
+  clusters are deleted. Read the B12 landing commit for the full accounting.
+
+  Methodology finding, recorded because it should shape how B15 is carved:
+  B12 was MIS-SIZED as a single item. It consumed six implement runs and
+  nine side-quests across two dependency repos, and the loop had to
+  adjudicate its scope twice. The cost was not spec quality - no obstacle
+  the dual critique settled was ever reopened - but the surrounding
+  infrastructure's inability to express what the spec demanded: a mock the
+  harness could not reach, an ACL lifecycle it could not stage, namespaces
+  push could not carry. The recurring shape is worth naming: bifrost's own
+  rules forbid integration and mock-server tests, so a bifrost change can be
+  unit-green and wire-broken, and this item hit that four separate times
+  (a LIST form a conforming server answers with the wrong namespace, a
+  hydration door that routed in batch but not singly - twice, once per
+  protocol crate - and a discovery seed gated on an optional chain). The
+  durable mitigations both landed here: each fix extracted its wiring
+  decision into a pure unit-pinnable function, and the loop adopted the rule
+  that a bifrost side-quest is not done at promotion but only when the
+  consumer's own harness gates pass against the promoted surface. Apply both
+  to B15, and prefer several narrow items to one broad one where a brick
+  spans more than one dependency repo.
 - B13. Identities, signatures, vacation, quota. CLOSED - the live Gmail
   signature reconciliation now uses bifrost `identities_list` / `identity_update`
   and the hand-rolled Gmail sendAs API calls are deleted. The dead JMAP
@@ -1855,6 +1883,23 @@ B13-SQ advanced the freeze a seventeenth time, from `bc97132` to `8e1006e`
 capability-dispatched `identities_list`, `identity_update`, `vacation_get`,
 `vacation_set`, and `quota_get` forwarders return the flattened engine `Error`
 and preserve account failures inside `Error::Account`.
+
+B12-SQ advanced the freeze an eighteenth time, from `8e1006e` to `44ae303`:
+`Container` gained an additive namespace dimension (`namespace`, `owner`,
+`owner_local_id`, `content_class`, and IMAP/Graph `rights` projection) via
+`with_*` builder setters, `containers_list` for Graph, IMAP, and JMAP now
+projects namespaced containers under the same native-id strings their cursor
+scopes carry, Graph's Autodiscover and EWS bases honor the harness api-base
+override, `with_public_folders` takes a `PublicFolderScope::{HierarchyOnly,
+Pinned}` allowlist instead of syncing the whole readable hierarchy, an EWS
+`GetItem` / `GetAttachment` hydration route serves `Public` scopes, and JMAP
+foreign hydration (`get_stream` / `blob_open`) routes through the
+`foreign_mail` client rather than the primary account. B12-SQ-MOCK's matching
+saehrimnir work (POX Autodiscover `alternativeMailboxes`, the Autodiscover /
+EWS route co-mount on the Graph listener, the `is_personal = false` fixture
+relaxation, `[[public_folder]]` / `[[public_item]]` class/body/attachment
+fields, and per-folder MYRIGHTS / `effective_rights` staging) landed in the
+mock, an installed external binary, not commit-pinned here.
 
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and

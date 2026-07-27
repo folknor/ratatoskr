@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use bifrost_types::ObjectId;
+use common::types::NamespaceAttribution;
 
 use super::context::ActionContext;
 use super::dispatch_target::{
@@ -153,7 +154,19 @@ async fn execute_account_group(
         };
         guards.push(guard);
 
-        if !use_bulk {
+        let namespace = match namespace_preflight(ctx, account_id, &thread_id, &op).await {
+            Ok(namespace) => namespace,
+            Err(error) => {
+                results.push((idx, ActionOutcome::Failed { error }));
+                continue;
+            }
+        };
+
+        // Remote batches are deliberately personal-only. A batch key without
+        // namespace would combine a personal archive with a shared archive,
+        // and system-role resolution would then be wrong for one of them.
+        // Shared actions remain fully remote, just one thread at a time.
+        if !use_bulk || namespace != NamespaceAttribution::Personal {
             let outcome =
                 dispatch_with_engine(ctx, &action_account, &op, account_id, &thread_id).await;
             results.push((idx, outcome));
@@ -263,7 +276,14 @@ async fn execute_account_group(
             .iter()
             .flat_map(|entry| entry.targets.iter().cloned())
             .collect::<Vec<_>>();
-        let remote = dispatch_bulk_mutation(&action_account, account_id, &batch_key, ids).await;
+        let remote = dispatch_bulk_mutation(
+            &action_account,
+            account_id,
+            &batch_key,
+            ids,
+            &NamespaceAttribution::Personal,
+        )
+        .await;
         match remote {
             Ok(()) => {
                 let mdn_on_read = matches!(batch_key, RemoteBatchKey::Read { to: true });
@@ -474,6 +494,10 @@ async fn dispatch_with_engine(
     if is_local_only(op) {
         return dispatch_local_only(ctx, op, account_id, thread_id).await;
     }
+    let namespace = match namespace_preflight(ctx, account_id, thread_id, op).await {
+        Ok(namespace) => namespace,
+        Err(error) => return ActionOutcome::Failed { error },
+    };
     // Label / label-group ops route through their own modules so the
     // optimistic-intent lifecycle (confirm / clear / attach the pending
     // action id) and the composite contract (single composite retry row,
@@ -543,7 +567,7 @@ async fn dispatch_with_engine(
                 return outcome;
             }
         };
-        let remote = dispatch_mutation(action_account, account_id, op, targets).await;
+        let remote = dispatch_mutation(action_account, account_id, op, targets, &namespace).await;
         let outcome = match remote {
             Ok(()) => match op_local(ctx, op, account_id, thread_id).await {
                 Ok(_) => ActionOutcome::Success,
@@ -603,7 +627,7 @@ async fn dispatch_with_engine(
         }
     };
     let outcome = outcome_from_remote_result(
-        dispatch_mutation(action_account, account_id, op, targets).await,
+        dispatch_mutation(action_account, account_id, op, targets, &namespace).await,
     );
     if outcome.is_success() && matches!(op, MailOperation::SetRead { to: true }) {
         super::mdn_send::send_mdn_for_read(ctx, action_account, account_id, thread_id).await;
@@ -621,6 +645,7 @@ async fn op_local(
     account_id: &str,
     thread_id: &str,
 ) -> Result<bool, ActionError> {
+    namespace_preflight(ctx, account_id, thread_id, op).await?;
     match op {
         MailOperation::Archive => archive::archive_local(ctx, account_id, thread_id).await,
         MailOperation::Trash => trash::trash_local(ctx, account_id, thread_id)
@@ -685,7 +710,189 @@ async fn op_local(
     }
 }
 
-/// Dispatch a local-only action (pin/mute/snooze).
+/// Namespace mutations must be rejected before the optimistic/local half of
+/// an action. Public folders are explicitly read-only at the bifrost freeze;
+/// returning `NotImplemented` here keeps the outcome terminal instead of
+/// producing the misleading LocalOnly fallback used for a later dispatch
+/// failure.
+async fn namespace_preflight(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    op: &MailOperation,
+) -> Result<NamespaceAttribution, ActionError> {
+    let account_id = account_id.to_string();
+    let thread_id = thread_id.to_string();
+    let namespace = ctx
+        .db
+        .with_read(move |conn| {
+            conn.query_row(
+                &format!("{THREAD_RIGHTS_CTE}{SHARED_NAMESPACE_SQL}"),
+                rusqlite::params![account_id, thread_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        SharedFolderRights {
+                            may_remove: row.get::<_, i64>(3)? != 0,
+                            may_set_seen: row.get::<_, i64>(4)? != 0,
+                            may_set_keywords: row.get::<_, i64>(5)? != 0,
+                        },
+                    ))
+                },
+            )
+            .map(Some)
+            .or_else(|error| match error {
+                db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                other => Err(format!("read action namespace: {other}")),
+            })
+        })
+        .await
+        .map_err(ActionError::db)?;
+    // A thread row can legitimately be absent (a local draft, or a thread
+    // already deleted by a racing action). Nothing namespaced can be missing
+    // its own thread, so treat it as personal and let the real action path
+    // report the miss with its own error.
+    let Some((kind, namespace_id, provider, rights)) = namespace else {
+        return Ok(NamespaceAttribution::Personal);
+    };
+    let attribution = match (kind.as_deref(), namespace_id.as_deref()) {
+        (Some("shared"), Some(owner)) => NamespaceAttribution::Shared {
+            owner: owner.to_string(),
+        },
+        (Some("public"), Some(folder_storage_id)) => NamespaceAttribution::Public {
+            folder_storage_id: folder_storage_id.to_string(),
+        },
+        _ => NamespaceAttribution::Personal,
+    };
+    validate_namespace_action(&attribution, &provider, rights, op)?;
+    Ok(attribution)
+}
+
+/// The thread's most restrictive rights across the shared folders it sits in.
+/// An unset (`NULL`) right means the provider never reported one, in which
+/// case the mutation is allowed through and the server arbitrates.
+#[derive(Debug, Clone, Copy)]
+struct SharedFolderRights {
+    may_remove: bool,
+    may_set_seen: bool,
+    may_set_keywords: bool,
+}
+
+/// Per-right `MIN` over every folder the thread sits in, strictest wins.
+/// Only consulted for a `Shared` attribution, where all of the thread's
+/// folders are shared ones.
+///
+/// Two deliberate defaults inside the `MIN`:
+/// - the folder row exists but the right is `NULL` (the provider reported no
+///   rights at all): PERMITTED, and the server arbitrates;
+/// - the folder row is MISSING (the container projection never produced one,
+///   so the membership is dangling): DENIED. We cannot claim a write right on
+///   a foreign folder we know nothing about, and the whole namespace design
+///   fails closed rather than open.
+const SHARED_NAMESPACE_SQL: &str = "\
+    SELECT t.namespace_kind, t.namespace_id, a.provider, \
+           COALESCE((SELECT MIN(right_remove) FROM thread_rights), 1), \
+           COALESCE((SELECT MIN(right_set_seen) FROM thread_rights), 1), \
+           COALESCE((SELECT MIN(right_set_keywords) FROM thread_rights), 1) \
+    FROM threads t JOIN accounts a ON a.id = t.account_id \
+    WHERE t.account_id = ?1 AND t.id = ?2";
+
+/// The `thread_rights` CTE `SHARED_NAMESPACE_SQL` reads. Kept separate so the
+/// per-right subqueries stay one line each.
+const THREAD_RIGHTS_CTE: &str = "\
+    WITH thread_rights AS ( \
+        SELECT COALESCE(f.right_remove, CASE WHEN f.id IS NULL THEN 0 ELSE 1 END) \
+                 AS right_remove, \
+               COALESCE(f.right_set_seen, CASE WHEN f.id IS NULL THEN 0 ELSE 1 END) \
+                 AS right_set_seen, \
+               COALESCE(f.right_set_keywords, CASE WHEN f.id IS NULL THEN 0 ELSE 1 END) \
+                 AS right_set_keywords \
+        FROM thread_folders tf \
+        LEFT JOIN folders f ON f.account_id = tf.account_id AND f.id = tf.folder_id \
+        WHERE tf.account_id = ?1 AND tf.thread_id = ?2 \
+    ) ";
+
+/// Pure half of namespace preflight. Keeping the policy independent of the
+/// database lookup makes the fail-before-local-write contract directly
+/// testable and keeps every action entry point on the same rule.
+fn validate_namespace_action(
+    attribution: &NamespaceAttribution,
+    provider: &str,
+    rights: SharedFolderRights,
+    op: &MailOperation,
+) -> Result<(), ActionError> {
+    // Pin / mute / snooze never reach a provider, so no namespace, rights, or
+    // capability gap can make them unsupported. Refusing them would make a
+    // read-only shared folder or a public folder unusable for purely local
+    // organisation, which is not what obstacles K, L, and W are about.
+    if is_local_only(op) {
+        return Ok(());
+    }
+    if matches!(attribution, NamespaceAttribution::Public { .. }) {
+        return Err(ActionError::not_implemented(
+            "public-folder items are read-only",
+        ));
+    }
+    if matches!(attribution, NamespaceAttribution::Shared { .. }) && provider == "jmap" {
+        return Err(ActionError::not_implemented(
+            "JMAP shared-mailbox mutations are not supported",
+        ));
+    }
+    if matches!(attribution, NamespaceAttribution::Shared { .. }) && !permitted_by(rights, op) {
+        return Err(ActionError::not_implemented(
+            "shared mailbox rights do not permit this mutation",
+        ));
+    }
+    if let MailOperation::MoveToFolder { dest, .. } = op {
+        let destination = dest.as_str();
+        let expected_prefix = match attribution {
+            NamespaceAttribution::Shared { owner } => format!("shared:{owner}:"),
+            NamespaceAttribution::Public { .. } => unreachable!("public returns above"),
+            NamespaceAttribution::Personal => String::new(),
+        };
+        let same_namespace = if expected_prefix.is_empty() {
+            !destination.starts_with("shared:") && !destination.starts_with("public:")
+        } else {
+            destination.starts_with(&expected_prefix)
+        };
+        if !same_namespace {
+            return Err(ActionError::not_implemented(
+                "cross-namespace moves are not supported",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Map an operation onto the single MYRIGHTS / `effective_rights` bit that
+/// actually governs it. Gating a flag change on the item-removal right (as a
+/// blanket "read-only folder" check would) refuses mutations the server would
+/// have accepted.
+fn permitted_by(rights: SharedFolderRights, op: &MailOperation) -> bool {
+    match op {
+        MailOperation::SetRead { .. } => rights.may_set_seen,
+        MailOperation::SetStarred { .. }
+        | MailOperation::AddLabel { .. }
+        | MailOperation::RemoveLabel { .. }
+        | MailOperation::ApplyLabelGroup { .. }
+        | MailOperation::RemoveLabelGroup { .. } => rights.may_set_keywords,
+        MailOperation::Archive
+        | MailOperation::Trash
+        | MailOperation::PermanentDelete
+        | MailOperation::SetSpam { .. }
+        | MailOperation::MoveToFolder { .. } => rights.may_remove,
+        MailOperation::SetPinned { .. }
+        | MailOperation::SetMuted { .. }
+        | MailOperation::Snooze { .. }
+        | MailOperation::Unsnooze => true,
+    }
+}
+
+/// Dispatch a local-only action (pin/mute/snooze). No namespace preflight
+/// here: `validate_namespace_action` passes every local-only op by design,
+/// so a lookup would only cost a query.
 async fn dispatch_local_only(
     ctx: &ActionContext,
     op: &MailOperation,
@@ -757,5 +964,176 @@ fn op_name(op: &MailOperation) -> &'static str {
         MailOperation::SetMuted { .. } => "mute",
         MailOperation::Snooze { .. } => "snooze",
         MailOperation::Unsnooze => "unsnooze",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::typed_ids::FolderId;
+
+    use super::*;
+
+    fn shared() -> NamespaceAttribution {
+        NamespaceAttribution::Shared {
+            owner: "alice".into(),
+        }
+    }
+
+    fn public() -> NamespaceAttribution {
+        NamespaceAttribution::Public {
+            folder_storage_id: "public:pf".into(),
+        }
+    }
+
+    fn move_to(dest: &str) -> MailOperation {
+        MailOperation::MoveToFolder {
+            dest: FolderId::from(dest),
+            source: None,
+        }
+    }
+
+    fn label_op() -> MailOperation {
+        MailOperation::AddLabel {
+            label_id: common::typed_ids::LabelId::from("tag"),
+        }
+    }
+
+    const OPEN: SharedFolderRights = SharedFolderRights {
+        may_remove: true,
+        may_set_seen: true,
+        may_set_keywords: true,
+    };
+
+    const READ_ONLY: SharedFolderRights = SharedFolderRights {
+        may_remove: false,
+        may_set_seen: false,
+        may_set_keywords: false,
+    };
+
+    #[test]
+    fn cross_namespace_move_is_rejected_before_local_write() {
+        assert!(validate_namespace_action(&shared(), "graph", OPEN, &move_to("archive")).is_err());
+        assert!(
+            validate_namespace_action(
+                &NamespaceAttribution::Personal,
+                "graph",
+                OPEN,
+                &move_to("shared:alice:graph-1"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn same_namespace_move_is_allowed() {
+        assert!(
+            validate_namespace_action(&shared(), "graph", OPEN, &move_to("shared:alice:graph-1"))
+                .is_ok()
+        );
+        assert!(
+            validate_namespace_action(
+                &NamespaceAttribution::Personal,
+                "graph",
+                OPEN,
+                &move_to("archive"),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn public_namespace_action_fails_without_local_mutation() {
+        assert!(
+            validate_namespace_action(&public(), "graph", OPEN, &MailOperation::Trash).is_err()
+        );
+    }
+
+    #[test]
+    fn public_namespace_label_action_fails_without_local_mutation() {
+        assert!(validate_namespace_action(&public(), "graph", OPEN, &label_op()).is_err());
+    }
+
+    #[test]
+    fn local_only_ops_are_allowed_in_every_namespace() {
+        for namespace in [NamespaceAttribution::Personal, shared(), public()] {
+            for op in [
+                MailOperation::SetPinned { to: true },
+                MailOperation::SetMuted { to: true },
+                MailOperation::Snooze { until: 1 },
+                MailOperation::Unsnooze,
+            ] {
+                assert!(
+                    validate_namespace_action(&namespace, "jmap", READ_ONLY, &op).is_ok(),
+                    "{namespace:?} must still allow {op:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rights_denied_shared_folder_action_fails_before_local_write() {
+        assert!(
+            validate_namespace_action(
+                &shared(),
+                "imap",
+                READ_ONLY,
+                &MailOperation::SetRead { to: true },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn shared_folder_rights_are_checked_per_operation() {
+        let seen_only = SharedFolderRights {
+            may_remove: false,
+            may_set_seen: true,
+            may_set_keywords: false,
+        };
+        assert!(
+            validate_namespace_action(
+                &shared(),
+                "imap",
+                seen_only,
+                &MailOperation::SetRead { to: true },
+            )
+            .is_ok(),
+            "a folder granting \\Seen must accept mark-as-read"
+        );
+        assert!(
+            validate_namespace_action(&shared(), "imap", seen_only, &MailOperation::Archive)
+                .is_err(),
+            "the same folder must still refuse a move"
+        );
+        assert!(
+            validate_namespace_action(&shared(), "imap", seen_only, &label_op()).is_err(),
+            "the same folder must still refuse a keyword change"
+        );
+    }
+
+    #[test]
+    fn rights_are_ignored_outside_a_shared_namespace() {
+        assert!(
+            validate_namespace_action(
+                &NamespaceAttribution::Personal,
+                "imap",
+                READ_ONLY,
+                &MailOperation::Archive,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn jmap_shared_namespace_mutation_is_rejected() {
+        assert!(
+            validate_namespace_action(
+                &shared(),
+                "jmap",
+                OPEN,
+                &MailOperation::SetRead { to: true }
+            )
+            .is_err()
+        );
     }
 }

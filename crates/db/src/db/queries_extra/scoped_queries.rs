@@ -5,6 +5,7 @@ use crate::db::types::{
     AccountScope, DbThread, DraftTotalCount, FolderAccountUnreadCount, FolderUnreadCount,
     UniversalUnreadCount,
 };
+use types::NamespaceKind;
 
 /// Build the WHERE clause fragment and collect parameter values for an `AccountScope`.
 ///
@@ -102,7 +103,7 @@ pub fn get_threads_scoped(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+             WHERE {scope_clause} AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
                AND {excl_clause}
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -129,7 +130,7 @@ pub fn get_threads_scoped(
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND tf.folder_id = ?{next_idx}
-               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+               AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -142,7 +143,7 @@ pub fn get_threads_scoped(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+             WHERE {scope_clause} AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
             limit_idx = next_idx,
@@ -223,7 +224,7 @@ pub fn get_threads_for_label_group(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause}
-           AND t.shared_mailbox_id IS NULL
+           AND t.namespace_kind IS NULL
            AND t.is_chat_thread = 0
            AND {group_fragment}
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -260,7 +261,7 @@ pub fn get_thread_count_scoped(
         let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
         let sql = format!(
             "SELECT COUNT(*) AS cnt FROM threads t
-             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+             WHERE {scope_clause} AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
                AND {excl_clause}"
         );
         let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
@@ -277,13 +278,13 @@ pub fn get_thread_count_scoped(
             "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) AS cnt FROM threads t
              INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
              WHERE {scope_clause} AND tf.folder_id = ?{next_idx}
-               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
+               AND t.namespace_kind IS NULL AND t.is_chat_thread = 0"
         );
         execute_count_query(conn, &sql, scope_params, Some(lid))
     } else {
         let sql = format!(
             "SELECT COUNT(*) AS cnt FROM threads t WHERE {scope_clause}
-               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
+               AND t.namespace_kind IS NULL AND t.is_chat_thread = 0"
         );
         execute_count_query(conn, &sql, scope_params, None)
     }
@@ -305,7 +306,7 @@ pub fn get_unread_count_scoped(conn: &ReadConn<'_>, scope: &AccountScope) -> Res
         "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
          WHERE {scope_clause} AND tf.folder_id = 'INBOX' AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0"
     );
 
     execute_count_query(conn, &sql, scope_params, None)
@@ -321,7 +322,7 @@ fn broad_inbox_unread_count(conn: &ReadConn<'_>, scope: &AccountScope) -> Result
     let sql = format!(
         "SELECT COUNT(*) AS cnt FROM threads t
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
            AND {excl_clause}"
     );
 
@@ -419,7 +420,7 @@ fn get_system_folder_unread_counts(
         "SELECT tf.folder_id AS folder_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
            AND tf.folder_id IN ({})
          GROUP BY tf.folder_id",
         placeholders.join(", ")
@@ -451,7 +452,7 @@ fn get_flag_folder_unread_count(
     let sql = format!(
         "SELECT COUNT(*) AS cnt FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0"
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -476,7 +477,7 @@ fn get_all_mail_unread_count(
     let sql = format!(
         "SELECT COUNT(*) AS cnt FROM threads t
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0"
     );
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
         scope_params.iter().map(AsRef::as_ref).collect();
@@ -505,7 +506,7 @@ fn get_system_folder_unread_counts_by_account(
         "SELECT tf.folder_id AS folder_id, t.account_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
            AND tf.folder_id IN ({})
          GROUP BY tf.folder_id, t.account_id",
         placeholders.join(", ")
@@ -537,7 +538,7 @@ fn get_flag_folder_unread_by_account(
     let sql = format!(
         "SELECT t.account_id, COUNT(*) AS unread_count FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
          GROUP BY t.account_id"
     );
 
@@ -566,7 +567,7 @@ fn get_all_mail_unread_by_account(
     let sql = format!(
         "SELECT t.account_id, COUNT(*) AS unread_count FROM threads t
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
          GROUP BY t.account_id"
     );
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -661,7 +662,7 @@ pub(crate) fn get_draft_threads_synced(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND tf.folder_id = ?{next_idx}
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
          GROUP BY t.account_id, t.id
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -690,7 +691,7 @@ fn get_flag_threads(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND t.{flag_col} = 1
-           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
+           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{next_idx} OFFSET ?{offset_idx}",
         offset_idx = next_idx + 1,
@@ -846,7 +847,7 @@ pub fn get_threads_for_shared_mailbox(
     let sql = if label_id.is_some() {
         "WITH mb_threads AS (
                SELECT id FROM threads
-               WHERE account_id = ?1 AND shared_mailbox_id = ?2
+               WHERE account_id = ?1 AND namespace_kind = 'shared' AND t.namespace_id = ?2
              )
              SELECT t.*, m.from_name, m.from_address FROM threads t
              INNER JOIN thread_folders tf
@@ -862,7 +863,7 @@ pub fn get_threads_for_shared_mailbox(
                  WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
                ) WHERE rn = 1
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+             WHERE t.account_id = ?1 AND t.namespace_kind = 'shared' AND t.namespace_id = ?2
                AND t.is_chat_thread = 0
                AND tf.folder_id = ?3
              GROUP BY t.account_id, t.id
@@ -871,7 +872,7 @@ pub fn get_threads_for_shared_mailbox(
     } else {
         "WITH mb_threads AS (
                SELECT id FROM threads
-               WHERE account_id = ?1 AND shared_mailbox_id = ?2
+               WHERE account_id = ?1 AND namespace_kind = 'shared' AND t.namespace_id = ?2
              )
              SELECT t.*, m.from_name, m.from_address FROM threads t
              LEFT JOIN (
@@ -885,7 +886,7 @@ pub fn get_threads_for_shared_mailbox(
                  WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
                ) WHERE rn = 1
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+             WHERE t.account_id = ?1 AND t.namespace_kind = 'shared' AND t.namespace_id = ?2
                AND t.is_chat_thread = 0
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3"
@@ -950,7 +951,7 @@ fn shared_mailbox_threads_by_flag(
     let sql = format!(
         "WITH mb_threads AS (
            SELECT id FROM threads
-           WHERE account_id = ?1 AND shared_mailbox_id = ?2
+           WHERE account_id = ?1 AND namespace_kind = 'shared' AND t.namespace_id = ?2
          )
          SELECT t.*, m.from_name, m.from_address FROM threads t
          LEFT JOIN (
@@ -964,7 +965,7 @@ fn shared_mailbox_threads_by_flag(
              WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
            ) WHERE rn = 1
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-         WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+         WHERE t.account_id = ?1 AND t.namespace_kind = 'shared' AND t.namespace_id = ?2
            AND t.is_chat_thread = 0
            AND t.{flag_col} = 1
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -995,7 +996,7 @@ pub fn get_threads_for_shared_mailbox_label_group(
     let sql = format!(
         "WITH mb_threads AS (
            SELECT id FROM threads
-           WHERE account_id = ?1 AND shared_mailbox_id = ?2
+           WHERE account_id = ?1 AND namespace_kind = 'shared' AND t.namespace_id = ?2
          )
          SELECT t.*, m.from_name, m.from_address FROM threads t
          LEFT JOIN (
@@ -1010,7 +1011,7 @@ pub fn get_threads_for_shared_mailbox_label_group(
            ) WHERE rn = 1
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE t.account_id = ?1
-           AND t.shared_mailbox_id = ?2
+           AND t.namespace_kind = 'shared' AND t.namespace_id = ?2
            AND t.is_chat_thread = 0
            AND {group_fragment}
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -1043,55 +1044,40 @@ fn count_local_drafts(conn: &ReadConn<'_>, scope: &AccountScope) -> Result<i64, 
         .map_err(|e| e.to_string())
 }
 
-/// A single item from a public folder.
-#[derive(Debug, Clone)]
-pub struct PublicFolderItem {
-    pub item_id: String,
-    pub account_id: String,
-    pub folder_id: String,
-    pub subject: Option<String>,
-    pub sender_name: Option<String>,
-    pub sender_email: Option<String>,
-    pub received_at: Option<i64>,
-    pub body_preview: Option<String>,
-    pub is_read: bool,
-    pub item_class: String,
-}
-
-/// Items from a pinned public folder, ordered by received date.
+/// Threads belonging to one non-personal namespace (a shared mailbox or a
+/// public folder).
+///
+/// Public-folder items are ordinary threads after B12 - there is no
+/// pseudo-thread table - so the same family serves both namespaces.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-pub fn get_public_folder_items(
+pub fn get_threads_for_namespace(
     conn: &ReadConn<'_>,
     account_id: &str,
-    folder_id: &str,
+    kind: NamespaceKind,
+    namespace_id: &str,
     limit: Option<i64>,
-) -> Result<Vec<PublicFolderItem>, String> {
+) -> Result<Vec<DbThread>, String> {
+    let namespace_kind = match kind {
+        NamespaceKind::Personal => return Ok(Vec::new()),
+        NamespaceKind::Shared => "shared",
+        NamespaceKind::Public => "public",
+    };
     let lim = limit.unwrap_or(200);
     let mut stmt = conn
-        .prepare(
-            "SELECT item_id, account_id, folder_id, subject, sender_name,
-                    sender_email, received_at, body_preview, is_read, item_class
-             FROM public_folder_items
-             WHERE account_id = ?1 AND folder_id = ?2
-             ORDER BY received_at DESC
-             LIMIT ?3",
-        )
+        .prepare(&format!(
+            "SELECT t.*, m.from_name, m.from_address FROM threads t
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}) m
+               ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND t.namespace_kind = ?2 AND t.namespace_id = ?3
+               AND t.is_chat_thread = 0
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?4",
+        ))
         .map_err(|e| e.to_string())?;
-
-    stmt.query_map(rusqlite::params![account_id, folder_id, lim], |row| {
-        Ok(PublicFolderItem {
-            item_id: row.get("item_id")?,
-            account_id: row.get("account_id")?,
-            folder_id: row.get("folder_id")?,
-            subject: row.get("subject")?,
-            sender_name: row.get("sender_name")?,
-            sender_email: row.get("sender_email")?,
-            received_at: row.get("received_at")?,
-            body_preview: row.get("body_preview")?,
-            is_read: row.get::<_, i64>("is_read")? != 0,
-            item_class: row.get("item_class")?,
-        })
-    })
+    stmt.query_map(
+        rusqlite::params![account_id, namespace_kind, namespace_id, lim],
+        DbThread::from_row,
+    )
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())

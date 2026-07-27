@@ -73,6 +73,16 @@ pub struct TestSeedAccountParams {
     pub oauth_token_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jmap_url: Option<String>,
+    /// Enable Graph delegate discovery for a harness fixture.
+    #[serde(default)]
+    pub delegate_discovery_enabled: bool,
+    /// Enable Graph public-folder discovery for a harness fixture.
+    #[serde(default)]
+    pub public_folders_enabled: bool,
+    /// Public folders enabled for sync before the harness attaches the
+    /// resident account. Values are native public-folder ids.
+    #[serde(default)]
+    pub public_folder_pins: Vec<String>,
     /// Space-separated extra OAuth scopes appended to the negotiated set.
     /// Used by IT-distributable config and the (future) custom-OIDC wizard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4261,6 +4271,9 @@ mod tests {
                 oauth_client_id: Some("ratatoskr-harness".into()),
                 oauth_token_url: Some("http://127.0.0.1:12345/oauth/token".into()),
                 jmap_url: Some("http://127.0.0.1:12345/jmap".into()),
+                delegate_discovery_enabled: true,
+                public_folders_enabled: true,
+                public_folder_pins: vec!["public:pf-notices".into()],
                 oauth_extra_scopes: Some("custom:scope".into()),
                 read_receipt_policy: Some("always".into()),
             },

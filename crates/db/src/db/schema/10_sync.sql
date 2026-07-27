@@ -33,16 +33,6 @@ CREATE TABLE IF NOT EXISTS graph_folder_delta_tokens (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS graph_shared_mailbox_delta_tokens (
-    account_id TEXT NOT NULL,
-    mailbox_id TEXT NOT NULL,
-    folder_id TEXT NOT NULL,
-    delta_link TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (account_id, mailbox_id, folder_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-
 -- Bifrost opaque cursor store (B2). Replaces the per-protocol cursor
 -- tables (jmap_sync_state, folder_sync_state, graph_*_delta_tokens, ...).
 -- bifrost owns the protocol-minted envelope bytes serialized by its
@@ -75,14 +65,15 @@ CREATE TABLE IF NOT EXISTS seen_ingest_markers (
     PRIMARY KEY (account_id, scope_key, checkpoint_blob)
 );
 
-CREATE TABLE IF NOT EXISTS shared_mailbox_sync_state (
+CREATE TABLE IF NOT EXISTS shared_mailboxes (
     account_id TEXT NOT NULL,
     mailbox_id TEXT NOT NULL,
     display_name TEXT,
     is_sync_enabled INTEGER NOT NULL DEFAULT 0,
-    last_synced_at INTEGER,
-    sync_error TEXT,
     email_address TEXT,
+    is_visible INTEGER NOT NULL DEFAULT 1,
+    discovered_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    revoked_at INTEGER,
     PRIMARY KEY (account_id, mailbox_id),
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );

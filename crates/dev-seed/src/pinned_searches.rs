@@ -82,7 +82,7 @@ fn load_unread_snapshot(conn: &Connection, limit: i64) -> Result<Vec<(String, St
             "SELECT t.id, t.account_id
              FROM threads t
              WHERE t.is_read = 0
-               AND t.shared_mailbox_id IS NULL
+               AND t.namespace_kind IS NULL
                AND t.is_chat_thread = 0
              ORDER BY t.last_message_at DESC
              LIMIT ?1",
@@ -108,7 +108,7 @@ fn load_attachment_snapshot(
             "SELECT t.id, t.account_id
              FROM threads t
              WHERE t.has_attachments = 1
-               AND t.shared_mailbox_id IS NULL
+               AND t.namespace_kind IS NULL
                AND t.is_chat_thread = 0
              ORDER BY t.last_message_at DESC
              LIMIT ?1",
@@ -138,7 +138,7 @@ fn load_account_inbox_snapshot(
                ON tf.account_id = t.account_id AND tf.thread_id = t.id
              WHERE t.account_id = ?1
                AND tf.folder_id = 'INBOX'
-               AND t.shared_mailbox_id IS NULL
+               AND t.namespace_kind IS NULL
                AND t.is_chat_thread = 0
              ORDER BY t.last_message_at DESC
              LIMIT ?2",

@@ -1,5 +1,13 @@
 # Shared / Delegated Mailboxes
 
+> **B12 migration note (July 2026).** The implementation history below predates
+> the bifrost scope cut. Shared mail now arrives through bifrost namespaced
+> containers and the service consumer, is stored in ordinary `folders`,
+> `messages`, and `threads` rows with `shared` attribution, and is surfaced
+> from the provider-agnostic `shared_mailboxes` registry. Legacy Graph shared
+> sync and its delta-token path were removed; older paths and
+> `shared_mailbox_sync_state` references are historical context only.
+
 **Tier**: 1 - Blocks switching from Outlook
 **Status**: (yellow) **Backend done, identity wiring in core, compose UI not connected.** Exchange (Graph) shared mailbox read/write, Autodiscover discovery, per-mailbox delta sync orchestration, and IMAP shared namespace + MYRIGHTS discovery are all implemented. Sidebar integration done (2026-03-22) and thread loading on selection is wired (`SidebarEvent::SharedMailboxSelected` → `load_navigation_and_threads` → `load_shared_mailbox_threads`, `crates/app/src/helpers.rs:354`). JMAP Sharing shipped, with its sync hooks relocated to the bifrost consumer path by the B3a-cut-jmap cutover (see `docs/roadmap/jmap-sharing.md` and its architecture note). Gmail delegation blocked (API limitation). **Remaining (all in the app crate):** wire `rtsk::send_identity::select_from_address` into the pop-out compose, expose per-shared-mailbox sync settings UI (the DB column `sync_depth_days` doesn't exist on `shared_mailbox_sync_state` yet - needs a schema add too), and per-delegate notification preferences.
 

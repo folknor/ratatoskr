@@ -5,7 +5,6 @@ pub mod convert;
 pub mod folder_mapper;
 pub mod ops;
 pub mod parse;
-pub mod public_folders;
 pub mod raw;
 pub mod types;
 mod utf7_imap;

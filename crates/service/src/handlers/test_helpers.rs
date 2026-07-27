@@ -121,6 +121,9 @@ pub(super) async fn seed_account_handle(
     let caldav_username = params.caldav_username;
     let caldav_password = params.caldav_password;
     let read_receipt_policy = params.read_receipt_policy;
+    let delegate_discovery_enabled = params.delegate_discovery_enabled;
+    let public_folders_enabled = params.public_folders_enabled;
+    let public_folder_pins = params.public_folder_pins;
     let encryption_key = boot_state.encryption_key().ok_or_else(|| {
         ServiceError::Internal(
             "test.seed_account received before encryption key was available".into(),
@@ -227,6 +230,18 @@ pub(super) async fn seed_account_handle(
                     params![uuid::Uuid::new_v4().to_string(), &account_id, policy],
                 )
                 .map_err(|e| format!("seed read_receipt_policy: {e}"))?;
+            }
+            conn.execute(
+                "UPDATE accounts SET delegate_discovery_enabled = ?1, public_folders_enabled = ?2 WHERE id = ?3",
+                params![delegate_discovery_enabled as i64, public_folders_enabled as i64, &account_id],
+            )
+            .map_err(|e| format!("seed namespace discovery flags: {e}"))?;
+            for folder_id in &public_folder_pins {
+                conn.execute(
+                    "INSERT INTO public_folder_pins (account_id, folder_id, is_sync_enabled, is_visible) VALUES (?1, ?2, 1, 1)",
+                    params![&account_id, folder_id],
+                )
+                .map_err(|e| format!("seed public-folder pin: {e}"))?;
             }
             let label_count = insert_harness_account_rows(conn, &account_id, &email)?;
             Ok((account_id, label_count))

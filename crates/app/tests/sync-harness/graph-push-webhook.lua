@@ -1,7 +1,7 @@
 -- description: Graph webhook push imports a new message without a second sync kick
 -- @covers: architecture.folder_vs_label_semantics_are_explicit
 -- expected: pass
--- fixture: jmap-incremental.lua
+-- fixture: push-namespaces.toml
 -- protocol: graph
 -- ceiling: 120s
 
@@ -53,6 +53,20 @@ local function apply_step(endpoint, step_id)
     return response
 end
 
+local function subscriptions(endpoint)
+    local value = harness.http_json({ method = "GET", url = harness.join_url(endpoint, "test/push/subscriptions") })
+    harness.assert(value ~= nil, "subscription inventory missing")
+    return value
+end
+
+local function entries(value, key)
+    return value[key] or value
+end
+
+local function namespace(entry)
+    return entry.namespace or entry.resource_class or entry.classification or entry.class
+end
+
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 harness.clear_mock_requests(admin_endpoint)
@@ -75,18 +89,28 @@ local account, account_err = client:request("TestSeedAccount", {
     display_name = "Graph Push",
     account_name = "Graph Push",
     provider = "graph",
+    delegate_discovery_enabled = true,
+    public_folders_enabled = true,
+    public_folder_pins = { "public:pf-notices" },
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 
 start_sync(client, account.account_id, "initial")
 local initial = query_state(client, account.account_id)
-harness.assert_eq(initial.message_count, 2, "initial message count")
+harness.assert(message_by_id(initial, "email-001") ~= nil, "personal message missing after namespaced attach")
 
 local subscription_requests = harness.mock_requests(admin_endpoint, { stable = true })
 harness.assert(
     harness.request_count(subscription_requests, "graph", "POST /v1.0/subscriptions") >= 1,
     "Graph push did not create a subscription"
 )
+local registered = entries(subscriptions(admin_endpoint), "subscriptions")
+local saw_personal = false
+for _, subscription in ipairs(registered) do
+    harness.assert_eq(namespace(subscription), "personal", "Graph subscribed to a non-personal namespace")
+    saw_personal = true
+end
+harness.assert(saw_personal, "Graph subscription request log was empty")
 harness.sleep(500)
 harness.clear_mock_requests(admin_endpoint)
 apply_step(admin_endpoint, "new")

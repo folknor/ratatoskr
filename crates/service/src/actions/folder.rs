@@ -58,14 +58,15 @@ async fn resolve_container_with_refresh(
     storage_id: &str,
     not_found_msg: impl FnOnce() -> String,
 ) -> Result<ContainerId, ActionError> {
-    if let Some(native) = native_container_id(&account.folder_map, storage_id) {
+    if let Some(native) = native_container_id(account.folder_map(), storage_id) {
         return Ok(native);
     }
     let fresh = account
-        .refresh_folder_map()
+        .refresh_containers()
         .await
         .map_err(|error| ActionError::remote(format!("refresh container map: {error}")))?;
-    native_container_id(&fresh, storage_id).ok_or_else(|| ActionError::not_found(not_found_msg()))
+    native_container_id(fresh.folder_map(), storage_id)
+        .ok_or_else(|| ActionError::not_found(not_found_msg()))
 }
 
 /// Storage id for a freshly-created user folder (role `None`), per the
@@ -101,6 +102,8 @@ async fn upsert_local_folder(
         imap_folder_path: is_imap.then(|| native.to_string()),
         imap_special_use: None,
         namespace_type: None,
+        owner_id: None,
+        content_class: None,
         parent_id: parent_storage,
         right_read: None,
         right_add: None,

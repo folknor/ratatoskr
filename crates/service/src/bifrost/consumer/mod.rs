@@ -62,6 +62,8 @@ use self::hydrate::HydrateBatch;
 use self::imap_threading::ImapThreadAccumulator;
 use super::SqliteCheckpointStore;
 use super::checkpoint_store::BACKFILL_COMPLETION_PARTITION;
+use super::containers;
+use super::containers::ContainerIndex;
 use super::error_map;
 
 const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
@@ -176,6 +178,11 @@ pub struct ChangeStreamConsumer {
     checkpoint_store: Option<Arc<SqliteCheckpointStore>>,
     hook_registry: Option<Arc<ConsumerHookRegistry>>,
     folder_map: HashMap<String, FolderKind>,
+    containers: Option<Arc<ContainerIndex>>,
+    /// Folder scopes already retried through one `sync_containers` refresh
+    /// (obstacle Q). Bounded by the number of distinct scopes the engine
+    /// emits, so it cannot grow without bound.
+    refreshed_scopes: HashSet<CursorScope>,
     /// The set of scopes the consumer has OBSERVED a `MultiplexerEvent` for
     /// on the broadcast. This is the completion-synthesis scope enumeration
     /// (spec 4.1.2), used in place of `engine.cursors.all_scopes()`.
@@ -266,6 +273,8 @@ impl ChangeStreamConsumer {
             checkpoint_store: None,
             hook_registry: None,
             folder_map: HashMap::new(),
+            containers: None,
+            refreshed_scopes: HashSet::new(),
             observed_scopes: HashSet::new(),
             imap_threading: ImapThreadAccumulator::default(),
             deferred_imap_acks: Vec::new(),
@@ -289,6 +298,12 @@ impl ChangeStreamConsumer {
     #[must_use]
     pub fn with_folder_map(mut self, folder_map: HashMap<String, FolderKind>) -> Self {
         self.folder_map = folder_map;
+        self
+    }
+
+    pub fn with_containers(mut self, containers: ContainerIndex) -> Self {
+        self.folder_map = containers.folder_map().clone();
+        self.containers = Some(Arc::new(containers));
         self
     }
 
@@ -569,7 +584,9 @@ impl ChangeStreamConsumer {
     ) -> Result<bool, Error> {
         match &*event.event {
             SyncEvent::Batch(batch) => {
-                let hydrated = if is_email_scope(&event.scope) {
+                let attribution = self.resolve_attribution(&event.scope).await;
+                let unknown_attribution = attribution.is_none();
+                let mut hydrated = if attribution.is_some() && self.is_mail_scope(&event.scope) {
                     HydrateBatch::from_changes(
                         &self.engine,
                         &self.account_id,
@@ -579,8 +596,19 @@ impl ChangeStreamConsumer {
                     )
                     .await?
                 } else {
+                    if unknown_attribution {
+                        log::warn!(
+                            "skipping un-attributed bifrost scope {:?}; it will be redelivered",
+                            event.scope
+                        );
+                        // Do not acknowledge an unknown folder scope: a
+                        // later resident refresh must be able to redeliver it.
+                        return Ok(false);
+                    }
                     HydrateBatch::default()
                 };
+                let attribution = attribution.expect("known attribution was checked above");
+                hydrated.qualify_namespace(&attribution);
                 let batch_checkpoint = batch.checkpoint.clone();
                 if self.provider == BifrostProviderKind::Imap {
                     let seen = u64::try_from(batch.items.len()).unwrap_or(u64::MAX);
@@ -594,10 +622,11 @@ impl ChangeStreamConsumer {
                 // deletion of unreconciled candidates is deferred to drive end.
                 pending.live.extend(hydrated.live_ids.iter().cloned());
                 pending.removed.extend(hydrated.removed_ids.iter().cloned());
-                let affected = write::persist(
+                let affected = write::persist_in_namespace(
                     &self.stores,
                     &self.account_id.0,
                     self.provider,
+                    &attribution,
                     &hydrated.rows,
                     &hydrated.deleted_ids,
                 )
@@ -611,8 +640,11 @@ impl ChangeStreamConsumer {
                     // reassigns by message id, so it must see the adopted id
                     // (`affected.message_ids`, 1:1 with `hydrated.rows`), not
                     // the provisional hydrate-time id.
-                    self.imap_threading
-                        .push_rows_with_ids(&hydrated.rows, &affected.message_ids);
+                    self.imap_threading.push_rows_with_ids(
+                        &hydrated.rows,
+                        &affected.message_ids,
+                        &attribution,
+                    );
                 }
                 post_persist::run(
                     &self.stores.db,
@@ -726,6 +758,56 @@ impl ChangeStreamConsumer {
             _ => {}
         }
         Ok(false)
+    }
+
+    /// Folder scopes are only attributable through the attach-time container
+    /// snapshot. A newly discovered shared folder can race that snapshot, so
+    /// refresh exactly once before failing closed. The skipped batch is left
+    /// unacked and is consequently redelivered after the next healthy drive.
+    async fn resolve_attribution(
+        &mut self,
+        scope: &CursorScope,
+    ) -> Option<common::types::NamespaceAttribution> {
+        let initial = self.containers.as_ref().map_or_else(
+            || Some(common::types::NamespaceAttribution::Personal),
+            |index| index.attribution_for_scope(scope),
+        );
+        if initial.is_some() {
+            return initial;
+        }
+        // Exactly one refresh per scope. The skipped batch is redelivered, so
+        // without this latch a permanently unknown scope would re-enumerate
+        // every container on every redelivery, forever.
+        if !self.refreshed_scopes.insert(scope.clone()) {
+            return None;
+        }
+        match containers::sync_containers(&self.engine, &self.account_id.0, &self.stores.db).await {
+            Ok(containers) => {
+                self.folder_map = containers.folder_map().clone();
+                let attribution = containers.attribution_for_scope(scope);
+                self.containers = Some(Arc::new(containers));
+                attribution
+            }
+            Err(error) => {
+                log::warn!(
+                    "failed refreshing containers for unknown bifrost scope {scope:?}: {error}"
+                );
+                None
+            }
+        }
+    }
+
+    fn is_mail_scope(&self, scope: &CursorScope) -> bool {
+        if !is_email_scope(scope) {
+            return false;
+        }
+        match (self.containers.as_ref(), scope) {
+            (Some(index), CursorScope::Folder(folder)) => index.is_mail_container(&folder.0),
+            (Some(index), CursorScope::FolderType { folder, .. }) => {
+                index.is_mail_container(&folder.0)
+            }
+            _ => true,
+        }
     }
 
     async fn ack_checkpoint(

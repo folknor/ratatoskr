@@ -1,5 +1,3 @@
-pub use db::db::queries_extra::thread_persistence::*;
-
 use search::SearchDocument;
 use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use store::body_store::MessageBody;

@@ -9,6 +9,8 @@ const IMPORTANCE_LOW_ID: &str = "importance:low";
 const GRAPH_FOLDER_PREFIX: &str = "graph-";
 const JMAP_FOLDER_PREFIX: &str = "jmap-";
 const IMAP_FOLDER_PREFIX: &str = "folder-";
+const SHARED_FOLDER_PREFIX: &str = "shared:";
+const PUBLIC_FOLDER_PREFIX: &str = "public:";
 
 /// Validated IMAP/JMAP user keyword payload.
 ///
@@ -98,6 +100,75 @@ pub enum FolderKind {
     GraphUser(GraphGuid),
     JmapUser(JmapId),
     ImapUser(ImapPath),
+    /// A provider-validated folder inside a foreign/shared mailbox.
+    Shared {
+        owner: String,
+        inner: Box<FolderKind>,
+    },
+    /// A public-folder native id. Public folders are Graph/EWS scoped and
+    /// intentionally do not pass their opaque id into a provider folder API.
+    Public {
+        native: String,
+    },
+}
+
+/// Attribution for rows that do not belong to an account's personal mailbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NamespaceKind {
+    Personal,
+    Shared,
+    Public,
+}
+
+/// The stable namespace identity carried from a bifrost cursor scope into
+/// storage. `Personal` deliberately has no id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NamespaceAttribution {
+    Personal,
+    Shared { owner: String },
+    Public { folder_storage_id: String },
+}
+
+impl NamespaceAttribution {
+    pub fn kind(&self) -> NamespaceKind {
+        match self {
+            Self::Personal => NamespaceKind::Personal,
+            Self::Shared { .. } => NamespaceKind::Shared,
+            Self::Public { .. } => NamespaceKind::Public,
+        }
+    }
+
+    pub fn storage_key(&self) -> Option<&str> {
+        match self {
+            Self::Personal => None,
+            Self::Shared { owner } => Some(owner),
+            Self::Public { folder_storage_id } => Some(folder_storage_id),
+        }
+    }
+
+    /// The prefix every storage id minted inside this namespace carries.
+    /// `None` for `Personal`, whose ids are unprefixed.
+    ///
+    /// `folder_storage_id` is already a `public:`-prefixed folder storage id
+    /// (`FolderKind::Public::storage_id`), so it is used verbatim rather than
+    /// prefixed a second time.
+    pub fn id_prefix(&self) -> Option<String> {
+        match self {
+            Self::Personal => None,
+            Self::Shared { owner } => Some(format!("shared:{owner}")),
+            Self::Public { folder_storage_id } => Some(folder_storage_id.clone()),
+        }
+    }
+
+    /// Namespace-qualify a provider-minted id for local storage. Provider ids
+    /// are only unique within their owner namespace, while `messages` and
+    /// `threads` are keyed `(account_id, id)` - see B12 obstacle P.
+    pub fn qualified_id(&self, id: &str) -> String {
+        match self.id_prefix() {
+            None => id.to_string(),
+            Some(prefix) => format!("{prefix}:{id}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -331,6 +402,27 @@ impl SystemFolderId {
 
 impl FolderKind {
     pub fn parse(raw: &str, provider: MailProviderKind) -> Result<Self, String> {
+        if let Some(rest) = raw.strip_prefix(SHARED_FOLDER_PREFIX) {
+            let mut parts = rest.splitn(2, ':');
+            let owner = parts
+                .next()
+                .filter(|owner| !owner.is_empty())
+                .ok_or_else(|| format!("shared folder id `{raw}` has no owner"))?;
+            let inner = parts
+                .next()
+                .filter(|inner| !inner.is_empty())
+                .ok_or_else(|| format!("shared folder id `{raw}` has no local id"))?;
+            return Self::parse(inner, provider).map(|inner| Self::Shared {
+                owner: owner.to_string(),
+                inner: Box::new(inner),
+            });
+        }
+        if let Some(native) = raw.strip_prefix(PUBLIC_FOLDER_PREFIX) {
+            validate_component("public folder id", native)?;
+            return Ok(Self::Public {
+                native: native.to_string(),
+            });
+        }
         if let Some(system) = SystemFolderId::parse(raw) {
             return Ok(Self::System(system));
         }
@@ -359,6 +451,21 @@ impl FolderKind {
         ImapPath::from_path(path).map(Self::ImapUser)
     }
 
+    pub fn shared(owner: &str, inner: FolderKind) -> Result<Self, String> {
+        validate_component("shared mailbox owner", owner)?;
+        Ok(Self::Shared {
+            owner: owner.to_string(),
+            inner: Box::new(inner),
+        })
+    }
+
+    pub fn public(native: &str) -> Result<Self, String> {
+        validate_component("public folder id", native)?;
+        Ok(Self::Public {
+            native: native.to_string(),
+        })
+    }
+
     pub fn storage_id(&self) -> String {
         match self {
             Self::System(system) => system.as_str().to_string(),
@@ -366,6 +473,10 @@ impl FolderKind {
             Self::GraphUser(id) => id.storage_id(),
             Self::JmapUser(id) => id.storage_id(),
             Self::ImapUser(path) => path.storage_id(),
+            Self::Shared { owner, inner } => {
+                format!("{SHARED_FOLDER_PREFIX}{owner}:{}", inner.storage_id())
+            }
+            Self::Public { native } => format!("{PUBLIC_FOLDER_PREFIX}{native}"),
         }
     }
 }
@@ -684,5 +795,83 @@ mod tests {
     fn category_name_rejects_storage_prefix() {
         assert!(CategoryName::parse("cat:Blue").is_err());
         assert!(LabelKind::graph_category("cat:Blue").is_err());
+    }
+
+    #[test]
+    fn folder_kind_shared_and_public_round_trip() {
+        let shared = FolderKind::shared(
+            "alice@example.test",
+            FolderKind::graph_user("AAMkAGI2").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            shared.storage_id(),
+            "shared:alice@example.test:graph-AAMkAGI2"
+        );
+        assert_eq!(
+            FolderKind::parse(&shared.storage_id(), MailProviderKind::Graph).unwrap(),
+            shared
+        );
+
+        let shared_system =
+            FolderKind::shared("alice", FolderKind::System(SystemFolderId::Inbox)).unwrap();
+        assert_eq!(shared_system.storage_id(), "shared:alice:INBOX");
+        assert_eq!(
+            FolderKind::parse("shared:alice:INBOX", MailProviderKind::Imap).unwrap(),
+            shared_system
+        );
+
+        let public = FolderKind::public("pf-notices").unwrap();
+        assert_eq!(public.storage_id(), "public:pf-notices");
+        assert_eq!(
+            FolderKind::parse("public:pf-notices", MailProviderKind::Graph).unwrap(),
+            public
+        );
+    }
+
+    #[test]
+    fn folder_kind_shared_parses_imap_path_containing_colon() {
+        // `validate_component` allows `:` inside an IMAP path, so the parse
+        // must be a LEFT-anchored split - owner ids never contain a colon and
+        // the remainder is taken verbatim.
+        let raw = "shared:alice:folder-#user/alice/Projects:2026";
+        let parsed = FolderKind::parse(raw, MailProviderKind::Imap).unwrap();
+        let FolderKind::Shared { owner, inner } = &parsed else {
+            panic!("expected a shared folder, got {parsed:?}");
+        };
+        assert_eq!(owner, "alice");
+        assert_eq!(
+            **inner,
+            FolderKind::ImapUser(ImapPath::parse("#user/alice/Projects:2026").unwrap())
+        );
+        assert_eq!(parsed.storage_id(), raw);
+    }
+
+    #[test]
+    fn folder_kind_shared_rejects_empty_components() {
+        assert!(FolderKind::parse("shared:", MailProviderKind::Imap).is_err());
+        assert!(FolderKind::parse("shared::INBOX", MailProviderKind::Imap).is_err());
+        assert!(FolderKind::parse("shared:alice:", MailProviderKind::Imap).is_err());
+        assert!(FolderKind::parse("public:", MailProviderKind::Graph).is_err());
+    }
+
+    #[test]
+    fn namespace_attribution_qualifies_ids_without_double_prefixing() {
+        assert_eq!(NamespaceAttribution::Personal.qualified_id("m1"), "m1");
+        assert_eq!(
+            NamespaceAttribution::Shared {
+                owner: "alice".into()
+            }
+            .qualified_id("m1"),
+            "shared:alice:m1"
+        );
+        // `folder_storage_id` is already `public:`-prefixed.
+        assert_eq!(
+            NamespaceAttribution::Public {
+                folder_storage_id: FolderKind::public("pf-notices").unwrap().storage_id(),
+            }
+            .qualified_id("m1"),
+            "public:pf-notices:m1"
+        );
     }
 }

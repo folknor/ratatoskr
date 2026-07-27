@@ -1,12 +1,9 @@
-pub mod autodiscover;
 pub mod calendar_sync;
 pub mod client;
-pub mod ews;
 pub mod folder_mapper;
 pub mod group_sync;
 pub mod label_sync;
 pub mod ops;
 pub mod parse;
-pub mod public_folder_sync;
 pub mod sync;
 pub mod types;

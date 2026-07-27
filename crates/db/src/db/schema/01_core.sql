@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     -- via `attachment.fetch`) or (b) the toggle flips back to 1
     -- and the next sync's post-sync sweep / next boot recovery
     -- kick picks them up.
-    cache_attachments_enabled INTEGER NOT NULL DEFAULT 1
+    cache_attachments_enabled INTEGER NOT NULL DEFAULT 1,
+    delegate_discovery_enabled INTEGER NOT NULL DEFAULT 0,
+    public_folders_enabled INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS settings (

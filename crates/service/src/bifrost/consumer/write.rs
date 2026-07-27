@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
-use common::types::LabelKind;
+use common::types::{FolderKind, LabelKind, NamespaceAttribution};
 use db::db::queries_extra::{
     LabelWriteRow, compute_thread_aggregate, delete_messages_and_cleanup_threads,
     insert_attachments, insert_messages, maybe_update_chat_state, query_user_emails, upsert_labels,
     upsert_thread_aggregate, upsert_thread_participants,
 };
 use provider_sync::consumer_support::{
-    FolderWriteRow, KeywordProvider, index_search_documents, insert_folders_batch,
+    FolderWriteRow, KeywordProvider, ensure_folder_rows, index_search_documents,
     recompute_thread_keyword_labels, replace_message_folders_and_recompute,
     replace_message_keywords, replace_message_membership_and_recompute, store_inline_images,
     store_message_bodies,
@@ -43,6 +43,25 @@ pub async fn persist(
     rows: &[ConsumerMessageRow],
     deleted_ids: &[String],
 ) -> Result<PersistAffected, String> {
+    persist_in_namespace(
+        stores,
+        account_id,
+        provider,
+        &NamespaceAttribution::Personal,
+        rows,
+        deleted_ids,
+    )
+    .await
+}
+
+pub async fn persist_in_namespace(
+    stores: &BifrostConsumerStores,
+    account_id: &str,
+    provider: BifrostProviderKind,
+    namespace: &NamespaceAttribution,
+    rows: &[ConsumerMessageRow],
+    deleted_ids: &[String],
+) -> Result<PersistAffected, String> {
     if rows.is_empty() && deleted_ids.is_empty() {
         return Ok(PersistAffected::default());
     }
@@ -50,12 +69,16 @@ pub async fn persist(
     let rows = rows.to_vec();
     let deleted_ids = deleted_ids.to_vec();
     let account_id = account_id.to_string();
+    let namespace_kind = namespace_kind(namespace).map(str::to_string);
+    let namespace_id = namespace_id(namespace).map(str::to_string);
     let (affected, persisted_rows, resolved_deleted_ids) = stores
         .db
         .with_write({
             let rows = rows.clone();
             let deleted_ids = deleted_ids.clone();
             let account_id = account_id.clone();
+            let namespace_kind = namespace_kind.clone();
+            let namespace_id = namespace_id.clone();
             move |conn| {
                 let tx = conn.transaction().map_err(|error| error.to_string())?;
                 let mut rows = rows;
@@ -64,6 +87,45 @@ pub async fn persist(
                         adopt_existing_imap_identity(&tx, row)?;
                     }
                 }
+                // Namespace attribution is immutable. Check it before the
+                // placeholder/message inserts so a malformed or colliding
+                // delivery can never turn a personal thread into a foreign
+                // one (or vice versa).
+                rows.retain(|row| {
+                    let existing = tx
+                        .query_row(
+                            "SELECT namespace_kind, namespace_id FROM threads \
+                             WHERE account_id = ?1 AND id = ?2",
+                            rusqlite::params![row.message.account_id, row.message.thread_id],
+                            |record| {
+                                Ok((
+                                    record.get::<_, Option<String>>(0)?,
+                                    record.get::<_, Option<String>>(1)?,
+                                ))
+                            },
+                        )
+                        .optional();
+                    match existing {
+                        Ok(Some(found))
+                            if found != (namespace_kind.clone(), namespace_id.clone()) =>
+                        {
+                            log::warn!(
+                                "dropping message {}: thread {} belongs to a different namespace",
+                                row.message.id,
+                                row.message.thread_id
+                            );
+                            false
+                        }
+                        Ok(_) => true,
+                        Err(error) => {
+                            log::warn!(
+                                "dropping message {}: cannot inspect thread namespace: {error}",
+                                row.message.id
+                            );
+                            false
+                        }
+                    }
+                });
                 let deleted_ids = if provider == BifrostProviderKind::Imap {
                     resolve_imap_deleted_ids(&tx, &account_id, &deleted_ids)?
                 } else {
@@ -107,10 +169,27 @@ pub async fn persist(
                     // before it writes membership (spec 1 / 4.1.4 "folder-row
                     // creation"). Production folder sync seeds these; the consumer's
                     // provider-agnostic path mints a minimal row from the FolderKind.
+                    //
+                    // `ensure_folder_rows`, NOT `insert_folders_batch`: a FolderKind
+                    // carries no rights, no display name and no parent, so the
+                    // container-sync upsert would overwrite `containers_list`'s
+                    // projection with NULLs the moment a message landed in a shared
+                    // folder. That is exactly how a read-only share (rights `lr`)
+                    // lost its `namespace_type` / `right_*` columns and started
+                    // passing the B12 obstacle K preflight as a personal folder,
+                    // while a writable share that happened to hold no messages kept
+                    // its metadata. This path may create a row, never redefine one.
                     let folder_rows = row
                         .folders
                         .iter()
                         .map(|folder| {
+                            let (namespace_type, owner_id) = match folder {
+                                FolderKind::Shared { owner, .. } => {
+                                    (Some("shared".to_string()), Some(owner.clone()))
+                                }
+                                FolderKind::Public { .. } => (Some("public".to_string()), None),
+                                _ => (None, None),
+                            };
                             let id = folder.storage_id();
                             FolderWriteRow {
                                 name: id.clone(),
@@ -120,7 +199,13 @@ pub async fn persist(
                                 sort_order: None,
                                 imap_folder_path: None,
                                 imap_special_use: None,
-                                namespace_type: None,
+                                // A membership-minted row still knows which
+                                // namespace its id was minted in, so a folder the
+                                // container pass has not (yet) produced does not
+                                // masquerade as personal.
+                                namespace_type,
+                                owner_id,
+                                content_class: None,
                                 parent_id: None,
                                 right_read: None,
                                 right_add: None,
@@ -136,8 +221,8 @@ pub async fn persist(
                             }
                         })
                         .collect::<Vec<_>>();
-                    insert_folders_batch(&tx, &folder_rows)
-                        .map_err(|error| format!("insert folders: {error}"))?;
+                    ensure_folder_rows(&tx, &folder_rows)
+                        .map_err(|error| format!("ensure folders: {error}"))?;
                     match provider {
                         BifrostProviderKind::Jmap => {
                             replace_message_folders_and_recompute(
@@ -281,7 +366,8 @@ pub async fn persist(
                             thread_id,
                             &aggregate,
                             is_important,
-                            None,
+                            namespace_kind.as_deref(),
+                            namespace_id.as_deref(),
                         )
                         .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
                         if matches!(
@@ -358,6 +444,22 @@ pub async fn persist(
     }
 
     Ok(affected)
+}
+
+fn namespace_kind(namespace: &NamespaceAttribution) -> Option<&'static str> {
+    match namespace {
+        NamespaceAttribution::Personal => None,
+        NamespaceAttribution::Shared { .. } => Some("shared"),
+        NamespaceAttribution::Public { .. } => Some("public"),
+    }
+}
+
+fn namespace_id(namespace: &NamespaceAttribution) -> Option<&str> {
+    match namespace {
+        NamespaceAttribution::Personal => None,
+        NamespaceAttribution::Shared { owner } => Some(owner),
+        NamespaceAttribution::Public { folder_storage_id } => Some(folder_storage_id),
+    }
 }
 
 fn keyword_provider(provider: BifrostProviderKind) -> KeywordProvider {

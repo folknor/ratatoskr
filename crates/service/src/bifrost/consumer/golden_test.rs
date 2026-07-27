@@ -90,7 +90,7 @@ const SNAPSHOT_QUERIES: &[(&str, &str)] = &[
     (
         "threads",
         "SELECT id, account_id, message_count, is_read, is_starred, is_important, \
-         has_attachments, is_chat_thread, shared_mailbox_id FROM threads ORDER BY id",
+         has_attachments, is_chat_thread, namespace_kind, namespace_id FROM threads ORDER BY id",
     ),
     (
         "thread_participants",
@@ -885,7 +885,11 @@ async fn imap_drive_threading_equals_legacy() {
     .await
     .unwrap();
     let mut accumulator = super::imap_threading::ImapThreadAccumulator::default();
-    accumulator.push_rows_with_ids(&rows, &affected.message_ids);
+    accumulator.push_rows_with_ids(
+        &rows,
+        &affected.message_ids,
+        &common::types::NamespaceAttribution::Personal,
+    );
     super::imap_threading::run_drive_end_threading(
         &consumer_stores,
         &input.account_id,
@@ -1126,7 +1130,11 @@ async fn imap_drive_threading_reassigns_adopted_message() {
     );
 
     let mut accumulator = super::imap_threading::ImapThreadAccumulator::default();
-    accumulator.push_rows_with_ids(&rows, &affected.message_ids);
+    accumulator.push_rows_with_ids(
+        &rows,
+        &affected.message_ids,
+        &common::types::NamespaceAttribution::Personal,
+    );
     super::imap_threading::run_drive_end_threading(&consumer_stores, &account.0, &accumulator)
         .await
         .unwrap();

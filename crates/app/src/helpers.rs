@@ -8,8 +8,8 @@ use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
-    get_active_account_ids_sync, get_public_folder_items, get_snoozed_threads, get_starred_threads,
-    get_threads_for_label_group, get_threads_for_shared_mailbox,
+    get_active_account_ids_sync, get_snoozed_threads, get_starred_threads,
+    get_threads_for_label_group, get_threads_for_namespace, get_threads_for_shared_mailbox,
     get_threads_for_shared_mailbox_label_group, get_threads_for_shared_mailbox_snoozed,
     get_threads_for_shared_mailbox_starred, get_threads_scoped, query_thread_list_decorations,
 };
@@ -17,7 +17,7 @@ use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{ChatList, GenerationToken, Nav};
 use rtsk::scope::ViewScope;
 use std::sync::Arc;
-use types::{Bundle, FeatureView, SidebarSelection, VirtualView};
+use types::{Bundle, FeatureView, NamespaceKind, SidebarSelection, VirtualView};
 
 impl ReadyApp {
     pub(crate) fn current_scope(&self) -> &ViewScope {
@@ -110,7 +110,7 @@ impl ReadyApp {
                     } => {
                         let aid = account_id.clone();
                         let fid = folder_id.clone();
-                        load_public_folder_items_async(db, aid, fid).await
+                        load_namespace_threads(db, aid, NamespaceKind::Public, fid).await
                     }
                     ViewScope::AllAccounts => {
                         load_personal_scope_threads(db, AccountScope::All, selection).await
@@ -465,17 +465,18 @@ pub(crate) fn apply_thread_decorations(
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-async fn load_public_folder_items_async(
+async fn load_namespace_threads(
     db: Arc<Db>,
     account_id: String,
-    folder_id: String,
+    kind: NamespaceKind,
+    namespace_id: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_read(move |conn| {
-        let items = get_public_folder_items(conn, &account_id, &folder_id, Some(1000))?;
-        let mut threads: Vec<Thread> = items
-            .into_iter()
-            .map(Thread::from_public_folder_item)
-            .collect();
+        let mut threads: Vec<Thread> =
+            get_threads_for_namespace(conn, &account_id, kind, &namespace_id, Some(1000))?
+                .into_iter()
+                .map(Thread::from_db_thread)
+                .collect();
         apply_thread_decorations(conn, &mut threads)?;
         Ok(threads)
     })

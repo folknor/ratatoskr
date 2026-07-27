@@ -24,6 +24,18 @@ Do not use your Memory functionality. Do not read, write, or update memories. Do
 - Never `find /`.
 - Never run `git` with `-C <path>`
 - One Bash() invocation === one command
+- Never chain commands with `&&`.
+- Never chain commands with `;`.
+- Never chain/pipe commands with `|`.
+- Never capture stdout into env vars (`UUID=$(...)`).
+
+### git commit rules
+
+- Always run `brokkr fmt` before a commit.
+- Never commit markdown changes, `Cargo.lock`, or `.brokkr/ratatoskr/gate.db` alone. Bundle them with upcoming code commits.
+- When committing other changes: always tag along markdown files, `Cargo.lock`, and `.brokkr/ratatoskr/gate.db` if dirty.
+- Write substantive engineering-focused commit messages.
+- Never `git push` unless the user explicitly asks. Stop after the commit.
 
 ## Multi-Agent Orchestration
 

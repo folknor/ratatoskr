@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS folders (
     imap_folder_path TEXT,
     imap_special_use TEXT,
     namespace_type TEXT,
+    owner_id TEXT,
+    content_class TEXT,
     parent_id TEXT,
     right_read INTEGER,
     right_add INTEGER,
@@ -107,7 +109,8 @@ CREATE TABLE IF NOT EXISTS threads (
     snooze_until INTEGER,
     is_pinned INTEGER DEFAULT 0,
     is_muted INTEGER DEFAULT 0,
-    shared_mailbox_id TEXT,
+    namespace_kind TEXT,
+    namespace_id TEXT,
     is_chat_thread INTEGER NOT NULL DEFAULT 0,
     label_membership_generation INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (account_id, id)
@@ -116,7 +119,7 @@ CREATE INDEX IF NOT EXISTS idx_threads_date ON threads(account_id, last_message_
 CREATE INDEX IF NOT EXISTS idx_threads_snoozed ON threads(is_snoozed, snooze_until);
 CREATE INDEX IF NOT EXISTS idx_threads_pinned ON threads(account_id, is_pinned DESC, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_threads_muted ON threads(account_id, is_muted);
-CREATE INDEX IF NOT EXISTS idx_threads_shared_mailbox ON threads(account_id, shared_mailbox_id, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_namespace ON threads(account_id, namespace_kind, namespace_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_threads_chat ON threads(account_id, is_chat_thread) WHERE is_chat_thread = 1;
 
 CREATE TABLE IF NOT EXISTS thread_folders (

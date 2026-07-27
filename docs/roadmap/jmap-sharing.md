@@ -1,5 +1,10 @@
 # JMAP Sharing (RFC 9670)
 
+> **B12 migration note (July 2026).** Foreign JMAP accounts are now discovered
+> and reconciled from bifrost namespaced containers, not by this roadmap's
+> JMAP-only registry pass. Their mail is persisted as `shared` namespace rows;
+> foreign mutations remain explicitly rejected until bifrost exposes support.
+
 **Tier**: 2 - Enhances JMAP provider parity
 **Status**: (green) **All 6 phases implemented** - Full JMAP Sharing pipeline: Session discovery + revocation (Phase 1), shared account sync with independent state tokens (Phase 2), `myRights` persistence (Phase 3), subscription management (Phase 4), ShareNotification polling (Phase 5), principal-based identity resolution (Phase 6). Remaining: UI-side integration (app crate) for rights gating, subscription toggle, and compose identity auto-selection.
 

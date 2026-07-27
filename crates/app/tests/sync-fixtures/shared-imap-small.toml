@@ -1,0 +1,82 @@
+name = "shared-imap-small"
+
+[[account]]
+id = "account-primary"
+name = "viewer@example.test"
+is_personal = true
+primary = true
+
+[[account]]
+id = "account-alice"
+name = "alice@example.test"
+is_personal = false
+
+[[mailbox]]
+id = "primary-inbox"
+account_id = "account-primary"
+name = "Inbox"
+role = "inbox"
+
+[[mailbox]]
+id = "alice-readonly"
+account_id = "account-alice"
+name = "Read only"
+
+[[mailbox]]
+id = "alice-writable"
+account_id = "account-alice"
+name = "Writable"
+
+[[acl]]
+mailbox_id = "alice-readonly"
+identifier = "account-primary"
+rights = "lr"
+
+[[acl]]
+mailbox_id = "alice-writable"
+identifier = "account-primary"
+rights = "lrswip"
+
+[[email]]
+id = "personal-copy"
+mailbox_ids = ["primary-inbox"]
+from = "sender@example.test"
+to = ["viewer@example.test"]
+subject = "Personal copy"
+received_at = "2026-02-01T10:00:00Z"
+message_id = ["<same-message-id@example.test>"]
+body_text = "Personal body."
+
+[[email]]
+id = "hello"
+mailbox_ids = ["primary-inbox"]
+keywords = ["$seen"]
+from = "alice@example.test"
+to = ["viewer@example.test"]
+subject = "Hello"
+received_at = "2026-02-01T10:15:00Z"
+message_id = ["<hello@example.test>"]
+body_text = "Hello body."
+
+[[email]]
+id = "reply"
+mailbox_ids = ["primary-inbox"]
+keywords = ["$flagged"]
+from = "bob@example.test"
+to = ["viewer@example.test"]
+subject = "Re: Hello"
+received_at = "2026-02-01T10:30:00Z"
+message_id = ["<reply@example.test>"]
+in_reply_to = ["<hello@example.test>"]
+references = ["<hello@example.test>"]
+body_text = "Reply body."
+
+[[email]]
+id = "alice-copy"
+mailbox_ids = ["alice-readonly"]
+from = "sender@example.test"
+to = ["alice@example.test"]
+subject = "Shared copy"
+received_at = "2026-02-01T11:00:00Z"
+message_id = ["<same-message-id@example.test>"]
+body_text = "Shared body."
