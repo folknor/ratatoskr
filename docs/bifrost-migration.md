@@ -1901,6 +1901,33 @@ relaxation, `[[public_folder]]` / `[[public_item]]` class/body/attachment
 fields, and per-folder MYRIGHTS / `effective_rights` staging) landed in the
 mock, an installed external binary, not commit-pinned here.
 
+The post-B12 investigation advanced the freeze a nineteenth time, from
+`44ae303` to `80a56965` (the current frozen reference), with saehrimnir
+installed at `0cf44e43`. This one is NOT a B12 prerequisite - B12 had already
+landed at `9b9b4d36` - but a cost fix found while restoring the sync-bench
+baselines. `AccountCapabilities` gained `foreign_namespaces_advertised`, set
+from the IMAP open-time NAMESPACE response through a pure predicate, so a
+consumer can tell a server that can ever share a folder from one that cannot.
+ratatoskr needed it because B12 made `kick_account` detach and reattach the
+resident IMAP slot on EVERY kick - the only channel through which a
+post-attach ACL grant surfaces, since IMAP discovers foreign folders solely at
+open and emits no scope-lifecycle event. Correct on a sharing server, pure
+per-kick waste on a personal-only one, and it tripled the IMAP steady-state
+request budget (13 pre-B12, 33 post, 6 after the fix). saehrimnir advertises
+the other-users namespace only for fixtures that can actually share.
+
+Two findings from that investigation are worth carrying into B15, because
+both are about measurement rather than code. First, a request-count
+regression is not proof of a code regression: Graph read 4 against a
+documented 2 and looked like the same defect as IMAP, but a comparison run at
+`9b9b4d36~1` measured 4 there too - the extra pair is B8's resident aux pass
+firing five seconds after attach, inside the measured window, and the fix was
+to the script rather than the code. Always run the comparison at the parent
+commit before attributing. Second, a gate's `baseline_label` is the only
+durable record of what a metric SHOULD read; `gate.db` holds the numbers but
+lives outside git, so when the label and the measurement disagree the label is
+the evidence and the measurement is the claim.
+
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -

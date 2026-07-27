@@ -69,6 +69,23 @@ harness.assert(
     "initial sync did not mark account completed"
 )
 
+-- The resident auxiliary pass (IMAP PERMANENTFLAGS SELECT probes plus its
+-- own LOGIN) fires RESIDENT_AUX_INITIAL_DELAY (5s) after attach - AFTER this
+-- script's clear point, so its requests used to land inside the measured
+-- window and inflate provider_requests past the per-kick budget. Wait out
+-- the aux start, then wait for the request log to go quiet, so the window
+-- below measures the delta kick and nothing else.
+harness.sleep(6000)
+local quiesce = #harness.mock_requests(admin_endpoint)
+for _ = 1, 20 do
+    harness.sleep(500)
+    local now = #harness.mock_requests(admin_endpoint)
+    if now == quiesce then
+        break
+    end
+    quiesce = now
+end
+
 harness.clear_mock_requests(admin_endpoint)
 
 harness.marker("SYNC_START")

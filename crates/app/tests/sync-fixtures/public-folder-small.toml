@@ -15,6 +15,14 @@ id = "pf-calendar"
 display_name = "Calendar"
 folder_class = "IPF.Appointment"
 
+# Unpinned mail folder: stages more hierarchy than the steady-state gate
+# pins, so a regression to hierarchy-wide item sync shows up as a
+# multiplied request count (B12 obstacle O cost contract).
+[[public_folder]]
+id = "pf-board"
+display_name = "Board"
+folder_class = "IPF.Note"
+
 [[public_item]]
 id = "notice-1"
 folder_id = "pf-notices"
@@ -32,3 +40,12 @@ from = "admin@example.test"
 to = ["viewer@example.test"]
 received_at = "2026-02-01T13:00:00Z"
 body_text = "Must not enter the mail path."
+
+[[public_item]]
+id = "board-1"
+folder_id = "pf-board"
+subject = "Board item"
+from = "admin@example.test"
+to = ["viewer@example.test"]
+received_at = "2026-02-01T14:00:00Z"
+body_text = "Unpinned; must never be fetched."

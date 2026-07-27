@@ -162,16 +162,12 @@ equal = 1
 
 [ratatoskr.gate.graph_steady_state_delta]
 script = "crates/app/tests/sync-harness/graph-steady-state-delta.lua"
-baseline_label = "2026-06-26 bifrost B3b keep-attached steady-state (provider_requests=2: mail delta only; folder/master-category refresh amortized)"
+baseline_label = "2026-07-27 post-B12 steady-state delta kick (provider_requests=2: mail delta only; the resident aux pass - B8 contacts pull etc - is waited out and cleared before the measured window)"
 
 [ratatoskr.gate.graph_steady_state_delta.baseline]
-# PROVISIONAL. Measured provider_requests=4 where the B3b label documents 2.
-# Pinned so the gate is runnable again, NOT because 4 is believed correct.
-# See TODO.md "B12 steady-state request-count regressions".
-plantasjen = "19dc85c74aba4b22afd080429478e402"
+plantasjen = "c59f3a1a08fd4a559ecb3f0fecc3fde4"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
-plantasjen = "14d041ffa46d4472a5283e59ca3420fa"
 
 [ratatoskr.gate.graph_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
@@ -207,7 +203,6 @@ baseline_label = "2026-06-26 bifrost B3b keep-attached steady-state (provider_re
 plantasjen = "34bea82a1a3a4ff493f60acbc843d663"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
-plantasjen = "f3327e5325e441a6b783a897bb9cb3e0"
 
 [ratatoskr.gate.gmail_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
@@ -247,7 +242,6 @@ baseline_label = "2026-07-18 bifrost B7a Google Calendar rolling-window steady-s
 
 [ratatoskr.gate.gcal_calendar_steady_state.baseline]
 plantasjen = "c014da524a57445383186e6fee714025"
-plantasjen = "e996f6e2aa4d4e3a97b860813ef48b49"
 
 [ratatoskr.gate.gcal_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
@@ -280,7 +274,6 @@ baseline_label = "2026-07-18 bifrost B7a Graph Calendar rolling-window steady-st
 
 [ratatoskr.gate.graph_calendar_steady_state.baseline]
 plantasjen = "b1b9e84e3d6d47bcafbcba33fe25045a"
-plantasjen = "87e157a0a4fe43d184206562e3f467f4"
 
 [ratatoskr.gate.graph_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
@@ -313,7 +306,6 @@ baseline_label = "2026-07-18 bifrost B7a JMAP Calendar rolling-window steady-sta
 
 [ratatoskr.gate.jmap_calendar_steady_state.baseline]
 plantasjen = "ad2f2ec2180f4bdd82fd5bb3d28a915d"
-plantasjen = "84b0880c56674963ac7e7bbdd07125a5"
 
 [ratatoskr.gate.jmap_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
@@ -346,7 +338,6 @@ baseline_label = "2026-07-18 bifrost B7a CalDAV Calendar rolling-window steady-s
 
 [ratatoskr.gate.caldav_calendar_steady_state.baseline]
 plantasjen = "7faca03a89754668be066f8dc70ba620"
-plantasjen = "dab74e011bcf4b0b92b2669049ef4b64"
 
 [ratatoskr.gate.caldav_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
@@ -382,7 +373,6 @@ baseline_label = "2026-07-19 B8 contact pull cadence: jmap=1 graph=5 google=20 c
 
 [ratatoskr.gate.contacts_cadence.baseline]
 plantasjen = "3ede120913a24d62ac57b79adfbeda51"
-plantasjen = "1c3830517b284f098cb367f816e1d71e"
 
 [ratatoskr.gate.contacts_cadence.metrics.success]
 equal = 1
@@ -407,18 +397,12 @@ equal = 5
 
 [ratatoskr.gate.imap_steady_state_delta]
 script = "crates/app/tests/sync-harness/imap-steady-state-delta.lua"
-baseline_label = "2026-06-26 bifrost B3b keep-attached steady-state (CONDSTORE no-op delta, provider_requests=12: 1 LIST + 2 SELECT + 2 UID SEARCH, 0 body fetches; aux reconnects amortized)"
+baseline_label = "2026-07-27 post-B12 steady-state delta kick (CONDSTORE no-op delta, provider_requests=6: per folder EXAMINE + flags UID FETCH CHANGEDSINCE + UID SEARCH x2 folders, 0 body fetches; no per-kick reattach on a personal-only server - the rebuild is gated on foreign_namespaces_advertised - and the aux pass is waited out and cleared before the measured window)"
 
 [ratatoskr.gate.imap_steady_state_delta.baseline]
-# PROVISIONAL. Measured provider_requests=33 (list=2 select=2 uid_search=4)
-# where the B3b label documents 12 (1 LIST + 2 SELECT + 2 UID SEARCH). Body
-# fetches are still 0, so this is control traffic, not refetched mail.
-# Pinned so the gate is runnable again, NOT because 33 is believed correct.
-# See TODO.md "B12 steady-state request-count regressions".
-plantasjen = "37dbc6cb278f4d55b22bf680e67b1e96"
+plantasjen = "3bdbdad5a54d46e78c9a8ab0567189ff"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
-plantasjen = "3edc741d23874258a5b05bfbe09f4479"
 
 [ratatoskr.gate.imap_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
@@ -444,6 +428,88 @@ max_delta = 0
 equal_to_baseline = true
 
 [ratatoskr.gate.imap_steady_state_delta.metrics."meta.correct"]
+equal = 1
+
+# ── B12 namespaced steady-state gates ────────────────────────────────
+#
+# The cost contract for shared mailboxes and public folders (B12c):
+# a delta kick costs one mail delta per folder - personal AND foreign -
+# with no per-kick delegate rediscovery, and one EWS FindItem watermark
+# poll per PINNED public folder with none for unpinned ones and no
+# hierarchy re-walk. The exact-matched detail counters are the load-
+# bearing metrics: the public-folder request count must scale with the
+# pin count, never the hierarchy size (obstacle O), and a foreign-delta
+# count change means duplicated or dropped namespace legs.
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state]
+script = "crates/app/tests/sync-harness/graph-shared-mailbox-steady-state.lua"
+baseline_label = "2026-07-27 B12 shared-mailbox steady-state delta kick (provider_requests=3: 1 personal + 2 foreign mail deltas on shared-graph-small; no delegate rediscovery)"
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.baseline]
+plantasjen = "ed66b015b26644dab76a091081367fdd"
+# Other hosts and CI must record their own baseline with --as-baseline
+# before running this gate.
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics.success]
+equal = 1
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.graph_personal_mail_requests"]
+equal = 1
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.graph_foreign_mail_requests"]
+equal = 2
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.message_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.correct"]
+equal = 1
+
+[ratatoskr.gate.graph_public_folder_steady_state]
+script = "crates/app/tests/sync-harness/graph-public-folder-steady-state.lua"
+baseline_label = "2026-07-27 B12 public-folder steady-state delta kick (provider_requests=2: one EWS FindItem watermark poll per pinned folder on public-folder-small, pins=2 of 3 staged folders; unpinned folders unpolled, no hierarchy re-walk)"
+
+[ratatoskr.gate.graph_public_folder_steady_state.baseline]
+plantasjen = "393b9d6614534611b0fa7ab02c523265"
+# Other hosts and CI must record their own baseline with --as-baseline
+# before running this gate.
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics.elapsed_ms]
+max_relative = 1.25
+max = 10000
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics.success]
+equal = 1
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.provider_requests"]
+max_delta = 0
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.ews_find_item_requests"]
+equal = 2
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.message_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.correct"]
 equal = 1
 
 # ── B6a containers-attach gates ──────────────────────────────────────
@@ -488,12 +554,7 @@ script = "crates/app/tests/sync-harness/graph-initial.lua"
 baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_graph_folder_map)"
 
 [ratatoskr.gate.graph_containers_attach.baseline]
-# NO BASELINE. The gate cannot run: graph-initial.lua fails on the persisted
-# inbox folder name (expected "INBOX", got "Inbox") because B12 persists
-# Container::name verbatim where the legacy folder map wrote the canonical id.
-# Record this baseline only after that regression is fixed, or it will pin
-# whatever the broken run happens to produce.
-# See TODO.md "B12 Graph inbox folder name regression".
+plantasjen = "63a306c5647e4327990c0346457f53b0"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
 [ratatoskr.gate.graph_containers_attach.metrics.elapsed_ms]
@@ -566,7 +627,6 @@ baseline_label = "2026-06-18 B3a bifrost consumer hot-path baseline"
 
 [ratatoskr.gate.bifrost-consumer-hot-path.baseline]
 plantasjen = "088ecb3ef7724690a625a9e627f33b1f"
-plantasjen = "a70721e2b67b4516acd93deff79eaa51"
 
 [ratatoskr.gate.bifrost-consumer-hot-path.metrics.elapsed_ms]
 # MARKED measurement: the script emits SYNC_START/SYNC_END around exactly the

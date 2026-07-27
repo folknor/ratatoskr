@@ -181,12 +181,33 @@ impl ResidentEngine {
         // MYRIGHTS discovery and the container persistence pass. Other
         // providers have their own account-scope lifecycle surfaces and stay
         // resident across kicks.
+        //
+        // The rebuild is gated on the server actually advertising a foreign
+        // (other-user / shared) NAMESPACE at open
+        // (`AccountCapabilities::foreign_namespaces_advertised`): on a
+        // personal-only server no ACL grant can ever surface a folder, so
+        // paying a full detach / reconnect / rediscovery on every kick there
+        // is pure waste - it tripled the imap_steady_state_delta request
+        // budget on personal fixtures. Decision pinned by
+        // `should_rebuild_slot_on_kick`.
         let refresh_imap_containers = {
-            let slots = self.inner.slots.lock().await;
-            matches!(
-                slots.get(account_id).map(|slot| slot.provider),
-                Some(BifrostProviderKind::Imap)
-            )
+            let provider = {
+                let slots = self.inner.slots.lock().await;
+                slots.get(account_id).map(|slot| slot.provider)
+            };
+            match provider {
+                Some(provider) => {
+                    let advertised = self
+                        .inner
+                        .engine
+                        .engine()
+                        .account_capabilities(&AccountId(account_id.to_string()))
+                        .ok()
+                        .map(|capabilities| capabilities.foreign_namespaces_advertised);
+                    should_rebuild_slot_on_kick(provider, advertised)
+                }
+                None => false,
+            }
         };
         if refresh_imap_containers {
             self.detach_account(account_id).await?;
@@ -622,6 +643,23 @@ impl ResidentEngine {
     }
 }
 
+/// Should a sync kick tear the resident slot down and reattach so the
+/// engine re-runs account-open scope discovery?
+///
+/// Only IMAP: it discovers foreign folders exclusively at open and emits
+/// no scope-lifecycle events, so a post-attach ACL grant becomes visible
+/// only through a reattach. And only when the server advertised a foreign
+/// namespace at open - without one, a grant can never surface a folder
+/// and the reattach is pure per-kick wire waste. An unreadable capability
+/// snapshot (`None`) fails toward rebuilding: correctness (a reachable
+/// grant) beats the redundant round trips.
+fn should_rebuild_slot_on_kick(
+    provider: BifrostProviderKind,
+    foreign_namespaces_advertised: Option<bool>,
+) -> bool {
+    matches!(provider, BifrostProviderKind::Imap) && foreign_namespaces_advertised.unwrap_or(true)
+}
+
 fn push_subscribe_scopes(
     provider: BifrostProviderKind,
     containers: &ContainerIndex,
@@ -1006,6 +1044,19 @@ async fn resident_aux_loop(
     account_id: String,
     provider: BifrostProviderKind,
 ) {
+    // Snapshot BEFORE the initial delay. The consumer's first caught-up
+    // edge marks `initial_sync_completed` within a couple of seconds -
+    // ahead of the 5s initial-delay tick - so a fresh read at tick time
+    // always says "completed" for a newly added account and the initial
+    // aux branch (Graph contacts + master-category import, JMAP initial
+    // contacts) becomes dead code. The attach-time snapshot decides
+    // whether the FIRST pass is the initial one; every later pass is a
+    // delta pass by construction (task-local flip below), matching the
+    // legacy runner which read the marker before each kick and set it
+    // after the initial pass ran.
+    let mut initial_sync_completed = read_initial_sync_completed(&inner.read_db, &account_id)
+        .await
+        .unwrap_or(false);
     let mut delay = RESIDENT_AUX_INITIAL_DELAY;
     loop {
         tokio::select! {
@@ -1022,21 +1073,21 @@ async fn resident_aux_loop(
             },
             &account_id,
             provider,
+            initial_sync_completed,
         )
         .await;
+        initial_sync_completed = true;
     }
 }
 
-async fn run_aux_pass(resident: ResidentEngine, account_id: &str, provider: BifrostProviderKind) {
+async fn run_aux_pass(
+    resident: ResidentEngine,
+    account_id: &str,
+    provider: BifrostProviderKind,
+    initial_sync_completed: bool,
+) {
     let gmail_resident = resident.clone();
     let inner = &resident.inner;
-    // Read the marker fresh each pass, mirroring the legacy runner which read
-    // it before each kick: a fresh account whose initial drive has not yet
-    // completed gets the initial pass (full contacts pull etc.), later passes
-    // get the delta path once the consumer marks the account complete.
-    let initial_sync_completed = read_initial_sync_completed(&inner.read_db, account_id)
-        .await
-        .unwrap_or(false);
     let result: Result<(), String> = match provider {
         BifrostProviderKind::Jmap => {
             async {
@@ -1376,5 +1427,34 @@ mod tests {
         assert!(scopes.contains(&CursorScope::Folder(FolderId(
             "#user/alice/INBOX".to_string()
         ))));
+    }
+
+    /// The per-kick slot rebuild (detach + reattach, the only channel a
+    /// post-attach IMAP ACL grant surfaces through) runs ONLY for IMAP and
+    /// ONLY when the server advertised a foreign namespace at open. A
+    /// personal-only IMAP server never rebuilds (this tripled the
+    /// imap_steady_state_delta budget); an unreadable capability snapshot
+    /// fails toward rebuilding.
+    #[test]
+    fn kick_rebuild_gates_on_provider_and_foreign_namespace() {
+        use super::should_rebuild_slot_on_kick;
+
+        assert!(should_rebuild_slot_on_kick(
+            BifrostProviderKind::Imap,
+            Some(true)
+        ));
+        assert!(!should_rebuild_slot_on_kick(
+            BifrostProviderKind::Imap,
+            Some(false)
+        ));
+        assert!(should_rebuild_slot_on_kick(BifrostProviderKind::Imap, None));
+        for provider in [
+            BifrostProviderKind::Jmap,
+            BifrostProviderKind::Graph,
+            BifrostProviderKind::Gmail,
+        ] {
+            assert!(!should_rebuild_slot_on_kick(provider, Some(true)));
+            assert!(!should_rebuild_slot_on_kick(provider, None));
+        }
     }
 }

@@ -3,6 +3,14 @@
 -- fixture: jmap-bulk.lua
 -- protocol: jmap
 -- ceiling: 180s
+--
+-- Deliberately NOT a `[ratatoskr.gate.*]` bench gate. The load-bearing
+-- property (a 10k-message steady state must never fall back to
+-- Email/query) is asserted inline below, so any suite/smoke run enforces
+-- it; the per-kick request-count budget is already pinned by the
+-- jmap_steady_state_delta gate on the small fixture, and benching the
+-- 10k initial sync three times per gate evaluation buys no additional
+-- contract for its cost.
 
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")

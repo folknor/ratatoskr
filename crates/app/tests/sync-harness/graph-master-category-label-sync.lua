@@ -44,19 +44,38 @@ harness.marker("SYNC_END")
 harness.assert(sync_err == nil, "start_sync failed")
 harness.assert_eq(result.result, "completed", result.error or "sync result")
 
+-- Master categories land through the resident auxiliary pass's initial
+-- branch, which fires RESIDENT_AUX_INITIAL_DELAY (5s) after attach - after
+-- start_sync returns. Poll until the aux pass has written them.
+local function collect_cat_labels(labels)
+    -- Filter out folder-kind labels (Inbox etc) and the local "Harness"
+    -- label inserted by TestSeedAccount; assert only on cat-prefixed
+    -- tag-kind rows that graph_label_sync wrote.
+    local cat_labels = {}
+    for _, label in ipairs(labels) do
+        if string.sub(label.id, 1, 4) == "cat:" then
+            cat_labels[#cat_labels + 1] = label
+        end
+    end
+    return cat_labels
+end
+
 local state, state_err = client:request("TestQueryDbState", {
     account_id = account.account_id,
 })
 harness.assert(state_err == nil, "TestQueryDbState failed")
-
--- Filter out folder-kind labels (Inbox etc) and the local "Harness"
--- label inserted by TestSeedAccount; assert only on cat-prefixed
--- tag-kind rows that graph_label_sync wrote.
-local cat_labels = {}
-for _, label in ipairs(state.labels) do
-    if string.sub(label.id, 1, 4) == "cat:" then
-        cat_labels[#cat_labels + 1] = label
+local cat_labels = collect_cat_labels(state.labels)
+for _ = 1, 40 do
+    if #cat_labels > 0 then
+        break
     end
+    harness.sleep(500)
+    local refreshed, refresh_err = client:request("TestQueryDbState", {
+        account_id = account.account_id,
+    })
+    harness.assert(refresh_err == nil, "TestQueryDbState aux poll failed")
+    state = refreshed
+    cat_labels = collect_cat_labels(state.labels)
 end
 harness.assert_eq(#cat_labels, 4, "graph master-category count")
 

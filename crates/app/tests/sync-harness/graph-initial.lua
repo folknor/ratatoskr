@@ -93,7 +93,13 @@ harness.assert(synced_account.initial_sync_completed, "initial sync did not mark
 
 local inbox = folder_by_id(state.folders, "INBOX")
 harness.assert(inbox ~= nil, "missing INBOX folder")
-harness.assert_eq(inbox.name, "INBOX", "INBOX folder name")
+-- `folders.name` is a DISPLAY name (glossary "Schema"): the containers pass
+-- persists Graph's displayName ("Inbox" in graph-initial.toml) under the
+-- canonical id. The old "INBOX" value here was an artifact of the pre-B12
+-- message-persist path clobbering the name with the storage id via
+-- insert_folders_batch; B12's create-only ensure_folder_rows (which exists
+-- to stop shares losing rights/namespace metadata) removed the clobber.
+harness.assert_eq(inbox.name, "Inbox", "INBOX folder display name")
 
 local message = message_by_subject(state.messages, "Graph initial")
 harness.assert(message ~= nil, "missing Graph initial message")
@@ -103,6 +109,23 @@ local attachment = attachment_by_filename(state.attachments, "sample.txt")
 harness.assert(attachment ~= nil, "missing sample.txt attachment")
 harness.assert_eq(attachment.mime_type, "text/plain", "attachment mime type")
 harness.assert((attachment.size or 0) > 0, "attachment size")
+
+-- Master categories land through the resident auxiliary pass, which fires
+-- RESIDENT_AUX_INITIAL_DELAY (5s) after attach - after start_sync returns.
+-- Poll until the aux pass has written them (bounded by the script ceiling).
+for _ = 1, 40 do
+    if label_by_id(state.labels, "cat:Work") ~= nil then
+        break
+    end
+    harness.sleep(500)
+    local refreshed, refresh_err = client:request("TestQueryDbState", {
+        account_id = account.account_id,
+        message_limit = 10,
+        attachment_limit = 10,
+    })
+    harness.assert(refresh_err == nil, "TestQueryDbState aux poll failed")
+    state = refreshed
+end
 
 local work = label_by_id(state.labels, "cat:Work")
 harness.assert(work ~= nil, "missing cat:Work")
