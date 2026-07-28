@@ -3,7 +3,7 @@
 -- fixture: contacts-cadence.toml
 -- protocol: jmap
 -- ceiling: 120s
--- The resident policy is deterministic and unit-pinned; this sync-bench keeps
+-- The resident policy is deterministic and unit-pinned; this sync --bench keeps
 -- the provider-facing account-wide route measurable in the harness.
 local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin ~= nil, "saehrimnir admin endpoint missing")

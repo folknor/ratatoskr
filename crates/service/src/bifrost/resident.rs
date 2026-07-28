@@ -1186,6 +1186,17 @@ async fn run_aux_pass(
     {
         log::debug!("resident contact pull for {account_id} skipped: {error}");
     }
+    let group_cycle = next_group_pull_cycle(inner, account_id).await;
+    if super::contacts::groups::should_pull_groups_on_cycle(group_cycle)
+        && let Err(error) = super::contacts::groups::run_group_pull(
+            &inner.engine.engine(),
+            account_id,
+            &inner.write_db,
+        )
+        .await
+    {
+        log::debug!("resident directory-group pull for {account_id} skipped: {error}");
+    }
 }
 
 /// The auxiliary loop wakes every five minutes. Keep contact refreshes at
@@ -1215,6 +1226,24 @@ async fn next_contact_pull_cycle(
         .await
         .unwrap_or_else(|error| {
             log::debug!("contact pull cycle counter unavailable, forcing pull: {error}");
+            0
+        })
+}
+
+async fn next_group_pull_cycle(inner: &ResidentEngineInner, account_id: &str) -> u32 {
+    let account_id = account_id.to_string();
+    inner
+        .write_db
+        .with_write(move |conn| {
+            db::db::queries_extra::next_contact_pull_cycle_sync(
+                conn,
+                &account_id,
+                super::contacts::groups::DIRECTORY_GROUP_CYCLE_SOURCE,
+            )
+        })
+        .await
+        .unwrap_or_else(|error| {
+            log::debug!("directory-group pull cycle counter unavailable, forcing pull: {error}");
             0
         })
 }

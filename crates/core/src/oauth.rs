@@ -39,7 +39,7 @@ const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const MICROSOFT_GRAPH_ME_URL: &str =
     "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName";
-const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
+const MICROSOFT_GRAPH_SCOPES: [&str; 11] = [
     "Mail.ReadWrite",
     "Mail.ReadWrite.Shared",
     "Mail.Send",
@@ -50,6 +50,7 @@ const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
     "openid",
     "profile",
     "User.Read",
+    "GroupMember.Read.All",
 ];
 
 use common::http::shared_http_client;
@@ -751,7 +752,30 @@ pub fn sha256_base64url(input: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MicrosoftGraphMe, microsoft_userinfo_from_me};
+    use super::{MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, microsoft_userinfo_from_me};
+
+    /// O10: the directory-group pull needs `GroupMember.Read.All`, and the
+    /// two Microsoft scope lists are maintained separately - they have
+    /// already drifted from each other elsewhere (`User.Read` vs `email`),
+    /// so each is asserted on its own.
+    #[test]
+    fn microsoft_scopes_include_group_member_read() {
+        const SCOPE: &str = "GroupMember.Read.All";
+        assert!(
+            MICROSOFT_GRAPH_SCOPES.contains(&SCOPE),
+            "MICROSOFT_GRAPH_SCOPES is missing {SCOPE}"
+        );
+
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(
+            scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry is missing {SCOPE}"
+        );
+    }
 
     #[test]
     fn microsoft_userinfo_prefers_mail() {

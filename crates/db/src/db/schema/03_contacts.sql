@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS contact_groups (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
     source TEXT NOT NULL DEFAULT 'user',
-    account_id TEXT,
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
     server_id TEXT,
     email TEXT,
     group_type TEXT

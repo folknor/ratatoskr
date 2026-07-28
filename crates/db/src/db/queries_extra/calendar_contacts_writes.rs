@@ -2,8 +2,7 @@
 //! previously lived inline in calendar, graph, and gmail crates. Agent-owned
 //! scaffold for Phase 1.6 - functions get added here as call sites in
 //! `crates/calendar/src/sync.rs`, `crates/calendar/src/actions.rs`,
-//! `crates/calendar/src/caldav/mod.rs`, `crates/graph/src/group_sync.rs`,
-//! `crates/graph/src/sync/persistence.rs`, and
+//! `crates/calendar/src/caldav/mod.rs`, `crates/graph/src/sync/persistence.rs`, and
 //! `crates/gmail/src/contacts/other_contacts.rs` are routed through `db` APIs.
 //!
 //! Writer-side functions take `&WriteConn` or `&WriteTxn` so Service code
@@ -12,7 +11,7 @@
 pub use super::calendars::{
     CalendarAttendeeWriteRow, CalendarReminderWriteRow, LocalCalendarEventParams,
 };
-use crate::db::{WriteConn, WriteTxn};
+use crate::db::{WriteConn, WriteTarget, WriteTxn};
 use rusqlite::{OptionalExtension, params, params_from_iter};
 
 // ---------------------------------------------------------------------------
@@ -951,7 +950,7 @@ pub struct ContactGroupRow {
 }
 
 /// Upsert a contact group row (INSERT OR UPDATE on conflict by id).
-pub fn upsert_contact_group(conn: &WriteConn<'_>, row: &ContactGroupRow) -> Result<(), String> {
+pub fn upsert_contact_group(conn: &impl WriteTarget, row: &ContactGroupRow) -> Result<(), String> {
     conn.execute(
         "INSERT INTO contact_groups (id, name, source, account_id, server_id, email, group_type) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
@@ -1012,7 +1011,7 @@ pub fn delete_contact_group_by_id(conn: &WriteTxn<'_>, group_id: &str) -> Result
 
 /// Delete all contact groups for an account with a given source label.
 pub fn delete_contact_groups_for_account_by_source(
-    conn: &WriteConn<'_>,
+    conn: &impl WriteTarget,
     account_id: &str,
     source: &str,
 ) -> Result<(), String> {

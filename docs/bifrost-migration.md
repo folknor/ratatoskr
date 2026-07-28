@@ -460,7 +460,7 @@ consumer is `graph/shared_mailbox_sync.rs` (B12), which calls the FULL
 `graph_{initial,delta}_sync`, so re-homing a "minimal shim" would relocate ~the
 whole tree for ~0 net LOC and high risk - B12 deletes/rewires it. The Graph
 `ProviderOps` action methods survive (B4/B15). Gated by `brokkr check` green,
-`brokkr service-suite`, the `graph-initial` / `graph-steady-state-delta` sync-bench
+`brokkr service-suite`, the `graph-initial` / `graph-steady-state-delta` sync `--bench`
 (the new `graph_steady_state_delta` gate, `meta.provider_requests` pinned
 `max_delta = 0`), the `graph_consumer_membership_equals_legacy` membership golden,
 the `hydrate_change_graph_category_and_importance_mapping` unit test, the
@@ -591,7 +591,7 @@ Graph / Gmail write arms; IMAP has no importance). A deliberate, validated
 DEVIATION rode along: `SyncEvent::Done(checkpoint)` persistence was GENERALIZED to
 all providers (the consumer previously ignored `Done`), closing the empty-delta
 cursor-durability gap for every provider - the JMAP, Gmail, and Graph steady-state
-sync-bench gates were re-run and all held at delta = 0 (no request-count
+sync `--bench` gates were re-run and all held at delta = 0 (no request-count
 regression). This cut needed NO bifrost change: the frozen `../bifrost` stays at
 `002e7b9` (§ 11; bifrost's IMAP CONDSTORE/QRESYNC behavior was already correct). The
 mock work was entirely in `saehrimnir`, whose IMAP mock gained real CONDSTORE/QRESYNC
@@ -603,7 +603,7 @@ not commit-pinned here, recorded like the sibling cuts' mock extensions. Gated b
 threading-reassign unit tests; all ten `imap-*` sync-harness scripts; the three
 `bifrost-consumer-*` durability scripts including the new IMAP deferred-ack crash
 gate; `parent_sigkill`; `brokkr service-suite` 63/63; and the `imap_steady_state_delta`
-sync-bench (baseline pinned on the clean tree at land). Read the B3a-cut-imap landing
+sync `--bench` (baseline pinned on the clean tree at land). Read the B3a-cut-imap landing
 commit.
 
 B3b (push plus invalidation - the keep-attached lifecycle) is done and its TODO entry
@@ -660,7 +660,7 @@ change-cursor replay, not a resume cursor. Both tables stop being written (addit
 row deletion is B15). This cut also realized the two B3a follow-ups: keep-attached
 collapses the two provider connections per kick to one and removes the per-kick
 `COMPLETION_IDLE_INTERVAL` idle tax and the `OAuthRefresher` first-read refresh from the
-steady-state path, and the four steady-state sync-bench baselines were re-recorded against
+steady-state path, and the four steady-state sync `--bench` baselines were re-recorded against
 the measured drop. A B3b bifrost side-quest advanced the freeze from `002e7b9` to
 `db34ab4` (§ 11): the push-gate work surfaced a JMAP-WebSocket `StateChange` parser bug in
 `client_ws.rs` - a double `@type` tag that rejected conformant RFC 8620/8887 frames -
@@ -673,7 +673,7 @@ harness-mode ingress validation bypass keyed to the mock's signing material. Gat
 (`jmap-push-websocket`, `imap-push-idle`, `gmail-push-pubsub`, `graph-push-webhook`), the
 B3a regression + durability scripts held green under the longer lifetime, the new
 `bifrost-consumer-sustained-push-bound` accumulator-bound gate, the re-recorded
-steady-state sync-bench amortization baselines, and the resident-teardown /
+steady-state sync `--bench` amortization baselines, and the resident-teardown /
 no-table-writer service tests - read the B3b landing commit.
 
 B3c (control / pause / recovery - the final B3 sub-item) is done and its TODO
@@ -977,7 +977,7 @@ git history): `imap-container-crud` (the rename handler now re-keys the local
 OAuth seeding). The separate `gmail-initial` zero-ingest carved alongside them
 turned out to be TWO faults: a stale installed `saehrimnir` binary (which also
 silently broke `jmap-initial`) plus a latent bifrost cold-start backfill
-subscriber race (freeze `bea56e8`; see § 11). The `containers-attach` sync-bench
+subscriber race (freeze `bea56e8`; see § 11). The `containers-attach` sync `--bench`
 gates exist with per-host baselines to record via `--as-baseline`. Read the B6
 landing commit.
 
@@ -1332,7 +1332,7 @@ landing commit.
   for `rsvp_calendar_event`'s unsynced-event `Failed` path; and the eight
   per-provider calendar action-writeback and RSVP sync-harness round-trip
   scripts, with per-op provider-request counts pinned in the harness
-  assertions as the performance instrument (no `brokkr sync-bench` regression
+  assertions as the performance instrument (no `brokkr sync --bench` regression
   surfaced). Read the B7b landing commit for the full accounting.
   - B7c (stale-calendar reap-vs-hide lifecycle) is done and its TODO entry is
     removed per repo convention. It superseded B7a's retain-and-skip policy
@@ -1395,7 +1395,7 @@ landing commit.
 - B8. Contacts. Replace Google People, Graph contacts, JMAP contacts, and
   Google other-contacts sync with the bifrost contact surface. Needs B1; A7 for
   DAV (landed). B8 is done and its TODO entry is removed per repo convention;
-  what remains open is the B8-groups follow-up filed out of it (see below).
+  the B8-groups follow-up filed out of it (see below) is also done.
 
   It collapsed the four per-provider contact READ implementations -
   `crates/gmail/src/contacts/` (People main + otherContacts),
@@ -1459,20 +1459,47 @@ landing commit.
   (per-provider pull round-trips, delete-all-vs-transient-empty, the Google
   otherContacts corpus, cross-provider dedup, the Graph fan-out
   identity-equivalence check, per-provider write-back including CardDAV, and
-  GAL) plus the `contacts_cadence` sync-bench request-budget gate, replacing
+  GAL) plus the `contacts_cadence` sync `--bench` request-budget gate, replacing
   the retired `jmap-contacts-initial.lua` / `graph-contacts-{initial,
   incremental}.lua` / `people-contacts-{initial,incremental,
   writeback-delete}.lua` scripts. Read the B8 landing commit for the full
   accounting.
   - B8-groups. Exchange distribution / M365 group sync onto a bifrost groups
-    surface. Carved out of B8 (disposition (b), not attempted there):
-    `crates/graph/src/group_sync.rs` enumerates `/groups`, classifies
-    Unified (M365) vs distribution-list groups, and fetches transitive
+    surface. Carved out of B8 (disposition (b), not attempted there). B8-groups
+    is done and its TODO entry (the "Exchange group sync compatibility smoke"
+    check) is removed per repo convention.
+
+    Legacy `crates/graph/src/group_sync.rs` enumerated `/groups`, classified
+    Unified (M365) vs distribution-list groups, and fetched transitive
     membership into `contact_groups` / `contact_group_members`, and bifrost
-    has no directory-group equivalent to `address_books_list` today. Needs a
-    bifrost groups surface (new bifrost work, not yet a side-quest) before
-    this can rewire uniformly; until then `group_sync.rs` and
-    `sync_exchange_groups` stay in place, Graph-specific.
+    had no directory-group equivalent to `address_books_list`. That
+    prerequisite is now SATISFIED: the B8-groups-SQ bifrost side-quest
+    (freeze `59b9e2d`, § 11) added `directory_groups_list` /
+    `directory_group_expand` on the `Account` trait, the `DirectoryGroup` /
+    `DirectoryGroupKind` / `DirectoryGroupMember` types, two
+    `PimMethodSupport` flags, the Graph implementation, `Unsupported` stubs
+    on the other five protocol crates, and two `SyncEngine` forwarders. The
+    consumer landing replaced the Graph-specific `/groups` enumeration with
+    `crates/service/src/bifrost/contacts/groups.rs::run_group_pull`, driven
+    off the resident aux loop exactly like the rest of the B8 contacts
+    family; `crates/graph/src/group_sync.rs` (and the `sync_exchange_groups`
+    call site in `provider-sync/src/graph/aux_sync.rs`) is deleted outright,
+    not shimmed. The `saehrimnir` `/me/memberOf` / `/transitiveMembers`
+    routes already existed; the mock side-quest was the narrower gap
+    recorded in § 11, now closed: a fixture `Group` can stage `Unified`, and
+    group change-script ops (`group_create` / `group_update` /
+    `group_destroy`) reconcile it without advancing an account's mail delta.
+    This item was a B15 PREREQUISITE - B15 deletes the `graph` crate, and
+    `group_sync.rs` is no longer a live consumer of it. Gated by
+    `brokkr check`, the `-p service` unit tests on `groups.rs` (cadence
+    divisor, snapshot upsert/prune/delete-all, partial-enumeration abort,
+    `Unsupported` no-op), the `db` account-delete cascade test, the
+    Microsoft scope-list test (O10), and the sync-harness suite under
+    `crates/app/tests/sync-harness/contacts/` (`graph_groups_pull`,
+    `graph_groups_reconcile`, `graph_groups_cadence`) plus the
+    `graph_groups_pull` sync `--bench` gate and the re-baselined
+    `graph_containers_attach` gate. Read the B8-groups landing commit for
+    the full accounting.
 - B9. Attachments plus cloud attachments. LANDED - both attachment seams now
   dispatch through the resident bifrost `SyncEngine` instead of per-provider
   `ProviderOps`. INCOMING: `attachment.fetch` and the prefetch worker pull
@@ -1647,7 +1674,7 @@ Estimated scope: ~8 bifrost specs plus ~16-20 ratatoskr specs.
   that threading and bundling outputs are unchanged across the cut. "Validate"
   here means named behavioral gates, not a compile check: B3 (and every other
   sync-touching spec) must pin explicit `brokkr service-test` / sync-harness runs
-  plus the relevant `brokkr sync-bench` so a compile-only replacement cannot pass
+  plus the relevant `brokkr sync --bench` so a compile-only replacement cannot pass
   the gate. See § 10 for the workspace-wide gate requirement this is an instance
   of.
 - Calendar (B7) is a large rewire but lower structural risk than B3: bifrost
@@ -1677,7 +1704,7 @@ compiles and passes unit tests, not that real provider sync still behaves. Every
 spec that touches sync, actions, calendar, or contacts must pin, in its gate
 section, the explicit behavioral gates it has to pass: the relevant
 `brokkr service-test` scripts, the sync-harness runs (real provider sync against
-the `saehrimnir` mock servers - see the harness doc), and `brokkr sync-bench`
+the `saehrimnir` mock servers - see the harness doc), and `brokkr sync --bench`
 where performance is in scope. A spec the loop can satisfy with a compile-only
 replacement is under-gated and must be rejected at review.
 
@@ -1902,9 +1929,9 @@ fields, and per-folder MYRIGHTS / `effective_rights` staging) landed in the
 mock, an installed external binary, not commit-pinned here.
 
 The post-B12 investigation advanced the freeze a nineteenth time, from
-`44ae303` to `80a56965` (the current frozen reference), with saehrimnir
+`44ae303` to `80a56965`, with saehrimnir
 installed at `0cf44e43`. This one is NOT a B12 prerequisite - B12 had already
-landed at `9b9b4d36` - but a cost fix found while restoring the sync-bench
+landed at `9b9b4d36` - but a cost fix found while restoring the sync `--bench`
 baselines. `AccountCapabilities` gained `foreign_namespaces_advertised`, set
 from the IMAP open-time NAMESPACE response through a pure predicate, so a
 consumer can tell a server that can ever share a folder from one that cannot.
@@ -1928,6 +1955,47 @@ durable record of what a metric SHOULD read; `gate.db` holds the numbers but
 lives outside git, so when the label and the measurement disagree the label is
 the evidence and the measurement is the claim.
 
+B8-groups-SQ advanced the freeze a twentieth time, from `80a56965` to
+`59b9e2d` (the current frozen reference): the directory-groups surface
+B8-groups was blocked on. `crates/types/src/directory.rs` gained
+`DirectoryGroupId`, `DirectoryGroup` with a `#[non_exhaustive]
+DirectoryGroupKind { Unified, DistributionList, MailEnabledSecurity }`, and a
+minimal `DirectoryGroupMember { email, display_name }`, plus two
+idempotent-by-omission `AccountOperation` variants and two
+`PimMethodSupport` flags carrying the tenant-consent caveat (`/groups` needs
+`GroupMember.Read.All`, a harder grant than `directory_search`'s
+`User.ReadBasic.All`). The `Account` trait gained
+`directory_groups_list(page_cursor)` and `directory_group_expand(group,
+page_cursor)`, paged exactly like `directory_search`, with two 1:1
+`SyncEngine` forwarders in the contact passthrough cluster. Graph implements
+both in the new `crates/graph/src/account/groups.rs`
+(`/me/memberOf/microsoft.graph.group` filtered to mail-enabled with the
+Unified / mail-enabled-security / distribution-list classification, and
+`/groups/{id}/transitiveMembers/microsoft.graph.user` projecting
+mail-preferred-over-UPN, lowercased, unresolvable members dropped); google /
+jmap / imap / caldav / carddav carry `Unsupported` stubs. Ratatoskr compiled
+and passed `brokkr check` green against the promotion with no consumer-side
+change, since nothing here implements `Account` and no exhaustive
+`PimMethodSupport` literal exists on this side. The matching `saehrimnir` mock
+routes (`/me/memberOf`, `/transitiveMembers`, both the bare and the
+`microsoft.graph.group` / `microsoft.graph.user` type-cast forms, plus the
+`/users/{id}/memberOf` walkers) already existed
+(`research/saehrimnir/src/graph/group_sync.rs`). What was missing was
+narrower, and B8-groups' own mock side-quest closed it, advancing saehrimnir
+from `0cf44e4` to `45514fa` (the installed reference): the fixture `Group`
+carried no `group_types`, so `groupTypes` was never projected and no fixture
+could stage a `Unified` group, leaving the m365 classification arm ungateable
+end to end; and there were no group change-script operations, so no
+reconciliation window could be staged at all. That side-quest added both, plus
+a `StepTouches` groups category so a step that fails partway rolls the group
+set back atomically like every other mutation category. Group ops deliberately
+record no account transition and advance no mail delta: the Graph group
+surface has no delta endpoint, and `record_transition` does not bump on an
+empty diff, so the state-token bump the spec originally demanded was
+self-contradictory rather than merely unimplemented. The consumer harness
+gates cover the Unified classification, the prune, member replacement, the
+no-data-loss guarantee on a failed enumeration, and the production cadence.
+
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and
 `../bifrost` stays frozen at that commit for the full duration of the item -
@@ -1939,9 +2007,14 @@ spec was built against.
 
 ## 12. Review reconciliation
 
-This plan was reviewed twice before the loop launched (R1 / opus, R2 / codex);
-both reports live under `docs/bifrost-migration/`. Every valid finding from both
-is now folded into the sections above: the stale commit pin (advanced from
+This plan was reviewed twice before the loop launched (R1 / opus, R2 / codex).
+Both reports were deleted after consolidation - `docs/bifrost-migration/`
+holds only the live per-item specs for items still in their implementation
+window, not the review reports themselves; each spec is itself removed at its
+own item's landing, per the B12 precedent, so this document is the durable
+record, not any file under that directory. Every valid finding from both
+reviews is now folded into the sections above: the stale commit pin (advanced
+from
 `416cbd4` to `ff56478` in § 11), the core-boundary leak (the core-boundary rule
 in § 7), the maximal-integration deletion audit and the out-of-tree
 `bifrost-jmap` dep (§ 7 B15), the incomplete B2 cursor-table set (which expanded

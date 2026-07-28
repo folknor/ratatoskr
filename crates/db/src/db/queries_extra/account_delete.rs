@@ -436,4 +436,52 @@ mod tests {
         // the `cached_hashes` query filters on `content_hash IS NOT NULL`.
         assert_eq!(plan.data.cached_hashes, vec![real]);
     }
+
+    #[test]
+    fn contact_groups_cascade_on_account_delete() {
+        let conn = test_db();
+        insert_account(&conn, "acct-a");
+        conn.execute(
+            "INSERT INTO contact_groups (id, name, source, account_id, server_id) \
+             VALUES ('exchange-acct-a-g1', 'Exchange', 'exchange', 'acct-a', 'g1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contact_group_members (group_id, member_type, member_value) \
+             VALUES ('exchange-acct-a-g1', 'email', 'member@example.test')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contact_groups (id, name, source) VALUES ('user-group', 'User', 'user')",
+            [],
+        )
+        .unwrap();
+
+        delete_account_orchestrate_sync(&write(&conn), "acct-a").expect("delete account");
+
+        let exchange_groups: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contact_groups WHERE source = 'exchange'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let members: i64 = conn
+            .query_row("SELECT COUNT(*) FROM contact_group_members", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let user_groups: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contact_groups WHERE source = 'user'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exchange_groups, 0);
+        assert_eq!(members, 0);
+        assert_eq!(user_groups, 1);
+    }
 }

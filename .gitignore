@@ -52,7 +52,7 @@ nul
 
 # brokkr local cache, with one deliberate exception.
 #
-# gate.db holds the sync-bench baseline rows that brokkr.toml pins by UUID.
+# gate.db holds the sync --bench baseline rows that brokkr.toml pins by UUID.
 # It was the ONLY copy of those numbers: the pin is committed, the row it
 # points at was not, so anything that removed the file orphaned every
 # baseline on the host with no recovery path. That is not hypothetical -

@@ -29,7 +29,7 @@ the same artifact.
    - a named `brokkr service-test <script>` (or `brokkr service-suite
      [--filter X]`) Lua harness script for Service IO-boundary behavior - boot,
      dispatch, drain, crash, framing - that only a real subprocess exercises;
-   - a named `brokkr sync-bench <script> --gate <name>` run, held against its
+   - a named `brokkr sync <script> --gate <name> --bench` run, held against its
      recorded `brokkr.toml` baseline, for provider-sync behavior and for any
      hot path carrying a performance, provider-request-count, or memory budget.
      Ratatoskr DOES measure performance: these baselines (elapsed, provider
@@ -39,7 +39,7 @@ the same artifact.
 
    These integration, harness, and perf gates are the norm here, not the
    exception: most bricks that touch sync, providers, the Service boundary, or
-   a hot path are gated by a harness script or a sync-bench baseline, not by a
+   a hot path are gated by a harness script or a sync --bench baseline, not by a
    unit test alone. If a behavior genuinely cannot be pinned by any of these,
    the spec says so explicitly and names the `brokkr check` outcome that stands
    in. A brick whose load is unproven is not laid. Per gate, the spec contains
@@ -47,7 +47,7 @@ the same artifact.
    relevant tests". If no instrument exists that can verify a gate (no path
    exercises it, no test or harness script pins the behavior), building that
    instrument - the smallest deterministic unit test, the Lua harness script,
-   or the sync-bench gate that pins the behavior - is itself a brick of the
+   or the sync --bench gate that pins the behavior - is itself a brick of the
    spec, specified to the same standard and laid before the brick it gates.
 6. **A keep/revert path.** The implementation unit is one coherent, fully
    intrusive change that lands and is then kept or reverted on its gate
@@ -76,18 +76,18 @@ the same artifact.
     area-specific required-reading doc from AGENTS.md's required-reading map
     that the spec touches - `reference/glossary/folders-labels.md` for
     folders/labels/`label_kind`/system-folder work, `reference/glossary/harness.md`
-    for any harness, `--test-harness`, service-test, or sync-bench work,
+    for any harness, `--test-harness`, service-test, or sync --bench work,
     `UI.md` for UI work, and the relevant `docs/<area>/` design doc for a
     feature area. A spec citing these references must direct its reviewers and
     implementers to READ them, not merely name them - they are the ground the
     work is built on and judged against. A spec missing any of these is
     incomplete. Unlike the bifrost dependency, ratatoskr DOES keep performance
     baselines: a spec touching a sync, provider, storage, or Service hot path
-    owes the relevant `brokkr sync-bench` gate recorded against its
+    owes the relevant `brokkr sync --bench` gate recorded against its
     `brokkr.toml` baseline (elapsed, provider-request count, peak RSS), so
     correctness AND the named performance budgets are measured axes - gated by
     `brokkr check`, named `brokkr test` / `brokkr service-test` cases, and the
-    sync-bench baselines.
+    sync --bench baselines.
 
 ## Stance
 

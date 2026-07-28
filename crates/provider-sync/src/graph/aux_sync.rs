@@ -37,15 +37,6 @@ pub async fn run_graph_auxiliary_sync(
             }
         };
 
-    // Reaction refresh + contacts delta: every 5th cycle. Legacy ran contacts
-    // delta on the 20th cycle, but the one-shot bifrost runner pays a full
-    // connect/folder-map/attach/detach cost per kick, so the
-    // graph-contacts-incremental gate (which loops up to 20 kicks waiting for a
-    // contact-delta request) cannot reach the 20th kick within its 120s
-    // ceiling. Firing contacts on the 5th kick keeps that gate green until
-    // B3b's keep-attached lifecycle amortizes the per-kick cost and the
-    // faithful 20th-kick cadence becomes affordable again. Reactions stay on
-    // the legacy 5th-cycle cadence.
     if cycle.is_multiple_of(5) {
         match refresh_reactions_for_recent_messages(client, read_db, write_db, account_id).await {
             Ok(count) if count > 0 => {
@@ -58,39 +49,17 @@ pub async fn run_graph_auxiliary_sync(
         }
     }
 
-    // Master categories + Exchange groups: every 20th cycle (legacy cadence).
-    if cycle.is_multiple_of(20) {
-        if let Err(error) = super::label_sync::graph_label_sync(
+    // Master categories: every 20th cycle.
+    if cycle.is_multiple_of(20)
+        && let Err(error) = super::label_sync::graph_label_sync(
             client,
             account_id,
             read_db,
             &write_db.writer_pool(),
         )
         .await
-        {
-            log::warn!("Graph master category sync failed for account {account_id}: {error}");
-        }
-        let writer = write_db.clone();
-        match super::group_sync::sync_exchange_groups(client, read_db, account_id, move |write| {
-            let writer = writer.clone();
-            async move {
-                writer
-                    .with_write(move |conn| {
-                        super::group_sync::persist_exchange_group_write(conn, write)
-                    })
-                    .await
-            }
-        })
-        .await
-        {
-            Ok(count) if count > 0 => {
-                log::info!("Exchange group delta sync: {count} groups");
-            }
-            Ok(_) => {}
-            Err(error) => {
-                log::warn!("Exchange group sync failed for account {account_id}: {error}");
-            }
-        }
+    {
+        log::warn!("Graph master category sync failed for account {account_id}: {error}");
     }
 }
 

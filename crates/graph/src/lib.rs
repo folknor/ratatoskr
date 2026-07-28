@@ -1,7 +1,6 @@
 pub mod calendar_sync;
 pub mod client;
 pub mod folder_mapper;
-pub mod group_sync;
 pub mod label_sync;
 pub mod ops;
 pub mod parse;

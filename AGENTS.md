@@ -29,7 +29,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 - Architectural decisions, crate boundaries, new email actions, generation counters, scope wiring, calendar workflow layering, provider trait additions - `reference/architecture.md`.
 - Anything touching (email provider) folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync - `reference/glossary/folders-labels.md`.
 - Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface - `reference/glossary/overlay-surfaces.md`.
-- Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service-test`/`service-suite`/`sync-bench`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
+- Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service-test`/`service-suite`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
 
 ## Rules
 
@@ -61,6 +61,20 @@ Use `brokkr` (not `cargo`) for check/test. By default output is filtered to chan
   - Example: `brokkr test -p common truncates_without_splitting` or `brokkr test -p calendar extract_tag_value_flattens_nested_text -N 5` or `brokkr test -p app terminal_failure_at_initial_boot_does_not_respawn --debug`.
 - `cargo run -p app` - run the iced app
 
+### brokkr baselines and gate.db
+
+- brokkr writes TWO databases with DIFFERENT dirty-tree policies. `.brokkr/results.db`
+  stores nothing on a dirty tree; `.brokkr/ratatoskr/gate.db` records EVERY gated run by
+  design, so a failure stays inspectable. `--force` therefore does write `gate.db`, and
+  always has - the row is tagged dirty. A dirty-tagged baseline is real and usable; it is
+  not lost work and does not need re-recording for the numbers to exist.
+- brokkr NEVER writes `brokkr.toml`. `--as-baseline` prints a UUID and a TOML line for you
+  to paste. Editing that file is yours, so paste by REPLACING the existing host key in the
+  block - never by anchoring an insert on the `[...baseline]` header. A pre-existing
+  `plantasjen = "..."` often sits below a comment; a header-anchored insert sails past it
+  and produces a duplicate key, and one duplicate makes the whole file unparseable, which
+  breaks every gate-config-reading brokkr command, not just the gate you touched.
+
 ## Harness
 
 Lua Service harness scripts live under `crates/app/tests/service-harness/`.
@@ -72,6 +86,12 @@ Sync harness scripts live under `crates/app/tests/sync-harness/`.
 - `brokkr service-suite [--filter X]` - run the discovered Service
   harness suite, optionally filtered.
 - `brokkr service-list` - list scripts and parsed frontmatter.
+- `brokkr sync` - list discovered sync-harness scripts.
+- `brokkr sync <SCRIPT>` - run one, PASS/FAIL.
+- `brokkr sync --all [--filter X] [--include-ignored]` - run every
+  discovered script.
+- `brokkr sync <SCRIPT> --bench [N]` - measure one (N defaults to 3).
+- `brokkr sync --gate all --bench [N]` - sweep every configured gate.
 
 `brokkr.toml` has two ratatoskr sections:
 

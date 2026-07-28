@@ -354,6 +354,20 @@ pub struct TestContactPullAck {
     pub imported: u64,
 }
 
+/// Deterministically runs the directory-group snapshot pull after attaching
+/// the account. The `supported` bit distinguishes a capability no-op from a
+/// successful empty snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestGroupPullParams {
+    pub account_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestGroupPullAck {
+    pub groups: u64,
+    pub supported: bool,
+}
+
 /// Synchronous request counterpart to the UI's fire-and-forget `gal.kick`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestGalKickAck;
@@ -787,6 +801,16 @@ pub struct TestDbContactGroupRow {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_type: Option<String>,
+    #[serde(default)]
+    pub member_emails: Vec<String>,
+}
+
+/// Test-only readback of a settings-table entry. Used by cadence scripts to
+/// prove independent counter keys rather than inferring them from timing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbSettingRow {
+    pub key: String,
+    pub value: String,
 }
 
 /// A remote contact identity claim. Kept separate from the deduplicated
@@ -884,6 +908,8 @@ pub struct TestQueryDbStateAck {
     pub seen_addresses: Vec<TestDbSeenAddressRow>,
     #[serde(default)]
     pub gal_cache: Vec<TestDbGalCacheRow>,
+    #[serde(default)]
+    pub settings: Vec<TestDbSettingRow>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1498,6 +1524,10 @@ pub enum RequestParams {
     TestContactPull {
         params: TestContactPullParams,
     },
+    /// Drives one provider-agnostic resident directory-group pull (harness).
+    TestGroupPull {
+        params: TestGroupPullParams,
+    },
     /// Drives GAL refresh and waits for its DB writes (harness).
     TestGalKick,
     /// Harness-only Bifrost engine attach plus consumer drive.
@@ -1627,6 +1657,7 @@ impl RequestParams {
             Self::TestPendingOpsRead { .. } => "test.pending_ops_read",
             Self::TestStartSync { .. } => "test.start_sync",
             Self::TestContactPull { .. } => "test.contact_pull",
+            Self::TestGroupPull { .. } => "test.group_pull",
             Self::TestGalKick => "test.gal_kick",
             Self::TestBifrostAttach { .. } => "test.bifrost_attach",
             Self::TestBifrostInjectBatch { .. } => "test.bifrost_inject_batch",
@@ -1771,6 +1802,7 @@ impl RequestParams {
             | Self::TestPendingOpsRead { .. }
             | Self::TestStartSync { .. }
             | Self::TestContactPull { .. }
+            | Self::TestGroupPull { .. }
             | Self::TestGalKick
             | Self::TestBifrostAttach { .. }
             | Self::TestBifrostInjectBatch { .. }
@@ -1896,6 +1928,7 @@ impl RequestParams {
 
             Self::TestStartSync { .. }
             | Self::TestContactPull { .. }
+            | Self::TestGroupPull { .. }
             | Self::TestGalKick
             | Self::TestBifrostFactoryOpen { .. }
             | Self::TestBifrostAttach { .. }
@@ -2023,6 +2056,7 @@ impl RequestParams {
             Self::TestPendingOpsRead { params } => serde_json::json!({ "params": params }),
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
             Self::TestContactPull { params } => serde_json::json!({ "params": params }),
+            Self::TestGroupPull { params } => serde_json::json!({ "params": params }),
             Self::TestGalKick => serde_json::json!({}),
             Self::TestBifrostAttach { params } => serde_json::json!({ "params": params }),
             Self::TestBifrostInjectBatch { params } => {
@@ -2633,6 +2667,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.contact_pull params: {e}"))?;
                 Ok(Self::TestContactPull { params: p.params })
+            }
+            "test.group_pull" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestGroupPullParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.group_pull params: {e}"))?;
+                Ok(Self::TestGroupPull { params: p.params })
             }
             "test.gal_kick" => Ok(Self::TestGalKick),
             "test.bifrost_attach" => {

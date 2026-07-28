@@ -15,15 +15,16 @@ use dellingr::{ArgCount, LuaType, RetCount, State};
 use service_api::{
     AccountDeleteParams, ActionWireOperation, ActionWirePlan, AttachmentFetchParams,
     BootClassification, BootExitCode, BootPhaseKind, CalendarActionPlan,
-    CalendarActionWireOperation, ClientNotification, ContactDeleteParams, ContactSaveParams,
-    ExtractStatusParams, IndexRebuildParams, Notification, OauthExchangeCodeParams, OperationId,
-    PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy, RedactedString, RequestParams,
-    SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage, SendWireRequest,
-    SettingValue, SettingsSetParams, SignatureUpdateParams, SyncCancelAccountParams,
-    TestBifrostArmHookParams, TestBifrostAttachParams, TestBifrostHook, TestBifrostProbeParams,
-    TestBifrostProviderKind, TestContactPullParams, TestContainerCrudParams,
-    TestCrashAfterNWritesParams, TestDelayNextWriteParams, TestDiscardDraftParams,
-    TestPendingOpsReadParams, TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
+    CalendarActionWireOperation, ClientNotification, ContactDeleteParams, ContactGroupSaveParams,
+    ContactSaveParams, ExtractStatusParams, IndexRebuildParams, Notification,
+    OauthExchangeCodeParams, OperationId, PlanId, ReadBootstrapSnapshotsParams, RebuildPolicy,
+    RedactedString, RequestParams, SendAttachmentSource, SendIntent, SendWireAttachment,
+    SendWireMessage, SendWireRequest, SettingValue, SettingsSetParams, SignatureUpdateParams,
+    SyncCancelAccountParams, TestBifrostArmHookParams, TestBifrostAttachParams, TestBifrostHook,
+    TestBifrostProbeParams, TestBifrostProviderKind, TestContactPullParams,
+    TestContainerCrudParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
+    TestDiscardDraftParams, TestGroupPullParams, TestPendingOpsReadParams,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
     TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
     TestSeedThreadParams, TestStartSyncParams, TestThreadReadParams, VerifyAccountParams,
@@ -2557,6 +2558,9 @@ fn request_params_from_lua(
         "ContactsContactSave" | "contacts.contact_save" => Ok(RequestParams::ContactsContactSave {
             params: parse_contact_save_params(state, params_idx)?,
         }),
+        "ContactsGroupSave" | "contacts.group_save" => Ok(RequestParams::ContactsGroupSave {
+            params: parse_contact_group_save_params(state, params_idx)?,
+        }),
         "ContactsContactSaveWithWriteback" | "contacts.contact_save_with_writeback" => {
             Ok(RequestParams::ContactsContactSaveWithWriteback {
                 params: parse_contact_save_params(state, params_idx)?,
@@ -2948,6 +2952,16 @@ fn request_params_from_lua(
                 params: TestContactPullParams { account_id },
             })
         }
+        "TestGroupPull" | "test.group_pull" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestGroupPull requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestGroupPull requires params.account_id"))?;
+            Ok(RequestParams::TestGroupPull {
+                params: TestGroupPullParams { account_id },
+            })
+        }
         "TestGalKick" | "test.gal_kick" => Ok(RequestParams::TestGalKick),
         "TestContainerCrud" | "test.container_crud" => {
             if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
@@ -3258,6 +3272,34 @@ fn parse_contact_save_params(
         groups: get_string_array_field(state, params_idx, "groups")?,
         source: get_string_field(state, params_idx, "source")?,
         server_id: get_string_field(state, params_idx, "server_id")?,
+    })
+}
+
+fn parse_contact_group_save_params(
+    state: &mut State,
+    params_idx: isize,
+) -> dellingr::Result<ContactGroupSaveParams> {
+    if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+        return Err(lua_error_message("ContactsGroupSave requires params table"));
+    }
+    let id = get_string_field(state, params_idx, "id")?
+        .ok_or_else(|| lua_error_message("ContactsGroupSave requires params.id"))?;
+    let name = get_string_field(state, params_idx, "name")?
+        .ok_or_else(|| lua_error_message("ContactsGroupSave requires params.name"))?;
+    let member_emails = get_string_array_field(state, params_idx, "member_emails")?;
+    // `member_count` is derived, not read: the UI keeps it in step with the
+    // member list, and a script that could set the two independently would
+    // be able to seed a row no production path can produce. Timestamps are
+    // optional and default to 0 - scripts that assert on ordering pass them.
+    let created_at = get_number_field(state, params_idx, "created_at")?.unwrap_or(0.0) as i64;
+    let updated_at = get_number_field(state, params_idx, "updated_at")?.unwrap_or(0.0) as i64;
+    Ok(ContactGroupSaveParams {
+        id,
+        name,
+        member_count: i64::try_from(member_emails.len()).unwrap_or(i64::MAX),
+        member_emails,
+        created_at,
+        updated_at,
     })
 }
 

@@ -290,13 +290,6 @@ and mirroring any needed upstream fixtures into
   `graph_label_sync()` to use `GraphClient::api_path_prefix()` instead
   of hardcoded `/me`, then assert category labels from one mailbox
   never appear in another mailbox's label set or sidebar scope.
-- [ ] **Exchange group sync compatibility smoke** - Try
-  `sync_exchange_groups()` against the new Graph group fixture. Track
-  whether saehrimnir needs aliases for Ratatoskr's exact paths:
-  `/me/memberOf/microsoft.graph.group` and
-  `/groups/{id}/transitiveMembers/microsoft.graph.user`. Once those
-  paths are covered, assert groups and member email rows land in
-  contact groups.
 - [x] **Google OAuth token account binding: Gmail** - Landed via
   `gmail-oauth-multi-account`. Two minted tokens against
   `multi-account-small` give each Gmail account its own messages
@@ -409,7 +402,7 @@ Ratatoskr-side work:
 
 - [x] **Discovery probes route through saehrimnir in test mode** - `discovery_client()` + `rewrite_for_test_harness()` helpers in `crates/core/src/discovery/mod.rs` rewrite `https://{host}/...` to `${BASE}/{host}/...` and relax `https_only` when `RATATOSKR_TEST_JMAP_ENDPOINT` is set (reuses the existing JMAP env-var slot since saehrimnir mounts discovery on the JMAP listener; no brokkr-side env-var schema change needed). `is_valid_https_url` loosened to accept `http://` URLs whose origin matches the configured test base, so chained-issuer hrefs survive validation. Used by `webfinger::probe`, `oidc::probe_issuer`, and `dyn_registration::register`. Production paths untouched - the env var is never set there.
 - [x] **`TestRunDiscovery { email }` service-api request** - Invokes `rtsk::discovery::discover(email)` and returns the full `DiscoveredConfig` (options + diagnostics + oidc_endpoints) for harness assertions. `run_discovery_handle` in `crates/service/src/handlers/test_helpers.rs`; Lua dispatch in `crates/app/src/harness/mod.rs` maps `"TestRunDiscovery" | "test.run_discovery"`.
-- [x] **`discovery-webfinger.lua`** - Happy-path script asserting the chained OIDC issuer resolves through WebFinger and the cascade returns the expected endpoints. `brokkr sync-smoke` passes in ~3.4s.
+- [x] **`discovery-webfinger.lua`** - Happy-path script asserting the chained OIDC issuer resolves through WebFinger and the cascade returns the expected endpoints. `brokkr sync discovery-webfinger.lua` passes in ~3.4s.
 - [x] **`discovery-oidc-bare-domain.lua`** - WebFinger absent (no fixture table), cascade falls back to the bare-domain `.well-known/openid-configuration` probe. Documented the fixture-level rule: bare-domain OIDC needs an absolute `issuer = "https://{domain}"` because that's the URL-space ratatoskr probes in (pre-rewrite), whereas the WebFinger-chained path operates in `${BASE}` space where path-relative issuers work.
 - [x] **`discovery-autoconfig.lua`** - Mozilla autoconfig XML, `authentication="oauth2"` triggers `OAuth2Unsupported`, the cascade's post-merge upgrade against the OIDC discovery doc converts it to `OAuth2` with full endpoints. Required wiring `autoconfig.rs` through `rewrite_for_test_harness` (it was bypassing the shared helper).
 - [x] **Negative-path coverage** - `discovery-negatives.lua` exercises malformed JRD (`raw_body`), non-HTTPS href in WebFinger response, and OIDC issuer self-claim mismatch from one fixture using multiple prefixes (cheaper than one spawn per case). Each path asserts `oidcEndpoints` stays absent. Oversized-body and redirect-chain-cap negatives remain unit-test only.
@@ -439,7 +432,11 @@ The Linux equivalents already automate. The harness scripts are platform-agnosti
 - [ ] **Re-record the dirty-tagged baselines on a clean checkout** - The
   baselines recorded during the post-B12 investigation were taken with
   `--force` against an intentionally uncommitted tree, so brokkr tagged
-  them dirty and will suggest re-recording. Affects
+  them dirty in `gate.db` (by design - `--force` always writes `gate.db`,
+  tagged dirty, unlike `results.db` which stores nothing on a dirty tree).
+  The rows are not lost or unreliable; the issue is narrower: a baseline
+  measured against an uncommitted tree pins a code state that is not in
+  git and so is not reproducible later. Affects
   `graph_steady_state_delta`, `imap_steady_state_delta`,
   `graph_containers_attach`, `graph_shared_mailbox_steady_state`, and
   `graph_public_folder_steady_state`. The values themselves were gate-
@@ -471,8 +468,18 @@ The Linux equivalents already automate. The harness scripts are platform-agnosti
     since it silently rebases onto current numbers and blesses whatever
     regression is present; a warning on that path would help.
 
-- [ ] **Per-host baselines for `jmap_steady_state_delta`** - The checked-in baseline map (`brokkr.toml`) is currently single-host (`plantasjen` only). Other contributors or CI hosts that should run the gate need to record their own baseline with `brokkr sync-bench crates/app/tests/sync-harness/jmap-steady-state-delta.lua --gate jmap_steady_state_delta --as-baseline --bench 10` and append the printed line under `[ratatoskr.gate.jmap_steady_state_delta.baseline]`.
+- [ ] **Per-host baselines for `jmap_steady_state_delta`** - The checked-in baseline map (`brokkr.toml`) is currently single-host (`plantasjen` only). Other contributors or CI hosts that should run the gate need to record their own baseline with `brokkr sync crates/app/tests/sync-harness/jmap-steady-state-delta.lua --gate jmap_steady_state_delta --as-baseline --bench 10` and append the printed line under `[ratatoskr.gate.jmap_steady_state_delta.baseline]`.
 - [ ] **More checked-in gates** - Once a stable benchmark script matters to CI or release decisions, add a `[ratatoskr.gate.<name>]` block to `brokkr.toml` and record per-host baselines. Good candidates: JMAP scripted incremental, IMAP steady-state, Graph calendar remote-delta, CalDAV calendar remote-delta.
+- [ ] **`bifrost-consumer-hot-path`'s `meta.messages_per_second` rule has no
+  throughput floor** - The metric is configured with `min = 0` in
+  `brokkr.toml`, which no measurement can ever breach, so it functions as a
+  presence check (the field exists and is numeric) rather than an actual
+  throughput guarantee. `elapsed_ms` (`max_relative = 1.6`, `max = 2000`) is
+  the only thing on this gate actually guarding against a consumer-drain
+  collapse today. Fix needs either a measured absolute floor (record real
+  `messages_per_second` numbers across a few runs first) or a
+  baseline-relative rule (e.g. `min_relative`) if brokkr's gate-rule set
+  offers one - check upstream before assuming it needs to be added there too.
 
 ### Brokkr polish
 

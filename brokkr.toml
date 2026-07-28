@@ -395,6 +395,37 @@ equal = 20
 [ratatoskr.gate.contacts_cadence.metrics."meta.carddav_divisor"]
 equal = 5
 
+# B8-groups: explicit directory-group pull after the resident aux window has
+# settled. The request count is exact so new protocol calls require review.
+[ratatoskr.gate.graph_groups_pull]
+script = "crates/app/tests/sync-harness/contacts/graph_groups_pull.lua"
+baseline_label = "2026-07-28 B8-groups explicit directory-group snapshot pull (graph-groups.lua fixture: memberOf enumeration + one transitiveMembers expansion per imported group, provider_requests=15)"
+
+[ratatoskr.gate.graph_groups_pull.baseline]
+plantasjen = "9d91b002e3d74f599ed4a58e41f60340"
+
+[ratatoskr.gate.graph_groups_pull.metrics.elapsed_ms]
+max_relative = 1.25
+max = 30000
+
+[ratatoskr.gate.graph_groups_pull.metrics.success]
+equal = 1
+
+[ratatoskr.gate.graph_groups_pull.metrics.exit_code]
+equal = 0
+
+[ratatoskr.gate.graph_groups_pull.metrics."sidecar.rss_peak_kb"]
+max_relative = 1.20
+
+[ratatoskr.gate.graph_groups_pull.metrics."meta.correct"]
+equal = 1
+
+[ratatoskr.gate.graph_groups_pull.metrics."meta.group_count"]
+equal_to_baseline = true
+
+[ratatoskr.gate.graph_groups_pull.metrics."meta.provider_requests"]
+max_delta = 0
+
 [ratatoskr.gate.imap_steady_state_delta]
 script = "crates/app/tests/sync-harness/imap-steady-state-delta.lua"
 baseline_label = "2026-07-27 post-B12 steady-state delta kick (CONDSTORE no-op delta, provider_requests=6: per folder EXAMINE + flags UID FETCH CHANGEDSINCE + UID SEARCH x2 folders, 0 body fetches; no per-kick reattach on a personal-only server - the rebuild is gated on foreign_namespaces_advertised - and the aux pass is waited out and cleared before the measured window)"
@@ -523,7 +554,7 @@ equal = 1
 # rewrite replaced four per-provider folder-map fetches with one
 # `containers_list`, and a regression here means a re-introduced extra
 # round trip. Baselines are host-specific - record with
-# `brokkr sync-bench <script> --gate <name> --as-baseline` before gating.
+# `brokkr sync <script> --gate <name> --bench --as-baseline` before gating.
 
 [ratatoskr.gate.jmap_containers_attach]
 script = "crates/app/tests/sync-harness/jmap-initial.lua"
@@ -551,10 +582,10 @@ max_delta = 0
 
 [ratatoskr.gate.graph_containers_attach]
 script = "crates/app/tests/sync-harness/graph-initial.lua"
-baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_graph_folder_map)"
+baseline_label = "2026-07-28 B8-groups cycle-zero directory-group pull joins the Graph attach window (provider_requests=21)"
 
 [ratatoskr.gate.graph_containers_attach.baseline]
-plantasjen = "63a306c5647e4327990c0346457f53b0"
+plantasjen = "4c496545ccea4b14a63994dfb427a9e1"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
 [ratatoskr.gate.graph_containers_attach.metrics.elapsed_ms]

@@ -18,11 +18,11 @@ use service_api::{
     TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
     TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactClaimRow, TestDbContactGroupRow,
     TestDbContactRow, TestDbFolderRow, TestDbGalCacheRow, TestDbLabelRow, TestDbLocalDraftRow,
-    TestDbMessageRow, TestDbSeenAddressRow, TestDbSignatureRow, TestDelayNextWriteAck,
-    TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams, TestGalKickAck,
-    TestPendingOpRow, TestPendingOpsReadAck, TestPendingOpsReadParams,
-    TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams, TestQueryDbStateAck,
-    TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
+    TestDbMessageRow, TestDbSeenAddressRow, TestDbSettingRow, TestDbSignatureRow,
+    TestDelayNextWriteAck, TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams,
+    TestGalKickAck, TestGroupPullAck, TestGroupPullParams, TestPendingOpRow, TestPendingOpsReadAck,
+    TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams,
+    TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
     TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
     TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
     TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
@@ -1452,6 +1452,42 @@ pub(super) async fn contact_pull_handle(
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
+pub(super) async fn group_pull_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestGroupPullParams,
+) -> Result<Value, ServiceError> {
+    if params.account_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.group_pull".into(),
+            message: "account_id is required".into(),
+        });
+    }
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal("test.group_pull received before SyncRuntime was installed".into())
+    })?;
+    runtime
+        .attach_resident_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    let action_account = runtime
+        .resident_action_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    let outcome = crate::bifrost::contacts::groups::run_group_pull(
+        &action_account.engine,
+        &params.account_id,
+        &boot_state.write_db_state()?,
+    )
+    .await
+    .map_err(ServiceError::Internal)?;
+    serde_json::to_value(TestGroupPullAck {
+        groups: u64::try_from(outcome.groups)
+            .map_err(|error| ServiceError::Internal(format!("group pull count: {error}")))?,
+        supported: outcome.supported,
+    })
+    .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
 pub(super) async fn gal_kick_handle(
     boot_state: &Arc<BootSharedState>,
 ) -> Result<Value, ServiceError> {
@@ -2203,7 +2239,32 @@ fn read_harness_db_state(
         contact_claims: read_harness_contact_claims(conn, params)?,
         seen_addresses: read_harness_seen_addresses(conn, params)?,
         gal_cache: read_harness_gal_cache(conn, params)?,
+        settings: read_harness_settings(conn, params)?,
     })
+}
+
+fn read_harness_settings(
+    conn: &impl db::db::WriteTransactionTarget,
+    params: &TestQueryDbStateParams,
+) -> Result<Vec<TestDbSettingRow>, String> {
+    let prefix = params
+        .account_id
+        .as_deref()
+        .map_or("contact_pull_cycle:".to_string(), |account_id| {
+            format!("contact_pull_cycle:{account_id}:")
+        });
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM settings WHERE key LIKE ?1 ORDER BY key")
+        .map_err(|e| format!("prepare settings query: {e}"))?;
+    let rows = stmt
+        .query_map(params![format!("{prefix}%")], |row| {
+            Ok(TestDbSettingRow {
+                key: row.get(0)?,
+                value: row.get(1)?,
+            })
+        })
+        .map_err(|e| format!("query settings: {e}"))?;
+    collect_rows(rows, "settings")
 }
 
 struct HarnessAccountRaw {
@@ -2827,7 +2888,7 @@ fn read_harness_contact_groups(
 ) -> Result<Vec<TestDbContactGroupRow>, String> {
     let limit = i64::try_from(params.contact_group_limit.unwrap_or(20).min(200))
         .map_err(|e| format!("contact group limit conversion: {e}"))?;
-    match params.account_id.as_deref() {
+    let mut groups = match params.account_id.as_deref() {
         Some(account_id) => {
             let mut stmt = conn
                 .prepare(
@@ -2841,7 +2902,7 @@ fn read_harness_contact_groups(
             let mapped = stmt
                 .query_map(params![account_id, limit], test_db_contact_group_from_row)
                 .map_err(|e| format!("query contact groups: {e}"))?;
-            collect_rows(mapped, "contact groups")
+            collect_rows(mapped, "contact groups")?
         }
         None => {
             let mut stmt = conn
@@ -2855,9 +2916,19 @@ fn read_harness_contact_groups(
             let mapped = stmt
                 .query_map(params![limit], test_db_contact_group_from_row)
                 .map_err(|e| format!("query contact groups: {e}"))?;
-            collect_rows(mapped, "contact groups")
+            collect_rows(mapped, "contact groups")?
         }
+    };
+    for group in &mut groups {
+        let mut stmt = conn.prepare(
+            "SELECT member_value FROM contact_group_members WHERE group_id = ?1 AND member_type = 'email' ORDER BY member_value ASC"
+        ).map_err(|e| format!("prepare contact group members query: {e}"))?;
+        let rows = stmt
+            .query_map(params![group.id], |row| row.get(0))
+            .map_err(|e| format!("query contact group members: {e}"))?;
+        group.member_emails = collect_rows(rows, "contact group members")?;
     }
+    Ok(groups)
 }
 
 fn read_harness_contact_claims(
@@ -3076,6 +3147,7 @@ fn test_db_contact_group_from_row(
         server_id: row.get(4)?,
         email: row.get(5)?,
         group_type: row.get(6)?,
+        member_emails: Vec::new(),
     })
 }
 

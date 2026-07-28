@@ -153,6 +153,7 @@ static REGISTRY: &[RegistryEntry] = &[
                             "openid",
                             "profile",
                             "email",
+                            "GroupMember.Read.All",
                         ],
                         use_pkce: true,
                     },
