@@ -165,7 +165,7 @@ script = "crates/app/tests/sync-harness/graph-steady-state-delta.lua"
 baseline_label = "2026-07-27 post-B12 steady-state delta kick (provider_requests=2: mail delta only; the resident aux pass - B8 contacts pull etc - is waited out and cleared before the measured window)"
 
 [ratatoskr.gate.graph_steady_state_delta.baseline]
-plantasjen = "c59f3a1a08fd4a559ecb3f0fecc3fde4"
+plantasjen = "7cccd36c5d2d4a64823b9bded75d7dbc"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
@@ -402,7 +402,7 @@ script = "crates/app/tests/sync-harness/contacts/graph_groups_pull.lua"
 baseline_label = "2026-07-28 B8-groups explicit directory-group snapshot pull (graph-groups.lua fixture: memberOf enumeration + one transitiveMembers expansion per imported group, provider_requests=15)"
 
 [ratatoskr.gate.graph_groups_pull.baseline]
-plantasjen = "9d91b002e3d74f599ed4a58e41f60340"
+plantasjen = "5f84d09622884854adf8fdd3b96639f6"
 
 [ratatoskr.gate.graph_groups_pull.metrics.elapsed_ms]
 max_relative = 1.25
@@ -431,7 +431,7 @@ script = "crates/app/tests/sync-harness/imap-steady-state-delta.lua"
 baseline_label = "2026-07-27 post-B12 steady-state delta kick (CONDSTORE no-op delta, provider_requests=6: per folder EXAMINE + flags UID FETCH CHANGEDSINCE + UID SEARCH x2 folders, 0 body fetches; no per-kick reattach on a personal-only server - the rebuild is gated on foreign_namespaces_advertised - and the aux pass is waited out and cleared before the measured window)"
 
 [ratatoskr.gate.imap_steady_state_delta.baseline]
-plantasjen = "3bdbdad5a54d46e78c9a8ab0567189ff"
+plantasjen = "236834c767ba4f8e94531f92f133635c"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
@@ -477,7 +477,7 @@ script = "crates/app/tests/sync-harness/graph-shared-mailbox-steady-state.lua"
 baseline_label = "2026-07-27 B12 shared-mailbox steady-state delta kick (provider_requests=3: 1 personal + 2 foreign mail deltas on shared-graph-small; no delegate rediscovery)"
 
 [ratatoskr.gate.graph_shared_mailbox_steady_state.baseline]
-plantasjen = "ed66b015b26644dab76a091081367fdd"
+plantasjen = "9097613a934042dab95802903b207a91"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
@@ -514,7 +514,7 @@ script = "crates/app/tests/sync-harness/graph-public-folder-steady-state.lua"
 baseline_label = "2026-07-27 B12 public-folder steady-state delta kick (provider_requests=2: one EWS FindItem watermark poll per pinned folder on public-folder-small, pins=2 of 3 staged folders; unpinned folders unpolled, no hierarchy re-walk)"
 
 [ratatoskr.gate.graph_public_folder_steady_state.baseline]
-plantasjen = "393b9d6614534611b0fa7ab02c523265"
+plantasjen = "c90520db1ba34cd385657c27c5105e90"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
@@ -585,7 +585,7 @@ script = "crates/app/tests/sync-harness/graph-initial.lua"
 baseline_label = "2026-07-28 B8-groups cycle-zero directory-group pull joins the Graph attach window (provider_requests=21)"
 
 [ratatoskr.gate.graph_containers_attach.baseline]
-plantasjen = "4c496545ccea4b14a63994dfb427a9e1"
+plantasjen = "734ca90dd5d94abaa671f65960697779"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
 [ratatoskr.gate.graph_containers_attach.metrics.elapsed_ms]
