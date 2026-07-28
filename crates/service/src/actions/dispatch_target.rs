@@ -92,10 +92,10 @@ pub(crate) enum RemoteBatchKey {
         to: bool,
     },
     /// The source is part of the KEY, not dropped as it once was. On a
-    /// label-model provider the source decides the wire patch (Gmail's move
-    /// is destination-only, so ratatoskr has to detach the source itself -
-    /// see `gmail_source_detach`), so two moves to the same destination out
-    /// of DIFFERENT sources are two different wire ops and must not coalesce
+    /// label-model provider the source decides the wire patch (Gmail's
+    /// `bulk_move_from` folds the source detach into the same `batchModify`
+    /// as the destination), so two moves to the same destination out of
+    /// DIFFERENT sources are two different wire ops and must not coalesce
     /// into one. Moves issued from a single folder view share a source and
     /// still coalesce, which is the case that matters for volume.
     MoveToFolder {
@@ -674,8 +674,8 @@ fn destination_role(op: ContainerMoveOp<'_>) -> Option<FolderRole> {
 /// itself names one. `None` means "no role-shaped source": either the op does
 /// not imply one, or (for `MoveToFolder`) the source is an explicit storage id.
 ///
-/// Only Gmail consumes this (see `gmail_source_detach`), and the two `None`
-/// arms below are deliberate rather than unfinished:
+/// Only Gmail's `bulk_move_from` consumes the source on the wire, and the two
+/// `None` arms below are deliberate rather than unfinished:
 ///
 /// - `Trash` and mark-as-spam: bifrost's Gmail patch already removes INBOX for
 ///   any non-INBOX destination, and a USER label surviving a trash is native
@@ -700,12 +700,16 @@ fn source_role(op: ContainerMoveOp<'_>) -> Option<FolderRole> {
 /// What a container-move op reduces to once its native destination is resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ContainerMovePlan {
-    /// Bulk-move every id into `destination`, then - on a label-model provider
-    /// whose move patch is destination-only - detach `detach_source` so the
-    /// container the thread left does not survive the move.
+    /// Bulk-move every id into `destination`, carrying `source` for the
+    /// provider to fold in as it sees fit: bifrost's `bulk_move_from` default
+    /// ignores it on the folder-model providers (their `bulk_move` removes
+    /// each message's own source natively), and Gmail folds it into the same
+    /// `batchModify` as the destination - which is what makes a Gmail move
+    /// out of a user label ONE request instead of one plus a
+    /// `remove_from_container` per message.
     MoveTo {
         destination: String,
-        detach_source: Option<String>,
+        source: Option<String>,
     },
     /// Detach every id from the account's INBOX container. Gmail's archive
     /// shape, and the only shape that legitimately has no destination folder.
@@ -719,9 +723,6 @@ enum ContainerMovePlan {
 /// `containers_list` synthesises an `archive` container purely to give the role
 /// table an Archive entry.
 const GMAIL_SYNTHETIC_ARCHIVE_ID: &str = "archive";
-/// Gmail's INBOX label id. The one container bifrost's destination-only move
-/// patch removes on its own.
-const GMAIL_LABEL_INBOX: &str = "INBOX";
 
 /// True when this op on Gmail is the "drop INBOX, add nothing" shape.
 ///
@@ -741,41 +742,6 @@ fn is_gmail_archive_shape(op: ContainerMoveOp<'_>, native_destination: Option<&s
         ContainerMoveOp::MoveToFolder { .. } => native_destination.is_some_and(is_synthetic),
         ContainerMoveOp::Trash | ContainerMoveOp::Spam { .. } => false,
     }
-}
-
-/// The container a Gmail move must ALSO detach.
-///
-/// Bifrost's Gmail `move_patch` is destination-only: it adds the destination
-/// label and removes INBOX, and nothing else. Gmail message ids carry no source
-/// label either, so - unlike the folder-model providers, whose `bulk_move` is a
-/// real move that removes each message's own source - Gmail cannot derive the
-/// source from the id set. Every other container the thread belongs to
-/// therefore survives the move, while `move_to_folder::move_local` /
-/// `spam::spam_local` DO drop the source locally: the next sync then restores
-/// the container the user thought they moved out of.
-///
-/// Two exclusions:
-/// - INBOX, because the destination-only patch already removes it;
-/// - a source equal to the destination, which is a no-op move.
-///
-/// Non-Gmail providers always get `None`: adding a redundant per-id detach
-/// there would be a wire op per message for no behavioural gain, and on IMAP
-/// `remove_from_container` is a destructive `\Deleted` + `UID EXPUNGE`.
-fn gmail_source_detach(
-    provider: BifrostProviderKind,
-    native_destination: &str,
-    native_source: Option<&str>,
-) -> Option<String> {
-    if provider != BifrostProviderKind::Gmail {
-        return None;
-    }
-    let source = native_source?;
-    if source.eq_ignore_ascii_case(GMAIL_LABEL_INBOX)
-        || source.eq_ignore_ascii_case(native_destination)
-    {
-        return None;
-    }
-    Some(source.to_string())
 }
 
 /// Reduce a resolved native destination to the plan the engine dispatch runs.
@@ -813,9 +779,15 @@ fn container_move_plan(
         });
     }
     let destination = native_destination?;
+    // The source flows through UNFILTERED. The exclusions the dispatch used
+    // to apply (Gmail-only, skip INBOX, skip source == destination) are
+    // bifrost's to make now: Gmail's `move_patch` drops a redundant or
+    // synthetic source itself, and the folder-model providers' default
+    // `bulk_move_from` ignores the source entirely because their `bulk_move`
+    // removes each message's own source natively.
     Some(ContainerMovePlan::MoveTo {
         destination: destination.to_string(),
-        detach_source: gmail_source_detach(provider, destination, native_source),
+        source: native_source.map(str::to_string),
     })
 }
 
@@ -898,16 +870,17 @@ async fn dispatch_container_op(
 /// Execute a resolved `ContainerMovePlan`.
 ///
 /// A move ALWAYS rides the bulk surface, including a one-id set: it maps the
-/// native destination to the provider's `MembershipScope` and dispatches
-/// `bulk_move` (ONE bulk campaign over the id set - the engine still chunks it
-/// to the provider's batch ceiling - keeping the provider's native batch verb
-/// AND the engine's idempotency / read-back guard). On the folder-model
-/// providers `bulk_move` removes each message from its own source as part of
-/// the move (IMAP MOVE/COPY+EXPUNGE, JMAP mailbox replace, Graph folder move),
-/// so no source is composed here; Gmail is the exception and gets an explicit
-/// `detach_source` (see `gmail_source_detach`). No batch-wide source is ever
-/// composed for the move itself - that would be wrong for every message not in
-/// it.
+/// native destination (and source, when the plan carries one) to the
+/// provider's `MembershipScope` shapes and dispatches ONE `bulk_move_from`
+/// campaign over the id set - the engine still chunks it to the provider's
+/// batch ceiling, keeping the provider's native batch verb AND the engine's
+/// idempotency / read-back guard. The folder-model providers ignore the
+/// source (their `bulk_move` removes each message's own source natively);
+/// Gmail folds it into the same `batchModify` as the destination, so a Gmail
+/// move out of a user label is one request where it used to be one plus a
+/// per-id `remove_from_container` detach. Note the engine's read-back guard
+/// reconciles membership of the DESTINATION only - absence from the source is
+/// asserted by our own gates, not re-verified on the wire.
 ///
 /// The earlier singleton special-case that routed a one-id set through a
 /// single-object `add_to_container` + `remove_from_container` compose is
@@ -924,38 +897,27 @@ async fn run_container_move_plan(
     match plan {
         ContainerMovePlan::MoveTo {
             destination,
-            detach_source,
+            source,
         } => {
             let scope = membership_scope_for(action_account.provider, &destination);
+            let source_scope =
+                source.map(|source| membership_scope_for(action_account.provider, &source));
             let vendor = IdempotencyVendor::fresh(
                 bifrost_sync::mutation::idempotency::default_salt_factory(),
             );
-            // Only clone the id set when a detach actually follows.
-            let detach_ids = detach_source.as_ref().map(|_| ids.clone());
             action_account
                 .engine
-                .bulk_move(
+                .bulk_move_from(
                     account,
                     ids,
                     scope,
+                    source_scope,
                     &vendor,
                     protocol_for_provider(action_account.provider),
                 )
                 .await
                 .map(|_| ())
-                .map_err(engine_error_to_action_error)?;
-            // Ordered AFTER the move on purpose: if the detach fails, the
-            // message is already in the destination and the op degrades to a
-            // retryable LocalOnly with a stale source label, which a retry or
-            // resync reconciles. Detaching first would strand the message
-            // outside both containers if the move then failed.
-            match (detach_source, detach_ids) {
-                (Some(source), Some(detach_ids)) => {
-                    detach_from_container(action_account, account, detach_ids, ContainerId(source))
-                        .await
-                }
-                _ => Ok(()),
-            }
+                .map_err(engine_error_to_action_error)
         }
         ContainerMovePlan::DetachInbox(inbox) => {
             detach_from_container(action_account, account, ids, ContainerId(inbox)).await
@@ -968,7 +930,9 @@ async fn run_container_move_plan(
 ///
 /// Per-id by necessity: bifrost's `remove_from_container` takes a single
 /// `MutationTarget`, and there is no bulk container-detach on the engine
-/// surface. Only ever reached on Gmail, where the operation is a label patch.
+/// surface. Only ever reached for the Gmail ARCHIVE shape (`DetachInbox`),
+/// where the operation is a label patch with no destination to ride
+/// `bulk_move_from`.
 async fn detach_from_container(
     action_account: &ResidentActionAccount,
     account: &AccountId,
@@ -1267,7 +1231,7 @@ mod tests {
     fn moves_to(destination: &str) -> Option<ContainerMovePlan> {
         Some(ContainerMovePlan::MoveTo {
             destination: destination.to_string(),
-            detach_source: None,
+            source: None,
         })
     }
 
@@ -1398,10 +1362,10 @@ mod tests {
 
     /// Gmail's move patch is destination-only (add the destination, remove
     /// INBOX), and a Gmail message id carries no source label, so the source
-    /// container has to be detached explicitly or it survives the move and the
-    /// next sync restores the row the local write removed.
+    /// container must ride the plan into `bulk_move_from` or it survives the
+    /// move and the next sync restores the row the local write removed.
     #[test]
-    fn gmail_move_detaches_the_source_it_leaves() {
+    fn gmail_move_carries_the_source_it_leaves() {
         assert_eq!(
             container_move_plan(
                 BifrostProviderKind::Gmail,
@@ -1412,7 +1376,7 @@ mod tests {
             ),
             Some(ContainerMovePlan::MoveTo {
                 destination: "TRASH".to_string(),
-                detach_source: Some("SPAM".to_string()),
+                source: Some("SPAM".to_string()),
             }),
             "trashing out of SPAM must clear SPAM"
         );
@@ -1428,38 +1392,38 @@ mod tests {
             ),
             Some(ContainerMovePlan::MoveTo {
                 destination: "INBOX".to_string(),
-                detach_source: Some("SPAM".to_string()),
+                source: Some("SPAM".to_string()),
             })
         );
     }
 
-    /// The two exclusions, and the provider restriction. Detaching where it is
-    /// not needed costs a call per message; on IMAP it would be destructive.
+    /// The plan passes the source through UNFILTERED for every provider - the
+    /// exclusions the dispatch used to apply are bifrost's now. Gmail's
+    /// `move_patch` drops a redundant source (INBOX on a non-INBOX
+    /// destination, source == destination, the synthetic archive id) itself,
+    /// and the folder-model providers' default `bulk_move_from` ignores the
+    /// source entirely, so no wire op is added anywhere by carrying it.
     #[test]
-    fn source_detach_is_gmail_only_and_skips_redundant_sources() {
-        assert_eq!(
-            gmail_source_detach(BifrostProviderKind::Gmail, "TRASH", Some("INBOX")),
-            None,
-            "bifrost's Gmail patch already removes INBOX for a non-INBOX destination"
-        );
-        assert_eq!(
-            gmail_source_detach(BifrostProviderKind::Gmail, "TRASH", Some("trash")),
-            None,
-            "source equal to destination is a no-op move"
-        );
-        assert_eq!(
-            gmail_source_detach(BifrostProviderKind::Gmail, "TRASH", None),
-            None
-        );
+    fn move_plan_passes_the_source_through_for_bifrost_to_filter() {
         for provider in [
+            BifrostProviderKind::Gmail,
             BifrostProviderKind::Graph,
             BifrostProviderKind::Imap,
             BifrostProviderKind::Jmap,
         ] {
             assert_eq!(
-                gmail_source_detach(provider, "Trash", Some("Spam")),
-                None,
-                "{provider:?} bulk_move is a real move and removes the source itself"
+                container_move_plan(
+                    provider,
+                    move_from("TRASH", "INBOX"),
+                    Some("TRASH"),
+                    Some("INBOX"),
+                    Some("INBOX")
+                ),
+                Some(ContainerMovePlan::MoveTo {
+                    destination: "TRASH".to_string(),
+                    source: Some("INBOX".to_string()),
+                }),
+                "{provider:?} plan carries the source verbatim"
             );
         }
     }

@@ -1,0 +1,51 @@
+name = "gmail-move-sources"
+
+# Source-carrying Gmail moves: one message resident in TRASH and one in SPAM,
+# so a gate can drive the two moves whose SOURCE the destination cannot imply
+# (restore-from-trash and un-spam, both with an INBOX destination that removes
+# nothing on its own) and assert the source label is gone after a resync.
+
+[[account]]
+id = "account-1"
+name = "test@example.com"
+is_personal = true
+
+[[mailbox]]
+id = "mbx-inbox"
+name = "Inbox"
+role = "inbox"
+sort_order = 0
+
+[[mailbox]]
+id = "mbx-trash"
+name = "Trash"
+role = "trash"
+sort_order = 1
+
+[[mailbox]]
+id = "mbx-junk"
+name = "Spam"
+role = "junk"
+sort_order = 2
+
+[[email]]
+id = "email-trashed"
+thread_id = "thread-trashed"
+mailbox_ids = ["mbx-trash"]
+from = "alice@example.com"
+to = ["test@example.com"]
+subject = "Trashed"
+received_at = "2026-01-15T10:00:00Z"
+message_id = ["<email-trashed@example.com>"]
+body_text = "A message sitting in the trash."
+
+[[email]]
+id = "email-spammed"
+thread_id = "thread-spammed"
+mailbox_ids = ["mbx-junk"]
+from = "mallory@example.com"
+to = ["test@example.com"]
+subject = "Spammed"
+received_at = "2026-01-15T11:00:00Z"
+message_id = ["<email-spammed@example.com>"]
+body_text = "A message sitting in spam."
