@@ -132,12 +132,12 @@ debug = true
 
 [ratatoskr.gate.jmap_steady_state_delta]
 script = "crates/app/tests/sync-harness/jmap-steady-state-delta.lua"
-baseline_label = "2026-06-26 bifrost B3b keep-attached steady-state (provider_requests=2: Mailbox/changes + Email/changes; one-shot reconnect/backfill requests amortized)"
+baseline_label = "2026-07-28 aux-quiesced steady-state delta kick (provider_requests=2: Mailbox/changes + Email/changes; the resident aux pass is waited out and cleared before the measured window)"
 
 [ratatoskr.gate.jmap_steady_state_delta.baseline]
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
-plantasjen = "3bf421bfba6f4f3e84289edc5294a3bc"
+plantasjen = "437cb48e530d4bdc9ad3e5b08c90cd2c"
 
 [ratatoskr.gate.jmap_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
@@ -202,10 +202,10 @@ equal = 1
 
 [ratatoskr.gate.gmail_steady_state_delta]
 script = "crates/app/tests/sync-harness/gmail-steady-state-delta.lua"
-baseline_label = "2026-06-26 bifrost B3b keep-attached steady-state (provider_requests=2: profile + history; label/message-list refresh amortized)"
+baseline_label = "2026-07-28 aux-quiesced steady-state delta kick (provider_requests=2: profile + history; the resident aux pass is waited out and cleared before the measured window)"
 
 [ratatoskr.gate.gmail_steady_state_delta.baseline]
-plantasjen = "34bea82a1a3a4ff493f60acbc843d663"
+plantasjen = "e27deb6e07a9474a9cccb84082b83805"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 

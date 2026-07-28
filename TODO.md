@@ -461,16 +461,11 @@ The Linux equivalents already automate. The harness scripts are platform-agnosti
 
 ### M9 follow-ups (optional)
 
-- [ ] **Aux-quiesce the jmap/gmail steady-state scripts** - The
-  graph/imap steady-state scripts wait out the resident aux pass
-  (`RESIDENT_AUX_INITIAL_DELAY` = 5s after attach) and let the mock
-  request log go quiet before clearing and measuring the delta kick.
-  `jmap-steady-state-delta.lua` and `gmail-steady-state-delta.lua` do
-  not: they currently pass only because their whole run finishes before
-  the 5s aux tick, so any slowdown that pushes the measured window past
-  5s counts aux requests against the `max_delta = 0` budget. Apply the
-  same quiesce block (and post-quiesce baseline snapshot) there, then
-  re-record both baselines.
+- [x] **Aux-quiesce the jmap/gmail steady-state scripts** - Resolved: both
+  scripts carry the same quiesce block and post-quiesce baseline snapshot as
+  the graph/imap twins, and both `plantasjen` baselines were re-recorded
+  (`--as-baseline --bench 10`, provider_requests=2 both) and re-evaluated
+  green against the new pins.
 
 - [ ] **Per-host baselines for `jmap_steady_state_delta`** - The checked-in baseline map (`brokkr.toml`) is currently single-host (`plantasjen` only). Other contributors or CI hosts that should run the gate need to record their own baseline with `brokkr sync crates/app/tests/sync-harness/jmap-steady-state-delta.lua --gate jmap_steady_state_delta --as-baseline --bench 10` and append the printed line under `[ratatoskr.gate.jmap_steady_state_delta.baseline]`.
 - [ ] **More checked-in gates** - Once a stable benchmark script matters to CI or release decisions, add a `[ratatoskr.gate.<name>]` block to `brokkr.toml` and record per-host baselines. Good candidates: JMAP scripted incremental, IMAP steady-state, Graph calendar remote-delta, CalDAV calendar remote-delta.
