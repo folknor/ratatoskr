@@ -41,7 +41,7 @@ local account, account_err = client:request("TestSeedAccount", {
     email = "scheduled-gmail@example.test",
     display_name = "Scheduled Gmail",
     account_name = "Scheduled Gmail",
-    provider = "gmail",
+    provider = "gmail_api",
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")
 

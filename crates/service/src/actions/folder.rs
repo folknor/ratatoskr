@@ -47,7 +47,7 @@ fn native_container_id(
 /// `folder_map` still holds only the attach-time snapshot - so a bare cached
 /// lookup misses the freshly-created folder and the handler would strand the
 /// mutation on a terminal not-found before reaching the provider. This mirrors
-/// `dispatch_target::resolve_move_destination`: cache-hit returns immediately,
+/// `dispatch_target::dispatch_container_op`: cache-hit returns immediately,
 /// a miss triggers one `refresh_folder_map` re-fetch and re-lookup, and only a
 /// still-absent target yields not-found. A refresh that itself fails maps to a
 /// transient remote error so the caller does not classify a flaky re-fetch as a

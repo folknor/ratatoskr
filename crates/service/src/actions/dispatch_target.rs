@@ -14,9 +14,11 @@ use super::context::ActionContext;
 use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use crate::bifrost::BifrostProviderKind;
+use crate::bifrost::containers::ContainerIndex;
 use crate::bifrost::resident::ResidentActionAccount;
 
 const FLAG_SEEN: &str = "\\Seen";
+const FLAG_FLAGGED: &str = "\\Flagged";
 /// JMAP names the read-state keyword `$seen` (RFC 8621 4.1.1), not the
 /// IMAP-style `\Seen` engine flag the other providers use. Bifrost's JMAP
 /// `bulk_set_flags` writes the supplied flag string VERBATIM into the
@@ -29,6 +31,9 @@ const FLAG_SEEN: &str = "\\Seen";
 /// reads back unread. Speak the JMAP-native keyword so the write and read
 /// vocabularies match, mirroring that read-side asymmetry.
 const JMAP_KEYWORD_SEEN: &str = "$seen";
+/// The starred/flagged counterpart of `JMAP_KEYWORD_SEEN`, for the same
+/// verbatim-keyword reason (RFC 8621 4.1.1 names the flag `$flagged`).
+const JMAP_KEYWORD_FLAGGED: &str = "$flagged";
 
 /// The read-state flag string to hand `bulk_set_flags` for `provider`. JMAP
 /// takes the native `$seen` keyword; every other provider takes the IMAP-style
@@ -42,14 +47,61 @@ fn seen_flag(provider: BifrostProviderKind) -> &'static str {
     }
 }
 
+/// The starred-state flag string to hand `bulk_set_flags` for `provider`.
+///
+/// Exactly the `seen_flag` shape, and the reason star can ride the same bulk
+/// primitive the other volume ops use instead of the per-message `set_starred`
+/// convenience: every provider's bulk flag path already translates the starred
+/// flag into its own native star field, so the capability dispatch bifrost's
+/// `set_starred` performs (`StarredFlagShape`) is reproduced by the flag string
+/// alone.
+///
+/// - Gmail: `translate_flag_op` maps `\Flagged` onto the `STARRED` label
+///   membership (the same thing `StarredFlagShape::LabelMembership` selects).
+/// - Graph: `patch_for_flags` maps `\Flagged` onto `flag.flagStatus` (the same
+///   field `StarredFlagShape::Category` reaches via its `$flagged` special case).
+/// - IMAP: `Flag::from_imap_str` maps `\Flagged` onto the `\Flagged` system
+///   flag. Note it does NOT recognise `$flagged` - only the single-object
+///   `set_keyword` path does that translation - so the bulk path must be handed
+///   the backslash form.
+/// - JMAP: keywords are written verbatim, so it must be handed `$flagged`.
+///
+/// The consumer's `hydrate::normalized_flags` performs the mirror-image
+/// `\Flagged -> $flagged` normalisation on the read side for exactly the three
+/// non-JMAP providers, so write and read vocabularies match per provider.
+fn starred_flag(provider: BifrostProviderKind) -> &'static str {
+    match provider {
+        BifrostProviderKind::Jmap => JMAP_KEYWORD_FLAGGED,
+        BifrostProviderKind::Gmail | BifrostProviderKind::Graph | BifrostProviderKind::Imap => {
+            FLAG_FLAGGED
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum RemoteBatchKey {
-    Star { to: bool },
-    Read { to: bool },
+    Star {
+        to: bool,
+    },
+    Read {
+        to: bool,
+    },
     Archive,
     Trash,
-    Spam { to: bool },
-    MoveToFolder { dest: String },
+    Spam {
+        to: bool,
+    },
+    /// The source is part of the KEY, not dropped as it once was. On a
+    /// label-model provider the source decides the wire patch (Gmail's move
+    /// is destination-only, so ratatoskr has to detach the source itself -
+    /// see `gmail_source_detach`), so two moves to the same destination out
+    /// of DIFFERENT sources are two different wire ops and must not coalesce
+    /// into one. Moves issued from a single folder view share a source and
+    /// still coalesce, which is the case that matters for volume.
+    MoveToFolder {
+        dest: String,
+        source: Option<String>,
+    },
     PermanentDelete,
 }
 
@@ -61,8 +113,9 @@ impl RemoteBatchKey {
             MailOperation::Archive => Some(Self::Archive),
             MailOperation::Trash => Some(Self::Trash),
             MailOperation::SetSpam { to } => Some(Self::Spam { to: *to }),
-            MailOperation::MoveToFolder { dest, .. } => Some(Self::MoveToFolder {
+            MailOperation::MoveToFolder { dest, source } => Some(Self::MoveToFolder {
                 dest: dest.as_str().to_string(),
+                source: source.as_ref().map(|source| source.as_str().to_string()),
             }),
             MailOperation::PermanentDelete => Some(Self::PermanentDelete),
             _ => None,
@@ -244,63 +297,65 @@ pub(crate) async fn dispatch_mutation(
     let account = AccountId(account_id.to_string());
     match op {
         MailOperation::SetStarred { to } => {
-            set_starred_each(action_account, &account, ids, *to).await
-        }
-        MailOperation::SetRead { to } => dispatch_read(action_account, &account, ids, *to).await,
-        MailOperation::Archive => {
-            let dest = role_destination(action_account, namespace, FolderRole::Archive);
-            let source = role_destination(action_account, namespace, FolderRole::Inbox);
-            dispatch_container_move(
+            dispatch_flags(
                 action_account,
                 &account,
                 ids,
-                dest.as_deref(),
-                source.as_deref(),
+                starred_flag(action_account.provider),
+                *to,
+            )
+            .await
+        }
+        MailOperation::SetRead { to } => {
+            dispatch_flags(
+                action_account,
+                &account,
+                ids,
+                seen_flag(action_account.provider),
+                *to,
+            )
+            .await
+        }
+        MailOperation::Archive => {
+            dispatch_container_op(
+                action_account,
+                &account,
+                ContainerMoveOp::Archive,
+                ids,
+                namespace,
             )
             .await
         }
         MailOperation::Trash => {
-            let dest =
-                resolve_role_destination(action_account, namespace, FolderRole::Trash).await?;
-            let source = role_destination(action_account, namespace, FolderRole::Inbox);
-            dispatch_container_move(
+            dispatch_container_op(
                 action_account,
                 &account,
+                ContainerMoveOp::Trash,
                 ids,
-                Some(&dest),
-                source.as_deref(),
+                namespace,
             )
             .await
         }
         MailOperation::SetSpam { to } => {
-            // Spamming moves INBOX -> SPAM; un-spamming moves SPAM -> INBOX. The
-            // source role is the inverse of the destination so the single-object
-            // compose removes the message from the container it actually leaves.
-            let (dest_role, source_role) = if *to {
-                (FolderRole::Spam, FolderRole::Inbox)
-            } else {
-                (FolderRole::Inbox, FolderRole::Spam)
-            };
-            let dest = resolve_role_destination(action_account, namespace, dest_role).await?;
-            let source = role_destination(action_account, namespace, source_role);
-            dispatch_container_move(
+            dispatch_container_op(
                 action_account,
                 &account,
+                ContainerMoveOp::Spam { to: *to },
                 ids,
-                Some(&dest),
-                source.as_deref(),
+                namespace,
             )
             .await
         }
         MailOperation::MoveToFolder { dest, source } => {
-            let native = resolve_move_destination(action_account, dest.as_str()).await?;
-            let native_source = move_source_native(action_account, namespace, source.as_ref());
-            dispatch_container_move(
+            dispatch_container_op(
                 action_account,
                 &account,
+                ContainerMoveOp::MoveToFolder {
+                    dest: dest.as_str(),
+                    source: source.as_ref().map(common::typed_ids::FolderId::as_str),
+                },
                 ids,
-                Some(&native),
-                native_source.as_deref(),
+                namespace,
             )
             .await
         }
@@ -320,30 +375,21 @@ pub(crate) async fn dispatch_mutation(
     }
 }
 
-/// Native folder id for a `MoveToFolder` source. The op-level `source` is an
-/// advisory hint (spec 2.2.3): when present, resolve it through the folder
-/// map; otherwise default to INBOX, the dominant move-out-of-inbox case. Only
-/// the single-object compose consumes this - `bulk_move` derives the source
-/// per message from each `ObjectId`'s own container context.
-fn move_source_native(
-    action_account: &ResidentActionAccount,
-    namespace: &NamespaceAttribution,
-    source: Option<&common::typed_ids::FolderId>,
-) -> Option<String> {
-    match source {
-        Some(source) => {
-            native_folder_for_storage_id_opt(action_account.folder_map(), source.as_str())
-        }
-        None => role_destination(action_account, namespace, FolderRole::Inbox),
-    }
-}
-
 /// Coalesced engine dispatch for a multi-thread batch: same-account, same-op
 /// `ObjectId`s accumulate and dispatch through the bulk surface
 /// (`bulk_move` / `bulk_set_flags` / `bulk_destroy`) so the provider's native
-/// batch wire op applies (spec 4.5). Star is the exception: it routes per-id
-/// through `set_starred` so the capability dispatch (`StarredFlagShape`) picks
-/// the right wire field instead of a hardcoded `\Flagged` (finding 2).
+/// batch wire op applies (spec 4.5). Star coalesces here too, through
+/// `bulk_set_flags` with the provider's own starred flag string - see
+/// `starred_flag` for why that reproduces the `StarredFlagShape` capability
+/// dispatch without the per-id `set_starred` convenience, which issued one
+/// single-object call PER MESSAGE while archive / move / delete each ran a
+/// single bulk campaign.
+///
+/// "One campaign" is not "one request": every provider chunks the id set
+/// (Gmail by its `batchModify` limit, Graph by `max_items`, JMAP by
+/// `maxObjectsInSet`, IMAP by folder grouping). The win is the provider's
+/// native batch verb plus one pass through the engine's idempotency /
+/// read-back / recovery pipeline, not a single HTTP call.
 pub(crate) async fn dispatch_bulk_mutation(
     action_account: &ResidentActionAccount,
     account_id: &str,
@@ -353,61 +399,66 @@ pub(crate) async fn dispatch_bulk_mutation(
 ) -> Result<(), ActionError> {
     let account = AccountId(account_id.to_string());
     match key {
-        RemoteBatchKey::Star { to } => set_starred_each(action_account, &account, ids, *to).await,
-        RemoteBatchKey::Read { to } => dispatch_read(action_account, &account, ids, *to).await,
-        RemoteBatchKey::Archive => {
-            let dest = role_destination(action_account, namespace, FolderRole::Archive);
-            let source = role_destination(action_account, namespace, FolderRole::Inbox);
-            dispatch_container_move(
+        RemoteBatchKey::Star { to } => {
+            dispatch_flags(
                 action_account,
                 &account,
                 ids,
-                dest.as_deref(),
-                source.as_deref(),
+                starred_flag(action_account.provider),
+                *to,
+            )
+            .await
+        }
+        RemoteBatchKey::Read { to } => {
+            dispatch_flags(
+                action_account,
+                &account,
+                ids,
+                seen_flag(action_account.provider),
+                *to,
+            )
+            .await
+        }
+        RemoteBatchKey::Archive => {
+            dispatch_container_op(
+                action_account,
+                &account,
+                ContainerMoveOp::Archive,
+                ids,
+                namespace,
             )
             .await
         }
         RemoteBatchKey::Trash => {
-            let dest =
-                resolve_role_destination(action_account, namespace, FolderRole::Trash).await?;
-            let source = role_destination(action_account, namespace, FolderRole::Inbox);
-            dispatch_container_move(
+            dispatch_container_op(
                 action_account,
                 &account,
+                ContainerMoveOp::Trash,
                 ids,
-                Some(&dest),
-                source.as_deref(),
+                namespace,
             )
             .await
         }
         RemoteBatchKey::Spam { to } => {
-            let (dest_role, source_role) = if *to {
-                (FolderRole::Spam, FolderRole::Inbox)
-            } else {
-                (FolderRole::Inbox, FolderRole::Spam)
-            };
-            let dest = resolve_role_destination(action_account, namespace, dest_role).await?;
-            let source = role_destination(action_account, namespace, source_role);
-            dispatch_container_move(
+            dispatch_container_op(
                 action_account,
                 &account,
+                ContainerMoveOp::Spam { to: *to },
                 ids,
-                Some(&dest),
-                source.as_deref(),
+                namespace,
             )
             .await
         }
-        RemoteBatchKey::MoveToFolder { dest } => {
-            let native = resolve_move_destination(action_account, dest).await?;
-            // The coalescing key drops the per-op advisory source; the single
-            // compose falls back to INBOX (bulk_move derives source per id).
-            let source = role_destination(action_account, namespace, FolderRole::Inbox);
-            dispatch_container_move(
+        RemoteBatchKey::MoveToFolder { dest, source } => {
+            dispatch_container_op(
                 action_account,
                 &account,
+                ContainerMoveOp::MoveToFolder {
+                    dest: dest.as_str(),
+                    source: source.as_deref(),
+                },
                 ids,
-                Some(&native),
-                source.as_deref(),
+                namespace,
             )
             .await
         }
@@ -417,10 +468,10 @@ pub(crate) async fn dispatch_bulk_mutation(
     }
 }
 
-/// Read-state dispatch over the resolved message id set.
+/// Flag-state dispatch (read state, star) over the resolved message id set.
 ///
 /// ALWAYS rides `bulk_set_flags`, including a one-id set. This is the single
-/// remote path for read-state across single- and multi-thread dispatch: the
+/// remote path for flag state across single- and multi-thread dispatch: the
 /// engine's idempotency / read-back / recovery pipeline applies uniformly, and
 /// the provider issues its native flag verb over the id set (a one-element set
 /// is a one-element batch). The earlier singleton special-case that routed a
@@ -428,16 +479,18 @@ pub(crate) async fn dispatch_bulk_mutation(
 /// gone: that convenience drives a separate per-provider primitive (e.g. Graph
 /// does an etag-resolving read-modify-write before the flag write) whose
 /// failure modes differ from the bulk surface, which silently degraded a
-/// single-message thread's read writeback to `local_only` with no wire op.
-async fn dispatch_read(
+/// single-message thread's read writeback to `local_only` with no wire op. The
+/// same reasoning retires the per-id `set_starred` loop star used to run.
+async fn dispatch_flags(
     action_account: &ResidentActionAccount,
     account: &AccountId,
     ids: Vec<ObjectId>,
+    flag: &str,
     to: bool,
 ) -> Result<(), ActionError> {
     let vendor =
         IdempotencyVendor::fresh(bifrost_sync::mutation::idempotency::default_salt_factory());
-    let op = flag_op(seen_flag(action_account.provider), to);
+    let op = flag_op(flag, to);
     action_account
         .engine
         .bulk_set_flags(
@@ -476,22 +529,6 @@ async fn dispatch_permanent_delete(
         .await
         .map(|_| ())
         .map_err(engine_error_to_action_error)
-}
-
-async fn set_starred_each(
-    action_account: &ResidentActionAccount,
-    account: &AccountId,
-    ids: Vec<ObjectId>,
-    to: bool,
-) -> Result<(), ActionError> {
-    for id in ids {
-        action_account
-            .engine
-            .set_starred(account, MutationTarget::Message(id), to)
-            .await
-            .map_err(engine_error_to_action_error)?;
-    }
-    Ok(())
 }
 
 /// Leaf engine dispatch for a single resolved label across the thread's
@@ -583,19 +620,294 @@ fn bifrost_label_for_kind(
     })
 }
 
+/// The container-move family: the four ops whose remote leg is "put these
+/// messages somewhere else". `dispatch_mutation` (single thread) and
+/// `dispatch_bulk_mutation` (coalesced batch) both reduce to this so the two
+/// paths cannot drift in destination resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContainerMoveOp<'a> {
+    Archive,
+    Trash,
+    Spam {
+        to: bool,
+    },
+    MoveToFolder {
+        dest: &'a str,
+        /// Storage id of the container the thread is leaving, when the caller
+        /// knows it. Advisory (spec 2.2.3) for the folder-model providers,
+        /// whose `bulk_move` removes the source itself; load-bearing on Gmail,
+        /// where the move patch is destination-only.
+        source: Option<&'a str>,
+    },
+}
+
+impl ContainerMoveOp<'_> {
+    /// Text for the terminal not-found when nothing resolves the destination,
+    /// even after a container refresh.
+    fn destination_description(self) -> String {
+        match self {
+            Self::Archive => "archive destination".to_string(),
+            Self::Trash => "trash destination".to_string(),
+            Self::Spam { to: true } => "spam destination".to_string(),
+            Self::Spam { to: false } => "un-spam destination".to_string(),
+            Self::MoveToFolder { dest, .. } => format!("container {dest}"),
+        }
+    }
+}
+
+/// The `FolderRole` a container-move op targets, or `None` for `MoveToFolder`,
+/// whose destination is an explicit storage id rather than a role.
+///
+/// Spamming moves INBOX -> SPAM and un-spamming moves SPAM -> INBOX, so the
+/// un-spam destination is the Inbox role, not the Spam one.
+fn destination_role(op: ContainerMoveOp<'_>) -> Option<FolderRole> {
+    match op {
+        ContainerMoveOp::Archive => Some(FolderRole::Archive),
+        ContainerMoveOp::Trash => Some(FolderRole::Trash),
+        ContainerMoveOp::Spam { to: true } => Some(FolderRole::Spam),
+        ContainerMoveOp::Spam { to: false } => Some(FolderRole::Inbox),
+        ContainerMoveOp::MoveToFolder { .. } => None,
+    }
+}
+
+/// The container a container-move op LEAVES, expressed as a role, when the op
+/// itself names one. `None` means "no role-shaped source": either the op does
+/// not imply one, or (for `MoveToFolder`) the source is an explicit storage id.
+///
+/// Only Gmail consumes this (see `gmail_source_detach`), and the two `None`
+/// arms below are deliberate rather than unfinished:
+///
+/// - `Trash` and mark-as-spam: bifrost's Gmail patch already removes INBOX for
+///   any non-INBOX destination, and a USER label surviving a trash is native
+///   Gmail behaviour, not drift - `trash_local` / `spam_local` only remove
+///   INBOX locally, so local and remote agree.
+/// - `Archive`: the whole op IS the INBOX detach.
+///
+/// Un-spam is the one role-shaped source that matters: `spam_local` removes
+/// SPAM locally, and the destination-only Gmail patch for a destination of
+/// INBOX removes nothing at all, so without this the thread comes back from
+/// the next sync still labelled SPAM.
+fn source_role(op: ContainerMoveOp<'_>) -> Option<FolderRole> {
+    match op {
+        ContainerMoveOp::Spam { to: false } => Some(FolderRole::Spam),
+        ContainerMoveOp::Archive
+        | ContainerMoveOp::Trash
+        | ContainerMoveOp::Spam { to: true }
+        | ContainerMoveOp::MoveToFolder { .. } => None,
+    }
+}
+
+/// What a container-move op reduces to once its native destination is resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ContainerMovePlan {
+    /// Bulk-move every id into `destination`, then - on a label-model provider
+    /// whose move patch is destination-only - detach `detach_source` so the
+    /// container the thread left does not survive the move.
+    MoveTo {
+        destination: String,
+        detach_source: Option<String>,
+    },
+    /// Detach every id from the account's INBOX container. Gmail's archive
+    /// shape, and the only shape that legitimately has no destination folder.
+    DetachInbox(String),
+    /// Gmail archive on an account whose INBOX container did not resolve:
+    /// there is nothing to detach, so there is nothing to send.
+    NoOp,
+}
+
+/// Gmail models archive as the ABSENCE of INBOX, so bifrost's Gmail
+/// `containers_list` synthesises an `archive` container purely to give the role
+/// table an Archive entry.
+const GMAIL_SYNTHETIC_ARCHIVE_ID: &str = "archive";
+/// Gmail's INBOX label id. The one container bifrost's destination-only move
+/// patch removes on its own.
+const GMAIL_LABEL_INBOX: &str = "INBOX";
+
+/// True when this op on Gmail is the "drop INBOX, add nothing" shape.
+///
+/// OPERATION-AWARE ON PURPOSE. An earlier revision keyed this on
+/// `native_destination.is_none()` alone, which is wrong twice over, because
+/// Trash and Spam resolve their destinations through the SAME role table: a
+/// snapshot that has not yet seen the account's Trash role would (a) silently
+/// turn a trash into an archive, and (b) by answering `Some`, suppress the
+/// caller's refresh-and-retry, so the snapshot never got re-fetched either.
+/// Only Archive - and a `MoveToFolder` naming Gmail's synthetic archive id -
+/// may take this shape; every other op with an unresolved destination must
+/// stay `None` so the caller refreshes and then fails terminally.
+fn is_gmail_archive_shape(op: ContainerMoveOp<'_>, native_destination: Option<&str>) -> bool {
+    let is_synthetic = |dest: &str| dest.eq_ignore_ascii_case(GMAIL_SYNTHETIC_ARCHIVE_ID);
+    match op {
+        ContainerMoveOp::Archive => native_destination.is_none_or(is_synthetic),
+        ContainerMoveOp::MoveToFolder { .. } => native_destination.is_some_and(is_synthetic),
+        ContainerMoveOp::Trash | ContainerMoveOp::Spam { .. } => false,
+    }
+}
+
+/// The container a Gmail move must ALSO detach.
+///
+/// Bifrost's Gmail `move_patch` is destination-only: it adds the destination
+/// label and removes INBOX, and nothing else. Gmail message ids carry no source
+/// label either, so - unlike the folder-model providers, whose `bulk_move` is a
+/// real move that removes each message's own source - Gmail cannot derive the
+/// source from the id set. Every other container the thread belongs to
+/// therefore survives the move, while `move_to_folder::move_local` /
+/// `spam::spam_local` DO drop the source locally: the next sync then restores
+/// the container the user thought they moved out of.
+///
+/// Two exclusions:
+/// - INBOX, because the destination-only patch already removes it;
+/// - a source equal to the destination, which is a no-op move.
+///
+/// Non-Gmail providers always get `None`: adding a redundant per-id detach
+/// there would be a wire op per message for no behavioural gain, and on IMAP
+/// `remove_from_container` is a destructive `\Deleted` + `UID EXPUNGE`.
+fn gmail_source_detach(
+    provider: BifrostProviderKind,
+    native_destination: &str,
+    native_source: Option<&str>,
+) -> Option<String> {
+    if provider != BifrostProviderKind::Gmail {
+        return None;
+    }
+    let source = native_source?;
+    if source.eq_ignore_ascii_case(GMAIL_LABEL_INBOX)
+        || source.eq_ignore_ascii_case(native_destination)
+    {
+        return None;
+    }
+    Some(source.to_string())
+}
+
+/// Reduce a resolved native destination to the plan the engine dispatch runs.
+///
+/// `None` means the op has no destination this account can satisfy. It is
+/// reachable for any role-resolved op whose role is missing from the snapshot,
+/// and it must NEVER degrade into detaching from INBOX: bifrost lowers IMAP
+/// `remove_from_container` to `\Deleted` + `UID EXPUNGE`, so an INBOX-shaped
+/// fallback destroys an inbox message on archive (immediately where UIDPLUS or
+/// IMAP4rev2 allow `UID EXPUNGE`, and otherwise by leaving the message
+/// `\Deleted` and exposed to the next expunge from any client), and for a
+/// message living in any other folder it filters to an empty id set and fails
+/// `Unsupported` - degrading the whole op to a retryable LocalOnly that can
+/// never succeed. The caller turns `None` into a terminal not-found after one
+/// container refresh.
+///
+/// The Gmail archive shape is the one legitimate destination-less plan: Gmail's
+/// `archive` container id is SYNTHETIC, not a real label id, and bifrost's bulk
+/// `move_patch` lowers a `MembershipScope::Label` destination straight into
+/// `addLabelIds`, so routing Gmail archive through `bulk_move` would ask Gmail
+/// to apply a label that does not exist. (Only bifrost's single-object
+/// `add_to_container` special-cases the synthetic id, and the bulk surface is
+/// the only one the action pipeline uses.)
+fn container_move_plan(
+    provider: BifrostProviderKind,
+    op: ContainerMoveOp<'_>,
+    native_destination: Option<&str>,
+    native_inbox: Option<&str>,
+    native_source: Option<&str>,
+) -> Option<ContainerMovePlan> {
+    if provider == BifrostProviderKind::Gmail && is_gmail_archive_shape(op, native_destination) {
+        return Some(match native_inbox {
+            Some(inbox) => ContainerMovePlan::DetachInbox(inbox.to_string()),
+            None => ContainerMovePlan::NoOp,
+        });
+    }
+    let destination = native_destination?;
+    Some(ContainerMovePlan::MoveTo {
+        destination: destination.to_string(),
+        detach_source: gmail_source_detach(provider, destination, native_source),
+    })
+}
+
+/// Resolve one container-move op against a container snapshot. Pure, so the
+/// caller owns the decision to re-fetch the snapshot on a `None`.
+///
+/// An unresolvable SOURCE is not a miss: the source is advisory, so it simply
+/// yields no detach. Only an unresolvable DESTINATION returns `None`.
+fn plan_for_container_op(
+    provider: BifrostProviderKind,
+    op: ContainerMoveOp<'_>,
+    containers: &ContainerIndex,
+    namespace: &NamespaceAttribution,
+) -> Option<ContainerMovePlan> {
+    let inbox = containers.role_target(namespace, FolderRole::Inbox);
+    let destination: Option<String> = match destination_role(op) {
+        Some(role) => containers.role_target(namespace, role).map(str::to_string),
+        None => {
+            let ContainerMoveOp::MoveToFolder { dest, .. } = op else {
+                unreachable!("only MoveToFolder has no destination role")
+            };
+            Some(native_folder_for_storage_id_opt(
+                containers.folder_map(),
+                dest,
+            )?)
+        }
+    };
+    let source: Option<String> = match op {
+        ContainerMoveOp::MoveToFolder { source, .. } => source
+            .and_then(|storage| native_folder_for_storage_id_opt(containers.folder_map(), storage)),
+        _ => source_role(op)
+            .and_then(|role| containers.role_target(namespace, role))
+            .map(str::to_string),
+    };
+    container_move_plan(
+        provider,
+        op,
+        destination.as_deref(),
+        inbox,
+        source.as_deref(),
+    )
+}
+
 /// Object-level container move composed for archive / trash / spam / move.
 ///
-/// ALWAYS rides the bulk surface, including a one-id set. A destination-bearing
-/// move maps the native destination to the provider's `MembershipScope` and
-/// dispatches `bulk_move` (one wire campaign over the id set, keeping the
-/// provider's native batch verb AND the engine's idempotency / read-back
-/// guard); `bulk_move` removes each message from its source as part of the move
-/// (IMAP MOVE/COPY+EXPUNGE, Gmail removing INBOX, JMAP mailbox replace, Graph
-/// folder move), so no separate per-id source removal is needed.
+/// Resolves the op's destination against the resident slot's container
+/// snapshot, re-fetching once on a miss (spec 4.1, finding 5) so a folder
+/// created since attach - or an Archive folder the account grew later - resolves
+/// instead of stranding the already-completed local write on a terminal
+/// not-found.
+async fn dispatch_container_op(
+    action_account: &ResidentActionAccount,
+    account: &AccountId,
+    op: ContainerMoveOp<'_>,
+    ids: Vec<ObjectId>,
+    namespace: &NamespaceAttribution,
+) -> Result<(), ActionError> {
+    let plan = match plan_for_container_op(
+        action_account.provider,
+        op,
+        action_account.containers.as_ref(),
+        namespace,
+    ) {
+        Some(plan) => plan,
+        None => {
+            let fresh = action_account.refresh_containers().await.map_err(|error| {
+                ActionError::remote_with_kind(
+                    RemoteFailureKind::Transient,
+                    format!("refresh container map: {error}"),
+                )
+            })?;
+            plan_for_container_op(action_account.provider, op, &fresh, namespace).ok_or_else(
+                || ActionError::not_found(format!("{} not found", op.destination_description())),
+            )?
+        }
+    };
+    run_container_move_plan(action_account, account, ids, plan).await
+}
+
+/// Execute a resolved `ContainerMovePlan`.
 ///
-/// The destination-less case is Gmail archive ("archive = remove the INBOX
-/// label, no destination folder"): each message is removed from the source
-/// (INBOX) container directly.
+/// A move ALWAYS rides the bulk surface, including a one-id set: it maps the
+/// native destination to the provider's `MembershipScope` and dispatches
+/// `bulk_move` (ONE bulk campaign over the id set - the engine still chunks it
+/// to the provider's batch ceiling - keeping the provider's native batch verb
+/// AND the engine's idempotency / read-back guard). On the folder-model
+/// providers `bulk_move` removes each message from its own source as part of
+/// the move (IMAP MOVE/COPY+EXPUNGE, JMAP mailbox replace, Graph folder move),
+/// so no source is composed here; Gmail is the exception and gets an explicit
+/// `detach_source` (see `gmail_source_detach`). No batch-wide source is ever
+/// composed for the move itself - that would be wrong for every message not in
+/// it.
 ///
 /// The earlier singleton special-case that routed a one-id set through a
 /// single-object `add_to_container` + `remove_from_container` compose is
@@ -603,57 +915,74 @@ fn bifrost_label_for_kind(
 /// per-provider path (e.g. Graph's etag-resolving read-modify-write) whose
 /// failure modes differ from the bulk surface, which silently degraded a
 /// single-message thread's move writeback to `local_only` with no wire op.
-async fn dispatch_container_move(
+async fn run_container_move_plan(
     action_account: &ResidentActionAccount,
     account: &AccountId,
     ids: Vec<ObjectId>,
-    native_destination: Option<&str>,
-    native_source: Option<&str>,
+    plan: ContainerMovePlan,
 ) -> Result<(), ActionError> {
-    match native_destination {
-        Some(native) => {
-            let destination = membership_scope_for(action_account.provider, native);
+    match plan {
+        ContainerMovePlan::MoveTo {
+            destination,
+            detach_source,
+        } => {
+            let scope = membership_scope_for(action_account.provider, &destination);
             let vendor = IdempotencyVendor::fresh(
                 bifrost_sync::mutation::idempotency::default_salt_factory(),
             );
+            // Only clone the id set when a detach actually follows.
+            let detach_ids = detach_source.as_ref().map(|_| ids.clone());
             action_account
                 .engine
                 .bulk_move(
                     account,
                     ids,
-                    destination,
+                    scope,
                     &vendor,
                     protocol_for_provider(action_account.provider),
                 )
                 .await
                 .map(|_| ())
-                .map_err(engine_error_to_action_error)
-        }
-        None => {
-            // Gmail archive: no destination folder; archive means drop the
-            // INBOX label. Nothing to remove if the account has no INBOX
-            // container resolved.
-            let Some(inbox) = native_source
-                .map(str::to_string)
-                .or_else(|| native_folder_for_storage_id_opt(action_account.folder_map(), "INBOX"))
-            else {
-                return Ok(());
-            };
-            let inbox_container = ContainerId(inbox);
-            for id in ids {
-                action_account
-                    .engine
-                    .remove_from_container(
-                        account,
-                        MutationTarget::Message(id),
-                        inbox_container.clone(),
-                    )
-                    .await
-                    .map_err(engine_error_to_action_error)?;
+                .map_err(engine_error_to_action_error)?;
+            // Ordered AFTER the move on purpose: if the detach fails, the
+            // message is already in the destination and the op degrades to a
+            // retryable LocalOnly with a stale source label, which a retry or
+            // resync reconciles. Detaching first would strand the message
+            // outside both containers if the move then failed.
+            match (detach_source, detach_ids) {
+                (Some(source), Some(detach_ids)) => {
+                    detach_from_container(action_account, account, detach_ids, ContainerId(source))
+                        .await
+                }
+                _ => Ok(()),
             }
-            Ok(())
         }
+        ContainerMovePlan::DetachInbox(inbox) => {
+            detach_from_container(action_account, account, ids, ContainerId(inbox)).await
+        }
+        ContainerMovePlan::NoOp => Ok(()),
     }
+}
+
+/// Remove every id from one container.
+///
+/// Per-id by necessity: bifrost's `remove_from_container` takes a single
+/// `MutationTarget`, and there is no bulk container-detach on the engine
+/// surface. Only ever reached on Gmail, where the operation is a label patch.
+async fn detach_from_container(
+    action_account: &ResidentActionAccount,
+    account: &AccountId,
+    ids: Vec<ObjectId>,
+    container: ContainerId,
+) -> Result<(), ActionError> {
+    for id in ids {
+        action_account
+            .engine
+            .remove_from_container(account, MutationTarget::Message(id), container.clone())
+            .await
+            .map_err(engine_error_to_action_error)?;
+    }
+    Ok(())
 }
 
 /// Map a native folder id to the `MembershipScope` shape `bulk_move` expects
@@ -667,60 +996,6 @@ fn membership_scope_for(provider: BifrostProviderKind, native: &str) -> Membersh
         }
         BifrostProviderKind::Jmap => MembershipScope::Mailbox(MailboxId(native.to_string())),
     }
-}
-
-/// Resolve a destination storage id to its native folder id, re-fetching the
-/// container map on a cache miss before erroring (spec 4.1, finding 5). A
-/// folder created since the resident slot attached is absent from the cached
-/// snapshot; re-fetching avoids a terminal not-found that would strand the
-/// completed local write.
-async fn resolve_move_destination(
-    action_account: &ResidentActionAccount,
-    storage_id: &str,
-) -> Result<String, ActionError> {
-    if let Some(native) = native_folder_for_storage_id_opt(action_account.folder_map(), storage_id)
-    {
-        return Ok(native);
-    }
-    let fresh = action_account.refresh_containers().await.map_err(|error| {
-        ActionError::remote_with_kind(
-            RemoteFailureKind::Transient,
-            format!("refresh container map: {error}"),
-        )
-    })?;
-    native_folder_for_storage_id_opt(fresh.folder_map(), storage_id)
-        .ok_or_else(|| ActionError::not_found(format!("container {storage_id} not found")))
-}
-
-fn role_destination(
-    action_account: &ResidentActionAccount,
-    namespace: &NamespaceAttribution,
-    role: FolderRole,
-) -> Option<String> {
-    action_account
-        .containers
-        .role_target(namespace, role)
-        .map(str::to_string)
-}
-
-async fn resolve_role_destination(
-    action_account: &ResidentActionAccount,
-    namespace: &NamespaceAttribution,
-    role: FolderRole,
-) -> Result<String, ActionError> {
-    if let Some(native) = role_destination(action_account, namespace, role) {
-        return Ok(native);
-    }
-    let fresh = action_account.refresh_containers().await.map_err(|error| {
-        ActionError::remote_with_kind(
-            RemoteFailureKind::Transient,
-            format!("refresh container map: {error}"),
-        )
-    })?;
-    fresh
-        .role_target(namespace, role)
-        .map(str::to_string)
-        .ok_or_else(|| ActionError::not_found(format!("role destination {role:?} not found")))
 }
 
 fn native_folder_for_storage_id_opt(
@@ -909,6 +1184,350 @@ mod tests {
             SendIntent::Reply => SendIntentClass::MarkReplied,
             SendIntent::Forward => SendIntentClass::MarkForwarded,
         }
+    }
+
+    /// Star and read state must speak each provider's own flag vocabulary,
+    /// because star now rides `bulk_set_flags` (one bulk campaign for an
+    /// N-thread star, still chunked to the provider's batch ceiling) instead of
+    /// the per-message `set_starred` convenience that did the
+    /// `StarredFlagShape` capability dispatch for us. The flag string IS the
+    /// capability dispatch now, so it is pinned per provider - and pinned
+    /// against the read side, which is what makes a star survive a round trip.
+    #[test]
+    fn flag_vocabulary_matches_the_consumer_read_side() {
+        for provider in [
+            BifrostProviderKind::Gmail,
+            BifrostProviderKind::Graph,
+            BifrostProviderKind::Imap,
+        ] {
+            assert_eq!(
+                starred_flag(provider),
+                "\\Flagged",
+                "{provider:?} bulk flag path canonicalizes the backslash form; \
+                 `$flagged` would fall through as an unknown custom keyword"
+            );
+            assert_eq!(seen_flag(provider), "\\Seen");
+        }
+        assert_eq!(
+            starred_flag(BifrostProviderKind::Jmap),
+            "$flagged",
+            "JMAP writes keywords verbatim, and the consumer reads `$flagged`"
+        );
+        assert_eq!(seen_flag(BifrostProviderKind::Jmap), "$seen");
+    }
+
+    /// `hydrate::normalized_flags` maps `\Flagged` -> `$flagged` for exactly the
+    /// three non-JMAP providers, and `is_starred` is `flags.contains("$flagged")`
+    /// for all four. Pinning the write vocabulary against that read rule here
+    /// keeps the two halves from drifting independently.
+    #[test]
+    fn starred_write_flag_normalizes_to_the_read_key() {
+        const READ_KEY: &str = "$flagged";
+        for provider in [
+            BifrostProviderKind::Gmail,
+            BifrostProviderKind::Graph,
+            BifrostProviderKind::Imap,
+            BifrostProviderKind::Jmap,
+        ] {
+            let written = starred_flag(provider);
+            let normalizes = written == READ_KEY
+                || (provider != BifrostProviderKind::Jmap
+                    && written.eq_ignore_ascii_case("\\flagged"));
+            assert!(
+                normalizes,
+                "{provider:?} writes {written} which never normalizes to {READ_KEY}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_starred_and_set_read_both_add_or_remove_one_flag() {
+        let FlagOp::Add(added) = flag_op("\\Flagged", true) else {
+            panic!("starring must ADD the flag");
+        };
+        assert_eq!(added.len(), 1);
+        assert!(added.contains("\\Flagged"));
+        let FlagOp::Remove(removed) = flag_op("$flagged", false) else {
+            panic!("un-starring must REMOVE the flag");
+        };
+        assert!(removed.contains("$flagged"));
+    }
+
+    fn move_to(dest: &str) -> ContainerMoveOp<'_> {
+        ContainerMoveOp::MoveToFolder { dest, source: None }
+    }
+
+    fn move_from<'a>(dest: &'a str, source: &'a str) -> ContainerMoveOp<'a> {
+        ContainerMoveOp::MoveToFolder {
+            dest,
+            source: Some(source),
+        }
+    }
+
+    fn moves_to(destination: &str) -> Option<ContainerMovePlan> {
+        Some(ContainerMovePlan::MoveTo {
+            destination: destination.to_string(),
+            detach_source: None,
+        })
+    }
+
+    /// Gmail archive must compose as an INBOX detach, never as a move onto the
+    /// synthetic `archive` container id. That id exists only so bifrost's role
+    /// table has an Archive entry; it is not a real Gmail label, and the bulk
+    /// move path lowers the destination straight into `addLabelIds`.
+    #[test]
+    fn gmail_archive_detaches_inbox_rather_than_labelling_a_synthetic_id() {
+        let detach_inbox = Some(ContainerMovePlan::DetachInbox("INBOX".to_string()));
+        for (op, destination) in [
+            (ContainerMoveOp::Archive, Some("archive")),
+            // Same answer whether the Archive role resolved or not, and
+            // case-insensitively.
+            (ContainerMoveOp::Archive, None),
+            (ContainerMoveOp::Archive, Some("ARCHIVE")),
+            // A MoveToFolder that names the synthetic id is the same shape.
+            (move_to("archive"), Some("archive")),
+        ] {
+            assert_eq!(
+                container_move_plan(
+                    BifrostProviderKind::Gmail,
+                    op,
+                    destination,
+                    Some("INBOX"),
+                    None
+                ),
+                detach_inbox,
+                "{op:?} with destination {destination:?} must detach INBOX"
+            );
+        }
+        // No INBOX container resolved: nothing to detach, so nothing to send.
+        assert_eq!(
+            container_move_plan(
+                BifrostProviderKind::Gmail,
+                ContainerMoveOp::Archive,
+                Some("archive"),
+                None,
+                None
+            ),
+            Some(ContainerMovePlan::NoOp)
+        );
+    }
+
+    /// REGRESSION PIN. The archive shape must be decided by the OPERATION, not
+    /// by "this Gmail op has no destination". Trash and Spam resolve their
+    /// destinations through the same role table, so a snapshot that has not yet
+    /// seen the account's Trash role would otherwise (a) silently archive
+    /// instead of trashing, and (b) by answering `Some`, suppress the caller's
+    /// refresh-and-retry so the role never got re-resolved either.
+    #[test]
+    fn gmail_unresolved_non_archive_role_is_a_miss_not_an_archive() {
+        for op in [
+            ContainerMoveOp::Trash,
+            ContainerMoveOp::Spam { to: true },
+            ContainerMoveOp::Spam { to: false },
+            move_to("Work"),
+        ] {
+            assert_eq!(
+                container_move_plan(BifrostProviderKind::Gmail, op, None, Some("INBOX"), None),
+                None,
+                "{op:?} with an unresolved destination must force a container refresh, \
+                 never degrade into a Gmail archive"
+            );
+        }
+    }
+
+    /// The correctness gap this pins: a non-Gmail account with no Archive-role
+    /// folder must NOT fall back to "detach from INBOX". On IMAP that lowers to
+    /// `\Deleted` + `UID EXPUNGE` - destroying an inbox message on archive where
+    /// UIDPLUS / IMAP4rev2 allow the expunge, and otherwise leaving it `\Deleted`
+    /// and exposed to the next expunge - and for a message in any other folder it
+    /// fails outright on a batch-wide source that never matched its real folder.
+    #[test]
+    fn non_gmail_archive_without_an_archive_folder_is_unresolved_not_an_inbox_detach() {
+        for provider in [
+            BifrostProviderKind::Imap,
+            BifrostProviderKind::Jmap,
+            BifrostProviderKind::Graph,
+        ] {
+            assert_eq!(
+                container_move_plan(
+                    provider,
+                    ContainerMoveOp::Archive,
+                    None,
+                    Some("INBOX"),
+                    None
+                ),
+                None,
+                "{provider:?} must surface an unresolved destination, not an INBOX detach"
+            );
+        }
+    }
+
+    /// Everything with a real destination is a bulk move, including a
+    /// non-Gmail folder that happens to be NAMED `archive` - the synthetic-id
+    /// special case is Gmail-only.
+    #[test]
+    fn resolved_destinations_always_bulk_move() {
+        for provider in [
+            BifrostProviderKind::Gmail,
+            BifrostProviderKind::Graph,
+            BifrostProviderKind::Imap,
+            BifrostProviderKind::Jmap,
+        ] {
+            assert_eq!(
+                container_move_plan(
+                    provider,
+                    ContainerMoveOp::Trash,
+                    Some("Trash"),
+                    Some("INBOX"),
+                    None
+                ),
+                moves_to("Trash")
+            );
+        }
+        assert_eq!(
+            container_move_plan(
+                BifrostProviderKind::Imap,
+                ContainerMoveOp::Archive,
+                Some("archive"),
+                Some("INBOX"),
+                None
+            ),
+            moves_to("archive")
+        );
+    }
+
+    /// Gmail's move patch is destination-only (add the destination, remove
+    /// INBOX), and a Gmail message id carries no source label, so the source
+    /// container has to be detached explicitly or it survives the move and the
+    /// next sync restores the row the local write removed.
+    #[test]
+    fn gmail_move_detaches_the_source_it_leaves() {
+        assert_eq!(
+            container_move_plan(
+                BifrostProviderKind::Gmail,
+                move_from("TRASH", "SPAM"),
+                Some("TRASH"),
+                Some("INBOX"),
+                Some("SPAM")
+            ),
+            Some(ContainerMovePlan::MoveTo {
+                destination: "TRASH".to_string(),
+                detach_source: Some("SPAM".to_string()),
+            }),
+            "trashing out of SPAM must clear SPAM"
+        );
+        // Un-spam: the destination IS Inbox, so the patch removes nothing at
+        // all and SPAM would otherwise stick.
+        assert_eq!(
+            container_move_plan(
+                BifrostProviderKind::Gmail,
+                ContainerMoveOp::Spam { to: false },
+                Some("INBOX"),
+                Some("INBOX"),
+                Some("SPAM")
+            ),
+            Some(ContainerMovePlan::MoveTo {
+                destination: "INBOX".to_string(),
+                detach_source: Some("SPAM".to_string()),
+            })
+        );
+    }
+
+    /// The two exclusions, and the provider restriction. Detaching where it is
+    /// not needed costs a call per message; on IMAP it would be destructive.
+    #[test]
+    fn source_detach_is_gmail_only_and_skips_redundant_sources() {
+        assert_eq!(
+            gmail_source_detach(BifrostProviderKind::Gmail, "TRASH", Some("INBOX")),
+            None,
+            "bifrost's Gmail patch already removes INBOX for a non-INBOX destination"
+        );
+        assert_eq!(
+            gmail_source_detach(BifrostProviderKind::Gmail, "TRASH", Some("trash")),
+            None,
+            "source equal to destination is a no-op move"
+        );
+        assert_eq!(
+            gmail_source_detach(BifrostProviderKind::Gmail, "TRASH", None),
+            None
+        );
+        for provider in [
+            BifrostProviderKind::Graph,
+            BifrostProviderKind::Imap,
+            BifrostProviderKind::Jmap,
+        ] {
+            assert_eq!(
+                gmail_source_detach(provider, "Trash", Some("Spam")),
+                None,
+                "{provider:?} bulk_move is a real move and removes the source itself"
+            );
+        }
+    }
+
+    /// Un-spamming moves SPAM -> INBOX, so its destination role is Inbox. Kept
+    /// as its own pinned mapping because reading it off the op is the one place
+    /// a polarity flip would silently send un-spam back to SPAM.
+    #[test]
+    fn container_ops_target_the_expected_role() {
+        assert_eq!(
+            destination_role(ContainerMoveOp::Archive),
+            Some(FolderRole::Archive)
+        );
+        assert_eq!(
+            destination_role(ContainerMoveOp::Trash),
+            Some(FolderRole::Trash)
+        );
+        assert_eq!(
+            destination_role(ContainerMoveOp::Spam { to: true }),
+            Some(FolderRole::Spam)
+        );
+        assert_eq!(
+            destination_role(ContainerMoveOp::Spam { to: false }),
+            Some(FolderRole::Inbox)
+        );
+        assert_eq!(
+            destination_role(move_to("f1")),
+            None,
+            "an explicit move destination is a storage id, not a role"
+        );
+    }
+
+    /// Un-spam is the ONLY role-shaped source. Trash and mark-as-spam leave
+    /// user labels attached, which is native Gmail behaviour and matches what
+    /// `trash_local` / `spam_local` do locally (they only drop INBOX), so
+    /// inventing a source for them would delete a label the user still expects.
+    #[test]
+    fn only_unspam_carries_a_role_shaped_source() {
+        assert_eq!(
+            source_role(ContainerMoveOp::Spam { to: false }),
+            Some(FolderRole::Spam)
+        );
+        for op in [
+            ContainerMoveOp::Archive,
+            ContainerMoveOp::Trash,
+            ContainerMoveOp::Spam { to: true },
+            move_to("f1"),
+        ] {
+            assert_eq!(source_role(op), None, "{op:?} must not invent a source");
+        }
+    }
+
+    /// The coalescing key has to carry the source, because on Gmail the source
+    /// decides the wire patch. Two moves to the same destination out of
+    /// different sources are different wire ops and must land in different
+    /// batches; moves out of the same folder view still coalesce.
+    #[test]
+    fn move_batch_key_separates_distinct_sources() {
+        use common::typed_ids::FolderId;
+        let key = |source: Option<&str>| {
+            RemoteBatchKey::from_operation(&MailOperation::MoveToFolder {
+                dest: FolderId::from("TRASH"),
+                source: source.map(FolderId::from),
+            })
+        };
+        assert_ne!(key(Some("SPAM")), key(Some("INBOX")));
+        assert_ne!(key(Some("SPAM")), key(None));
+        assert_eq!(key(Some("SPAM")), key(Some("SPAM")));
     }
 
     #[test]
