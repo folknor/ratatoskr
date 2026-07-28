@@ -298,10 +298,79 @@ fn persist_containers(
         .map_err(|error| format!("begin containers tx: {error}"))?;
     insert_folders_batch(&tx, &folder_rows)?;
     upsert_labels(&tx, &label_rows)?;
+    reap_missing_personal_folders(&tx, account_id, &folder_rows)?;
     reconcile_namespace_registry(&tx, account_id, containers, &index)?;
     tx.commit()
         .map_err(|error| format!("commit containers: {error}"))?;
     Ok(index)
+}
+
+/// Delete the account's PERSONAL folder rows whose container no longer exists
+/// in the snapshot - the reconciliation half of the container sync, without
+/// which a mailbox destroyed on the server leaves its `folders` row behind
+/// forever (the upserts above only add and update).
+///
+/// Deliberately narrow:
+/// - Personal rows only (`namespace_type IS NULL`). Shared-mailbox rows are
+///   lifecycle-managed through the `shared_mailboxes` registry's `revoked_at`
+///   reconciliation below, and public-folder rows through
+///   `public_folder_pins`; reaping either here would change semantics those
+///   paths own.
+/// - Canonical system ids and Gmail system-label ids are never reaped, even
+///   when absent from the snapshot: system rows are also seeded outside the
+///   container sync (account creation, harness seed), and a provider that
+///   advertises no role for one (a JMAP server with no archive-role mailbox)
+///   must not have its seeded row destroyed.
+///
+/// Known race, accepted: a locally created folder whose `containers_list`
+/// snapshot was fetched just before the provider create completed can be
+/// reaped once. It is self-healing - our own create advances the provider's
+/// mailbox state, so the next container-change batch re-lists and re-adds it.
+fn reap_missing_personal_folders(
+    conn: &WriteTxn<'_>,
+    account_id: &str,
+    folder_rows: &[FolderWriteRow],
+) -> Result<(), String> {
+    let snapshot: std::collections::HashSet<&str> =
+        folder_rows.iter().map(|row| row.id.as_str()).collect();
+    let existing: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM folders \
+                 WHERE account_id = ?1 AND namespace_type IS NULL",
+            )
+            .map_err(|error| format!("prepare personal folder listing: {error}"))?;
+        let mapped = stmt
+            .query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("list personal folders: {error}"))?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("collect personal folders: {error}"))?
+    };
+    for id in folder_ids_to_reap(&existing, &snapshot) {
+        conn.execute(
+            "DELETE FROM folders WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![account_id, id],
+        )
+        .map_err(|error| format!("reap folder {id}: {error}"))?;
+    }
+    Ok(())
+}
+
+/// The pure reap decision: which of the account's existing personal folder
+/// ids are deleted, given the snapshot's persisted ids. Split out so the
+/// exclusions (snapshot membership, system ids) are unit-pinnable without a
+/// database.
+fn folder_ids_to_reap<'a>(
+    existing: &'a [String],
+    snapshot: &std::collections::HashSet<&str>,
+) -> Vec<&'a str> {
+    existing
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !snapshot.contains(*id))
+        .filter(|id| !common::folder_roles::is_gmail_system_folder_label_id(id))
+        .collect()
 }
 
 /// Pure partition of `containers` into `folders` rows, `labels` rows, and

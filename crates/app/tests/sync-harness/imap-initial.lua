@@ -22,6 +22,15 @@ local function message_by_subject(messages, subject)
     return nil
 end
 
+local function label_by_id(state, id)
+    for _, label in ipairs(state.labels) do
+        if label.id == id then
+            return label
+        end
+    end
+    return nil
+end
+
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
@@ -59,7 +68,11 @@ harness.assert(state_err == nil, "TestQueryDbState failed")
 harness.assert_eq(state.message_count, 2, "message count")
 harness.assert_eq(state.unread_message_count, 1, "unread message count")
 harness.assert(state.thread_count >= 1, "thread count")
-harness.assert(state.label_count >= 2, "label count")
+-- Post labels-unification split: IMAP mailboxes land in `folders`; the only
+-- provider-derived `labels` row this fixture produces is the custom "project"
+-- keyword on email-001. Assert THAT row - a bare label_count is satisfiable
+-- by the harness seed alone.
+harness.assert(label_by_id(state, "kw:project") ~= nil, "kw:project label missing")
 
 local synced_account = account_by_id(state, account.account_id)
 harness.assert(synced_account ~= nil, "account missing after sync")

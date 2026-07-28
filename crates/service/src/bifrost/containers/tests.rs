@@ -22,7 +22,7 @@ use service_state::WriteDbState;
 use tempfile::TempDir;
 
 use super::{
-    ContainerIndex, build_container_rows, folder_kind_for, persist_containers,
+    ContainerIndex, build_container_rows, folder_ids_to_reap, folder_kind_for, persist_containers,
     role_to_system_folder_id,
 };
 
@@ -613,4 +613,99 @@ fn owner_email_populates_shared_mailbox_cache() {
         })
         .unwrap();
     assert_eq!(email.as_deref(), Some("owner@example.test"));
+}
+
+#[test]
+fn reap_decision_deletes_only_stale_non_system_personal_ids() {
+    let existing = vec![
+        "jmap-stale".to_string(),
+        "jmap-live".to_string(),
+        "INBOX".to_string(),
+        // System rows seeded outside the container sync survive even when
+        // the provider snapshot never advertises them.
+        "IMPORTANT".to_string(),
+        "CATEGORY_FORUMS".to_string(),
+        "CHAT".to_string(),
+    ];
+    let snapshot = ["jmap-live", "INBOX"].into_iter().collect();
+    assert_eq!(folder_ids_to_reap(&existing, &snapshot), vec!["jmap-stale"]);
+}
+
+#[test]
+fn persist_reaps_destroyed_personal_folder_and_keeps_seeded_and_shared_rows() {
+    let temp = TempDir::new().unwrap();
+    let write_db = WriteDbState::from_pool(db::db::open_writer_pool(temp.path()).unwrap());
+    let inbox = folder(
+        ProtocolKind::Jmap,
+        "mbx-inbox",
+        "Inbox",
+        Some(FolderRole::Inbox),
+        None,
+    );
+    let scratch = folder(ProtocolKind::Jmap, "mbx-scratch", "Scratch", None, None);
+    let shared = namespaced(
+        ProtocolKind::Jmap,
+        "shared-inbox",
+        "Shared inbox",
+        ContainerNamespace::Shared,
+        Some("foreign-account"),
+        Some("shared-inbox"),
+        Some(ContainerContentClass::Mail),
+    );
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let first = vec![inbox.clone(), scratch, shared.clone()];
+    let second = vec![inbox, shared];
+    let survivors = runtime
+        .block_on(async move {
+            write_db
+                .with_write(move |conn| {
+                    conn.execute(
+                        "INSERT INTO accounts (id, email) VALUES (?1, ?2)",
+                        rusqlite::params![ACCOUNT, "account@example.test"],
+                    )
+                    .map_err(|error| format!("seed account: {error}"))?;
+                    // A system row seeded outside the container sync (account
+                    // creation / harness seed); never in any JMAP snapshot.
+                    conn.execute(
+                        "INSERT INTO folders (id, account_id, name, visible) \
+                         VALUES ('SENT', ?1, 'Sent', 1)",
+                        rusqlite::params![ACCOUNT],
+                    )
+                    .map_err(|error| format!("seed SENT row: {error}"))?;
+                    persist_containers(conn, ACCOUNT, &first)?;
+                    // The provider destroyed the scratch mailbox: the second
+                    // snapshot no longer carries it.
+                    persist_containers(conn, ACCOUNT, &second)?;
+                    let mut stmt = conn
+                        .prepare("SELECT id FROM folders WHERE account_id = ?1 ORDER BY id")
+                        .map_err(|error| format!("prepare survivors: {error}"))?;
+                    let mapped = stmt
+                        .query_map([ACCOUNT], |row| row.get::<_, String>(0))
+                        .map_err(|error| format!("query survivors: {error}"))?;
+                    mapped
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| format!("collect survivors: {error}"))
+                })
+                .await
+        })
+        .unwrap();
+    assert!(
+        !survivors.iter().any(|id| id == "jmap-mbx-scratch"),
+        "destroyed personal folder must be reaped, survivors: {survivors:?}"
+    );
+    assert!(survivors.iter().any(|id| id == "INBOX"), "role folder kept");
+    assert!(
+        survivors.iter().any(|id| id == "SENT"),
+        "seeded system row absent from the snapshot must survive"
+    );
+    assert!(
+        survivors
+            .iter()
+            .any(|id| id == "shared:foreign-account:jmap-shared-inbox"),
+        "shared-namespace row is not the personal reap's to manage, survivors: {survivors:?}"
+    );
 }

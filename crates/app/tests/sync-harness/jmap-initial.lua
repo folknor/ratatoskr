@@ -13,6 +13,15 @@ local function subject_seen(messages, subject)
     return false
 end
 
+local function label_by_id(state, id)
+    for _, label in ipairs(state.labels) do
+        if label.id == id then
+            return label
+        end
+    end
+    return nil
+end
+
 local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 harness.clear_mock_requests(admin_endpoint)
@@ -48,7 +57,11 @@ local state, state_err = client:request("TestQueryDbState", {
 harness.assert(state_err == nil, "TestQueryDbState failed")
 harness.assert_eq(state.message_count, 2, "message count")
 harness.assert(state.thread_count >= 1, "thread count")
-harness.assert(state.label_count >= 2, "label count")
+-- Post labels-unification split: JMAP mailboxes land in `folders`; the only
+-- provider-derived `labels` row this fixture produces is the custom keyword
+-- on email-001. Assert THAT row - a bare label_count is satisfiable by the
+-- harness seed alone.
+harness.assert(label_by_id(state, "kw:project") ~= nil, "kw:project label missing")
 harness.assert(subject_seen(state.messages, "Hello"), "missing Hello")
 harness.assert(subject_seen(state.messages, "Re: Hello"), "missing Re: Hello")
 
