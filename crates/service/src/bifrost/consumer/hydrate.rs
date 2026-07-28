@@ -6,13 +6,13 @@ use bifrost_types::{
     AccountId, BlobHandle, Change, HydrationProjection, Importance, Message, ObjectChangeKind,
     ObjectId, ScopeChangeKind, SyncEvent,
 };
+use common::rfc822::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use common::types::{
     FolderKind, ImportanceLevel, LabelKind, MailProviderKind, NamespaceAttribution,
 };
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow};
 use futures::StreamExt;
 use mail_parser::{MessageParser, MimeHeaders};
-use provider_sync::consumer_support::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use search::SearchDocument;
 use serde::{Deserialize, Serialize};
 use store::inline_image_store::InlineImage;

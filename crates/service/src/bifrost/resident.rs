@@ -1146,30 +1146,7 @@ async fn run_aux_pass(
             }
             .await
         }
-        BifrostProviderKind::Imap => {
-            async {
-                let imap_ops =
-                    imap::ops::ImapOps::new(inner.encryption_key, inner.write_db.writer_pool());
-                let imap_config = imap_ops.load_config(&inner.read_db, account_id).await?;
-                let mut session = imap::connection::connect(&imap_config).await?;
-                // The aux pass needs only the folder PATH strings for its
-                // per-folder PERMANENTFLAGS SELECT probe, not a folder-map
-                // sync. `sync_containers` already wrote the `folders` rows at
-                // attach, so source the paths from the `imap_folder_path`
-                // column rather than re-issuing a LIST through the deleted
-                // `sync_imap_folder_map` facade (B6a, spec 4.3).
-                let folder_paths = read_imap_folder_paths(&inner.read_db, account_id).await?;
-                provider_sync::consumer_support::run_imap_auxiliary_sync(
-                    &mut session,
-                    account_id,
-                    &inner.write_db,
-                    &folder_paths,
-                )
-                .await;
-                Ok(())
-            }
-            .await
-        }
+        BifrostProviderKind::Imap => Ok(()),
     };
     if let Err(error) = result {
         log::warn!("resident auxiliary pass for {account_id} skipped: {error}");
@@ -1246,36 +1223,6 @@ async fn next_group_pull_cycle(inner: &ResidentEngineInner, account_id: &str) ->
             log::debug!("directory-group pull cycle counter unavailable, forcing pull: {error}");
             0
         })
-}
-
-/// Read the IMAP folder PATH strings off the already-synced `folders`
-/// table for the account (the `imap_folder_path` column the list sync
-/// wrote at attach). Backs the IMAP aux pass's per-folder keyword-capability
-/// SELECT probe after B6a deleted the `sync_imap_folder_map` facade it used
-/// to re-LIST through.
-async fn read_imap_folder_paths(
-    read_db: &ReadDbState,
-    account_id: &str,
-) -> Result<Vec<String>, String> {
-    let aid = account_id.to_string();
-    read_db
-        .with_read(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT imap_folder_path FROM folders \
-                     WHERE account_id = ?1 AND imap_folder_path IS NOT NULL",
-                )
-                .map_err(|error| format!("prepare imap folder paths: {error}"))?;
-            let rows = stmt
-                .query_map(rusqlite::params![aid], |row| row.get::<_, String>(0))
-                .map_err(|error| format!("query imap folder paths: {error}"))?;
-            let mut paths = Vec::new();
-            for row in rows {
-                paths.push(row.map_err(|error| format!("read imap folder path: {error}"))?);
-            }
-            Ok(paths)
-        })
-        .await
 }
 
 async fn read_initial_sync_completed(

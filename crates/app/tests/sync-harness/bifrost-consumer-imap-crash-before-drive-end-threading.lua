@@ -1,5 +1,6 @@
 -- description: IMAP deferred ack re-drives messages after crash before drive-end threading
 -- expected: pass
+-- fixture: imap-small.toml
 -- ceiling: 90s
 
 local function read_thread(client, account_id, thread_id, label)

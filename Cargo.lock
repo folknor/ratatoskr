@@ -1363,6 +1363,7 @@ dependencies = [
  "hotpath 0.22.0",
  "log",
  "lol_html",
+ "mail-parser",
  "regex",
  "reqwest",
  "rusqlite",

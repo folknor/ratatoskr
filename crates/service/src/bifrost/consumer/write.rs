@@ -1,16 +1,19 @@
 use std::collections::BTreeSet;
 
+use super::support::keyword_membership::{
+    KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
+};
+use super::support::persistence::{
+    index_search_documents, store_inline_images, store_message_bodies,
+};
+use super::support::thread_membership::{
+    replace_message_folders_and_recompute, replace_message_membership_and_recompute,
+};
 use common::types::{FolderKind, LabelKind, NamespaceAttribution};
 use db::db::queries_extra::{
-    LabelWriteRow, compute_thread_aggregate, delete_messages_and_cleanup_threads,
-    insert_attachments, insert_messages, maybe_update_chat_state, query_user_emails, upsert_labels,
-    upsert_thread_aggregate, upsert_thread_participants,
-};
-use provider_sync::consumer_support::{
-    FolderWriteRow, KeywordProvider, ensure_folder_rows, index_search_documents,
-    recompute_thread_keyword_labels, replace_message_folders_and_recompute,
-    replace_message_keywords, replace_message_membership_and_recompute, store_inline_images,
-    store_message_bodies,
+    FolderWriteRow, LabelWriteRow, compute_thread_aggregate, delete_messages_and_cleanup_threads,
+    ensure_folder_rows, insert_attachments, insert_messages, maybe_update_chat_state,
+    query_user_emails, upsert_labels, upsert_thread_aggregate, upsert_thread_participants,
 };
 use rusqlite::OptionalExtension;
 

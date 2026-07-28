@@ -10,6 +10,7 @@ pub mod html_sanitizer;
 pub mod http;
 pub mod ops;
 pub mod parsed_message;
+pub mod rfc822;
 pub mod signature_images;
 pub mod signature_strip;
 pub mod state;

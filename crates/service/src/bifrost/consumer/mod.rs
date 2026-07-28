@@ -28,6 +28,7 @@
 pub mod hydrate;
 pub mod imap_threading;
 pub mod post_persist;
+pub mod support;
 pub mod write;
 
 #[cfg(test)]

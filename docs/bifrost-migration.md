@@ -1639,12 +1639,22 @@ landing commit.
   mechanical dependency-and-module audit of the whole workspace - every crate's
   `Cargo.toml` plus its module tree - and delete every bifrost-covered equivalent
   it finds, not only the named targets. Known instance to confirm in that audit:
-  `crates/service/Cargo.toml` still carries
-  `bifrost-jmap = { path = "/home/folk/Programs/jmap-client/crates/jmap" }` (the
-  out-of-tree `jmap-client` checkout, used by the JMAP-specific contact action
-  handlers). That dependency, and any others the audit surfaces, retire here -
-  subject to the § 9 caveat that retiring the external `jmap-client` must not
-  strand bifrost-jmap (confirm bifrost-jmap's own internal JMAP dependency first).
+  `crates/service/Cargo.toml` carries TWO JMAP client dependencies side by
+  side, which is the § 1 parallel-dependency rule's purest case. `bifrost-jmap`
+  is the out-of-tree `jmap-client` checkout, wired as a GIT dependency pinned
+  to a rev (`git = "file:///home/folk/Programs/jmap-client"`,
+  `rev = "b3d207c"`) - NOT the path dependency an earlier draft of this item
+  described. `bifrost-jmap-new` is bifrost's own JMAP crate, taken from the
+  workspace. The near-identical names are a trap, and the § 9 caveat inherits
+  it: read that caveat as "retiring the external `jmap-client` must not strand
+  bifrost's JMAP crate", because it is `bifrost-jmap` that retires here and
+  `bifrost-jmap-new` that survives. Confirm which consumers outside the
+  deleted `crates/jmap` still reach for the old crate before cutting it.
+  That dependency, and any others the audit surfaces, retire here.
+
+  Carve this narrow. Per the B12 methodology finding recorded above, prefer
+  several narrow items to one broad one, and extract each wiring decision into
+  a pure, unit-pinnable function rather than leaving it inline.
 - B16. Reference-doc reconciliation. Update `reference/architecture.md`,
   `AGENTS.md`, and the crate map. Bundled with B15 per repo convention (never a
   standalone markdown commit).

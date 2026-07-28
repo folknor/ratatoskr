@@ -17,8 +17,8 @@
 
 use mail_parser::{MessageParser, MimeHeaders};
 
-use common::email_parsing::format_address_list;
-use common::text::snippet_from_text_body;
+use crate::email_parsing::format_address_list;
+use crate::text::snippet_from_text_body;
 
 /// One attachment recovered from the raw MIME, carrying the fields the
 /// structured `BlobHandle` cannot: the part `name`, the `Content-ID`, and
@@ -102,7 +102,7 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
             && let Some(part) = message.parts.get(part_idx as usize)
             && let Some(ct) = part.content_type()
             && let Some(subtype) = ct.subtype()
-            && common::email_parsing::is_amp_content_type(&format!("{}/{subtype}", ct.ctype()))
+            && crate::email_parsing::is_amp_content_type(&format!("{}/{subtype}", ct.ctype()))
         {
             return None;
         }
@@ -132,7 +132,7 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
             let is_inline = part
                 .content_disposition()
                 .is_some_and(mail_parser::ContentType::is_inline);
-            let calendar_payload = common::email_parsing::is_calendar_content_type(&mime_type)
+            let calendar_payload = crate::email_parsing::is_calendar_content_type(&mime_type)
                 .then(|| String::from_utf8_lossy(part.contents()).into_owned());
             Some(Rfc822Attachment {
                 filename: part.attachment_name().unwrap_or("attachment").to_string(),

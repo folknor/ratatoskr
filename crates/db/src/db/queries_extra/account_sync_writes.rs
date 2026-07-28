@@ -97,24 +97,6 @@ pub fn clear_account_sync_state(conn: &WriteConn<'_>, account_id: &str) -> Resul
     Ok(())
 }
 
-/// Set the `supports_keywords` flag on an account.
-///
-/// Used by the IMAP provider to record whether the server advertises
-/// IMAP KEYWORD capability, enabling custom flag sync.
-pub fn set_account_supports_keywords(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-    supports: bool,
-) -> Result<(), String> {
-    let val = i64::from(supports);
-    conn.execute(
-        "UPDATE accounts SET supports_keywords = ?1 WHERE id = ?2",
-        params![val, account_id],
-    )
-    .map_err(|e| format!("set_account_supports_keywords: {e}"))?;
-    Ok(())
-}
-
 /// Delete a single orphaned placeholder thread for an account.
 ///
 /// Used during initial sync orphan cleanup to remove threads whose message IDs
