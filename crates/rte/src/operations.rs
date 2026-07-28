@@ -12,7 +12,8 @@
 use std::sync::Arc;
 
 use crate::document::{
-    Block, BlockKind, DocPosition, Document, InlineStyle, StyledRun, isolate_runs, text_len,
+    Block, BlockKind, DocPosition, Document, InlineStyle, StyledRun, block_with_runs_like,
+    isolate_runs, text_len,
 };
 
 // ── Position map ────────────────────────────────────────
@@ -1047,25 +1048,6 @@ fn split_runs_at_offset(runs: &[StyledRun], offset: usize) -> (Vec<StyledRun>, V
     }
 
     (left, right)
-}
-
-fn block_with_runs_like(template: &Block, runs: Vec<StyledRun>) -> Block {
-    match template {
-        Block::Heading { level, .. } => Block::Heading {
-            level: *level,
-            runs,
-        },
-        Block::ListItem {
-            ordered,
-            indent_level,
-            ..
-        } => Block::ListItem {
-            ordered: *ordered,
-            indent_level: *indent_level,
-            runs,
-        },
-        _ => Block::Paragraph { runs },
-    }
 }
 
 // ── Apply: MergeBlocks ──────────────────────────────────

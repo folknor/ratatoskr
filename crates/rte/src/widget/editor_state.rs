@@ -327,9 +327,12 @@ impl EditorState {
 
         let cursor_before = self.selection;
 
-        // Step 1: delete selection if non-collapsed.
+        // Step 1: delete selection if non-collapsed. The insert position is
+        // computed up front (atom-trailing-edge aware) because the deletion
+        // shifts the document under the selection.
         let mut all_ops: Vec<EditOp> = Vec::new();
         let insert_pos = if !self.selection.is_collapsed() {
+            let pos = rules::post_delete_position(&self.document, self.selection);
             let delete_ops = rules::resolve(
                 &self.document,
                 self.selection,
@@ -337,11 +340,8 @@ impl EditorState {
                 InlineStyle::empty(),
             );
             for op in &delete_ops {
-                let pos_map = op.apply(&mut self.document);
-                self.selection.anchor = pos_map.map(self.selection.anchor);
-                self.selection.focus = pos_map.map(self.selection.focus);
+                op.apply(&mut self.document);
             }
-            let pos = self.selection.start();
             self.selection = DocSelection::caret(pos);
             all_ops.extend(delete_ops);
             pos
@@ -575,42 +575,51 @@ impl EditorState {
     }
 
     /// Update the cursor position after applying ops.
+    ///
+    /// Scans backwards for the last cursor-determining op: rule resolution
+    /// can emit trailing fixup ops (style toggles after an insert, the
+    /// block-type reset after splitting at the end of a heading) that do not
+    /// move the caret and must not mask the op that does.
     fn update_cursor_after_ops(&mut self, ops: &[EditOp]) {
-        // Use the last op to determine final cursor position.
-        let Some(last_op) = ops.last() else {
-            return;
-        };
-
-        match last_op {
-            EditOp::InsertText { position, text } => {
-                let char_count = text_len(text);
-                let new_pos = DocPosition::new(position.block_index, position.offset + char_count);
-                self.selection = DocSelection::caret(new_pos);
-            }
-            EditOp::DeleteRange { start, .. } => {
-                self.selection = DocSelection::caret(*start);
-            }
-            EditOp::SplitBlock { position } => {
-                // Cursor at start of the new (second) block.
-                self.selection = DocSelection::caret(DocPosition::new(position.block_index + 1, 0));
-            }
-            EditOp::MergeBlocks {
-                merge_offset,
-                block_index,
-                ..
-            } => {
-                // Cursor at the merge point in the previous block.
-                let target_block = block_index.saturating_sub(1);
-                self.selection = DocSelection::caret(DocPosition::new(target_block, *merge_offset));
-            }
-            EditOp::ToggleInlineStyle { .. }
-            | EditOp::SetBlockType { .. }
-            | EditOp::SetBlockAttrs { .. }
-            | EditOp::InsertBlock { .. }
-            | EditOp::RemoveBlock { .. }
-            | EditOp::ReplaceBlock { .. }
-            | EditOp::RestoreMergedBlock { .. } => {
-                // These don't move the cursor.
+        for op in ops.iter().rev() {
+            match op {
+                EditOp::InsertText { position, text } => {
+                    let char_count = text_len(text);
+                    let new_pos =
+                        DocPosition::new(position.block_index, position.offset + char_count);
+                    self.selection = DocSelection::caret(new_pos);
+                    return;
+                }
+                EditOp::DeleteRange { start, .. } => {
+                    self.selection = DocSelection::caret(*start);
+                    return;
+                }
+                EditOp::SplitBlock { position } => {
+                    // Cursor at start of the new (second) block.
+                    self.selection =
+                        DocSelection::caret(DocPosition::new(position.block_index + 1, 0));
+                    return;
+                }
+                EditOp::MergeBlocks {
+                    merge_offset,
+                    block_index,
+                    ..
+                } => {
+                    // Cursor at the merge point in the previous block.
+                    let target_block = block_index.saturating_sub(1);
+                    self.selection =
+                        DocSelection::caret(DocPosition::new(target_block, *merge_offset));
+                    return;
+                }
+                EditOp::ToggleInlineStyle { .. }
+                | EditOp::SetBlockType { .. }
+                | EditOp::SetBlockAttrs { .. }
+                | EditOp::InsertBlock { .. }
+                | EditOp::RemoveBlock { .. }
+                | EditOp::ReplaceBlock { .. }
+                | EditOp::RestoreMergedBlock { .. } => {
+                    // These don't move the cursor; keep scanning.
+                }
             }
         }
     }
@@ -1521,6 +1530,120 @@ mod tests {
                 .all(|r| r.style.contains(InlineStyle::BOLD)),
             "all non-empty runs should be bold, got: {bold_runs:?}",
         );
+    }
+
+    #[test]
+    fn pending_style_insert_places_caret_after_text() {
+        // Regression: the trailing ToggleInlineStyle fixup op used to mask
+        // the InsertText when computing the post-edit caret, leaving the
+        // caret BEFORE the typed character - the next keystroke then landed
+        // in front of it, scrambling the text.
+        let mut state = EditorState::new();
+        state.apply_action(EditAction::ToggleInlineStyle(InlineStyle::BOLD));
+        state.apply_action(EditAction::InsertText("x".into()));
+        assert_eq!(state.selection.focus, DocPosition::new(0, 1));
+
+        state.apply_action(EditAction::InsertText("y".into()));
+        assert_eq!(
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("xy"),
+        );
+        assert_eq!(state.selection.focus, DocPosition::new(0, 2));
+    }
+
+    #[test]
+    fn replacing_styled_selection_with_typed_text_keeps_style() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::styled("abc", InlineStyle::BOLD)],
+        }]));
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 3));
+        state.apply_action(EditAction::InsertText("x".into()));
+
+        assert_eq!(
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("x"),
+        );
+        let runs = state.document.block(0).and_then(Block::runs).expect("runs");
+        assert!(
+            runs.iter()
+                .filter(|r| !r.is_empty())
+                .all(|r| r.style.contains(InlineStyle::BOLD)),
+            "replacement should inherit the deleted selection's bold, got {runs:?}",
+        );
+        assert_eq!(state.selection.focus, DocPosition::new(0, 1));
+    }
+
+    #[test]
+    fn enter_at_end_of_heading_moves_caret_to_new_paragraph() {
+        // The SetBlockType fixup after the split must not mask the
+        // SplitBlock when computing the caret.
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Heading {
+            level: HeadingLevel::H1,
+            runs: vec![StyledRun::plain("Title")],
+        }]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 5));
+        state.apply_action(EditAction::SplitBlock);
+
+        assert!(matches!(
+            state.document.block(1),
+            Some(Block::Paragraph { .. })
+        ));
+        assert_eq!(state.selection.focus, DocPosition::new(1, 0));
+    }
+
+    #[test]
+    fn delete_selection_starting_after_image_keeps_image() {
+        // Caret after the image (reachable via ArrowRight), selection
+        // extended into the next block: the image is outside the selection
+        // and must survive the delete.
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: None,
+            height: None,
+        };
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            image,
+            Block::paragraph("hello"),
+        ]));
+        state.selection = DocSelection::range(DocPosition::new(0, 1), DocPosition::new(1, 3));
+        state.apply_action(EditAction::DeleteSelection);
+
+        assert!(matches!(state.document.block(0), Some(Block::Image { .. })));
+        assert_eq!(
+            state
+                .document
+                .block(1)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("lo"),
+        );
+        assert_eq!(state.selection.focus, DocPosition::new(1, 0));
+    }
+
+    #[test]
+    fn delete_selection_starting_after_image_undo_restores() {
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: None,
+            height: None,
+        };
+        let original = Document::from_blocks(vec![image, Block::paragraph("hello")]);
+        let mut state = EditorState::from_document(original.clone());
+        state.selection = DocSelection::range(DocPosition::new(0, 1), DocPosition::new(1, 3));
+        state.apply_action(EditAction::DeleteSelection);
+        state.perform(Action::Undo);
+
+        assert_eq!(state.document, original);
     }
 
     #[test]

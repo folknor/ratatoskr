@@ -9,7 +9,8 @@
 //! notice when Enter doesn't do what they expect.
 
 use crate::document::{
-    Block, BlockKind, DocPosition, DocSelection, Document, InlineStyle, StyledRun, text_len,
+    Block, BlockKind, DocPosition, DocSelection, Document, InlineStyle, StyledRun,
+    block_with_runs_like, text_len,
 };
 use crate::operations::{DeletedContent, EditOp};
 
@@ -74,30 +75,42 @@ fn resolve_insert(
 ) -> Vec<EditOp> {
     let mut ops = Vec::new();
 
-    // Rule: insert replaces selection
-    let insert_pos = if !selection.is_collapsed() {
+    // Rule: insert replaces selection. The style decisions must account for
+    // the deletion: the desired style comes from the first selected character
+    // (the text being replaced), while the inherited style must be predicted
+    // against the post-delete document, because the deletion can remove the
+    // very runs the insertion offset would otherwise inherit from.
+    let scratch: Document;
+    let (target_doc, insert_pos, style) = if selection.is_collapsed() {
+        let pos = selection.focus;
+        let style = if pending_style.is_empty() {
+            resolve_style_at(doc, pos)
+        } else {
+            pending_style
+        };
+        (doc, pos, style)
+    } else {
+        let pos = post_delete_position(doc, selection);
+        let style = if pending_style.is_empty() {
+            style_at_position(doc, pos)
+        } else {
+            pending_style
+        };
         let delete_ops = build_delete_selection(doc, selection);
-        let pos = selection.start();
+        let mut post_delete = doc.clone();
+        for op in &delete_ops {
+            op.apply(&mut post_delete);
+        }
         ops.extend(delete_ops);
-        pos
-    } else {
-        selection.focus
-    };
-
-    // Determine the style for the inserted text.
-    // If pending_style is non-empty, use it directly.
-    // Otherwise, resolve from the document at the cursor position.
-    let style = if !pending_style.is_empty() {
-        pending_style
-    } else {
-        resolve_style_at(doc, insert_pos)
+        scratch = post_delete;
+        (&scratch, pos, style)
     };
 
     // The InsertText op inserts text into the run at the insertion point,
     // inheriting that run's style. If the desired style differs (e.g., pending
     // bold into plain text), we emit ToggleInlineStyle ops after the insert to
     // fix up the style bits on the newly inserted range.
-    let run_style = run_style_at(doc, insert_pos);
+    let run_style = run_style_at(target_doc, insert_pos);
 
     ops.push(EditOp::InsertText {
         position: insert_pos,
@@ -175,6 +188,42 @@ fn resolve_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
     // For InlineStyle bits (bold/italic/etc), still inherit them.
 
     run.style
+}
+
+/// Style of the character at `pos` (right affinity). Used when replacing a
+/// selection: the typed text takes on the style of the first character it
+/// replaces, matching mainstream editor behavior. Falls back to the last
+/// run's style past the end of the block.
+fn style_at_position(doc: &Document, pos: DocPosition) -> InlineStyle {
+    let Some(runs) = doc.block(pos.block_index).and_then(Block::runs) else {
+        return InlineStyle::empty();
+    };
+    let mut char_pos = 0;
+    for run in runs {
+        let run_len = run.char_len();
+        if pos.offset < char_pos + run_len {
+            return run.style;
+        }
+        char_pos += run_len;
+    }
+    runs.last().map_or(InlineStyle::empty(), |r| r.style)
+}
+
+/// The caret position after deleting `selection`. Normally the selection
+/// start; when the selection starts at the trailing edge of an atomic block
+/// (offset past the atom), the atom itself is not part of the selection, so
+/// the deletion - and the caret - begin at the start of the next block.
+pub(crate) fn post_delete_position(doc: &Document, selection: DocSelection) -> DocPosition {
+    let start = selection.start();
+    if start.offset > 0
+        && start.block_index + 1 < doc.block_count()
+        && doc
+            .block(start.block_index)
+            .is_some_and(Block::is_atomic_block)
+    {
+        return DocPosition::new(start.block_index + 1, 0);
+    }
+    start
 }
 
 /// Get the style of the run at a given position - the style that `InsertText`
@@ -426,10 +475,14 @@ fn resolve_delete_selection(doc: &Document, selection: DocSelection) -> Vec<Edit
 
 /// Build the EditOps to delete a non-collapsed selection.
 fn build_delete_selection(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
-    let start = selection.start();
+    // A selection anchored at the trailing edge of an atomic block does not
+    // include the atom; start the deletion at the next block so the atom
+    // survives (and so undo doesn't have to reconstruct a block it never
+    // captured).
+    let start = post_delete_position(doc, selection);
     let end = selection.end();
 
-    if start == end {
+    if start >= end {
         return vec![];
     }
 
@@ -540,8 +593,8 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
 
     // Rule 1: delete selection first.
     let split_pos = if !selection.is_collapsed() {
+        let pos = post_delete_position(doc, selection);
         let delete_ops = build_delete_selection(doc, selection);
-        let pos = selection.start();
         ops.extend(delete_ops);
         pos
     } else {
@@ -786,25 +839,6 @@ fn remove_or_clear_block(doc: &Document, block_index: usize) -> EditOp {
             index: block_index,
             saved: block,
         }
-    }
-}
-
-fn block_with_runs_like(template: &Block, runs: Vec<StyledRun>) -> Block {
-    match template {
-        Block::Heading { level, .. } => Block::Heading {
-            level: *level,
-            runs,
-        },
-        Block::ListItem {
-            ordered,
-            indent_level,
-            ..
-        } => Block::ListItem {
-            ordered: *ordered,
-            indent_level: *indent_level,
-            runs,
-        },
-        _ => Block::Paragraph { runs },
     }
 }
 
@@ -1203,6 +1237,135 @@ mod tests {
     }
 
     // ── Delete selection ────────────────────────────────
+
+    #[test]
+    fn delete_from_atom_trailing_edge_spares_atom() {
+        // Selection starts at (image, 1) - the trailing edge of the atom -
+        // so the image is NOT part of the selection and must survive.
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: None,
+            height: None,
+        };
+        let mut doc = Document::from_blocks(vec![image, Block::paragraph("hello")]);
+        let sel = DocSelection::range(DocPosition::new(0, 1), DocPosition::new(1, 3));
+        let ops = resolve(&doc, sel, EditAction::DeleteSelection, InlineStyle::empty());
+        apply_ops(&mut doc, &ops);
+
+        assert!(matches!(doc.block(0), Some(Block::Image { .. })));
+        assert_eq!(block_text(&doc, 1), "lo");
+    }
+
+    #[test]
+    fn delete_from_atom_trailing_edge_cross_block_undo_restores() {
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: None,
+            height: None,
+        };
+        let original = Document::from_blocks(vec![
+            image,
+            Block::paragraph("aaa"),
+            Block::paragraph("bbb"),
+        ]);
+        let mut doc = original.clone();
+        let sel = DocSelection::range(DocPosition::new(0, 1), DocPosition::new(2, 2));
+        let ops = resolve(&doc, sel, EditAction::DeleteSelection, InlineStyle::empty());
+        apply_ops(&mut doc, &ops);
+
+        assert!(matches!(doc.block(0), Some(Block::Image { .. })));
+        assert_eq!(doc.block_count(), 2);
+        assert_eq!(block_text(&doc, 1), "b");
+
+        for op in ops.iter().rev() {
+            op.invert().apply(&mut doc);
+        }
+        crate::normalize::normalize(&mut doc);
+        assert_eq!(doc, original);
+    }
+
+    #[test]
+    fn delete_selection_collapsed_to_atom_trailing_edge_is_noop() {
+        // (atom, 1) .. (next, 0) selects nothing once normalized.
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: String::new(),
+            width: None,
+            height: None,
+        };
+        let doc = Document::from_blocks(vec![image, Block::paragraph("hello")]);
+        let sel = DocSelection::range(DocPosition::new(0, 1), DocPosition::new(1, 0));
+        let ops = resolve(&doc, sel, EditAction::DeleteSelection, InlineStyle::empty());
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn insert_replacing_styled_selection_keeps_style() {
+        // Replacing a fully-bold selection with typed text: the replacement
+        // inherits the deleted text's bold, even though the deletion removes
+        // the bold runs the insert would otherwise inherit from.
+        let mut doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::styled("abc", InlineStyle::BOLD)],
+        }]);
+        let sel = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 3));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("x".into()),
+            InlineStyle::empty(),
+        );
+        apply_ops(&mut doc, &ops);
+
+        assert_eq!(block_text(&doc, 0), "x");
+        let runs = doc.block(0).and_then(Block::runs).expect("runs");
+        for run in runs {
+            if !run.is_empty() {
+                assert!(
+                    run.style.contains(InlineStyle::BOLD),
+                    "replacement run {:?} should be bold",
+                    run.text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn insert_replacing_mixed_selection_takes_first_char_style() {
+        // Selection starts inside the italic run: the replacement takes the
+        // first selected character's style (italic), not the style of the
+        // character before the selection (plain).
+        let mut doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::plain("ab"),
+                StyledRun::styled("cde", InlineStyle::ITALIC),
+            ],
+        }]);
+        let sel = DocSelection::range(DocPosition::new(0, 2), DocPosition::new(0, 5));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("x".into()),
+            InlineStyle::empty(),
+        );
+        apply_ops(&mut doc, &ops);
+
+        assert_eq!(block_text(&doc, 0), "abx");
+        let runs = doc.block(0).and_then(Block::runs).expect("runs");
+        let mut pos = 0;
+        for run in runs {
+            let rlen = run.char_len();
+            if pos <= 2 && pos + rlen > 2 {
+                assert!(
+                    run.style.contains(InlineStyle::ITALIC),
+                    "replacement run {:?} should take the first selected char's italic",
+                    run.text
+                );
+            }
+            pos += rlen;
+        }
+    }
 
     #[test]
     fn delete_selection_collapsed_is_noop() {

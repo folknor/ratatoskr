@@ -114,7 +114,13 @@ fn map_command_shortcut(key: &Key, shift: bool) -> Option<KeyAction> {
         _ => return Option::None,
     };
 
-    match ch {
+    // With Shift or CapsLock held the logical key arrives uppercased
+    // ("Z" for Ctrl+Shift+Z), which would miss every lowercase match arm
+    // below - Ctrl+Shift+Z redo was dead without this. (Non-Latin layouts
+    // would additionally need `Key::to_latin(physical_key)`; not wired.)
+    let normalized = ch.to_lowercase();
+
+    match normalized.as_str() {
         "b" => Some(KeyAction::Edit(EditAction::ToggleInlineStyle(
             InlineStyle::BOLD,
         ))),
@@ -675,6 +681,23 @@ mod tests {
         fn ctrl_shift_z_redoes() {
             let action = map_key_event(&Key::Character("z".into()), ctrl_shift(), Option::None);
             assert_eq!(action, KeyAction::Redo);
+        }
+
+        #[test]
+        fn ctrl_shift_z_uppercase_logical_key_redoes() {
+            // With Shift held the logical key arrives uppercased.
+            let action = map_key_event(&Key::Character("Z".into()), ctrl_shift(), Option::None);
+            assert_eq!(action, KeyAction::Redo);
+        }
+
+        #[test]
+        fn ctrl_b_uppercase_logical_key_toggles_bold() {
+            // CapsLock uppercases the logical key without setting shift.
+            let action = map_key_event(&Key::Character("B".into()), ctrl(), Option::None);
+            assert_eq!(
+                action,
+                KeyAction::Edit(EditAction::ToggleInlineStyle(InlineStyle::BOLD))
+            );
         }
 
         #[test]

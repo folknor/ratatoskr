@@ -1135,6 +1135,28 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_br() {
+        use crate::html_serialize::to_html;
+        let html = "<p>line one<br>line two</p>";
+        let doc = from_html(html);
+        assert_eq!(
+            doc.block(0).expect("block").flattened_text(),
+            "line one\nline two"
+        );
+        assert_eq!(to_html(&doc), html);
+    }
+
+    #[test]
+    fn round_trip_br_inside_styled_signature_line() {
+        use crate::html_serialize::to_html;
+        // The signature shape that motivated the fix: name + title separated
+        // by <br> inside one paragraph.
+        let html = "<p><strong>Alice Smith</strong><br>Engineering Lead</p>";
+        let doc = from_html(html);
+        assert_eq!(to_html(&doc), html);
+    }
+
+    #[test]
     fn round_trip_all_styles() {
         use crate::html_serialize::to_html;
         let html = "<p><a href=\"https://example.com\"><strong><em><u><s>styled</s></u></em></strong></a></p>";

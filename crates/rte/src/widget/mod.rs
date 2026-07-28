@@ -306,10 +306,12 @@ impl<Message> RichTextEditor<'_, Message> {
                     let text = self.state.selection_text();
                     if !text.is_empty() {
                         shell.write_clipboard(clipboard::Content::Text(text));
-                        // Emit Action::Cut so EditorState captures the structured
-                        // slice and then deletes the selection.
-                        shell.publish(on_action(Action::Cut));
                     }
+                    // Emit Action::Cut unconditionally: the selection may have
+                    // no plain-text form (an image with empty alt) but must
+                    // still be captured and deleted. EditorState no-ops on a
+                    // collapsed selection.
+                    shell.publish(on_action(Action::Cut));
                     shell.capture_event();
                 }
                 KeyAction::Paste => {
@@ -377,7 +379,12 @@ impl<Message> RichTextEditor<'_, Message> {
             let scroll_amount = (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
             widget_state.scroll_offset = (widget_state.scroll_offset - scroll_amount).max(0.0);
 
-            let content_pos = Point::new(position.x - bounds.x - self.padding.left, 0.0);
+            // Hit-test at the top of the (freshly scrolled) viewport, not the
+            // top of the document - mirroring the below-viewport branch.
+            let content_pos = Point::new(
+                position.x - bounds.x - self.padding.left,
+                widget_state.scroll_offset,
+            );
             let doc_pos =
                 hit_test_content_point(content_pos, &widget_state.cache, &self.state.document);
             shell.publish(on_action(Action::Drag(doc_pos)));

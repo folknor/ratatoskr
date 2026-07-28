@@ -627,7 +627,7 @@ impl Document {
             if let Some(runs) = start_block.runs() {
                 let extracted = extract_runs(runs, start.offset, end.offset);
                 return Some(DocSlice {
-                    blocks: vec![Block::Paragraph { runs: extracted }],
+                    blocks: vec![block_with_runs_like(start_block, extracted)],
                     open_start: true,
                     open_end: true,
                 });
@@ -640,7 +640,7 @@ impl Document {
 
         if let Some(runs) = start_block.runs() {
             let extracted = extract_runs(runs, start.offset, start_block.char_len());
-            blocks.push(Block::Paragraph { runs: extracted });
+            blocks.push(block_with_runs_like(start_block, extracted));
         } else if start.offset == 0 {
             blocks.push(start_block.clone());
         }
@@ -653,7 +653,7 @@ impl Document {
 
         if let Some(runs) = end_block.runs() {
             let extracted = extract_runs(runs, 0, end.offset);
-            blocks.push(Block::Paragraph { runs: extracted });
+            blocks.push(block_with_runs_like(end_block, extracted));
         } else if end.offset > 0 {
             blocks.push(end_block.clone());
         }
@@ -693,6 +693,27 @@ impl Default for Document {
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+/// Rebuild `template`'s block type around a new run list. Non-inline
+/// templates produce a `Paragraph`.
+pub(crate) fn block_with_runs_like(template: &Block, runs: Vec<StyledRun>) -> Block {
+    match template {
+        Block::Heading { level, .. } => Block::Heading {
+            level: *level,
+            runs,
+        },
+        Block::ListItem {
+            ordered,
+            indent_level,
+            ..
+        } => Block::ListItem {
+            ordered: *ordered,
+            indent_level: *indent_level,
+            runs,
+        },
+        _ => Block::Paragraph { runs },
+    }
+}
 
 fn extract_runs(runs: &[StyledRun], start_offset: usize, end_offset: usize) -> Vec<StyledRun> {
     if start_offset >= end_offset {
@@ -868,6 +889,60 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn slice_multi_block_preserves_edge_block_types() {
+        let doc = Document::from_blocks(vec![
+            Block::Heading {
+                level: HeadingLevel::H1,
+                runs: vec![StyledRun::plain("Title")],
+            },
+            Block::list_item_with_indent("item", true, 1),
+        ]);
+        let slice = doc
+            .slice(DocPosition::new(0, 0), DocPosition::new(1, 4))
+            .expect("slice");
+
+        assert!(matches!(
+            slice.blocks.first(),
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
+        ));
+        assert!(matches!(
+            slice.blocks.get(1),
+            Some(Block::ListItem {
+                ordered: true,
+                indent_level: 1,
+                ..
+            })
+        ));
+        assert!(!slice.open_start);
+        assert!(!slice.open_end);
+    }
+
+    #[test]
+    fn slice_partial_single_block_preserves_block_type() {
+        let doc = Document::from_blocks(vec![Block::Heading {
+            level: HeadingLevel::H2,
+            runs: vec![StyledRun::plain("Title")],
+        }]);
+        let slice = doc
+            .slice(DocPosition::new(0, 1), DocPosition::new(0, 4))
+            .expect("slice");
+
+        assert!(slice.open_start);
+        assert!(slice.open_end);
+        assert!(matches!(
+            slice.blocks.first(),
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
+        ));
+        assert_eq!(slice.blocks[0].flattened_text(), "itl");
     }
 
     #[test]

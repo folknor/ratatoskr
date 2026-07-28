@@ -214,8 +214,17 @@ fn serialize_run(run: &StyledRun, buf: &mut String) {
         buf.push_str("<s>");
     }
 
-    // Text content (escaped)
-    html_escape_into(&run.text, buf);
+    // Text content (escaped). Newlines in run text come from parsed `<br>`
+    // elements (see html_parse); emit them back as `<br>` so soft line
+    // breaks survive the round trip instead of collapsing to whitespace.
+    let mut segments = run.text.split('\n');
+    if let Some(first) = segments.next() {
+        html_escape_into(first, buf);
+    }
+    for segment in segments {
+        buf.push_str("<br>");
+        html_escape_into(segment, buf);
+    }
 
     // Close tags: strikethrough → underline → italic → bold → link
     if has_strikethrough {
@@ -516,6 +525,20 @@ mod tests {
     fn unicode_content() {
         let doc = Document::from_blocks(vec![Block::paragraph("Héllo wörld \u{1F30D}")]);
         assert_eq!(to_html(&doc), "<p>Héllo wörld \u{1F30D}</p>");
+    }
+
+    #[test]
+    fn newline_in_run_serializes_as_br() {
+        let doc = Document::from_blocks(vec![Block::paragraph("line one\nline two")]);
+        assert_eq!(to_html(&doc), "<p>line one<br>line two</p>");
+    }
+
+    #[test]
+    fn newline_inside_styled_run_serializes_as_br() {
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::styled("a\nb", InlineStyle::BOLD)],
+        }]);
+        assert_eq!(to_html(&doc), "<p><strong>a<br>b</strong></p>");
     }
 
     #[test]
