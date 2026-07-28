@@ -1,5 +1,11 @@
 use std::path::{Path, PathBuf};
 
+// B15e renamed the workspace alias `bifrost-jmap-new` back to `bifrost-jmap`
+// when the retired external jmap-client git dep went away, so the two
+// `bifrost_jmap::` tokens below now name BIFROST's own crate rather than the
+// old client. That is deliberate and the lockdown still holds: account
+// settings route through `AccountSettingsSurface` over the engine, never
+// through a direct JMAP client module, whichever crate provides it.
 const HAND_ROLLED_SETTINGS_TOKENS: [&str; 9] = [
     "bifrost_jmap::identity::IdentitySet",
     "bifrost_jmap::vacation_response",
@@ -23,19 +29,14 @@ const ENGINE_SETTINGS_METHODS: [&str; 5] = [
 #[test]
 fn account_settings_route_through_bifrost() {
     let root = workspace_root();
-    let signatures = root.join("crates/jmap/src/signatures.rs");
+    // B15e deleted `crates/jmap` outright, which subsumes the two narrower
+    // assertions this test used to make (no `signatures.rs`, no
+    // `pub mod signatures;` in its lib). Pin the stronger fact instead.
+    let legacy_jmap = root.join("crates/jmap");
     assert!(
-        !signatures.exists(),
-        "{} restores the retired hand-rolled JMAP signature surface; use AccountSettingsSurface instead",
-        signatures.display(),
-    );
-
-    let jmap_lib = read(&root.join("crates/jmap/src/lib.rs"));
-    assert!(
-        !jmap_lib
-            .lines()
-            .any(|line| line.trim() == "pub mod signatures;"),
-        "crates/jmap/src/lib.rs restores the retired hand-rolled JMAP signature surface; use AccountSettingsSurface instead",
+        !legacy_jmap.exists(),
+        "{} restores the legacy JMAP client crate deleted in B15e; providers route through bifrost-jmap",
+        legacy_jmap.display(),
     );
 
     let auto_responses = read(&root.join("crates/core/src/auto_responses.rs"));

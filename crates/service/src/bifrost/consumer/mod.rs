@@ -26,6 +26,7 @@
 //! exercises - a pause is self-limiting, an unbounded healthy push is not.
 
 pub mod hydrate;
+pub(crate) mod imap_mime;
 pub mod imap_threading;
 pub mod post_persist;
 pub mod support;

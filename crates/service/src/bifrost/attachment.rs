@@ -166,7 +166,7 @@ pub(crate) fn extract_imap_part(
         .remote_attachment_id
         .as_deref()
         .ok_or_else(|| AttachmentByteError::ImapPart("missing persisted part id".into()))?;
-    imap::client::extract_attachment_from_rfc822(raw, part_id)
+    super::consumer::imap_mime::extract_attachment_from_rfc822(raw, part_id)
         .map_err(AttachmentByteError::ImapPart)
 }
 

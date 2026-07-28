@@ -97,7 +97,7 @@ pub fn unsnooze_thread_sync(
     Ok(())
 }
 
-// `upsert_folder_from_mutation_sync` retired with the `ProviderOps` folder
+// `upsert_folder_from_mutation_sync` retired with the legacy folder
 // CRUD surface (B6). The folder CRUD action handlers now upsert their
 // `folders` row directly through `insert_folders_batch` from the engine's
 // returned `ContainerId`, and the list sync writes rows via

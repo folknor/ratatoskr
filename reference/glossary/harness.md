@@ -107,7 +107,15 @@ Backstops are still wall-clock - the harness can't escape physical time entirely
 
 ## Test scripts and the Lua API
 
-Tests are Lua scripts under `crates/app/tests/service-harness/` (and `crates/app/tests/sync-harness/` for provider-sync coverage). The VM is `dellingr` (pure Rust, no FFI, no system Lua dep). Adding a test means adding a `.lua` file; no brokkr rebuild, and no harness-module rebuild unless the new test exercises a Lua API surface that does not yet exist.
+Tests are Lua scripts under `crates/app/tests/service-harness/` (and `crates/app/tests/sync-harness/` for provider sync coverage). The VM is `dellingr` (pure Rust, no FFI, no system Lua dep). Adding a test means adding a `.lua` file; no brokkr rebuild, and no harness-module rebuild unless the new test exercises a Lua API surface that does not yet exist.
+
+`graph-reaction-refresh.lua` uses the test-only `test.graph_aux_pass` request
+(params: `account_id`, `cycle`, `initial_sync_completed`) to seed the
+`graph_sync_cycle` settings counter through the same write path production
+uses, then drive exactly one resident auxiliary pass synchronously, acking on
+completion. That is what makes the every-fifth-cycle reaction refresh drivable
+at all: the production loop is a 5s-then-300s wall-clock timer that sync kicks
+never invoke, so without the affordance the gate would be a sleep race.
 
 Why dellingr: pure Rust, no system Lua dep; `HostCallbacks` redirects `print()` to per-test capture and hooks errors for the failure dump; `RustFunc` exposes `ServiceClient` methods directly as userdata; variable capture, loops, and conditionals come from the language. Dellingr's per-opcode cost accounting is **not** used for runaway-script abort - `while true do end` is free by design, so wall-clock is the right mechanism. Scripts may set frontmatter `-- ceiling: 60s`; omitted scripts use a sane default.
 

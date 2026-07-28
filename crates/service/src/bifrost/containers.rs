@@ -464,6 +464,23 @@ fn reconcile_namespace_registry(
             rusqlite::params![account_id, owner, container.name],
         )
         .map_err(|error| format!("upsert shared mailbox registry: {error}"))?;
+
+        // B15d: JMAP resolves this optional metadata during `containers_list`.
+        // Two pins from the spec's Obstacle C, both structural rather than
+        // conventional so they cannot drift:
+        //   ORDERED - the UPDATE runs immediately after the INSERT above, in
+        //   the same transaction, because it silently no-ops on a missing row.
+        //   WRITE-ONCE - `email_address IS NULL` reproduces legacy's
+        //   `Ok(Some(_)) => continue`. Overwriting churns (or, on a fail-soft
+        //   `None`, would clear) a live pop-out-compose sender identity.
+        if let Some(owner_email) = container.owner_email.as_deref() {
+            conn.execute(
+                "UPDATE shared_mailboxes SET email_address = ?3 \
+                 WHERE account_id = ?1 AND mailbox_id = ?2 AND email_address IS NULL",
+                rusqlite::params![account_id, owner, owner_email],
+            )
+            .map_err(|error| format!("set shared mailbox email: {error}"))?;
+        }
     }
 
     if owners.is_empty() {

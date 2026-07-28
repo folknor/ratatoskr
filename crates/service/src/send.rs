@@ -8,7 +8,7 @@
 use std::time::SystemTime;
 
 use bifrost_types::{Address, AttachmentInline};
-use lettre::message::Mailbox;
+use mail_parser::MessageParser;
 pub use service_api::actions::{SendAttachment, SendIntent, SendRequest};
 use service_state::WriteDbState;
 
@@ -31,24 +31,38 @@ impl std::fmt::Display for SendError {
 
 impl std::error::Error for SendError {}
 
-/// Parse an address string into a lettre `Mailbox`.
+/// Parse `"alice@example.com"` or `"Alice <alice@example.com>"` into a
+/// bifrost `Address`.
 ///
-/// Accepts both `"alice@example.com"` and `"Alice <alice@example.com>"` forms.
-fn parse_mailbox(addr: &str) -> Result<Mailbox, SendError> {
-    addr.parse::<Mailbox>()
-        .map_err(|e| SendError::Build(format!("Invalid address '{addr}': {e}")))
-}
-
-fn address_from_mailbox(mailbox: Mailbox) -> Address {
-    let email = mailbox.email.to_string();
-    match mailbox.name {
-        Some(name) => Address::named(name, email),
-        None => Address::bare(email),
-    }
-}
-
+/// B15 dropped the `lettre` dependency, whose `Mailbox` parser did this
+/// before. `mail_parser` is deliberately lenient - it will happily hand back
+/// a bare token as an "address" - so the addr-spec shape is checked here
+/// rather than assumed, preserving the rejection the `lettre` parse gave us.
 fn parse_address(addr: &str) -> Result<Address, SendError> {
-    parse_mailbox(addr).map(address_from_mailbox)
+    let invalid = || SendError::Build(format!("Invalid address '{addr}'"));
+    let raw = format!("From: {addr}\r\n\r\n");
+    let (name, email) = MessageParser::default()
+        .parse(&raw)
+        .and_then(|message| {
+            message
+                .from()
+                .and_then(|addresses| addresses.first().cloned())
+        })
+        .and_then(|address| address.address.map(|email| (address.name, email)))
+        .ok_or_else(invalid)?;
+    let email = email.into_owned();
+    let (local, domain) = email.split_once('@').ok_or_else(invalid)?;
+    if local.is_empty()
+        || domain.is_empty()
+        || domain.contains('@')
+        || email.chars().any(char::is_whitespace)
+    {
+        return Err(invalid());
+    }
+    Ok(match name {
+        Some(name) => Address::named(name.into_owned(), email),
+        None => Address::bare(email),
+    })
 }
 
 fn parse_addresses(values: &[String]) -> Result<Vec<Address>, SendError> {
@@ -105,8 +119,8 @@ pub fn to_bifrost_send_request(
         .map(|refs| refs.split_whitespace().map(str::to_string).collect())
         .unwrap_or_default();
     bifrost_request.scheduled = scheduled;
-    // Preserve the unconditional outgoing read-receipt request the four
-    // legacy `ProviderOps::send_email` impls injected on every send.
+    // Preserve the unconditional outgoing read-receipt request that every
+    // pre-Bifrost send implementation injected.
     bifrost_request.request_read_receipt = true;
     Ok(bifrost_request)
 }
@@ -263,5 +277,23 @@ mod tests {
         req.to = vec!["not an email".to_string()];
         let result = to_bifrost_send_request(&req, None);
         assert!(result.is_err());
+    }
+
+    /// The `lettre::Mailbox` parse B15 removed rejected these; `mail_parser`
+    /// alone does not, so the addr-spec guard in `parse_address` has to.
+    #[test]
+    fn parse_address_rejects_non_addr_spec_shapes() {
+        for addr in ["bob", "bob@", "@example.com", "bob@a@b.com", ""] {
+            assert!(
+                parse_address(addr).is_err(),
+                "expected {addr:?} to be rejected"
+            );
+        }
+        assert_eq!(
+            parse_address("Bob <bob@example.com>")
+                .expect("valid")
+                .address,
+            "bob@example.com"
+        );
     }
 }

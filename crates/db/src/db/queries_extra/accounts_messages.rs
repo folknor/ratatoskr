@@ -11,7 +11,6 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
         access_token: row.get("access_token")?,
         refresh_token: row.get("refresh_token")?,
         token_expires_at: row.get("token_expires_at")?,
-        history_id: row.get("history_id")?,
         initial_sync_completed: row.get("initial_sync_completed")?,
         last_sync_at: row.get("last_sync_at")?,
         is_active: row.get("is_active")?,

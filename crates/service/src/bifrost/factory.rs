@@ -8,7 +8,7 @@ use bifrost_imap::{
     AuthPolicy, Credentials, ImapAccountConfig, ImapAccountFactory, ImapConfig,
     SmtpSubmissionConfig, SubmissionCredentials, SubmissionTls,
 };
-use bifrost_jmap_new::sync::{JmapAccountFactory, JmapCredentials};
+use bifrost_jmap::sync::{JmapAccountFactory, JmapCredentials};
 use bifrost_net::{OAuthRefresher, StaticTokenSource, TokenSource};
 use bifrost_types::FolderId;
 use bifrost_types::{AccountFactory, ProtocolKind};

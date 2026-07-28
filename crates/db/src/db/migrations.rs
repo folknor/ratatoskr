@@ -47,9 +47,7 @@ const SCHEMA_V100: &str = concat!(
     // read_receipt_policy, filter_rules, image_allowlist
     include_str!("schema/09_security.sql"),
     "\n",
-    // folder_sync_state, jmap_sync_state, graph_folder_delta_tokens,
-    // sync_cursors, seen_ingest_markers, shared_mailboxes, jmap_push_state,
-    // graph_subscriptions, pending_operations
+    // sync_cursors, seen_ingest_markers, shared_mailboxes, pending_operations
     include_str!("schema/10_sync.sql"),
     "\n",
     // public_folder_pins, chat_contacts, thread_participants
@@ -272,6 +270,43 @@ mod tests {
             )
             .expect("query");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn retired_sync_tables_and_account_columns_are_absent() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("migrations should succeed");
+
+        for table in [
+            "jmap_push_state",
+            "graph_subscriptions",
+            "jmap_sync_state",
+            "folder_sync_state",
+            "graph_folder_delta_tokens",
+            "public_folder_sync_state",
+            "graph_shared_mailbox_delta_tokens",
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("query schema");
+            assert!(!exists, "retired table {table} remains in the schema");
+        }
+
+        let columns = conn
+            .prepare("PRAGMA table_info(accounts)")
+            .expect("prepare table info")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect account columns");
+        assert!(!columns.iter().any(|column| column == "history_id"));
+        assert!(!columns.iter().any(|column| column == "supports_keywords"));
     }
 
     /// Locks in the per-migration progress contract: each migration produces

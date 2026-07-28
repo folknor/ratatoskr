@@ -18,16 +18,18 @@ use service_api::{
     TestCrashAfterNWritesAck, TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow,
     TestDbCalendarEventRow, TestDbCalendarRow, TestDbContactClaimRow, TestDbContactGroupRow,
     TestDbContactRow, TestDbFolderRow, TestDbGalCacheRow, TestDbLabelRow, TestDbLocalDraftRow,
-    TestDbMessageRow, TestDbSeenAddressRow, TestDbSettingRow, TestDbSignatureRow,
-    TestDelayNextWriteAck, TestDelayNextWriteParams, TestDiscardDraftAck, TestDiscardDraftParams,
-    TestGalKickAck, TestGroupPullAck, TestGroupPullParams, TestPendingOpRow, TestPendingOpsReadAck,
-    TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck, TestQueryBlobTombstoneStateParams,
-    TestQueryDbStateAck, TestQueryDbStateParams, TestRemoveCachedAttachmentBytesAck,
-    TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexAck,
-    TestSearchIndexParams, TestSearchIndexResult, TestSeedAccountAck, TestSeedAccountParams,
-    TestSeedCachedAttachmentAck, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck,
-    TestSeedRemoteAttachmentParams, TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams,
-    TestThreadReadAck, TestThreadReadParams,
+    TestDbMessageReactionRow, TestDbMessageRow, TestDbSeenAddressRow, TestDbSettingRow,
+    TestDbSharedMailboxRow, TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams,
+    TestDiscardDraftAck, TestDiscardDraftParams, TestGalKickAck, TestGraphAuxPassAck,
+    TestGraphAuxPassParams, TestGroupPullAck, TestGroupPullParams, TestPendingOpRow,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
+    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
+    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
+    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
+    TestThreadReadParams,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -1082,10 +1084,6 @@ pub(super) async fn seed_remote_attachment_handle(
         .unwrap_or_else(|| "application/octet-stream".into());
     let account_id = params.account_id.clone();
     let message_id = params.message_id.clone();
-    let registered_account_id = account_id.clone();
-    let registered_message_id = message_id.clone();
-    let registered_attachment_id = attachment_id.clone();
-    let registered_bytes = bytes.clone();
     let write_db = boot_state.write_db_state()?;
     let ack = TestSeedRemoteAttachmentAck {
         account_id: account_id.clone(),
@@ -1109,12 +1107,6 @@ pub(super) async fn seed_remote_attachment_handle(
         })
         .await
         .map_err(ServiceError::Internal)?;
-    crate::actions::provider::register_harness_attachment(
-        &registered_account_id,
-        &registered_message_id,
-        &registered_attachment_id,
-        registered_bytes,
-    );
     serde_json::to_value(ack).map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
@@ -1486,6 +1478,53 @@ pub(super) async fn group_pull_handle(
         supported: outcome.supported,
     })
     .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+pub(super) async fn graph_aux_pass_handle(
+    boot_state: &Arc<BootSharedState>,
+    params: TestGraphAuxPassParams,
+) -> Result<Value, ServiceError> {
+    if params.account_id.is_empty() {
+        return Err(ServiceError::InvalidParams {
+            method: "test.graph_aux_pass".into(),
+            message: "account_id is required".into(),
+        });
+    }
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "test.graph_aux_pass received before SyncRuntime was installed".into(),
+        )
+    })?;
+    runtime
+        .attach_resident_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    let action_account = runtime
+        .resident_action_account(&params.account_id)
+        .await
+        .map_err(ServiceError::Internal)?;
+    if !matches!(
+        action_account.provider,
+        crate::bifrost::BifrostProviderKind::Graph
+    ) {
+        return Err(ServiceError::InvalidParams {
+            method: "test.graph_aux_pass".into(),
+            message: "account must use the Graph provider".into(),
+        });
+    }
+    sync::state::set_graph_sync_cycle(
+        &boot_state.write_db_state()?.writer_pool(),
+        &params.account_id,
+        params.cycle,
+    )
+    .await
+    .map_err(ServiceError::Internal)?;
+    runtime
+        .run_resident_aux_pass_for_test(&params.account_id, params.initial_sync_completed)
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(TestGraphAuxPassAck)
+        .map_err(|error| ServiceError::Internal(error.to_string()))
 }
 
 pub(super) async fn gal_kick_handle(
@@ -2239,8 +2278,81 @@ fn read_harness_db_state(
         contact_claims: read_harness_contact_claims(conn, params)?,
         seen_addresses: read_harness_seen_addresses(conn, params)?,
         gal_cache: read_harness_gal_cache(conn, params)?,
+        message_reactions: read_harness_message_reactions(conn, account_id)?,
+        shared_mailboxes: read_harness_shared_mailboxes(conn, account_id)?,
         settings: read_harness_settings(conn, params)?,
     })
+}
+
+/// B15d pins `shared_mailboxes.email_address` at the integration level: the
+/// pure row-mapping golden cannot see a mis-ordered or silently no-op UPDATE,
+/// because `set_shared_mailbox_email` is a bare UPDATE on a row that
+/// `reconcile_namespace_registry` has to have inserted first.
+fn read_harness_shared_mailboxes(
+    conn: &impl db::db::WriteTransactionTarget,
+    account_id: Option<&str>,
+) -> Result<Vec<TestDbSharedMailboxRow>, String> {
+    let sql = if account_id.is_some() {
+        "SELECT account_id, mailbox_id, email_address FROM shared_mailboxes \
+         WHERE account_id = ?1 ORDER BY mailbox_id"
+    } else {
+        "SELECT account_id, mailbox_id, email_address FROM shared_mailboxes \
+         ORDER BY account_id, mailbox_id"
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|error| format!("prepare shared mailboxes: {error}"))?;
+    let map_row = |row: &rusqlite::Row<'_>| {
+        Ok(TestDbSharedMailboxRow {
+            account_id: row.get(0)?,
+            mailbox_id: row.get(1)?,
+            email_address: row.get(2)?,
+        })
+    };
+    let rows = match account_id {
+        Some(account_id) => stmt
+            .query_map(params![account_id], map_row)
+            .map_err(|error| format!("query shared mailboxes: {error}"))?,
+        None => stmt
+            .query_map([], map_row)
+            .map_err(|error| format!("query shared mailboxes: {error}"))?,
+    };
+    collect_rows(rows, "shared mailboxes")
+}
+
+fn read_harness_message_reactions(
+    conn: &impl db::db::WriteTransactionTarget,
+    account_id: Option<&str>,
+) -> Result<Vec<TestDbMessageReactionRow>, String> {
+    let sql = if account_id.is_some() {
+        "SELECT message_id, account_id, reactor_email, reaction_type, source \
+         FROM message_reactions WHERE account_id = ?1 \
+         ORDER BY message_id, reactor_email, reaction_type"
+    } else {
+        "SELECT message_id, account_id, reactor_email, reaction_type, source \
+         FROM message_reactions ORDER BY account_id, message_id, reactor_email, reaction_type"
+    };
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|error| format!("prepare message reactions: {error}"))?;
+    let map_row = |row: &rusqlite::Row<'_>| {
+        Ok(TestDbMessageReactionRow {
+            message_id: row.get(0)?,
+            account_id: row.get(1)?,
+            reactor_email: row.get(2)?,
+            reaction_type: row.get(3)?,
+            source: row.get(4)?,
+        })
+    };
+    let rows = match account_id {
+        Some(account_id) => stmt
+            .query_map(params![account_id], map_row)
+            .map_err(|error| format!("query message reactions: {error}"))?,
+        None => stmt
+            .query_map([], map_row)
+            .map_err(|error| format!("query message reactions: {error}"))?,
+    };
+    collect_rows(rows, "message reactions")
 }
 
 fn read_harness_settings(

@@ -34,14 +34,14 @@ from = "service"
 forbid = "app"
 
 [[dependency_rule]]
-name = "app-no-providers"
+name = "app-no-service-internals"
 from = "app"
-forbid = ["gmail", "jmap", "graph", "imap", "provider-sync"]
+forbid = ["service", "service-state"]
 
 [[dependency_rule]]
 name = "common-stays-leafward"
 from = "common"
-forbid = ["gmail", "jmap", "graph", "imap", "provider-sync", "sync", "rtsk", "service", "service-state", "cal", "app"]
+forbid = ["sync", "rtsk", "service", "service-state", "cal", "app"]
 
 [[dependency_rule]]
 name = "core-no-upward"
@@ -55,8 +55,7 @@ forbid = [
     "db", "db-read", "rusqlite",
     "rtsk", "service", "service-state", "action-types",
     "store", "search", "common", "cal", "calendar",
-    "sync", "provider-sync",
-    "gmail", "jmap", "graph", "imap", "smtp",
+    "sync",
     "smart-folder", "seen", "ai", "import", "dev-seed",
     "app", "runner",
 ]
@@ -69,27 +68,7 @@ forbid = [
 [[dependency_rule]]
 name = "sync-no-upward"
 from = "sync"
-forbid = ["app", "service", "service-state", "cal", "gmail", "jmap", "graph", "imap", "provider-sync"]
-
-[[dependency_rule]]
-name = "gmail-boundaries"
-from = "gmail"
-forbid = ["jmap", "graph", "imap", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
-
-[[dependency_rule]]
-name = "jmap-boundaries"
-from = "jmap"
-forbid = ["gmail", "graph", "imap", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
-
-[[dependency_rule]]
-name = "graph-boundaries"
-from = "graph"
-forbid = ["gmail", "jmap", "imap", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
-
-[[dependency_rule]]
-name = "imap-boundaries"
-from = "imap"
-forbid = ["gmail", "jmap", "graph", "app", "service", "service-state", "cal", "rtsk", "provider-sync"]
+forbid = ["app", "service", "service-state", "cal"]
 
 [[dependency_rule]]
 name = "cal-no-app"
@@ -546,7 +525,7 @@ equal = 1
 # ── B6a containers-attach gates ──────────────────────────────────────
 #
 # `bifrost::containers::sync_containers` runs on EVERY account attach, so
-# the container list sync is a provider-sync hot path (B6 spec 6). Each
+# the container list sync is a Bifrost hot path (B6 spec 6). Each
 # gate runs the provider's initial-sync script (which exercises attach +
 # the single `containers_list` pass) and pins the attach-path request
 # count, elapsed, and peak RSS at the host-recorded baseline. The

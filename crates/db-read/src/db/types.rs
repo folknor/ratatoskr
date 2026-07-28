@@ -25,7 +25,6 @@ pub struct DbAccount {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub token_expires_at: Option<i64>,
-    pub history_id: Option<String>,
     pub initial_sync_completed: i64,
     pub last_sync_at: Option<i64>,
     pub is_active: i64,
@@ -509,18 +508,6 @@ pub struct DbWritingStyleProfile {
     pub sample_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
-}
-
-// ── Folder Sync State ──────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbFolderSyncState {
-    pub account_id: String,
-    pub folder_path: String,
-    pub uidvalidity: Option<i64>,
-    pub last_uid: i64,
-    pub modseq: Option<i64>,
-    pub last_sync_at: Option<i64>,
 }
 
 // ── Notification VIP ────────────────────────────────────────

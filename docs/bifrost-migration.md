@@ -69,7 +69,22 @@ otherwise force a ratatoskr workaround - that becomes a side-quest, never a
 ratatoskr contortion. The orchestrator brings the tree to a clean boundary
 (landing what is landable, reverting the blocked in-flight work so nothing
 parks dirty), then handles the side-quest itself, in-loop, without pausing for
-the user:
+the user. Side-quest work is never delegated to an implement run: codex and
+other step-4 agents must not EDIT `../bifrost`, `../sæhrimnir`, or the
+`./research/` copies - even when the spec names the side-quest surface as a
+required prerequisite - and every implement prompt that runs while a
+side-quest is pending states this prohibition explicitly.
+
+The prohibition is on WRITES, and the distinction is load-bearing. READING
+those trees is expected and often necessary: § 11 designates
+`./research/bifrost` as the reading reference, and an implementer resolving a
+promoted type signature, a field's visibility, or an accessor name must be
+able to consult it. Phrase the guard as "must not edit", never as "must not
+read or touch". (Both halves were learned the hard way in B15. First an
+implement run edited the frozen `../bifrost` directly, which is what prompted
+this rule. Then the next run stalled mid-brick, unable to resolve a
+`BatchOutcome` accessor on the freshly promoted surface, because the
+orchestrator had over-tightened the prompt to forbid reading as well.)
 
 1. The orchestrator launches ONE Opus agent (the Agent tool, never codex) to do
    the bifrost or saehrimnir work. The agent's prompt must state, in
@@ -1628,36 +1643,26 @@ landing commit.
   `account-verify-oauth.lua` against `saehrimnir`, plus unit tests on
   `factory_from_decrypted` dispatch and the `account_verify` error mapping.
   Needs B1.
-- B15. Deletion and collapse. Remove the four provider crates, `provider-sync`,
-  `common`'s provider surface, the external `jmap-client` dep, and the
-  workspace members; remove any transitional scaffolding. The final green cut.
-  Needs all above.
-
-  This explicit list is a floor, not the full scope. The § 1 maximal-integration
-  rule (no parallel hand-rolled or duplicated dependency surviving alongside a
-  bifrost equivalent) is stronger than this enumeration, so B15 must run a
-  mechanical dependency-and-module audit of the whole workspace - every crate's
-  `Cargo.toml` plus its module tree - and delete every bifrost-covered equivalent
-  it finds, not only the named targets. Known instance to confirm in that audit:
-  `crates/service/Cargo.toml` carries TWO JMAP client dependencies side by
-  side, which is the § 1 parallel-dependency rule's purest case. `bifrost-jmap`
-  is the out-of-tree `jmap-client` checkout, wired as a GIT dependency pinned
-  to a rev (`git = "file:///home/folk/Programs/jmap-client"`,
-  `rev = "b3d207c"`) - NOT the path dependency an earlier draft of this item
-  described. `bifrost-jmap-new` is bifrost's own JMAP crate, taken from the
-  workspace. The near-identical names are a trap, and the § 9 caveat inherits
-  it: read that caveat as "retiring the external `jmap-client` must not strand
-  bifrost's JMAP crate", because it is `bifrost-jmap` that retires here and
-  `bifrost-jmap-new` that survives. Confirm which consumers outside the
-  deleted `crates/jmap` still reach for the old crate before cutting it.
-  That dependency, and any others the audit surfaces, retire here.
-
-  Carve this narrow. Per the B12 methodology finding recorded above, prefer
-  several narrow items to one broad one, and extract each wiring decision into
-  a pure, unit-pinnable function rather than leaving it inline.
-- B16. Reference-doc reconciliation. Update `reference/architecture.md`,
-  `AGENTS.md`, and the crate map. Bundled with B15 per repo convention (never a
-  standalone markdown commit).
+B15 (deletion and collapse) and B16 (bundled reference-doc reconciliation) are
+done and their TODO entries are removed per repo convention. B15 removed the
+four provider crates (`gmail`, `jmap`, `graph`, `imap`), `provider-sync`,
+`smtp`, `common`'s `ProviderOps` surface, and the external `jmap-client` git
+dependency (`bifrost-jmap`, pinned to `rev = "b3d207c"`; `bifrost-jmap-new`,
+bifrost's own JMAP crate, survives and was renamed `bifrost-jmap` once the
+name collision retired) from the workspace. The three surviving legacy
+auxiliary passes (JMAP shared-owner email, Graph master categories plus
+reactions) were rewired onto two narrow bifrost side-quests (owner email
+projected as `Container.owner_email`; category definitions and reaction
+reads as new capability-dispatched `Account` methods), the JMAP
+`ShareNotification` poll and the IMAP keyword-capability probe were deleted
+outright rather than ported, and the retired sync-state tables/columns kept
+additive-green by earlier items (`jmap_sync_state`, `folder_sync_state`,
+`graph_folder_delta_tokens`, `jmap_push_state`, `graph_subscriptions`,
+`accounts.history_id`, `accounts.supports_keywords`) were dropped from
+schema. B16's reconciliation (`reference/architecture.md`, `AGENTS.md`, the
+crate map, and the glossaries) is folded into the same landing. For the full
+brick-by-brick record, read the landing commit history; the authoring spec
+is removed at landing.
 
 Estimated scope: ~8 bifrost specs plus ~16-20 ratatoskr specs.
 
@@ -2005,6 +2010,32 @@ empty diff, so the state-token bump the spec originally demanded was
 self-contradictory rather than merely unimplemented. The consumer harness
 gates cover the Unified classification, the prune, member replacement, the
 no-data-loss guarantee on a failed enumeration, and the production cadence.
+
+B15-SQ-graph and B15-SQ-jmap landed together as one commit, advancing the
+freeze a twenty-first time, from `59b9e2d` to `4cf8264` ("sync: expose Graph
+category-definition and reaction reads, owner email on shared containers"):
+`CategoryDefinition` / `MessageReactionState` types, two `PimMethodSupport`
+flags and two `AccountOperation` variants, default-`Unsupported` `Account`
+trait methods with Graph implementations (`{prefix}/outlook/masterCategories`;
+the reaction extended-property pair via `$batch` chunked to 20 into one
+finalized three-lane `BatchOutcome`), two `SyncEngine` forwarders, and
+`Container.owner_email` populated by bifrost-jmap's `containers_list`
+(legacy two-level RFC 9670 principals gate, fail-soft, resolved once per
+foreign account) and by bifrost-graph when the `/users/{id}` routing key is
+addressable. A process note rides this advance: the surfaces were first
+sketched by a codex implement run editing the frozen `../bifrost` DIRECTLY -
+a § 2 / § 11 violation; the diff was relocated to `./research/bifrost` as a
+patch, `../bifrost` was hard-restored to `59b9e2d`, the ratatoskr B15b brick
+was landed against the restored freeze, and only then was the completed
+side-quest promoted. § 2 now states explicitly that side-quest work is never
+delegated to an implement run. Per the B12 rule the side-quests were not DONE
+until B15c's / B15d's gates passed against `4cf8264`; both bricks have since
+landed (B15c: `crates/service/src/bifrost/aux/graph.rs`; B15d: owner-email
+caching in `crates/service/src/bifrost/containers.rs`, the JMAP
+`ShareNotification` poll and `jmap_sync_state` deleted), B15e removed the
+four provider crates plus `provider-sync`/`smtp`, and B15f dropped the
+retired schema surface and reconciled the reference docs - the side-quests
+are DONE.
 
 Each Track B spec records, in its ground
 survey, the exact `../bifrost` commit it was authored and gated against, and

@@ -15,11 +15,9 @@ rtsk = { path = "../core" }
 db = { path = "../db" }
 crypto-key = { path = "../crypto-key" }
 process-lifetime = { path = "../process-lifetime" }
-# Phase 2 task 6 - the relocated action service. The action handler
-# constructs `ProviderOps` instances per account (gmail/jmap/graph/imap),
-# stores attachment cache + body store via `store`, indexes via `search`,
-# and submits SMTP via `lettre`. `common` carries `ProviderCtx` and the
-# typed-id surface the action methods consume.
+# The action service writes locally and dispatches through resident Bifrost
+# engines; it stores attachment cache + body store via `store` and indexes
+# via `search`.
 common = { path = "../common" }
 service-state = { path = "../service-state" }
 store = { path = "../stores" }
@@ -32,14 +30,9 @@ squeeze = { path = "../squeeze" }
 search = { path = "../search" }
 seen = { path = "../seen" }
 sync = { path = "../sync" }
+label-colors = { path = "../label-colors" }
 rusqlite.workspace = true
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
-gmail = { path = "../gmail" }
-jmap = { path = "../jmap" }
-graph = { path = "../graph" }
-imap = { path = "../imap" }
-# Bifrost consumer support plus retained provider auxiliary sync helpers.
-provider-sync = { path = "../provider-sync" }
 async-trait = "0.1"
 # Action service deps brought in from core: futures for batch_execute's
 # join_all, uuid for action plan/op IDs and send.rs RFC822 message-id,
@@ -50,11 +43,11 @@ uuid = { version = "1.23.1", features = ["v4"] }
 # streams (`open_raw_rfc822`) to recover the headers / attachment detail the
 # structured `Message` drops.
 mail-parser = "0.11.3"
-bifrost-jmap = { git = "file:///home/folk/Programs/jmap-client", rev = "b3d207c", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 bifrost-types.workspace = true
 bifrost-net.workspace = true
 bifrost-sync.workspace = true
-bifrost-jmap-new = { workspace = true, features = ["sync"] }
+bifrost-jmap = { workspace = true, features = ["sync"] }
 bifrost-imap.workspace = true
 bifrost-graph.workspace = true
 bifrost-google.workspace = true
@@ -72,7 +65,6 @@ chrono.workspace = true
 fs2 = "0.4"
 log = "0.4"
 dirs = "6"
-lettre = { version = "0.11.22", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 sha2 = "0.11"
 blake3 = "1"
 thiserror.workspace = true

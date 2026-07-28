@@ -18,8 +18,13 @@ use bifrost_types::{
 };
 use common::types::{FolderKind, NamespaceAttribution, SystemFolderId};
 use rusqlite::Connection;
+use service_state::WriteDbState;
+use tempfile::TempDir;
 
-use super::{ContainerIndex, build_container_rows, folder_kind_for, role_to_system_folder_id};
+use super::{
+    ContainerIndex, build_container_rows, folder_kind_for, persist_containers,
+    role_to_system_folder_id,
+};
 
 const ACCOUNT: &str = "acct-1";
 
@@ -542,4 +547,70 @@ fn assert_preservation_semantics() {
         )
         .unwrap();
     assert_eq!(folder_count, 6, "six Gmail system folders persisted");
+}
+
+#[test]
+fn owner_email_populates_shared_mailbox_cache() {
+    let temp = TempDir::new().unwrap();
+    let write_db = WriteDbState::from_pool(db::db::open_writer_pool(temp.path()).unwrap());
+    let shared = namespaced(
+        ProtocolKind::Jmap,
+        "shared-inbox",
+        "Shared inbox",
+        ContainerNamespace::Shared,
+        Some("foreign-account"),
+        Some("shared-inbox"),
+        Some(ContainerContentClass::Mail),
+    )
+    .with_owner_email(Some("owner@example.test".to_string()));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let first_snapshot = shared.clone();
+    let first_write_db = write_db.clone();
+    let email = runtime
+        .block_on(async move {
+            first_write_db
+                .with_write(move |conn| {
+                    conn.execute(
+                        "INSERT INTO accounts (id, email) VALUES (?1, ?2)",
+                        rusqlite::params![ACCOUNT, "account@example.test"],
+                    )
+                    .map_err(|error| format!("seed account: {error}"))?;
+                    persist_containers(conn, ACCOUNT, &[first_snapshot])?;
+                    conn.query_row(
+                        "SELECT email_address FROM shared_mailboxes \
+                 WHERE account_id = ?1 AND mailbox_id = 'foreign-account'",
+                        [ACCOUNT],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|error| format!("read owner email: {error}"))
+                })
+                .await
+        })
+        .unwrap();
+    assert_eq!(email.as_deref(), Some("owner@example.test"));
+
+    // Legacy principal resolution was write-once. A later container snapshot
+    // must not churn or replace the compose sender identity.
+    let updated = shared.with_owner_email(Some("new@example.test".to_string()));
+    let email = runtime
+        .block_on(async move {
+            write_db
+                .with_write(move |conn| {
+                    persist_containers(conn, ACCOUNT, &[updated])?;
+                    conn.query_row(
+                        "SELECT email_address FROM shared_mailboxes \
+                 WHERE account_id = ?1 AND mailbox_id = 'foreign-account'",
+                        [ACCOUNT],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|error| format!("read retained owner email: {error}"))
+                })
+                .await
+        })
+        .unwrap();
+    assert_eq!(email.as_deref(), Some("owner@example.test"));
 }

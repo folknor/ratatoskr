@@ -226,6 +226,9 @@ pub(crate) async fn dispatch(
         RequestParams::TestGroupPull { params } => {
             test_helpers::group_pull_handle(&boot_state, params).await
         }
+        RequestParams::TestGraphAuxPass { params } => {
+            test_helpers::graph_aux_pass_handle(&boot_state, params).await
+        }
         RequestParams::TestGalKick => test_helpers::gal_kick_handle(&boot_state).await,
         RequestParams::TestBifrostAttach { params } => {
             test_helpers::bifrost_attach_handle(&boot_state, params).await

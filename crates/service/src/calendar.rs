@@ -23,7 +23,7 @@
 //! - **No marker-file lifecycle.** Calendar sync is idempotent against
 //!   CalDAV CTags / Exchange ETags; the provider re-fetches whatever
 //!   changed regardless of whether the previous run completed. No
-//!   `clear_account_history_id`-equivalent needed.
+//!   initial-sync-reset equivalent needed.
 //! - **No body / inline / search writer halves.** Calendar writes only
 //!   to calendar tables in the main DB.
 //! - **No invariant-pass entry.** Cross-store crash consistency is

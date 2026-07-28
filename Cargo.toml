@@ -19,12 +19,7 @@ members = [
 "crates/label-colors",
 "crates/seen",
 "crates/common",
-"crates/smtp",
 "crates/sync",
-"crates/gmail",
-"crates/jmap",
-"crates/graph",
-"crates/imap",
 "crates/system-fonts",
 "crates/rte",
 "crates/iced-drop",
@@ -35,7 +30,6 @@ members = [
 "crates/process-lifetime",
 "crates/service-state",
 "crates/action-types",
-"crates/provider-sync",
 "crates/coverage",
 ]
 
@@ -115,7 +109,7 @@ bytes = "1"
 bifrost-types = { path = "../bifrost/crates/types" }
 bifrost-net = { path = "../bifrost/crates/net" }
 bifrost-sync = { path = "../bifrost/crates/sync" }
-bifrost-jmap-new = { package = "bifrost-jmap", path = "../bifrost/crates/jmap" }
+bifrost-jmap = { path = "../bifrost/crates/jmap" }
 bifrost-imap = { path = "../bifrost/crates/imap" }
 bifrost-graph = { path = "../bifrost/crates/graph" }
 bifrost-google = { path = "../bifrost/crates/google" }

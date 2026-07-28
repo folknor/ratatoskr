@@ -167,6 +167,26 @@ impl ResidentEngine {
         self.inner.ingress.spawn().await;
     }
 
+    /// Harness-only synchronous counterpart to the resident auxiliary timer.
+    /// The production five-second-then-five-minute loop is deliberately
+    /// unchanged; callers supply the attach-time initial-sync snapshot so the
+    /// exact production branch is exercised and acknowledged before return.
+    pub(crate) async fn run_aux_pass_for_test(
+        &self,
+        account_id: &str,
+        initial_sync_completed: bool,
+    ) -> Result<(), String> {
+        let provider = {
+            let slots = self.inner.slots.lock().await;
+            slots
+                .get(account_id)
+                .map(|slot| slot.provider)
+                .ok_or_else(|| format!("resident slot is not attached for {account_id}"))?
+        };
+        run_aux_pass(self.clone(), account_id, provider, initial_sync_completed).await;
+        Ok(())
+    }
+
     pub async fn kick_account(
         &self,
         account_id: &str,
@@ -1089,48 +1109,17 @@ async fn run_aux_pass(
     let gmail_resident = resident.clone();
     let inner = &resident.inner;
     let result: Result<(), String> = match provider {
-        BifrostProviderKind::Jmap => {
-            async {
-                let client = jmap::client::JmapClient::from_account(
-                    &inner.read_db,
-                    inner.write_db.writer_pool(),
-                    account_id,
-                    &inner.encryption_key,
-                )
-                .await
-                .map_err(|error| error.clone())?;
-                client.ensure_valid_token().await.map_err(|e| e.clone())?;
-                provider_sync::consumer_support::run_jmap_auxiliary_sync(
-                    &client,
-                    account_id,
-                    &inner.read_db,
-                    &inner.write_db,
-                    initial_sync_completed,
-                )
-                .await;
-                Ok(())
-            }
-            .await
-        }
+        // B15d: shared-owner email is projected while containers are
+        // persisted. ShareNotification polling had no user-visible effect.
+        BifrostProviderKind::Jmap => Ok(()),
         BifrostProviderKind::Graph => {
-            async {
-                let client = graph::client::GraphClient::from_account(
-                    &inner.read_db,
-                    inner.write_db.writer_pool(),
-                    account_id,
-                    inner.encryption_key,
-                )
-                .await?;
-                provider_sync::consumer_support::run_graph_auxiliary_sync(
-                    &client,
-                    account_id,
-                    &inner.read_db,
-                    &inner.write_db,
-                    initial_sync_completed,
-                )
-                .await;
-                Ok(())
-            }
+            super::aux::graph::run_graph_auxiliary_sync(
+                &inner.engine.engine(),
+                account_id,
+                &inner.read_db,
+                &inner.write_db,
+                initial_sync_completed,
+            )
             .await
         }
         BifrostProviderKind::Gmail => {
@@ -1283,35 +1272,6 @@ mod tests {
             1,
             "resident detach should call unsubscribe_push exactly once",
         );
-    }
-
-    #[test]
-    fn push_state_tables_have_no_writer() {
-        let checked_sources = [
-            include_str!("resident.rs"),
-            include_str!("push_ingress/mod.rs"),
-            include_str!("push_ingress/pubsub.rs"),
-            include_str!("push_ingress/webhook.rs"),
-            include_str!("engine_sync.rs"),
-            include_str!("../sync.rs"),
-            include_str!("../dispatch/post_ready.rs"),
-            include_str!("../handlers/account.rs"),
-            include_str!("../handlers/oauth.rs"),
-        ];
-        let writer_verbs = ["INSERT", "UPDATE", "REPLACE", "DELETE"];
-        let retired_tables = ["jmap_push_state", "graph_subscriptions"];
-
-        for source in checked_sources {
-            for table in retired_tables {
-                for verb in writer_verbs {
-                    let writer = format!("{verb} {table}");
-                    assert!(
-                        !source.contains(&writer),
-                        "retired push-state table writer still present: {writer}",
-                    );
-                }
-            }
-        }
     }
 
     /// Obstacles H, I, and R: a Graph shared-mailbox scope cannot carry a

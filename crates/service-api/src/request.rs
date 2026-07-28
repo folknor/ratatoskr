@@ -368,6 +368,19 @@ pub struct TestGroupPullAck {
     pub supported: bool,
 }
 
+/// Deterministically drives one resident auxiliary pass after setting the
+/// Graph cadence counter. This is harness-only wiring for auxiliary-sync
+/// contracts that must not wait on the five-minute production timer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestGraphAuxPassParams {
+    pub account_id: String,
+    pub cycle: u32,
+    pub initial_sync_completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestGraphAuxPassAck;
+
 /// Synchronous request counterpart to the UI's fire-and-forget `gal.kick`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestGalKickAck;
@@ -853,6 +866,22 @@ pub struct TestDbGalCacheRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbSharedMailboxRow {
+    pub account_id: String,
+    pub mailbox_id: String,
+    pub email_address: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestDbMessageReactionRow {
+    pub message_id: String,
+    pub account_id: String,
+    pub reactor_email: String,
+    pub reaction_type: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestQueryDbStateAck {
     pub account_count: u64,
     #[serde(default)]
@@ -908,6 +937,10 @@ pub struct TestQueryDbStateAck {
     pub seen_addresses: Vec<TestDbSeenAddressRow>,
     #[serde(default)]
     pub gal_cache: Vec<TestDbGalCacheRow>,
+    #[serde(default)]
+    pub message_reactions: Vec<TestDbMessageReactionRow>,
+    #[serde(default)]
+    pub shared_mailboxes: Vec<TestDbSharedMailboxRow>,
     #[serde(default)]
     pub settings: Vec<TestDbSettingRow>,
 }
@@ -1528,6 +1561,10 @@ pub enum RequestParams {
     TestGroupPull {
         params: TestGroupPullParams,
     },
+    /// Sets Graph auxiliary cadence and drives one pass (harness).
+    TestGraphAuxPass {
+        params: TestGraphAuxPassParams,
+    },
     /// Drives GAL refresh and waits for its DB writes (harness).
     TestGalKick,
     /// Harness-only Bifrost engine attach plus consumer drive.
@@ -1658,6 +1695,7 @@ impl RequestParams {
             Self::TestStartSync { .. } => "test.start_sync",
             Self::TestContactPull { .. } => "test.contact_pull",
             Self::TestGroupPull { .. } => "test.group_pull",
+            Self::TestGraphAuxPass { .. } => "test.graph_aux_pass",
             Self::TestGalKick => "test.gal_kick",
             Self::TestBifrostAttach { .. } => "test.bifrost_attach",
             Self::TestBifrostInjectBatch { .. } => "test.bifrost_inject_batch",
@@ -1803,6 +1841,7 @@ impl RequestParams {
             | Self::TestStartSync { .. }
             | Self::TestContactPull { .. }
             | Self::TestGroupPull { .. }
+            | Self::TestGraphAuxPass { .. }
             | Self::TestGalKick
             | Self::TestBifrostAttach { .. }
             | Self::TestBifrostInjectBatch { .. }
@@ -1929,6 +1968,7 @@ impl RequestParams {
             Self::TestStartSync { .. }
             | Self::TestContactPull { .. }
             | Self::TestGroupPull { .. }
+            | Self::TestGraphAuxPass { .. }
             | Self::TestGalKick
             | Self::TestBifrostFactoryOpen { .. }
             | Self::TestBifrostAttach { .. }
@@ -2057,6 +2097,7 @@ impl RequestParams {
             Self::TestStartSync { params } => serde_json::json!({ "params": params }),
             Self::TestContactPull { params } => serde_json::json!({ "params": params }),
             Self::TestGroupPull { params } => serde_json::json!({ "params": params }),
+            Self::TestGraphAuxPass { params } => serde_json::json!({ "params": params }),
             Self::TestGalKick => serde_json::json!({}),
             Self::TestBifrostAttach { params } => serde_json::json!({ "params": params }),
             Self::TestBifrostInjectBatch { params } => {
@@ -2676,6 +2717,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("test.group_pull params: {e}"))?;
                 Ok(Self::TestGroupPull { params: p.params })
+            }
+            "test.graph_aux_pass" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TestGraphAuxPassParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.graph_aux_pass params: {e}"))?;
+                Ok(Self::TestGraphAuxPass { params: p.params })
             }
             "test.gal_kick" => Ok(Self::TestGalKick),
             "test.bifrost_attach" => {

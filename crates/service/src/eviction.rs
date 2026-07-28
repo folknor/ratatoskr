@@ -99,7 +99,7 @@ pub async fn run_eviction_sweep(
             .with_write(move |conn| {
                 // `messages.date` is stored as a Unix millisecond
                 // timestamp (JMAP wire format passes straight through;
-                // see `provider_sync::jmap::sync::storage`). The caller
+                // see the Bifrost container persistence path). The caller
                 // supplies `window_start_unix` in SECONDS to match the
                 // rest of the codebase's window conventions, so we
                 // multiply by 1000 inside the query rather than make

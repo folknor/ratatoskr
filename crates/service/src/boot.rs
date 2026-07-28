@@ -1390,7 +1390,7 @@ async fn run_boot_sequence_inner(
             // ensured the index directory exists; opening a second
             // reader is cheap and independent of the writer. If the
             // open fails the rest of the pass still runs; the
-            // history_id-clear plus next initial-style sync covers
+            // initial-sync reset plus next initial-style sync covers
             // index correctness even without orphan iteration.
             let search_read = search::SearchReadState::init(&app_data_dir)
                 .map_err(|e| {

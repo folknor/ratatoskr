@@ -6,27 +6,43 @@
 > foreign mutations remain explicitly rejected until bifrost exposes support.
 
 **Tier**: 2 - Enhances JMAP provider parity
-**Status**: (green) **All 6 phases implemented** - Full JMAP Sharing pipeline: Session discovery + revocation (Phase 1), shared account sync with independent state tokens (Phase 2), `myRights` persistence (Phase 3), subscription management (Phase 4), ShareNotification polling (Phase 5), principal-based identity resolution (Phase 6). Remaining: UI-side integration (app crate) for rights gating, subscription toggle, and compose identity auto-selection.
+**Status**: (yellow) **Superseded by the bifrost container cutover; ShareNotification polling withdrawn.** Phases 1-2 (session discovery, shared account sync) are subsumed by bifrost's namespaced-container discovery (B12 note above). Phase 6 (principal-based owner-email resolution) is delivered through `Container.owner_email` (B15-SQ-jmap, see the architecture note above), feeding the same `shared_mailboxes.email_address` cache this doc originally specified. Phase 5 (ShareNotification polling) was deleted at B15, not ported - it had no reader beyond its own cursor. Phases 3-4 (`myRights` persistence, subscription management) and the app-side rights gating / subscription toggle / compose identity auto-selection remain unimplemented.
 
 ---
 
-> **Architecture note (post bifrost JMAP cutover).** The implementation-plan
-> file paths below (`crates/jmap/src/sync/mod.rs`, `sync/mailbox.rs`, the
-> `sync_initial`/`sync_delta` flows, and the `jmap_sync_state` change cursor)
-> describe the PRE-cutover JMAP sync stack. That stack was deleted by the
-> bifrost JMAP cutover (B3a-cut-jmap): JMAP mail sync now runs through the
-> bifrost change-stream consumer (`crates/service/src/bifrost/`), the change
-> cursor lives in the opaque `sync_cursors` envelope, and the four auxiliary
-> passes this doc relies on - shared-account discovery, identity resolution,
-> contacts sync, and ShareNotification polling - were relocated to
-> `crates/provider-sync/src/jmap/aux_sync.rs`. Originally invoked from the per-kick
-> JMAP runner branch in `crates/service/src/bifrost/engine_sync.rs`, that branch was
-> itself replaced by the B3b keep-attached landing: the aux passes now run from a
-> per-slot wall-clock cadence task in the resident engine
-> (`crates/service/src/bifrost/resident.rs`), and `engine_sync.rs` retains only the
-> per-provider folder-map prepare helpers. The phase descriptions remain accurate as
-> a record of WHAT ships; their hook locations must be read against the consumer
-> architecture. See the B3a-cut-jmap and B3b landing commits and
+> **Architecture note (post bifrost JMAP cutover, updated for B15).** The
+> implementation-plan file paths below (`crates/jmap/src/sync/mod.rs`,
+> `sync/mailbox.rs`, the `sync_initial`/`sync_delta` flows, and the
+> `jmap_sync_state` change cursor) describe the PRE-cutover JMAP sync stack.
+> That stack was deleted by the bifrost JMAP cutover (B3a-cut-jmap): JMAP mail
+> sync now runs through the bifrost change-stream consumer
+> (`crates/service/src/bifrost/`), and the change cursor lives in the opaque
+> `sync_cursors` envelope. Of the four auxiliary passes this doc relies on -
+> shared-account discovery, identity resolution, contacts sync, and
+> ShareNotification polling - contacts sync moved to the provider-agnostic
+> pull in `crates/service/src/bifrost/contacts/` (B8), and the other three
+> rode a second relocation at B15, which deleted `crates/jmap/`,
+> `crates/provider-sync/`, and `jmap_sync_state` outright:
+> - Shared-account owner-email resolution (Phase 6) is no longer a ratatoskr
+>   aux pass at all. bifrost-jmap's `containers_list` resolves the owner
+>   email for `Shared`-namespace containers during container sync and
+>   projects it as `Container.owner_email`, reproducing the legacy two-level
+>   RFC 9670 principals gate fail-soft; ratatoskr persists it into the
+>   existing `shared_mailboxes.email_address` cache via
+>   `set_shared_mailbox_email`, write-once (never overwriting an already-cached
+>   value), from `crates/service/src/bifrost/containers.rs` after the owning
+>   `shared_mailboxes` row insert.
+> - ShareNotification polling (Phase 5) was deleted, not ported. Its only
+>   durable effects were its own `jmap_sync_state` cursor and best-effort
+>   server-side notification cleanup; shared-mailbox discovery has been
+>   container-owned since B6/B12, and no ratatoskr feature reads
+>   ShareNotification objects. RFC 9670 servers expire them on their own.
+> There is no longer a `crates/jmap/src/` or `crates/provider-sync/src/jmap/`
+> at any layer - action or sync - and the only remaining JMAP dependency is
+> bifrost's own `bifrost-jmap` crate. The still-open phases below (session
+> account discovery beyond the owner-email cache, `myRights`/subscription
+> persistence) remain unimplemented UI/DB work, not a hook-location
+> correction. See the B3a-cut-jmap, B3b, and B15 landing commits and
 > `docs/bifrost-migration.md` § 7.
 
 - **What**: JMAP's native mechanism for shared mailboxes, delegated access, and permission management. RFC 9670 (published November 2024) defines Principal objects, ShareNotification tracking, and per-mailbox ACLs - all integrated into the protocol rather than bolted on as a separate system.

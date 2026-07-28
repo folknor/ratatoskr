@@ -14,7 +14,10 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 **`db`** owns the main application SQLite schema and all shared-table SQL. Query shape, write shape, conflict resolution, and transaction-scoped shared-table persistence belong here. If multiple crates need to write the same table, `db` owns that write API.
 
-**Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`common/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface. Personal, shared, and public-folder mail sync for JMAP, Graph, Gmail, and IMAP routes through the service-owned bifrost change-stream consumer (`crates/service/src/bifrost/`). The legacy sync-only `ProviderSyncOps` surface and coexistence `sync_dispatch` are deleted; `provider-sync` remains only for retained auxiliary sync helpers and consumer support. Provider `ProviderOps` action methods still live in their provider crates until B4/B15.
+**Mail providers** are reached only through the service-owned bifrost engine and
+change-stream consumer (`crates/service/src/bifrost/`). Personal, shared, and
+public-folder sync, actions, attachments, and send dispatch through bifrost;
+app and core never depend on a protocol client crate.
 
 For shared-table persistence, providers normalize protocol payloads into `db` write structs and call `db` APIs. They do not independently own SQL for shared tables like `messages`, `attachments`, `labels`, `contacts`, `threads`, or calendar tables.
 
@@ -43,7 +46,9 @@ That includes:
 
 A subset of the boundaries above is mechanically enforced by `brokkr check` via `[[dependency_rule]]` entries in `brokkr.toml`. The phase reads `cargo metadata --no-deps` and fails on direct forbidden edges before clippy or tests run.
 
-The dependency graph runs roughly leafward-to-rootward as `types` / `crypto-key` -> `common` -> `db` -> `store`, `search`, `seen` -> `sync` -> providers (`gmail`, `jmap`, `graph`, `imap`) -> `provider-sync`, `cal`, `rtsk` (core) -> `service-state` -> `service` -> `app`. The rules forbid upward edges and sideways edges that would let two peers form a tighter coupling than the layer above mediates.
+The dependency graph runs roughly leafward-to-rootward as `types` /
+`crypto-key` -> `common` -> `db` -> `store`, `search`, `seen` -> `sync`,
+`cal`, `rtsk` (core) -> `service-state` -> `service` -> `app`.
 
 UI / writer split:
 - `app` may not depend on `rusqlite`, `db`, `service-state`, or any provider crate. UI talks to the writer side only through `service-api` IPC.
@@ -51,14 +56,14 @@ UI / writer split:
 - `rtsk` (core) may not depend on `rusqlite` (shared-table SQL belongs to `db`) or on any of `service`, `service-state`, `cal`, `app`.
 
 Layer rules:
-- `common` may not depend on `sync`, providers, `provider-sync`, `rtsk`, `service`, `service-state`, `cal`, or `app`. It stays a shared-helper leaf.
-- `sync` may not depend on providers, `provider-sync`, `cal`, `service`, `service-state`, or `app`. Provider crates depend on `sync`, never the reverse.
+- `common` may not depend on `sync`, `rtsk`, `service`, `service-state`, `cal`, or `app`. It stays a shared-helper leaf.
+- `sync` may not depend on `cal`, `service`, `service-state`, or `app`.
 - `cal` may not depend on `app`.
 
-Provider isolation:
-- Each provider crate (`gmail`, `jmap`, `graph`, `imap`) may not depend on the other three, nor on `provider-sync`, `rtsk`, `cal`, `service`, `service-state`, or `app`. Provider crates are leaves of the protocol-specific subtree.
+Protocol isolation is owned by bifrost's crate graph; service only depends on
+bifrost's promoted protocol crates.
 
-Rules are direct-edge only. Transitive boundaries (e.g. "no shared-table SQL anywhere outside `db`", or "`app` cannot transitively reach `service-state` at all") are not expressible at the Cargo level. The transitive lockdown for `app` -> `cal` and `app` -> `service-state` lives in `crates/service-state/tests/lockdown.rs`. Shared-table SQL scoping inside provider/sync crates remains a code-review concern - provider and sync crates legitimately need `rusqlite` for protocol-state tables carved out in *Current Exceptions* below (`jmap_sync_state`, `graph_*_delta_tokens`, `folder_sync_state`, etc.).
+Rules are direct-edge only. Transitive boundaries (e.g. "no shared-table SQL anywhere outside `db`", or "`app` cannot transitively reach `service-state` at all") are not expressible at the Cargo level. The transitive lockdown for `app` -> `cal` and `app` -> `service-state` lives in `crates/service-state/tests/lockdown.rs`. Shared-table SQL scoping inside `sync` remains a code-review concern - `sync` legitimately needs `rusqlite` for the surviving cadence-counter and cursor tables named in *Current Exceptions* below; B15 dropped the legacy protocol-state tables (`jmap_sync_state`, `graph_folder_delta_tokens`, `folder_sync_state`, `jmap_push_state`, `graph_subscriptions`, `accounts.history_id`, `accounts.supports_keywords`) that used to be carved out here.
 
 ### Action service as mutation gate
 <!-- coverage: architecture.action_service_as_mutation_gate enforcement=rust-test -->
@@ -186,12 +191,16 @@ The `ExtractRuntime` lifecycle mirrors `CalendarRuntime`: a `CancellationToken` 
 - **`ActionProviderCtx`** (`crates/common/src/types.rs`) carries only `account_id` / `&ReadDbState` / `&dyn ProgressReporter` - no `&SearchState` field, so action methods cannot write to the Tantivy index. A regression test in `common::types::tests` enforces the exhaustive-destructure shape.
 - **Tri-state in-flight tracking** (`crates/app/src/app.rs::PlanState`). UI plans live as `Pending` / `Acked` / `AckUnknown`; `ServiceCrashed` while `Pending` defers rollback to post-respawn `action.job_status` reconciliation, while `ServiceCrashed` while `Acked` does nothing because the journal will replay.
 
-### Provider trait as abstraction layer
+### Bifrost engine as abstraction layer
 <!-- coverage: architecture.provider_trait_as_abstraction_layer enforcement=compiler -->
 
-The four providers are unified behind `ProviderOps`. All provider-specific behavior is behind this trait - callers should never branch on provider type.
+All provider-specific behavior is behind bifrost's `SyncEngine` and `Account`
+surfaces. Callers must not construct or branch on a legacy provider client.
 
-**Enforcement:** `FolderId` and `LabelId` newtypes in `crates/common/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder` and `&LabelId` for `add_label`, `remove_label`. Passing a folder ID where a label ID is expected is a compile error. (B6 removed the folder LIST + OBJECT-CRUD methods - `list_folders` / `create_folder` / `rename_folder` / `delete_folder` - from `ProviderOps`: the list sync runs through `bifrost::containers::sync_containers` over `SyncEngine::containers_list`, and the folder/label CRUD action handlers in `service::actions::{folder,label}` dispatch through `engine.container_*`.) Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider - no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
+**Enforcement:** `FolderId` and `LabelId` preserve folder-versus-label intent
+through `MailActionIntent`, `MailOperation`, and `batch_execute` to the engine.
+Container sync uses `SyncEngine::containers_list`; folder and label CRUD uses
+`engine.container_*`.
 
 For persistence, the provider boundary is:
 - providers fetch and translate protocol payloads
@@ -311,14 +320,14 @@ All three are FK-cascaded by message. The pattern exists because partial-delta p
 
 **Partial-delta membership merge vs full-thread replace** - The Bifrost consumer chooses the membership strategy by provider because each provider exposes different coverage. Graph and Gmail call `replace_message_membership_and_recompute`, which atomically replaces the per-message rows for one message and recomputes the thread aggregate from the union. JMAP uses `replace_message_folders_and_recompute` plus keyword recompute. IMAP writes `messages.imap_folder` and `message_keywords` per batch, then the drive-end IMAP threading pass (`crates/service/src/bifrost/consumer/imap_threading.rs`) reassigns messages and repairs `thread_folders` / `thread_labels` from those persisted sources. Neither helper exposes a separable "write rows" step from the recompute, so a contributor cannot forget the second half. `db::queries_extra::thread_persistence` and `message_membership` expose only raw row insert/delete primitives; provider-semantic orchestration lives in the bifrost consumer where the provider's coverage shape is known. Same-client moves continue to mutate `thread_folders` locally before dispatching to the provider; same-client label actions write `pending_thread_label_intents` and let provider truth catch up.
 
-**Send-intent threading** - When a Reply or Forward is sent from Ratatoskr, the user's intent and the source message's local DB ID flow through every layer of the send pipeline so the appropriate provider can write back the replied/forwarded primitive. The `SendIntent` enum (`New` / `Reply` / `Forward`) is defined in `crates/common/src/types.rs` and `crates/service-api/src/action.rs` (wire copy). It threads UI compose state -> `service_api::SendWireMessage` -> action journal (`crates/service/src/handlers/action_send.rs::JournaledMessage`) -> `service::send::SendRequest` -> the action service's `send_email`. The action service then performs two writes in order: `mark_send_intent_local` (`crates/service/src/send.rs`) flips `messages.is_replied` or `is_forwarded` on the source message immediately - this is the authoritative local mark - and the provider's `mark_send_intent` (`ProviderOps` trait method, `crates/common/src/ops.rs`) issues a best-effort write-back: IMAP `STORE +FLAGS \Answered` or `$Forwarded`; JMAP `EmailSet` keyword `$answered` or `$forwarded`; Graph PATCH on `singleValueExtendedProperties` for `PR_LAST_VERB_EXECUTED`. Provider failures are logged at warn and the local state remains the source of truth. Gmail has no `mark_send_intent` because the parser derives the bit from `SENT` membership + reply headers on the next sync. Adding a new send-intent surface (e.g. mark-as-template) extends `SendIntent`, the wire copy, and one match arm in each provider's `mark_send_intent`.
+**Send-intent threading** - When a Reply or Forward is sent from Ratatoskr, the user's intent and the source message's local DB ID flow through every layer of the send pipeline so the appropriate provider can write back the replied/forwarded primitive. The `SendIntent` enum (`New` / `Reply` / `Forward`) is defined in `crates/common/src/types.rs` and `crates/service-api/src/action.rs` (wire copy). It threads UI compose state -> `service_api::SendWireMessage` -> action journal (`crates/service/src/handlers/action_send.rs::JournaledMessage`) -> `service::send::SendRequest` -> the action service's `send_email`. The action service then performs two writes in order: `mark_send_intent_local` (`crates/service/src/send.rs`) flips `messages.is_replied` or `is_forwarded` on the source message immediately - this is the authoritative local mark - and `dispatch_send_intent_mark` (`crates/service/src/actions/dispatch_target.rs`) issues a best-effort provider write-back through the bifrost `SyncEngine` (`mark_replied` / `mark_forwarded`): IMAP `STORE +FLAGS \Answered` or `$Forwarded`; JMAP `EmailSet` keyword `$answered` or `$forwarded`; Graph PATCH on `singleValueExtendedProperties` for `PR_LAST_VERB_EXECUTED`. Provider failures are logged at warn and the local state remains the source of truth. Gmail has no writeback arm because the parser derives the bit from `SENT` membership + reply headers on the next sync. Adding a new send-intent surface (e.g. mark-as-template) extends `SendIntent`, the wire copy, and one match arm in `dispatch_send_intent_mark`.
 
 ## Current Exceptions
 
 These are intentional unresolved areas, not reasons to bypass the boundaries above.
 
 - **Signatures** are not yet a settled architecture surface. Gmail and JMAP signature sync/write behavior exists, but the product/spec is not finalized enough to treat that path as a completed shared persistence contract.
-- **Provider-local sync/state tables** may still live in provider or sync crates. That is acceptable only for provider-owned or protocol-owned state, not for shared application tables. The ownership is now explicit:
+- **Provider-local sync/state tables** are gone. There is no protocol client crate left to own them, and B15 deleted every table that used to be carved out here. The ownership is now explicit:
   - The former per-provider contact mapping tables (Gmail's `google_contact_map` /
     `google_other_contact_map`, Graph's `graph_contact_map`, and CardDAV's
     `carddav_contact_map`) were retired by the bifrost B8 contacts landing and
@@ -326,8 +335,7 @@ These are intentional unresolved areas, not reasons to bypass the boundaries abo
     address_book_id, corpus)` remote-claim ledger in `crates/db/src/db/schema/03_contacts.sql`,
     written by the provider-agnostic pull in `crates/service/src/bifrost/contacts/`
     - not a provider-owned table, since no per-provider crate interprets it anymore.
-  - **Sync-owned protocol coordination tables** stay with sync/protocol helpers until there is a clear benefit to moving them behind narrow `db` APIs:
-    - `jmap_sync_state`
-    - `graph_folder_delta_tokens`
-    - `folder_sync_state`
-  - These tables are exceptions because they track provider protocol state, cursors, subscriptions, or mapping identity. They do not make the provider or sync crates owners of shared application tables like `messages`, `labels`, `contacts`, or calendar rows. The former Graph `graph_subscriptions` and JMAP `jmap_push_state` push-subscription tables were retired by the bifrost B3b push landing: push subscription state now lives in bifrost's in-memory per-engine `SubscriptionRegistry`, neither table has a writer, and both schemas remain additive-green until B15. The former `graph_shared_mailbox_delta_tokens`, `shared_mailbox_sync_state`, and `public_folder_sync_state` were retired by the bifrost B12 namespace landing: the engine owns each namespaced cursor inside the opaque `sync_cursors` envelope, and the provider-agnostic `shared_mailboxes` registry (renamed from `shared_mailbox_sync_state`) plus `public_folder_pins` are the two surviving app-owned tables - a discovery-and-visibility registry, not per-mailbox sync-status state.
+  - The former Graph `graph_subscriptions` and JMAP `jmap_push_state` push-subscription tables were retired by the bifrost B3b push landing (push subscription state moved into bifrost's in-memory per-engine `SubscriptionRegistry`, so neither table ever had a writer again) and their schemas were dropped in B15.
+  - The former `graph_shared_mailbox_delta_tokens`, `shared_mailbox_sync_state`, and `public_folder_sync_state` were retired by the bifrost B12 namespace landing: the engine owns each namespaced cursor inside the opaque `sync_cursors` envelope, and the provider-agnostic `shared_mailboxes` registry (renamed from `shared_mailbox_sync_state`) plus `public_folder_pins` are the two surviving app-owned tables - a discovery-and-visibility registry, not per-mailbox sync-status state.
+  - `jmap_sync_state` lost its last writer when B15 deleted the JMAP `ShareNotification` poll (a vestigial cursor-and-log pass; shared-mailbox discovery has been container-owned since B6/B12). `graph_folder_delta_tokens` and `folder_sync_state` had already gone caller-free in earlier bricks; B15's mechanical workspace audit confirmed that and dropped the orphaned helpers and schema alongside the rest. `accounts.history_id` and `accounts.supports_keywords` were dropped alongside them - the boot invariant's `clear_account_history_id` call was renamed to `reset_initial_sync_state` (`sync/src/pipeline.rs`) to describe what it actually does now that the column is gone: reset `initial_sync_completed`, the load-bearing half the drop preserved.
+  - The one surviving cross-cutting protocol counter is the `settings`-table `graph_sync_cycle` cadence counter, read and incremented by `service/src/bifrost/aux/graph.rs` to cadence the Graph master-category and reaction-refresh passes - not a dedicated table, and not provider-owned in the old sense.

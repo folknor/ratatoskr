@@ -1,185 +1,10 @@
-use std::collections::HashMap;
+use db::db::WriterPool;
 
-use db::db::{ReadDbState, ReadError, WriteConn, WriterPool};
-
-fn optional_read<T>(result: Result<T, ReadError>, context: &str) -> Result<Option<T>, String> {
-    match result {
-        Ok(value) => Ok(Some(value)),
-        Err(ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
-        Err(error) => Err(format!("{context}: {error}")),
-    }
-}
-
-/// Synchronous version: update account sync state (history_id column).
-pub fn update_account_sync_state(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-    history_id: &str,
-) -> Result<(), String> {
-    db::db::queries_extra::set_account_history_id(conn, account_id, history_id)
-}
-
-/// Async version: update account sync state (history_id column).
-pub async fn save_account_history_id(
-    db: &WriterPool,
-    account_id: &str,
-    history_id: &str,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let hid = history_id.to_string();
-    db.with_write(move |conn| update_account_sync_state(conn, &aid, &hid))
-        .await
-}
-
-pub async fn load_account_history_id(
-    db: &ReadDbState,
-    account_id: &str,
-) -> Result<Option<String>, String> {
-    let aid = account_id.to_string();
-    db.with_read(move |conn| db::db::queries_extra::get_account_history_id(conn, &aid))
-        .await
-}
-
-pub async fn save_jmap_sync_state(
-    db: &WriterPool,
-    account_id: &str,
-    state_type: &str,
-    state: &str,
-) -> Result<(), String> {
-    save_jmap_sync_state_for(db, account_id, None, state_type, state).await
-}
-
-pub async fn load_jmap_sync_state(
-    db: &ReadDbState,
-    account_id: &str,
-    state_type: &str,
-) -> Result<Option<String>, String> {
-    load_jmap_sync_state_for(db, account_id, None, state_type).await
-}
-
-/// Save JMAP sync state for a specific (possibly shared) account.
-///
-/// `shared_account_id` is `None` for the primary account, `Some(jmap_id)` for
-/// a shared account discovered from the JMAP Session.
-pub async fn save_jmap_sync_state_for(
-    db: &WriterPool,
-    account_id: &str,
-    shared_account_id: Option<&str>,
-    state_type: &str,
-    state: &str,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let said = shared_account_id.map(String::from);
-    let st = state_type.to_string();
-    let sv = state.to_string();
-
-    db.with_write(move |conn| {
-        conn.execute(
-            "INSERT INTO jmap_sync_state (account_id, shared_account_id, type, state, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now')) \
-             ON CONFLICT(account_id, COALESCE(shared_account_id, ''), type) \
-             DO UPDATE SET state = ?4, updated_at = strftime('%s', 'now')",
-            rusqlite::params![aid, said, st, sv],
-        )
-        .map_err(|e| format!("save jmap sync state: {e}"))?;
-        Ok(())
-    })
-    .await
-}
-
-/// Load JMAP sync state for a specific (possibly shared) account.
-pub async fn load_jmap_sync_state_for(
-    db: &ReadDbState,
-    account_id: &str,
-    shared_account_id: Option<&str>,
-    state_type: &str,
-) -> Result<Option<String>, String> {
-    let aid = account_id.to_string();
-    let said = shared_account_id.map(String::from);
-    let st = state_type.to_string();
-
-    db.with_read(move |conn| {
-        optional_read(
-            conn.query_row(
-                "SELECT state FROM jmap_sync_state \
-             WHERE account_id = ?1 AND type = ?2 \
-             AND COALESCE(shared_account_id, '') = COALESCE(?3, '')",
-                rusqlite::params![aid, st, said],
-                |row| row.get::<_, String>("state"),
-            ),
-            "load jmap sync state",
-        )
-    })
-    .await
-}
-
-pub async fn save_graph_delta_token(
-    db: &WriterPool,
-    account_id: &str,
-    folder_id: &str,
-    delta_link: &str,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let fid = folder_id.to_string();
-    let dl = delta_link.to_string();
-
-    db.with_write(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO graph_folder_delta_tokens \
-             (account_id, folder_id, delta_link, updated_at) \
-             VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-            rusqlite::params![aid, fid, dl],
-        )
-        .map_err(|e| format!("save delta token: {e}"))?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn load_graph_delta_tokens(
-    db: &ReadDbState,
-    account_id: &str,
-) -> Result<HashMap<String, String>, String> {
-    let aid = account_id.to_string();
-
-    db.with_read(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT folder_id, delta_link FROM graph_folder_delta_tokens \
-                 WHERE account_id = ?1",
-            )
-            .map_err(|e| format!("prepare: {e}"))?;
-        stmt.query_map(rusqlite::params![aid], |row| {
-            Ok((
-                row.get::<_, String>("folder_id")?,
-                row.get::<_, String>("delta_link")?,
-            ))
-        })
-        .map_err(|e| format!("query: {e}"))?
-        .collect::<Result<HashMap<_, _>, _>>()
-        .map_err(|e| format!("collect: {e}"))
-    })
-    .await
-}
-
-pub async fn delete_graph_delta_token(
-    db: &WriterPool,
-    account_id: &str,
-    folder_id: &str,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let fid = folder_id.to_string();
-
-    db.with_write(move |conn| {
-        conn.execute(
-            "DELETE FROM graph_folder_delta_tokens \
-             WHERE account_id = ?1 AND folder_id = ?2",
-            rusqlite::params![aid, fid],
-        )
-        .map_err(|e| format!("delete delta token: {e}"))?;
-        Ok(())
-    })
-    .await
+/// The `settings` key holding a provider's auxiliary cadence counter.
+/// Production increments it; the harness affordance seeds it. Both must
+/// derive the key here so they cannot drift apart.
+fn provider_sync_cycle_key(provider_key: &str, account_id: &str) -> String {
+    format!("{provider_key}_sync_cycle:{account_id}")
 }
 
 async fn increment_provider_sync_cycle(
@@ -189,7 +14,7 @@ async fn increment_provider_sync_cycle(
     provider_label: &'static str,
     overflow_cycle: u32,
 ) -> Result<u32, String> {
-    let key = format!("{provider_key}_sync_cycle:{account_id}");
+    let key = provider_sync_cycle_key(provider_key, account_id);
 
     db.with_write(move |conn| {
         let tx = conn
@@ -224,55 +49,38 @@ pub async fn increment_graph_sync_cycle(db: &WriterPool, account_id: &str) -> Re
     increment_provider_sync_cycle(db, account_id, "graph", "Graph", 20).await
 }
 
-// ── Shared mailbox sync state management ─────────────────
-
-/// Set the resolved email address for a shared mailbox.
-///
-/// Used by JMAP principal resolution to associate a JMAP shared account
-/// with its owner's email address for send identity auto-selection.
-pub async fn set_shared_mailbox_email(
+/// Test-only companion to the production Graph auxiliary cadence counter.
+/// Keeping this write here makes harnesses exercise the same settings key and
+/// persistence route as `increment_graph_sync_cycle` rather than reaching
+/// into the settings table themselves.
+pub async fn set_graph_sync_cycle(
     db: &WriterPool,
     account_id: &str,
-    mailbox_id: &str,
-    email: &str,
+    cycle: u32,
 ) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let mid = mailbox_id.to_string();
-    let em = email.to_string();
-
-    db.with_write(move |conn| {
-        conn.execute(
-            "UPDATE shared_mailboxes \
-             SET email_address = ?3 \
-             WHERE account_id = ?1 AND mailbox_id = ?2",
-            rusqlite::params![aid, mid, em],
-        )
-        .map_err(|e| format!("set shared mailbox email: {e}"))?;
-        Ok(())
-    })
-    .await
+    let key = provider_sync_cycle_key("graph", account_id);
+    db.with_write(move |conn| db::db::queries::set_setting(conn, &key, &cycle.to_string()))
+        .await
 }
 
-/// Get the email address for a shared mailbox, if resolved.
-pub async fn get_shared_mailbox_email(
-    db: &ReadDbState,
-    account_id: &str,
-    mailbox_id: &str,
-) -> Result<Option<String>, String> {
-    let aid = account_id.to_string();
-    let mid = mailbox_id.to_string();
+// The `shared_mailboxes.email_address` cache lost its async helpers in B15d.
+// The write now lives inside `bifrost::containers::reconcile_namespace_registry`,
+// where it shares the transaction that INSERTs the row it updates; the read is
+// `rtsk::db::queries_extra::get_shared_mailbox_email_sync`, called from the
+// pop-out compose window.
 
-    db.with_read(move |conn| {
-        optional_read(
-            conn.query_row(
-                "SELECT email_address FROM shared_mailboxes \
-             WHERE account_id = ?1 AND mailbox_id = ?2",
-                rusqlite::params![aid, mid],
-                |row| row.get(0),
-            ),
-            "get shared mailbox email",
-        )
-        .map(std::option::Option::flatten)
-    })
-    .await
+#[cfg(test)]
+mod tests {
+    use super::provider_sync_cycle_key;
+
+    /// The harness seeder and the production incrementer must address the
+    /// same `settings` row, otherwise a cadence-crossing gate silently
+    /// drives cycle 1 instead of the value it asked for.
+    #[test]
+    fn graph_cycle_key_is_shared_between_seed_and_increment() {
+        assert_eq!(
+            provider_sync_cycle_key("graph", "account-1"),
+            "graph_sync_cycle:account-1"
+        );
+    }
 }

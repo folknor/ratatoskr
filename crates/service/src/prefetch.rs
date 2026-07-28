@@ -19,7 +19,7 @@
 //! The runtime is provider-agnostic. Phase 4 only wires JMAP enqueue
 //! sites (post-sync sweep + backfill kick); Phase 7 adds the others
 //! without touching this file. A non-JMAP `PrefetchWork` would still
-//! process correctly - `create_provider` dispatches by account row -
+//! process correctly - the resident engine dispatches by account row -
 //! but Phase 4 doesn't enqueue any.
 
 use std::collections::{HashMap, HashSet, VecDeque};

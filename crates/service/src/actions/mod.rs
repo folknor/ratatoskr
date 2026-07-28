@@ -24,9 +24,6 @@ mod outcome;
 pub mod pending;
 mod permanent_delete;
 mod pin;
-// Public for retained provider-backed send, draft, folder, attachment, MDN,
-// and prefetch paths. Email action mutations no longer call `create_provider`.
-pub mod provider;
 mod send;
 mod snooze;
 mod spam;

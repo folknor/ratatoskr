@@ -1,40 +1,7 @@
 -- ── Sync state ──────────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS folder_sync_state (
-    account_id TEXT NOT NULL,
-    folder_path TEXT NOT NULL,
-    uidvalidity INTEGER,
-    last_uid INTEGER DEFAULT 0,
-    modseq INTEGER,
-    last_sync_at INTEGER,
-    last_deletion_check_at INTEGER,
-    PRIMARY KEY (account_id, folder_path),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS jmap_sync_state (
-    account_id TEXT NOT NULL,
-    type TEXT NOT NULL,
-    state TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    shared_account_id TEXT,
-    PRIMARY KEY (account_id, type),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_jmap_sync_state_shared
-    ON jmap_sync_state(account_id, COALESCE(shared_account_id, ''), type);
-
-CREATE TABLE IF NOT EXISTS graph_folder_delta_tokens (
-    account_id TEXT NOT NULL,
-    folder_id TEXT NOT NULL,
-    delta_link TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (account_id, folder_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-
 -- Bifrost opaque cursor store (B2). Replaces the per-protocol cursor
--- tables (jmap_sync_state, folder_sync_state, graph_*_delta_tokens, ...).
+-- tables.
 -- bifrost owns the protocol-minted envelope bytes serialized by its
 -- encode_envelope codec; ratatoskr owns the SQLite storage and lookup keys.
 -- `checkpoint_blob` is the self-describing envelope (scope, protocol, BOTH
@@ -78,31 +45,6 @@ CREATE TABLE IF NOT EXISTS shared_mailboxes (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS jmap_push_state (
-    account_id TEXT NOT NULL PRIMARY KEY,
-    push_state TEXT,
-    ws_url TEXT,
-    is_push_enabled INTEGER NOT NULL DEFAULT 0,
-    last_connected_at INTEGER,
-    consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-
--- ── Graph subscriptions ─────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS graph_subscriptions (
-    id TEXT PRIMARY KEY,
-    account_id TEXT NOT NULL,
-    resource TEXT NOT NULL,
-    notification_url TEXT NOT NULL,
-    client_state TEXT NOT NULL,
-    expiration_date_time TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_graph_subscriptions_account ON graph_subscriptions(account_id);
-CREATE INDEX IF NOT EXISTS idx_graph_subscriptions_expiry ON graph_subscriptions(expiration_date_time);
-
 -- ── Offline queue ───────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS pending_operations (
@@ -129,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_ops_resource ON pending_operations(accoun
 -- attachment_extracted_text.extracted_at) exceeds the cursor, bounding
 -- the scan on a 200 GB mailbox after a non-graceful exit.
 --
--- Defense-in-depth, not load-bearing: the per-account history_id clear
+-- Defense-in-depth, not load-bearing: the per-account initial-sync reset
 -- + next initial-style sync handles correctness regardless of what the
 -- cursor-bounded scan misses.
 CREATE TABLE IF NOT EXISTS clean_shutdown_cursors (

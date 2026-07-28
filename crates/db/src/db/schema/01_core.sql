@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     access_token TEXT,
     refresh_token TEXT,
     token_expires_at INTEGER,
-    history_id TEXT,
     last_sync_at INTEGER,
     is_active INTEGER DEFAULT 1,
     created_at INTEGER DEFAULT (unixepoch()),

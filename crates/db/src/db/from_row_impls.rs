@@ -18,7 +18,6 @@ impl_from_row!(DbAccount {
     access_token,
     refresh_token,
     token_expires_at,
-    history_id,
     initial_sync_completed,
     last_sync_at,
     is_active,
@@ -343,17 +342,6 @@ impl_from_row!(DbWritingStyleProfile {
     sample_count,
     created_at,
     updated_at,
-});
-
-// ── Folder Sync State ──────────────────────────────────────
-
-impl_from_row!(DbFolderSyncState {
-    account_id,
-    folder_path,
-    uidvalidity,
-    last_uid,
-    modseq,
-    last_sync_at,
 });
 
 // ── Notification VIP ────────────────────────────────────────

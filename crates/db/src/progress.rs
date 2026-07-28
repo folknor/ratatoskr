@@ -11,7 +11,7 @@ pub trait ProgressReporter: Send + Sync {
 }
 
 /// A no-op reporter that silently discards all events.
-/// Used when a `ProviderCtx` is needed but progress reporting is not.
+/// Used when a progress reporter is needed but no reporting is required.
 pub struct NoopProgressReporter;
 
 impl ProgressReporter for NoopProgressReporter {

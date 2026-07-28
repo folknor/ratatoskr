@@ -23,7 +23,7 @@ use service_api::{
     SyncCancelAccountParams, TestBifrostArmHookParams, TestBifrostAttachParams, TestBifrostHook,
     TestBifrostProbeParams, TestBifrostProviderKind, TestContactPullParams,
     TestContainerCrudParams, TestCrashAfterNWritesParams, TestDelayNextWriteParams,
-    TestDiscardDraftParams, TestGroupPullParams, TestPendingOpsReadParams,
+    TestDiscardDraftParams, TestGraphAuxPassParams, TestGroupPullParams, TestPendingOpsReadParams,
     TestQueryBlobTombstoneStateParams, TestQueryDbStateParams,
     TestRemoveCachedAttachmentBytesParams, TestRunDiscoveryParams, TestSearchIndexParams,
     TestSeedAccountParams, TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentParams,
@@ -2960,6 +2960,28 @@ fn request_params_from_lua(
                 .ok_or_else(|| lua_error_message("TestGroupPull requires params.account_id"))?;
             Ok(RequestParams::TestGroupPull {
                 params: TestGroupPullParams { account_id },
+            })
+        }
+        "TestGraphAuxPass" | "test.graph_aux_pass" => {
+            if state.get_top() < params_idx as usize || state.typ(params_idx) != LuaType::Table {
+                return Err(lua_error_message("TestGraphAuxPass requires params table"));
+            }
+            let account_id = get_string_field(state, params_idx, "account_id")?
+                .ok_or_else(|| lua_error_message("TestGraphAuxPass requires params.account_id"))?;
+            let cycle = get_u64_field(state, params_idx, "cycle", "TestGraphAuxPass params.cycle")?
+                .ok_or_else(|| lua_error_message("TestGraphAuxPass requires params.cycle"))?;
+            let cycle = u32::try_from(cycle)
+                .map_err(|_| lua_error_message("TestGraphAuxPass params.cycle exceeds u32"))?;
+            let initial_sync_completed =
+                get_bool_field(state, params_idx, "initial_sync_completed")?.ok_or_else(|| {
+                    lua_error_message("TestGraphAuxPass requires params.initial_sync_completed")
+                })?;
+            Ok(RequestParams::TestGraphAuxPass {
+                params: TestGraphAuxPassParams {
+                    account_id,
+                    cycle,
+                    initial_sync_completed,
+                },
             })
         }
         "TestGalKick" | "test.gal_kick" => Ok(RequestParams::TestGalKick),

@@ -1,6 +1,6 @@
 use super::super::WriterPool;
-use super::super::types::{DbFolderSyncState, DbWritingStyleProfile};
-use crate::db::{query_as, query_one};
+use super::super::types::DbWritingStyleProfile;
+use crate::db::query_one;
 use rusqlite::params;
 
 pub async fn db_get_ai_cache(
@@ -165,91 +165,6 @@ pub async fn db_delete_writing_style_profile(
         )
         .map_err(|e| e.to_string())?;
         Ok(())
-    })
-    .await
-}
-
-pub async fn db_get_folder_sync_state(
-    db: &WriterPool,
-    account_id: String,
-    folder_path: String,
-) -> Result<Option<DbFolderSyncState>, String> {
-    db.with_write(move |conn| {
-        query_one::<DbFolderSyncState>(
-            conn,
-            "SELECT account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at
-                 FROM folder_sync_state WHERE account_id = ?1 AND folder_path = ?2",
-            &[&account_id, &folder_path],
-        )
-    })
-    .await
-}
-
-pub async fn db_upsert_folder_sync_state(
-    db: &WriterPool,
-    account_id: String,
-    folder_path: String,
-    uidvalidity: Option<i64>,
-    last_uid: i64,
-    modseq: Option<i64>,
-    last_sync_at: Option<i64>,
-) -> Result<(), String> {
-    db.with_write(move |conn| {
-        conn.execute(
-            "INSERT INTO folder_sync_state (account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(account_id, folder_path) DO UPDATE SET
-                   uidvalidity = ?3, last_uid = ?4, modseq = ?5, last_sync_at = ?6",
-            params![account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_delete_folder_sync_state(
-    db: &WriterPool,
-    account_id: String,
-    folder_path: String,
-) -> Result<(), String> {
-    db.with_write(move |conn| {
-        conn.execute(
-            "DELETE FROM folder_sync_state WHERE account_id = ?1 AND folder_path = ?2",
-            params![account_id, folder_path],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_clear_all_folder_sync_states(
-    db: &WriterPool,
-    account_id: String,
-) -> Result<(), String> {
-    db.with_write(move |conn| {
-        conn.execute(
-            "DELETE FROM folder_sync_state WHERE account_id = ?1",
-            params![account_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_get_all_folder_sync_states(
-    db: &WriterPool,
-    account_id: String,
-) -> Result<Vec<DbFolderSyncState>, String> {
-    db.with_write(move |conn| {
-        query_as::<DbFolderSyncState>(
-            conn,
-            "SELECT account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at
-                 FROM folder_sync_state WHERE account_id = ?1 ORDER BY folder_path ASC",
-            &[&account_id],
-        )
     })
     .await
 }

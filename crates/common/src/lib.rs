@@ -8,7 +8,6 @@ pub use db::db::folder_roles;
 pub mod headers;
 pub mod html_sanitizer;
 pub mod http;
-pub mod ops;
 pub mod parsed_message;
 pub mod rfc822;
 pub mod signature_images;

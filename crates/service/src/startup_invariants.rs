@@ -6,7 +6,7 @@
 //! `failed`, or unparseable). Each such marker becomes one
 //! `DirtyAccount` entry; the pass:
 //!
-//! 1. Per dirty account: calls `clear_account_history_id`. This is the
+//! 1. Per dirty account: calls `reset_initial_sync_state`. This is the
 //!    load-bearing repair: the next JMAP delta sync becomes
 //!    initial-style and re-fetches the cached window from the
 //!    provider, repopulating body / inline / search regardless of
@@ -62,7 +62,7 @@ pub enum DirtyStatus {
 
 #[derive(Debug, Default)]
 pub struct InvariantPassStats {
-    pub history_ids_cleared: u64,
+    pub initial_sync_states_reset: u64,
     pub body_orphans_dropped: u64,
     pub inline_orphans_dropped: u64,
     /// Phase 8-2: Tantivy docs whose `messages` row was deleted in a
@@ -159,7 +159,7 @@ pub async fn discover_dirty_accounts(app_data_dir: &Path) -> Vec<DirtyAccount> {
 /// (returns immediately).
 ///
 /// Order:
-/// 1. Per dirty account: clear `history_id`, drop Tantivy orphans
+/// 1. Per dirty account: reset initial-sync state, drop Tantivy orphans
 ///    scoped to that account, unlink marker.
 /// 2. Globally (gated on dirty-account presence): cursor-bounded
 ///    sweeps over body / inline / extracted_text stores. Each store
@@ -222,21 +222,21 @@ pub async fn run_invariant_pass(
             account.status,
         );
 
-        // Clear JMAP cursor (load-bearing).
+        // Reset initial-sync state (load-bearing).
         let aid = account_id.clone();
         match db
-            .with_write(move |conn| ::sync::pipeline::clear_account_history_id(conn, &aid))
+            .with_write(move |conn| ::sync::pipeline::reset_initial_sync_state(conn, &aid))
             .await
         {
-            Ok(()) => stats.history_ids_cleared += 1,
+            Ok(()) => stats.initial_sync_states_reset += 1,
             Err(e) => {
-                log::warn!("invariant pass: clear_account_history_id({account_id}) failed: {e}");
+                log::warn!("invariant pass: reset_initial_sync_state({account_id}) failed: {e}");
             }
         }
 
         // Tantivy orphan iteration scoped to this account. Skipped
         // if the SearchReadState was unavailable at boot - the
-        // history_id-clear plus next initial-style sync still
+        // initial-sync reset plus next initial-style sync still
         // repopulates the index.
         if let Some(search_read) = search_read {
             match drop_search_orphans(db, search_read, search_write, &account_id).await {
@@ -283,9 +283,9 @@ pub async fn run_invariant_pass(
 
     stats.elapsed_ms = started.elapsed().as_millis();
     log::info!(
-        "invariant pass: done in {}ms (history={}, body={}/{}ms, inline={}/{}ms, search={}/{}ms, extract={}/{}ms)",
+        "invariant pass: done in {}ms (initial_sync_reset={}, body={}/{}ms, inline={}/{}ms, search={}/{}ms, extract={}/{}ms)",
         stats.elapsed_ms,
-        stats.history_ids_cleared,
+        stats.initial_sync_states_reset,
         stats.body_orphans_dropped,
         stats.body_scan_ms,
         stats.inline_orphans_dropped,

@@ -3,10 +3,9 @@
 //! Provider-first, local best-effort: each handler dispatches through the
 //! resident bifrost engine's `container_*` primitives, then upserts/deletes
 //! the local `folders` row. The provider-first ordering, the `MutationLog`,
-//! and the outcome taxonomy are unchanged from the legacy `ProviderOps`
-//! handlers - only the dispatch target moved (from
-//! `create_provider(...).create_folder(...)` to
-//! `action_account.engine.container_create(...)`).
+//! and the outcome taxonomy are unchanged from the pre-B6b handlers; only
+//! the dispatch target moved, onto
+//! `action_account.engine.container_create(...)` and its siblings.
 //!
 //! These are the service-side capability; the IPC/app wiring that calls
 //! them from a user gesture is the named out-of-scope follow-up (see

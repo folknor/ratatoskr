@@ -1,8 +1,5 @@
 use serde::Serialize;
 
-use db::db::ReadDbState;
-use db::progress::ProgressReporter;
-
 pub use ::types::{
     FolderKind, GmailSystemLabelId, ImportanceLevel, LabelKind, MailProviderKind,
     NamespaceAttribution, NamespaceKind, SendIntent, SystemFolderId,
@@ -24,54 +21,6 @@ pub struct AutoSyncResult {
     pub affected_thread_ids: Vec<String>,
     pub was_delta: bool,
     pub fell_back_to_initial: bool,
-}
-
-/// Shared context for non-sync, non-action provider operations.
-///
-/// Phase 3 task 5 narrows this from the pre-Phase-3 wide shape (which
-/// also carried `&BodyStoreReadState`, `&InlineImageStoreReadState`,
-/// `&SearchReadState`). Those store handles only ever served sync
-/// methods; the non-sync methods (folder mutations, `fetch_*`,
-/// `list_folders`) never read or
-/// wrote them.
-///
-/// Action methods take `ActionProviderCtx`. This narrow `ProviderCtx`
-/// covers non-action provider calls such as attachment fetches and
-/// provider metadata.
-pub struct ProviderCtx<'a> {
-    pub account_id: &'a str,
-    pub db: &'a ReadDbState,
-    pub progress: &'a dyn ProgressReporter,
-}
-
-/// Narrower context for `ProviderOps` action methods (Phase 2 task 7).
-///
-/// Action methods (`archive`, `trash`, `mark_read`, `star`, `spam`,
-/// `move_to_folder`, `add_label`, `remove_label`, `permanent_delete`) issue
-/// HTTP requests to the provider; the local DB write happens UI-side
-/// (now Service-side after task 9) BEFORE the provider call. They
-/// don't need `body_store` / `inline_images` / `search` - those exist
-/// on `ProviderCtx` for the sync-side consumers. Dropping the unused
-/// fields keeps the action-side ctx narrower and means
-/// service-state's writers stay unreachable through this surface
-/// (the type only carries `&ReadDbState`, which `common` already
-/// depends on).
-pub struct ActionProviderCtx<'a> {
-    pub account_id: &'a str,
-    pub db: &'a ReadDbState,
-    pub progress: &'a dyn ProgressReporter,
-}
-
-// `ProviderFolderEntry` / `ProviderFolderMutation` retired with the
-// `ProviderOps` folder LIST + CRUD surface (B6). The folder/label object
-// path now flows through bifrost's `Container` / `container_*` types.
-
-/// Raw attachment bytes returned by a provider's `fetch_attachment` impl.
-/// Bytes never round-trip through base64 inside the Service.
-#[derive(Debug, Clone)]
-pub struct FetchedAttachment {
-    pub bytes: Vec<u8>,
-    pub size: u64,
 }
 
 /// Provider-agnostic parsed attachment metadata.
@@ -113,26 +62,4 @@ pub struct ProviderParsedMessage {
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
     pub auth_results: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Phase 2 task 16 regression guard: action-side `ProviderCtx`
-    /// does not expose `&SearchReadState`. The action methods on
-    /// `ProviderOps` take `ActionProviderCtx`, and Phase 2
-    /// deliberately defers the Tantivy writer relocation to Phase 3 -
-    /// so any action-time search write would be a type error. The
-    /// destructure below is exhaustive (no `..` rest pattern): a
-    /// future `search` field on `ActionProviderCtx` fails to compile,
-    /// forcing the design conversation.
-    #[allow(dead_code)]
-    fn action_provider_ctx_destructure_is_exhaustive(ctx: &ActionProviderCtx<'_>) {
-        let ActionProviderCtx {
-            account_id: _,
-            db: _,
-            progress: _,
-        } = ctx;
-    }
 }

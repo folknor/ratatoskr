@@ -704,19 +704,10 @@ pub(crate) fn build_consumer_row(
             &message_id,
         );
         thread_id = sync::threading::generate_thread_id(&root);
-        if let (Some(raw), Some(decoded)) = (raw, decoded_imap.as_ref())
-            && let Ok(parsed_imap) = imap::parse::parse_message(
+        if let Some(raw) = raw
+            && let Ok(parsed_imap) = super::imap_mime::parse_message(
                 &MessageParser::default(),
                 raw,
-                decoded.uid,
-                &decoded.folder,
-                u32::try_from(raw.len()).unwrap_or(u32::MAX),
-                flags.contains("$seen"),
-                flags.contains("$flagged"),
-                flags.contains("$answered"),
-                flags.contains("$forwarded"),
-                flags.contains("$draft"),
-                keywords.clone(),
                 message.date.map(system_time_secs),
             )
         {

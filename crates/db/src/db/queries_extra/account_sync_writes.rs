@@ -9,7 +9,6 @@
 
 use rusqlite::params;
 
-use crate::db::from_row::{FromRow, QuerySource, query_one};
 use crate::db::{WriteConn, WriteTarget};
 
 /// Mark every `local_drafts` row whose `sync_status = 'sending'` as `'failed'`.
@@ -23,55 +22,10 @@ pub fn mark_sending_drafts_failed(conn: &impl WriteTarget) -> Result<usize, Stri
     .map_err(|e| format!("mark_sending_drafts_failed: {e}"))
 }
 
-/// Update the `history_id` column on an account and mark initial sync completed.
-///
-/// Used by Gmail and IMAP after a successful sync pass to record the new
-/// history cursor, ensuring the next delta starts from the right point.
-pub fn set_account_history_id(
-    conn: &WriteConn<'_>,
-    account_id: &str,
-    history_id: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
-        params![history_id, account_id],
-    )
-    .map_err(|e| format!("set_account_history_id: {e}"))?;
-    Ok(())
-}
-
-/// Read the current `history_id` for an account.
-///
-/// Returns `Ok(None)` when no history cursor has been stored yet (pre-initial-sync).
-pub fn get_account_history_id(
-    conn: &(impl QuerySource + ?Sized),
-    account_id: &str,
-) -> Result<Option<String>, String> {
-    struct HistoryRow {
-        history_id: Option<String>,
-    }
-
-    impl FromRow for HistoryRow {
-        fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-            Ok(Self {
-                history_id: row.get("history_id")?,
-            })
-        }
-    }
-
-    query_one::<HistoryRow>(
-        conn,
-        "SELECT history_id FROM accounts WHERE id = ?1",
-        &[&account_id],
-    )
-    .map(|row| row.and_then(|row| row.history_id))
-    .map_err(|e| format!("get_account_history_id: {e}"))
-}
-
-/// Mark `initial_sync_completed = 1` for an account without changing `history_id`.
+/// Mark `initial_sync_completed = 1` for an account.
 ///
 /// Used by providers (e.g. IMAP) whose delta cursor lives in a separate
-/// protocol-owned table rather than in the `history_id` column.
+/// protocol-owned cursor store.
 pub fn mark_account_initial_sync_completed(
     conn: &WriteConn<'_>,
     account_id: &str,
@@ -84,16 +38,19 @@ pub fn mark_account_initial_sync_completed(
     Ok(())
 }
 
-/// Clear `history_id` and reset `initial_sync_completed = 0` for an account.
+/// Reset `initial_sync_completed = 0` for an account.
 ///
 /// Forces the next sync cycle to run a full initial sync from scratch.
-pub fn clear_account_sync_state(conn: &WriteConn<'_>, account_id: &str) -> Result<(), String> {
+pub fn clear_account_initial_sync_completed(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+) -> Result<(), String> {
     conn.execute(
-        "UPDATE accounts SET history_id = NULL, initial_sync_completed = 0, \
+        "UPDATE accounts SET initial_sync_completed = 0, \
          updated_at = unixepoch() WHERE id = ?1",
         params![account_id],
     )
-    .map_err(|e| format!("clear_account_sync_state: {e}"))?;
+    .map_err(|e| format!("clear_account_initial_sync_completed: {e}"))?;
     Ok(())
 }
 

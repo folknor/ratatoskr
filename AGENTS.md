@@ -19,14 +19,15 @@ Cargo workspace. Key crates:
 - `label-colors` (`crates/label-colors/`) - Label color resolution + Exchange preset color palette.
 - `types` (`crates/types/`) - Lightweight shared types (`FolderId`, `TagId`, `SidebarSelection`). Minimal deps (serde only).
 - `dev-seed` (`crates/dev-seed/`) - Deterministic test database generator. See dev-seed section below.
-- Providers: `gmail`, `jmap`, `graph`, `imap` - each in `crates/{name}/`.
+
+There are no ratatoskr-owned provider crates. Every mail protocol (Gmail, JMAP, Graph, IMAP) is implemented in the external `bifrost` workspace and reached exclusively through the resident `SyncEngine` from `crates/service/src/bifrost/`; `app` and `rtsk` never depend on a protocol client directly.
 
 ## Required reading
 
 Read the doc before starting work in its area. Subagents launched for these tasks must include the relevant doc in their required-reading list.
 
 - Any UI work - `UI.md` at the repo root.
-- Architectural decisions, crate boundaries, new email actions, generation counters, scope wiring, calendar workflow layering, provider trait additions - `reference/architecture.md`.
+- Architectural decisions, crate boundaries, new email actions, generation counters, scope wiring, calendar workflow layering, bifrost `Account`/`SyncEngine` surface additions - `reference/architecture.md`.
 - Anything touching (email provider) folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync - `reference/glossary/folders-labels.md`.
 - Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface - `reference/glossary/overlay-surfaces.md`.
 - Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service-test`/`service-suite`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
@@ -130,7 +131,10 @@ Never run squeeze against `fixtures/5.pdf`. It's a 220MB PDF that pegs all CPU c
 
 Multiple content stores (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
-Four email providers: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`common/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`common/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider - no raw string boundaries in the action pipeline.
+Mail providers are reached only through the resident bifrost `SyncEngine` and
+its protocol crates. Typed IDs flow from `MailActionIntent` through
+`MailOperation` to bifrost operations; legacy provider crates and `ProviderOps`
+are gone.
 
 Action pipeline: `MailActionIntent → resolve_intent() → build_execution_plan() → batch_execute() → handle_action_completed()`. All 12 action types flow through one path. `MailOperation` (core) is the canonical execution type. `CompletionBehavior` (app) drives toast, auto-advance, and undo via exhaustive match. See `reference/architecture.md` § "Adding a New Email Action" for the checklist.
 
@@ -139,21 +143,6 @@ Generation counters use branded tokens: `GenerationCounter<T>` / `GenerationToke
 Core crate boundary: Business logic belongs in `rtsk`. The app crate calls core functions directly (no command wrappers needed - the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
 
 iced is depended on in 3 places: `crates/app/Cargo.toml` (full iced umbrella), `crates/rte/Cargo.toml` (iced umbrella, optional behind `widget` feature), and `crates/iced-drop/Cargo.toml` (iced_core + iced_widget + iced_runtime individually). All three must point to the same iced source. When switching between the git URL and local path, update all three.
-
-## `jmap-client` crate gotchas
-
-These are non-obvious behaviors of the `jmap-client` crate that will matter if the code is modified:
-
-- Getting all mailboxes: `mailbox_get(id, props)` fetches ONE mailbox. To get all, use the builder: `MailboxGet::new(&account_id)` with no IDs set, submitted via `request.call(get)`. See `sync/mailbox.rs:fetch_all_mailboxes_for()`.
-- `mb.role()` returns `Role` directly (not `Option<Role>`). Compare with `Role::None` to check if unset.
-- `mb.total_emails()` returns `usize` directly, not `Option<usize>`.
-- `take_id()` / `take_list()` require `let mut` on the response object.
-- Filter type inference: Rust can't infer the generic for `Some(filter.into())` in `email_query()`. Bind to an explicit type: `let filter: core::query::Filter<email::query::Filter> = ...;`
-- `download(blob_id)` takes only the blob ID - NOT `(account_id, blob_id, name)`.
-- `email_submission_create(email_id, identity_id)` needs an identity ID, not account ID. Fetch identities via builder pattern.
-- `changes.created()/updated()/destroyed()` return `&[String]`, not `&[&str]`. Use `.map(String::as_str)` not `.copied()`.
-- `fetch_text_body_values(true)` is accessed via `get_req.arguments().fetch_text_body_values(true)`, not directly on the get request.
-- `mailbox_changes(since_state, 0)` - max_changes of 0 is invalid per JMAP spec. Use 500.
 
 ## Encryption
 

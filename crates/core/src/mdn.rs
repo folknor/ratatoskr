@@ -82,10 +82,10 @@ pub fn build_mdn_message(
     raw.into_bytes()
 }
 
-// Server-side `$MDNSent` / `$mdnsent` keyword sync now lives behind
-// `ProviderOps::mark_mdn_sent` in each provider's `ops.rs`. Gmail and
-// Graph have no equivalent (Graph's `isReadReceiptRequested` is
-// read-only); their default trait impl is a no-op.
+// Server-side `$MDNSent` / `$mdnsent` keyword write-back is a Bifrost
+// concern; it is an IMAP/JMAP keyword and Gmail and Graph have no
+// equivalent (Graph's `isReadReceiptRequested` is read-only), so those
+// two protocols are a no-op.
 
 // ---------------------------------------------------------------------------
 // Tests

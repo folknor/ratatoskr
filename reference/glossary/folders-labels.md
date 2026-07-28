@@ -285,6 +285,11 @@ Synthesised `importance:high` / `importance:low` rows in `labels` always carry `
 
 Per-message keyword membership for IMAP and JMAP. Columns: `(account_id, message_id, keyword, label_id)` with PK `(account_id, message_id, label_id)`. The thread-level `kw:%` rows in `thread_labels` are derived from the union of `message_keywords` rows for messages in the thread - this is what makes keyword removal observable. Incoming IMAP and JMAP message changes replace the message's keyword rows, then recompute the thread aggregate from the union. Graph categories are not keyword-shaped and are reconciled through the provider category path instead.
 
+The retired account-wide IMAP keyword-capability flag is gone. Bifrost IMAP
+owns any per-mailbox keyword refusal; ratatoskr does not project that protocol
+verdict into the accounts table. Graph master categories are fetched by the
+resident Graph auxiliary pass through bifrost and persisted as `cat:` labels.
+
 ### `threads` table - message-state columns
 
 - `is_read`, `is_starred`, `is_snoozed`, `is_pinned`, `is_muted` - booleans driving sidebar filters and inline glyphs.

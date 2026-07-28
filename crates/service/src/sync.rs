@@ -211,6 +211,17 @@ impl SyncRuntime {
         self.inner.resident_engine.attach_account(account_id).await
     }
 
+    pub(crate) async fn run_resident_aux_pass_for_test(
+        &self,
+        account_id: &str,
+        initial_sync_completed: bool,
+    ) -> Result<(), String> {
+        self.inner
+            .resident_engine
+            .run_aux_pass_for_test(account_id, initial_sync_completed)
+            .await
+    }
+
     pub async fn detach_resident_account(&self, account_id: &str) -> Result<(), String> {
         self.inner.resident_engine.detach_account(account_id).await
     }

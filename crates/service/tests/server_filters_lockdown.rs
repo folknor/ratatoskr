@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+// `bifrost_jmap::sieve` names BIFROST's own crate since B15e renamed the
+// `bifrost-jmap-new` alias. Deliberate: server filters route through
+// `ServerFilterSurface` over the engine, never a direct JMAP client module.
 const HAND_ROLLED_SIEVE_TOKENS: [&str; 6] = [
     "bifrost_jmap::sieve",
     "SieveScript",
@@ -20,17 +23,13 @@ const ENGINE_FILTER_CALLS: [&str; 5] = [
 #[test]
 fn server_filters_route_through_bifrost() {
     let root = workspace_root();
-    let sieve_module = root.join("crates/jmap/src/sieve.rs");
+    // B15e deleted `crates/jmap` outright, which subsumes the narrower
+    // "no `sieve.rs` / no `pub mod sieve;`" assertions this test used to make.
+    let legacy_jmap = root.join("crates/jmap");
     assert!(
-        !sieve_module.exists(),
-        "{} restores the retired hand-rolled Sieve surface; use ServerFilterSurface instead",
-        sieve_module.display(),
-    );
-
-    let jmap_lib = read(&root.join("crates/jmap/src/lib.rs"));
-    assert!(
-        !jmap_lib.lines().any(|line| line.trim() == "pub mod sieve;"),
-        "crates/jmap/src/lib.rs restores the retired Sieve module; use ServerFilterSurface instead",
+        !legacy_jmap.exists(),
+        "{} restores the legacy JMAP client crate deleted in B15e; server filters route through ServerFilterSurface",
+        legacy_jmap.display(),
     );
 
     let allowed = root.join("crates/service/src/bifrost/server_filters.rs");

@@ -4,6 +4,10 @@ As a general rule, TODO.md items are **removed** when completed.
 
 ## Remaining Work
 
+- [ ] **`gmail-scheduled-send-rejected.lua` seeds the wrong provider string (pre-existing, one-word fix)** - The script seeds `provider = "gmail"` (line 44), but the canonical string is `gmail_api` - what every other Gmail sync-harness script uses and the only Gmail arm `resident.rs::provider_for_account` and `sync.rs`'s dispatch accept. The account therefore fails `run_sync` with `unsupported sync provider: gmail` before any mock contact, and the script's line-54 `expected "completed"` assertion blows up. Confirmed NOT introduced by B15: the diff touches neither the script nor the dispatch's match arms (`sync.rs`'s only change there is an additive test hook). This gate is named as green in the B5 landing notes, so it broke somewhere between B5 and now. Fix is `provider = "gmail_api"`; re-run `brokkr sync crates/app/tests/sync-harness/gmail-scheduled-send-rejected.lua` to confirm the capability gate itself still rejects correctly, which is what the script actually exists to prove.
+
+- [ ] **Pre-existing sync-harness failures: 8 `jmap-*` scripts and 6 `bifrost-consumer-*` frontmatter errors** - Surfaced during B15's step-5 review sweep (`brokkr sync --all`), confirmed NOT caused by B15: two of them were shown to fail identically at `351b220a` via a stash round-trip, so the whole set is inherited, not introduced. Two distinct shapes: (a) eight `jmap-*` scripts failing outright, and (b) six `bifrost-consumer-*` scripts erroring with "no fixture frontmatter" - shape (b) reads like a harness/discovery regression (the frontmatter parser or the fixture header contract), not eight independent script bugs, so diagnose (b) as one cause before treating them as six items. First step is to enumerate the exact script names and the failure text for each (`brokkr sync --all`), which B15 deliberately did not do - it held the item to its own scope rather than chasing an inherited red. Note `graph` was green across the same sweep (32/32) and `service-suite` was 63/63, so this is confined to those two families.
+
 - [ ] **JMAP-Basic and CustomOIDC manual account setup write dead rows (pre-existing)** - Surfaced during B14 (account verify) but out of that item's scope, which excludes `account.create` changes. For `ManualProvider::Jmap` with password auth, `password_auth.rs::handle_submit_credentials` and `identity.rs::build_create_params` (~line 157) both send `jmap_url: None`, so `build_jmap_factory` fails `required_plain("jmap_url", ...)` with `MissingEndpoint` - the account can be neither verified nor synced. Separately, `CustomOidc{Imap,Jmap}` persist `resolved_provider = "oidc:{issuer}"` (`manual_config.rs:143`), which `MailProviderKind::parse` rejects, so those rows also fail the bifrost factory build (this wizard leg is gated/not-live today per the `oauth.rs` dead-code note). B14 verify correctly mirrors create for both (verify fails exactly where create writes a dead row - the intended verify/create parity), so no new divergence was introduced; the durable fix is to resolve/persist a real `jmap_url` on the JMAP-Basic create path and a parseable provider identity for CustomOIDC.
 
 - [ ] **Sidebar scope persistence** - `selected_account` is in-memory state on the iced app model and resets to `None` (All Accounts) on every launch. The previous sidebar problem statement listed two options: persist to SQLite `settings`, or treat "All Accounts" as the launch default. Caution flagged in the original write-up: if persisted, the user needs strong visual context (account name/color in the sidebar header) so they don't fall into a "hidden mode trap" where they're scoped without realizing it and wonder where their email went. Decision deferred.
@@ -147,7 +151,7 @@ Sanitization pipeline, MDN detection, tracking pixel detection, URL cleaning all
 
 ### Cloud Attachments - `docs/roadmap/cloud-attachments.md`
 
-The hand-rolled OneDrive (`gmail/src/gdrive.rs`) and Google Drive (`graph/src/onedrive.rs`) upload code has been deleted (bifrost-migration B9) - it had no production caller. Outgoing hosting now goes through bifrost's capability-gated `Account::host_attachment` (Google -> Drive, Graph -> OneDrive), reached via `AttachmentByteSource::host_large_attachment` in `crates/service/src/bifrost/attachment.rs`, which has no caller yet. `core/cloud_attachments.rs` now holds only incoming-link detection/enrichment (`detect_cloud_links`, `enrich_*_link`) - the upload orchestration it used to hold is gone. Remaining:
+The hand-rolled OneDrive (`gmail/src/gdrive.rs`) and Google Drive (`graph/src/onedrive.rs`) upload code has been deleted (bifrost-migration B9) - it had no production caller. Outgoing hosting now goes through bifrost's capability-gated `Account::host_attachment` (Google -> Drive, Graph -> OneDrive), reached via `AttachmentByteSource::host_large_attachment` in `crates/service/src/bifrost/attachment.rs`, which has no caller yet. `core/cloud_attachments.rs` now holds only the pure incoming-link detectors (`detect_cloud_links`, `extract_gdrive_file_id`, `CloudProvider`) - `enrich_onedrive_link`/`enrich_gdrive_link` and their `GraphClient`/`CloudMetadata` plumbing had no caller either and were deleted at bifrost-migration B15 along with the rest of `core`'s provider-crate deps. Remaining:
 
 - [ ] **Compose UI for cloud attachment flow** - Size threshold detection in compose, prompt to upload to cloud, upload progress indicator, insert link into message body, wired against `AttachmentByteSource::host_large_attachment`.
 - [ ] **Offline upload queue** - Queue uploads when offline, retry when connectivity returns.
@@ -269,16 +273,19 @@ and mirroring any needed upstream fixtures into
 `crates/app/tests/sync-fixtures/`.
 
 - [ ] **Graph shared-mailbox `/users/{id}` mail sync** - Drive
-  Graph sync through `GraphClient::for_shared_mailbox` against a
-  secondary account in `multi-account-small`. Assert shared mailbox
-  folders, messages, attachment metadata, and delta tokens are stored
-  under `shared_mailbox_id` instead of the personal account scope.
+  Graph sync against a secondary account in `multi-account-small` through
+  bifrost's namespaced-container path (the legacy `GraphClient::
+  for_shared_mailbox` this item was written against was deleted at
+  bifrost-migration B15; shared-mailbox Graph sync has been container-owned
+  since B12). Assert shared mailbox folders, messages, attachment metadata,
+  and delta cursors are stored under the shared namespace instead of the
+  personal account scope.
 - [ ] **Graph `/users/{id}` calendar scoping** - Extend the
   shared-mailbox sync harness to cover Graph calendar reads through
   `/v1.0/users/{id}/...`. Assert per-account calendars, events, and
   delta links stay isolated.
 - [x] **Graph master category label sync** - Landed.
-  `graph-categories-small.toml` exercises `graph_label_sync()`
+  `graph-categories-small.toml` exercises the resident Graph auxiliary pass
   through the `graph-master-category-label-sync` script. Sync runs
   via the new initial-sync invocation; `cat:<displayName>` rows land
   with `label_kind = 'tag'`, the correct `account_id`, sort order
@@ -286,10 +293,13 @@ and mirroring any needed upstream fixtures into
   through `label-colors::preset_colors` (preset0/2/15 verified, no
   preset → color_bg/fg null).
 - [ ] **Graph category shared-mailbox path hardening** - Combine
-  master categories with a multi-account fixture. This should drive
-  `graph_label_sync()` to use `GraphClient::api_path_prefix()` instead
-  of hardcoded `/me`, then assert category labels from one mailbox
-  never appear in another mailbox's label set or sidebar scope.
+  master categories with a multi-account fixture. The category-definitions
+  read (`SyncEngine::category_definitions_list`, `service/src/bifrost/aux/
+  graph.rs`) is per-account-scoped through bifrost-graph's own account
+  routing as of bifrost-migration B15 (the legacy `graph_label_sync()` /
+  `GraphClient::api_path_prefix()` hardcoded-`/me` path this item was
+  written against no longer exists); assert category labels from one
+  mailbox never appear in another mailbox's label set or sidebar scope.
 - [x] **Google OAuth token account binding: Gmail** - Landed via
   `gmail-oauth-multi-account`. Two minted tokens against
   `multi-account-small` give each Gmail account its own messages
@@ -467,8 +477,6 @@ The original M1 foundation sketch named these as target surface; the M2-M8 cohor
 Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` or `#[allow(clippy::type_complexity)]` so clippy stays clean. Nothing here is blocking - each is a localized API cleanup that would replace a long arg list or nested-Option tuple with a named struct.
 
 **Replace long arg lists with a params struct:**
-- [ ] `gmail::ops::send_reaction` (9 args) - `crates/gmail/src/ops.rs:429` -> `ReactionMessage` (headers + threading fields)
-- [ ] `imap_delta_sync` (8 args) - `crates/provider-sync/src/imap/imap_delta.rs:43` -> bundle stores/state into a `SyncCtx` struct
 - [ ] `compose::new_reply` (8 args) - `crates/app/src/pop_out/compose/state.rs:253` -> `ReplyContext`
 - [ ] `compose::build_recipient_row_inner` (8 args) - `crates/app/src/pop_out/compose/view.rs:388` -> recipient row params struct (autocomplete + selection state)
 - [ ] `calendar_month::mini_month` (9 args) - `crates/app/src/ui/calendar_month.rs:348` -> navigation params struct

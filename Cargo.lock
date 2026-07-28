@@ -411,68 +411,10 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "435a87a52755b8f27fcf321ac4f04b2802e337c8c4872923137471ec39c37532"
 dependencies = [
- "event-listener 5.4.1",
+ "event-listener",
  "event-listener-strategy",
  "futures-core",
  "pin-project-lite",
-]
-
-[[package]]
-name = "async-channel"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81953c529336010edd6d8e358f886d9581267795c61b19475b71314bffa46d35"
-dependencies = [
- "concurrent-queue",
- "event-listener 2.5.3",
- "futures-core",
-]
-
-[[package]]
-name = "async-channel"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
-dependencies = [
- "concurrent-queue",
- "event-listener-strategy",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-compression"
-version = "0.4.42"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e79b3f8a79cccc2898f31920fc69f304859b3bd567490f75ebf51ae1c792a9ac"
-dependencies = [
- "compression-codecs",
- "compression-core",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
-name = "async-imap"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a6728e0f7931b36d725ac234fcb02539e9f7888dbeaaa8a18d9ea5792181570"
-dependencies = [
- "async-channel 2.5.0",
- "async-compression",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "futures",
- "imap-proto",
- "log",
- "nom 7.1.3",
- "pin-project",
- "pin-utils",
- "self_cell",
- "stop-token",
- "thiserror 1.0.69",
- "tokio",
 ]
 
 [[package]]
@@ -710,24 +652,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bifrost-jmap"
-version = "0.1.0"
-source = "git+file:///home/folk/Programs/jmap-client?rev=b3d207c#b3d207c1c40dd7cc14b65566e83316541a8c5254"
-dependencies = [
- "async-stream",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "futures-util",
- "native-tls",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.29.0",
-]
-
-[[package]]
 name = "bifrost-net"
 version = "0.1.0"
 dependencies = [
@@ -756,7 +680,7 @@ dependencies = [
  "hmac",
  "md-5 0.11.0",
  "pbkdf2",
- "sha1 0.11.0",
+ "sha1",
  "sha2 0.11.0",
  "thiserror 2.0.19",
  "zeroize",
@@ -1378,22 +1302,6 @@ dependencies = [
  "xxhash-rust",
  "zeroize",
 ]
-
-[[package]]
-name = "compression-codecs"
-version = "0.4.38"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2548391e9c1929c21bf6aa2680af86fe4c1b33e6cea9ac1cfeec0bd11218cf"
-dependencies = [
- "compression-core",
- "flate2",
-]
-
-[[package]]
-name = "compression-core"
-version = "0.4.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc14f565cf027a105f7a44ccf9e5b424348421a1d8952a8fc9d499d313107789"
 
 [[package]]
 name = "concurrent-queue"
@@ -2288,12 +2196,6 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
-version = "2.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
-
-[[package]]
-name = "event-listener"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
@@ -2309,7 +2211,7 @@ version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
- "event-listener 5.4.1",
+ "event-listener",
  "pin-project-lite",
 ]
 
@@ -2777,32 +2679,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gmail"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "common",
- "db",
- "futures",
- "hotpath 0.22.0",
- "log",
- "reqwest",
- "rusqlite",
- "search",
- "seen",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "store",
- "sync",
- "tokio",
- "tokio-util",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
 name = "gpu-allocator"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2834,39 +2710,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.13.1",
-]
-
-[[package]]
-name = "graph"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.23.0",
- "calcard",
- "chrono",
- "common",
- "db",
- "futures",
- "getrandom 0.4.3",
- "hotpath 0.22.0",
- "label-colors",
- "log",
- "mail-parser",
- "quick-xml 0.41.0",
- "reqwest",
- "rusqlite",
- "search",
- "seen",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "store",
- "sync",
- "tempfile",
- "tokio",
- "tokio-util",
- "urlencoding",
- "uuid",
 ]
 
 [[package]]
@@ -3681,48 +3524,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09e54e57b4c48b40f7aec75635392b12b3421fa26fe8b4332e63138ed278459c"
 
 [[package]]
-name = "imap"
-version = "0.1.0"
-dependencies = [
- "async-imap",
- "async-trait",
- "base64 0.23.0",
- "chrono",
- "common",
- "db",
- "futures",
- "getrandom 0.4.3",
- "hotpath 0.22.0",
- "log",
- "mail-parser",
- "native-tls",
- "regex",
- "reqwest",
- "rusqlite",
- "search",
- "seen",
- "serde",
- "serde_json",
- "smtp",
- "socket2",
- "store",
- "sync",
- "tokio",
- "tokio-native-tls",
- "tokio-util",
- "xxhash-rust",
-]
-
-[[package]]
-name = "imap-proto"
-version = "0.16.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25f6af35c6a517aea5c72314abe90134980d2ae6a763809b50c208b3e429d71f"
-dependencies = [
- "nom 7.1.3",
-]
-
-[[package]]
 name = "imgref"
 version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3898,36 +3699,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jmap"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.23.0",
- "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
- "chrono",
- "common",
- "db",
- "futures",
- "hotpath 0.22.0",
- "log",
- "mail-parser",
- "native-tls",
- "reqwest",
- "rusqlite",
- "search",
- "seen",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "store",
- "sync",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "tokio-util",
- "uuid",
-]
-
-[[package]]
 name = "jmap-tools"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4094,32 +3865,6 @@ name = "lebe"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
-
-[[package]]
-name = "lettre"
-version = "0.11.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da65617f6cb926332d039cb578aad56178da86e128db6a1b09f4c94fa5b3349"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "email-encoding",
- "email_address",
- "fastrand",
- "futures-io",
- "futures-util",
- "httpdate",
- "idna",
- "mime",
- "native-tls",
- "nom 8.0.0",
- "percent-encoding",
- "quoted_printable",
- "socket2",
- "tokio",
- "tokio-native-tls",
- "url",
-]
 
 [[package]]
 name = "levenshtein_automata"
@@ -5865,36 +5610,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "provider-sync"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
- "chrono",
- "common",
- "db",
- "futures",
- "gmail",
- "graph",
- "imap",
- "jmap",
- "log",
- "rusqlite",
- "search",
- "seen",
- "serde",
- "serde_json",
- "service-state",
- "sha2 0.11.0",
- "store",
- "sync",
- "tempfile",
- "tokio",
- "tokio-util",
- "urlencoding",
-]
-
-[[package]]
 name = "pulp"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6440,7 +6155,6 @@ dependencies = [
  "ammonia",
  "async-trait",
  "base64 0.23.0",
- "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
  "calcard",
  "chrono",
  "cmdk",
@@ -6449,11 +6163,8 @@ dependencies = [
  "flate2",
  "futures",
  "getrandom 0.4.3",
- "gmail",
- "graph",
  "hickory-resolver",
  "hotpath 0.22.0",
- "jmap",
  "label-colors",
  "log",
  "lol_html",
@@ -6469,7 +6180,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "smart-folder",
- "smtp",
  "socket2",
  "store",
  "sync",
@@ -6477,7 +6187,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-native-tls",
- "tokio-tungstenite 0.30.0",
+ "tokio-tungstenite",
  "tokio-util",
  "types",
  "unicode-segmentation",
@@ -6861,8 +6571,7 @@ dependencies = [
  "bifrost-google",
  "bifrost-graph",
  "bifrost-imap",
- "bifrost-jmap 0.1.0",
- "bifrost-jmap 0.1.0 (git+file:///home/folk/Programs/jmap-client?rev=b3d207c)",
+ "bifrost-jmap",
  "bifrost-net",
  "bifrost-sync",
  "bifrost-types",
@@ -6878,17 +6587,12 @@ dependencies = [
  "fs2",
  "futures",
  "futures-util",
- "gmail",
- "graph",
- "imap",
- "jmap",
- "lettre",
+ "label-colors",
  "libc",
  "log",
  "mail-parser",
  "pdf-extract",
  "process-lifetime",
- "provider-sync",
  "quick-xml 0.41.0",
  "reqwest",
  "rtsk",
@@ -6911,6 +6615,7 @@ dependencies = [
  "types",
  "uuid",
  "windows-sys 0.61.2",
+ "xxhash-rust",
  "zip",
 ]
 
@@ -6948,17 +6653,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
 dependencies = [
  "stable_deref_trait",
-]
-
-[[package]]
-name = "sha1"
-version = "0.10.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
 ]
 
 [[package]]
@@ -7203,18 +6897,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
 
 [[package]]
-name = "smtp"
-version = "0.1.0"
-dependencies = [
- "common",
- "hotpath 0.22.0",
- "lettre",
- "log",
- "mail-parser",
- "serde",
-]
-
-[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7302,18 +6984,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "stop-token"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af91f480ee899ab2d9f8435bfdfc14d08a5754bd9d3fef1f1a1c23336aad6c8b"
-dependencies = [
- "async-channel 1.9.0",
- "cfg-if",
- "futures-core",
- "pin-project-lite",
-]
 
 [[package]]
 name = "store"
@@ -7974,20 +7644,6 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
-dependencies = [
- "futures-util",
- "log",
- "native-tls",
- "tokio",
- "tokio-native-tls",
- "tungstenite 0.29.0",
-]
-
-[[package]]
-name = "tokio-tungstenite"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
@@ -7997,7 +7653,7 @@ dependencies = [
  "native-tls",
  "tokio",
  "tokio-native-tls",
- "tungstenite 0.30.0",
+ "tungstenite",
 ]
 
 [[package]]
@@ -8205,23 +7861,6 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
-dependencies = [
- "bytes",
- "data-encoding",
- "http",
- "httparse",
- "log",
- "native-tls",
- "rand 0.9.5",
- "sha1 0.10.7",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "tungstenite"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
@@ -8233,7 +7872,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.10.2",
- "sha1 0.11.0",
+ "sha1",
  "thiserror 2.0.19",
 ]
 
@@ -9537,7 +9176,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "enumflags2",
- "event-listener 5.4.1",
+ "event-listener",
  "futures-core",
  "futures-lite",
  "hex",

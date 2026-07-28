@@ -14,8 +14,6 @@ pub use sync::bundling;
 pub mod db;
 pub mod discovery;
 pub mod generation;
-#[allow(clippy::single_component_path_imports)]
-pub(crate) use graph;
 pub use label_colors;
 pub use store::inline_image_store;
 pub use sync::filters;
@@ -35,7 +33,6 @@ pub mod search_pipeline;
 pub use seen as seen_addresses;
 pub use smart_folder;
 pub mod send_identity;
-pub use smtp;
 pub use sync;
 pub use sync::smart_labels;
 pub use sync::threading;

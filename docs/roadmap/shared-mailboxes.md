@@ -13,8 +13,8 @@
 
 **File-path drift since this doc was written:**
 
-- Shared-mailbox sync orchestration moved to `crates/provider-sync/src/graph/shared_mailbox_sync.rs` (`sync_shared_mailbox`, `sync_all_shared_mailboxes`) during the provider-sync extraction. `crates/graph/src/` no longer contains it.
-- DB tables live in `crates/db/src/db/schema/10_sync.sql` (`graph_shared_mailbox_delta_tokens`, `shared_mailbox_sync_state`) and `crates/db/src/db/schema/02_mail.sql` (`labels.namespace_type` column). `migrations.rs` only carries a top-level comment referencing them - the v51/v54 numbered-migration scheme was replaced by a single v100 schema split across SQL files.
+- Shared-mailbox sync orchestration no longer exists anywhere in ratatoskr. It moved to `crates/provider-sync/src/graph/shared_mailbox_sync.rs` during the provider-sync extraction, then that whole path went caller-free at the bifrost B12 namespace landing (superseded by container-owned discovery), and B15 deleted `crates/provider-sync/` and `crates/graph/` outright along with the dead file.
+- `graph_shared_mailbox_delta_tokens` was dropped from schema at B15 (it had been caller-free since B12). `shared_mailbox_sync_state` was renamed to `shared_mailboxes` at the B12 namespace landing and is the surviving discovery-and-visibility registry (`crates/db/src/db/schema/10_sync.sql`); `crates/db/src/db/schema/02_mail.sql` still carries `labels.namespace_type`. `migrations.rs` only carries a top-level comment referencing them - the v51/v54 numbered-migration scheme was replaced by a single v100 schema split across SQL files.
 - `crates/graph/src/sync.rs` is a single file, not a directory. Earlier references to `graph/src/sync/` are stale.
 - Sidebar code split into `crates/app/src/ui/sidebar/` (subdirectory); the scope dropdown specifically lives in `crates/app/src/ui/sidebar/scope.rs`, sidebar state in `mod.rs`.
 
