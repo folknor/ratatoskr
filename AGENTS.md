@@ -32,7 +32,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 - Architectural decisions, crate boundaries, new email actions, generation counters, scope wiring, calendar workflow layering, bifrost `Account`/`SyncEngine` surface additions - `reference/architecture.md`.
 - Anything touching (email provider) folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync - `reference/glossary/folders-labels.md`.
 - Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface - `reference/glossary/overlay-surfaces.md`.
-- Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service-test`/`service-suite`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
+- Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
 - Any change to `bifrost` or `saehrimnir` (the sibling dependency repos), or any ratatoskr work blocked on one - `docs/side-quests.md`. Read it BEFORE editing anything under `./research/`, `../bifrost`, or `../sæhrimnir`.
 
 ## Rules
@@ -45,7 +45,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 
 ### Behavioral gates
 
-- A green `brokkr check` is necessary but NOT sufficient for anything touching sync, actions, calendar, or contacts. It proves the code compiles and unit tests pass, not that real provider sync still behaves. Changes in those areas name and run the relevant `brokkr service-test` / sync-harness scripts, plus `brokkr sync --bench` where performance is in scope. A change satisfiable by a compile-only replacement is under-gated.
+- A green `brokkr check` is necessary but NOT sufficient for anything touching sync, actions, calendar, or contacts. It proves the code compiles and unit tests pass, not that real provider sync still behaves. Changes in those areas name and run the relevant `brokkr service` / sync-harness scripts, plus `brokkr sync --bench` where performance is in scope. A change satisfiable by a compile-only replacement is under-gated.
 - No parallel hand-rolled dependency may survive alongside a bifrost equivalent. `scripts/b15-audit.sh` mechanically walks every crate's manifest and module tree for dependencies with a bifrost equivalent, modules claiming provider transport duty, and dead `RATATOSKR_TEST_*` consumers. Re-run it after any deletion or dependency work; every flag is either deleted or retained with a stated rationale.
 
 ### Bash rules
@@ -89,12 +89,11 @@ Use `brokkr` (not `cargo`) for check/test. By default output is filtered to chan
 Lua Service harness scripts live under `crates/app/tests/service-harness/`.
 Sync harness scripts live under `crates/app/tests/sync-harness/`.
 
-- `brokkr service-test <SCRIPT>` - run one Service harness script.
-- `brokkr service-test <DIR> -N <N>` - run a cohort directory; `-N`
-  means cohort cycles.
-- `brokkr service-suite [--filter X]` - run the discovered Service
-  harness suite, optionally filtered.
-- `brokkr service-list` - list scripts and parsed frontmatter.
+- `brokkr service` - list discovered scripts and parsed frontmatter.
+- `brokkr service <SCRIPT>` - run one Service harness script. A
+  directory runs that cohort; `-N` means cohort cycles.
+- `brokkr service --all [--filter X]` - run the discovered Service
+  harness suite against one shared build.
 - `brokkr sync` - list discovered sync-harness scripts.
 - `brokkr sync <SCRIPT>` - run one, PASS/FAIL.
 - `brokkr sync --all [--filter X] [--include-ignored]` - run every

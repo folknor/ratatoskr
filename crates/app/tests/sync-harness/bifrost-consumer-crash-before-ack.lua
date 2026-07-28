@@ -6,7 +6,7 @@
 --
 -- The fixture is nominal: this script drives the inject path only and never
 -- talks to the mock. Named because `brokkr sync` discovery requires fixture
--- frontmatter; `brokkr service-test` runs it identically without the mock.
+-- frontmatter; `brokkr service` runs it identically without the mock.
 
 -- This gate proves the durability contract of spec 4.1.3 (ack-last +
 -- the single-txn replay-safety marker) across a TRUE crash-replay: the

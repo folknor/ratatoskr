@@ -26,7 +26,7 @@ the same artifact.
      deterministic unit or in-process integration test can pin (parser,
      encoder, type-level check, serde round-trip, error classification, DB
      query, action-pipeline resolution);
-   - a named `brokkr service-test <script>` (or `brokkr service-suite
+   - a named `brokkr service <script>` (or `brokkr service --all
      [--filter X]`) Lua harness script for Service IO-boundary behavior - boot,
      dispatch, drain, crash, framing - that only a real subprocess exercises;
    - a named `brokkr sync <script> --gate <name> --bench` run, held against its
@@ -76,7 +76,7 @@ the same artifact.
     area-specific required-reading doc from AGENTS.md's required-reading map
     that the spec touches - `reference/glossary/folders-labels.md` for
     folders/labels/`label_kind`/system-folder work, `reference/glossary/harness.md`
-    for any harness, `--test-harness`, service-test, or sync --bench work,
+    for any harness, `--test-harness`, `brokkr service`, or sync --bench work,
     `UI.md` for UI work, and the relevant `docs/<area>/` design doc for a
     feature area. A spec citing these references must direct its reviewers and
     implementers to READ them, not merely name them - they are the ground the
@@ -86,7 +86,7 @@ the same artifact.
     owes the relevant `brokkr sync --bench` gate recorded against its
     `brokkr.toml` baseline (elapsed, provider-request count, peak RSS), so
     correctness AND the named performance budgets are measured axes - gated by
-    `brokkr check`, named `brokkr test` / `brokkr service-test` cases, and the
+    `brokkr check`, named `brokkr test` / `brokkr service` cases, and the
     sync --bench baselines.
 
 ## Stance

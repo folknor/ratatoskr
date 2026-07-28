@@ -6,7 +6,7 @@
 --
 -- The fixture is nominal: this script drives the inject path only and never
 -- talks to the mock. Named because `brokkr sync` discovery requires fixture
--- frontmatter; `brokkr service-test` runs it identically without the mock.
+-- frontmatter; `brokkr service` runs it identically without the mock.
 
 -- This gate proves spec 4.1.3's search-flush-before-ack boundary across a
 -- TRUE reboot: the consumer queues the search docs, COMMITS Tantivy via

@@ -7,7 +7,7 @@
 -- The fixture is nominal: this script drives the inject path only
 -- (test.bifrost_attach + test.bifrost_inject_batch) and never talks to the
 -- mock. It names one anyway because `brokkr sync` discovery requires fixture
--- frontmatter; `brokkr service-test` runs it identically without the mock.
+-- frontmatter; `brokkr service` runs it identically without the mock.
 
 local dir = harness.data_dir("bifrost_consumer_checkpoint_resume")
 local client, err = harness.spawn(dir)

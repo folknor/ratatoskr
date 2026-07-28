@@ -26,14 +26,14 @@ The harness fixes these by making waits deterministic by construction and by pre
 
 ## Brokkr context
 
-Brokkr is a single-binary Rust dev tool, **external to ratatoskr** - its source lives in a separate repository and it is installed via `cargo install --path ~/Programs/brokkr`. It is not a ratatoskr crate, not a workspace member, and not a build dependency. From ratatoskr's side, brokkr is a binary on `$PATH` invoked from any project root. Brokkr reads `./brokkr.toml` to detect the active project and exposes project-gated commands tagged `[ratatoskr]`. The harness commands (`service-test`, `service-list`, `service-suite`, `sync`) are an extension of that surface.
+Brokkr is a single-binary Rust dev tool, **external to ratatoskr** - its source lives in a separate repository and it is installed via `cargo install --path ~/Programs/brokkr`. It is not a ratatoskr crate, not a workspace member, and not a build dependency. From ratatoskr's side, brokkr is a binary on `$PATH` invoked from any project root. Brokkr reads `./brokkr.toml` to detect the active project and exposes project-gated commands tagged `[ratatoskr]`. The harness commands (`service`, `sync`) are an extension of that surface.
 
 ## Brokkr / ratatoskr split
 
 Two repositories. Ratatoskr's `app` crate hosts the Lua VM and the `ServiceClient` userdata bindings (the runtime); brokkr orchestrates from outside (build, spawn, artefact dir, history). Concretely:
 
 ```
-brokkr service-test foo.lua
+brokkr service foo.lua
     |
     +-- builds [ratatoskr.harness].package (defaults: binary=package, dev profile per debug=true)
     +-- allocates .brokkr/ratatoskr/<test>/run-N/ as artefact dir
@@ -250,12 +250,12 @@ The data dir copy, protocol/step trace, and `/proc` snapshot for real subprocess
 ## Brokkr CLI surface
 
 ```
-brokkr service-test <SCRIPT>
-brokkr service-test <SCRIPT> -N 200       # single-script soak
-brokkr service-test <DIR> -N 50           # cohort cycles
-brokkr service-suite [--filter X] [-N 50]
-brokkr service-list
-brokkr sync                                            # list discovered sync-harness scripts
+brokkr service                                          # list discovered scripts + frontmatter
+brokkr service <SCRIPT>                                 # run one, PASS/FAIL
+brokkr service <SCRIPT> -N 200                          # single-script soak
+brokkr service <DIR> -N 50                              # cohort cycles
+brokkr service --all [--filter X] [-N 50]               # run everything against one shared build
+brokkr sync                                             # list discovered sync-harness scripts
 brokkr sync <SCRIPT>                                    # run one, PASS/FAIL
 brokkr sync --all [--filter X] [--include-ignored]      # run every discovered script
 brokkr sync <SCRIPT> --bench [N]                        # measure one (N defaults to 3)
@@ -265,17 +265,33 @@ brokkr sync --gate all --bench [N]                      # sweep every configured
 
 Brokkr does not embed the Lua VM or `ServiceClient`; it never speaks JSON-RPC over the wire.
 
-`brokkr sync` collapsed the former `sync-list` / `sync-smoke` / `sync-bench` three-command
-surface into one, following brokkr's bare-is-an-index convention (like `results`, `man`,
-`deps`): no argument lists, a `SCRIPT` argument runs. The old names are gone, not aliased.
+Both harness commands collapsed a former three-command surface into one, following brokkr's
+bare-is-an-index convention (like `results`, `man`, `deps`): bare lists, a `SCRIPT` argument
+runs, `--all` sweeps. The old names are gone, not aliased.
+
+- `brokkr service` replaced `service-test` / `service-suite` / `service-list` (brokkr
+  `acd89f6`). Flags keep their meanings (`-N`, `--filter`, `--keep-going`,
+  `--include-ignored`, `--keep-artefacts`, `--debug`/`--release`) but are parse-time
+  enforced: run-shape flags require a `SCRIPT` or `--all`, and `--filter` /
+  `--include-ignored` require `--all`. Service runs were never recorded in `results.db`, and
+  artefact layout, ceiling semantics, fixture lifecycle, and the stop-on-first-failure
+  cohort default are all unchanged. Cohort output is ONE line per run -
+  `[cycle c/C][N/total] PASS <name> in Xms` as each script exits; the per-script
+  `running <name>` pre-line and the `harness build ok` echo are gone, so a hung script is
+  silent until its ceiling fires. Use `brokkr lock` from another shell for live progress
+  plus the PID. See `brokkr man service`.
+- `brokkr sync` replaced `sync-list` / `sync-smoke` / `sync-bench`. Its `--all` sweep builds
+  the harness once before the loop (formerly one no-op cargo invocation per script - about a
+  minute of a 160-script sweep) and prints the same one `name: PASS/FAIL` line per script;
+  the exit error names failures without repeating their messages. See `brokkr man sync`.
 
 - `--all [--filter X] [--include-ignored]` is the unmeasured sweep - the sync counterpart to
-  `service-suite`. Discovery walks `[ratatoskr] sync_script_dir` (default
+  `service --all`. Discovery walks `[ratatoskr] sync_script_dir` (default
   `crates/app/tests/sync-harness`). `--filter` substring-matches the discovered script name,
   not its path. Scripts carrying `ignored` frontmatter are skipped unless `--include-ignored`
   is passed. An empty discovery directory, or a `--filter` that matches nothing, is a hard
   error. Each script gets its own run dir, so KEEP-GOING is the default here - the opposite of
-  `service-suite` - because a later script's failure cannot clobber an earlier one's triage
+  `service --all` - because a later script's failure cannot clobber an earlier one's triage
   artefacts. `--all` conflicts with a `SCRIPT` argument and with `--bench` (best-of-N across
   unrelated scripts is meaningless).
 - `--bench [N]` measures one script (bare `--bench` defaults to N=3). `--force` and
