@@ -469,16 +469,14 @@ The Linux equivalents already automate. The harness scripts are platform-agnosti
 
 - [ ] **Per-host baselines for `jmap_steady_state_delta`** - The checked-in baseline map (`brokkr.toml`) is currently single-host (`plantasjen` only). Other contributors or CI hosts that should run the gate need to record their own baseline with `brokkr sync crates/app/tests/sync-harness/jmap-steady-state-delta.lua --gate jmap_steady_state_delta --as-baseline --bench 10` and append the printed line under `[ratatoskr.gate.jmap_steady_state_delta.baseline]`.
 - [ ] **More checked-in gates** - Once a stable benchmark script matters to CI or release decisions, add a `[ratatoskr.gate.<name>]` block to `brokkr.toml` and record per-host baselines. Good candidates: JMAP scripted incremental, IMAP steady-state, Graph calendar remote-delta, CalDAV calendar remote-delta.
-- [ ] **`bifrost-consumer-hot-path`'s `meta.messages_per_second` rule has no
-  throughput floor** - The metric is configured with `min = 0` in
-  `brokkr.toml`, which no measurement can ever breach, so it functions as a
-  presence check (the field exists and is numeric) rather than an actual
-  throughput guarantee. `elapsed_ms` (`max_relative = 1.6`, `max = 2000`) is
-  the only thing on this gate actually guarding against a consumer-drain
-  collapse today. Fix needs either a measured absolute floor (record real
-  `messages_per_second` numbers across a few runs first) or a
-  baseline-relative rule (e.g. `min_relative`) if brokkr's gate-rule set
-  offers one - check upstream before assuming it needs to be added there too.
+- [x] **`bifrost-consumer-hot-path`'s `meta.messages_per_second` rule has no
+  throughput floor** - Resolved with the measured-absolute-floor option:
+  benched 888.9 msg/s best-of-5 (the documented 228-331ms noise band maps to
+  ~604-877), pinned `min = 300` with the rationale in `brokkr.toml`. An
+  absolute floor was preferred over a `min_relative` (existence unverified
+  upstream) because it survives a baseline repin - it cannot be blessed into
+  a regression. Gate re-evaluated PASSED with the floor active, including a
+  run at the slow end of the noise band (649 msg/s).
 
 ### Brokkr polish
 

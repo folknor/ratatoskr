@@ -688,7 +688,13 @@ equal = 0
 max_relative = 1.20
 
 [ratatoskr.gate.bifrost-consumer-hot-path.metrics."meta.messages_per_second"]
-min = 0
+# Measured absolute floor (2026-07-28, plantasjen): best-of-5 gave 888.9 msg/s
+# at 225ms; the documented 228-331ms noise band maps to ~604-877 msg/s. 300
+# sits well below sampling jitter but catches a ~3x throughput collapse, and
+# unlike the baseline-relative elapsed rule it survives a baseline repin - an
+# absolute floor cannot be blessed into a regression. The previous `min = 0`
+# was satisfiable by any number and functioned only as a presence check.
+min = 300
 
 [ratatoskr.gate.bifrost-consumer-hot-path.metrics."meta.marker_rows"]
 # One acked advancing checkpoint leaves exactly one replay-safety marker
