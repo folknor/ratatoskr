@@ -42,8 +42,7 @@
 > bifrost's own `bifrost-jmap` crate. The still-open phases below (session
 > account discovery beyond the owner-email cache, `myRights`/subscription
 > persistence) remain unimplemented UI/DB work, not a hook-location
-> correction. See the B3a-cut-jmap, B3b, and B15 landing commits and
-> `docs/bifrost-migration.md` § 7.
+> correction. See the B3a-cut-jmap, B3b, and B15 landing commits.
 
 - **What**: JMAP's native mechanism for shared mailboxes, delegated access, and permission management. RFC 9670 (published November 2024) defines Principal objects, ShareNotification tracking, and per-mailbox ACLs - all integrated into the protocol rather than bolted on as a separate system.
 - **Scope**: JMAP providers only (primarily Stalwart). The elegant counterpart to Exchange's Autodiscover-based shared mailbox discovery and IMAP's NAMESPACE/ACL extensions.

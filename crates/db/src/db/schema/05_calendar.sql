@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS calendars (
     history_backfilled_at INTEGER,
     -- Set when a successful non-empty discovery omits this calendar. While
     -- stamped the cached calendar is hidden; after seven days it is reaped.
-    -- See docs/bifrost-migration.md B7c.
+    -- Stamp/hide/reap lifecycle lives in crates/calendar/src/sync.rs and
+    -- calendar_contacts_writes.rs; see the B7c landing commit.
     unlisted_since INTEGER,
     UNIQUE(account_id, remote_id)
 );

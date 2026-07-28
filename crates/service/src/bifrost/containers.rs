@@ -13,8 +13,8 @@
 //! hand collapses into the single `FolderRole -> canonical id` table in
 //! `role_to_system_folder_id`; non-system ids keep their glossary
 //! prefixes via `FolderKind`'s per-provider constructors. See
-//! `reference/glossary/folders-labels.md` (the binding contract) and
-//! `docs/bifrost-migration.md` (the B6 landing).
+//! `reference/glossary/folders-labels.md` (the binding contract); for the
+//! rewire itself read the B6 landing commit.
 
 use std::collections::HashMap;
 

@@ -5,8 +5,8 @@
 # The spec-loop edits bifrost ONLY in ratatoskr/research/bifrost - inside the
 # harness root, so Opus agents (and the orchestrator) can write there.
 # research/bifrost and ../bifrost are two clones of the same repo
-# (github.com/folknor/bifrost); the migration keeps them at one shared commit
-# (see docs/bifrost-migration.md section 11). This script is the re-sync: it
+# (github.com/folknor/bifrost), kept at one shared commit
+# (see docs/side-quests.md). This script is the re-sync: it
 # pushes the staged commit from research/bifrost and pulls it into ../bifrost,
 # which is what Cargo actually builds against.
 #

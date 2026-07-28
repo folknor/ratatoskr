@@ -4,6 +4,34 @@ As a general rule, TODO.md items are **removed** when completed.
 
 ## Remaining Work
 
+### Bifrost / saehrimnir follow-ups
+
+Carried out of the bifrost migration when its planning document was retired; each is a side-quest per `docs/side-quests.md`, not a ratatoskr change. None is a regression - all were found and consciously not-fixed during the migration.
+
+- [ ] **bifrost `LiveSupersedes` cold-start de-dup is a no-op** - In `crates/sync/src/engine.rs`, the `LiveSupersedes` set is constructed and threaded onto the backfill handle, but nothing ever calls `.add()`, so `filter_supersedes` filters nothing and cold-start backfill can double-emit an object the live `changes_stream` already announced. Surfaced during the backfill-race investigation; it did not cause that bug (an empty set filters nothing) and every gate passes, but it is a real latent correctness gap. Highest-value item in this group.
+
+- [ ] **bifrost Gmail bulk un-spam leaves the SPAM label** - `move_patch` adds `INBOX` without removing `SPAM` when the bulk destination is INBOX, so a bulk un-spam campaign on Gmail leaves messages labelled SPAM. The singleton path does an explicit add+remove and is unaffected; only the >1 bulk path diverges. Found during B4a.
+
+- [ ] **bifrost JMAP keeps `$draft` on a submitted message** - After `EmailSubmission/set`, `on_success_update_email` rewrites `mailboxIds` to `[Sent]` but never clears `keywords/$draft`, so a sent message shows under BOTH `DRAFT` and `SENT`. Found while building the B5 MDN gates.
+
+- [ ] **bifrost CalDAV hardcodes `pim_methods.event_rsvp = true`** - bifrost-caldav advertises RSVP capability regardless of what RFC 6638 scheduling the server actually supports. A scheduling-less server (no `schedule-outbox-URL`, no calendar-user-address) passes ratatoskr's capability gate and then fails at runtime when bifrost cannot post the iTIP REPLY. Our `ActionOutcome::Failed` mapping covers the UX, so this is not a ratatoskr defect; the durable fix is deriving the flag from discovery.
+
+- [ ] **bifrost CalDAV: one bad propstat aborts the whole pull** - A literal non-2xx propstat inside a 207 makes `parse_multiget_report` return `Err` and abort the entire pull, so `Page.failed_ids` only ever surfaces a resource that fetched 200 but failed to tokenize. A transient whole-collection failure is caught by our empty-pull deletion guard instead, which is why this is tolerable today rather than urgent.
+
+- [ ] **bifrost `owner_email_plan` treats an unresolvable `principalId` as terminal** - No name fallback, so any change that mints a principal id without a matching account silently blanks owner emails rather than degrading. The whole path fails soft, which is precisely what makes this hard to notice.
+
+- [ ] **saehrimnir `dispatch_batch_request` never percent-decodes sub-request URLs** - It parses sub-request URLs by hand. bifrost percent-encodes both the message id and the `/users/{owner}` segment (`shared%40contoso.com`), so a foreign-account batch sub-request misses `fix.account(user)` and 404s. Unreachable with current fixture ids; it will bite the first fixture with a reserved character in an account or message id.
+
+### Ratatoskr follow-ups from the migration
+
+- [ ] **Bulk star never coalesces** - The capability-aware `set_starred` is per-id for any set size, so a large star campaign issues N wire ops where archive/move/delete coalesce into one bulk call via `RemoteBatchKey`. Structural, not a bug: the other three ops route through bulk primitives and star does not.
+
+- [ ] **IMAP single-message Archive/Trash from a non-inbox folder degrades to LocalOnly** - The action resolves `source = INBOX` regardless of the message's actual folder, so the remote leg fails and the op degrades to a retryable LocalOnly. Bounded - a resync reconciles it, and the common archive-from-INBOX and advisory-source MoveToFolder cases are correct - but a user archiving from a custom folder pays a round-trip that silently does nothing remotely.
+
+- [ ] **Gmail multi-message-thread partial-delta sibling scenario is not integration-gated** - A label change on ONE message of a multi-message thread, asserting the OTHER messages' membership survives end to end. Accepted coverage gap, recorded rather than deferred silently: the per-message-recompute resolution makes the partial-batch case correct by construction (the recompute reads every persisted thread message row) and `gmail_consumer_membership_equals_legacy` covers the multi-message union invariant. Closing it needs saehrimnir multi-message-thread grouping plus a single-message history-delta emitter plus a new fixture.
+
+### Other
+
 - [ ] **`gmail-scheduled-send-rejected.lua` seeds the wrong provider string (pre-existing, one-word fix)** - The script seeds `provider = "gmail"` (line 44), but the canonical string is `gmail_api` - what every other Gmail sync-harness script uses and the only Gmail arm `resident.rs::provider_for_account` and `sync.rs`'s dispatch accept. The account therefore fails `run_sync` with `unsupported sync provider: gmail` before any mock contact, and the script's line-54 `expected "completed"` assertion blows up. Confirmed NOT introduced by B15: the diff touches neither the script nor the dispatch's match arms (`sync.rs`'s only change there is an additive test hook). This gate is named as green in the B5 landing notes, so it broke somewhere between B5 and now. Fix is `provider = "gmail_api"`; re-run `brokkr sync crates/app/tests/sync-harness/gmail-scheduled-send-rejected.lua` to confirm the capability gate itself still rejects correctly, which is what the script actually exists to prove.
 
 - [ ] **Pre-existing sync-harness failures: 8 `jmap-*` scripts and 6 `bifrost-consumer-*` frontmatter errors** - Surfaced during B15's step-5 review sweep (`brokkr sync --all`), confirmed NOT caused by B15: two of them were shown to fail identically at `351b220a` via a stash round-trip, so the whole set is inherited, not introduced. Two distinct shapes: (a) eight `jmap-*` scripts failing outright, and (b) six `bifrost-consumer-*` scripts erroring with "no fixture frontmatter" - shape (b) reads like a harness/discovery regression (the frontmatter parser or the fixture header contract), not eight independent script bugs, so diagnose (b) as one cause before treating them as six items. First step is to enumerate the exact script names and the failure text for each (`brokkr sync --all`), which B15 deliberately did not do - it held the item to its own scope rather than chasing an inherited red. Note `graph` was green across the same sweep (32/32) and `service-suite` was 63/63, so this is confined to those two families.

@@ -300,6 +300,27 @@ surface into one, following brokkr's bare-is-an-index convention (like `results`
   still carry `mode = bench`). `gate.db` has no command column, so it needed no migration and
   nothing in it references the old names.
 
+## Reading a moved number
+
+Two rules for interpreting a gate whose measurement has shifted. Both are about
+measurement rather than code, and both were learned by getting them wrong first.
+
+**A request-count regression is not proof of a code regression.** Attribute only
+after running the comparison at the parent commit. A Graph gate once read 4
+against a documented 2 and looked like the same defect as a genuine IMAP
+regression measured the same afternoon; a run at the parent commit measured 4
+there too. The extra pair was the resident auxiliary pass firing five seconds
+after attach, inside the measured window - a script that fenced its window too
+loosely, not a code change. The fix belonged in the script.
+
+**When a gate's `baseline_label` and its measurement disagree, the label is the
+evidence and the measurement is the claim.** `gate.db` holds the numbers but
+lives outside git, so the label is the only durable record of what a metric
+SHOULD read and why. Write labels that say what the number is made of (which
+requests, which window, what is amortized), because that sentence is what a
+future reader has to reason against. Repin a baseline only when you can state
+why the new number is correct - never to make a red gate green.
+
 ## Out of scope
 
 - **Replacing ratatoskr's correctness assertions.** The Lua scripts drive `ServiceClient` methods and assert on returned values; they don't bypass ratatoskr's invariants.

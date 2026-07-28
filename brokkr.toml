@@ -38,6 +38,32 @@ name = "app-no-service-internals"
 from = "app"
 forbid = ["service", "service-state"]
 
+# Bifrost is a SERVICE-side dependency. The app depends on `rtsk` plus the
+# `service-api` wire types only, so any bifrost type that lands in `rtsk` is
+# pulled into the UI build - which is why `rtsk` is fenced as well as `app`.
+# The service-to-app IPC contract is the firewall; `AccountError` and friends
+# never cross it. `action-types` and `cal` DO carry `bifrost-types`, and that
+# is deliberate: it holds the `CalendarAccountOpener` trait that lets the
+# calendar crate open an account without a circular dep on `service`. Those two
+# are therefore absent here on purpose, not by oversight.
+[[dependency_rule]]
+name = "app-no-bifrost"
+from = "app"
+forbid = [
+    "bifrost-types", "bifrost-net", "bifrost-sync", "bifrost-jmap",
+    "bifrost-imap", "bifrost-graph", "bifrost-google", "bifrost-caldav",
+    "bifrost-carddav",
+]
+
+[[dependency_rule]]
+name = "core-no-bifrost"
+from = "rtsk"
+forbid = [
+    "bifrost-types", "bifrost-net", "bifrost-sync", "bifrost-jmap",
+    "bifrost-imap", "bifrost-graph", "bifrost-google", "bifrost-caldav",
+    "bifrost-carddav",
+]
+
 [[dependency_rule]]
 name = "common-stays-leafward"
 from = "common"

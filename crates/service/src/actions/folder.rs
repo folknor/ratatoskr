@@ -8,9 +8,9 @@
 //! `action_account.engine.container_create(...)` and its siblings.
 //!
 //! These are the service-side capability; the IPC/app wiring that calls
-//! them from a user gesture is the named out-of-scope follow-up (see
-//! docs/bifrost-migration.md). They are reachable today only through
-//! the harness test-only request.
+//! them from a user gesture was deliberately left out of scope by the B6
+//! landing (no such request or affordance existed before it either). They
+//! are reachable today only through the harness test-only request.
 
 use std::collections::HashMap;
 

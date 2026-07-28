@@ -22,6 +22,8 @@ Cargo workspace. Key crates:
 
 There are no ratatoskr-owned provider crates. Every mail protocol (Gmail, JMAP, Graph, IMAP) is implemented in the external `bifrost` workspace and reached exclusively through the resident `SyncEngine` from `crates/service/src/bifrost/`; `app` and `rtsk` never depend on a protocol client directly.
 
+Bifrost is a SERVICE-side dependency, and that boundary is machine-enforced by the `app-no-bifrost` / `core-no-bifrost` rules in `brokkr.toml`, not just convention: the app depends on `rtsk` plus `service-api` wire types only, so a bifrost type reaching `rtsk` would be pulled into the UI build. The service-to-app IPC contract is the firewall - `AccountError` never crosses it. `action-types` and `cal` carry `bifrost-types` alone, deliberately, for the `CalendarAccountOpener` seam. Bifrost and the `saehrimnir` mock are sibling repos we own and change ourselves; the procedure for doing so is `docs/side-quests.md`.
+
 ## Required reading
 
 Read the doc before starting work in its area. Subagents launched for these tasks must include the relevant doc in their required-reading list.
@@ -31,6 +33,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 - Anything touching (email provider) folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync - `reference/glossary/folders-labels.md`.
 - Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface - `reference/glossary/overlay-surfaces.md`.
 - Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service-test`/`service-suite`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
+- Any change to `bifrost` or `saehrimnir` (the sibling dependency repos), or any ratatoskr work blocked on one - `docs/side-quests.md`. Read it BEFORE editing anything under `./research/`, `../bifrost`, or `../sæhrimnir`.
 
 ## Rules
 
@@ -39,6 +42,11 @@ Read the doc before starting work in its area. Subagents launched for these task
 - Don't use gremlins! Em-dash, en-dash, strange quotes, whatever - they're all verboten.
 - Don't remind the user of the rules. They wrote them, so they know them.
 - The user can exempt you from any rule at any time.
+
+### Behavioral gates
+
+- A green `brokkr check` is necessary but NOT sufficient for anything touching sync, actions, calendar, or contacts. It proves the code compiles and unit tests pass, not that real provider sync still behaves. Changes in those areas name and run the relevant `brokkr service-test` / sync-harness scripts, plus `brokkr sync --bench` where performance is in scope. A change satisfiable by a compile-only replacement is under-gated.
+- No parallel hand-rolled dependency may survive alongside a bifrost equivalent. `scripts/b15-audit.sh` mechanically walks every crate's manifest and module tree for dependencies with a bifrost equivalent, modules claiming provider transport duty, and dead `RATATOSKR_TEST_*` consumers. Re-run it after any deletion or dependency work; every flag is either deleted or retained with a stated rationale.
 
 ### Bash rules
 
