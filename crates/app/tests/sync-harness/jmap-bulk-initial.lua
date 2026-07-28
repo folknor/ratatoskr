@@ -39,7 +39,11 @@ local state, state_err = client:request("TestQueryDbState", {
 harness.assert(state_err == nil, "TestQueryDbState failed")
 harness.assert_eq(state.message_count, 10001, "message count")
 harness.assert(state.thread_count >= 10001, "thread count")
-harness.assert(state.label_count >= 2, "label count")
+-- Post labels-unification split: JMAP mailboxes land in `folders`, not
+-- `labels`. Both fixture mailboxes are role-bearing (inbox/archive) so they
+-- collapse onto canonical system folder ids; this is a smoke bound - the
+-- 10001 message/thread counts above are the real gate.
+harness.assert(state.folder_count >= 2, "folder count")
 
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
 local mailbox_get_requests = harness.request_count(requests, "jmap", "Mailbox/get")

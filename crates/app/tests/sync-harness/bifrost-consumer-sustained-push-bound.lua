@@ -1,6 +1,12 @@
 -- description: Bifrost resident consumer bounds sustained-push accumulators
 -- expected: pass
+-- fixture: jmap-small.toml
+-- protocol: jmap
 -- ceiling: 120s
+--
+-- The fixture is nominal: this script drives the inject path only and never
+-- talks to the mock. Named because `brokkr sync` discovery requires fixture
+-- frontmatter; `brokkr service-test` runs it identically without the mock.
 
 local dir = harness.data_dir("bifrost_consumer_sustained_push_bound")
 local client, err = harness.spawn(dir)

@@ -1,6 +1,12 @@
 -- description: Bifrost consumer lag-recovery API smoke
 -- expected: pass
+-- fixture: jmap-small.toml
+-- protocol: jmap
 -- ceiling: 60s
+--
+-- The fixture is nominal: this script drives the inject path only and never
+-- talks to the mock. Named because `brokkr sync` discovery requires fixture
+-- frontmatter; `brokkr service-test` runs it identically without the mock.
 --
 -- This gate exercises the INJECT path (test.bifrost_attach + inject + manual
 -- re-attach): it proves no-message-loss / last-safe-cursor across a bounded-

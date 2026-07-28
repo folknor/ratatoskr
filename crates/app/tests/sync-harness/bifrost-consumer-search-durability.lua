@@ -1,6 +1,12 @@
 -- description: Bifrost consumer search durability survives a real Service reboot after ack
 -- expected: pass
+-- fixture: jmap-small.toml
+-- protocol: jmap
 -- ceiling: 90s
+--
+-- The fixture is nominal: this script drives the inject path only and never
+-- talks to the mock. Named because `brokkr sync` discovery requires fixture
+-- frontmatter; `brokkr service-test` runs it identically without the mock.
 
 -- This gate proves spec 4.1.3's search-flush-before-ack boundary across a
 -- TRUE reboot: the consumer queues the search docs, COMMITS Tantivy via

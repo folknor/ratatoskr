@@ -37,8 +37,8 @@ local state, state_err = client:request("TestQueryDbState", {
     message_limit = 20,
 })
 harness.assert(state_err == nil, "TestQueryDbState failed")
-harness.assert_eq(state.message_count, 250, "message count")
-harness.assert(state.thread_count >= 250, "thread count")
+harness.assert_eq(state.message_count, 2600, "message count")
+harness.assert(state.thread_count >= 2600, "thread count")
 
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
 local email_query_requests = harness.request_count(requests, "jmap", "Email/query")

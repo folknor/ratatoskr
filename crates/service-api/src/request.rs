@@ -726,6 +726,7 @@ pub struct TestDbAttachmentRow {
     pub filename: Option<String>,
     pub mime_type: Option<String>,
     pub size: Option<i64>,
+    pub remote_attachment_id: Option<String>,
     pub content_hash: Option<String>,
     pub text_indexed_at: Option<i64>,
     pub extraction_status: Option<String>,

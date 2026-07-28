@@ -38,7 +38,21 @@ local state, state_err = client:request("TestQueryDbState", {
 })
 harness.assert(state_err == nil, "TestQueryDbState failed")
 harness.assert_eq(state.message_count, 1, "message count")
-harness.assert(state.label_count >= 64, "many-folder label count")
+-- Post labels-unification split: JMAP mailboxes land in `folders`, not
+-- `labels`. The 64 bulk_mailboxes are roleless user folders, so they import
+-- as `jmap-mbf-*` folder rows; the seeded system rows alone cannot satisfy
+-- this bound.
+harness.assert(state.folder_count >= 64, "many-folder folder count")
+local imported_with_parent = 0
+for _, folder in ipairs(state.folders) do
+    if folder.parent_id ~= nil then
+        imported_with_parent = imported_with_parent + 1
+    end
+end
+harness.assert(
+    imported_with_parent >= 1,
+    "bulk_mailboxes branching tree imported no parented folder"
+)
 
 local requests = harness.mock_requests(admin_endpoint, { stable = true })
 local mailbox_get_requests = harness.request_count(requests, "jmap", "Mailbox/get")
@@ -51,7 +65,7 @@ harness.assert(email_get_requests >= 1, "JMAP sync did not call Email/get")
 harness.write_summary({
     correct = 1,
     message_count = state.message_count,
-    label_count = state.label_count,
+    folder_count = state.folder_count,
     provider_requests = #requests,
     jmap_mailbox_get_requests = mailbox_get_requests,
     jmap_email_query_requests = email_query_requests,

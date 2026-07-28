@@ -607,6 +607,42 @@ impl ChangeStreamConsumer {
                         // later resident refresh must be able to redeliver it.
                         return Ok(false);
                     }
+                    // A container-object change batch (JMAP drives
+                    // `Type(Mailbox)` as a cursor scope; its items are mailbox
+                    // ObjectChanges). Containers are otherwise only persisted
+                    // at attach, so without this trigger a mailbox created or
+                    // renamed on the server after attach never reaches the
+                    // `folders` table: an EMPTY new mailbox produces no
+                    // message batch, and the unknown-scope refresh above
+                    // therefore never fires for it. The items themselves are
+                    // not hydrated - one `containers_list` re-snapshot is the
+                    // provider-agnostic way to fold them in, and it only costs
+                    // a request when mailbox state actually moved.
+                    if is_container_change_batch(&event.scope, batch.items.len()) {
+                        match containers::sync_containers(
+                            &self.engine,
+                            &self.account_id.0,
+                            &self.stores.db,
+                        )
+                        .await
+                        {
+                            Ok(containers) => {
+                                self.folder_map = containers.folder_map().clone();
+                                self.containers = Some(Arc::new(containers));
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "container refresh for changed bifrost scope {:?} failed: \
+                                     {error}; leaving checkpoint unacked for redelivery",
+                                    event.scope
+                                );
+                                // Mirror the unknown-scope policy: acking would
+                                // advance the mailbox change cursor past the
+                                // only trigger for this refresh.
+                                return Ok(false);
+                            }
+                        }
+                    }
                     HydrateBatch::default()
                 };
                 let attribution = attribution.expect("known attribution was checked above");
@@ -980,6 +1016,17 @@ impl PendingDeletions {
     }
 }
 
+/// True when a batch on `scope` signals container-object (mailbox/folder)
+/// changes that must be folded into the persisted `folders` / `labels` rows
+/// via a `containers_list` re-snapshot. Scope-shape-driven rather than
+/// provider-gated: today only JMAP exposes `Type(Mailbox)` as a cursor scope,
+/// but a provider growing one later gets the refresh for free. Empty batches
+/// (a caught-up `Mailbox/changes` page) must not trigger it - that would turn
+/// every idle delta cycle into a full container re-list.
+fn is_container_change_batch(scope: &CursorScope, item_count: usize) -> bool {
+    item_count > 0 && matches!(scope, CursorScope::Type(ObjectType::Mailbox))
+}
+
 fn is_email_scope(scope: &CursorScope) -> bool {
     // `CursorScope::Folder(_)` is accepted unconditionally rather than gated to
     // the IMAP provider. It is the scope IMAP drives on (the bifrost IMAP
@@ -1071,5 +1118,33 @@ mod tests {
         assert!(is_email_scope(&CursorScope::Folder(FolderId(
             "INBOX".to_string(),
         ))));
+    }
+
+    #[test]
+    fn mailbox_scope_batch_with_items_triggers_container_refresh() {
+        use bifrost_types::ObjectType;
+        assert!(super::is_container_change_batch(
+            &CursorScope::Type(ObjectType::Mailbox),
+            1
+        ));
+    }
+
+    #[test]
+    fn empty_mailbox_scope_batch_does_not_trigger_container_refresh() {
+        use bifrost_types::ObjectType;
+        assert!(!super::is_container_change_batch(
+            &CursorScope::Type(ObjectType::Mailbox),
+            0
+        ));
+    }
+
+    #[test]
+    fn email_scope_batch_never_triggers_container_refresh() {
+        use bifrost_types::ObjectType;
+        assert!(!super::is_container_change_batch(
+            &CursorScope::Type(ObjectType::Email),
+            5
+        ));
+        assert!(!super::is_container_change_batch(&CursorScope::Account, 5));
     }
 }

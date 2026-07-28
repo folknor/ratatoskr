@@ -1,4 +1,10 @@
 -- Bulk fixture with a deliberately slow middle Email/query page.
+--
+-- The count must exceed several multiples of the session's advertised
+-- maxObjectsInGet (saehrimnir hardcodes 500), because bifrost pages
+-- Email/query at that limit. 2600 emails = 6 pages, so the call_index == 3
+-- latency below lands on a genuine MIDDLE page. At the legacy 250 the whole
+-- mailbox fit one page and the slow-page trigger never fired.
 
 fixture({ name = "jmap-slow-paged" })
 
@@ -15,7 +21,7 @@ mailbox({
 })
 
 bulk_emails({
-  count = 250,
+  count = 2600,
   mailbox = "mbx-inbox",
   seed = 71,
   start_at = "2026-01-01T00:00:00Z",

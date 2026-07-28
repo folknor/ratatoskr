@@ -2828,7 +2828,7 @@ fn read_harness_attachments(
                 .prepare(
                     "SELECT a.id, a.account_id, a.message_id, a.filename, a.mime_type,
                             a.size, a.content_hash, a.text_indexed_at,
-                            t.status, t.extracted_text
+                            t.status, t.extracted_text, a.remote_attachment_id
                      FROM attachments a
                      LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash
                      WHERE a.account_id = ?1
@@ -2846,7 +2846,7 @@ fn read_harness_attachments(
                 .prepare(
                     "SELECT a.id, a.account_id, a.message_id, a.filename, a.mime_type,
                             a.size, a.content_hash, a.text_indexed_at,
-                            t.status, t.extracted_text
+                            t.status, t.extracted_text, a.remote_attachment_id
                      FROM attachments a
                      LEFT JOIN attachment_extracted_text t ON t.content_hash = a.content_hash
                      ORDER BY a.account_id ASC, a.message_id ASC, a.id ASC
@@ -3181,6 +3181,7 @@ fn test_db_attachment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Test
         filename: row.get(3)?,
         mime_type: row.get(4)?,
         size: row.get(5)?,
+        remote_attachment_id: row.get(10)?,
         content_hash: row
             .get::<_, Option<db::blob_hash::BlobHash>>(6)?
             .map(|h| h.to_hex()),

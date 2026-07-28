@@ -21,10 +21,12 @@ local function run_sync(client, account_id, label)
     harness.assert_eq(result.result, "completed", result.error or (label .. " sync result"))
 end
 
-local function label_by_id(state, id)
-    for _, label in ipairs(state.labels) do
-        if label.id == id then
-            return label
+-- Post labels-unification split: JMAP mailboxes land in `folders`, not
+-- `labels`.
+local function folder_by_id(state, id)
+    for _, folder in ipairs(state.folders) do
+        if folder.id == id then
+            return folder
         end
     end
     return nil
@@ -82,13 +84,13 @@ harness.assert(created.created ~= nil, "mailbox create missing created map")
 harness.assert(created.created.scratch ~= nil, "mailbox create missing scratch result")
 local remote_id = created.created.scratch.id
 harness.assert(remote_id ~= nil, "created mailbox missing server id")
-local label_id = "jmap-" .. remote_id
+local folder_id = "jmap-" .. remote_id
 
 run_sync(client, account.account_id, "delta secondary create")
 local after_create = query_state(client, account.account_id, "after mailbox create")
-local label = label_by_id(after_create, label_id)
-harness.assert(label ~= nil, "created mailbox label missing")
-harness.assert_eq(label.name, "Secondary Scratch", "created mailbox label name")
+local folder = folder_by_id(after_create, folder_id)
+harness.assert(folder ~= nil, "created mailbox folder missing")
+harness.assert_eq(folder.name, "Secondary Scratch", "created mailbox folder name")
 
 local renamed = jmap_call(jmap_endpoint, "Mailbox/set", {
     accountId = "account-secondary",
@@ -102,17 +104,17 @@ harness.assert(renamed.updated ~= nil, "mailbox rename missing updated map")
 
 run_sync(client, account.account_id, "delta secondary rename")
 local after_rename = query_state(client, account.account_id, "after mailbox rename")
-local renamed_label = label_by_id(after_rename, label_id)
-harness.assert(renamed_label ~= nil, "renamed mailbox label missing")
-harness.assert_eq(renamed_label.name, "Renamed Secondary Scratch", "renamed mailbox label name")
-harness.assert_eq(after_rename.label_count, before.label_count + 1, "label count after rename")
+local renamed_folder = folder_by_id(after_rename, folder_id)
+harness.assert(renamed_folder ~= nil, "renamed mailbox folder missing")
+harness.assert_eq(renamed_folder.name, "Renamed Secondary Scratch", "renamed mailbox folder name")
+harness.assert_eq(after_rename.folder_count, before.folder_count + 1, "folder count after rename")
 
 harness.write_summary({
     correct = 1,
     target_account = "account-secondary",
     remote_mailbox_id = remote_id,
-    local_label_id = label_id,
-    label_count = after_rename.label_count,
+    local_folder_id = folder_id,
+    folder_count = after_rename.folder_count,
 })
 
 local ok, shutdown_err = client:shutdown()
