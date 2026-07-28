@@ -90,6 +90,33 @@ harness.assert(
     "initial sync did not mark account completed"
 )
 
+-- The resident auxiliary pass (Gmail SendAs import etc.) fires
+-- RESIDENT_AUX_INITIAL_DELAY (5s) after attach - AFTER this script's clear
+-- point. Without this quiesce the script passed only because its whole run
+-- finished before the 5s tick; any slowdown pushing the measured window past
+-- 5s counted aux requests against the max_delta = 0 budget. Wait out the aux
+-- start, then wait for the request log to go quiet, so the window below
+-- measures the delta kick and nothing else.
+harness.sleep(6000)
+local quiesce = #harness.mock_requests(admin_endpoint)
+for _ = 1, 20 do
+    harness.sleep(500)
+    local now = #harness.mock_requests(admin_endpoint)
+    if now == quiesce then
+        break
+    end
+    quiesce = now
+end
+
+-- Re-snapshot AFTER the aux pass settled: the aux writes rows (imported
+-- SendAs signatures etc.) the pre-aux snapshot does not have, and the delta
+-- comparison below must be against the settled state, not the mid-boot one.
+local baseline, baseline_err = client:request("TestQueryDbState", {
+    account_id = account.account_id,
+    message_limit = 10,
+})
+harness.assert(baseline_err == nil, "TestQueryDbState after aux quiesce failed")
+
 harness.clear_mock_requests(admin_endpoint)
 
 harness.marker("SYNC_START")
@@ -119,9 +146,9 @@ local after_delta, after_delta_err = client:request("TestQueryDbState", {
     message_limit = 10,
 })
 harness.assert(after_delta_err == nil, "TestQueryDbState after delta sync failed")
-harness.assert_eq(after_delta.message_count, after_initial.message_count, "delta message count")
-harness.assert_eq(after_delta.thread_count, after_initial.thread_count, "delta thread count")
-harness.assert_eq(after_delta.label_count, after_initial.label_count, "delta label count")
+harness.assert_eq(after_delta.message_count, baseline.message_count, "delta message count")
+harness.assert_eq(after_delta.thread_count, baseline.thread_count, "delta thread count")
+harness.assert_eq(after_delta.label_count, baseline.label_count, "delta label count")
 local delta_account = account_by_id(after_delta, account.account_id)
 harness.assert(delta_account ~= nil, "account missing after delta sync")
 harness.assert(delta_account.initial_sync_completed, "delta cleared initial sync flag")
