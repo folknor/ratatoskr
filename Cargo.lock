@@ -537,9 +537,8 @@ dependencies = [
  "bifrost-types",
  "bytes",
  "caldata",
- "chrono",
- "chrono-tz",
  "futures",
+ "jiff",
  "quick-xml 0.41.0",
  "reqwest",
  "uuid",
@@ -569,8 +568,8 @@ dependencies = [
  "bifrost-net",
  "bifrost-types",
  "bytes",
- "chrono",
  "futures",
+ "jiff",
  "reqwest",
  "serde",
  "serde_json",
@@ -588,9 +587,9 @@ dependencies = [
  "bifrost-net",
  "bifrost-types",
  "bytes",
- "chrono",
  "futures",
  "getrandom 0.4.3",
+ "jiff",
  "quick-xml 0.41.0",
  "reqwest",
  "serde",
@@ -612,11 +611,10 @@ dependencies = [
  "bifrost-smtp",
  "bifrost-types",
  "bytes",
- "chrono",
- "encoding_rs",
  "flate2",
  "futures",
  "getrandom 0.4.3",
+ "jiff",
  "native-tls",
  "nom 8.0.0",
  "socket2",
@@ -637,9 +635,9 @@ dependencies = [
  "bifrost-net",
  "bifrost-types",
  "bytes",
- "chrono",
  "futures",
  "http",
+ "jiff",
  "native-tls",
  "percent-encoding",
  "reqwest",
@@ -649,6 +647,7 @@ dependencies = [
  "tokio-native-tls",
  "tokio-util",
  "tokio-websockets",
+ "tracing",
 ]
 
 [[package]]
@@ -721,9 +720,9 @@ dependencies = [
  "bifrost-net",
  "bifrost-types",
  "bytes",
- "chrono",
  "dashmap",
  "futures",
+ "jiff",
  "thiserror 2.0.19",
  "tokio",
  "tokio-util",
@@ -737,7 +736,9 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.0",
  "bytes",
+ "encoding_rs",
  "futures",
+ "jiff",
  "serde",
  "thiserror 2.0.19",
  "tracing",
@@ -7692,9 +7693,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.3+spec-1.1.0"
+version = "1.1.4+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53c96ecdfa941c8fc4fcaed14f99ada8ebed502eef533015095a07e3301d4c3c"
+checksum = "3aace63f4bbcdfc2c965b059de67119c89c4017a70d633be6c104910f67056f5"
 dependencies = [
  "indexmap",
  "serde_core",

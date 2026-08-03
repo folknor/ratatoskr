@@ -200,17 +200,16 @@ pub(crate) fn factory_from_decrypted(
                 .ok()
                 .map(|base| format!("{}/v1.0", base.trim_end_matches('/')))
                 .unwrap_or_else(|| "https://graph.microsoft.com/v1.0".to_string());
-            let graph_beta = std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT")
-                .ok()
-                .map(|base| format!("{}/beta", base.trim_end_matches('/')))
-                .unwrap_or_else(|| "https://graph.microsoft.com/beta".to_string());
+            // GraphClient takes a single v1.0 api base now and derives the
+            // sibling bases from it internally, so the separately-constructed
+            // beta base this used to thread through is gone rather than moved.
             let client = if std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT").is_ok() {
                 let access_token =
                     decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
-                GraphClient::with_api_bases(graph_base, graph_beta, access_token)
+                GraphClient::with_api_base(graph_base, access_token)
             } else {
                 let source = decrypted.token_source(provider, token_mode)?;
-                GraphClient::with_source(graph_base, graph_beta, source)
+                GraphClient::with_source(graph_base, source)
             };
             let mut factory = GraphAccountFactory::new(client);
             if let Ok(webhook_url) = std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL") {

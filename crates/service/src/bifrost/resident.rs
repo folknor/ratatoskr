@@ -223,7 +223,7 @@ impl ResidentEngine {
                         .engine()
                         .account_capabilities(&AccountId(account_id.to_string()))
                         .ok()
-                        .map(|capabilities| capabilities.foreign_namespaces_advertised);
+                        .map(|capabilities| capabilities.reopen_discovers_foreign_namespaces);
                     should_rebuild_slot_on_kick(provider, advertised)
                 }
                 None => false,
@@ -668,16 +668,32 @@ impl ResidentEngine {
 ///
 /// Only IMAP: it discovers foreign folders exclusively at open and emits
 /// no scope-lifecycle events, so a post-attach ACL grant becomes visible
-/// only through a reattach. And only when the server advertised a foreign
-/// namespace at open - without one, a grant can never surface a folder
-/// and the reattach is pure per-kick wire waste. An unreadable capability
-/// snapshot (`None`) fails toward rebuilding: correctness (a reachable
-/// grant) beats the redundant round trips.
+/// only through a reattach. And only when a reopen could actually surface
+/// one - otherwise a grant can never appear and the reattach is pure
+/// per-kick wire waste. An unreadable capability snapshot (`None`) fails
+/// toward rebuilding: correctness (a reachable grant) beats the redundant
+/// round trips.
+///
+/// The capability read here is bifrost's `reopen_discovers_foreign_namespaces`,
+/// which replaced the older `foreign_namespaces_advertised`. The rename is not
+/// cosmetic - the new flag is discovery POTENTIAL rather than observed
+/// membership, so an IMAP account with zero shares today still reports `true`
+/// when a later grant would surface at the next open. That is the question this
+/// function actually wants answered. IMAP refines it with its NAMESPACE
+/// response (personal-only means `false`), which is exactly the "without one, a
+/// grant can never surface" condition the provider gate below used to
+/// approximate on its own.
+///
+/// The `BifrostProviderKind::Imap` gate stays regardless: JMAP is
+/// constitutively `true` for this capability (any RFC 8620 session may list a
+/// foreign account tomorrow), so keying off the flag alone would reattach a
+/// JMAP account on every single kick.
 fn should_rebuild_slot_on_kick(
     provider: BifrostProviderKind,
-    foreign_namespaces_advertised: Option<bool>,
+    reopen_discovers_foreign_namespaces: Option<bool>,
 ) -> bool {
-    matches!(provider, BifrostProviderKind::Imap) && foreign_namespaces_advertised.unwrap_or(true)
+    matches!(provider, BifrostProviderKind::Imap)
+        && reopen_discovers_foreign_namespaces.unwrap_or(true)
 }
 
 fn push_subscribe_scopes(

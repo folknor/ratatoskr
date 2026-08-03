@@ -303,10 +303,10 @@ pub(super) async fn bifrost_factory_open_handle(
         .open(bifrost_types::AccountId(params.account_id.clone()))
         .await
     {
-        Ok(account) => serde_json::to_value(TestBifrostFactoryOpenAck {
+        Ok(opened) => serde_json::to_value(TestBifrostFactoryOpenAck {
             account_id: params.account_id,
             opened: true,
-            capability_debug: Some(format!("{:?}", account.capabilities())),
+            capability_debug: Some(format!("{:?}", opened.account.capabilities())),
             failure_kind: None,
             provider_message: None,
             diagnostic_debug: None,

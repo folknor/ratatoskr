@@ -94,11 +94,11 @@ impl CalendarAccountOpener for ServiceCalendarAccountOpener {
         let Some(factory) = factory else {
             return Ok(None);
         };
-        let account = factory
+        let opened = factory
             .open(AccountId(account_id.to_string()))
             .await
             .map_err(|e| ActionError::remote(e.to_string()))?;
-        Ok(Some((account, kind)))
+        Ok(Some((opened.account, kind)))
     }
 }
 

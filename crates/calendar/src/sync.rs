@@ -72,10 +72,16 @@ async fn sync_bifrost_calendar_account(
     cancellation_token: &CancellationToken,
     mutated: &mut bool,
 ) -> Result<(), String> {
-    let account = factory
+    let opened = factory
         .open(AccountId(account_id.to_string()))
         .await
         .map_err(|error| error.to_string())?;
+    // `AccountFactory::open` now returns an `OpenedAccount` envelope rather than
+    // a bare handle. `skipped_scopes` names surface the open discovered but could
+    // not bring up (a shared calendar whose probe failed); it is not consulted
+    // here because calendar sync targets are re-derived from `calendars_list`
+    // below, which already omits anything that did not open.
+    let account = opened.account;
     if !account.capabilities().pim_methods.calendars_list
         || !account.capabilities().pim_methods.events_in_range
     {

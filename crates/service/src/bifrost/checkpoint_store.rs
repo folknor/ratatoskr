@@ -158,6 +158,42 @@ impl CheckpointStore for SqliteCheckpointStore {
                 .await
         })
     }
+
+    /// Durable side of the engine's `SchemaIncompatible` recovery. Drops EVERY
+    /// backfill row for `(account, scope)` - the `BACKFILL_COMPLETION_PARTITION`
+    /// marker included, not just the in-progress partitions. The marker is the
+    /// row that makes the next attach skip the inventory re-walk, and the
+    /// re-walk is the only thing that re-mints ids under the new schema, so
+    /// leaving it behind would pin the consumer to the disowned ids forever.
+    ///
+    /// Scoped strictly to the one `scope_key`: other scopes on the same account
+    /// keep their backfill progress, since a schema bump on one scope says
+    /// nothing about the rest. Routine `RestartScope` recovery deliberately does
+    /// NOT reach this method - see `delete_change_cursor` for that path.
+    fn delete_backfill<'a>(
+        &'a self,
+        account: &'a AccountId,
+        scope: &'a CursorScope,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let scope_key = scope_to_key(scope)?;
+            let account_id = account.0.clone();
+            self.writer
+                .with_write_mapped(
+                    move |conn| {
+                        conn.execute(
+                            "DELETE FROM sync_cursors
+                             WHERE account_id = ?1 AND kind = 'backfill' AND scope_key = ?2",
+                            params![account_id, scope_key],
+                        )
+                        .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        Ok(())
+                    },
+                    Error::CheckpointStore,
+                )
+                .await
+        })
+    }
 }
 
 async fn upsert_checkpoint(
@@ -540,6 +576,65 @@ mod tests {
                 .expect("completion checkpoint"),
             &complete_lower_progress,
         );
+
+        remove_test_dir(dir);
+    }
+
+    /// Mirrors bifrost's `delete_backfill_drops_every_partition_for_the_scope_only`.
+    /// Both halves matter: every partition for the target scope goes (including
+    /// the completion marker, which is what would otherwise skip the id-re-minting
+    /// inventory walk), and no other scope on the same account is touched.
+    #[tokio::test]
+    async fn delete_backfill_drops_every_partition_for_the_scope_only() {
+        let (writer, reader, dir) = test_dbs("delete-backfill");
+        seed_account(&writer, "acct-a").await;
+        let store = SqliteCheckpointStore::new(writer.clone(), reader);
+        let account = AccountId("acct-a".to_string());
+        let target = CursorScope::Folder(FolderId("folder-a".to_string()));
+        let bystander = CursorScope::Folder(FolderId("folder-b".to_string()));
+
+        for partition in [
+            b"A".to_vec(),
+            b"B".to_vec(),
+            BACKFILL_COMPLETION_PARTITION.to_vec(),
+        ] {
+            store
+                .put_backfill(
+                    &account,
+                    backfill_checkpoint(target.clone(), partition, 5, None),
+                )
+                .await
+                .expect("put target partition");
+        }
+        let survivor = backfill_checkpoint(bystander.clone(), b"A".to_vec(), 7, None);
+        store
+            .put_backfill(&account, survivor.clone())
+            .await
+            .expect("put bystander partition");
+        assert_eq!(count_rows(&writer, "backfill", "acct-a").await, 4);
+
+        store
+            .delete_backfill(&account, &target)
+            .await
+            .expect("delete backfill");
+
+        assert!(
+            store
+                .get_backfill(&account, &target)
+                .await
+                .expect("get target after delete")
+                .is_none(),
+            "completion marker and every partition for the scope must be gone"
+        );
+        assert_backfill_eq(
+            &store
+                .get_backfill(&account, &bystander)
+                .await
+                .expect("get bystander after delete")
+                .expect("bystander scope must survive"),
+            &survivor,
+        );
+        assert_eq!(count_rows(&writer, "backfill", "acct-a").await, 1);
 
         remove_test_dir(dir);
     }

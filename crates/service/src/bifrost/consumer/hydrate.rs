@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
-    AccountId, BlobHandle, Change, HydrationProjection, Importance, Message, ObjectChangeKind,
-    ObjectId, ScopeChangeKind, SyncEvent,
+    AccountId, AttachmentSource, BlobHandle, Change, HydrationProjection, Importance, Message,
+    MessageAttachment, ObjectChangeKind, ObjectId, ScopeChangeKind, SyncEvent,
 };
 use common::rfc822::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use common::types::{
@@ -628,10 +628,20 @@ pub(crate) fn build_consumer_row(
         .attachments
         .iter()
         .enumerate()
-        .map(|(index, blob)| {
+        .filter_map(|(index, attachment)| {
+            // Keyless (non-`Blob`) sources are skipped rather than synthesized
+            // an id - see `attachment_blob`. Warn so the skip is visible in
+            // logs instead of presenting as a silently missing attachment row.
+            let Some(blob) = attachment_blob(attachment) else {
+                log::warn!(
+                    "attachment {index} on message {message_id} has no fetchable blob \
+                     (source carries no id); no attachment row written"
+                );
+                return None;
+            };
             let detail = parsed_attachments.get(index);
             let remote_attachment_id = remote_attachment_id(provider, &blob.id.0);
-            AttachmentInsertRow {
+            Some(AttachmentInsertRow {
                 id: format!("{}_{}", message_id, blob.id.0),
                 message_id: message_id.clone(),
                 account_id: account_id.0.clone(),
@@ -640,23 +650,24 @@ pub(crate) fn build_consumer_row(
                     .or_else(|| Some(blob.id.0.clone())),
                 mime_type: detail
                     .map(|d| d.mime_type.clone())
-                    .or_else(|| blob.content_type.clone()),
+                    .or_else(|| attachment.content_type.clone()),
                 size: detail
                     .map(|d| d.size)
-                    .or_else(|| blob.size.and_then(|size| i64::try_from(size).ok())),
+                    .or_else(|| attachment.size.and_then(|size| i64::try_from(size).ok())),
                 remote_attachment_id: Some(remote_attachment_id),
                 blob_id: Some(blob.id.0.clone()),
                 content_hash: inline_hashes.get(&blob.id.0).map(|entry| entry.0),
                 content_id: detail.and_then(|d| d.content_id.clone()),
                 is_inline: detail.map_or_else(
                     || {
-                        blob.content_type
+                        attachment
+                            .content_type
                             .as_deref()
                             .is_some_and(|mime| mime.starts_with("image/"))
                     },
                     |d| d.is_inline,
                 ),
-            }
+            })
         })
         .collect::<Vec<_>>();
     let mut inline_images = inline_hashes
@@ -1040,14 +1051,37 @@ async fn fetch_raw_rfc822(
 /// the caller can back-fill `attachments.content_hash` (legacy parity); a
 /// blob is downloaded at most once per message so duplicate attachment rows
 /// pointing at the same blob share a single download and the same hash.
+/// The fetchable blob behind an attachment, when the provider offered one.
+///
+/// `MessageAttachment::source` replaced the bare `BlobHandle` this consumer
+/// used to be handed. Only the `Blob` arm carries an id, and that id is what
+/// keys BOTH inline-image dedup and `attachments.content_hash` - so the other
+/// arms have no key at all rather than a different one. They are skipped by
+/// every caller here instead of being given a synthesized id, because a
+/// synthesized key would silently split or collide dedup entries. Settling
+/// whether the mail protocols ever return a non-`Blob` source (and hashing the
+/// carried bytes directly if they do) is tracked in TODO.md.
+fn attachment_blob(attachment: &MessageAttachment) -> Option<&BlobHandle> {
+    match &attachment.source {
+        AttachmentSource::Blob(handle) => Some(handle),
+        // `AttachmentSource` is `#[non_exhaustive]`, so this arm also absorbs
+        // future variants - all of which are equally keyless until proven
+        // otherwise.
+        _ => None,
+    }
+}
+
 async fn hydrate_inline_images(
     engine: &SyncEngine,
     account_id: &AccountId,
-    blobs: &[BlobHandle],
+    attachments: &[MessageAttachment],
 ) -> Result<HashMap<String, (db::blob_hash::BlobHash, InlineImage)>, bifrost_sync::Error> {
     let mut images: HashMap<String, (db::blob_hash::BlobHash, InlineImage)> = HashMap::new();
-    for blob in blobs {
-        let Some(mime_type) = blob.content_type.as_ref() else {
+    for attachment in attachments {
+        let Some(blob) = attachment_blob(attachment) else {
+            continue;
+        };
+        let Some(mime_type) = attachment.content_type.as_ref() else {
             continue;
         };
         if !mime_type.starts_with("image/") {
@@ -1493,6 +1527,7 @@ pngbytes\r\n\
             size_bytes: Some(raw.len() as u64),
             in_reply_to: None,
             references: Vec::new(),
+            incomplete: false,
         };
         let mut folder_map = HashMap::new();
         folder_map.insert(
@@ -1658,6 +1693,7 @@ pngbytes\r\n\
             size_bytes: None,
             in_reply_to: None,
             references: Vec::new(),
+            incomplete: false,
         };
         let folder_map = HashMap::from([(
             "graph-inbox-native".to_string(),
@@ -1727,6 +1763,7 @@ pngbytes\r\n\
             size_bytes: None,
             in_reply_to: None,
             references: Vec::new(),
+            incomplete: false,
         };
         let folder_map = HashMap::from([
             (

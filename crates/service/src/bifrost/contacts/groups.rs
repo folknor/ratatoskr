@@ -412,6 +412,7 @@ mod tests {
             next_cursor: next.map(|cursor| cursor.as_bytes().to_vec()),
             estimated_total: None,
             failed_ids: Vec::new(),
+            skipped_scopes: Vec::new(),
         }
     }
 

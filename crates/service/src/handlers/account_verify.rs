@@ -51,8 +51,8 @@ pub(crate) async fn handle_verify_account(
     };
     let synthetic_id = AccountId(format!("verify-{}", uuid::Uuid::new_v4()));
     match factory.open(synthetic_id).await {
-        Ok(account) => {
-            let _ = account.close().await;
+        Ok(opened) => {
+            let _ = opened.account.close().await;
             ack(true, None)
         }
         Err(error) => ack(

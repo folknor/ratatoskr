@@ -129,8 +129,8 @@ pub(crate) async fn handle_exchange_code(
         let synthetic_id =
             bifrost_types::AccountId(format!("reauth-verify-{}", uuid::Uuid::new_v4()));
         match factory.open(synthetic_id).await {
-            Ok(account) => {
-                let _ = account.close().await;
+            Ok(opened) => {
+                let _ = opened.account.close().await;
             }
             Err(error) => {
                 log::warn!(

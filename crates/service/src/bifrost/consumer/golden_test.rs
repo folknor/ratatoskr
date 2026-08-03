@@ -23,8 +23,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bifrost_types::{
-    AccountId, Address, BlobCapabilities, BlobEncoding, BlobHandle, BlobId, ContainerId,
-    Importance, Message, ObjectId, ThreadId,
+    AccountId, Address, AttachmentSource, BlobCapabilities, BlobEncoding, BlobHandle, BlobId,
+    ContainerId, Importance, Message, MessageAttachment, ObjectId, ThreadId,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -160,6 +160,25 @@ fn blob_handle(blob: &InputBlob) -> BlobHandle {
     }
 }
 
+/// Wrap a fixture blob in the post-reshape attachment envelope.
+///
+/// `filename` / `content_id` / `inline` stay unset on purpose: the fixtures
+/// only ever supplied an id and a content type, and `build_consumer_row` still
+/// recovers those three from the RFC822 re-parse. Populating them here would
+/// pre-empt the very pairing this golden test exists to pin. See the
+/// ordinal-pairing item in TODO.md.
+fn message_attachment(blob: &InputBlob) -> MessageAttachment {
+    MessageAttachment {
+        filename: None,
+        content_type: blob.content_type.clone(),
+        content_id: None,
+        inline: false,
+        size: None,
+        source: AttachmentSource::Blob(blob_handle(blob)),
+        truncated: false,
+    }
+}
+
 fn build_message(input: &InputMessage) -> (Message, Vec<u8>) {
     let raw = input.raw_lines.join("\r\n").into_bytes();
     let message = Message {
@@ -185,10 +204,11 @@ fn build_message(input: &InputMessage) -> (Message, Vec<u8>) {
         },
         body_text: None,
         body_html: None,
-        attachments: input.blobs.iter().map(blob_handle).collect(),
+        attachments: input.blobs.iter().map(message_attachment).collect(),
         size_bytes: Some(raw.len() as u64),
         in_reply_to: None,
         references: Vec::new(),
+        incomplete: false,
     };
     (message, raw)
 }
@@ -1185,6 +1205,7 @@ fn basic_message(id: &str, thread_id: &str, subject: &str) -> Message {
         size_bytes: Some(64),
         in_reply_to: None,
         references: Vec::new(),
+        incomplete: false,
     }
 }
 
@@ -1228,6 +1249,7 @@ fn gmail_message_with_raw(id: &str) -> Message {
         size_bytes: None,
         in_reply_to: None,
         references: Vec::new(),
+        incomplete: false,
     }
 }
 

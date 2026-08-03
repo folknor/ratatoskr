@@ -42,10 +42,25 @@ pub(crate) async fn sync_containers(
     write_db: &WriteDbState,
 ) -> Result<ContainerIndex, String> {
     let account = AccountId(account_id.to_string());
-    let containers = engine
+    let list = engine
         .containers_list(&account)
         .await
         .map_err(|error| format!("containers_list: {error:?}"))?;
+    // `containers_list` returns an envelope now: a namespace the enumeration
+    // could not bring up (a shared mailbox whose folder walk errored, a revoked
+    // delegate grant) lands on `skipped_scopes` instead of failing the whole
+    // call. A skip is advisory - the containers we did get stay valid, but the
+    // ABSENCE of a skipped namespace's containers is not evidence they were
+    // deleted, so this must not reach `persist_containers` as an implicit
+    // delete. Logging it is the floor; staying silent is how a revoked share
+    // becomes a support ticket instead of a log line.
+    for skipped in &list.skipped_scopes {
+        log::warn!(
+            "containers_list: account {account_id} skipped a namespace ({skipped:?}); \
+             its containers are absent from this pass and must not be treated as deleted"
+        );
+    }
+    let containers = list.containers;
     let aid = account_id.to_string();
     write_db
         .with_write(move |conn| persist_containers(conn, &aid, &containers))

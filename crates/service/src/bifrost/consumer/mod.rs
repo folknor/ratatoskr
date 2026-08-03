@@ -875,7 +875,9 @@ impl ChangeStreamConsumer {
     fn scopes_backfill_completed(&self) -> bool {
         self.observed_scopes.iter().all(|scope| {
             matches!(
-                self.engine.backfill_registry().snapshot(scope),
+                self.engine
+                    .backfill_registry()
+                    .snapshot(&self.account_id, scope),
                 None | Some(BackfillState::Completed)
             )
         })
@@ -886,7 +888,9 @@ impl ChangeStreamConsumer {
             .iter()
             .filter(|scope| {
                 matches!(
-                    self.engine.backfill_registry().snapshot(scope),
+                    self.engine
+                        .backfill_registry()
+                        .snapshot(&self.account_id, scope),
                     Some(BackfillState::Completed)
                 )
             })
