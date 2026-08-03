@@ -68,7 +68,7 @@ pub fn seed_groups(
         "Family",
     ];
 
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let one_day = 86_400_i64;
 
     for name in GROUP_NAMES {

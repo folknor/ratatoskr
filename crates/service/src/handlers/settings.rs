@@ -197,7 +197,7 @@ async fn kick_window_extend(boot_state: &Arc<BootSharedState>, window_days: i64)
             return;
         }
     };
-    let window_start_unix = chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
+    let window_start_unix = jiff::Timestamp::now().as_second() - window_days.saturating_mul(86_400);
     for (account_id, provider) in accounts {
         if provider.is_empty() {
             continue;

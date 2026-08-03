@@ -969,8 +969,12 @@ fn attachment_overlay_button_style(
 
 fn format_date(timestamp: Option<i64>) -> String {
     timestamp
-        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-        .map(|dt| dt.format("%a, %b %d, %Y, %l:%M %p").to_string())
+        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .map(|ts| {
+            ts.to_zoned(jiff::tz::TimeZone::UTC)
+                .strftime("%a, %b %d, %Y, %-I:%M %p")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 

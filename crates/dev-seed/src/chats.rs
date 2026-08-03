@@ -213,7 +213,7 @@ pub fn seed_chats(
     // `threads.rs` FIXED_NOW has drifted into the past. Determinism within a
     // single run is preserved by the seeded RNG; the only drift across days
     // is the absolute timestamps themselves, which is what we want here.
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let palette = ChatImagePalette::new();
     let mut already_used: HashSet<String> = HashSet::new();
     let mut palette_pushed: HashSet<db::blob_hash::BlobHash> = HashSet::new();

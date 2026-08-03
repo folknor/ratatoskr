@@ -1,6 +1,6 @@
-use chrono::Local;
 use iced::widget::{Space, button, checkbox, column, container, row, text};
 use iced::{Alignment, Element, Length, Theme};
+use jiff::Zoned;
 
 use crate::icon;
 use crate::ui::calendar_month;
@@ -13,7 +13,7 @@ use super::types::{CalendarState, CalendarView};
 
 /// Calendar sidebar: mini-month, view switcher, calendar list placeholder.
 pub(super) fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
-    let today = Local::now().date_naive();
+    let today = Zoned::now().date();
 
     let mini = calendar_month::mini_month(
         state.mini_month_year,

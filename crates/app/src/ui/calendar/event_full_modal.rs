@@ -1,4 +1,3 @@
-use chrono::Datelike;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
@@ -234,13 +233,14 @@ pub(super) fn event_full_modal<'a>(
             let time_str = if ev.all_day {
                 "All day".to_string()
             } else {
-                let start = chrono::DateTime::from_timestamp(ev.start_time, 0)
-                    .map(|dt| dt.with_timezone(&chrono::Local));
-                let end = chrono::DateTime::from_timestamp(ev.end_time, 0)
-                    .map(|dt| dt.with_timezone(&chrono::Local));
-                match (start, end) {
+                let local = |seconds: i64| {
+                    jiff::Timestamp::from_second(seconds)
+                        .ok()
+                        .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
+                };
+                match (local(ev.start_time), local(ev.end_time)) {
                     (Some(s), Some(e)) => {
-                        format!("{} \u{2013} {}", s.format("%H:%M"), e.format("%H:%M"))
+                        format!("{} \u{2013} {}", s.strftime("%H:%M"), e.strftime("%H:%M"))
                     }
                     _ => String::new(),
                 }

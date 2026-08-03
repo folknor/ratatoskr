@@ -180,7 +180,7 @@ pub async fn db_update_task(
 ) -> Result<(), String> {
     db.with_write(move |conn| {
         let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
-        sets.push(("updated_at", Box::new(chrono::Utc::now().timestamp())));
+        sets.push(("updated_at", Box::new(jiff::Timestamp::now().as_second())));
         if let Some(v) = title {
             sets.push(("title", Box::new(v)));
         }
@@ -230,7 +230,7 @@ pub async fn db_delete_task(db: &WriterPool, id: String) -> Result<(), String> {
 
 pub async fn db_complete_task(db: &WriterPool, id: String) -> Result<(), String> {
     db.with_write(move |conn| {
-        let now = chrono::Utc::now().timestamp();
+        let now = jiff::Timestamp::now().as_second();
         conn.execute(
             "UPDATE tasks SET is_completed = 1, completed_at = ?2, updated_at = ?2 WHERE id = ?1",
             params![id, now],
@@ -243,7 +243,7 @@ pub async fn db_complete_task(db: &WriterPool, id: String) -> Result<(), String>
 
 pub async fn db_uncomplete_task(db: &WriterPool, id: String) -> Result<(), String> {
     db.with_write(move |conn| {
-        let now = chrono::Utc::now().timestamp();
+        let now = jiff::Timestamp::now().as_second();
         conn.execute(
             "UPDATE tasks SET is_completed = 0, completed_at = NULL, updated_at = ?2 WHERE id = ?1",
             params![id, now],
@@ -257,7 +257,7 @@ pub async fn db_uncomplete_task(db: &WriterPool, id: String) -> Result<(), Strin
 pub async fn db_reorder_tasks(db: &WriterPool, task_ids: Vec<String>) -> Result<(), String> {
     db.with_write(move |conn| {
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        let now = chrono::Utc::now().timestamp();
+        let now = jiff::Timestamp::now().as_second();
         for (i, task_id) in task_ids.iter().enumerate() {
             #[allow(clippy::cast_possible_wrap)]
             let sort_order = i as i64;

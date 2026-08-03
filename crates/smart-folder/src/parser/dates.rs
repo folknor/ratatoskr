@@ -1,4 +1,18 @@
-use chrono::TimeZone as _;
+use jiff::civil;
+use jiff::tz::TimeZone;
+use jiff::{Span, Zoned};
+
+/// Build a civil date from the parser's `i32`/`u32` field widths. jiff's civil
+/// types are `i16`/`i8`, and out-of-range values are exactly the "reject this
+/// input" case every caller already handles.
+fn civil_date(year: i32, month: u32, day: u32) -> Option<civil::Date> {
+    civil::Date::new(
+        i16::try_from(year).ok()?,
+        i8::try_from(month).ok()?,
+        i8::try_from(day).ok()?,
+    )
+    .ok()
+}
 
 // -- Date parsing --
 
@@ -40,13 +54,12 @@ pub(super) fn parse_date_to_timestamp(date_str: &str) -> Option<i64> {
 /// Parse a relative offset like `-7` or `0` into a timestamp.
 fn parse_relative_offset(s: &str) -> Option<i64> {
     let days: i64 = s.parse().ok()?;
-    let today = chrono::Local::now().date_naive();
-    let target = if days <= 0 {
-        today + chrono::Duration::days(days)
-    } else {
+    if days > 0 {
         // Positive numbers are not valid relative offsets.
         return None;
-    };
+    }
+    let today = Zoned::now().date();
+    let target = today.checked_add(Span::new().days(days)).ok()?;
     naive_date_to_timestamp(target)
 }
 
@@ -59,13 +72,13 @@ fn parse_separated_date(s: &str) -> Option<i64> {
             let year: i32 = parts[0].parse().ok()?;
             let month: u32 = parts[1].parse().ok()?;
             let day: u32 = parts[2].parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+            let date = civil_date(year, month, day)?;
             naive_date_to_timestamp(date)
         }
         2 => {
             let year: i32 = parts[0].parse().ok()?;
             let month: u32 = parts[1].parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
+            let date = civil_date(year, month, 1)?;
             naive_date_to_timestamp(date)
         }
         _ => None,
@@ -80,13 +93,13 @@ fn parse_space_separated_date(s: &str) -> Option<i64> {
             let year: i32 = parts[0].parse().ok()?;
             let month: u32 = parts[1].parse().ok()?;
             let day: u32 = parts[2].parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+            let date = civil_date(year, month, day)?;
             naive_date_to_timestamp(date)
         }
         2 => {
             let year: i32 = parts[0].parse().ok()?;
             let month: u32 = parts[1].parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
+            let date = civil_date(year, month, 1)?;
             naive_date_to_timestamp(date)
         }
         _ => None,
@@ -101,29 +114,37 @@ fn parse_compact_date(s: &str) -> Option<i64> {
     match s.len() {
         4 => {
             let year: i32 = s.parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, 1, 1)?;
+            let date = civil_date(year, 1, 1)?;
             naive_date_to_timestamp(date)
         }
         6 => {
             let year: i32 = s[..4].parse().ok()?;
             let month: u32 = s[4..6].parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, month, 1)?;
+            let date = civil_date(year, month, 1)?;
             naive_date_to_timestamp(date)
         }
         8 => {
             let year: i32 = s[..4].parse().ok()?;
             let month: u32 = s[4..6].parse().ok()?;
             let day: u32 = s[6..8].parse().ok()?;
-            let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+            let date = civil_date(year, month, day)?;
             naive_date_to_timestamp(date)
         }
         _ => None,
     }
 }
 
-/// Convert a `NaiveDate` to a Unix timestamp at start of day in local time.
-pub(super) fn naive_date_to_timestamp(date: chrono::NaiveDate) -> Option<i64> {
-    let datetime = date.and_hms_opt(0, 0, 0)?;
-    let local = chrono::Local.from_local_datetime(&datetime).single()?;
-    Some(local.timestamp())
+/// Convert a civil date to a Unix timestamp at start of day in local time.
+///
+/// Uses jiff's compatible disambiguation rather than chrono's `.single()?`.
+/// That is a deliberate behaviour change: a handful of zones move their clocks
+/// AT midnight (Chile, Cuba, Iran, Lebanon, and Brazil historically), so on
+/// those dates `single()` returned `None` and the entire date filter silently
+/// matched nothing. Resolving past the gap gives the user the filter they
+/// asked for, and matches how the calendar path resolves the same situation.
+pub(super) fn naive_date_to_timestamp(date: civil::Date) -> Option<i64> {
+    TimeZone::system()
+        .to_zoned(date.at(0, 0, 0, 0))
+        .ok()
+        .map(|zoned| zoned.timestamp().as_second())
 }

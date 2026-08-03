@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date as NaiveDate;
 
 use crate::ui::calendar_time_grid;
 

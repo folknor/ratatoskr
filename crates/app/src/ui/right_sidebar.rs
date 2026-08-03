@@ -1,6 +1,8 @@
-use chrono::{Local, NaiveDate};
 use iced::widget::{Space, button, column, container, scrollable, text};
 use iced::{Element, Length, Padding};
+use jiff::civil::Date as NaiveDate;
+use jiff::tz::TimeZone;
+use jiff::{Timestamp, Zoned};
 
 use crate::Message;
 use crate::db::Thread;
@@ -46,7 +48,7 @@ pub fn view<'a>(open: bool, data: &RightSidebarData<'a>) -> Element<'a, Message>
 }
 
 fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
-    let today = Local::now().date_naive();
+    let today = Zoned::now().date();
 
     let mini = calendar_month::mini_month(
         cal.mini_month_year,
@@ -67,7 +69,7 @@ fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
 
 /// Show today's calendar events as a compact time + title list.
 fn agenda_section(cal: &CalendarState) -> Element<'_, Message> {
-    let today = Local::now().date_naive();
+    let today = Zoned::now().date();
     let today_events = events_for_date(&cal.events, today);
 
     let body: Element<'_, Message> = if today_events.is_empty() {
@@ -182,14 +184,17 @@ fn events_for_date(
     events
         .iter()
         .filter(|ev| {
-            let Some(start_dt) = chrono::DateTime::from_timestamp(ev.start_time, 0) else {
+            let Ok(start_dt) = Timestamp::from_second(ev.start_time) else {
                 return false;
             };
-            let Some(end_dt) = chrono::DateTime::from_timestamp(ev.end_time, 0) else {
+            let Ok(end_dt) = Timestamp::from_second(ev.end_time) else {
                 return false;
             };
-            let start_date = start_dt.date_naive();
-            let end_date = end_dt.date_naive();
+            // UTC, matching the chrono original's `date_naive()` on a
+            // `DateTime<Utc>`. See the note in `calendar_month::build_month_grid`
+            // about this disagreeing with the host-zone derivation elsewhere.
+            let start_date = start_dt.to_zoned(TimeZone::UTC).date();
+            let end_date = end_dt.to_zoned(TimeZone::UTC).date();
             date >= start_date && date <= end_date
         })
         .collect()
@@ -197,13 +202,14 @@ fn events_for_date(
 
 /// Format a Unix timestamp range as "HH:MM -- HH:MM".
 fn format_time_range(start: i64, end: i64) -> String {
-    use chrono::TimeZone;
-    let local = Local;
-    let start_dt = local.timestamp_opt(start, 0).single();
-    let end_dt = local.timestamp_opt(end, 0).single();
-    match (start_dt, end_dt) {
-        (Some(s), Some(e)) => format!("{} \u{2013} {}", s.format("%H:%M"), e.format("%H:%M")),
-        (Some(s), None) => s.format("%H:%M").to_string(),
+    let local = |seconds: i64| {
+        Timestamp::from_second(seconds)
+            .ok()
+            .map(|ts| ts.to_zoned(TimeZone::system()))
+    };
+    match (local(start), local(end)) {
+        (Some(s), Some(e)) => format!("{} \u{2013} {}", s.strftime("%H:%M"), e.strftime("%H:%M")),
+        (Some(s), None) => s.strftime("%H:%M").to_string(),
         _ => String::new(),
     }
 }

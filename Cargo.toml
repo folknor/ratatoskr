@@ -100,12 +100,10 @@ rusqlite = { version = "0.40" }
 
 # Time
 #
-# Migration in progress: chrono + chrono-tz are being replaced by jiff, which is
-# already the time vocabulary on the bifrost boundary (`bifrost-types` and
-# `bifrost-sync` both depend on it), so every conversion at that seam is
-# temporary. jiff also carries its own tzdb, which retires the separate
-# `chrono-tz` dependency `brokkr deps` flags as stale.
-chrono = { version = "0.4", features = ["serde"] }
+# jiff, not chrono. It is also the time vocabulary on the bifrost boundary
+# (`bifrost-types` and `bifrost-sync` both depend on it), so the two sides now
+# agree, and it carries its own tzdb, which retired the separate `chrono-tz`
+# dependency `brokkr deps` used to flag as stale.
 jiff = { version = "0.2.35", features = ["serde"] }
 
 # HTTP client

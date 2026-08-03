@@ -218,19 +218,18 @@ fn format_last_sync(last_sync_at: Option<i64>) -> String {
     match last_sync_at {
         None => "Never synced".to_string(),
         Some(ts) => {
-            let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else {
+            let Ok(dt) = jiff::Timestamp::from_second(ts) else {
                 return "Unknown".to_string();
             };
-            let now = chrono::Utc::now();
-            let diff = now.signed_duration_since(dt);
-            if diff.num_minutes() < 1 {
+            let diff = jiff::Timestamp::now().duration_since(dt);
+            if diff.as_mins() < 1 {
                 "Just now".to_string()
-            } else if diff.num_minutes() < 60 {
-                format!("{} min ago", diff.num_minutes())
-            } else if diff.num_hours() < 24 {
-                format!("{} hours ago", diff.num_hours())
+            } else if diff.as_mins() < 60 {
+                format!("{} min ago", diff.as_mins())
+            } else if diff.as_hours() < 24 {
+                format!("{} hours ago", diff.as_hours())
             } else {
-                format!("{} days ago", diff.num_days())
+                format!("{} days ago", diff.as_hours() / 24)
             }
         }
     }

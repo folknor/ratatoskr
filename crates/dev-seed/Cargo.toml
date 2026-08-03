@@ -16,7 +16,7 @@ store = { path = "../stores" }
 types = { path = "../types" }
 
 rusqlite.workspace = true
-chrono.workspace = true
+jiff.workspace = true
 rand = "0.10.1"
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 toml = "1"

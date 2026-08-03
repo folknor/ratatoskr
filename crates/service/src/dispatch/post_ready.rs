@@ -272,7 +272,8 @@ pub(crate) fn spawn_post_ready_prefetch_startup(
                 return;
             }
         };
-        let window_start_unix = chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
+        let window_start_unix =
+            jiff::Timestamp::now().as_second() - window_days.saturating_mul(86_400);
 
         // Attachments roadmap Phase 8a: eviction sweep BEFORE the
         // backfill kick, so we don't pre-fetch bytes only to tombstone

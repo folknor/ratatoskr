@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use chrono::{Datelike, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
@@ -14,8 +13,8 @@ impl ReadyApp {
         match cal_msg {
             CalendarMessage::SelectDate(date) => {
                 self.calendar.selected_date = date;
-                self.calendar.mini_month_year = date.year();
-                self.calendar.mini_month_month = date.month();
+                self.calendar.mini_month_year = i32::from(date.year());
+                self.calendar.mini_month_month = u32::from(date.month().unsigned_abs());
                 self.calendar.rebuild_view_data();
                 Task::none()
             }
@@ -811,7 +810,7 @@ fn build_wire_input(draft: &CalendarEventData) -> service_api::WireCalendarEvent
         // span). This matches the read-sync round-trip, which also anchors
         // all-day epochs at UTC midnight.
         let start = utc_midnight_timestamp(draft.start_date);
-        let end = utc_midnight_timestamp(draft.start_date.succ_opt().unwrap_or(draft.start_date));
+        let end = utc_midnight_timestamp(draft.start_date.tomorrow().unwrap_or(draft.start_date));
         (start, end)
     } else {
         let start = data_to_timestamp(
@@ -844,22 +843,24 @@ fn build_wire_input(draft: &CalendarEventData) -> service_api::WireCalendarEvent
 /// and their epochs must round-trip through `idmap::epoch_to_event_time`, which
 /// reads the UTC date - so they are anchored here at UTC midnight rather than in
 /// the user's local zone.
-fn utc_midnight_timestamp(date: chrono::NaiveDate) -> i64 {
-    use chrono::TimeZone;
-    let naive = date.and_time(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default());
-    chrono::Utc.from_utc_datetime(&naive).timestamp()
+fn utc_midnight_timestamp(date: jiff::civil::Date) -> i64 {
+    jiff::tz::TimeZone::UTC
+        .to_zoned(date.at(0, 0, 0, 0))
+        .map_or(0, |zoned| zoned.timestamp().as_second())
 }
 
 /// Convert date + hour + minute to a Unix timestamp (local time).
-fn data_to_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32) -> i64 {
-    use chrono::TimeZone;
-    let naive_time = chrono::NaiveTime::from_hms_opt(hour, minute, 0)
-        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default());
-    let naive_dt = date.and_time(naive_time);
-    chrono::Local
-        .from_local_datetime(&naive_dt)
-        .single()
-        .map_or(0, |dt| dt.timestamp())
+fn data_to_timestamp(date: jiff::civil::Date, hour: u32, minute: u32) -> i64 {
+    let time = jiff::civil::Time::new(
+        i8::try_from(hour).unwrap_or(0),
+        i8::try_from(minute).unwrap_or(0),
+        0,
+        0,
+    )
+    .unwrap_or_else(|_| jiff::civil::Time::midnight());
+    jiff::tz::TimeZone::system()
+        .to_zoned(date.to_datetime(time))
+        .map_or(0, |zoned| zoned.timestamp().as_second())
 }
 
 /// Map a `CalendarActionCompleted` to the `Result<(), String>` shape
@@ -894,16 +895,27 @@ pub(crate) fn completion_to_result(
 
 /// Convert a CalendarEvent from the DB to CalendarEventData for the UI.
 fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData {
-    use chrono::TimeZone;
-    let start_dt = chrono::Local.timestamp_opt(ev.start_time, 0).single();
-    let end_dt = chrono::Local.timestamp_opt(ev.end_time, 0).single();
+    let local = |seconds: i64| {
+        jiff::Timestamp::from_second(seconds)
+            .ok()
+            .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
+    };
+    let start_dt = local(ev.start_time);
+    let end_dt = local(ev.end_time);
 
     let (date, sh, sm) = match start_dt {
-        Some(dt) => (dt.date_naive(), dt.time().hour(), dt.time().minute()),
-        None => (chrono::Local::now().date_naive(), 9, 0),
+        Some(dt) => (
+            dt.date(),
+            u32::from(dt.hour().unsigned_abs()),
+            u32::from(dt.minute().unsigned_abs()),
+        ),
+        None => (jiff::Zoned::now().date(), 9, 0),
     };
     let (eh, em) = match end_dt {
-        Some(dt) => (dt.time().hour(), dt.time().minute()),
+        Some(dt) => (
+            u32::from(dt.hour().unsigned_abs()),
+            u32::from(dt.minute().unsigned_abs()),
+        ),
         None => ((sh + 1).min(23), 0),
     };
 
@@ -937,26 +949,24 @@ fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{NaiveDate, TimeZone};
+    use jiff::civil::Date;
 
-    fn local_date(ts: i64) -> NaiveDate {
-        chrono::Local
-            .timestamp_opt(ts, 0)
-            .single()
+    fn local_date(ts: i64) -> Date {
+        jiff::Timestamp::from_second(ts)
             .expect("valid local timestamp")
-            .date_naive()
+            .to_zoned(jiff::tz::TimeZone::system())
+            .date()
     }
 
-    fn utc_date(ts: i64) -> NaiveDate {
-        chrono::Utc
-            .timestamp_opt(ts, 0)
-            .single()
+    fn utc_date(ts: i64) -> Date {
+        jiff::Timestamp::from_second(ts)
             .expect("valid utc timestamp")
-            .date_naive()
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .date()
     }
 
-    fn ymd(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).expect("valid date")
+    fn ymd(year: i16, month: i8, day: i8) -> Date {
+        Date::new(year, month, day).expect("valid date")
     }
 
     #[test]
@@ -985,7 +995,7 @@ mod tests {
         // never the same day (which would lower to a zero-day span).
         assert_eq!(
             utc_date(wire.end_time),
-            start_date.succ_opt().expect("successor date")
+            start_date.tomorrow().expect("successor date")
         );
     }
 

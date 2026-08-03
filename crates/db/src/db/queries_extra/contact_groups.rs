@@ -409,7 +409,7 @@ pub fn save_group_sync(
     entry: &GroupSettingsEntry,
     member_emails: &[String],
 ) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let tx = conn
         .transaction()
         .map_err(|e| format!("save_group begin tx: {e}"))?;

@@ -1,4 +1,4 @@
-use chrono::Weekday;
+use jiff::civil::Weekday;
 
 use super::types::CalendarEventData;
 
@@ -18,17 +18,17 @@ pub(super) fn format_event_time_range(event: &CalendarEventData) -> String {
 
 pub(super) fn weekday_short(day: Weekday) -> &'static str {
     match day {
-        Weekday::Mon => "Mon",
-        Weekday::Tue => "Tue",
-        Weekday::Wed => "Wed",
-        Weekday::Thu => "Thu",
-        Weekday::Fri => "Fri",
-        Weekday::Sat => "Sat",
-        Weekday::Sun => "Sun",
+        Weekday::Monday => "Mon",
+        Weekday::Tuesday => "Tue",
+        Weekday::Wednesday => "Wed",
+        Weekday::Thursday => "Thu",
+        Weekday::Friday => "Fri",
+        Weekday::Saturday => "Sat",
+        Weekday::Sunday => "Sun",
     }
 }
 
-pub(super) fn month_short(month: u32) -> &'static str {
+pub(super) fn month_short(month: i8) -> &'static str {
     match month {
         1 => "Jan",
         2 => "Feb",

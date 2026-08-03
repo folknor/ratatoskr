@@ -1,4 +1,5 @@
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 
 use crate::parsing;
 use crate::prompts;
@@ -18,11 +19,9 @@ fn format_message(msg: &AiMessageInput) -> String {
         (Some(name), None) if !name.is_empty() => name.clone(),
         _ => "Unknown".to_string(),
     };
-    let date = Utc
-        .timestamp_opt(msg.date, 0)
-        .single()
-        .map(|dt| dt.format("%b %d, %Y").to_string())
-        .unwrap_or_else(|| "Unknown date".to_string());
+    let date = Timestamp::from_second(msg.date)
+        .map(|ts| ts.to_zoned(TimeZone::UTC).strftime("%b %d, %Y").to_string())
+        .unwrap_or_else(|_| "Unknown date".to_string());
     let body = msg
         .body_text
         .as_deref()
@@ -115,11 +114,9 @@ pub async fn ask_inbox(
     let context: String = search_results
         .iter()
         .map(|r| {
-            let date = Utc
-                .timestamp_opt(r.date, 0)
-                .single()
-                .map(|dt| dt.format("%b %d, %Y").to_string())
-                .unwrap_or_else(|| "Unknown date".to_string());
+            let date = Timestamp::from_second(r.date)
+                .map(|ts| ts.to_zoned(TimeZone::UTC).strftime("%b %d, %Y").to_string())
+                .unwrap_or_else(|_| "Unknown date".to_string());
             let from = match (&r.from_name, &r.from_address) {
                 (Some(name), Some(addr)) if !name.is_empty() => format!("{name} <{addr}>"),
                 (_, Some(addr)) => addr.clone(),

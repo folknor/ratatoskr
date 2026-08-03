@@ -87,7 +87,7 @@ pub(crate) async fn handle_exchange_code(
         Some(bundle.user_info.name.clone())
     };
     #[allow(clippy::cast_possible_wrap)]
-    let token_expires_at = chrono::Utc::now().timestamp() + bundle.tokens.expires_in as i64;
+    let token_expires_at = jiff::Timestamp::now().as_second() + bundle.tokens.expires_in as i64;
 
     if let Some(account_id) = p.reauth_account_id {
         // Re-auth (option b): verify-before-persist runs SERVICE-SIDE, and

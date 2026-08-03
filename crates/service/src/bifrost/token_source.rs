@@ -210,7 +210,7 @@ async fn refresh_oauth_token_typed(
         transmission_state: TransmissionState::Acknowledged,
         source: Some(Box::new(error)),
     })?;
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     Ok(TokenRefreshResult {
         access_token: resp.access_token,
         expires_at: now + resp.expires_in,
@@ -251,7 +251,7 @@ async fn persist_refreshed_token_best_effort(
 
 fn instant_from_unix(expires_at: Option<i64>) -> Option<Instant> {
     let expires_at = expires_at?;
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     if expires_at <= now {
         return Some(Instant::now());
     }
@@ -304,7 +304,7 @@ mod tests {
             .decrypt(&KEY)
             .expect("stored secret decrypts");
         assert_eq!(decrypted, "new-token");
-        assert!(expires_at > chrono::Utc::now().timestamp());
+        assert!(expires_at > jiff::Timestamp::now().as_second());
         let _ = std::fs::remove_dir_all(dir);
     }
 

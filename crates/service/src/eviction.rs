@@ -195,7 +195,7 @@ pub async fn run_eviction_sweep(
 /// Compute the inclusive lower-bound `messages.date` value for an
 /// `n`-day retention window relative to wallclock now.
 pub fn window_start_unix(days: i64) -> i64 {
-    chrono::Utc::now()
-        .timestamp()
+    jiff::Timestamp::now()
+        .as_second()
         .saturating_sub(days.saturating_mul(86_400))
 }

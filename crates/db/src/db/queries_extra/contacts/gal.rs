@@ -65,7 +65,7 @@ pub fn gal_cache_age_sync(
 
 /// Record that a GAL refresh was performed for an account.
 pub fn record_gal_refresh_sync(conn: &WriteConn<'_>, account_id: &str) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp().to_string();
+    let now = jiff::Timestamp::now().as_second().to_string();
     let key = format!("gal_refresh_{account_id}");
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",

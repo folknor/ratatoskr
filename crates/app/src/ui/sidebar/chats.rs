@@ -111,19 +111,18 @@ fn chat_entry_card<'a>(
 /// "2h", "3d"). Distinct from `format_relative_time` (used by pinned searches)
 /// because the chat sidebar entries need shorter labels per the chats spec.
 fn format_relative_time_short(timestamp: i64) -> String {
-    let Some(dt) = chrono::DateTime::from_timestamp(timestamp, 0) else {
+    let Ok(dt) = jiff::Timestamp::from_second(timestamp) else {
         return String::new();
     };
-    let now = chrono::Utc::now();
-    let delta = now.signed_duration_since(dt);
+    let delta = jiff::Timestamp::now().duration_since(dt);
 
-    if delta.num_seconds() < 60 {
+    if delta.as_secs() < 60 {
         "now".to_string()
-    } else if delta.num_minutes() < 60 {
-        format!("{}m", delta.num_minutes())
-    } else if delta.num_hours() < 24 {
-        format!("{}h", delta.num_hours())
+    } else if delta.as_mins() < 60 {
+        format!("{}m", delta.as_mins())
+    } else if delta.as_hours() < 24 {
+        format!("{}h", delta.as_hours())
     } else {
-        format!("{}d", delta.num_days())
+        format!("{}d", delta.as_hours() / 24)
     }
 }

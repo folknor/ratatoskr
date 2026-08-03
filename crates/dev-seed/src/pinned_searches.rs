@@ -11,7 +11,7 @@ struct SeededPinnedSearch {
 
 pub fn seed_pinned_searches(conn: &Connection, accounts: &[Account]) -> Result<(), String> {
     ensure_pinned_search_tables(conn)?;
-    let seeded_now = chrono::Utc::now().timestamp();
+    let seeded_now = jiff::Timestamp::now().as_second();
 
     let mut searches = Vec::new();
 

@@ -160,7 +160,7 @@ async fn kick_cache_reenable(boot_state: Arc<BootSharedState>, account_id: Strin
             return;
         }
     };
-    let window_start = chrono::Utc::now().timestamp() - window_days.saturating_mul(86_400);
+    let window_start = jiff::Timestamp::now().as_second() - window_days.saturating_mul(86_400);
     if let Err(e) = prefetch
         .kick_backfill_account(&account_id, &provider, window_start)
         .await

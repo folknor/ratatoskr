@@ -29,7 +29,7 @@ pub(crate) async fn sync_gmail_signatures(
         .map(|local| (local.server_id.as_str(), local))
         .collect();
 
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let mut push_queue: Vec<(IdentityId, String, String)> = Vec::new();
 
     for (index, identity) in identities.into_iter().enumerate() {

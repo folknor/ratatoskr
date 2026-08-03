@@ -26,12 +26,10 @@ pub(super) fn pinned_searches_section(sidebar: &Sidebar) -> Element<'_, SidebarM
 
 /// Whether a pinned search's results are stale (> 1 hour old).
 fn is_results_stale(updated_at: i64) -> bool {
-    let Some(dt) = chrono::DateTime::from_timestamp(updated_at, 0) else {
+    let Ok(dt) = jiff::Timestamp::from_second(updated_at) else {
         return true;
     };
-    let now = chrono::Utc::now();
-    let delta = now.signed_duration_since(dt);
-    delta.num_hours() >= 1
+    jiff::Timestamp::now().duration_since(dt).as_hours() >= 1
 }
 
 fn pinned_search_card<'a>(
@@ -142,22 +140,21 @@ fn pinned_search_scope_label(sidebar: &Sidebar, ps: &PinnedSearch) -> String {
 
 /// Formats a unix timestamp as a relative time string (e.g. "5 min ago", "2 hours ago").
 pub(crate) fn format_relative_time(timestamp: i64) -> String {
-    let Some(dt) = chrono::DateTime::from_timestamp(timestamp, 0) else {
+    let Ok(dt) = jiff::Timestamp::from_second(timestamp) else {
         return "Unknown".to_string();
     };
-    let now = chrono::Utc::now();
-    let delta = now.signed_duration_since(dt);
+    let delta = jiff::Timestamp::now().duration_since(dt);
 
-    if delta.num_seconds() < 60 {
+    if delta.as_secs() < 60 {
         "just now".to_string()
-    } else if delta.num_minutes() < 60 {
-        let m = delta.num_minutes();
+    } else if delta.as_mins() < 60 {
+        let m = delta.as_mins();
         format!("{m} min ago")
-    } else if delta.num_hours() < 24 {
-        let h = delta.num_hours();
+    } else if delta.as_hours() < 24 {
+        let h = delta.as_hours();
         format!("{h} hours ago")
     } else {
-        let d = delta.num_days();
+        let d = delta.as_hours() / 24;
         format!("{d} days ago")
     }
 }

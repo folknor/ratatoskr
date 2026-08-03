@@ -74,7 +74,7 @@ pub fn domains_to_warm(
     lookback_days: i64,
     max_domains: i64,
 ) -> Result<Vec<String>, String> {
-    let cutoff = chrono::Utc::now().timestamp() - (lookback_days * 24 * 3600);
+    let cutoff = jiff::Timestamp::now().as_second() - (lookback_days * 24 * 3600);
 
     let mut stmt = conn
         .prepare(

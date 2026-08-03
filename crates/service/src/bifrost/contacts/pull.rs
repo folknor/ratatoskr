@@ -148,7 +148,7 @@ pub async fn run_contact_pull(
                             &email,
                             &account_id,
                             card.display_name.as_deref(),
-                            chrono::Utc::now().timestamp(),
+                            jiff::Timestamp::now().as_second(),
                         )?;
                         upsert_contact_claim_sync(
                             &tx,

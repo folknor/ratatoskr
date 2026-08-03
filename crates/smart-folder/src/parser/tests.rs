@@ -215,8 +215,10 @@ fn date_relative_offset_negative() {
     let q = parse_query("after:-7");
     assert!(q.after.is_some());
     // Should be 7 days ago at start of day.
-    let today = chrono::Local::now().date_naive();
-    let expected = today - chrono::Duration::days(7);
+    let today = jiff::Zoned::now().date();
+    let expected = today
+        .checked_sub(jiff::Span::new().days(7))
+        .expect("7 days back is representable");
     let expected_ts = naive_date_to_timestamp(expected);
     assert_eq!(q.after.map(DateBound::timestamp), expected_ts);
 }
@@ -225,7 +227,7 @@ fn date_relative_offset_negative() {
 fn date_relative_offset_zero() {
     let q = parse_query("after:0");
     assert!(q.after.is_some());
-    let today = chrono::Local::now().date_naive();
+    let today = jiff::Zoned::now().date();
     let expected_ts = naive_date_to_timestamp(today);
     assert_eq!(q.after.map(DateBound::timestamp), expected_ts);
 }
@@ -233,49 +235,49 @@ fn date_relative_offset_zero() {
 #[test]
 fn date_year_only() {
     let q = parse_query("after:2025");
-    let expected = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2025, 1, 1));
     assert_eq!(q.after.map(DateBound::timestamp), expected);
 }
 
 #[test]
 fn date_year_month_compact() {
     let q = parse_query("after:202603");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 3, 1));
     assert_eq!(q.after.map(DateBound::timestamp), expected);
 }
 
 #[test]
 fn date_full_compact() {
     let q = parse_query("after:20260311");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 3, 11));
     assert_eq!(q.after.map(DateBound::timestamp), expected);
 }
 
 #[test]
 fn date_slash_separated() {
     let q = parse_query("before:2026/03/11");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 3, 11));
     assert_eq!(q.before.map(DateBound::timestamp), expected);
 }
 
 #[test]
 fn date_dash_separated() {
     let q = parse_query("before:2026-03-11");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 3, 11));
     assert_eq!(q.before.map(DateBound::timestamp), expected);
 }
 
 #[test]
 fn date_space_separated_greedy() {
     let q = parse_query("after:2026 03 11");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 3, 11));
     assert_eq!(q.after.map(DateBound::timestamp), expected);
 }
 
 #[test]
 fn date_space_separated_year_month_only() {
     let q = parse_query("after:2026 03 hello");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 3, 1));
     assert_eq!(q.after.map(DateBound::timestamp), expected);
     assert_eq!(q.free_text, "hello");
 }
@@ -283,7 +285,7 @@ fn date_space_separated_year_month_only() {
 #[test]
 fn date_space_greedy_does_not_consume_non_digits() {
     let q = parse_query("after:2026 hello");
-    let expected = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).and_then(naive_date_to_timestamp);
+    let expected = naive_date_to_timestamp(jiff::civil::date(2026, 1, 1));
     assert_eq!(q.after.map(DateBound::timestamp), expected);
     assert_eq!(q.free_text, "hello");
 }

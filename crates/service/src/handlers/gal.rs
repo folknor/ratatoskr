@@ -145,7 +145,7 @@ async fn fetch_gal_entries_if_stale(
     read_db: &db::db::ReadDbState,
     account_id: &str,
 ) -> Result<Option<Vec<rtsk::contacts::gal::GalEntry>>, String> {
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let stale_threshold = now - 86400;
     if let Some(cached_at) =
         rtsk::contacts::gal::gal_cache_age(read_db, account_id.to_string()).await?

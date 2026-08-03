@@ -25,7 +25,12 @@ pub fn build_mdn_message(
 ) -> Vec<u8> {
     let boundary = format!("mdn-boundary-{}", uuid::Uuid::new_v4());
     let message_id = format!("<{}.mdn@ratatoskr>", uuid::Uuid::new_v4());
-    let date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S +0000");
+    // RFC 5322 Date header, fixed to +0000. `strftime` is locale-independent
+    // here (jiff's `%a`/`%b` are always English abbreviations), which the
+    // header format requires.
+    let date = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .strftime("%a, %d %b %Y %H:%M:%S +0000");
 
     let disposition_mode = if is_manual {
         "manual-action/MDN-sent-manually"

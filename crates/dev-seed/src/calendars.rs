@@ -1,4 +1,6 @@
-use chrono::{Duration, Local, NaiveDate, TimeZone};
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::{Span, Zoned};
 use rand::RngExt;
 use rusqlite::{Connection, params};
 
@@ -39,7 +41,7 @@ pub fn seed_calendars(
     rng: &mut impl RngExt,
     accounts: &[Account],
 ) -> Result<(), String> {
-    let today = Local::now().date_naive();
+    let today = Zoned::now().date();
 
     for (idx, account) in accounts.iter().enumerate() {
         let primary = SeededCalendar {
@@ -97,10 +99,10 @@ fn seed_primary_events(
     rng: &mut impl RngExt,
     account: &Account,
     calendar: &SeededCalendar,
-    today: NaiveDate,
+    today: Date,
     idx: usize,
 ) -> Result<(), String> {
-    let base_day = today + Duration::days(i64::try_from(idx).unwrap_or(0));
+    let base_day = today + Span::new().days(i64::try_from(idx).unwrap_or(0));
 
     let (title, location, start_h, start_m, end_h, end_m, description) =
         match account.account_name.as_str() {
@@ -162,7 +164,7 @@ fn seed_primary_events(
     insert_event(conn, &event)?;
     insert_default_event_details(conn, &event, account, false)?;
 
-    let all_day_date = today + Duration::days(3 + i64::try_from(idx).unwrap_or(0));
+    let all_day_date = today + Span::new().days(3 + i64::try_from(idx).unwrap_or(0));
     let all_day = SeededEvent {
         id: crate::next_uuid(rng),
         account_id: account.id.clone(),
@@ -172,7 +174,7 @@ fn seed_primary_events(
         description: format!("Reserved day on the {} calendar.", account.account_name),
         location: String::new(),
         start_time: local_timestamp(all_day_date, 0, 0)?,
-        end_time: local_timestamp(all_day_date + Duration::days(1), 0, 0)?,
+        end_time: local_timestamp(all_day_date + Span::new().days(1), 0, 0)?,
         is_all_day: true,
         organizer_name: account.display_name.clone(),
         organizer_email: account.email.clone(),
@@ -191,7 +193,7 @@ fn seed_secondary_events(
     rng: &mut impl RngExt,
     account: &Account,
     calendar: &SeededCalendar,
-    today: NaiveDate,
+    today: Date,
     idx: usize,
 ) -> Result<(), String> {
     let (title, location, offset_days, start_h, start_m, end_h, end_m, description) =
@@ -218,7 +220,7 @@ fn seed_secondary_events(
             ),
         };
 
-    let date = today + Duration::days(offset_days + i64::try_from(idx).unwrap_or(0));
+    let date = today + Span::new().days(offset_days + i64::try_from(idx).unwrap_or(0));
     let event = SeededEvent {
         id: crate::next_uuid(rng),
         account_id: account.id.clone(),
@@ -350,16 +352,22 @@ fn insert_default_event_details(
     Ok(())
 }
 
-fn local_timestamp(date: NaiveDate, hour: u32, minute: u32) -> Result<i64, String> {
-    let naive = date
-        .and_hms_opt(hour, minute, 0)
-        .ok_or_else(|| format!("invalid local time {date} {hour}:{minute:02}"))?;
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .or_else(|| Local.from_local_datetime(&naive).earliest())
-        .map(|dt| dt.timestamp())
-        .ok_or_else(|| format!("ambiguous local time {date} {hour}:{minute:02}"))
+fn local_timestamp(date: Date, hour: u32, minute: u32) -> Result<i64, String> {
+    let hour_i8 =
+        i8::try_from(hour).map_err(|_| format!("invalid local hour {date} {hour}:{minute:02}"))?;
+    let minute_i8 = i8::try_from(minute)
+        .map_err(|_| format!("invalid local minute {date} {hour}:{minute:02}"))?;
+    let naive = date.at(hour_i8, minute_i8, 0, 0);
+    // jiff's compatible disambiguation subsumes the previous
+    // `single().or_else(earliest())` pair: a fold takes the earlier instant,
+    // which is what `earliest()` was reaching for. It also resolves a
+    // spring-forward gap by shifting past it rather than erroring, so a seed
+    // date that lands in one produces a usable event instead of failing the
+    // whole seed run.
+    TimeZone::system()
+        .to_zoned(naive)
+        .map(|zoned| zoned.timestamp().as_second())
+        .map_err(|_| format!("unresolvable local time {date} {hour}:{minute:02}"))
 }
 
 fn guest_email_for_account(account: &Account) -> &'static str {

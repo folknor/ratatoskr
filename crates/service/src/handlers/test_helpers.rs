@@ -183,7 +183,7 @@ pub(super) async fn seed_account_handle(
         )?,
         token_expires_at: params
             .token_expires_at
-            .or_else(|| uses_oauth.then(|| chrono::Utc::now().timestamp() + 3_600)),
+            .or_else(|| uses_oauth.then(|| jiff::Timestamp::now().as_second() + 3_600)),
         oauth_provider,
         oauth_client_id: encrypt_secret(
             params

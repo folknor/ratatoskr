@@ -40,7 +40,7 @@ pub fn compute_health(
     if last_sync_at.is_none() && token_expires_at.is_none() {
         return AccountHealth::Unknown;
     }
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     if let Some(expires) = token_expires_at {
         let no_recent_sync = last_sync_at.is_none_or(|ls| now - ls > 3600);
         if expires < now && no_recent_sync {

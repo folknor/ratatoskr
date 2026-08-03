@@ -325,7 +325,6 @@ impl ReadyApp {
     /// Create a calendar event pre-filled from the given email message.
     pub(crate) fn create_event_from_email(&mut self, message_index: usize) -> Task<Message> {
         use crate::ui::calendar::{CalendarEventData, CalendarWorkflow, EditorSession};
-        use chrono::Timelike;
 
         let msg = self.reading_pane.thread_messages.get(message_index);
         let Some(msg) = msg else { return Task::none() };
@@ -334,8 +333,9 @@ impl ReadyApp {
         let description = msg.snippet.clone().unwrap_or_default();
 
         // Pre-fill attendees from To/Cc addresses.
-        let today = chrono::Local::now().date_naive();
-        let hour = chrono::Local::now().time().hour();
+        let now = jiff::Zoned::now();
+        let today = now.date();
+        let hour = u32::from(now.hour().unsigned_abs());
         let mut event = CalendarEventData::new_at(today, hour.min(22));
         event.title = title;
         event.description = description;

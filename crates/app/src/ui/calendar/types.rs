@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use chrono::{Datelike, Local, NaiveDate, TimeZone, Weekday};
+use jiff::civil::{Date, Weekday};
+use jiff::tz::TimeZone;
+use jiff::{Span, Timestamp, Zoned};
 
 use crate::ui::calendar_month;
 use crate::ui::calendar_time_grid;
@@ -153,7 +155,7 @@ pub struct CalendarEventData {
     /// DB row id. `None` for new events that haven't been saved.
     pub id: Option<String>,
     pub title: String,
-    pub start_date: NaiveDate,
+    pub start_date: Date,
     pub start_hour: String,
     pub start_minute: String,
     pub end_hour: String,
@@ -178,7 +180,7 @@ pub struct CalendarEventData {
 
 impl CalendarEventData {
     /// Build a blank event pre-filled with the given date/hour.
-    pub fn new_at(date: NaiveDate, hour: u32) -> Self {
+    pub fn new_at(date: Date, hour: u32) -> Self {
         let (end_hour, end_minute) = if hour >= 23 {
             ("23".to_string(), "59".to_string())
         } else {
@@ -268,7 +270,7 @@ impl CalendarEventData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventSnapshot {
     pub title: String,
-    pub start_date: NaiveDate,
+    pub start_date: Date,
     pub start_hour: String,
     pub start_minute: String,
     pub end_hour: String,
@@ -335,30 +337,35 @@ pub struct CalendarListEntry {
     pub is_visible: bool,
 }
 
-fn first_day_of_month(year: i32, month: u32) -> Option<NaiveDate> {
-    NaiveDate::from_ymd_opt(year, month, 1)
+/// jiff's civil fields are `i16` year / `i8` month; the calendar state and the
+/// grid builders speak `i32`/`u32`. Widen at the boundary rather than churning
+/// every signature in the view layer.
+fn year_of(date: Date) -> i32 {
+    i32::from(date.year())
 }
 
-fn local_midnight_unix(date: NaiveDate) -> i64 {
-    let naive = match date.and_hms_opt(0, 0, 0) {
-        Some(d) => d,
-        None => return 0,
-    };
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .map(|dt| dt.timestamp())
-        // Spring-forward midnight is non-existent in some zones (rare; no
-        // current IANA zone springs forward at 00:00 but the API permits
-        // it). The window is approximate so we round up to the next
-        // representable minute.
-        .unwrap_or_else(|| naive.and_utc().timestamp())
+fn month_of(date: Date) -> u32 {
+    u32::from(date.month().unsigned_abs())
+}
+
+fn first_day_of_month(year: i32, month: u32) -> Option<Date> {
+    Date::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, 1).ok()
+}
+
+fn local_midnight_unix(date: Date) -> i64 {
+    // jiff's compatible disambiguation covers the spring-forward-at-midnight
+    // case the old `.single()` fallback existed for (no current IANA zone
+    // springs forward at 00:00, but the API permits it): the gap is resolved
+    // by shifting past it rather than by falling back to a UTC reading.
+    TimeZone::system()
+        .to_zoned(date.at(0, 0, 0, 0))
+        .map_or(0, |zoned| zoned.timestamp().as_second())
 }
 
 /// Persistent calendar state (survives mode switches).
 pub struct CalendarState {
     /// The currently selected/focused date.
-    pub selected_date: NaiveDate,
+    pub selected_date: Date,
     /// The selected time slot hour (for event creation pre-fill).
     pub selected_hour: Option<u32>,
     /// The active view (day/work-week/week/month).
@@ -384,7 +391,7 @@ pub struct CalendarState {
     /// All calendars across accounts (for sidebar list).
     pub calendars: Vec<CalendarListEntry>,
     /// Set of dates that have at least one event (for mini-month dots).
-    pub dates_with_events: HashSet<NaiveDate>,
+    pub dates_with_events: HashSet<Date>,
     /// Generation counter for async load staleness detection.
     /// Incremented before each load dispatch; results carry the generation
     /// they were dispatched with and are dropped if it no longer matches.
@@ -399,17 +406,22 @@ impl CalendarState {
 
     /// Create calendar state with a specific default view (read from settings).
     pub fn with_default_view(default_view: CalendarView) -> Self {
-        let today = Local::now().date_naive();
-        let month_grid =
-            calendar_month::build_month_grid(today.year(), today.month(), &[], Weekday::Mon, today);
+        let today = Zoned::now().date();
+        let month_grid = calendar_month::build_month_grid(
+            year_of(today),
+            month_of(today),
+            &[],
+            Weekday::Monday,
+            today,
+        );
         let time_grid_config = calendar_time_grid::build_day_view(today, &[], today);
         Self {
             selected_date: today,
             selected_hour: None,
             active_view: default_view,
-            mini_month_year: today.year(),
-            mini_month_month: today.month(),
-            week_start: Weekday::Mon,
+            mini_month_year: year_of(today),
+            mini_month_month: month_of(today),
+            week_start: Weekday::Monday,
             month_grid,
             time_grid_config,
             workflow: CalendarWorkflow::Idle,
@@ -442,18 +454,18 @@ impl CalendarState {
     /// of instances into the view.
     pub fn current_view_window(&self) -> (i64, i64) {
         let prev = first_day_of_month(self.mini_month_year, self.mini_month_month)
-            .and_then(|d| d.checked_sub_months(chrono::Months::new(1)))
+            .and_then(|d| d.checked_sub(Span::new().months(1)).ok())
             .unwrap_or_else(|| {
                 first_day_of_month(self.mini_month_year, self.mini_month_month)
-                    .unwrap_or_else(|| Local::now().date_naive())
+                    .unwrap_or_else(|| Zoned::now().date())
             });
         let next = first_day_of_month(self.mini_month_year, self.mini_month_month)
-            .and_then(|d| d.checked_add_months(chrono::Months::new(2)))
+            .and_then(|d| d.checked_add(Span::new().months(2)).ok())
             .unwrap_or_else(|| {
                 first_day_of_month(self.mini_month_year, self.mini_month_month)
-                    .unwrap_or_else(|| Local::now().date_naive())
+                    .unwrap_or_else(|| Zoned::now().date())
             });
-        // Anchor in chrono::Local. The window is approximate by design so
+        // Anchor in the host zone. The window is approximate by design so
         // a host-zone offset of a few hours doesn't matter; the exact
         // boundary is meaningless for the SQL filter (it's just bounding
         // the result set).
@@ -548,10 +560,10 @@ impl CalendarState {
 
     /// Jump to today, updating both selected date and mini-month.
     pub fn go_to_today(&mut self) {
-        let today = Local::now().date_naive();
+        let today = Zoned::now().date();
         self.selected_date = today;
-        self.mini_month_year = today.year();
-        self.mini_month_month = today.month();
+        self.mini_month_year = year_of(today);
+        self.mini_month_month = month_of(today);
         self.rebuild_view_data();
     }
 
@@ -559,19 +571,23 @@ impl CalendarState {
     /// Call after any state change (date, view, events loaded).
     pub fn rebuild_view_data(&mut self) {
         let events = &self.events;
-        let today = Local::now().date_naive();
+        let today = Zoned::now().date();
 
         self.dates_with_events.clear();
         for e in events {
-            if let Some(start_dt) = chrono::DateTime::from_timestamp(e.start_time, 0) {
-                let start_date = start_dt.with_timezone(&chrono::Local).date_naive();
-                let end_dt = chrono::DateTime::from_timestamp(e.end_time, 0)
-                    .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
+            if let Ok(start_dt) = Timestamp::from_second(e.start_time) {
+                let zone = TimeZone::system();
+                let start_date = start_dt.to_zoned(zone.clone()).date();
+                let end_dt = Timestamp::from_second(e.end_time)
+                    .map(|ts| ts.to_zoned(zone).date())
                     .unwrap_or(start_date);
                 let mut d = start_date;
                 while d <= end_dt {
                     self.dates_with_events.insert(d);
-                    d += chrono::Duration::days(1);
+                    match d.tomorrow() {
+                        Ok(next) => d = next,
+                        Err(_) => break,
+                    }
                 }
             }
         }

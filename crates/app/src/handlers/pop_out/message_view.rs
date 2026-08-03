@@ -128,9 +128,16 @@ fn synthesize_pseudo_source(state: &MessageViewState) -> String {
         out.push_str(&format!("Subject: {subject}\n"));
     }
     if let Some(ts) = state.date
-        && let Some(dt) = chrono::DateTime::from_timestamp(ts, 0)
+        && let Ok(instant) = jiff::Timestamp::from_second(ts)
     {
-        out.push_str(&format!("Date: {}\n", dt.to_rfc2822()));
+        // RFC 2822 Date header. Written out rather than relying on a helper:
+        // jiff has no `to_rfc2822`, and the `%a`/`%b` names it emits are always
+        // English, which is what the header format requires.
+        let dt = instant.to_zoned(jiff::tz::TimeZone::UTC);
+        out.push_str(&format!(
+            "Date: {}\n",
+            dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+        ));
     }
 
     let (body, content_type) = match (state.body_html.as_deref(), state.body_text.as_deref()) {

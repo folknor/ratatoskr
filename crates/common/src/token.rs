@@ -18,7 +18,7 @@ pub struct TokenState {
 impl TokenState {
     /// Returns `true` if the token expires within the next 5 minutes.
     pub fn needs_refresh(&self) -> bool {
-        let now = chrono::Utc::now().timestamp();
+        let now = jiff::Timestamp::now().as_second();
         self.expires_at - now < 300
     }
 }
@@ -76,7 +76,7 @@ pub async fn refresh_oauth_token(
         .await
         .map_err(|e| format!("Failed to parse token response: {e}"))?;
 
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     Ok(TokenRefreshResult {
         access_token: resp.access_token,
         expires_at: now + resp.expires_in,

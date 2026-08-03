@@ -223,8 +223,8 @@ fn extract_vevent(
         let end_date = dtend_pick.and_then(|(e, d)| extract_all_day_date(e, d));
         match (start_date, end_date) {
             (Some(start_date), Some(end_date)) => {
-                let days = end_date.signed_duration_since(start_date).num_days();
-                Some(start + days * 86400)
+                let days = (end_date - start_date).get_days();
+                Some(start + i64::from(days) * 86400)
             }
             _ => Some(end),
         }
@@ -653,17 +653,14 @@ fn extract_recurrence_id_canonical(
 /// duration math. Bailing here lets the caller fall through to its
 /// `_ => Some(end)` arm and keep the original timed end_time, which is
 /// the safer reading for a malformed feed.
-fn extract_all_day_date(entry: &ICalendarEntry, is_date_only: bool) -> Option<chrono::NaiveDate> {
+fn extract_all_day_date(entry: &ICalendarEntry, is_date_only: bool) -> Option<jiff::civil::Date> {
     if !is_date_only {
         return None;
     }
     let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
         return None;
     };
-    let year = i32::from(dt.year?);
-    let month = u32::from(dt.month?);
-    let day = u32::from(dt.day?);
-    chrono::NaiveDate::from_ymd_opt(year, month, day)
+    partial_to_date(dt)
 }
 
 /// Extract VALARM reminders from the event's sub-components.

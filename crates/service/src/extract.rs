@@ -516,7 +516,7 @@ async fn run_extraction_pipeline(
         if let Err(e) = inner
             .db
             .with_write(move |conn| {
-                let now: i64 = chrono::Utc::now().timestamp();
+                let now: i64 = jiff::Timestamp::now().as_second();
                 db::db::queries_extra::mark_attachment_text_indexed(conn, &hash_for_update, now)
             })
             .await
@@ -719,7 +719,7 @@ async fn run_extraction_pipeline(
         let _ = inner
             .db
             .with_write(move |conn| {
-                let now: i64 = chrono::Utc::now().timestamp();
+                let now: i64 = jiff::Timestamp::now().as_second();
                 db::db::queries_extra::mark_attachment_text_indexed(conn, &hash, now)
             })
             .await;
@@ -734,7 +734,7 @@ async fn persist_outcome_row(
     mime_type: &str,
     outcome: &ExtractionOutcome,
 ) {
-    let now: i64 = chrono::Utc::now().timestamp();
+    let now: i64 = jiff::Timestamp::now().as_second();
     let (status, text): (String, Option<String>) = match outcome {
         ExtractionOutcome::Indexed { text } => ("indexed".into(), Some(text.clone())),
         ExtractionOutcome::Skipped { reason } => (reason.status_string().to_string(), None),

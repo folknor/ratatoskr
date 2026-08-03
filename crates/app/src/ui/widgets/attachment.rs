@@ -205,8 +205,12 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
     let size = format_file_size(att.size);
     let date = att
         .date
-        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-        .map(|dt| dt.format("%b %d").to_string())
+        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .map(|ts| {
+            ts.to_zoned(jiff::tz::TimeZone::UTC)
+                .strftime("%b %d")
+                .to_string()
+        })
         .unwrap_or_default();
     let sender = att.from_name.as_deref().unwrap_or("unknown");
     format!("{type_label} \u{00B7} {size} \u{00B7} {date} from {sender}")
@@ -217,8 +221,12 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
 fn format_attachment_date_sender(att: &ThreadAttachment) -> String {
     let date = att
         .date
-        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-        .map(|dt| dt.format("%b %d").to_string())
+        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .map(|ts| {
+            ts.to_zoned(jiff::tz::TimeZone::UTC)
+                .strftime("%b %d")
+                .to_string()
+        })
         .unwrap_or_default();
     let sender = att.from_name.as_deref().unwrap_or("unknown");
     format!("{date} from {sender}")
@@ -230,8 +238,12 @@ fn format_attachment_version_line(att: &ThreadAttachment, is_latest: bool) -> St
     let size = format_file_size(att.size);
     let date = att
         .date
-        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-        .map(|dt| dt.format("%b %d").to_string())
+        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .map(|ts| {
+            ts.to_zoned(jiff::tz::TimeZone::UTC)
+                .strftime("%b %d")
+                .to_string()
+        })
         .unwrap_or_default();
     let sender = att.from_name.as_deref().unwrap_or("unknown");
     if is_latest {

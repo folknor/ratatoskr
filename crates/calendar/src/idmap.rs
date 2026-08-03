@@ -11,11 +11,12 @@ use bifrost_types::{
     EventRecurrence, EventReminder, EventStatus, EventTime, EventVisibility, ProtocolKind,
     ReminderTrigger, RsvpStatus,
 };
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Offset, SecondsFormat, TimeZone, Utc};
-use chrono_tz::Tz;
 use db::db::queries_extra::calendar_contacts_writes::{
     CalDavAttendee, CalDavReminder, CalendarEventRow, DiscoveredCalendar,
 };
+use jiff::Timestamp;
+use jiff::civil;
+use jiff::tz::TimeZone;
 
 pub fn calendar_remote_id(calendar: &Calendar) -> &str {
     &calendar.native_id
@@ -112,68 +113,66 @@ pub fn event_id_for_writeback(
 
 pub fn event_time_to_epoch(time: &EventTime, is_all_day: bool) -> Option<i64> {
     if is_all_day {
-        let date = NaiveDate::parse_from_str(&time.value, "%Y-%m-%d").ok()?;
-        return Some(
-            Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?)
-                .timestamp(),
-        );
+        let date: civil::Date = time.value.parse().ok()?;
+        return utc_epoch(date.at(0, 0, 0, 0));
     }
-    if let Ok(value) = DateTime::parse_from_rfc3339(&time.value) {
-        return Some(value.timestamp());
+    // Offset-bearing form first (`...Z` or `...+01:00`). `Timestamp` parses
+    // exactly those and REJECTS a zoneless value, which is why the civil
+    // fallback below is a second parse rather than a lenient single one.
+    if let Ok(value) = time.value.parse::<Timestamp>() {
+        return Some(value.as_second());
     }
-    let local = NaiveDateTime::parse_from_str(&time.value, "%Y-%m-%dT%H:%M:%S").ok()?;
+    // Zoneless wall clock. `civil::DateTime` is the exact complement: it
+    // rejects a trailing `Z`, because Temporal (and so jiff) reads a bare `Z`
+    // as an UNKNOWN offset rather than as UTC. The two parses therefore
+    // partition the input instead of overlapping, and neither one alone
+    // accepts both shapes.
+    let local: civil::DateTime = time.value.parse().ok()?;
     if let Some(zone) = time
         .timezone
         .as_deref()
-        .and_then(|zone| zone.parse::<Tz>().ok())
+        .and_then(|zone| TimeZone::get(zone).ok())
     {
-        return match zone.from_local_datetime(&local) {
-            chrono::LocalResult::Single(value) => Some(value.timestamp()),
-            chrono::LocalResult::Ambiguous(early, _) => Some(early.timestamp()),
-            chrono::LocalResult::None => {
-                for minute in 1..=(48 * 60) {
-                    let candidate = local.checked_add_signed(chrono::Duration::minutes(minute))?;
-                    if let chrono::LocalResult::Single(value)
-                    | chrono::LocalResult::Ambiguous(value, _) =
-                        zone.from_local_datetime(&candidate)
-                    {
-                        return Some(value.timestamp());
-                    }
-                }
-                None
-            }
-        };
+        // Compatible disambiguation: a fold takes the earlier instant and a
+        // gap shifts forward by its width. That is precisely what the previous
+        // `Single`/`Ambiguous(early)`/48-hour-minute-walk arms hand-rolled, so
+        // the walk is gone rather than ported.
+        return zone
+            .to_zoned(local)
+            .ok()
+            .map(|zoned| zoned.timestamp().as_second());
     }
-    Some(Utc.from_utc_datetime(&local).timestamp())
+    utc_epoch(local)
+}
+
+fn utc_epoch(naive: civil::DateTime) -> Option<i64> {
+    TimeZone::UTC
+        .to_zoned(naive)
+        .ok()
+        .map(|zoned| zoned.timestamp().as_second())
 }
 
 /// Inverse of `event_time_to_epoch`. All-day values use UTC dates and retain
 /// bifrost's exclusive-end convention; callers must pass an exclusive end.
 pub fn epoch_to_event_time(epoch_secs: i64, is_all_day: bool, timezone: Option<&str>) -> EventTime {
+    let instant = Timestamp::from_second(epoch_secs).unwrap_or(Timestamp::UNIX_EPOCH);
     if is_all_day {
         return EventTime {
-            value: Utc
-                .timestamp_opt(epoch_secs, 0)
-                .single()
-                .unwrap_or_else(|| Utc.timestamp_nanos(0))
-                .format("%Y-%m-%d")
+            value: instant
+                .to_zoned(TimeZone::UTC)
+                .strftime("%Y-%m-%d")
                 .to_string(),
             timezone: None,
         };
     }
-    if let Some(zone) = timezone.and_then(|zone| zone.parse::<Tz>().ok()) {
-        let zoned = zone
-            .timestamp_opt(epoch_secs, 0)
-            .single()
-            .unwrap_or_else(|| zone.timestamp_nanos(0));
+    if let Some(zone) = timezone.and_then(|zone| TimeZone::get(zone).ok()) {
+        let zoned = instant.to_zoned(zone);
         // A zero-offset zone (e.g. "UTC") emits the canonical `Z` form rather
         // than `+00:00`, matching the legacy wire format providers received.
-        let value = if zoned.offset().fix().local_minus_utc() == 0 {
-            zoned
-                .with_timezone(&Utc)
-                .to_rfc3339_opts(SecondsFormat::Secs, true)
+        let value = if zoned.offset().seconds() == 0 {
+            utc_rfc3339(instant)
         } else {
-            zoned.to_rfc3339()
+            zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
         };
         return EventTime {
             value,
@@ -181,13 +180,19 @@ pub fn epoch_to_event_time(epoch_secs: i64, is_all_day: bool, timezone: Option<&
         };
     }
     EventTime {
-        value: Utc
-            .timestamp_opt(epoch_secs, 0)
-            .single()
-            .unwrap_or_else(|| Utc.timestamp_nanos(0))
-            .to_rfc3339_opts(SecondsFormat::Secs, true),
+        value: utc_rfc3339(instant),
         timezone: None,
     }
+}
+
+/// Second-precision RFC 3339 in UTC with the canonical `Z` suffix. Written out
+/// rather than using jiff's `Display`, which emits fractional seconds and would
+/// change the wire format providers have been receiving.
+fn utc_rfc3339(instant: Timestamp) -> String {
+    instant
+        .to_zoned(TimeZone::UTC)
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        .to_string()
 }
 
 /// Parse form values for write payloads. Missing and unrecognised values share
@@ -308,14 +313,36 @@ fn recurrence_id(event: &CalendarEvent) -> Option<String> {
 /// Bifrost providers normally supply this already, but normalizing the common
 /// RFC 3339 spellings here keeps the cache key stable at the boundary.
 fn canonical_recurrence_id(value: &str) -> String {
-    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-        return date.format("%Y%m%d").to_string();
+    // Date-only, guarded on the absence of a time part. jiff's `civil::Date`
+    // parser is Temporal-lenient and happily accepts a full datetime, taking
+    // the date and discarding the clock - so an unguarded attempt here would
+    // swallow `2026-01-02T03:04:05` and canonicalise it to `20260102`. chrono's
+    // `parse_from_str(.., "%Y-%m-%d")` rejected the trailing text instead.
+    if !value.contains('T')
+        && let Ok(date) = value.parse::<civil::Date>()
+    {
+        return date.strftime("%Y%m%d").to_string();
     }
-    if let Ok(date_time) = DateTime::parse_from_rfc3339(value) {
-        return date_time.format("%Y%m%dT%H%M%SZ").to_string();
+    // RFC 3339 with an explicit offset. This deliberately formats the
+    // OFFSET-LOCAL wall clock and appends `Z`, reproducing what the chrono
+    // implementation did: `2026-03-15T10:00:00+01:00` canonicalises to
+    // `20260315T100000Z`, NOT the true UTC `20260315T090000Z`. That is almost
+    // certainly wrong - the `Z` asserts UTC - but the result is persisted as
+    // `events.recurrence_id_canonical` and compared against keys minted by
+    // earlier syncs, so correcting it is a data migration rather than a
+    // formatting change. Preserved bug-for-bug here; tracked in TODO.md.
+    //
+    // The `Timestamp` parse is the validity gate (it accepts exactly the
+    // offset-bearing spellings); the wall-clock fields come from the civil
+    // prefix because `Timestamp` itself has already normalised the offset away.
+    if value.parse::<Timestamp>().is_ok()
+        && let Some(prefix) = value.get(..19)
+        && let Ok(wall_clock) = prefix.parse::<civil::DateTime>()
+    {
+        return wall_clock.strftime("%Y%m%dT%H%M%SZ").to_string();
     }
-    if let Ok(date_time) = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S") {
-        return date_time.format("%Y%m%dT%H%M%S").to_string();
+    if let Ok(date_time) = value.parse::<civil::DateTime>() {
+        return date_time.strftime("%Y%m%dT%H%M%S").to_string();
     }
     value.to_string()
 }
@@ -641,7 +668,21 @@ mod tests {
             value: "2026-10-25T02:30:00".to_string(),
             timezone: Some("Europe/Oslo".to_string()),
         };
-        assert_eq!(event_time_to_epoch(&gap, false), Some(1_774_746_000));
+        // Oslo springs forward 2026-03-29 02:00 -> 03:00, so 02:30 sits in a
+        // 60-minute gap. Expectation CHANGED with the jiff migration, and the
+        // change is deliberate: the old hand-rolled walker stepped forward a
+        // minute at a time and took the FIRST valid wall clock (03:00 CEST =
+        // 01:00 UTC = 1_774_746_000), which silently discarded the user's
+        // intended :30. jiff's compatible disambiguation shifts by the gap's
+        // actual WIDTH instead (02:30 + 60min = 03:30 CEST = 01:30 UTC),
+        // preserving the minute.
+        //
+        // This also removes a real inconsistency rather than introducing one:
+        // `db`'s RRULE expander already resolved gaps by width - see the Lord
+        // Howe 30-minute case in its tests - so these two copies of the same
+        // logic disagreed with each other. A recurring event's master could be
+        // anchored by one rule and its instances by the other.
+        assert_eq!(event_time_to_epoch(&gap, false), Some(1_774_747_800));
         assert_eq!(event_time_to_epoch(&ambiguous, false), Some(1_792_888_200));
     }
 

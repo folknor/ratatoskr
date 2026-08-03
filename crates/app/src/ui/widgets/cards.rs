@@ -18,6 +18,19 @@ use crate::ui::theme;
 
 use super::avatars::{avatar_circle, label_dot, sender_avatar};
 use super::buttons::reply_button;
+
+/// The UTC wall clock for a Unix second.
+///
+/// NOTE: these labels are rendered in UTC, not the host zone. The chrono
+/// original formatted a `DateTime<Utc>` from `from_timestamp` directly, with no
+/// `with_timezone(&Local)`, so thread/message card timestamps have always shown
+/// UTC. Preserved bug-for-bug through the migration rather than silently
+/// shifting every visible timestamp; tracked in TODO.md.
+fn utc_dt(seconds: i64) -> Option<jiff::Zoned> {
+    jiff::Timestamp::from_second(seconds)
+        .ok()
+        .map(|ts| ts.to_zoned(jiff::tz::TimeZone::UTC))
+}
 use super::highlighted::highlighted_text_body;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -51,15 +64,14 @@ pub fn thread_card<'a, M: Clone + 'a>(
     let date_str = thread
         .last_message_at
         .and_then(|ts| {
-            chrono::DateTime::from_timestamp(ts, 0).map(|dt| {
-                let now = chrono::Utc::now();
-                let diff = now.signed_duration_since(dt);
-                if diff.num_hours() < 24 {
-                    dt.format("%l:%M %p").to_string().trim().to_string()
-                } else if diff.num_days() < 7 {
-                    dt.format("%a").to_string()
+            utc_dt(ts).map(|dt| {
+                let diff = jiff::Timestamp::now().duration_since(dt.timestamp());
+                if diff.as_hours() < 24 {
+                    dt.strftime("%-I:%M %p").to_string().trim().to_string()
+                } else if diff.as_hours() < 24 * 7 {
+                    dt.strftime("%a").to_string()
                 } else {
-                    dt.format("%b %d").to_string()
+                    dt.strftime("%b %d").to_string()
                 }
             })
         })
@@ -215,10 +227,7 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
     let avatar = avatar_circle(sender, AVATAR_MESSAGE_CARD);
     let date_str = thread
         .last_message_at
-        .and_then(|ts| {
-            chrono::DateTime::from_timestamp(ts, 0)
-                .map(|dt| dt.format("%a, %b %d, %Y, %l:%M %p").to_string())
-        })
+        .and_then(|ts| utc_dt(ts).map(|dt| dt.strftime("%a, %b %d, %Y, %-I:%M %p").to_string()))
         .unwrap_or_default();
 
     let header = row![
@@ -496,9 +505,7 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
 
     let short_date = msg
         .date
-        .and_then(|ts| {
-            chrono::DateTime::from_timestamp(ts, 0).map(|dt| dt.format("%b %d").to_string())
-        })
+        .and_then(|ts| utc_dt(ts).map(|dt| dt.strftime("%b %d").to_string()))
         .unwrap_or_default();
 
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
@@ -580,16 +587,20 @@ fn format_message_date(
     let Some(ts) = timestamp else {
         return String::new();
     };
-    let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else {
+    let Some(dt) = utc_dt(ts) else {
         return String::new();
     };
 
     match display {
         DateDisplay::RelativeOffset => {
-            let abs = dt.format("%b %d, %Y, %l:%M %p").to_string();
-            match first_message_timestamp.and_then(|fts| chrono::DateTime::from_timestamp(fts, 0)) {
+            let abs = dt.strftime("%b %d, %Y, %-I:%M %p").to_string();
+            match first_message_timestamp.and_then(utc_dt) {
                 Some(first_dt) => {
-                    let days = (dt - first_dt).num_days();
+                    let days = dt
+                        .timestamp()
+                        .duration_since(first_dt.timestamp())
+                        .as_hours()
+                        / 24;
                     if days == 0 {
                         abs.trim().to_string()
                     } else {
@@ -600,7 +611,7 @@ fn format_message_date(
             }
         }
         DateDisplay::Absolute => dt
-            .format("%b %d, %Y, %l:%M %p")
+            .strftime("%b %d, %Y, %-I:%M %p")
             .to_string()
             .trim()
             .to_string(),

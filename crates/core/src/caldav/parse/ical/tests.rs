@@ -1,5 +1,15 @@
 use super::*;
 
+/// Unix seconds for a wall clock already expressed in UTC. Keeps the
+/// expectations below readable as dates rather than epoch integers.
+fn utc_ts(year: i16, month: i8, day: i8, hour: i8, minute: i8) -> i64 {
+    jiff::tz::TimeZone::UTC
+        .to_zoned(jiff::civil::datetime(year, month, day, hour, minute, 0, 0))
+        .expect("valid UTC instant")
+        .timestamp()
+        .as_second()
+}
+
 #[test]
 fn parse_simple_vevent() {
     let ical = "\
@@ -469,10 +479,7 @@ END:VCALENDAR\r\n";
 
     let events = parse_icalendar(ical).expect("should parse");
     assert_eq!(events.len(), 1);
-    let expected = chrono::NaiveDate::from_ymd_opt(2024, 3, 10)
-        .and_then(|d| d.and_hms_opt(7, 30, 0))
-        .map(|d| d.and_utc().timestamp())
-        .expect("valid");
+    let expected = utc_ts(2024, 3, 10, 7, 30);
     assert_eq!(events[0].start_time, Some(expected));
 }
 
@@ -493,10 +500,7 @@ END:VCALENDAR\r\n";
 
     let events = parse_icalendar(ical).expect("should parse");
     assert_eq!(events.len(), 1);
-    let expected = chrono::NaiveDate::from_ymd_opt(2024, 11, 3)
-        .and_then(|d| d.and_hms_opt(5, 30, 0))
-        .map(|d| d.and_utc().timestamp())
-        .expect("valid");
+    let expected = utc_ts(2024, 11, 3, 5, 30);
     assert_eq!(events[0].start_time, Some(expected));
 }
 
@@ -589,10 +593,7 @@ END:VCALENDAR\r\n";
     let events = parse_icalendar(ical).expect("should parse");
     assert_eq!(events.len(), 1);
     // 10:00 UTC on 2024-03-15 (the wall-clock value, treated as UTC).
-    let expected = chrono::NaiveDate::from_ymd_opt(2024, 3, 15)
-        .and_then(|d| d.and_hms_opt(10, 0, 0))
-        .map(|d| d.and_utc().timestamp())
-        .expect("valid");
+    let expected = utc_ts(2024, 3, 15, 10, 0);
     assert_eq!(events[0].start_time, Some(expected));
 }
 

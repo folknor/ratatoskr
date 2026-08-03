@@ -99,7 +99,7 @@ pub fn save_contact_sync(
     conn: &impl WriteTarget,
     entry: &ContactSettingsEntry,
 ) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let source = entry.source.as_deref().unwrap_or("user");
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, email2, phone,

@@ -338,10 +338,11 @@ fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
         format!("{} members", group.member_count)
     };
     let format_date = |ts: i64| -> String {
-        chrono::DateTime::from_timestamp(ts, 0)
-            .map(|dt| {
-                dt.with_timezone(&chrono::Local)
-                    .format("%b %d, %Y")
+        jiff::Timestamp::from_second(ts)
+            .map(|instant| {
+                instant
+                    .to_zoned(jiff::tz::TimeZone::system())
+                    .strftime("%b %d, %Y")
                     .to_string()
             })
             .unwrap_or_default()

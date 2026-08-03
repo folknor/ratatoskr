@@ -3,7 +3,29 @@
 //! Provides data types, grid builder, and view functions for rendering
 //! a full month grid and a compact mini-month navigation widget.
 
-use chrono::{Datelike, NaiveDate, Weekday};
+use jiff::civil::{Date as NaiveDate, Weekday};
+use jiff::tz::TimeZone;
+use jiff::{Span, Timestamp};
+
+/// Days from Monday, in the `i64` this module's week arithmetic wants. jiff
+/// spells chrono's `num_days_from_monday` as `to_monday_zero_offset`.
+fn days_from_monday(day: Weekday) -> i64 {
+    i64::from(day.to_monday_zero_offset())
+}
+
+/// Add `days` to a date, saturating at the representable range rather than
+/// panicking. The grid builders walk fixed 6-week windows, so overflow is only
+/// reachable at the extreme ends of the calendar.
+fn add_days(date: NaiveDate, days: i64) -> NaiveDate {
+    date.checked_add(Span::new().days(days)).unwrap_or(date)
+}
+
+/// Build a civil date from this module's `i32`/`u32` year and month. jiff's
+/// civil fields are `i16`/`i8`; an out-of-range value is the same "no such
+/// date" case `from_ymd_opt` returned `None` for.
+fn civil_date(year: i32, month: u32, day: i8) -> Option<NaiveDate> {
+    NaiveDate::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, day).ok()
+}
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
@@ -54,7 +76,7 @@ pub fn build_month_grid(
     today: NaiveDate,
 ) -> MonthGridData {
     // Find the first day of the month.
-    let Some(first_of_month) = NaiveDate::from_ymd_opt(year, month, 1) else {
+    let Some(first_of_month) = civil_date(year, month, 1) else {
         return MonthGridData {
             year,
             month,
@@ -79,26 +101,34 @@ pub fn build_month_grid(
         let mut week: [MonthDay; 7] = std::array::from_fn(|day_idx| {
             #[allow(clippy::cast_possible_wrap)]
             let offset = (week_idx * 7 + day_idx) as i64;
-            let date = grid_start + chrono::Duration::days(offset);
+            let date = add_days(grid_start, offset);
             MonthDay {
                 date,
                 events: Vec::new(),
                 is_today: date == today,
-                is_current_month: date.month() == month && date.year() == year,
+                is_current_month: u32::from(date.month().unsigned_abs()) == month
+                    && i32::from(date.year()) == year,
             }
         });
 
         // Distribute events into this week's cells.
         // Multi-day events appear on every day they span, not just the start date.
         for event in events {
-            let Some(start_dt) = chrono::DateTime::from_timestamp(event.start_time, 0) else {
+            let Ok(start_dt) = Timestamp::from_second(event.start_time) else {
                 continue;
             };
-            let Some(end_dt) = chrono::DateTime::from_timestamp(event.end_time, 0) else {
+            let Ok(end_dt) = Timestamp::from_second(event.end_time) else {
                 continue;
             };
-            let event_start = start_dt.date_naive();
-            let event_end = end_dt.date_naive();
+            // UTC, preserving the chrono behaviour exactly: `date_naive()` on a
+            // `DateTime<Utc>` yielded the UTC calendar date. Note this differs
+            // from `CalendarState::rebuild_view_data`, which derives the same
+            // span in the HOST zone - a pre-existing inconsistency that can put
+            // a late-evening event on different grid days in the two paths.
+            // Preserved rather than unified here; unifying it is a behaviour
+            // change, not a migration one.
+            let event_start = start_dt.to_zoned(TimeZone::UTC).date();
+            let event_end = end_dt.to_zoned(TimeZone::UTC).date();
             for day in &mut week {
                 if day.date >= event_start && day.date <= event_end {
                     day.events.push(MonthEvent {
@@ -156,7 +186,10 @@ pub fn month_view<'a, M: 'a + Clone>(
 
     for week in &data.weeks {
         // ISO week number from the first day of the row.
-        let week_num = week.first().map(|d| d.date.iso_week().week()).unwrap_or(0);
+        let week_num = week
+            .first()
+            .map(|d| d.date.iso_week_date().week())
+            .unwrap_or(0);
 
         let week_label = button(
             container(
@@ -406,7 +439,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
     }
 
     // Date grid.
-    let Some(first_of_month) = NaiveDate::from_ymd_opt(year, month, 1) else {
+    let Some(first_of_month) = civil_date(year, month, 1) else {
         return container(column![header, dow_row]).into();
     };
     let grid_start = rewind_to_weekday(first_of_month, week_start);
@@ -420,8 +453,9 @@ pub fn mini_month<'a, M: 'a + Clone>(
         for d in 0..7 {
             #[allow(clippy::cast_possible_wrap)]
             let offset = (w * 7 + d) as i64;
-            let date = grid_start + chrono::Duration::days(offset);
-            let in_month = date.month() == month && date.year() == year;
+            let date = add_days(grid_start, offset);
+            let in_month =
+                u32::from(date.month().unsigned_abs()) == month && i32::from(date.year()) == year;
             let is_today = date == today;
             let is_selected = selected_date == Some(date);
 
@@ -505,67 +539,62 @@ fn max_events_with_overflow() -> usize {
 /// Rewind a date to the previous (or same) occurrence of `target` weekday.
 fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
     let current = date.weekday();
-    let diff =
-        (current.num_days_from_monday() as i64 - target.num_days_from_monday() as i64 + 7) % 7;
-    date - chrono::Duration::days(diff)
+    let diff = (days_from_monday(current) - days_from_monday(target) + 7) % 7;
+    add_days(date, -diff)
 }
 
 /// Last day of a given year/month.
 fn last_day_of_month(year: i32, month: u32) -> NaiveDate {
-    if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1)
-    }
-    .map(|d| d - chrono::Duration::days(1))
-    .unwrap_or_else(|| NaiveDate::from_ymd_opt(year, month, 28).unwrap_or_default())
+    civil_date(year, month, 1).map_or_else(NaiveDate::default, NaiveDate::last_of_month)
 }
 
 /// Number of days between two dates (inclusive would be +1 at call site).
 fn days_between(a: NaiveDate, b: NaiveDate) -> usize {
-    let diff = (b - a).num_days();
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let diff = (b - a).get_days();
+    #[allow(clippy::cast_sign_loss)]
     if diff < 0 { 0 } else { diff as usize }
 }
 
 /// Get the weekday that is `offset` days after `start`.
 fn weekday_offset(start: Weekday, offset: usize) -> Weekday {
-    let base = start.num_days_from_monday();
-    let target = (base as usize + offset) % 7;
+    // `to_monday_zero_offset` is 0..=6 by construction, so `unsigned_abs`
+    // widens without a lossy cast.
+    let base = usize::from(start.to_monday_zero_offset().unsigned_abs());
+    let target = (base + offset) % 7;
     match target {
-        0 => Weekday::Mon,
-        1 => Weekday::Tue,
-        2 => Weekday::Wed,
-        3 => Weekday::Thu,
-        4 => Weekday::Fri,
-        5 => Weekday::Sat,
-        _ => Weekday::Sun,
+        0 => Weekday::Monday,
+        1 => Weekday::Tuesday,
+        2 => Weekday::Wednesday,
+        3 => Weekday::Thursday,
+        4 => Weekday::Friday,
+        5 => Weekday::Saturday,
+        _ => Weekday::Sunday,
     }
 }
 
 /// Three-letter weekday abbreviation.
 fn weekday_short(day: Weekday) -> &'static str {
     match day {
-        Weekday::Mon => "Mon",
-        Weekday::Tue => "Tue",
-        Weekday::Wed => "Wed",
-        Weekday::Thu => "Thu",
-        Weekday::Fri => "Fri",
-        Weekday::Sat => "Sat",
-        Weekday::Sun => "Sun",
+        Weekday::Monday => "Mon",
+        Weekday::Tuesday => "Tue",
+        Weekday::Wednesday => "Wed",
+        Weekday::Thursday => "Thu",
+        Weekday::Friday => "Fri",
+        Weekday::Saturday => "Sat",
+        Weekday::Sunday => "Sun",
     }
 }
 
 /// Two-letter weekday abbreviation for the mini-month.
 fn weekday_two_letter(day: Weekday) -> &'static str {
     match day {
-        Weekday::Mon => "Mo",
-        Weekday::Tue => "Tu",
-        Weekday::Wed => "We",
-        Weekday::Thu => "Th",
-        Weekday::Fri => "Fr",
-        Weekday::Sat => "Sa",
-        Weekday::Sun => "Su",
+        Weekday::Monday => "Mo",
+        Weekday::Tuesday => "Tu",
+        Weekday::Wednesday => "We",
+        Weekday::Thursday => "Th",
+        Weekday::Friday => "Fr",
+        Weekday::Saturday => "Sa",
+        Weekday::Sunday => "Su",
     }
 }
 

@@ -471,7 +471,7 @@ async fn run_calendar(
                 &inner.db,
                 &inner.read_db,
                 factory,
-                now_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
+                now_ms.unwrap_or_else(|| jiff::Timestamp::now().as_millisecond()),
                 &cancellation_token,
             )
             .await

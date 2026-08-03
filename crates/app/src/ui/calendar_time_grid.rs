@@ -4,7 +4,27 @@
 //! event bars, positioned event blocks, and a current-time indicator.
 //! Built from iced primitives (no custom `advanced::Widget`).
 
-use chrono::{Datelike, NaiveDate, Timelike, Weekday};
+use jiff::civil::{Date as NaiveDate, Weekday};
+use jiff::tz::TimeZone;
+use jiff::{Span, Timestamp, Zoned};
+
+/// Days from Monday, in the `i64` this module's week arithmetic wants.
+fn days_from_monday(day: Weekday) -> i64 {
+    i64::from(day.to_monday_zero_offset())
+}
+
+/// Add `days` to a date, saturating rather than panicking at the ends of the
+/// representable calendar.
+fn add_days(date: NaiveDate, days: i64) -> NaiveDate {
+    date.checked_add(Span::new().days(days)).unwrap_or(date)
+}
+
+/// The host-zone wall clock for a Unix second.
+fn local_dt(seconds: i64) -> Option<Zoned> {
+    Timestamp::from_second(seconds)
+        .ok()
+        .map(|ts| ts.to_zoned(TimeZone::system()))
+}
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Theme};
 
@@ -92,10 +112,10 @@ pub fn build_work_week_view(
     events: &[TimeGridEvent],
     today: NaiveDate,
 ) -> TimeGridConfig {
-    let monday = rewind_to_weekday(date, Weekday::Mon);
+    let monday = rewind_to_weekday(date, Weekday::Monday);
     let days = (0..5)
         .map(|i| {
-            let d = monday + chrono::Duration::days(i);
+            let d = add_days(monday, i);
             TimeGridDay {
                 date: d,
                 events: events_for_date(events, d),
@@ -121,7 +141,7 @@ pub fn build_week_view(
     let start = rewind_to_weekday(date, week_start);
     let days = (0..7)
         .map(|i| {
-            let d = start + chrono::Duration::days(i);
+            let d = add_days(start, i);
             TimeGridDay {
                 date: d,
                 events: events_for_date(events, d),
@@ -414,8 +434,8 @@ fn build_day_column<'a, M: 'a + Clone>(
 
     // Build now-line for today's column.
     let now_line: Element<'a, M> = if day.is_today {
-        let now = chrono::Local::now();
-        let now_minutes = now.time().hour() as f32 * 60.0 + now.time().minute() as f32;
+        let now = Zoned::now();
+        let now_minutes = f32::from(now.hour()) * 60.0 + f32::from(now.minute());
         let grid_start_m = config.hour_start as f32 * 60.0;
         let grid_end_m = config.hour_end as f32 * 60.0;
         if now_minutes >= grid_start_m && now_minutes <= grid_end_m {
@@ -734,24 +754,22 @@ fn event_minutes(
 ) -> (f32, f32) {
     // Convert UTC timestamps to local time for display.
     // The spec says "Display in local time everywhere."
-    let start_dt = chrono::DateTime::from_timestamp(event.start_time, 0)
-        .map(|dt| dt.with_timezone(&chrono::Local));
-    let end_dt = chrono::DateTime::from_timestamp(event.end_time, 0)
-        .map(|dt| dt.with_timezone(&chrono::Local));
+    let start_dt = local_dt(event.start_time);
+    let end_dt = local_dt(event.end_time);
     let grid_start = config.hour_start as f32 * 60.0;
     let grid_end = config.hour_end as f32 * 60.0;
 
     let (start_m, end_m) = match (start_dt, end_dt) {
         (Some(s), Some(e)) => {
-            let event_start_date = s.date_naive();
-            let event_end_date = e.date_naive();
+            let event_start_date = s.date();
+            let event_end_date = e.date();
 
             // Clamp start: if event started before this column's day,
             // treat as starting at midnight.
             let sm = if event_start_date < column_date {
                 0.0
             } else {
-                s.time().hour() as f32 * 60.0 + s.time().minute() as f32
+                f32::from(s.hour()) * 60.0 + f32::from(s.minute())
             };
 
             // Clamp end: if event ends after this column's day,
@@ -759,7 +777,7 @@ fn event_minutes(
             let em = if event_end_date > column_date {
                 grid_end
             } else {
-                e.time().hour() as f32 * 60.0 + e.time().minute() as f32
+                f32::from(e.hour()) * 60.0 + f32::from(e.minute())
             };
 
             (sm.max(grid_start), em.min(grid_end).max(sm + 1.0))
@@ -776,10 +794,8 @@ pub fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGri
         .filter(|e| {
             // Use local time for date filtering - an event at 23:00 local
             // should appear on the correct local day, not the UTC day.
-            let start = chrono::DateTime::from_timestamp(e.start_time, 0)
-                .map(|dt| dt.with_timezone(&chrono::Local).date_naive());
-            let end = chrono::DateTime::from_timestamp(e.end_time, 0)
-                .map(|dt| dt.with_timezone(&chrono::Local).date_naive());
+            let start = local_dt(e.start_time).map(|dt| dt.date());
+            let end = local_dt(e.end_time).map(|dt| dt.date());
             match (start, end) {
                 (Some(s), Some(e_date)) => date >= s && date <= e_date,
                 (Some(s), None) => date == s,
@@ -791,11 +807,11 @@ pub fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGri
 }
 
 /// Rewind a date to the previous (or same) occurrence of `target` weekday.
+#[allow(clippy::needless_pass_by_value)]
 fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
     let current = date.weekday();
-    let diff =
-        (current.num_days_from_monday() as i64 - target.num_days_from_monday() as i64 + 7) % 7;
-    date - chrono::Duration::days(diff)
+    let diff = (days_from_monday(current) - days_from_monday(target) + 7) % 7;
+    add_days(date, -diff)
 }
 
 /// Format an hour number as a time label.
@@ -806,21 +822,32 @@ fn format_hour(hour: u32) -> String {
 /// Format a day header label (e.g. "Wed 19").
 fn format_day_header(date: NaiveDate) -> String {
     let weekday = match date.weekday() {
-        Weekday::Mon => "Mon",
-        Weekday::Tue => "Tue",
-        Weekday::Wed => "Wed",
-        Weekday::Thu => "Thu",
-        Weekday::Fri => "Fri",
-        Weekday::Sat => "Sat",
-        Weekday::Sun => "Sun",
+        Weekday::Monday => "Mon",
+        Weekday::Tuesday => "Tue",
+        Weekday::Wednesday => "Wed",
+        Weekday::Thursday => "Thu",
+        Weekday::Friday => "Fri",
+        Weekday::Saturday => "Sat",
+        Weekday::Sunday => "Sun",
     };
     format!("{} {}", weekday, date.day())
 }
 
 /// Format event start time for display in block.
+///
+/// NOTE: this reads the clock in UTC, not the host zone - the chrono original
+/// called `from_timestamp` without a `with_timezone(&Local)`, unlike every
+/// other display path in this module. So an event's block LABEL can disagree
+/// with the block's POSITION, which `event_minutes` computes in local time
+/// ("Display in local time everywhere," per the spec comment there). Preserved
+/// bug-for-bug through the migration rather than quietly changing what times
+/// users see; tracked in TODO.md.
 fn format_event_time(event: &TimeGridEvent) -> String {
-    chrono::DateTime::from_timestamp(event.start_time, 0)
-        .map(|dt| format!("{}:{:02}", dt.time().hour(), dt.time().minute()))
+    Timestamp::from_second(event.start_time)
+        .map(|ts| {
+            let dt = ts.to_zoned(TimeZone::UTC);
+            format!("{}:{:02}", dt.hour(), dt.minute())
+        })
         .unwrap_or_default()
 }
 
@@ -836,5 +863,5 @@ fn contrasting_text_color(bg: iced::Color) -> iced::Color {
 
 /// Check if a date falls on a weekend (Saturday or Sunday).
 fn is_weekend(date: NaiveDate) -> bool {
-    matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
+    matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday)
 }

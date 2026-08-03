@@ -651,7 +651,7 @@ async fn run_sync(
             .with_write(|conn| Ok(sync::config::get_sync_period_days(conn)))
             .await
         {
-            Ok(days) => chrono::Utc::now().timestamp() - days.saturating_mul(86_400),
+            Ok(days) => jiff::Timestamp::now().as_second() - days.saturating_mul(86_400),
             Err(e) => {
                 log::debug!("post-sync prefetch sweep: sync_period_days read failed: {e}");
                 0

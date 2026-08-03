@@ -218,7 +218,7 @@ impl ReadyApp {
                 }
                 let name = state.save_group_name.trim().to_string();
                 let group_id = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now().timestamp();
+                let now = jiff::Timestamp::now().as_second();
                 #[allow(clippy::cast_possible_wrap)]
                 let member_count = emails.len() as i64;
                 let entry = crate::db::GroupEntry {

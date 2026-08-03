@@ -19,7 +19,7 @@
 use super::actions::{ActionContext, ActionOutcome, unsnooze};
 
 pub(crate) async fn drain_due_snoozes(ctx: &ActionContext) {
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     let due =
         match db::db::queries_extra::db_get_snoozed_threads_due(&ctx.write_db.writer_pool(), now)
             .await

@@ -12,7 +12,7 @@ workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "rt-multi-thread", "macros", "sync", "time"] }
-chrono.workspace = true
+jiff.workspace = true
 thiserror.workspace = true
 
 # Crate-specific deps

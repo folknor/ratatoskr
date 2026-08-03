@@ -7,7 +7,6 @@ use crate::component::Component;
 use crate::ui::layout::*;
 use crate::ui::theme;
 
-use chrono::TimeZone;
 use rtsk::chat::ChatMessage;
 
 // ── Messages & Events ──────────────────────────────────
@@ -391,32 +390,29 @@ fn normalize_subject(s: &str) -> String {
     s
 }
 
-fn local_date(timestamp: i64) -> chrono::NaiveDate {
-    chrono::Local
-        .timestamp_opt(timestamp, 0)
-        .single()
-        .map(|dt| dt.date_naive())
-        .unwrap_or_default()
+fn local_zoned(timestamp: i64) -> Option<jiff::Zoned> {
+    jiff::Timestamp::from_second(timestamp)
+        .ok()
+        .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
+}
+
+fn local_date(timestamp: i64) -> jiff::civil::Date {
+    local_zoned(timestamp).map_or_else(jiff::civil::Date::default, |dt| dt.date())
 }
 
 fn format_date_label(timestamp: i64) -> String {
-    let today = chrono::Local::now().date_naive();
+    let today = jiff::Zoned::now().date();
     let msg_date = local_date(timestamp);
 
     if msg_date == today {
         "Today".to_string()
-    } else if msg_date == today.pred_opt().unwrap_or(today) {
+    } else if msg_date == today.yesterday().unwrap_or(today) {
         "Yesterday".to_string()
     } else {
-        msg_date.format("%B %e").to_string()
+        msg_date.strftime("%B %e").to_string()
     }
 }
 
 fn format_time(timestamp: i64) -> String {
-    use chrono::TimeZone;
-    chrono::Local
-        .timestamp_opt(timestamp, 0)
-        .single()
-        .map(|d| d.format("%H:%M").to_string())
-        .unwrap_or_default()
+    local_zoned(timestamp).map_or_else(String::new, |d| d.strftime("%H:%M").to_string())
 }

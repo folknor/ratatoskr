@@ -610,7 +610,7 @@ impl ReadyApp {
                     self.pinned_searches
                         .iter()
                         .find(|p| p.id == id)
-                        .map_or_else(|| chrono::Utc::now().timestamp(), |ps| ps.updated_at)
+                        .map_or_else(|| jiff::Timestamp::now().as_second(), |ps| ps.updated_at)
                 });
             }
         }

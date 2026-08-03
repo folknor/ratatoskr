@@ -2,7 +2,8 @@
 // Message formatting
 // ---------------------------------------------------------------------------
 
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 
 use crate::types::{AiMessageInput, AiSearchResult};
 
@@ -28,11 +29,9 @@ fn format_single_message(msg: &AiMessageInput) -> String {
         _ => "Unknown".to_string(),
     };
 
-    let date = Utc
-        .timestamp_opt(msg.date, 0)
-        .single()
-        .map(|dt| dt.format("%b %d, %Y").to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
+    let date = Timestamp::from_second(msg.date)
+        .map(|ts| ts.to_zoned(TimeZone::UTC).strftime("%b %d, %Y").to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
 
     let body = msg
         .body_text
@@ -63,11 +62,9 @@ pub fn format_search_results_for_ai(results: &[AiSearchResult], max_chars: usize
 }
 
 fn format_single_search_result(result: &AiSearchResult) -> String {
-    let date = Utc
-        .timestamp_opt(result.date, 0)
-        .single()
-        .map(|dt| dt.format("%b %d, %Y").to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
+    let date = Timestamp::from_second(result.date)
+        .map(|ts| ts.to_zoned(TimeZone::UTC).strftime("%b %d, %Y").to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
     let subject = result.subject.as_deref().unwrap_or("(no subject)");
     let from = match (&result.from_name, &result.from_address) {
         (Some(name), Some(addr)) if !name.is_empty() => format!("{name} <{addr}>"),

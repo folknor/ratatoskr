@@ -135,7 +135,7 @@ pub fn db_upsert_contact_full(
     conn: &impl WriteTarget,
     input: UpsertContactParams<'_>,
 ) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, email2, phone,
                                company, notes, account_id, source,

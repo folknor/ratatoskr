@@ -262,7 +262,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.0",
  "blake3",
- "chrono",
  "cmdk",
  "dashmap",
  "dellingr",
@@ -275,6 +274,7 @@ dependencies = [
  "iced",
  "iced-drop",
  "import",
+ "jiff",
  "label-colors",
  "libc",
  "log",
@@ -957,11 +957,10 @@ dependencies = [
  "action-types",
  "async-trait",
  "bifrost-types",
- "chrono",
- "chrono-tz",
  "db",
  "db-read",
  "hotpath 0.22.0",
+ "jiff",
  "log",
  "rtsk",
  "rusqlite",
@@ -1280,12 +1279,12 @@ dependencies = [
  "ammonia",
  "async-trait",
  "base64 0.23.0",
- "chrono",
  "crypto-key",
  "css-inline",
  "db",
  "getrandom 0.4.3",
  "hotpath 0.22.0",
+ "jiff",
  "log",
  "lol_html",
  "mail-parser",
@@ -1688,8 +1687,6 @@ name = "db"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "chrono",
- "chrono-tz",
  "db-read",
  "flate2",
  "hotpath 0.22.0",
@@ -1713,8 +1710,6 @@ name = "db-read"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "chrono",
- "chrono-tz",
  "db",
  "flate2",
  "hotpath 0.22.0",
@@ -1819,11 +1814,11 @@ dependencies = [
 name = "dev-seed"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "db",
  "flate2",
  "hotpath 0.22.0",
  "image",
+ "jiff",
  "log",
  "rand 0.10.2",
  "rusqlite",
@@ -4028,8 +4023,8 @@ name = "llm"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chrono",
  "hotpath 0.22.0",
+ "jiff",
  "log",
  "regex",
  "reqwest",
@@ -6158,7 +6153,6 @@ dependencies = [
  "async-trait",
  "base64 0.23.0",
  "calcard",
- "chrono",
  "cmdk",
  "common",
  "db-read",
@@ -6581,7 +6575,6 @@ dependencies = [
  "blake3",
  "bytes",
  "cal",
- "chrono",
  "common",
  "crypto-key",
  "db",
@@ -6590,6 +6583,7 @@ dependencies = [
  "fs2",
  "futures",
  "futures-util",
+ "jiff",
  "label-colors",
  "libc",
  "log",
@@ -6826,9 +6820,9 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 name = "smart-folder"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "db-read",
  "hotpath 0.22.0",
+ "jiff",
  "log",
  "rusqlite",
  "types",

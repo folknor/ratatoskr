@@ -707,7 +707,7 @@ impl ServiceClient {
         if last_ms == 0 {
             return false;
         }
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        let now_ms = jiff::Timestamp::now().as_millisecond();
         let elapsed = now_ms.saturating_sub(last_ms);
         u128::try_from(elapsed).unwrap_or(u128::MAX) <= BOOT_PROGRESS_RECENT_WINDOW.as_millis()
     }
@@ -3224,13 +3224,13 @@ async fn reader_task<R>(
                                 if let Some(client) = upgraded.as_ref() {
                                     match &notification {
                                         Notification::SyncProgress(_) => {
-                                            let now_ms = chrono::Utc::now().timestamp_millis();
+                                            let now_ms = jiff::Timestamp::now().as_millisecond();
                                             client
                                                 .last_sync_progress_at_ms
                                                 .store(now_ms, Ordering::Relaxed);
                                         }
                                         Notification::BootProgress(_) => {
-                                            let now_ms = chrono::Utc::now().timestamp_millis();
+                                            let now_ms = jiff::Timestamp::now().as_millisecond();
                                             client
                                                 .last_boot_progress_at_ms
                                                 .store(now_ms, Ordering::Relaxed);
@@ -3497,7 +3497,7 @@ async fn heartbeat_task(
                 if last_sync_ms == 0 {
                     None
                 } else {
-                    let now_ms = chrono::Utc::now().timestamp_millis();
+                    let now_ms = jiff::Timestamp::now().as_millisecond();
                     let diff = now_ms.saturating_sub(last_sync_ms);
                     let elapsed_ms = u128::try_from(diff).unwrap_or(u128::MAX);
                     if elapsed_ms <= SYNC_RECENT_WINDOW.as_millis() {

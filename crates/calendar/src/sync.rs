@@ -361,9 +361,9 @@ async fn pull_range(
 fn epoch_time(ms: i64) -> EventTime {
     let seconds = ms.div_euclid(1000);
     EventTime {
-        value: chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0).map_or_else(
-            || "1970-01-01T00:00:00Z".to_string(),
-            |value| value.to_rfc3339(),
+        value: jiff::Timestamp::from_second(seconds).map_or_else(
+            |_| "1970-01-01T00:00:00Z".to_string(),
+            |value| value.to_zoned(jiff::tz::TimeZone::UTC).to_string(),
         ),
         timezone: Some("UTC".to_string()),
     }
@@ -721,9 +721,10 @@ mod tests {
     }
 
     fn ical_utc(ts: i64) -> String {
-        chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+        jiff::Timestamp::from_second(ts)
             .expect("valid timestamp")
-            .format("%Y%m%dT%H%M%SZ")
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .strftime("%Y%m%dT%H%M%SZ")
             .to_string()
     }
 
