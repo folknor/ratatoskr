@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use chrono::Datelike;
+use jiff::civil;
+use jiff::tz::TimeZone;
+use jiff::{SignedDuration, Span, Timestamp};
 
 use super::CalendarViewEvent;
 
@@ -51,16 +53,26 @@ fn instance_cap(rule: &Rrule, default_unbounded: usize) -> usize {
 /// `chrono::Local` (the previous behavior, which silently shifted every
 /// recurring event by the user's UTC offset relative to its source zone).
 ///
-/// `Iana` covers any TZID we can resolve via `chrono_tz`. `Local` covers
-/// floating events (no TZID stored) and any TZID we couldn't parse - notably
-/// Windows zone names like "Pacific Standard Time" that the parse layer
+/// `Iana` covers any TZID we can resolve through jiff's bundled tzdb. `Local`
+/// covers floating events (no TZID stored) and any TZID we couldn't parse -
+/// notably Windows zone names like "Pacific Standard Time" that the parse layer
 /// resolves at sync time but stores in `event.timezone` as-is. Threading
 /// calcard's resolver into expansion would honor those, but that pulls
 /// calcard into the db crate; the warn-and-fall-back path keeps the previous
 /// behavior for the unresolved tail without infecting the dep graph.
-#[derive(Debug, Clone, Copy)]
+///
+/// The two arms are NOT redundant now that both hold the same jiff `TimeZone`
+/// type: the discriminant is what tells `canonical_recurrence_slot` whether to
+/// emit a `TZID=` suffix. A floating event that happens to resolve to the
+/// host's zone must still serialize without a TZID, so the distinction is
+/// semantic and survives the migration.
+///
+/// `Clone` rather than `Copy`: jiff's `TimeZone` is a handle to shared tzdb
+/// data, so it is cheap to clone but not a bare value. Callers take it by
+/// reference.
+#[derive(Debug, Clone)]
 enum RecurrenceTz {
-    Iana(chrono_tz::Tz),
+    Iana(TimeZone),
     Local,
 }
 
@@ -73,7 +85,7 @@ impl RecurrenceTz {
         if trimmed.is_empty() {
             return Self::Local;
         }
-        match trimmed.parse::<chrono_tz::Tz>() {
+        match TimeZone::get(trimmed) {
             Ok(tz) => Self::Iana(tz),
             Err(_) => {
                 log::debug!(
@@ -85,26 +97,58 @@ impl RecurrenceTz {
         }
     }
 
-    fn naive(self, timestamp: i64) -> Option<chrono::NaiveDateTime> {
-        use chrono::TimeZone;
+    /// The zone to compute in. `Local` resolves the host zone at call time;
+    /// jiff falls back to UTC (with its own warning) on a host with no
+    /// discoverable zone, which matches chrono's previous behavior here.
+    fn zone(&self) -> TimeZone {
         match self {
-            Self::Iana(tz) => tz
-                .timestamp_opt(timestamp, 0)
-                .single()
-                .map(|d| d.naive_local()),
-            Self::Local => chrono::Local
-                .timestamp_opt(timestamp, 0)
-                .single()
-                .map(|d| d.naive_local()),
+            Self::Iana(tz) => tz.clone(),
+            Self::Local => TimeZone::system(),
         }
     }
 
-    fn resolve(self, naive: chrono::NaiveDateTime) -> Option<i64> {
-        match self {
-            Self::Iana(tz) => crate::db::time::resolve_local_to_timestamp(naive, &tz),
-            Self::Local => crate::db::time::resolve_local_to_timestamp(naive, &chrono::Local),
-        }
+    fn naive(&self, timestamp: i64) -> Option<civil::DateTime> {
+        Timestamp::from_second(timestamp)
+            .ok()
+            .map(|instant| instant.to_zoned(self.zone()).datetime())
     }
+
+    fn resolve(&self, naive: civil::DateTime) -> Option<i64> {
+        crate::db::time::resolve_local_to_timestamp(naive, &self.zone())
+    }
+}
+
+/// jiff's civil types use narrow integer widths (`i16` year, `i8` month and
+/// day) while this module's year/month cursor arithmetic is `i32`/`u32`
+/// throughout. Convert at the boundary rather than rewriting the arithmetic:
+/// the widening direction is always lossless, and the cursor logic below is
+/// heavily reviewed against dateutil, so leaving it byte-identical keeps the
+/// migration honest.
+fn ymd_of(dt: civil::DateTime) -> (i32, u32, u32) {
+    (
+        i32::from(dt.year()),
+        u32::from(dt.month().unsigned_abs()),
+        u32::from(dt.day().unsigned_abs()),
+    )
+}
+
+/// Narrowing inverse of [`ymd_of`]. `None` when the values fall outside jiff's
+/// representable civil range - which every caller already treats as "skip this
+/// candidate", the same way the chrono `from_ymd_opt` it replaces did.
+fn civil_date(year: i32, month: u32, day: u32) -> Option<civil::Date> {
+    civil::Date::new(
+        i16::try_from(year).ok()?,
+        i8::try_from(month).ok()?,
+        i8::try_from(day).ok()?,
+    )
+    .ok()
+}
+
+/// Weekday offset from Monday, in the `i64` the week arithmetic below wants.
+/// jiff spells this `to_monday_zero_offset`; chrono spelled it
+/// `num_days_from_monday`. Same value, different name.
+fn days_from_monday(day: civil::Weekday) -> i64 {
+    i64::from(day.to_monday_zero_offset())
 }
 
 /// Expand a recurring event into concrete instances based on its RRULE.
@@ -237,7 +281,7 @@ fn expand_recurrence_windowed(
     let wall_duration = if event.all_day {
         match (tz.naive(event.start_time), tz.naive(event.end_time)) {
             (Some(s), Some(e)) => {
-                let mut days = e.date().signed_duration_since(s.date()).num_days();
+                let mut days = (e.date() - s.date()).get_days();
                 // If end_naive landed before midnight (DST fall-back, where
                 // start+86400 sits at 23:00 the same day), the date delta
                 // would underreport by one. Round up so a 1-day event stays
@@ -247,14 +291,18 @@ fn expand_recurrence_windowed(
                 if days == 0 && raw_duration > 0 {
                     days = 1;
                 }
-                chrono::Duration::days(days.max(0))
+                // Civil arithmetic, so a "day" here is a literal 24h of wall
+                // clock - the whole point of computing from the date delta is
+                // that the zone-aware re-resolution happens later, in
+                // `end_time_for_instance`.
+                SignedDuration::from_hours(24 * i64::from(days.max(0)))
             }
-            _ => chrono::Duration::seconds(raw_duration),
+            _ => SignedDuration::from_secs(raw_duration),
         }
     } else {
         match (tz.naive(event.start_time), tz.naive(event.end_time)) {
-            (Some(s), Some(e)) => e.signed_duration_since(s),
-            _ => chrono::Duration::seconds(raw_duration),
+            (Some(s), Some(e)) => e.duration_since(s),
+            _ => SignedDuration::from_secs(raw_duration),
         }
     };
 
@@ -281,24 +329,24 @@ fn expand_recurrence_windowed(
     //
     // Resolve UNTIL through the event's recurrence zone. Floating and
     // DATE-only UNTIL values were stored raw at parse time so the anchor
-    // matches the event's zone rather than the host's chrono::Local; UTC
+    // matches the event's zone rather than the host's local zone; UTC
     // UNTIL values are pre-resolved and unaffected. (Round 3 #7, #8.)
-    let until_ts = rule.until.and_then(|u| u.resolve(tz));
+    let until_ts = rule.until.and_then(|u| u.resolve(&tz));
     let window_end = match (until_ts, rule.count) {
         (Some(until), _) => until,
         (None, Some(_)) => i64::MAX,
         (None, None) => {
-            expansion_horizon.unwrap_or_else(|| two_year_window_end(event.start_time, tz))
+            expansion_horizon.unwrap_or_else(|| two_year_window_end(event.start_time, &tz))
         }
     };
 
     let mut instances = Vec::with_capacity(max_instances);
 
     let candidate_starts = match freq {
-        Freq::Daily => expand_daily(event.start_time, &rule, tz),
-        Freq::Weekly => expand_weekly(event.start_time, &rule, tz),
-        Freq::Monthly => expand_monthly(event.start_time, &rule, tz),
-        Freq::Yearly => expand_yearly(event.start_time, &rule, tz),
+        Freq::Daily => expand_daily(event.start_time, &rule, &tz),
+        Freq::Weekly => expand_weekly(event.start_time, &rule, &tz),
+        Freq::Monthly => expand_monthly(event.start_time, &rule, &tz),
+        Freq::Yearly => expand_yearly(event.start_time, &rule, &tz),
     };
 
     for (idx, start) in candidate_starts.into_iter().enumerate() {
@@ -315,7 +363,7 @@ fn expand_recurrence_windowed(
         // two events for the same slot - the user sees the original *and*
         // the moved instance.
         if !overrides.is_empty() {
-            let canonical = canonical_recurrence_slot(start, tz, event.all_day);
+            let canonical = canonical_recurrence_slot(start, &tz, event.all_day);
             if overrides.contains(&canonical) {
                 continue;
             }
@@ -325,7 +373,7 @@ fn expand_recurrence_windowed(
             instance.id = format!("{}__recur_{idx}", event.id);
         }
         instance.start_time = start;
-        instance.end_time = end_time_for_instance(start, wall_duration, tz, raw_duration);
+        instance.end_time = end_time_for_instance(start, wall_duration, &tz, raw_duration);
         // Recurring instances inherit the master's identity; never their
         // own override key. Stash uid alongside so that future code paths
         // (e.g. clicking through to an instance) keep the master link.
@@ -358,7 +406,7 @@ fn expand_recurrence_windowed(
 /// a floating-form override, which is the convention sane emitters use
 /// across master/override pairs anyway. UTC-form override + non-UTC
 /// master is a malformed feed; we don't try to dedup that combination.
-fn canonical_recurrence_slot(timestamp: i64, tz: RecurrenceTz, all_day: bool) -> String {
+fn canonical_recurrence_slot(timestamp: i64, tz: &RecurrenceTz, all_day: bool) -> String {
     let Some(naive) = tz.naive(timestamp) else {
         // Resolution failed (timestamp out of chrono's range). Return a
         // sentinel that won't collide with any real iCal canonical form;
@@ -366,11 +414,20 @@ fn canonical_recurrence_slot(timestamp: i64, tz: RecurrenceTz, all_day: bool) ->
         return format!("__unresolvable_slot_{timestamp}");
     };
     if all_day {
-        return naive.format("%Y%m%d").to_string();
+        return naive.strftime("%Y%m%d").to_string();
     }
-    let body = naive.format("%Y%m%dT%H%M%S").to_string();
+    let body = naive.strftime("%Y%m%dT%H%M%S").to_string();
     match tz {
-        RecurrenceTz::Iana(zone) => format!("{body};TZID={}", zone.name()),
+        // `iana_name` is `Option` because a jiff `TimeZone` can also be a
+        // fixed offset or a POSIX rule. This arm is only ever constructed
+        // from `TimeZone::get`, which always yields a named zone, so the
+        // fallback is unreachable in practice - but emitting the body
+        // without a TZID beats emitting `TZID=` with nothing after it,
+        // which would never match a real override's canonical form.
+        RecurrenceTz::Iana(zone) => match zone.iana_name() {
+            Some(name) => format!("{body};TZID={name}"),
+            None => body,
+        },
         RecurrenceTz::Local => body,
     }
 }
@@ -383,12 +440,12 @@ fn canonical_recurrence_slot(timestamp: i64, tz: RecurrenceTz, all_day: bool) ->
 /// duration on every subsequent instance.
 fn end_time_for_instance(
     start: i64,
-    wall_duration: chrono::Duration,
-    tz: RecurrenceTz,
+    wall_duration: SignedDuration,
+    tz: &RecurrenceTz,
     raw_duration: i64,
 ) -> i64 {
     tz.naive(start)
-        .and_then(|n| n.checked_add_signed(wall_duration))
+        .and_then(|n| n.checked_add(wall_duration).ok())
         .and_then(|n| tz.resolve(n))
         .unwrap_or(start + raw_duration)
 }
@@ -396,9 +453,9 @@ fn end_time_for_instance(
 /// Compute the 2-year window-end timestamp using calendar arithmetic so
 /// leap years are accounted for. Falls back to a 730-day approximation if
 /// the start timestamp is somehow out of chrono's representable range.
-fn two_year_window_end(start: i64, tz: RecurrenceTz) -> i64 {
+fn two_year_window_end(start: i64, tz: &RecurrenceTz) -> i64 {
     tz.naive(start)
-        .and_then(|n| n.with_year(n.year() + 2))
+        .and_then(|n| n.with().year(n.year() + 2).build().ok())
         .and_then(|n| tz.resolve(n))
         .unwrap_or(start + 730 * 86400)
 }
@@ -442,7 +499,7 @@ pub(super) fn master_intersects_window(
     let tz = RecurrenceTz::from_event_timezone(event.timezone.as_deref());
     let anchor = match Freq::parse(&rule.freq) {
         Some(freq @ (Freq::Daily | Freq::Weekly)) => {
-            reanchor_day_cadence(event.start_time, &rule, freq, tz, window_start)
+            reanchor_day_cadence(event.start_time, &rule, freq, &tz, window_start)
         }
         // MONTHLY/YEARLY: count cap never bites within a realistic window; the
         // horizon override below is sufficient. Malformed FREQ: leave as-is,
@@ -471,7 +528,7 @@ fn reanchor_day_cadence(
     start: i64,
     rule: &Rrule,
     freq: Freq,
-    tz: RecurrenceTz,
+    tz: &RecurrenceTz,
     window_start: i64,
 ) -> i64 {
     if window_start <= start {
@@ -502,7 +559,7 @@ struct ByDay {
     /// `None` means "every occurrence of `day` in the period", `Some(n)`
     /// means "the n-th occurrence" (negative counts from the end).
     ordinal: Option<i32>,
-    day: chrono::Weekday,
+    day: civil::Weekday,
 }
 
 /// Raw UNTIL value from an RRULE, before zone resolution.
@@ -523,20 +580,20 @@ enum Until {
     /// valid alongside floating DTSTART; some Outlook CalDAV bridges emit
     /// it alongside TZID-bearing DTSTART anyway. Either way, resolves at
     /// 23:59:59 in the event's zone.
-    Date(chrono::NaiveDate),
+    Date(civil::Date),
     /// `YYYYMMDDTHHMMSS` form. RFC 5545: floating, only legal when DTSTART
     /// is floating. Resolved in the event's zone at expand time.
-    Floating(chrono::NaiveDateTime),
+    Floating(civil::DateTime),
     /// `YYYYMMDDTHHMMSSZ` form. Already an absolute UTC instant; no
     /// zone-aware resolution needed.
     Utc(i64),
 }
 
 impl Until {
-    fn resolve(self, tz: RecurrenceTz) -> Option<i64> {
+    fn resolve(self, tz: &RecurrenceTz) -> Option<i64> {
         match self {
             Self::Date(date) => {
-                let dt = date.and_hms_opt(23, 59, 59)?;
+                let dt = date.at(23, 59, 59, 0);
                 tz.resolve(dt)
             }
             Self::Floating(dt) => tz.resolve(dt),
@@ -569,7 +626,7 @@ struct Rrule {
     /// occurrence. Adding BYWEEKNO without plumbing wkst into the YEARLY
     /// expander would silently shift week-1 anchoring by up to 6 days for
     /// any rule that does not opt into the default WKST=MO.
-    wkst: Option<chrono::Weekday>,
+    wkst: Option<civil::Weekday>,
     /// RFC 5545 BY-rules we recognize but don't yet implement. Populated by
     /// `parse_rrule` so `expand_recurrence` can short-circuit instead of
     /// silently producing wrong expansions (e.g. `BYSETPOS=-1` filtering
@@ -698,15 +755,15 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
 
 /// Parse a bare iCal weekday token (no ordinal prefix). Used for `WKST=`
 /// and as a helper for the BYDAY parser.
-fn parse_weekday_code(code: &str) -> Option<chrono::Weekday> {
+fn parse_weekday_code(code: &str) -> Option<civil::Weekday> {
     match code {
-        "MO" => Some(chrono::Weekday::Mon),
-        "TU" => Some(chrono::Weekday::Tue),
-        "WE" => Some(chrono::Weekday::Wed),
-        "TH" => Some(chrono::Weekday::Thu),
-        "FR" => Some(chrono::Weekday::Fri),
-        "SA" => Some(chrono::Weekday::Sat),
-        "SU" => Some(chrono::Weekday::Sun),
+        "MO" => Some(civil::Weekday::Monday),
+        "TU" => Some(civil::Weekday::Tuesday),
+        "WE" => Some(civil::Weekday::Wednesday),
+        "TH" => Some(civil::Weekday::Thursday),
+        "FR" => Some(civil::Weekday::Friday),
+        "SA" => Some(civil::Weekday::Saturday),
+        "SU" => Some(civil::Weekday::Sunday),
         _ => None,
     }
 }
@@ -761,7 +818,7 @@ fn parse_byday(spec: &str) -> Option<ByDay> {
     parse_weekday_code(code).map(|day| ByDay { ordinal, day })
 }
 
-fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
+fn expand_daily(start: i64, rule: &Rrule, tz: &RecurrenceTz) -> Vec<i64> {
     // Default unbounded cap matches the 2-year fallback window's worst case
     // for FREQ=DAILY (730 days). UNTIL-bounded rules run to RRULE_MAX_COUNT
     // and let the time bound terminate; see `instance_cap`.
@@ -772,7 +829,7 @@ fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // collected `rule.byday.iter().map(|b| b.day)` per iteration -
     // RRULE_MAX_STEPS=12_000 allocations of a single Vec for every daily
     // expansion, all carrying the same content. (Round 3 #11.)
-    let byday_filter: Vec<chrono::Weekday> = rule.byday.iter().map(|b| b.day).collect();
+    let byday_filter: Vec<civil::Weekday> = rule.byday.iter().map(|b| b.day).collect();
     // Step-bounded iteration: a BYDAY filter can reject 6 of every 7
     // candidates, and pathological filters (e.g. `BYDAY=TU` on a daily rule
     // with `INTERVAL=7` starting on Monday) match nothing - without a step
@@ -799,7 +856,7 @@ fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
 // (week 1: Mon/Wed/Fri; week 3: Mon/Wed/Fri; ...) and
 // `FREQ=MONTHLY;BYDAY=2WE,-1FR` from a normal-month anchor
 // (2026-01-14, 2026-01-30, 2026-02-11, 2026-02-27, ...). Output matched.
-fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
+fn expand_weekly(start: i64, rule: &Rrule, tz: &RecurrenceTz) -> Vec<i64> {
     // Bumped from 366 to 800: the previous default truncated dense BY-rules
     // (e.g. `BYDAY=MO,TU,WE,TH,FR` = 5/wk × 104wk = 520 emissions) inside
     // the 2-year synthesised fallback window. The standup vanished from
@@ -825,7 +882,7 @@ fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
         return out;
     }
 
-    let wkst = rule.wkst.unwrap_or(chrono::Weekday::Mon);
+    let wkst = rule.wkst.unwrap_or(civil::Weekday::Monday);
     // RFC 5545 § 3.8.5.3 says DTSTART is always part of the recurrence set;
     // a strict reading therefore requires the WEEKLY+BYDAY shape to emit
     // DTSTART even when its weekday is not in BYDAY (e.g. a Tuesday DTSTART
@@ -838,12 +895,8 @@ fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // WEEKLY ignores BYDAY ordinals (RFC 5545 § 3.3.10) so we only
     // consider the bare weekday. Sort by week-start anchored offset so
     // each week emits in chronological order rather than Mon-first.
-    let mut days: Vec<chrono::Weekday> = rule.byday.iter().map(|b| b.day).collect();
-    days.sort_by_key(|d| {
-        let wd = d.num_days_from_monday() as i64;
-        let from = wkst.num_days_from_monday() as i64;
-        (wd - from).rem_euclid(7)
-    });
+    let mut days: Vec<civil::Weekday> = rule.byday.iter().map(|b| b.day).collect();
+    days.sort_by_key(|d| (days_from_monday(*d) - days_from_monday(wkst)).rem_euclid(7));
 
     let week_start = start_of_week(start, wkst, tz);
     let mut week_anchor = week_start;
@@ -869,7 +922,7 @@ fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     out
 }
 
-fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
+fn expand_monthly(start: i64, rule: &Rrule, tz: &RecurrenceTz) -> Vec<i64> {
     // Bumped from 120 to 800: dense BY-rules
     // (`FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR` ~ 22/month) would otherwise
     // truncate to ~5.5 months inside the 2-year fallback window. (Round 3
@@ -879,7 +932,8 @@ fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     let Some(start_dt) = tz.naive(start) else {
         return out;
     };
-    let original_day = start_dt.day();
+    // Widen once, here: the month/year cursor arithmetic below is i32/u32.
+    let (start_year, start_month, original_day) = ymd_of(start_dt);
     // Hoist the wall-clock time out of the per-month loop. `with_ymd_time`
     // takes the pre-resolved time so it doesn't redo `tz.naive(start)` per
     // candidate. (Round 4 #13.)
@@ -895,8 +949,8 @@ fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // contain day 31. With a cursor we visit every interval-th month and
     // the per-month `collect_monthly_days` / default-day check decides
     // what (if anything) to emit there.
-    let mut year = start_dt.year();
-    let mut month = start_dt.month();
+    let mut year = start_year;
+    let mut month = start_month;
     // Step-bounded: filters that no visited month satisfies (e.g.
     // BYMONTHDAY=31 with INTERVAL=12 starting in February) would otherwise
     // never grow `out` and would loop forever.
@@ -1015,13 +1069,15 @@ fn collect_monthly_days(year: i32, month: u32, byday: &[ByDay], bymonthday: &[i3
 /// outer YEARLY expander can call this up to ~30 times per month per
 /// year per BYDAY entry; the previous shape paid 30 `from_ymd_opt`s per
 /// call for what is fundamentally a `(d - 1) % 7` check.
-fn weekday_occurrences_in_month(year: i32, month: u32, weekday: chrono::Weekday) -> Vec<u32> {
+fn weekday_occurrences_in_month(year: i32, month: u32, weekday: civil::Weekday) -> Vec<u32> {
     let dim = days_in_month(year, month);
-    let Some(day1) = chrono::NaiveDate::from_ymd_opt(year, month, 1) else {
+    let Some(day1) = civil_date(year, month, 1) else {
         return Vec::new();
     };
-    let day1_weekday = day1.weekday().num_days_from_monday();
-    let target = weekday.num_days_from_monday();
+    // `to_monday_zero_offset` is 0..=6 by construction, so `unsigned_abs`
+    // widens without a lossy cast.
+    let day1_weekday = u32::from(day1.weekday().to_monday_zero_offset().unsigned_abs());
+    let target = u32::from(weekday.to_monday_zero_offset().unsigned_abs());
     (1..=dim)
         .filter(|&d| {
             let offset = (d - 1) % 7;
@@ -1032,7 +1088,7 @@ fn weekday_occurrences_in_month(year: i32, month: u32, weekday: chrono::Weekday)
 
 /// The n-th occurrence of `weekday` in `year`/`month`. Positive `n` counts
 /// from the start of the month; negative counts from the end.
-fn nth_weekday_in_month(year: i32, month: u32, weekday: chrono::Weekday, n: i32) -> Option<u32> {
+fn nth_weekday_in_month(year: i32, month: u32, weekday: civil::Weekday, n: i32) -> Option<u32> {
     let occurrences = weekday_occurrences_in_month(year, month, weekday);
     if n > 0 {
         let idx = usize::try_from(n - 1).ok()?;
@@ -1045,7 +1101,7 @@ fn nth_weekday_in_month(year: i32, month: u32, weekday: chrono::Weekday, n: i32)
     }
 }
 
-fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
+fn expand_yearly(start: i64, rule: &Rrule, tz: &RecurrenceTz) -> Vec<i64> {
     // YEARLY's unbounded default sits lower than the others because the
     // 2-year fallback window only emits ~2 instances per realistic rule
     // (annual events). 200 covers ~80 years for repeated holidays
@@ -1059,8 +1115,8 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     let Some(start_dt) = tz.naive(start) else {
         return out;
     };
-    let original_month = start_dt.month();
-    let original_day = start_dt.day();
+    // Widen once, here: the month/year cursor arithmetic below is i32/u32.
+    let (start_year, original_month, original_day) = ymd_of(start_dt);
     // Hoist the wall-clock time. Without this, `expand_yearly` was paying
     // ~80k * 12 * ~30 = ~30M `tz.naive(start)` resolves on the inner
     // `with_year_month_day` call; the time is invariant across the whole
@@ -1081,7 +1137,7 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // bounds terminate. (`parse_rrule` already clamps interval to >=1, so
     // no further `.max(1)` is needed here.)
     let interval_years: i32 = i32::try_from(rule.interval).unwrap_or(1);
-    let mut year = start_dt.year();
+    let mut year = start_year;
     // Hoist the months slice. The default path uses a single-element stack
     // array; explicit BYMONTH borrows the rule's slice. Previously cloned a
     // Vec<u32> per year inside the 80k-iteration loop. (Round 4 #12.)
@@ -1152,17 +1208,17 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
 /// invariant start timestamp through `tz.naive(...)` per candidate; the
 /// YEARLY expander was paying ~30M of those for a single dense rule.
 fn with_ymd_time(
-    time: chrono::NaiveTime,
+    time: civil::Time,
     year: i32,
     month: u32,
     day: u32,
-    tz: RecurrenceTz,
+    tz: &RecurrenceTz,
 ) -> Option<i64> {
-    let new_date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
-    tz.resolve(new_date.and_time(time))
+    let new_date = civil_date(year, month, day)?;
+    tz.resolve(new_date.to_datetime(time))
 }
 
-fn matches_weekday(timestamp: i64, days: &[chrono::Weekday], tz: RecurrenceTz) -> bool {
+fn matches_weekday(timestamp: i64, days: &[civil::Weekday], tz: &RecurrenceTz) -> bool {
     let Some(naive) = tz.naive(timestamp) else {
         return false;
     };
@@ -1174,13 +1230,17 @@ fn matches_weekday(timestamp: i64, days: &[chrono::Weekday], tz: RecurrenceTz) -
 /// zone, preserving wall-clock time across DST transitions. Returns `None`
 /// only if the resulting NaiveDateTime or zone resolution overflows
 /// (essentially unreachable for any plausible recurrence window).
-fn add_days_in_zone(timestamp: i64, days: i64, tz: RecurrenceTz) -> Option<i64> {
+fn add_days_in_zone(timestamp: i64, days: i64, tz: &RecurrenceTz) -> Option<i64> {
     let naive = tz.naive(timestamp)?;
-    let new_naive = naive.checked_add_signed(chrono::Duration::days(days))?;
+    // Civil-day arithmetic: adding a day to a civil datetime moves the
+    // calendar day and leaves the clock alone, which is exactly the
+    // wall-clock-preserving step this wants. The zone re-enters in
+    // `tz.resolve`.
+    let new_naive = naive.checked_add(Span::new().days(days)).ok()?;
     tz.resolve(new_naive)
 }
 
-fn start_of_week(timestamp: i64, week_start: chrono::Weekday, tz: RecurrenceTz) -> i64 {
+fn start_of_week(timestamp: i64, week_start: civil::Weekday, tz: &RecurrenceTz) -> i64 {
     let Some(naive) = tz.naive(timestamp) else {
         return timestamp;
     };
@@ -1188,8 +1248,8 @@ fn start_of_week(timestamp: i64, week_start: chrono::Weekday, tz: RecurrenceTz) 
     // Modular distance from `week_start` to `current`, walking forward
     // through the week (so a Sun-anchored week with current=Sat -> 6 days
     // back, and a Mon-anchored week with current=Sun -> 6 days back).
-    let from = week_start.num_days_from_monday() as i64;
-    let to = current.num_days_from_monday() as i64;
+    let from = days_from_monday(week_start);
+    let to = days_from_monday(current);
     let days_back = (to - from).rem_euclid(7);
     add_days_in_zone(timestamp, -days_back, tz).unwrap_or_else(|| {
         // `add_days_in_zone` only returns None when the resulting
@@ -1214,10 +1274,10 @@ fn start_of_week(timestamp: i64, week_start: chrono::Weekday, tz: RecurrenceTz) 
 
 fn shift_to_weekday(
     week_anchor: i64,
-    target: chrono::Weekday,
-    week_start: chrono::Weekday,
+    target: civil::Weekday,
+    week_start: civil::Weekday,
     time_source: i64,
-    tz: RecurrenceTz,
+    tz: &RecurrenceTz,
 ) -> i64 {
     let Some(anchor_naive) = tz.naive(week_anchor) else {
         return week_anchor;
@@ -1231,8 +1291,8 @@ fn shift_to_weekday(
     // day in the Apia case): `target_offset` against the assumed
     // anchor was 0 for the start-day even though anchor was on a
     // different weekday entirely. (Round 3 #17.)
-    let anchor_weekday = anchor_naive.date().weekday().num_days_from_monday() as i64;
-    let target_to = target.num_days_from_monday() as i64;
+    let anchor_weekday = days_from_monday(anchor_naive.date().weekday());
+    let target_to = days_from_monday(target);
     let target_offset = (target_to - anchor_weekday).rem_euclid(7);
     // `week_start` is no longer used for the offset math - kept in the
     // signature for caller compatibility, since week_anchor is supposed
@@ -1243,13 +1303,13 @@ fn shift_to_weekday(
     // Day arithmetic in calendar units, not raw seconds. Then reattach the
     // intended wall-clock time and re-resolve in the event's zone, falling
     // through gap/ambiguous via `resolve_local_to_timestamp`.
-    let Some(target_date) = anchor_naive
+    let Ok(target_date) = anchor_naive
         .date()
-        .checked_add_signed(chrono::Duration::days(target_offset))
+        .checked_add(Span::new().days(target_offset))
     else {
         return week_anchor;
     };
-    let new_naive = target_date.and_time(time_naive.time());
+    let new_naive = target_date.to_datetime(time_naive.time());
     tz.resolve(new_naive).unwrap_or(week_anchor)
 }
 
@@ -1306,7 +1366,7 @@ fn parse_until_date(val: &str) -> Option<Until> {
         log::debug!("RRULE UNTIL year {year} outside 1..=9999; rejecting");
         return None;
     }
-    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let date = civil_date(year, month, day)?;
 
     // DATE-only form: exactly 8 chars.
     if val.len() == 8 {
@@ -1320,16 +1380,22 @@ fn parse_until_date(val: &str) -> Option<Until> {
         return None;
     }
     let time_part = val.get(9..15)?;
-    let hour: u32 = time_part.get(0..2)?.parse().ok()?;
-    let minute: u32 = time_part.get(2..4)?.parse().ok()?;
-    let second: u32 = time_part.get(4..6)?.parse().ok()?;
-    let dt = date.and_hms_opt(hour, minute, second)?;
+    let hour: i8 = time_part.get(0..2)?.parse().ok()?;
+    let minute: i8 = time_part.get(2..4)?.parse().ok()?;
+    let second: i8 = time_part.get(4..6)?.parse().ok()?;
+    let dt = date.at(hour, minute, second, 0);
 
     match (val.len(), val.as_bytes().get(15)) {
         // Floating: 15 chars, no trailing character.
         (15, None) => Some(Until::Floating(dt)),
         // UTC: 16 chars, trailing 'Z'.
-        (16, Some(&b'Z')) => Some(Until::Utc(dt.and_utc().timestamp())),
+        // UTC: 16 chars, trailing 'Z'. The `Z` really is UTC here - this is
+        // RFC 5545 wire syntax, not a Temporal-style timestamp string, so it
+        // is resolved explicitly against `TimeZone::UTC` rather than parsed.
+        (16, Some(&b'Z')) => TimeZone::UTC
+            .to_zoned(dt)
+            .ok()
+            .map(|zoned| Until::Utc(zoned.timestamp().as_second())),
         // Anything else (offset like +0100, fractional seconds, trailing
         // garbage) is malformed; rejecting prevents silent UTC mis-anchor.
         _ => {

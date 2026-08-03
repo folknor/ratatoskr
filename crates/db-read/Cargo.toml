@@ -13,6 +13,7 @@ workspace = true
 blake3 = "1"
 chrono.workspace = true
 chrono-tz = "0.10"
+jiff.workspace = true
 flate2 = "1"
 hotpath = { workspace = true, optional = true }
 log = "0.4"

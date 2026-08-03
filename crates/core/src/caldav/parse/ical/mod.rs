@@ -402,15 +402,35 @@ fn extract_datetime(
                     // Persist the IANA name (resolver folded Windows
                     // aliases like "Pacific Standard Time" through to
                     // "America/Los_Angeles") so downstream
-                    // `RecurrenceTz::from_event_timezone` can `parse()`
-                    // it without bringing calcard's alias map into the
-                    // db crate. `Tz::Fixed` resolves to an `Etc/GMT<n>`
-                    // string which chrono_tz also accepts.
+                    // `RecurrenceTz::from_event_timezone` can look it up
+                    // without bringing calcard's alias map into the db
+                    // crate. `Tz::Fixed` resolves to an `Etc/GMT<n>`
+                    // string, which jiff's tzdb also carries.
+                    //
+                    // The IANA name is also the bridge between the two
+                    // zone types: calcard's `Tz` is its own enum, so
+                    // rather than convert it structurally we re-look-up
+                    // the resolved name in jiff's tzdb - the same string
+                    // the db crate will resolve later, which keeps parse
+                    // and expansion agreeing by construction.
                     let resolved_name = tz.name().map(std::borrow::Cow::into_owned);
-                    return (
-                        common::time::resolve_local_to_timestamp(naive, &tz),
-                        false,
-                        resolved_name,
+                    if let Some(zone) = resolved_name
+                        .as_deref()
+                        .and_then(|name| jiff::tz::TimeZone::get(name).ok())
+                    {
+                        return (
+                            common::time::resolve_local_to_timestamp(naive, &zone),
+                            false,
+                            resolved_name,
+                        );
+                    }
+                    // calcard resolved the TZID but jiff's tzdb doesn't
+                    // carry the resulting name. Falls through to the same
+                    // UTC treatment as an unresolvable TZID below rather
+                    // than silently re-anchoring in the host's zone.
+                    log::warn!(
+                        "CalDAV TZID={tz_id_raw:?} resolved to {resolved_name:?}, \
+                         which is not in the tz database; falling back to UTC"
                     );
                 }
                 // The TZID was specified but did not resolve. Falling
@@ -424,7 +444,14 @@ fn extract_datetime(
                 log::warn!(
                     "CalDAV TZID={tz_id_raw:?} did not resolve; falling back to UTC interpretation"
                 );
-                return (Some(naive.and_utc().timestamp()), false, None);
+                return (
+                    jiff::tz::TimeZone::UTC
+                        .to_zoned(naive)
+                        .ok()
+                        .map(|zoned| zoned.timestamp().as_second()),
+                    false,
+                    None,
+                );
             }
         }
     }
@@ -442,7 +469,7 @@ fn extract_datetime(
     //    floating means "interpret in viewer's local zone," and persisting
     //    "Local" as a string would lock the event to the host that synced it.
     (
-        common::time::resolve_local_to_timestamp(naive, &chrono::Local),
+        common::time::resolve_local_to_timestamp(naive, &jiff::tz::TimeZone::system()),
         false,
         None,
     )
@@ -520,22 +547,26 @@ fn score_datetime_candidate(entry: &ICalendarEntry) -> u8 {
     1
 }
 
-fn partial_to_naive(dt: &calcard::common::PartialDateTime) -> Option<chrono::NaiveDateTime> {
-    let year = dt.year? as i32;
-    let month = dt.month? as u32;
-    let day = dt.day? as u32;
-    let hour = dt.hour.unwrap_or(0) as u32;
-    let minute = dt.minute.unwrap_or(0) as u32;
-    let second = dt.second.unwrap_or(0) as u32;
-    chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(hour, minute, second)
+fn partial_to_naive(dt: &calcard::common::PartialDateTime) -> Option<jiff::civil::DateTime> {
+    let date = partial_to_date(dt)?;
+    let hour = i8::try_from(dt.hour.unwrap_or(0)).ok()?;
+    let minute = i8::try_from(dt.minute.unwrap_or(0)).ok()?;
+    let second = i8::try_from(dt.second.unwrap_or(0)).ok()?;
+    Some(date.at(hour, minute, second, 0))
+}
+
+fn partial_to_date(dt: &calcard::common::PartialDateTime) -> Option<jiff::civil::Date> {
+    jiff::civil::Date::new(
+        i16::try_from(dt.year?).ok()?,
+        i8::try_from(dt.month?).ok()?,
+        i8::try_from(dt.day?).ok()?,
+    )
+    .ok()
 }
 
 fn build_local_midnight(dt: &calcard::common::PartialDateTime) -> Option<i64> {
-    let year = dt.year? as i32;
-    let month = dt.month? as u32;
-    let day = dt.day? as u32;
-    let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(0, 0, 0)?;
-    common::time::resolve_local_to_timestamp(naive, &chrono::Local)
+    let naive = partial_to_date(dt)?.at(0, 0, 0, 0);
+    common::time::resolve_local_to_timestamp(naive, &jiff::tz::TimeZone::system())
 }
 
 /// Build the canonical wall-clock storage form for a VEVENT's RECURRENCE-ID.
@@ -590,9 +621,9 @@ fn extract_recurrence_id_canonical(
             let offset_secs = if dt.tz_minus { -secs } else { secs };
             // Subtract the offset to land on UTC wall-clock, then format.
             let utc_naive = naive
-                .checked_sub_signed(chrono::Duration::seconds(i64::from(offset_secs)))
+                .checked_sub(jiff::SignedDuration::from_secs(i64::from(offset_secs)))
                 .unwrap_or(naive);
-            return Some(format!("{}Z", utc_naive.format("%Y%m%dT%H%M%S")));
+            return Some(format!("{}Z", utc_naive.strftime("%Y%m%dT%H%M%S")));
         }
         return Some(format!("{body}Z"));
     }

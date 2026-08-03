@@ -899,6 +899,22 @@ fn normalized_flags(
     normalized
 }
 
+/// Unwrap a bifrost `SystemTime` into the epoch seconds our schema stores.
+///
+/// DELIBERATE SEAM - do not "modernize" this to `jiff::Timestamp` when the
+/// rest of ratatoskr is on jiff. `bifrost-types` speaks `std::time::SystemTime`
+/// across its whole public time surface (`Message.date`, `Identity` vacation
+/// windows, filter/search `after`/`before`, `RetryAfter::At`, the scheduled-send
+/// path, the header date parser's return type), and that is a deliberate API
+/// choice by the bifrost side, not an oversight: jiff is an internal
+/// implementation detail there (only its MIME header parser names the type), so
+/// a `SystemTime` seam lets bifrost swap its date parser without a breaking
+/// release during pre-1.0 stabilization. `RetryAfter::At` in particular carries
+/// its own documented warning against exactly this kind of type churn.
+///
+/// Converting one field and not the others would leave two time vocabularies at
+/// a single boundary, which is worse than either end state. So this helper is
+/// the correct shape for the boundary, not residue to be cleaned up.
 fn system_time_secs(time: SystemTime) -> i64 {
     time.duration_since(UNIX_EPOCH)
         .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
@@ -1130,6 +1146,8 @@ async fn hydrate_inline_images(
     Ok(images)
 }
 
+/// Millisecond counterpart to [`system_time_secs`]. The same deliberate-seam
+/// note applies: this stays `SystemTime`.
 fn system_time_ms(time: SystemTime) -> i64 {
     let millis = time
         .duration_since(UNIX_EPOCH)
