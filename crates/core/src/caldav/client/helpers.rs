@@ -96,17 +96,11 @@ fn collect_hrefs(xml: &str, property_name: &str, limit: usize) -> Vec<String> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(raw) = std::str::from_utf8(e.as_ref())
-                    && let Ok(text) = unescape(raw)
-                {
+                if let Ok(text) = unescape(e) {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => {
-                if let Ok(text) = e.decode() {
-                    buf.push_str(&text);
-                }
-            }
+            Ok(Event::CData(ref e)) => buf.push_str(e),
             Ok(Event::End(_)) => {
                 let parent_is_property = stack
                     .iter()
@@ -135,11 +129,10 @@ fn collect_hrefs(xml: &str, property_name: &str, limit: usize) -> Vec<String> {
 }
 
 /// Extract the local name from a possibly-namespaced XML tag.
-fn local_name(raw: &[u8]) -> String {
-    let full = String::from_utf8_lossy(raw);
-    match full.rfind(':') {
-        Some(idx) => full[idx + 1..].to_string(),
-        None => full.to_string(),
+fn local_name(raw: &str) -> String {
+    match raw.rfind(':') {
+        Some(idx) => raw[idx + 1..].to_string(),
+        None => raw.to_string(),
     }
 }
 

@@ -112,7 +112,7 @@ pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
 
     let mut buf: Vec<u8> = Vec::with_capacity(256);
     let mut out = String::new();
-    let mut skip_until: Option<Vec<u8>> = None;
+    let mut skip_until: Option<String> = None;
 
     loop {
         buf.clear();
@@ -120,7 +120,7 @@ pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
             Ok(Event::Eof) => break,
             Ok(Event::Start(ref e)) => {
                 let name = e.name().as_ref().to_ascii_lowercase();
-                if name == b"script" || name == b"style" {
+                if name == "script" || name == "style" {
                     skip_until = Some(name);
                 }
             }
@@ -135,23 +135,19 @@ pub(crate) fn extract_html(bytes: &[u8]) -> ExtractionOutcome {
                 if skip_until.is_some() {
                     continue;
                 }
-                if let Ok(s) = t.decode() {
-                    let trimmed = s.trim();
-                    if !trimmed.is_empty() {
-                        if !out.is_empty() {
-                            out.push(' ');
-                        }
-                        out.push_str(trimmed);
+                let trimmed = t.trim();
+                if !trimmed.is_empty() {
+                    if !out.is_empty() {
+                        out.push(' ');
                     }
+                    out.push_str(trimmed);
                 }
             }
             Ok(Event::CData(ref c)) => {
                 if skip_until.is_some() {
                     continue;
                 }
-                // CDATA bytes are raw - decode as UTF-8 lossy and trim.
-                let raw = String::from_utf8_lossy(c.as_ref());
-                let trimmed = raw.trim();
+                let trimmed = c.trim();
                 if !trimmed.is_empty() {
                     if !out.is_empty() {
                         out.push(' ');

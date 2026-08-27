@@ -212,8 +212,25 @@ pub(crate) fn factory_from_decrypted(
                 GraphClient::with_source(graph_base, source)
             };
             let mut factory = GraphAccountFactory::new(client);
+            // Graph webhook mode now requires the `clientState` secret up
+            // front: bifrost dropped the URL-only constructor because it minted
+            // a random per-resource secret and discarded it, leaving the
+            // receiver nothing to validate against. A URL with no secret is
+            // therefore a misconfiguration, not a degraded mode - it falls back
+            // to the default (EWS streaming) push path rather than subscribing
+            // with a secret nobody can check.
             if let Ok(webhook_url) = std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL") {
-                factory = factory.with_push_endpoint(webhook_url);
+                match std::env::var("RATATOSKR_GRAPH_PUSH_CLIENT_STATE") {
+                    Ok(client_state) if !client_state.is_empty() => {
+                        factory =
+                            factory.with_push_endpoint_client_state(webhook_url, client_state);
+                    }
+                    _ => log::warn!(
+                        "RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL is set without a non-empty \
+                         RATATOSKR_GRAPH_PUSH_CLIENT_STATE; Graph webhook subscriptions are \
+                         disabled because the receiver could not validate them"
+                    ),
+                }
             }
             for mailbox in &decrypted.row.enabled_shared_mailboxes {
                 factory = factory.with_shared_mailbox(mailbox.clone());

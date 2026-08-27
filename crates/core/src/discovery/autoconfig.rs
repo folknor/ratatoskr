@@ -68,7 +68,7 @@ fn parse_autoconfig_xml(xml: &str, email: &str, source_url: &str) -> Vec<Protoco
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let name = e.name().as_ref().to_string();
                 handle_start_tag(&name, e, in_email_provider, &mut current_server);
                 if name == "emailProvider" {
                     in_email_provider = true;
@@ -77,14 +77,12 @@ fn parse_autoconfig_xml(xml: &str, email: &str, source_url: &str) -> Vec<Protoco
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(raw) = std::str::from_utf8(e.as_ref())
-                    && let Ok(text) = unescape(raw)
-                {
+                if let Ok(text) = unescape(e) {
                     buf.push_str(&text);
                 }
             }
             Ok(Event::End(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let name = e.name().as_ref().to_string();
                 handle_end_tag(
                     &name,
                     &current_tag,
@@ -118,8 +116,8 @@ fn handle_start_tag(
         let server_type = e
             .attributes()
             .filter_map(std::result::Result::ok)
-            .find(|a| a.key.as_ref() == b"type")
-            .map(|a| String::from_utf8_lossy(&a.value).to_string())
+            .find(|a| a.key.as_ref() == "type")
+            .map(|a| a.value.as_ref().to_string())
             .unwrap_or_default();
         *current_server = Some(ParsedServer {
             server_type,

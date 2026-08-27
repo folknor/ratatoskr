@@ -12,23 +12,23 @@ const BASE64_PNG_PREFIX: &str = "data:image/png;base64,";
 const BASE64_JPEG_PREFIX: &str = "data:image/jpeg;base64,";
 
 /// Editor-specific elements to strip entirely.
-const EDITOR_ELEMENTS: &[&[u8]] = &[
-    b"metadata",
-    b"sodipodi:namedview",
-    b"inkscape:grid",
-    b"inkscape:perspective",
+const EDITOR_ELEMENTS: &[&str] = &[
+    "metadata",
+    "sodipodi:namedview",
+    "inkscape:grid",
+    "inkscape:perspective",
 ];
 
 /// Editor-specific attribute prefixes to strip.
-const EDITOR_ATTR_PREFIXES: &[&[u8]] = &[
-    b"inkscape:",
-    b"sodipodi:",
-    b"xmlns:inkscape",
-    b"xmlns:sodipodi",
-    b"xmlns:dc",
-    b"xmlns:cc",
-    b"xmlns:rdf",
-    b"xml:space",
+const EDITOR_ATTR_PREFIXES: &[&str] = &[
+    "inkscape:",
+    "sodipodi:",
+    "xmlns:inkscape",
+    "xmlns:sodipodi",
+    "xmlns:dc",
+    "xmlns:cc",
+    "xmlns:rdf",
+    "xml:space",
 ];
 
 /// Compress an SVG: strip editor metadata/comments, optimize embedded images.
@@ -142,11 +142,11 @@ fn minify_svg(data: &[u8]) -> Result<Vec<u8>, quick_xml::Error> {
     Ok(writer.into_inner().into_inner())
 }
 
-fn should_skip_element(name: &[u8]) -> bool {
+fn should_skip_element(name: &str) -> bool {
     EDITOR_ELEMENTS.contains(&name)
 }
 
-fn should_strip_attr(key: &[u8]) -> bool {
+fn should_strip_attr(key: &str) -> bool {
     EDITOR_ATTR_PREFIXES
         .iter()
         .any(|&prefix| key.starts_with(prefix))
@@ -159,7 +159,7 @@ fn needs_attr_processing(e: &quick_xml::events::BytesStart<'_>) -> bool {
             return true;
         }
         // Check for embedded base64 image data URIs.
-        if attr.value.len() > 22 && attr.value.starts_with(b"data:image/") {
+        if attr.value.len() > 22 && attr.value.starts_with("data:image/") {
             return true;
         }
     }
@@ -168,9 +168,7 @@ fn needs_attr_processing(e: &quick_xml::events::BytesStart<'_>) -> bool {
 
 /// Process attributes: strip editor attrs, optimize embedded base64 images.
 fn process_attrs(e: &quick_xml::events::BytesStart<'_>) -> quick_xml::events::BytesStart<'static> {
-    let local_name = e.name().as_ref().to_vec();
-    let mut elem =
-        quick_xml::events::BytesStart::new(String::from_utf8_lossy(&local_name).into_owned());
+    let mut elem = quick_xml::events::BytesStart::new(e.name().as_ref().to_owned());
 
     for attr in e.attributes().flatten() {
         if should_strip_attr(attr.key.as_ref()) {
@@ -186,10 +184,7 @@ fn process_attrs(e: &quick_xml::events::BytesStart<'_>) -> quick_xml::events::By
         if value.starts_with(BASE64_PNG_PREFIX)
             && let Some(optimized) = optimize_embedded_png(&value)
         {
-            elem.push_attribute((
-                std::str::from_utf8(attr.key.as_ref()).unwrap_or_default(),
-                optimized.as_str(),
-            ));
+            elem.push_attribute((attr.key.as_ref(), optimized.as_str()));
             continue;
         }
 
@@ -197,10 +192,7 @@ fn process_attrs(e: &quick_xml::events::BytesStart<'_>) -> quick_xml::events::By
         if value.starts_with(BASE64_JPEG_PREFIX)
             && let Some(optimized) = optimize_embedded_jpeg(&value)
         {
-            elem.push_attribute((
-                std::str::from_utf8(attr.key.as_ref()).unwrap_or_default(),
-                optimized.as_str(),
-            ));
+            elem.push_attribute((attr.key.as_ref(), optimized.as_str()));
             continue;
         }
 

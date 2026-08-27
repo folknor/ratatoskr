@@ -613,6 +613,9 @@ pub(super) async fn bifrost_inject_batch_handle(
         scope: scope.clone(),
         event: Arc::new(bifrost_types::SyncEvent::Batch(batch)),
         checkpoint,
+        // Injected directly into the consumer, bypassing the engine's writer,
+        // so there is no publication to name and no coverage claim to apply.
+        publication: None,
     };
     // A CrashBeforeAck hook exits the drive task between the search flush
     // and the ack, so the cursor advance never lands. Read the armed hook

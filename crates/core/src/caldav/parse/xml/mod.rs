@@ -155,16 +155,11 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(raw) = std::str::from_utf8(e.as_ref())
-                    && let Ok(text) = unescape(raw)
-                {
+                if let Ok(text) = unescape(e) {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => match e.decode() {
-                Ok(text) => buf.push_str(&text),
-                Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
-            },
+            Ok(Event::CData(ref e)) => buf.push_str(e),
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -387,16 +382,11 @@ pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(raw) = std::str::from_utf8(e.as_ref())
-                    && let Ok(text) = unescape(raw)
-                {
+                if let Ok(text) = unescape(e) {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => match e.decode() {
-                Ok(text) => buf.push_str(&text),
-                Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
-            },
+            Ok(Event::CData(ref e)) => buf.push_str(e),
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -502,17 +492,11 @@ pub fn parse_ctag(xml: &str) -> Option<String> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(raw) = std::str::from_utf8(e.as_ref())
-                    && let Ok(text) = unescape(raw)
-                {
+                if let Ok(text) = unescape(e) {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => {
-                if let Ok(text) = e.decode() {
-                    buf.push_str(&text);
-                }
-            }
+            Ok(Event::CData(ref e)) => buf.push_str(e),
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -569,16 +553,11 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(raw) = std::str::from_utf8(e.as_ref())
-                    && let Ok(text) = unescape(raw)
-                {
+                if let Ok(text) = unescape(e) {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::CData(ref e)) => match e.decode() {
-                Ok(text) => buf.push_str(&text),
-                Err(err) => log::warn!("CalDAV multiget CDATA decode failed: {err}"),
-            },
+            Ok(Event::CData(ref e)) => buf.push_str(e),
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
@@ -657,11 +636,10 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
 /// malformed multistatus response anyway. The wider acceptance trades a
 /// theoretical false-positive risk for forgiveness with bridges that
 /// remap namespaces (Davical's "DAV1", Apple's `CALDAV` aliases).
-fn local_name(raw: &[u8]) -> String {
-    let full = String::from_utf8_lossy(raw);
-    match full.rfind(':') {
-        Some(idx) => full[idx + 1..].to_string(),
-        None => full.to_string(),
+fn local_name(raw: &str) -> String {
+    match raw.rfind(':') {
+        Some(idx) => raw[idx + 1..].to_string(),
+        None => raw.to_string(),
     }
 }
 

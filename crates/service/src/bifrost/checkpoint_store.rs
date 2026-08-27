@@ -1,7 +1,11 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
-use bifrost_sync::{CheckpointStore, Error, decode_envelope, encode_envelope};
+use bifrost_sync::{
+    CheckpointStore, CheckpointTransition, DebtLedger, Error, decode_envelope, encode_envelope,
+};
 use bifrost_types::{
     AccountId, BackfillCheckpoint, ChangeCursor, Checkpoint, CursorScope, ObjectType,
 };
@@ -13,33 +17,124 @@ pub(crate) const BACKFILL_COMPLETION_PARTITION: &[u8] = b"complete";
 pub struct SqliteCheckpointStore {
     writer: WriterPool,
     reader: ReadDbState,
+    /// Process-lifetime debt ledgers, keyed by account.
+    ///
+    /// The checkpoint half of a transition is durable; the ledger half is not,
+    /// because `DebtLedger` has private fields and bifrost exposes no encode /
+    /// decode pair for it the way it does for `Checkpoint`. A backend cannot
+    /// persist a value it cannot serialize, so this holds the ledger in memory
+    /// and rebuilds it from the next walk after a restart. The consequence is
+    /// bounded and one-directional: a restart forgets accepted debt, so a scope
+    /// that was degraded comes back looking clean until something re-enumerates
+    /// it and re-raises the obligations. It never invents coverage - nothing
+    /// here can write a completion sentinel over debt, because the ledger it
+    /// starts from is empty, and an empty ledger permits completion only for a
+    /// walk that itself reported complete.
+    ///
+    /// Replace this with a real table once `DebtLedger` gains a serialization
+    /// surface; that is a bifrost-side change, not a ratatoskr one.
+    ledgers: Arc<Mutex<HashMap<AccountId, DebtLedger>>>,
 }
 
 impl SqliteCheckpointStore {
     pub fn new(writer: WriterPool, reader: ReadDbState) -> Self {
-        Self { writer, reader }
+        Self {
+            writer,
+            reader,
+            ledgers: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn store_ledger(&self, account: AccountId, ledger: DebtLedger) {
+        let mut guard = self
+            .ledgers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.insert(account, ledger);
     }
 }
 
 impl CheckpointStore for SqliteCheckpointStore {
-    fn put_change_cursor<'a>(
+    fn apply_transition<'a>(
         &'a self,
         account: &'a AccountId,
-        cursor: ChangeCursor,
+        transition: CheckpointTransition,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
         Box::pin(async move {
-            let scope_key = scope_to_key(&cursor.scope)?;
-            let blob = encode_envelope(&Checkpoint::Change(cursor));
-            upsert_checkpoint(
-                self.writer.clone(),
-                account.0.clone(),
-                "change",
-                scope_key,
-                Vec::new(),
-                0,
-                blob,
-            )
-            .await
+            let CheckpointTransition { checkpoint, ledger } = transition;
+            match checkpoint {
+                Checkpoint::Change(cursor) => {
+                    let scope_key = scope_to_key(&cursor.scope)?;
+                    let blob = encode_envelope(&Checkpoint::Change(cursor));
+                    upsert_checkpoint(
+                        self.writer.clone(),
+                        account.0.clone(),
+                        "change",
+                        scope_key,
+                        Vec::new(),
+                        0,
+                        blob,
+                    )
+                    .await?;
+                }
+                Checkpoint::Backfill(checkpoint) => {
+                    let scope_key = scope_to_key(&checkpoint.scope)?;
+                    let partition_key = checkpoint.partition.0.clone();
+                    let items_done =
+                        i64::try_from(checkpoint.progress.items_done).map_err(|_| {
+                            Error::CheckpointStore(format!(
+                                "backfill items_done {} exceeds sqlite integer range",
+                                checkpoint.progress.items_done
+                            ))
+                        })?;
+                    let blob = encode_envelope(&Checkpoint::Backfill(checkpoint));
+                    upsert_checkpoint(
+                        self.writer.clone(),
+                        account.0.clone(),
+                        "backfill",
+                        scope_key,
+                        partition_key,
+                        items_done,
+                        blob,
+                    )
+                    .await?;
+                }
+                _ => {
+                    return Err(Error::CheckpointStore(
+                        "unknown checkpoint variant in transition".to_string(),
+                    ));
+                }
+            }
+            // Only after the durable half committed. The reverse order would
+            // record debt for progress that never landed.
+            self.store_ledger(account.clone(), ledger);
+            Ok(())
+        })
+    }
+
+    fn put_ledger<'a>(
+        &'a self,
+        account: &'a AccountId,
+        ledger: DebtLedger,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
+        let account = account.clone();
+        Box::pin(async move {
+            self.store_ledger(account, ledger);
+            Ok(())
+        })
+    }
+
+    fn get_ledger<'a>(
+        &'a self,
+        account: &'a AccountId,
+    ) -> Pin<Box<dyn Future<Output = Result<DebtLedger, Error>> + Send + 'a>> {
+        let account = account.clone();
+        Box::pin(async move {
+            let guard = self
+                .ledgers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Ok(guard.get(&account).cloned().unwrap_or_default())
         })
     }
 
@@ -64,34 +159,6 @@ impl CheckpointStore for SqliteCheckpointStore {
                     "sync_cursors change row decoded as unknown checkpoint".to_string(),
                 )),
             }
-        })
-    }
-
-    fn put_backfill<'a>(
-        &'a self,
-        account: &'a AccountId,
-        checkpoint: BackfillCheckpoint,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
-        Box::pin(async move {
-            let scope_key = scope_to_key(&checkpoint.scope)?;
-            let partition_key = checkpoint.partition.0.clone();
-            let items_done = i64::try_from(checkpoint.progress.items_done).map_err(|_| {
-                Error::CheckpointStore(format!(
-                    "backfill items_done {} exceeds sqlite integer range",
-                    checkpoint.progress.items_done
-                ))
-            })?;
-            let blob = encode_envelope(&Checkpoint::Backfill(checkpoint));
-            upsert_checkpoint(
-                self.writer.clone(),
-                account.0.clone(),
-                "backfill",
-                scope_key,
-                partition_key,
-                items_done,
-                blob,
-            )
-            .await
         })
     }
 

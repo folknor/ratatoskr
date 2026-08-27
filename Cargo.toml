@@ -125,13 +125,13 @@ bifrost-carddav = { path = "../bifrost/crates/carddav" }
 base64 = "0.23"
 
 # XML
-quick-xml = "0.41.0"
+quick-xml = "0.42.0"
 
 # Text diffing (for undo/redo)
 dissimilar = "1"
 
 # Profiling
-hotpath = "0.22.0"
+hotpath = "0.24.0"
 
 # Optimized release profile
 [profile.release]

@@ -150,6 +150,7 @@ fn batch_event(
             server_latency: Duration::from_millis(0),
         })),
         checkpoint: None,
+        publication: None,
     }
 }
 

@@ -49,7 +49,7 @@ pub(crate) fn extract_docx(bytes: &[u8]) -> ExtractionOutcome {
         Ok(a) => a,
         Err(o) => return o,
     };
-    match collect_text_from_entry(&mut archive, "word/document.xml", &[b"t"]) {
+    match collect_text_from_entry(&mut archive, "word/document.xml", &["t"]) {
         Ok(out) if out.text.trim().is_empty() => ExtractionOutcome::Skipped {
             reason: SkipReason::EmptyContent,
         },
@@ -77,7 +77,7 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
     // Shared strings: <si><t>...</t></si>. Only emitted if the file
     // actually has shared strings (small workbooks may inline-string
     // everything).
-    match collect_text_from_entry(&mut archive, "xl/sharedStrings.xml", &[b"t"]) {
+    match collect_text_from_entry(&mut archive, "xl/sharedStrings.xml", &["t"]) {
         Ok(out) => {
             push_with_separator(&mut combined, &out.text);
             // H3 fix: deduct decompressed bytes, not text length.
@@ -106,7 +106,7 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
                 reason: SkipReason::ZipBomb,
             };
         }
-        match collect_text_from_entry_bounded(&mut archive, &name, &[b"t"], budget) {
+        match collect_text_from_entry_bounded(&mut archive, &name, &["t"], budget) {
             Ok(out) => {
                 budget = budget.saturating_sub(out.decompressed_bytes);
                 push_with_separator(&mut combined, &out.text);
@@ -156,7 +156,7 @@ pub(crate) fn extract_pptx(bytes: &[u8]) -> ExtractionOutcome {
                 reason: SkipReason::ZipBomb,
             };
         }
-        match collect_text_from_entry_bounded(&mut archive, &name, &[b"t"], budget) {
+        match collect_text_from_entry_bounded(&mut archive, &name, &["t"], budget) {
             Ok(out) => {
                 budget = budget.saturating_sub(out.decompressed_bytes);
                 push_with_separator(&mut combined, &out.text);
@@ -241,7 +241,7 @@ fn open_with_size_check(bytes: &[u8]) -> Result<zip::ZipArchive<Cursor<&[u8]>>, 
 fn collect_text_from_entry(
     archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
     entry: &str,
-    target_local_names: &[&[u8]],
+    target_local_names: &[&str],
 ) -> Result<EntryReadOutput, EntryError> {
     collect_text_from_entry_bounded(archive, entry, target_local_names, MAX_TOTAL_DECOMPRESSED)
 }
@@ -262,7 +262,7 @@ struct EntryReadOutput {
 fn collect_text_from_entry_bounded(
     archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
     entry: &str,
-    target_local_names: &[&[u8]],
+    target_local_names: &[&str],
     byte_budget: u64,
 ) -> Result<EntryReadOutput, EntryError> {
     let file = match archive.by_name(entry) {
@@ -302,7 +302,7 @@ fn collect_text_from_entry_bounded(
 /// Walk the XML in `bytes`, collect text events that are inside an
 /// element whose local-name is in `target_local_names`. Whitespace
 /// between target elements becomes a single space in the output.
-fn collect_target_text(bytes: &[u8], target_local_names: &[&[u8]]) -> String {
+fn collect_target_text(bytes: &[u8], target_local_names: &[&str]) -> String {
     let mut reader = Reader::from_reader(bytes);
     let cfg = reader.config_mut();
     cfg.expand_empty_elements = false;
@@ -334,14 +334,12 @@ fn collect_target_text(bytes: &[u8], target_local_names: &[&[u8]]) -> String {
                 if depth_in_target == 0 {
                     continue;
                 }
-                if let Ok(s) = t.decode() {
-                    let trimmed = s.trim();
-                    if !trimmed.is_empty() {
-                        if !out.is_empty() {
-                            out.push(' ');
-                        }
-                        out.push_str(trimmed);
+                let trimmed = t.trim();
+                if !trimmed.is_empty() {
+                    if !out.is_empty() {
+                        out.push(' ');
                     }
+                    out.push_str(trimmed);
                 }
             }
             Ok(_) => {}
@@ -353,7 +351,7 @@ fn collect_target_text(bytes: &[u8], target_local_names: &[&[u8]]) -> String {
     out
 }
 
-fn is_target(local: &[u8], targets: &[&[u8]]) -> bool {
+fn is_target(local: &str, targets: &[&str]) -> bool {
     targets.contains(&local)
 }
 

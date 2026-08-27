@@ -46,7 +46,7 @@ use std::time::{Duration, Instant};
 
 use bifrost_sync::CheckpointStore;
 use bifrost_sync::backfill::BackfillState;
-use bifrost_sync::{Error, SyncEngine};
+use bifrost_sync::{Error, PublicationId, SyncEngine};
 use bifrost_types::{
     AccountErrorBuilder, AccountErrorKind, AccountId, AttemptCause, AuthCause, AuthErrorKind,
     BackfillCheckpoint, BackfillProgress, Cause, Checkpoint, CursorScope, DiagnosticText,
@@ -67,6 +67,51 @@ use super::checkpoint_store::BACKFILL_COMPLETION_PARTITION;
 use super::containers;
 use super::containers::ContainerIndex;
 use super::error_map;
+
+/// The two shapes of change stream this consumer drives.
+///
+/// The engine hands out a `ChangesReceiver`, which owns the recovery half of a
+/// broadcast lag (it abandons the account's outstanding checkpoint
+/// registrations, without which every later `pause` / `checkpoint_now` on the
+/// account waits forever for acks the consumer can no longer produce). Tests
+/// and the harness inject a bare broadcast receiver, which has no engine to
+/// recover against. Both are driven by the same loop, so they share one `recv`.
+enum ChangeStream {
+    Engine(bifrost_sync::multiplexer::ChangesReceiver),
+    Injected(broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>),
+}
+
+impl ChangeStream {
+    async fn recv(
+        &mut self,
+    ) -> Result<bifrost_sync::multiplexer::MultiplexerEvent, broadcast::error::RecvError> {
+        match self {
+            Self::Engine(rx) => rx.recv().await,
+            Self::Injected(rx) => rx.recv().await,
+        }
+    }
+}
+
+/// Whether an event is the synthetic warning `ChangesReceiver` substitutes for
+/// a `RecvError::Lagged`.
+///
+/// The drive loop still needs to know a lag happened - it detaches and
+/// re-drives so the next attach reconciles from the last durable checkpoint,
+/// and the sync-harness gates assert on `report.lagged`. Bifrost publishes that
+/// event with no structural marker distinguishing it from any other
+/// account-scoped `OperatorAttentionNeeded` warning (degraded coverage raises
+/// the same kind), so the message prefix is the only discriminator available.
+/// Keep this the single place that knows it: if bifrost grows a real marker
+/// (a `WarningKind` of its own, or a flag on `MultiplexerEvent`), this function
+/// is the one thing to rewrite.
+fn is_lag_warning(event: &bifrost_sync::multiplexer::MultiplexerEvent) -> bool {
+    matches!(event.scope, CursorScope::Account)
+        && matches!(
+            &*event.event,
+            SyncEvent::Warning(warning)
+                if warning.message.as_str().starts_with("change stream lagged")
+        )
+}
 
 const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 const RESIDENT_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
@@ -202,7 +247,7 @@ pub struct ChangeStreamConsumer {
     /// vacuously caught-up - the empty-stream "completes immediately" edge.
     observed_scopes: HashSet<CursorScope>,
     imap_threading: ImapThreadAccumulator,
-    deferred_imap_acks: Vec<(CursorScope, Checkpoint)>,
+    deferred_imap_acks: Vec<(CursorScope, Checkpoint, Option<PublicationId>)>,
     imap_seen_by_scope: HashMap<CursorScope, u64>,
     crash_before_drive_end_threading: bool,
 }
@@ -311,7 +356,7 @@ impl ChangeStreamConsumer {
 
     pub async fn drive_to_caught_up(&mut self) -> Result<ConsumerDriveReport, Error> {
         let mut report = ConsumerDriveReport::default();
-        let mut rx = self.engine.account_changes_stream(&self.account_id)?;
+        let mut rx = ChangeStream::Engine(self.engine.account_changes_stream(&self.account_id)?);
         self.drive_receiver(&mut rx, &mut report).await?;
         Ok(report)
     }
@@ -325,7 +370,7 @@ impl ChangeStreamConsumer {
         Fut: Future<Output = ()>,
     {
         self.drive_resident_loop(
-            self.engine.account_changes_stream(&self.account_id)?,
+            ChangeStream::Engine(self.engine.account_changes_stream(&self.account_id)?),
             &mut on_caught_up,
             None,
         )
@@ -342,13 +387,13 @@ impl ChangeStreamConsumer {
         F: FnMut(ConsumerDriveReport) -> Fut,
         Fut: Future<Output = ()>,
     {
-        self.drive_resident_loop(rx, &mut on_caught_up, telemetry)
+        self.drive_resident_loop(ChangeStream::Injected(rx), &mut on_caught_up, telemetry)
             .await
     }
 
     async fn drive_resident_loop<F, Fut>(
         &mut self,
-        mut rx: broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        mut rx: ChangeStream,
         on_caught_up: &mut F,
         telemetry: Option<Arc<ResidentFlushTelemetry>>,
     ) -> Result<ConsumerDriveReport, Error>
@@ -361,6 +406,15 @@ impl ChangeStreamConsumer {
         let mut last_forced_flush = Instant::now();
         loop {
             match tokio::time::timeout(COMPLETION_IDLE_INTERVAL, rx.recv()).await {
+                Ok(Ok(event)) if is_lag_warning(&event) => {
+                    log::warn!(
+                        "bifrost resident consumer lagged for account {}",
+                        self.account_id.0
+                    );
+                    report.lagged = true;
+                    self.flush_drive_end(&pending, &mut report, false).await?;
+                    return Ok(report);
+                }
                 Ok(Ok(event)) => {
                     self.observed_scopes.insert(event.scope.clone());
                     let hook = if let Some(registry) = &self.hook_registry {
@@ -455,8 +509,9 @@ impl ChangeStreamConsumer {
 
     pub async fn drive_injected_stream(
         &mut self,
-        mut rx: broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        rx: broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
     ) -> Result<ConsumerDriveReport, Error> {
+        let mut rx = ChangeStream::Injected(rx);
         let mut report = ConsumerDriveReport::default();
         self.drive_receiver(&mut rx, &mut report).await?;
         Ok(report)
@@ -464,7 +519,7 @@ impl ChangeStreamConsumer {
 
     async fn drive_receiver(
         &mut self,
-        rx: &mut broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        rx: &mut ChangeStream,
         report: &mut ConsumerDriveReport,
     ) -> Result<(), Error> {
         let mut pending = PendingDeletions::default();
@@ -498,12 +553,18 @@ impl ChangeStreamConsumer {
 
     async fn recv_loop(
         &mut self,
-        rx: &mut broadcast::Receiver<bifrost_sync::multiplexer::MultiplexerEvent>,
+        rx: &mut ChangeStream,
         report: &mut ConsumerDriveReport,
         pending: &mut PendingDeletions,
     ) -> Result<(), Error> {
         loop {
             match tokio::time::timeout(COMPLETION_IDLE_INTERVAL, rx.recv()).await {
+                Ok(Ok(event)) if is_lag_warning(&event) => {
+                    log::warn!("bifrost consumer lagged for account {}", self.account_id.0);
+                    report.lagged = true;
+                    self.engine.detach(&self.account_id).await?;
+                    return Ok(());
+                }
                 Ok(Ok(event)) => {
                     self.observed_scopes.insert(event.scope.clone());
                     let hook = if let Some(registry) = &self.hook_registry {
@@ -706,10 +767,14 @@ impl ChangeStreamConsumer {
                 }
                 if let (Some(checkpoint), false) = (batch_checkpoint, hydrated.blocked) {
                     if self.provider == BifrostProviderKind::Imap {
-                        self.deferred_imap_acks
-                            .push((event.scope.clone(), checkpoint));
+                        self.deferred_imap_acks.push((
+                            event.scope.clone(),
+                            checkpoint,
+                            event.publication,
+                        ));
                     } else {
-                        self.ack_checkpoint(event.scope.clone(), checkpoint).await?;
+                        self.ack_checkpoint(event.scope.clone(), checkpoint, event.publication)
+                            .await?;
                         post_persist::prune_marker_window(
                             &self.stores.db,
                             &self.account_id.0,
@@ -769,18 +834,27 @@ impl ChangeStreamConsumer {
                                 .get(&event.scope)
                                 .copied()
                                 .unwrap_or(0);
+                            // Consumer-synthesized, so the engine issued no
+                            // publication for it: it carries no coverage claim,
+                            // and naming a publication the writer never minted
+                            // would be rejected outright.
                             self.deferred_imap_acks.push((
                                 event.scope.clone(),
                                 Checkpoint::Backfill(completion_backfill_checkpoint(
                                     event.scope.clone(),
                                     seen,
                                 )),
+                                None,
                             ));
                         }
-                        self.deferred_imap_acks
-                            .push((event.scope.clone(), checkpoint));
+                        self.deferred_imap_acks.push((
+                            event.scope.clone(),
+                            checkpoint,
+                            event.publication,
+                        ));
                     } else {
-                        self.ack_checkpoint(event.scope.clone(), checkpoint).await?;
+                        self.ack_checkpoint(event.scope.clone(), checkpoint, event.publication)
+                            .await?;
                         post_persist::prune_marker_window(
                             &self.stores.db,
                             &self.account_id.0,
@@ -852,6 +926,7 @@ impl ChangeStreamConsumer {
         &self,
         scope: CursorScope,
         checkpoint: Checkpoint,
+        publication: Option<PublicationId>,
     ) -> Result<(), Error> {
         if let Some(store) = &self.checkpoint_store {
             match checkpoint {
@@ -867,7 +942,7 @@ impl ChangeStreamConsumer {
             }
         } else {
             self.engine
-                .ack_checkpoint(&self.account_id, scope, checkpoint)
+                .ack_checkpoint(&self.account_id, scope, checkpoint, publication)
                 .await
         }
     }
@@ -943,8 +1018,9 @@ impl ChangeStreamConsumer {
         .map_err(|error| Error::Other(format!("bifrost IMAP threading: {error}")))?;
         self.stores.search.flush_now().await.map_err(Error::Other)?;
         let deferred = std::mem::take(&mut self.deferred_imap_acks);
-        for (scope, checkpoint) in deferred {
-            self.ack_checkpoint(scope.clone(), checkpoint).await?;
+        for (scope, checkpoint, publication) in deferred {
+            self.ack_checkpoint(scope.clone(), checkpoint, publication)
+                .await?;
             post_persist::prune_marker_window(&self.stores.db, &self.account_id.0, &scope)
                 .await
                 .map_err(Error::Other)?;

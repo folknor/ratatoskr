@@ -153,13 +153,13 @@ fn parse_workbook_sheet_list(xml: &str) -> Result<Vec<WorkbookSheet>, ImportErro
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) | Ok(Event::Empty(e))
-                if local_name(e.name().as_ref()) == b"sheet" =>
+                if local_name(e.name().as_ref()) == "sheet" =>
             {
-                let name = attr_value(&e, b"name").unwrap_or_else(|| {
+                let name = attr_value(&e, "name").unwrap_or_else(|| {
                     let next = sheets.len() + 1;
                     format!("Sheet {next}")
                 });
-                let rel_id = attr_value(&e, b"r:id").unwrap_or_default();
+                let rel_id = attr_value(&e, "r:id").unwrap_or_default();
                 let index = sheets.len();
                 sheets.push(WorkbookSheet {
                     info: SheetInfo { index, name },
@@ -187,10 +187,9 @@ fn parse_workbook_relationships(xml: &str) -> Result<HashMap<String, String>, Im
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) | Ok(Event::Empty(e))
-                if local_name(e.name().as_ref()) == b"Relationship" =>
+                if local_name(e.name().as_ref()) == "Relationship" =>
             {
-                if let (Some(id), Some(target)) = (attr_value(&e, b"Id"), attr_value(&e, b"Target"))
-                {
+                if let (Some(id), Some(target)) = (attr_value(&e, "Id"), attr_value(&e, "Target")) {
                     rels.insert(id, target);
                 }
             }
@@ -220,23 +219,23 @@ fn parse_shared_strings(xml: &str) -> Result<Vec<String>, ImportError> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) if local_name(e.name().as_ref()) == b"si" => {
+            Ok(Event::Start(e)) if local_name(e.name().as_ref()) == "si" => {
                 in_si = true;
                 current.clear();
             }
-            Ok(Event::End(e)) if local_name(e.name().as_ref()) == b"si" => {
+            Ok(Event::End(e)) if local_name(e.name().as_ref()) == "si" => {
                 strings.push(current.clone());
                 current.clear();
                 in_si = false;
             }
-            Ok(Event::Start(e)) if in_si && local_name(e.name().as_ref()) == b"t" => {
+            Ok(Event::Start(e)) if in_si && local_name(e.name().as_ref()) == "t" => {
                 in_t = true;
             }
-            Ok(Event::End(e)) if local_name(e.name().as_ref()) == b"t" => {
+            Ok(Event::End(e)) if local_name(e.name().as_ref()) == "t" => {
                 in_t = false;
             }
             Ok(Event::Text(e)) if in_si && in_t => {
-                current.push_str(&xml_text(e.as_ref()));
+                current.push_str(&xml_text(&e));
             }
             Ok(Event::Eof) => break,
             Ok(_) => {}
@@ -263,10 +262,10 @@ fn parse_sheet_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<Vec<Stri
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) if local_name(e.name().as_ref()) == b"row" => {
+            Ok(Event::Start(e)) if local_name(e.name().as_ref()) == "row" => {
                 current_row = Some(Vec::new());
             }
-            Ok(Event::End(e)) if local_name(e.name().as_ref()) == b"row" => {
+            Ok(Event::End(e)) if local_name(e.name().as_ref()) == "row" => {
                 if let Some(mut row) = current_row.take() {
                     trim_trailing_empty_cells(&mut row);
                     if !row.iter().all(String::is_empty) {
@@ -274,15 +273,15 @@ fn parse_sheet_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<Vec<Stri
                     }
                 }
             }
-            Ok(Event::Start(e)) if local_name(e.name().as_ref()) == b"c" => {
+            Ok(Event::Start(e)) if local_name(e.name().as_ref()) == "c" => {
                 in_cell = true;
                 current_cell_text.clear();
-                current_cell_type = attr_value(&e, b"t").unwrap_or_default();
-                current_cell_col = attr_value(&e, b"r")
+                current_cell_type = attr_value(&e, "t").unwrap_or_default();
+                current_cell_col = attr_value(&e, "r")
                     .and_then(|r| column_index_from_cell_ref(&r))
                     .unwrap_or_else(|| current_row.as_ref().map(Vec::len).unwrap_or_default());
             }
-            Ok(Event::End(e)) if local_name(e.name().as_ref()) == b"c" => {
+            Ok(Event::End(e)) if local_name(e.name().as_ref()) == "c" => {
                 if let Some(row) = current_row.as_mut() {
                     let value =
                         resolve_cell_value(&current_cell_text, &current_cell_type, shared_strings);
@@ -294,15 +293,15 @@ fn parse_sheet_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<Vec<Stri
                 current_cell_type.clear();
             }
             Ok(Event::Start(e))
-                if in_cell && matches!(local_name(e.name().as_ref()), b"v" | b"t") =>
+                if in_cell && matches!(local_name(e.name().as_ref()), "v" | "t") =>
             {
                 in_value_text = true;
             }
-            Ok(Event::End(e)) if matches!(local_name(e.name().as_ref()), b"v" | b"t") => {
+            Ok(Event::End(e)) if matches!(local_name(e.name().as_ref()), "v" | "t") => {
                 in_value_text = false;
             }
             Ok(Event::Text(e)) if in_cell && in_value_text => {
-                current_cell_text.push_str(&xml_text(e.as_ref()));
+                current_cell_text.push_str(&xml_text(&e));
             }
             Ok(Event::Eof) => break,
             Ok(_) => {}
@@ -370,23 +369,21 @@ fn column_index_from_cell_ref(cell_ref: &str) -> Option<usize> {
     saw_letter.then_some(value - 1)
 }
 
-fn attr_value(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
+fn attr_value(e: &BytesStart<'_>, name: &str) -> Option<String> {
     e.attributes()
         .filter_map(std::result::Result::ok)
         .find(|attr| attr.key.as_ref() == name)
-        .map(|attr| String::from_utf8_lossy(attr.value.as_ref()).to_string())
+        .map(|attr| attr.value.as_ref().to_string())
 }
 
-fn local_name(name: &[u8]) -> &[u8] {
-    name.iter()
-        .position(|byte| *byte == b':')
-        .map_or(name, |index| &name[index + 1..])
+fn local_name(name: &str) -> &str {
+    name.split_once(':').map_or(name, |(_, rest)| rest)
 }
 
-fn xml_text(bytes: &[u8]) -> String {
-    std::str::from_utf8(bytes)
+fn xml_text(raw: &str) -> String {
+    unescape(raw)
         .ok()
-        .and_then(|raw| unescape(raw).ok().map(std::borrow::Cow::into_owned))
+        .map(std::borrow::Cow::into_owned)
         .unwrap_or_default()
 }
 
