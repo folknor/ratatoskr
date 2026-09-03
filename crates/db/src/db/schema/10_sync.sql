@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS sync_cursors (
     PRIMARY KEY (account_id, kind, scope_key, partition_key)
 );
 
+-- Bifrost debt-ledger store. `apply_transition` hands the backend a
+-- checkpoint and the account's whole DebtLedger as one atomic write; the
+-- checkpoint half lands in sync_cursors above and the ledger half here, in
+-- the same transaction. `ledger_blob` is bifrost's self-describing
+-- encode_ledger envelope (versioned; decode_ledger owns migration), the
+-- single source of truth - no query keys are minted from it because the
+-- ledger is only ever read whole per account.
+CREATE TABLE IF NOT EXISTS sync_ledgers (
+    account_id TEXT NOT NULL PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    ledger_blob BLOB NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS seen_ingest_markers (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     scope_key TEXT NOT NULL,

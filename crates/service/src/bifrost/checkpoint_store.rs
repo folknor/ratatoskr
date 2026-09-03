@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 
 use bifrost_sync::{
-    CheckpointStore, CheckpointTransition, DebtLedger, Error, decode_envelope, encode_envelope,
+    CheckpointStore, CheckpointTransition, DebtLedger, Error, decode_envelope, decode_ledger,
+    encode_envelope, encode_ledger,
 };
 use bifrost_types::{
     AccountId, BackfillCheckpoint, ChangeCursor, Checkpoint, CursorScope, ObjectType,
@@ -17,40 +16,11 @@ pub(crate) const BACKFILL_COMPLETION_PARTITION: &[u8] = b"complete";
 pub struct SqliteCheckpointStore {
     writer: WriterPool,
     reader: ReadDbState,
-    /// Process-lifetime debt ledgers, keyed by account.
-    ///
-    /// The checkpoint half of a transition is durable; the ledger half is not,
-    /// because `DebtLedger` has private fields and bifrost exposes no encode /
-    /// decode pair for it the way it does for `Checkpoint`. A backend cannot
-    /// persist a value it cannot serialize, so this holds the ledger in memory
-    /// and rebuilds it from the next walk after a restart. The consequence is
-    /// bounded and one-directional: a restart forgets accepted debt, so a scope
-    /// that was degraded comes back looking clean until something re-enumerates
-    /// it and re-raises the obligations. It never invents coverage - nothing
-    /// here can write a completion sentinel over debt, because the ledger it
-    /// starts from is empty, and an empty ledger permits completion only for a
-    /// walk that itself reported complete.
-    ///
-    /// Replace this with a real table once `DebtLedger` gains a serialization
-    /// surface; that is a bifrost-side change, not a ratatoskr one.
-    ledgers: Arc<Mutex<HashMap<AccountId, DebtLedger>>>,
 }
 
 impl SqliteCheckpointStore {
     pub fn new(writer: WriterPool, reader: ReadDbState) -> Self {
-        Self {
-            writer,
-            reader,
-            ledgers: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    fn store_ledger(&self, account: AccountId, ledger: DebtLedger) {
-        let mut guard = self
-            .ledgers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.insert(account, ledger);
+        Self { writer, reader }
     }
 }
 
@@ -62,20 +32,11 @@ impl CheckpointStore for SqliteCheckpointStore {
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
         Box::pin(async move {
             let CheckpointTransition { checkpoint, ledger } = transition;
-            match checkpoint {
+            let (kind, scope_key, partition_key, items_done, checkpoint_blob) = match checkpoint {
                 Checkpoint::Change(cursor) => {
                     let scope_key = scope_to_key(&cursor.scope)?;
                     let blob = encode_envelope(&Checkpoint::Change(cursor));
-                    upsert_checkpoint(
-                        self.writer.clone(),
-                        account.0.clone(),
-                        "change",
-                        scope_key,
-                        Vec::new(),
-                        0,
-                        blob,
-                    )
-                    .await?;
+                    ("change", scope_key, Vec::new(), 0, blob)
                 }
                 Checkpoint::Backfill(checkpoint) => {
                     let scope_key = scope_to_key(&checkpoint.scope)?;
@@ -88,27 +49,57 @@ impl CheckpointStore for SqliteCheckpointStore {
                             ))
                         })?;
                     let blob = encode_envelope(&Checkpoint::Backfill(checkpoint));
-                    upsert_checkpoint(
-                        self.writer.clone(),
-                        account.0.clone(),
-                        "backfill",
-                        scope_key,
-                        partition_key,
-                        items_done,
-                        blob,
-                    )
-                    .await?;
+                    ("backfill", scope_key, partition_key, items_done, blob)
                 }
                 _ => {
                     return Err(Error::CheckpointStore(
                         "unknown checkpoint variant in transition".to_string(),
                     ));
                 }
-            }
-            // Only after the durable half committed. The reverse order would
-            // record debt for progress that never landed.
-            self.store_ledger(account.clone(), ledger);
-            Ok(())
+            };
+            // One transaction for both halves: apply_transition is bifrost's
+            // atomic-write contract, and committing the checkpoint without the
+            // ledger would record progress whose accepted debt a crash then
+            // forgets - the exact degradation the durable ledger removes.
+            let ledger_blob = encode_ledger(&ledger);
+            let account_id = account.0.clone();
+            self.writer
+                .with_write_mapped(
+                    move |conn| {
+                        let tx = conn
+                            .transaction()
+                            .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        tx.execute(
+                            "INSERT OR REPLACE INTO sync_cursors (
+                                account_id, kind, scope_key, partition_key, items_done,
+                                checkpoint_blob, updated_at
+                             ) VALUES (
+                                ?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now')
+                             )",
+                            params![
+                                account_id,
+                                kind,
+                                scope_key,
+                                partition_key,
+                                items_done,
+                                checkpoint_blob
+                            ],
+                        )
+                        .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        tx.execute(
+                            "INSERT OR REPLACE INTO sync_ledgers (
+                                account_id, ledger_blob, updated_at
+                             ) VALUES (?1, ?2, strftime('%s', 'now'))",
+                            params![account_id, ledger_blob],
+                        )
+                        .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        tx.commit()
+                            .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        Ok(())
+                    },
+                    Error::CheckpointStore,
+                )
+                .await
         })
     }
 
@@ -117,10 +108,24 @@ impl CheckpointStore for SqliteCheckpointStore {
         account: &'a AccountId,
         ledger: DebtLedger,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
-        let account = account.clone();
+        let account_id = account.0.clone();
         Box::pin(async move {
-            self.store_ledger(account, ledger);
-            Ok(())
+            let ledger_blob = encode_ledger(&ledger);
+            self.writer
+                .with_write_mapped(
+                    move |conn| {
+                        conn.execute(
+                            "INSERT OR REPLACE INTO sync_ledgers (
+                                account_id, ledger_blob, updated_at
+                             ) VALUES (?1, ?2, strftime('%s', 'now'))",
+                            params![account_id, ledger_blob],
+                        )
+                        .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        Ok(())
+                    },
+                    Error::CheckpointStore,
+                )
+                .await
         })
     }
 
@@ -128,13 +133,35 @@ impl CheckpointStore for SqliteCheckpointStore {
         &'a self,
         account: &'a AccountId,
     ) -> Pin<Box<dyn Future<Output = Result<DebtLedger, Error>> + Send + 'a>> {
-        let account = account.clone();
+        let account_id = account.0.clone();
         Box::pin(async move {
-            let guard = self
-                .ledgers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            Ok(guard.get(&account).cloned().unwrap_or_default())
+            let blob = self
+                .reader
+                .with_read_mapped(
+                    move |conn| match conn.query_row(
+                        "SELECT ledger_blob FROM sync_ledgers WHERE account_id = ?1",
+                        params![account_id],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    ) {
+                        Ok(blob) => Ok(Some(blob)),
+                        Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
+                            Ok(None)
+                        }
+                        Err(error) => Err(Error::CheckpointStore(error.to_string())),
+                    },
+                    Error::CheckpointStore,
+                )
+                .await?;
+            match blob {
+                // A missing row is a genuinely fresh account: an empty ledger
+                // permits completion only for a walk that itself reported
+                // complete, so absent-as-default never invents coverage.
+                None => Ok(DebtLedger::default()),
+                // Decode failures (SchemaIncompatible included) propagate,
+                // mirroring the checkpoint rows: a blob that exists but cannot
+                // be read is engine-recovery input, not silently-empty state.
+                Some(blob) => decode_ledger(&blob),
+            }
         })
     }
 
@@ -261,42 +288,6 @@ impl CheckpointStore for SqliteCheckpointStore {
                 .await
         })
     }
-}
-
-async fn upsert_checkpoint(
-    writer: WriterPool,
-    account_id: String,
-    kind: &'static str,
-    scope_key: String,
-    partition_key: Vec<u8>,
-    items_done: i64,
-    checkpoint_blob: Vec<u8>,
-) -> Result<(), Error> {
-    writer
-        .with_write_mapped(
-            move |conn| {
-                conn.execute(
-                    "INSERT OR REPLACE INTO sync_cursors (
-                        account_id, kind, scope_key, partition_key, items_done,
-                        checkpoint_blob, updated_at
-                     ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now')
-                     )",
-                    params![
-                        account_id,
-                        kind,
-                        scope_key,
-                        partition_key,
-                        items_done,
-                        checkpoint_blob
-                    ],
-                )
-                .map_err(|error| Error::CheckpointStore(error.to_string()))?;
-                Ok(())
-            },
-            Error::CheckpointStore,
-        )
-        .await
 }
 
 async fn select_change_blob(
@@ -702,6 +693,100 @@ mod tests {
             &survivor,
         );
         assert_eq!(count_rows(&writer, "backfill", "acct-a").await, 1);
+
+        remove_test_dir(dir);
+    }
+
+    /// The ledger half of `apply_transition` survives a process restart: a
+    /// FRESH store over the same database returns a ledger that still blocks
+    /// completion for the degraded scope and re-encodes byte-identically
+    /// (bifrost's `encode_ledger` is deterministic, pinned on its side).
+    /// This is the exact degradation the old in-memory ledger map had -
+    /// a restart forgot accepted debt and a degraded scope came back clean.
+    #[tokio::test]
+    async fn ledger_survives_a_store_restart() {
+        use bifrost_types::{
+            AccountErrorBuilder, AccountErrorKind, Cause, CoverageDomain, DiagnosticText,
+            InventoryCoverageReport, InventoryObligation, ObjectId, ObligationKey, RequestCause,
+            RequestErrorKind,
+        };
+
+        let (writer, reader, dir) = test_dbs("ledger_restart");
+        seed_account(&writer, "acct-a").await;
+        let account = AccountId("acct-a".to_string());
+        let scope = CursorScope::Type(ObjectType::Email);
+
+        let error = AccountErrorBuilder::new(
+            AccountErrorKind::Request(RequestErrorKind::Malformed),
+            Cause::Request(RequestCause::Malformed {
+                detail: DiagnosticText::support_only("unrepresentable"),
+            }),
+        )
+        .try_build()
+        .expect("valid account error classification");
+        let mut ledger = DebtLedger::new();
+        ledger.ingest_debt_only(
+            &InventoryCoverageReport::degraded(
+                CoverageDomain::full(scope.clone()),
+                vec![InventoryObligation::Object {
+                    key: ObligationKey(b"ob-1".to_vec()),
+                    id: ObjectId("m-1".to_string()),
+                    error,
+                    repair: Vec::new(),
+                }],
+            ),
+            1,
+            0,
+        );
+        assert!(!ledger.is_empty(), "the staged ledger must carry debt");
+        assert!(!ledger.completion_permitted(&scope));
+        let expected = bifrost_sync::encode_ledger(&ledger);
+
+        let store = SqliteCheckpointStore::new(writer.clone(), reader.clone());
+        store
+            .apply_transition(
+                &account,
+                bifrost_sync::CheckpointTransition {
+                    checkpoint: Checkpoint::Change(change_cursor(
+                        scope.clone(),
+                        ProtocolKind::Jmap,
+                        1,
+                        None,
+                    )),
+                    ledger,
+                },
+            )
+            .await
+            .expect("apply transition");
+        drop(store);
+
+        let reopened = SqliteCheckpointStore::new(writer, reader);
+        let restored = reopened.get_ledger(&account).await.expect("restored get");
+        assert!(
+            !restored.is_empty(),
+            "restart must not forget accepted debt"
+        );
+        assert!(
+            !restored.completion_permitted(&scope),
+            "restored debt must still block completion for the degraded scope"
+        );
+        assert_eq!(bifrost_sync::encode_ledger(&restored), expected);
+
+        // The checkpoint half of the same transition is durable too.
+        assert!(
+            reopened
+                .get_change_cursor(&account, &scope)
+                .await
+                .expect("restored cursor get")
+                .is_some()
+        );
+
+        // An account with no ledger row is a fresh default, not an error.
+        let fresh = reopened
+            .get_ledger(&AccountId("acct-b".to_string()))
+            .await
+            .expect("absent ledger get");
+        assert!(fresh.is_empty());
 
         remove_test_dir(dir);
     }
