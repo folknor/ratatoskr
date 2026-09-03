@@ -37,7 +37,7 @@
       "flags": ["category:Blue"],
       "importance": "high",
       "blobs": [
-        { "id": "blob-invite", "content_type": "text/calendar; method=REQUEST" }
+        { "id": "blob-invite", "content_type": "text/calendar; method=REQUEST", "filename": "invite.ics", "size": 30 }
       ],
       "raw_lines": [
         "Message-ID: <graph-reply-gm1@example.test>",

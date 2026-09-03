@@ -619,11 +619,12 @@ pub(crate) fn build_consumer_row(
     // exactly as the legacy JMAP post-store UPDATE did, so the attachment-
     // store dedup linkage stays intact.
     // Attachment rows: id / remote_attachment_id come from the bifrost blob
-    // handle (the JMAP blobId); filename / content_id / is_inline come from
-    // the RFC822 re-parse (the structured `BlobHandle` cannot carry the part
-    // name, the Content-ID, or the inline disposition). The server returns
-    // the structured attachment list and the MIME parts in the same order,
-    // so the two are matched by ordinal position.
+    // handle; filename / mime type / size / content_id / is_inline come from
+    // `MessageAttachment` itself - bifrost's shared inbound MIME parser
+    // carries them as first-class fields, which retired the old re-parse
+    // pairing that matched structured entries to RFC822 parts by ordinal
+    // position. The blob id remains the filename fallback so a nameless part
+    // still gets a stable, non-empty label.
     let mut attachments = message
         .attachments
         .iter()
@@ -639,34 +640,22 @@ pub(crate) fn build_consumer_row(
                 );
                 return None;
             };
-            let detail = parsed_attachments.get(index);
             let remote_attachment_id = remote_attachment_id(provider, &blob.id.0);
             Some(AttachmentInsertRow {
                 id: format!("{}_{}", message_id, blob.id.0),
                 message_id: message_id.clone(),
                 account_id: account_id.0.clone(),
-                filename: detail
-                    .map(|d| d.filename.clone())
+                filename: attachment
+                    .filename
+                    .clone()
                     .or_else(|| Some(blob.id.0.clone())),
-                mime_type: detail
-                    .map(|d| d.mime_type.clone())
-                    .or_else(|| attachment.content_type.clone()),
-                size: detail
-                    .map(|d| d.size)
-                    .or_else(|| attachment.size.and_then(|size| i64::try_from(size).ok())),
+                mime_type: attachment.content_type.clone(),
+                size: attachment.size.and_then(|size| i64::try_from(size).ok()),
                 remote_attachment_id: Some(remote_attachment_id),
                 blob_id: Some(blob.id.0.clone()),
                 content_hash: inline_hashes.get(&blob.id.0).map(|entry| entry.0),
-                content_id: detail.and_then(|d| d.content_id.clone()),
-                is_inline: detail.map_or_else(
-                    || {
-                        attachment
-                            .content_type
-                            .as_deref()
-                            .is_some_and(|mime| mime.starts_with("image/"))
-                    },
-                    |d| d.is_inline,
-                ),
+                content_id: attachment.content_id.clone(),
+                is_inline: attachment.inline,
             })
         })
         .collect::<Vec<_>>();

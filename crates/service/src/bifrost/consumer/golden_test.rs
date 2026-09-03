@@ -115,6 +115,14 @@ struct InputAddress {
 struct InputBlob {
     id: String,
     content_type: Option<String>,
+    #[serde(default)]
+    filename: Option<String>,
+    #[serde(default)]
+    content_id: Option<String>,
+    #[serde(default)]
+    inline: bool,
+    #[serde(default)]
+    size: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -162,18 +170,17 @@ fn blob_handle(blob: &InputBlob) -> BlobHandle {
 
 /// Wrap a fixture blob in the post-reshape attachment envelope.
 ///
-/// `filename` / `content_id` / `inline` stay unset on purpose: the fixtures
-/// only ever supplied an id and a content type, and `build_consumer_row` still
-/// recovers those three from the RFC822 re-parse. Populating them here would
-/// pre-empt the very pairing this golden test exists to pin. See the
-/// ordinal-pairing item in TODO.md.
+/// `filename` / `content_id` / `inline` / `size` come from the fixture,
+/// mirroring what bifrost's shared inbound MIME parser now carries as
+/// first-class `MessageAttachment` fields - `build_consumer_row` reads them
+/// directly since the ordinal RFC822-re-parse pairing was retired.
 fn message_attachment(blob: &InputBlob) -> MessageAttachment {
     MessageAttachment {
-        filename: None,
+        filename: blob.filename.clone(),
         content_type: blob.content_type.clone(),
-        content_id: None,
-        inline: false,
-        size: None,
+        content_id: blob.content_id.clone(),
+        inline: blob.inline,
+        size: blob.size,
         source: AttachmentSource::Blob(blob_handle(blob)),
         truncated: false,
     }
