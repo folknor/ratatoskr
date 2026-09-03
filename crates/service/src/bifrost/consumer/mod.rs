@@ -97,19 +97,16 @@ impl ChangeStream {
 ///
 /// The drive loop still needs to know a lag happened - it detaches and
 /// re-drives so the next attach reconciles from the last durable checkpoint,
-/// and the sync-harness gates assert on `report.lagged`. Bifrost publishes that
-/// event with no structural marker distinguishing it from any other
-/// account-scoped `OperatorAttentionNeeded` warning (degraded coverage raises
-/// the same kind), so the message prefix is the only discriminator available.
-/// Keep this the single place that knows it: if bifrost grows a real marker
-/// (a `WarningKind` of its own, or a flag on `MultiplexerEvent`), this function
-/// is the one thing to rewrite.
+/// and the sync-harness gates assert on `report.lagged`. Keyed on the
+/// structural `WarningKind::ChangeStreamLagged` marker, which the
+/// multiplexer's `ChangesReceiver` alone mints (this replaced the
+/// message-text-prefix match the pre-marker contract forced).
 fn is_lag_warning(event: &bifrost_sync::multiplexer::MultiplexerEvent) -> bool {
     matches!(event.scope, CursorScope::Account)
         && matches!(
             &*event.event,
             SyncEvent::Warning(warning)
-                if warning.message.as_str().starts_with("change stream lagged")
+                if warning.kind == bifrost_types::WarningKind::ChangeStreamLagged
         )
 }
 
