@@ -323,23 +323,16 @@ fn canonical_recurrence_id(value: &str) -> String {
     {
         return date.strftime("%Y%m%d").to_string();
     }
-    // RFC 3339 with an explicit offset. This deliberately formats the
-    // OFFSET-LOCAL wall clock and appends `Z`, reproducing what the chrono
-    // implementation did: `2026-03-15T10:00:00+01:00` canonicalises to
-    // `20260315T100000Z`, NOT the true UTC `20260315T090000Z`. That is almost
-    // certainly wrong - the `Z` asserts UTC - but the result is persisted as
-    // `events.recurrence_id_canonical` and compared against keys minted by
-    // earlier syncs, so correcting it is a data migration rather than a
-    // formatting change. Preserved bug-for-bug here; tracked in TODO.md.
-    //
-    // The `Timestamp` parse is the validity gate (it accepts exactly the
-    // offset-bearing spellings); the wall-clock fields come from the civil
-    // prefix because `Timestamp` itself has already normalised the offset away.
-    if value.parse::<Timestamp>().is_ok()
-        && let Some(prefix) = value.get(..19)
-        && let Ok(wall_clock) = prefix.parse::<civil::DateTime>()
-    {
-        return wall_clock.strftime("%Y%m%dT%H%M%SZ").to_string();
+    // RFC 3339 with an explicit offset (`Z` included) canonicalises to the
+    // TRUE UTC instant: `2026-03-15T10:00:00+01:00` -> `20260315T090000Z`.
+    // The chrono implementation (preserved bug-for-bug through the jiff
+    // migration and fixed 2026-09-04) formatted the offset-local wall clock
+    // under a literal `Z`, minting a key that asserted the wrong instant for
+    // every non-zero offset. No stored keys needed migrating: pre-1.0 dev
+    // builds wipe and re-seed the data dir on every launch, so the corrected
+    // derivation is the only one any database has ever persisted.
+    if let Ok(timestamp) = value.parse::<Timestamp>() {
+        return timestamp.strftime("%Y%m%dT%H%M%SZ").to_string();
     }
     if let Ok(date_time) = value.parse::<civil::DateTime>() {
         return date_time.strftime("%Y%m%dT%H%M%S").to_string();
@@ -642,6 +635,16 @@ mod tests {
         assert_eq!(
             canonical_recurrence_id("2026-01-02T03:04:05Z"),
             "20260102T030405Z"
+        );
+        // An explicit offset canonicalises to the true UTC instant, never
+        // the offset-local wall clock under a false `Z`.
+        assert_eq!(
+            canonical_recurrence_id("2026-03-15T10:00:00+01:00"),
+            "20260315T090000Z"
+        );
+        assert_eq!(
+            canonical_recurrence_id("2026-03-15T10:00:00-05:30"),
+            "20260315T153000Z"
         );
         assert_eq!(
             canonical_recurrence_id("20260102T030405;TZID=Europe/Oslo"),

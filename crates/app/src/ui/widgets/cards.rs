@@ -19,17 +19,14 @@ use crate::ui::theme;
 use super::avatars::{avatar_circle, label_dot, sender_avatar};
 use super::buttons::reply_button;
 
-/// The UTC wall clock for a Unix second.
-///
-/// NOTE: these labels are rendered in UTC, not the host zone. The chrono
-/// original formatted a `DateTime<Utc>` from `from_timestamp` directly, with no
-/// `with_timezone(&Local)`, so thread/message card timestamps have always shown
-/// UTC. Preserved bug-for-bug through the migration rather than silently
-/// shifting every visible timestamp; tracked in TODO.md.
-fn utc_dt(seconds: i64) -> Option<jiff::Zoned> {
+/// The host-zone wall clock for a Unix second. Card timestamps are labels a
+/// user reads against their own clock; the chrono-era UTC rendering (an
+/// accidental missing `with_timezone(&Local)`) was off by the UTC offset for
+/// every non-UTC user.
+fn local_dt(seconds: i64) -> Option<jiff::Zoned> {
     jiff::Timestamp::from_second(seconds)
         .ok()
-        .map(|ts| ts.to_zoned(jiff::tz::TimeZone::UTC))
+        .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
 }
 use super::highlighted::highlighted_text_body;
 
@@ -64,7 +61,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
     let date_str = thread
         .last_message_at
         .and_then(|ts| {
-            utc_dt(ts).map(|dt| {
+            local_dt(ts).map(|dt| {
                 let diff = jiff::Timestamp::now().duration_since(dt.timestamp());
                 if diff.as_hours() < 24 {
                     dt.strftime("%-I:%M %p").to_string().trim().to_string()
@@ -227,7 +224,7 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
     let avatar = avatar_circle(sender, AVATAR_MESSAGE_CARD);
     let date_str = thread
         .last_message_at
-        .and_then(|ts| utc_dt(ts).map(|dt| dt.strftime("%a, %b %d, %Y, %-I:%M %p").to_string()))
+        .and_then(|ts| local_dt(ts).map(|dt| dt.strftime("%a, %b %d, %Y, %-I:%M %p").to_string()))
         .unwrap_or_default();
 
     let header = row![
@@ -505,7 +502,7 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
 
     let short_date = msg
         .date
-        .and_then(|ts| utc_dt(ts).map(|dt| dt.strftime("%b %d").to_string()))
+        .and_then(|ts| local_dt(ts).map(|dt| dt.strftime("%b %d").to_string()))
         .unwrap_or_default();
 
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
@@ -587,14 +584,14 @@ fn format_message_date(
     let Some(ts) = timestamp else {
         return String::new();
     };
-    let Some(dt) = utc_dt(ts) else {
+    let Some(dt) = local_dt(ts) else {
         return String::new();
     };
 
     match display {
         DateDisplay::RelativeOffset => {
             let abs = dt.strftime("%b %d, %Y, %-I:%M %p").to_string();
-            match first_message_timestamp.and_then(utc_dt) {
+            match first_message_timestamp.and_then(local_dt) {
                 Some(first_dt) => {
                     let days = dt
                         .timestamp()

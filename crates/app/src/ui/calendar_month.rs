@@ -120,15 +120,12 @@ pub fn build_month_grid(
             let Ok(end_dt) = Timestamp::from_second(event.end_time) else {
                 continue;
             };
-            // UTC, preserving the chrono behaviour exactly: `date_naive()` on a
-            // `DateTime<Utc>` yielded the UTC calendar date. Note this differs
-            // from `CalendarState::rebuild_view_data`, which derives the same
-            // span in the HOST zone - a pre-existing inconsistency that can put
-            // a late-evening event on different grid days in the two paths.
-            // Preserved rather than unified here; unifying it is a behaviour
-            // change, not a migration one.
-            let event_start = start_dt.to_zoned(TimeZone::UTC).date();
-            let event_end = end_dt.to_zoned(TimeZone::UTC).date();
+            // Host zone, agreeing with `CalendarState::rebuild_view_data`,
+            // which derives the same span locally. The chrono-era UTC read
+            // could place a late-evening event on a different grid day than
+            // the other rendering path.
+            let event_start = start_dt.to_zoned(TimeZone::system()).date();
+            let event_end = end_dt.to_zoned(TimeZone::system()).date();
             for day in &mut week {
                 if day.date >= event_start && day.date <= event_end {
                     day.events.push(MonthEvent {

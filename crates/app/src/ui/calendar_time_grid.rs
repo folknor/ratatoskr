@@ -833,19 +833,15 @@ fn format_day_header(date: NaiveDate) -> String {
     format!("{} {}", weekday, date.day())
 }
 
-/// Format event start time for display in block.
-///
-/// NOTE: this reads the clock in UTC, not the host zone - the chrono original
-/// called `from_timestamp` without a `with_timezone(&Local)`, unlike every
-/// other display path in this module. So an event's block LABEL can disagree
-/// with the block's POSITION, which `event_minutes` computes in local time
-/// ("Display in local time everywhere," per the spec comment there). Preserved
-/// bug-for-bug through the migration rather than quietly changing what times
-/// users see; tracked in TODO.md.
+/// Format event start time for display in block, in the host zone -
+/// matching `event_minutes`, which positions the same block in local time
+/// ("Display in local time everywhere," per the spec comment there). The
+/// chrono-era UTC read here could label a block with a different time than
+/// the position it was drawn at.
 fn format_event_time(event: &TimeGridEvent) -> String {
     Timestamp::from_second(event.start_time)
         .map(|ts| {
-            let dt = ts.to_zoned(TimeZone::UTC);
+            let dt = ts.to_zoned(TimeZone::system());
             format!("{}:{:02}", dt.hour(), dt.minute())
         })
         .unwrap_or_default()

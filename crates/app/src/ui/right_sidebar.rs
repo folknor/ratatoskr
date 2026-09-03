@@ -190,11 +190,12 @@ fn events_for_date(
             let Ok(end_dt) = Timestamp::from_second(ev.end_time) else {
                 return false;
             };
-            // UTC, matching the chrono original's `date_naive()` on a
-            // `DateTime<Utc>`. See the note in `calendar_month::build_month_grid`
-            // about this disagreeing with the host-zone derivation elsewhere.
-            let start_date = start_dt.to_zoned(TimeZone::UTC).date();
-            let end_date = end_dt.to_zoned(TimeZone::UTC).date();
+            // Host zone: the grid day an event lands on must agree with
+            // `CalendarState::rebuild_view_data`, which derives the same span
+            // locally. The chrono-era UTC read put a late-evening event on
+            // the wrong day for any non-UTC user.
+            let start_date = start_dt.to_zoned(TimeZone::system()).date();
+            let end_date = end_dt.to_zoned(TimeZone::system()).date();
             date >= start_date && date <= end_date
         })
         .collect()

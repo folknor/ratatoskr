@@ -971,7 +971,7 @@ fn format_date(timestamp: Option<i64>) -> String {
     timestamp
         .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
         .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::UTC)
+            ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%a, %b %d, %Y, %-I:%M %p")
                 .to_string()
         })

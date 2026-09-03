@@ -207,7 +207,7 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
         .date
         .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
         .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::UTC)
+            ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%b %d")
                 .to_string()
         })
@@ -223,7 +223,7 @@ fn format_attachment_date_sender(att: &ThreadAttachment) -> String {
         .date
         .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
         .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::UTC)
+            ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%b %d")
                 .to_string()
         })
@@ -240,7 +240,7 @@ fn format_attachment_version_line(att: &ThreadAttachment, is_latest: bool) -> St
         .date
         .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
         .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::UTC)
+            ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%b %d")
                 .to_string()
         })
