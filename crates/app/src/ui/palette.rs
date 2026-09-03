@@ -491,7 +491,7 @@ fn build_option_pick_card(state: &Palette) -> Element<'_, PaletteMessage> {
         format!("Search {}...", state.stage2_label)
     };
 
-    let input = text_input(&placeholder, &state.query)
+    let input = text_input(placeholder, &state.query)
         .on_input(|q| PaletteMessage::QueryChanged(q, CommandContext::default()))
         .on_submit(PaletteMessage::Confirm(CommandContext::default()))
         .id("palette-input")

@@ -21,7 +21,7 @@ use crate::ui::theme;
 /// - `on_category_changed`: called when the user clicks a category tab
 /// - `on_search_changed`: called when the search input text changes
 pub fn emoji_picker<'a, M: 'a + Clone>(
-    search_query: &str,
+    search_query: &'a str,
     selected_category: EmojiCategory,
     on_select: impl Fn(&'static str) -> M + 'a,
     on_category_changed: impl Fn(EmojiCategory) -> M + 'a,

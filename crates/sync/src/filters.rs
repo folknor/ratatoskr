@@ -104,11 +104,7 @@ pub fn message_matches_filter_without_body(
         }
     }
 
-    if criteria.has_attachment == Some(true) && !message.has_attachments {
-        return false;
-    }
-
-    true
+    criteria.has_attachment != Some(true) || message.has_attachments
 }
 
 /// Compute the aggregate label/flag changes from a set of filter actions.

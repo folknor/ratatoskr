@@ -38,7 +38,7 @@ fn build_query_url(domain: &str, email: &str) -> Option<String> {
     let resource = format!("acct:{email}");
     let url = url::Url::parse_with_params(
         &format!("https://{domain}/.well-known/webfinger"),
-        &[("resource", resource.as_str()), ("rel", OIDC_ISSUER_REL)],
+        [("resource", resource.as_str()), ("rel", OIDC_ISSUER_REL)],
     )
     .ok()?;
     Some(url.into())

@@ -1133,9 +1133,54 @@ fn grapheme_pixel_position(paragraph: &IcedParagraph, char_offset: usize) -> Poi
     let line_info = find_line_for_offset(paragraph, char_offset);
     let within_line = char_offset.saturating_sub(line_info.start_offset);
 
-    paragraph
-        .grapheme_position(line_info.line, within_line)
-        .unwrap_or(Point::ORIGIN)
+    grapheme_position(paragraph, line_info.line, within_line).unwrap_or(Point::ORIGIN)
+}
+
+/// Pixel position of the `index`-th grapheme on visual line `line`.
+///
+/// Port of `iced_graphics::text::Paragraph::grapheme_position`, removed
+/// upstream in 836a93a1 ("Draft `is_secure` support"); rebuilt here on the
+/// public `buffer()` / `hint_factor()` accessors. The buffer's glyph
+/// coordinates are in hinted (scaled) space, so results divide by the hint
+/// factor to get logical pixels.
+fn grapheme_position(paragraph: &IcedParagraph, line: usize, index: usize) -> Option<Point> {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let hint_factor = paragraph.hint_factor().unwrap_or(1.0);
+    let run = paragraph.buffer().layout_runs().nth(line)?;
+
+    // index represents a grapheme, not a glyph.
+    // Find the first glyph for the given grapheme cluster.
+    let mut last_start = None;
+    let mut last_grapheme_count = 0;
+    let mut graphemes_seen = 0;
+
+    let glyph = run
+        .glyphs
+        .iter()
+        .find(|glyph| {
+            if Some(glyph.start) != last_start {
+                last_grapheme_count = run.text[glyph.start..glyph.end].graphemes(false).count();
+                last_start = Some(glyph.start);
+                graphemes_seen += last_grapheme_count;
+            }
+
+            graphemes_seen >= index
+        })
+        .or_else(|| run.glyphs.last())?;
+
+    let advance = if index == 0 {
+        0.0
+    } else {
+        glyph.w
+            * (1.0
+                - graphemes_seen.saturating_sub(index) as f32 / last_grapheme_count.max(1) as f32)
+    };
+
+    Some(Point::new(
+        (glyph.x + glyph.x_offset * glyph.font_size + advance) / hint_factor,
+        (glyph.y - glyph.y_offset * glyph.font_size) / hint_factor,
+    ))
 }
 
 // ── Selection rectangle computation ─────────────────────
@@ -1185,9 +1230,7 @@ fn compute_selection_rects(
             para_origin_x
         } else {
             let within_line = sel_start_in_line.saturating_sub(line_start);
-            let pos = paragraph
-                .grapheme_position(line_idx, within_line)
-                .unwrap_or(Point::ORIGIN);
+            let pos = grapheme_position(paragraph, line_idx, within_line).unwrap_or(Point::ORIGIN);
             para_origin_x + pos.x
         };
 
@@ -1199,9 +1242,7 @@ fn compute_selection_rects(
             para_origin_x + available_width
         } else {
             let within_line = sel_end_in_line.saturating_sub(line_start);
-            let pos = paragraph
-                .grapheme_position(line_idx, within_line)
-                .unwrap_or(Point::ORIGIN);
+            let pos = grapheme_position(paragraph, line_idx, within_line).unwrap_or(Point::ORIGIN);
             para_origin_x + pos.x
         };
 

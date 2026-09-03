@@ -3,6 +3,27 @@ project = "ratatoskr"
 [test]
 debug = true
 
+# The [[check]] entry replaces brokkr's legacy fallback (one --all-features
+# sweep) with the default-features build - the shape the runner and every
+# consumer actually get. This is a deliberate behavior change: the first run
+# may surface breakage --all-features was hiding (the piners-vm class, where a
+# feature-gated path satisfied every call site the default build misses), and
+# surfacing it is the point. When cfg-gated code wants coverage (dev-seed and
+# friends), add package-scoped feature sweeps beside this entry rather than
+# going back to --all-features.
+#
+# `parallel = {}` runs this 30-crate workspace's test binaries concurrently
+# instead of sequentially - prebuilt binaries executed directly, budget =
+# tests in flight, defaulting to the L3 cache domain. Judge it over two runs:
+# the first warms the timing store by test count and is always the slow one,
+# and a `claims 1-1` line on the second means the budget is too small for the
+# pole binary and needs raising explicitly (see brokkr man config parallel).
+# The [ratatoskr.gate.*] sync-harness gates below are untouched - they run
+# through `brokkr sync`, not the check test phase.
+[[check]]
+name = "default"
+parallel = {}
+
 [[dependency_rule]]
 name = "app-no-rusqlite"
 from = "app"

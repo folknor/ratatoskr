@@ -32,13 +32,13 @@ impl<M> canvas::Program<M> for ThemePreviewPainter {
         });
         frame.fill(&bg_rect, self.colors[0]);
 
-        for i in 1..5 {
+        for (i, &color) in self.colors.iter().enumerate().take(5).skip(1) {
             let x = stripe_width * i as f32;
             let rect = canvas::path::Path::rectangle(
                 iced::Point::new(x, 0.0),
                 iced::Size::new(stripe_width, bounds.height),
             );
-            frame.fill(&rect, self.colors[i]);
+            frame.fill(&rect, color);
         }
 
         let last = canvas::path::Path::new(|b| {

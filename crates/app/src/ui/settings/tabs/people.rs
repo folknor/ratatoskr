@@ -84,9 +84,8 @@ pub(super) fn filter_row<'a>(
     filter_id: FilterId,
     focused: bool,
 ) -> Element<'a, SettingsMessage> {
-    let value_owned = value.to_string();
     let id_owned = id.to_string();
-    let has_value = !value_owned.is_empty();
+    let has_value = !value.is_empty();
 
     let trailing_slot_width = ICON_SM + PAD_ICON_BTN.left + PAD_ICON_BTN.right;
     let trailing: Element<'a, SettingsMessage> = if has_value {
@@ -110,7 +109,7 @@ pub(super) fn filter_row<'a>(
 
     let content = row![
         container(icon::search().size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
-        text_input(placeholder, &value_owned)
+        text_input(placeholder, value)
             .id(id_owned)
             .on_input(on_input)
             .size(TEXT_LG)

@@ -25,8 +25,8 @@ use iced::{Element, Event, Length, Rectangle, Size, Theme, Vector};
 /// This is the drop-in replacement for [`iced::widget::text_input()`].
 /// Chain `.on_undo(msg)` and `.on_redo(msg)` to wire up history.
 pub fn undoable_text_input<'a, Message>(
-    placeholder: &str,
-    value: &str,
+    placeholder: impl iced::widget::text::IntoFragment<'a>,
+    value: impl iced::widget::text::IntoFragment<'a>,
 ) -> UndoableTextInput<'a, Message>
 where
     Message: Clone + 'a,

@@ -411,7 +411,7 @@ pub(super) fn info_row(label: &str, value: &str) -> RowBuilder<'static> {
                     text(label_owned)
                         .size(TEXT_SM)
                         .style(theme::TextClass::Tertiary.style()),
-                    text_input("", &value_owned)
+                    text_input("", value_owned.clone())
                         .on_input(|_| SettingsMessage::Noop)
                         .size(TEXT_LG)
                         .padding(0)
@@ -484,7 +484,7 @@ fn input_row_inner<'a>(
                             text(label_owned.clone())
                                 .size(TEXT_SM)
                                 .style(theme::TextClass::Tertiary.style()),
-                            undoable_text_input(&placeholder_owned, &value_owned)
+                            undoable_text_input(placeholder_owned.clone(), value_owned.clone())
                                 .id(id_clone.clone())
                                 .on_input(on_input)
                                 .on_undo(SettingsMessage::UndoInput(field))
