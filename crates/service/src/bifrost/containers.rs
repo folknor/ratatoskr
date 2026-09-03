@@ -129,10 +129,33 @@ impl ContainerIndex {
     pub fn attribution_for_scope(&self, scope: &CursorScope) -> Option<NamespaceAttribution> {
         match scope {
             CursorScope::Account | CursorScope::Type(_) => Some(NamespaceAttribution::Personal),
-            CursorScope::Folder(folder) => self.namespaces.get(&folder.0).cloned(),
-            CursorScope::FolderType { folder, .. } => self.namespaces.get(&folder.0).cloned(),
+            CursorScope::Folder(folder) => self.attribution_for_native_id(&folder.0),
+            CursorScope::FolderType { folder, .. } => self.attribution_for_native_id(&folder.0),
             _ => None,
         }
+    }
+
+    /// Resolve a folder scope id to its namespace. Exact container match
+    /// first; failing that, bifrost's owner-qualified foreign form.
+    ///
+    /// JMAP owner-qualifies every foreign scope id as `owner<US>local`
+    /// (US = `\u{1f}`, bifrost `77e7a06`), and the foreign account's own
+    /// account-level scope is the empty-local form `owner<US>` - an id no
+    /// container ever carries, so an exact `ContainerIndex` match can never
+    /// attribute it and every foreign batch would be skipped-and-redelivered
+    /// forever. The separator is unambiguous (US appears in no provider
+    /// native id), so a qualified id is attributed by its OWNER half.
+    fn attribution_for_native_id(&self, native: &str) -> Option<NamespaceAttribution> {
+        if let Some(attribution) = self.namespaces.get(native) {
+            return Some(attribution.clone());
+        }
+        let (owner, _local) = native.split_once('\u{1f}')?;
+        if owner.is_empty() {
+            return None;
+        }
+        Some(NamespaceAttribution::Shared {
+            owner: owner.to_string(),
+        })
     }
 
     pub fn is_mail_container(&self, native: &str) -> bool {

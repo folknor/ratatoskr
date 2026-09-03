@@ -106,6 +106,13 @@ harness.assert_eq(review.end_time, 1769958000, "review end_time")
 harness.assert(review.attendees_json == nil, "empty attendees should stay nil")
 
 local requests = harness.mock_requests(admin_endpoint)
+-- RFC 6764: bifrost probes the origin's /.well-known/caldav first and
+-- falls back to a bare root PROPFIND only when that 404s. The mock
+-- answers the well-known probe, so root is never touched; accept either
+-- entry point so the assertion pins "principal was discovered", not
+-- which door was used.
+local well_known_propfind_requests =
+    harness.request_count(requests, "caldav", "PROPFIND /.well-known/caldav")
 local root_propfind_requests = harness.request_count(requests, "caldav", "PROPFIND /")
 local principal_propfind_requests =
     harness.request_count(requests, "caldav", "PROPFIND /principals/account-1/")
@@ -114,8 +121,8 @@ local calendar_home_propfind_requests =
 local work_report_requests =
     harness.request_count(requests, "caldav", "REPORT /calendars/account-1/cal-work/")
 harness.assert(
-    root_propfind_requests >= 1,
-    "CalDAV sync did not discover principal from root"
+    well_known_propfind_requests + root_propfind_requests >= 1,
+    "CalDAV sync did not discover principal from well-known or root"
 )
 harness.assert(
     principal_propfind_requests >= 1,
@@ -137,6 +144,7 @@ harness.write_summary({
     calendar_count = state.calendar_count,
     calendar_event_count = state.calendar_event_count,
     provider_requests = #requests,
+    caldav_well_known_propfind_requests = well_known_propfind_requests,
     caldav_root_propfind_requests = root_propfind_requests,
     caldav_principal_propfind_requests = principal_propfind_requests,
     caldav_calendar_home_propfind_requests = calendar_home_propfind_requests,

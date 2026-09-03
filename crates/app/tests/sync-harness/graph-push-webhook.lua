@@ -77,6 +77,10 @@ local dir = harness.data_dir("sync_graph_push_webhook")
 local client, err = harness.spawn(dir, nil, {
     RATATOSKR_GRAPH_PUSH_LOOPBACK = loopback,
     RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL = notification_url,
+    -- bifrost refuses to subscribe with a notification URL but no shared
+    -- clientState secret (the receiver could not validate notifications),
+    -- so the harness must provide one alongside the URL.
+    RATATOSKR_GRAPH_PUSH_CLIENT_STATE = "harness-graph-push-secret",
 })
 harness.assert(err == nil, "spawn failed")
 

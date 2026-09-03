@@ -102,7 +102,9 @@ harness.assert_eq(monthly.location, "Finance bot", "monthly location")
 harness.assert_eq(monthly.organizer_email, "alice@example.com", "monthly organizer_email")
 assert_rule_contains(monthly, "FREQ=MONTHLY", "monthly")
 assert_rule_contains(monthly, "BYMONTHDAY=15", "monthly")
-assert_rule_contains(monthly, "UNTIL=2026-12-15T17:00:00", "monthly")
+-- bifrost normalizes the JSCalendar LocalDateTime `until` through the
+-- event timeZone (UTC here) into the RRULE UTC form.
+assert_rule_contains(monthly, "UNTIL=20261215T170000Z", "monthly")
 
 local yearly = event_by_remote_id(state.calendar_events, "ev-yearly")
 harness.assert(yearly ~= nil, "missing yearly event")
@@ -110,6 +112,9 @@ harness.assert_eq(yearly.summary, "Christmas Eve", "yearly summary")
 harness.assert_eq(yearly.start_time, 1798135200, "yearly start_time")
 harness.assert_eq(yearly.end_time, 1798149600, "yearly end_time")
 assert_rule_contains(yearly, "FREQ=YEARLY", "yearly")
+-- Pins the RFC 8984 byMonth String[] round-trip (the shape whose absence
+-- turned the whole sync into Unsupported(EventsInRange)).
+assert_rule_contains(yearly, "BYMONTH=12", "yearly")
 assert_rule_contains(yearly, "BYMONTHDAY=24", "yearly")
 assert_rule_contains(yearly, "COUNT=3", "yearly")
 

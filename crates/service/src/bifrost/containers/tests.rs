@@ -192,6 +192,30 @@ fn container_index_attributes_scope_to_namespace() {
         None
     );
 
+    // bifrost's owner-qualified foreign scope ids (`owner<US>local`, US =
+    // \u{1f}) attribute by their OWNER half even when no container carries
+    // the exact id. The empty-local form is the foreign account's own
+    // account-level scope and is the case an exact match can never serve.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("account-team\u{1f}".into()))),
+        Some(NamespaceAttribution::Shared {
+            owner: "account-team".into()
+        })
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId(
+            "account-team\u{1f}mb-unknown".into()
+        ))),
+        Some(NamespaceAttribution::Shared {
+            owner: "account-team".into()
+        })
+    );
+    // An empty owner half is malformed, not personal, not shared.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("\u{1f}mb-x".into()))),
+        None
+    );
+
     // Obstacle T: a non-mail public container is not a mail scope.
     assert!(index.is_mail_container("pf-notices"));
     assert!(!index.is_mail_container("pf-calendar"));
