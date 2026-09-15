@@ -204,7 +204,7 @@ impl ResidentEngine {
         //
         // The rebuild is gated on the server actually advertising a foreign
         // (other-user / shared) NAMESPACE at open
-        // (`AccountCapabilities::foreign_namespaces_advertised`): on a
+        // (`AccountCapabilities::discovers_foreign_namespaces_on_rediscovery`): on a
         // personal-only server no ACL grant can ever surface a folder, so
         // paying a full detach / reconnect / rediscovery on every kick there
         // is pure waste - it tripled the imap_steady_state_delta request
@@ -223,7 +223,9 @@ impl ResidentEngine {
                         .engine()
                         .account_capabilities(&AccountId(account_id.to_string()))
                         .ok()
-                        .map(|capabilities| capabilities.reopen_discovers_foreign_namespaces);
+                        .map(|capabilities| {
+                            capabilities.discovers_foreign_namespaces_on_rediscovery
+                        });
                     should_rebuild_slot_on_kick(provider, advertised)
                 }
                 None => false,
