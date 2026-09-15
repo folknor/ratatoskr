@@ -63,7 +63,7 @@ fn get_href(attrs: &[Attribute]) -> Option<String> {
 /// Extract a named attribute value from an element's attributes.
 fn get_attr(attrs: &[Attribute], name: &str) -> Option<String> {
     attrs.iter().find_map(|a| {
-        if a.name.local.as_ref() == name {
+        if &*a.name.local == name {
             Some(a.value.to_string())
         } else {
             None
@@ -416,7 +416,7 @@ fn parse_list_to_items(
     for child in &borrow.children {
         let child_borrow = child.borrow();
         if let NodeData::Element { ref name, .. } = child_borrow.data
-            && name.local.as_ref() == "li"
+            && &*name.local == "li"
         {
             drop(child_borrow);
             parse_li_to_items(child, ordered, indent_level, blocks);
@@ -446,7 +446,7 @@ fn parse_li_to_items(li_node: &Handle, ordered: bool, indent_level: u8, blocks: 
     let has_nested_list = borrow.children.iter().any(|c| {
         let cb = c.borrow();
         if let NodeData::Element { ref name, .. } = cb.data {
-            let tag = name.local.as_ref();
+            let tag = &*name.local;
             return tag == "ul" || tag == "ol";
         }
         false
@@ -472,7 +472,7 @@ fn parse_li_to_items(li_node: &Handle, ordered: bool, indent_level: u8, blocks: 
     for child in &borrow.children {
         let child_borrow = child.borrow();
         let is_nested_list = if let NodeData::Element { ref name, .. } = child_borrow.data {
-            let tag = name.local.as_ref();
+            let tag = &*name.local;
             tag == "ul" || tag == "ol"
         } else {
             false
@@ -501,7 +501,7 @@ fn parse_li_to_items(li_node: &Handle, ordered: bool, indent_level: u8, blocks: 
 
             // Determine ordering of the nested list.
             let nested_ordered = if let NodeData::Element { ref name, .. } = child_borrow.data {
-                name.local.as_ref() == "ol"
+                &*name.local == "ol"
             } else {
                 false
             };
@@ -556,7 +556,7 @@ fn tree_has_img(children: &[Handle]) -> bool {
     children.iter().any(|c| {
         let cb = c.borrow();
         if let NodeData::Element { ref name, .. } = cb.data {
-            if name.local.as_ref() == "img" {
+            if &*name.local == "img" {
                 return true;
             }
             // Recurse into inline wrappers.

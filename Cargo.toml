@@ -131,7 +131,7 @@ quick-xml = "0.42.0"
 dissimilar = "1"
 
 # Profiling
-hotpath = "0.24.0"
+hotpath = "0.25.1"
 
 # Optimized release profile
 [profile.release]

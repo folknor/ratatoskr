@@ -15,8 +15,8 @@ hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [dependencies]
 bitflags = "2.11.1"
-html5ever = "0.39"
-markup5ever = "0.39"
+html5ever = "0.40"
+markup5ever = "0.40"
 hotpath = { workspace = true, optional = true }
 unicode-segmentation = "1.12"
 
