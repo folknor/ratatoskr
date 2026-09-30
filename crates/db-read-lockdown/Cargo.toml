@@ -10,9 +10,7 @@ publish = false
 [lints]
 workspace = true
 
-[dependencies]
-db-read = { path = "../db-read" }
-
 [dev-dependencies]
+db-read = { path = "../db-read" }
 rusqlite.workspace = true
 trybuild = "1"

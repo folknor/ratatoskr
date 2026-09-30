@@ -1,28 +1,2 @@
-[archetypes]
-bare = ""
-bugs = "You hunt bugs."
-goal = "/goal "
-
-[_defaults]
-providers = ["codex"]
-
-# Profiles are tiers, not roles: any archetype can take any profile, so they
-# name depth and write access rather than the job.
-#
-# Both state their sandbox. Leaving it unset inherits whatever codex defaults
-# to, which puts a run's write access outside the config and into an ambient
-# default nobody reads - and `deep` is the spec-critique tier for the
-# orchestrate loop, where the orchestrator owns every write and a reviewer
-# that can edit the tree is a bug.
-[plantasjen.codex.read]
-model = "gpt-5.6-sol"
-effort = "xhigh"
-sandbox = "read-only"
-
-[plantasjen.codex.write]
-model = "gpt-5.6-terra"
-effort = "medium"
-sandbox = "workspace-write"
-
 [_audit]
 id = "1f87"

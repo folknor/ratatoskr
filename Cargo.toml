@@ -127,11 +127,8 @@ base64 = "0.23"
 # XML
 quick-xml = "0.42.0"
 
-# Text diffing (for undo/redo)
-dissimilar = "1"
-
 # Profiling
-hotpath = "0.25.1"
+hotpath = "0.27.0"
 
 # Optimized release profile
 [profile.release]

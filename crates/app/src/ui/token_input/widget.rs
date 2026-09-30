@@ -99,14 +99,9 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         Size::new(Length::Fill, Length::Shrink)
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        _renderer: &iced::Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, _renderer: &iced::Renderer, limits: &layout::Limits) {
         let state = tree.state.downcast_mut::<TokenInputState>();
-        let max_width = limits.max().width;
+        let max_width = limits.bounds().width;
         let inner_width = max_width - PAD_TOKEN_INPUT.left - PAD_TOKEN_INPUT.right;
 
         let mut x: f32 = 0.0;
@@ -155,7 +150,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         }
         state.chip_v_offset = chip_v_offset;
 
-        layout::Node::new(Size::new(max_width, total_height))
+        tree.size = Size::new(max_width, total_height);
     }
 
     fn draw(
@@ -164,7 +159,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         renderer: &mut iced::Renderer,
         theme: &Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -291,7 +286,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, M>,
@@ -434,7 +429,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,

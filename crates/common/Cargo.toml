@@ -23,7 +23,6 @@ rusqlite.workspace = true
 # Extracted workspace crates
 db = { path = "../db" }
 store = { path = "../stores" }
-search = { path = "../search" }
 seen = { path = "../seen" }
 types = { path = "../types" }
 crypto-key = { path = "../crypto-key" }
@@ -33,7 +32,6 @@ crypto-key = { path = "../crypto-key" }
 # Crate-specific deps
 tokio = { workspace = true, features = ["sync"] }
 log = "0.4"
-async-trait = "0.1"
 unicode-segmentation = "1.12"
 zeroize = "1"
 regex = "1"
@@ -47,5 +45,5 @@ hotpath = { workspace = true, optional = true }
 
 
 [features]
-hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "search/hotpath", "seen/hotpath", "types/hotpath"]
-hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "search/hotpath-alloc", "seen/hotpath-alloc", "types/hotpath-alloc"]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "seen/hotpath", "types/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "seen/hotpath-alloc", "types/hotpath-alloc"]

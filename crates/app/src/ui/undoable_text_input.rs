@@ -187,34 +187,35 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         self.inner.as_widget().size()
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &iced::Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) {
         self.inner
             .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+            .layout(&mut tree.children[0], renderer, limits);
+        tree.size = tree.children[0].size;
     }
 
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
+        viewport: &Rectangle,
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
-        self.inner
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
+        self.inner.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout,
+            viewport,
+            renderer,
+            operation,
+        );
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -226,7 +227,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &iced::Renderer,
@@ -246,7 +247,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         renderer: &mut iced::Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -264,17 +265,19 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>> {
+        window: Size,
+    ) -> Vec<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>> {
         self.inner.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
             renderer,
             viewport,
             translation,
+            window,
         )
     }
 }
@@ -287,7 +290,7 @@ impl<Message: Clone> UndoableWrapper<'_, Message> {
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,

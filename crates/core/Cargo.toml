@@ -44,7 +44,6 @@ flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 getrandom = { version = "0.4.2", features = ["std"] }
 urlencoding = "2"
 uuid = { version = "1.23.1", features = ["v4"] }
-tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 async-trait = "0.1"
 hickory-resolver = { version = "0.26.1", features = ["tokio"] }
 sha2 = "0.11"
@@ -52,7 +51,6 @@ unicode-segmentation = "1.12"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 regex = "1"
 url = "2"
-resvg = { version = "0.48.1", default-features = false }
 lol_html = "3.0.0"
 ammonia = "4"
 calcard = "0.3.3"

@@ -82,21 +82,16 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
         }
     }
 
-    fn layout(
-        &mut self,
-        _tree: &mut Tree,
-        _renderer: &iced::Renderer,
-        _limits: &layout::Limits,
-    ) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, _renderer: &iced::Renderer, _limits: &layout::Limits) {
         // Toggler is 2:1 width:height ratio
-        layout::Node::new(Size::new(2.0 * self.size, self.size))
+        tree.size = Size::new(2.0 * self.size, self.size);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -146,7 +141,7 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
     fn mouse_interaction(
         &self,
         _tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -168,7 +163,7 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
         renderer: &mut iced::Renderer,
         theme: &Theme,
         _defaults: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -239,7 +234,7 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
 }
 
 impl<'a, Message> AnimatedToggler<'a, Message> {
-    fn current_status(&self, cursor: mouse::Cursor, layout: Layout<'_>) -> Status {
+    fn current_status(&self, cursor: mouse::Cursor, layout: Layout) -> Status {
         if self.on_toggle.is_none() {
             Status::Disabled {
                 is_toggled: self.is_toggled,

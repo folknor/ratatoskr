@@ -123,6 +123,10 @@ Each is a side-quest per `docs/side-quests.md`, not a ratatoskr change.
 
 - [ ] **Reconsider sidebar layout** *(Deferred until right before 1.0)* - Currently the spec says: (1) sidebar should not show any Labels section when "All Accounts" is selected, (2) when a single account is selected, only labels belonging to that account should be shown, and (3) that for providers that have a "folder" concept, the users folders should show in the Labels section. We might need to re-think all 3.
 
+- [ ] **`AnchoredOverlay` suppresses its base widget's overlays while the popup is closed** - `Widget::overlay` in `crates/app/src/ui/anchored_overlay.rs` returns an empty list when `popup` is `None`, so any overlay the base element produces (a tooltip, a nested dropdown) never appears unless the popup is open. With the popup open, the base's overlays are forwarded alongside it. Looks like an accident of the old `self.popup.as_mut()?` early return rather than intent; behavior was preserved as-is through the iced layout-in-tree port. Fix is to forward `self.base`'s overlays in the `None` branch - check first whether any call site relies on the suppression.
+
+- [ ] **rte hit-testing treats a byte index as a character offset** - `text::Paragraph::hit_test` returns `Position { line, index }` where `index` is cosmic-text's byte index within the buffer line. rte (`crates/rte/src/widget/mod.rs`: click-to-position and `build_line_starts`) takes `.index` and uses it as the paragraph-wide char offset in `DocPosition`. For ASCII-only text the two coincide; with multi-byte characters (accents, CJK, emoji) before the click point, the caret lands too far right, and any paragraph containing a hard line break would additionally lose the `line` component. Pre-existing - the old `Hit::CharOffset(usize)` carried the same byte index. Needs a byte-to-char (or grapheme, matching rte's offset unit) conversion against the paragraph's text, plus a test with non-ASCII content.
+
 ## Roadmap Features - Remaining Work
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.

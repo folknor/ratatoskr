@@ -896,12 +896,12 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         tree: &mut widget::Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
+    ) {
         let widget_state = tree.state.downcast_mut::<WidgetState>();
         let cache = &mut widget_state.cache;
 
         let limits = limits.width(self.width).height(self.height);
-        let max_size = limits.max();
+        let max_size = limits.bounds();
         let available_width = (max_size.width - self.padding.left - self.padding.right).max(0.0);
 
         // Layout paragraphs using the cache.
@@ -915,22 +915,20 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
 
         let content_height = total_height + self.padding.top + self.padding.bottom;
 
-        let node = match self.height {
+        let size = match self.height {
             // Content-sized: the widget is as tall as its document.
-            Length::Shrink | Length::Fit => {
-                let size = limits.height(Length::Fixed(content_height)).max();
-                layout::Node::new(size)
-            }
+            Length::Shrink | Length::Fit => limits.height(Length::Fixed(content_height)).bounds(),
             // Fill-like: the widget takes the offered height and scrolls.
             Length::Fill
             | Length::FillPortion(_)
             | Length::Fixed(_)
             | Length::Bounded { .. }
-            | Length::Fluid(_) => layout::Node::new(limits.max()),
+            | Length::Fluid(_) => limits.bounds(),
         };
+        tree.size = size;
 
         // Clamp scroll offset to valid range after layout.
-        let viewport_height = node.size().height - self.padding.top - self.padding.bottom;
+        let viewport_height = size.height - self.padding.top - self.padding.bottom;
         let max_scroll = (total_height - viewport_height).max(0.0);
         widget_state.scroll_offset = widget_state.scroll_offset.clamp(0.0, max_scroll);
 
@@ -957,15 +955,13 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                 );
             }
         }
-
-        node
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: iced::advanced::Layout<'_>,
+        layout: iced::advanced::Layout,
         cursor_pos: mouse::Cursor,
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
@@ -990,7 +986,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         renderer: &mut iced::Renderer,
         _theme: &iced::Theme,
         _style: &renderer::Style,
-        layout: iced::advanced::Layout<'_>,
+        layout: iced::advanced::Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -1017,7 +1013,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
-        layout: iced::advanced::Layout<'_>,
+        layout: iced::advanced::Layout,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -1092,7 +1088,7 @@ fn build_line_starts(paragraph: &IcedParagraph) -> Vec<(usize, usize)> {
         let probe_y = line_idx as f32 * line_height_px;
         let probe = Point::new(0.0, probe_y);
         if let Some(hit) = paragraph.hit_test(probe) {
-            let offset = hit.cursor();
+            let offset = hit.cursor().index;
             // Only add if this line starts at a different offset than the previous.
             if line_starts.last().is_some_and(|&(_, prev)| prev != offset) {
                 line_starts.push((line_idx, offset));
@@ -1347,7 +1343,7 @@ fn hit_test_content_point(
         let char_offset = child
             .paragraph
             .hit_test(local_point)
-            .map(iced::advanced::text::Hit::cursor)
+            .map(|hit| hit.cursor().index)
             .unwrap_or(0);
 
         return crate::document::DocPosition::new(block_index, char_offset);
@@ -1367,7 +1363,7 @@ fn hit_test_content_point(
 
     let char_offset = paragraph
         .hit_test(local_point)
-        .map(iced::advanced::text::Hit::cursor)
+        .map(|hit| hit.cursor().index)
         .unwrap_or(0);
 
     crate::document::DocPosition::new(block_index, char_offset)

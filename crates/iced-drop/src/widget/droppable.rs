@@ -2,7 +2,7 @@
 //!
 //! Vendored from <https://github.com/jhannyj/iced_drop> (v0.2.2).
 
-use iced_core::layout::{Limits, Node};
+use iced_core::layout::Limits;
 use iced_core::mouse::Cursor;
 use iced_core::renderer::Style;
 use iced_core::widget::tree::Tag;
@@ -172,18 +172,18 @@ where
         self.content.as_widget().size()
     }
 
-    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
-        let state: &mut DroppableState = tree.state.downcast_mut::<DroppableState>();
-        let content_node =
-            self.content
-                .as_widget_mut()
-                .layout(&mut tree.children[0], renderer, limits);
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
+        tree.size = tree.children[0].size;
 
         // Adjust the size of the original widget if it's being dragged or we're waiting to reset
+        let state: &mut DroppableState = tree.state.downcast_mut::<DroppableState>();
         if let Some(new_size) = self.drag_size {
             match state.action {
                 Action::Drag(_, _) => {
-                    return Node::with_children(new_size, content_node.children().to_vec());
+                    tree.size = new_size;
                 }
                 Action::Wait(reveal_index) => {
                     if reveal_index <= 1 {
@@ -192,13 +192,11 @@ where
                         state.action = Action::Wait(reveal_index - 1);
                     }
 
-                    return Node::with_children(new_size, content_node.children().to_vec());
+                    tree.size = new_size;
                 }
                 _ => (),
             }
         }
-
-        content_node
     }
 
     fn draw(
@@ -207,7 +205,7 @@ where
         renderer: &mut Renderer,
         theme: &Theme,
         style: &Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: Cursor,
         viewport: &Rectangle,
     ) {
@@ -244,17 +242,19 @@ where
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
+        viewport: &Rectangle,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         let state = tree.state.downcast_mut::<DroppableState>();
         operation.custom(self.id.as_ref(), layout.bounds(), state);
-        operation.container(self.id.as_ref(), layout.bounds());
+        operation.container(self.id.as_ref(), layout.bounds(), viewport);
         operation.traverse(&mut |operation| {
             self.content.as_widget_mut().operate(
                 &mut tree.children[0],
                 layout,
+                viewport,
                 renderer,
                 operation,
             );
@@ -265,7 +265,7 @@ where
         &mut self,
         tree: &mut Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: Cursor,
         renderer: &Renderer,
         shell: &mut iced_core::Shell<'_, Message>,
@@ -432,7 +432,7 @@ where
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
@@ -473,20 +473,27 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
         let state: &mut DroppableState = tree.state.downcast_mut::<DroppableState>();
         if self.drag_overlay
             && let Action::Drag(_, _) = state.action
         {
-            return Some(overlay::Element::new(Box::new(DragOverlay {
+            // The content tree already holds its layout at the dragged size
+            // (`overlay_bounds` is captured from the widget bounds on press),
+            // and it is shared with the in-place widget, so re-running layout
+            // here would clobber it. Reposition the existing size instead.
+            let content_tree = &mut tree.children[0];
+            return vec![overlay::Element::new(Box::new(DragOverlay {
+                layout: Layout::new(content_tree.size).move_to(state.overlay_bounds.position()),
                 content: &mut self.content,
-                tree: &mut tree.children[0],
-                overlay_bounds: state.overlay_bounds,
-            })));
+                tree: content_tree,
+                window,
+            }))];
         }
         self.content.as_widget_mut().overlay(
             &mut tree.children[0],
@@ -494,6 +501,7 @@ where
             renderer,
             viewport,
             translation,
+            window,
         )
     }
 }
@@ -547,9 +555,10 @@ struct DragOverlay<'a, 'b, Message, Theme, Renderer>
 where
     Renderer: renderer::Renderer,
 {
+    layout: Layout,
     content: &'b mut Element<'a, Message, Theme, Renderer>,
     tree: &'b mut Tree,
-    overlay_bounds: Rectangle,
+    window: Size,
 }
 
 impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -557,33 +566,24 @@ impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer
 where
     Renderer: renderer::Renderer,
 {
-    fn layout(&mut self, renderer: &Renderer, _bounds: Size) -> Node {
-        Widget::<Message, Theme, Renderer>::layout(
-            self.content.as_widget_mut(),
-            self.tree,
-            renderer,
-            &Limits::new(Size::ZERO, self.overlay_bounds.size()),
-        )
-        .move_to(self.overlay_bounds.position())
-    }
-
     fn draw(
         &self,
         renderer: &mut Renderer,
         theme: &Theme,
         inherited_style: &Style,
-        layout: Layout<'_>,
         cursor_position: Cursor,
     ) {
-        Widget::<Message, Theme, Renderer>::draw(
-            self.content.as_widget(),
-            self.tree,
-            renderer,
-            theme,
-            inherited_style,
-            layout,
-            cursor_position,
-            &Rectangle::with_size(Size::INFINITE),
-        );
+        renderer.with_layer(Rectangle::with_size(self.window), |renderer| {
+            Widget::<Message, Theme, Renderer>::draw(
+                self.content.as_widget(),
+                self.tree,
+                renderer,
+                theme,
+                inherited_style,
+                self.layout,
+                cursor_position,
+                &Rectangle::with_size(Size::INFINITE),
+            );
+        });
     }
 }

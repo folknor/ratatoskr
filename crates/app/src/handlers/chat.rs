@@ -100,7 +100,10 @@ impl ReadyApp {
         // cache and causes flicker / driver pressure.)
         timeline.refresh_image_handles();
         // Snap to bottom so the most recent message is visible on entry.
-        iced::widget::operation::snap_to_end::<Message>(CHAT_SCROLLABLE_ID.to_string())
+        iced::widget::operation::snap_to_end::<Message>(
+            CHAT_SCROLLABLE_ID.to_string(),
+            iced::widget::operation::Animation::Instant,
+        )
     }
 
     /// Handle events from the chat timeline component.

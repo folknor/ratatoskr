@@ -1,3 +1,4 @@
+use iced::advanced::Renderer as _;
 use iced::advanced::{Layout, Shell, Widget, layout, overlay, renderer, widget};
 use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
@@ -72,15 +73,11 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         self.base.as_widget().size()
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut widget::Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
+    fn layout(&mut self, tree: &mut widget::Tree, renderer: &Renderer, limits: &layout::Limits) {
         self.base
             .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+            .layout(&mut tree.children[0], renderer, limits);
+        tree.size = tree.children[0].size;
     }
 
     fn draw(
@@ -89,7 +86,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         renderer: &mut Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -116,20 +113,25 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
     fn operate(
         &mut self,
         tree: &mut widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
+        viewport: &Rectangle,
         renderer: &Renderer,
         operation: &mut dyn widget::Operation<()>,
     ) {
-        self.base
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
+        self.base.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout,
+            viewport,
+            renderer,
+            operation,
+        );
     }
 
     fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: &Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
@@ -149,7 +151,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &Renderer,
@@ -166,41 +168,104 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut widget::Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        let popup = self.popup.as_mut()?;
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        let Some(popup) = self.popup.as_mut() else {
+            return Vec::new();
+        };
 
         let (first, second) = tree.children.split_at_mut(1);
 
-        let base = self.base.as_widget_mut().overlay(
+        let mut overlays = self.base.as_widget_mut().overlay(
             &mut first[0],
             layout,
             renderer,
             viewport,
             translation,
+            window,
         );
 
-        let base_position = layout.position() + translation;
-        let overlay = overlay::Element::new(Box::new(AnchoredOverlayLayer {
-            content: popup,
-            tree: &mut second[0],
-            base_bounds: layout.bounds(),
-            base_position,
-            viewport: *viewport,
-            on_dismiss: self.on_dismiss.clone(),
-            popup_width: self.popup_width,
-            position: self.position,
-            anchor_point: self.anchor_point,
-        }));
+        let popup_tree = &mut second[0];
+        let popup_layout = layout_popup(
+            popup,
+            popup_tree,
+            renderer,
+            window,
+            self.anchor_point.unwrap_or(layout.position() + translation),
+            if self.anchor_point.is_some() {
+                Size::ZERO
+            } else {
+                layout.bounds().size()
+            },
+            self.popup_width,
+            self.anchor_point.is_some(),
+            self.position,
+        );
 
-        Some(
-            overlay::Group::with_children(base.into_iter().chain(Some(overlay)).collect())
-                .overlay(),
-        )
+        overlays.push(overlay::Element::new(Box::new(AnchoredOverlayLayer {
+            layout: popup_layout,
+            content: popup,
+            tree: popup_tree,
+            viewport: *viewport,
+            window,
+            on_dismiss: self.on_dismiss.clone(),
+        })));
+
+        overlays
     }
+}
+
+/// Lay the popup out in its own subtree and place it under the anchor,
+/// clamped horizontally so it stays inside the window.
+#[allow(clippy::too_many_arguments)]
+fn layout_popup<Message>(
+    popup: &mut iced::Element<'_, Message>,
+    tree: &mut widget::Tree,
+    renderer: &Renderer,
+    window: Size,
+    anchor_position: Point,
+    anchor_size: Size,
+    popup_width: Option<f32>,
+    point_anchored: bool,
+    position: AnchorPosition,
+) -> Layout {
+    let popup_width = popup_width.unwrap_or(if point_anchored {
+        POINT_ANCHORED_POPUP_MIN_WIDTH
+    } else {
+        anchor_size.width
+    });
+    let below_y = anchor_position.y + anchor_size.height;
+    let available_height = (window.height - below_y).max(0.0);
+
+    let limits = layout::Limits::new(
+        Size::ZERO,
+        Size {
+            width: popup_width,
+            height: available_height,
+        },
+    )
+    .width(Length::Fill);
+
+    popup.as_widget_mut().layout(tree, renderer, &limits);
+    let size = tree.size;
+
+    // Calculate X based on position mode
+    let x = match position {
+        AnchorPosition::Below => anchor_position.x,
+        AnchorPosition::BelowRight => {
+            let right_edge = anchor_position.x + anchor_size.width;
+            (right_edge - size.width).max(0.0)
+        }
+    };
+
+    // Clamp so popup stays within viewport
+    let x = x.clamp(0.0, (window.width - size.width).max(0.0));
+
+    Layout::new(size).move_to(Point::new(x, below_y))
 }
 
 impl<'a, Message: Clone + 'a> From<AnchoredOverlay<'a, Message>> for iced::Element<'a, Message> {
@@ -210,110 +275,57 @@ impl<'a, Message: Clone + 'a> From<AnchoredOverlay<'a, Message>> for iced::Eleme
 }
 
 struct AnchoredOverlayLayer<'a, 'b, Message> {
+    layout: Layout,
     content: &'b mut iced::Element<'a, Message>,
     tree: &'b mut widget::Tree,
-    base_bounds: Rectangle,
-    base_position: Point,
     viewport: Rectangle,
+    window: Size,
     on_dismiss: Option<Message>,
-    popup_width: Option<f32>,
-    position: AnchorPosition,
-    anchor_point: Option<Point>,
 }
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
     for AnchoredOverlayLayer<'_, '_, Message>
 {
-    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let anchor_position = self.anchor_point.unwrap_or(self.base_position);
-        let anchor_width = if self.anchor_point.is_some() {
-            0.0
-        } else {
-            self.base_bounds.width
-        };
-        let anchor_height = if self.anchor_point.is_some() {
-            0.0
-        } else {
-            self.base_bounds.height
-        };
-
-        let popup_width = self.popup_width.unwrap_or_else(|| {
-            if self.anchor_point.is_some() {
-                POINT_ANCHORED_POPUP_MIN_WIDTH
-            } else {
-                anchor_width
-            }
-        });
-        let below_y = anchor_position.y + anchor_height;
-        let available_height = (bounds.height - below_y).max(0.0);
-
-        let limits = layout::Limits::new(
-            Size::ZERO,
-            Size {
-                width: popup_width,
-                height: available_height,
-            },
-        )
-        .width(Length::Fill);
-
-        let node = self
-            .content
-            .as_widget_mut()
-            .layout(self.tree, renderer, &limits);
-
-        // Calculate X based on position mode
-        let x = match self.position {
-            AnchorPosition::Below => anchor_position.x,
-            AnchorPosition::BelowRight => {
-                let right_edge = anchor_position.x + anchor_width;
-                (right_edge - node.size().width).max(0.0)
-            }
-        };
-
-        // Clamp so popup stays within viewport
-        let x = x.clamp(0.0, (bounds.width - node.size().width).max(0.0));
-
-        node.move_to(Point::new(x, below_y))
-    }
-
     fn draw(
         &self,
         renderer: &mut Renderer,
         theme: &Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        self.content.as_widget().draw(
-            self.tree,
-            renderer,
-            theme,
-            style,
-            layout,
-            cursor,
-            &layout.bounds(),
-        );
+        let layout = self.layout;
+        renderer.with_layer(Rectangle::with_size(self.window), |renderer| {
+            self.content.as_widget().draw(
+                self.tree,
+                renderer,
+                theme,
+                style,
+                layout,
+                cursor,
+                &layout.bounds(),
+            );
+        });
     }
 
-    fn operate(
-        &mut self,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn widget::Operation<()>,
-    ) {
-        self.content
-            .as_widget_mut()
-            .operate(self.tree, layout, renderer, operation);
+    fn operate(&mut self, renderer: &Renderer, operation: &mut dyn widget::Operation<()>) {
+        let layout = self.layout;
+        self.content.as_widget_mut().operate(
+            self.tree,
+            layout,
+            &layout.bounds(),
+            renderer,
+            operation,
+        );
     }
 
     fn update(
         &mut self,
         event: &Event,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
+        let layout = self.layout;
         self.content.as_widget_mut().update(
             self.tree,
             event,
@@ -345,12 +357,8 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
         }
     }
 
-    fn mouse_interaction(
-        &self,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-    ) -> mouse::Interaction {
+    fn mouse_interaction(&self, cursor: mouse::Cursor, renderer: &Renderer) -> mouse::Interaction {
+        let layout = self.layout;
         let interaction = self.content.as_widget().mouse_interaction(
             self.tree,
             layout,
@@ -373,15 +381,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
 
     fn overlay<'c>(
         &'c mut self,
-        layout: Layout<'c>,
         renderer: &Renderer,
-    ) -> Option<overlay::Element<'c, Message, Theme, Renderer>> {
+    ) -> Vec<overlay::Element<'c, Message, Theme, Renderer>> {
         self.content.as_widget_mut().overlay(
             self.tree,
-            layout,
+            self.layout,
             renderer,
             &self.viewport,
             Vector::default(),
+            self.window,
         )
     }
 }

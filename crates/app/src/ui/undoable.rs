@@ -8,8 +8,8 @@
 //!
 //! Both use a simple snapshot approach: each undo entry stores the full
 //! previous state. This is appropriate because the values are small (short
-//! strings, small lists). The `dissimilar` crate is available for future
-//! smart-grouping of consecutive single-character edits.
+//! strings, small lists). Consecutive single-character edits are not
+//! grouped; each one is its own undo entry.
 
 use std::collections::VecDeque;
 

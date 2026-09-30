@@ -148,7 +148,7 @@ pub fn run_to_span<'a>(
     font_size: f32,
     text_color: Color,
     link_color: Color,
-) -> Span<'a, String, Font> {
+) -> Span<'a, String> {
     let font = font_for_style(base_font, run.style);
     let underline = run.style.contains(InlineStyle::UNDERLINE) || run.link.is_some();
     let strikethrough = run.style.contains(InlineStyle::STRIKETHROUGH);
@@ -182,7 +182,7 @@ pub fn build_spans_for_block<'a>(
     base_font: Font,
     text_color: Color,
     link_color: Color,
-) -> Vec<Span<'a, String, Font>> {
+) -> Vec<Span<'a, String>> {
     let Some(runs) = block.runs() else {
         return Vec::new();
     };
@@ -203,7 +203,7 @@ pub fn build_spans_for_any_block(
     base_font: Font,
     text_color: Color,
     link_color: Color,
-) -> Vec<Span<'static, String, Font>> {
+) -> Vec<Span<'static, String>> {
     // Try the normal path first (works for Paragraph, Heading).
     if let Some(runs) = block.runs() {
         let font_size = block_font_size(block);
@@ -226,7 +226,7 @@ fn collect_container_spans(
     base_font: Font,
     text_color: Color,
     link_color: Color,
-    spans: &mut Vec<Span<'static, String, Font>>,
+    spans: &mut Vec<Span<'static, String>>,
     needs_separator: bool,
 ) {
     if needs_separator && !spans.is_empty() {
@@ -264,7 +264,7 @@ fn owned_run_to_span(
     font_size: f32,
     text_color: Color,
     link_color: Color,
-) -> Span<'static, String, Font> {
+) -> Span<'static, String> {
     let font = font_for_style(base_font, run.style);
     let underline = run.style.contains(InlineStyle::UNDERLINE) || run.link.is_some();
     let strikethrough = run.style.contains(InlineStyle::STRIKETHROUGH);
@@ -292,7 +292,7 @@ fn owned_run_to_span(
 
 /// A laid-out paragraph for a child element within a container block
 /// (list item or blockquote child).
-pub struct ChildParagraph<P: Paragraph<Font = Font>> {
+pub struct ChildParagraph<P: Paragraph> {
     /// The laid-out paragraph for this child.
     pub paragraph: P,
     /// Y offset relative to the container block's top edge (px).
@@ -302,7 +302,7 @@ pub struct ChildParagraph<P: Paragraph<Font = Font>> {
 }
 
 /// A cached paragraph for a single document block.
-pub struct CacheEntry<P: Paragraph<Font = Font>> {
+pub struct CacheEntry<P: Paragraph> {
     /// The laid-out paragraph. `None` if the block has no inline content
     /// (e.g. `HorizontalRule`) or if it is a container block that uses
     /// `child_paragraphs` instead.
@@ -318,7 +318,7 @@ pub struct CacheEntry<P: Paragraph<Font = Font>> {
     height: f32,
 }
 
-impl<P: Paragraph<Font = Font>> Default for CacheEntry<P> {
+impl<P: Paragraph> Default for CacheEntry<P> {
     fn default() -> Self {
         Self {
             paragraph: None,
@@ -330,7 +330,7 @@ impl<P: Paragraph<Font = Font>> Default for CacheEntry<P> {
     }
 }
 
-impl<P: Paragraph<Font = Font>> CacheEntry<P> {
+impl<P: Paragraph> CacheEntry<P> {
     /// The pre-laid-out paragraph, if this block has inline content.
     pub fn paragraph(&self) -> Option<&P> {
         self.paragraph.as_ref()
@@ -363,13 +363,13 @@ impl<P: Paragraph<Font = Font>> CacheEntry<P> {
 /// The cache is rebuilt (or partially updated) during the widget's `layout()`
 /// pass. Only dirty entries are re-laid-out; clean entries keep their existing
 /// paragraph and just have their y-offsets recomputed.
-pub struct ParagraphCache<P: Paragraph<Font = Font>> {
+pub struct ParagraphCache<P: Paragraph> {
     entries: Vec<CacheEntry<P>>,
     /// Cached total height from the last `layout()` call.
     last_layout_height: f32,
 }
 
-impl<P: Paragraph<Font = Font>> Default for ParagraphCache<P> {
+impl<P: Paragraph> Default for ParagraphCache<P> {
     fn default() -> Self {
         Self {
             entries: Vec::new(),
@@ -378,7 +378,7 @@ impl<P: Paragraph<Font = Font>> Default for ParagraphCache<P> {
     }
 }
 
-impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
+impl<P: Paragraph> ParagraphCache<P> {
     /// Create an empty cache.
     pub fn new() -> Self {
         Self::default()
@@ -544,7 +544,7 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
 
 /// Lay out a single block, storing the paragraph in `entry`.
 /// Returns the height of the block.
-fn layout_block<P: Paragraph<Font = Font>>(
+fn layout_block<P: Paragraph>(
     entry: &mut CacheEntry<P>,
     block: &Block,
     available_width: f32,
@@ -640,8 +640,8 @@ fn layout_block<P: Paragraph<Font = Font>>(
 }
 
 /// Build an iced [`Paragraph`] from a set of spans.
-fn build_paragraph<P: Paragraph<Font = Font>>(
-    spans: &[Span<'_, String, Font>],
+fn build_paragraph<P: Paragraph>(
+    spans: &[Span<'_, String>],
     available_width: f32,
     base_font: Font,
     font_size: f32,
@@ -721,7 +721,7 @@ pub fn draw_list_marker<R>(
     text_color: Color,
     clip_bounds: Rectangle,
 ) where
-    R: iced::advanced::Renderer + iced::advanced::text::Renderer<Font = Font>,
+    R: iced::advanced::Renderer + iced::advanced::text::Renderer,
 {
     let marker_text = if ordered {
         let mut s = (item_index + 1).to_string();
