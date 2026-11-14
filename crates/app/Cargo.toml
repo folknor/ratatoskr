@@ -37,7 +37,7 @@ uuid = { version = "1.23.1", features = ["v4"] }
 toml = "1.0"
 mundy = { version = "0.2.3", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"
-rfd = "0.17"
+rfd = "0.18.0"
 store = { path = "../stores" }
 service-api = { path = "../service-api" }
 process-lifetime = { path = "../process-lifetime" }
@@ -47,7 +47,7 @@ sha2 = "0.11"
 blake3 = "1"
 dev-seed = { path = "../dev-seed", optional = true }
 hotpath = { workspace = true, optional = true }
-dellingr = "0.6.0"
+dellingr = "0.7.1"
 reqwest = { workspace = true }
 base64 = { workspace = true }
 

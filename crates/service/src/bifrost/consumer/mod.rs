@@ -877,8 +877,8 @@ impl ChangeStreamConsumer {
         &mut self,
         scope: &CursorScope,
     ) -> Option<common::types::NamespaceAttribution> {
-        let initial = self.containers.as_ref().map_or_else(
-            || Some(common::types::NamespaceAttribution::Personal),
+        let initial = self.containers.as_ref().map_or(
+            Some(common::types::NamespaceAttribution::Personal),
             |index| index.attribution_for_scope(scope),
         );
         if initial.is_some() {

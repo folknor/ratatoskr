@@ -4297,7 +4297,7 @@ fn set_field_fn(
     key: &str,
     func: dellingr::RustFunc,
 ) -> dellingr::Result<()> {
-    let handle = state.add_rust_fn(func)?;
+    let handle = state.add_rust_fn(key, func)?;
     state.push_string(key)?;
     state.push_rust_fn(handle)?;
     state.set_table_raw(table_idx)

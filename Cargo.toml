@@ -96,7 +96,7 @@ futures-util = "0.3"
 tokio = { version = "1.52.3" }
 
 # Database
-rusqlite = { version = "0.41.0" }
+rusqlite = { version = "0.42.0" }
 
 # Time
 #
@@ -128,7 +128,7 @@ base64 = "0.23"
 quick-xml = "0.42.0"
 
 # Profiling
-hotpath = "0.29.1"
+hotpath = "0.31.3"
 
 # Optimized release profile
 [profile.release]

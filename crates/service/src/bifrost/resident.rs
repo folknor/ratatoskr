@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
-    AccountControl, AccountId, CursorScope, FolderId, HintPayload, InvalidationHint, ObjectType,
-    PauseReason, PushSource, WatchEvent,
+    AccountControl, AccountId, CursorScope, FolderId, HintPayload, ObjectType, PauseReason,
+    PushSource,
 };
 use common::types::{FolderKind, SystemFolderId};
 use db::db::ReadDbState;
@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::containers::{self, ContainerIndex};
 use super::error_map;
+use super::push_ingress::push_invalidation;
 use super::{
     BifrostConsumerStores, BifrostProviderKind, BifrostSyncEngine, ChangeStreamConsumer,
     PushIngress, RoutingKey, build_account_factory,
@@ -533,14 +534,11 @@ impl ResidentEngine {
     }
 
     fn invalidate_account(&self, account_id: &str, source: PushSource) {
-        self.inner.engine.engine().invalidation_sink().push(
-            AccountId(account_id.to_string()),
-            WatchEvent::Invalidated {
-                hint: InvalidationHint {
-                    source,
-                    payload: HintPayload::Unknown,
-                },
-            },
+        push_invalidation(
+            self.inner.engine.engine().invalidation_sink().as_ref(),
+            account_id,
+            source,
+            HintPayload::Unknown,
         );
     }
 
@@ -1055,14 +1053,11 @@ async fn mark_initial_sync_completed_once(
 }
 
 fn repush_full_reconcile(inner: &ResidentEngineInner, account_id: &str) {
-    inner.engine.engine().invalidation_sink().push(
-        AccountId(account_id.to_string()),
-        WatchEvent::Invalidated {
-            hint: InvalidationHint {
-                source: PushSource::Coalesced,
-                payload: HintPayload::Unknown,
-            },
-        },
+    push_invalidation(
+        inner.engine.engine().invalidation_sink().as_ref(),
+        account_id,
+        PushSource::Coalesced,
+        HintPayload::Unknown,
     );
 }
 

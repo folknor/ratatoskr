@@ -5,11 +5,43 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bifrost_types::{
-    AccountId, HintPayload, InvalidationHint, InvalidationSink, PushSource, WatchEvent,
+    AccountId, HintPayload, InvalidationHint, InvalidationSink, PushSource, SinkPush, WatchEvent,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+/// Hand one invalidation to the engine's sink and report a non-accepted outcome.
+///
+/// Invalidations enter the engine's bounded pending state and coalesce; only
+/// control directives can be refused, so `Refused` is not expected here. A
+/// wake-up that is not accepted is still lost, so it is logged rather than
+/// dropped silently.
+pub fn push_invalidation(
+    sink: &dyn InvalidationSink,
+    account_id: &str,
+    source: PushSource,
+    payload: HintPayload,
+) {
+    let outcome = sink.push(
+        AccountId(account_id.to_string()),
+        WatchEvent::Invalidated {
+            hint: InvalidationHint { source, payload },
+        },
+    );
+    match outcome {
+        SinkPush::Accepted => {}
+        SinkPush::Refused(_) => {
+            log::warn!("engine refused invalidation for {account_id}");
+        }
+        SinkPush::NotAttached => {
+            log::warn!("invalidation for unattached account {account_id}");
+        }
+        other => {
+            log::warn!("unrecognized sink outcome for {account_id}: {other:?}");
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RoutingKey {
@@ -116,13 +148,8 @@ impl PushIngress {
         })
     }
 
-    pub fn on_validated(&self, account_id: String, source: PushSource, payload: HintPayload) {
-        self.sink.push(
-            AccountId(account_id),
-            WatchEvent::Invalidated {
-                hint: InvalidationHint { source, payload },
-            },
-        );
+    pub fn on_validated(&self, account_id: &str, source: PushSource, payload: HintPayload) {
+        push_invalidation(self.sink.as_ref(), account_id, source, payload);
     }
 
     #[must_use]
@@ -150,11 +177,12 @@ mod tests {
     }
 
     impl InvalidationSink for RecordingSink {
-        fn push(&self, account: AccountId, event: WatchEvent) {
+        fn push(&self, account: AccountId, event: WatchEvent) -> SinkPush {
             self.events
                 .lock()
                 .expect("events mutex poisoned")
                 .push((account, event));
+            SinkPush::Accepted
         }
     }
 

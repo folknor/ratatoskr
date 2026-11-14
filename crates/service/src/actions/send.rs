@@ -197,7 +197,24 @@ async fn send_email_inner(
         .send_message(&account, bifrost_request)
         .await
     {
-        Ok(sent_message_id) => {
+        Ok(receipt) => {
+            // The send committed; follow-up failures ride the receipt, never Err.
+            match &receipt.sent_copy {
+                bifrost_types::SentCopy::NotFiled { reason, .. } => {
+                    log::warn!("Send committed but Sent copy not filed: {reason:?}");
+                }
+                bifrost_types::SentCopy::Uncertain { .. } => {
+                    log::warn!("Send committed but Sent copy filing is uncertain");
+                }
+                _ => {}
+            }
+            if !receipt.recipients_not_accepted.is_empty() {
+                log::warn!(
+                    "Send committed but {} recipient(s) were not accepted",
+                    receipt.recipients_not_accepted.len()
+                );
+            }
+            let sent_message_id = receipt.id;
             mlog.set_remote_id(&sent_message_id.0);
             if let Some(scheduled_at) = scheduled_at
                 && let Err(e) = mark_scheduled_delegated(

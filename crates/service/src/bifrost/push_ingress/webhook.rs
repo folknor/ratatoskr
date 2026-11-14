@@ -96,7 +96,7 @@ pub(crate) async fn handle_notification(ingress: &PushIngress, body: &[u8]) -> R
         if let Some(account_id) = ingress.route(&key).await {
             log::debug!("graph push ingress routed notification to {account_id}");
             ingress.on_validated(
-                account_id,
+                &account_id,
                 PushSource::GraphSubscription,
                 HintPayload::Unknown,
             );

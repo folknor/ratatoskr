@@ -115,6 +115,6 @@ pub(crate) async fn handle_harness_message(
         return Ok(());
     };
     log::debug!("gmail pubsub ingress routed notification to {account_id}");
-    ingress.on_validated(account_id, PushSource::GmailPubsub, HintPayload::Unknown);
+    ingress.on_validated(&account_id, PushSource::GmailPubsub, HintPayload::Unknown);
     Ok(())
 }
